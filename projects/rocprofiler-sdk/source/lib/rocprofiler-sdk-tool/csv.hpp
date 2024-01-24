@@ -74,10 +74,11 @@ struct csv_encoder
     }
 };
 
-using hsa_csv_encoder                = csv_encoder<7>;
+using api_csv_encoder                = csv_encoder<7>;
 using kernel_trace_csv_encoder       = csv_encoder<16>;
 using counter_collection_csv_encoder = csv_encoder<14>;
 using memory_copy_csv_encoder        = csv_encoder<7>;
+using marker_csv_encoder             = csv_encoder<7>;
 }  // namespace csv
 }  // namespace tool
 }  // namespace rocprofiler

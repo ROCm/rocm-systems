@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
 #include <glog/logging.h>
 #include <hsa/hsa.h>
@@ -88,16 +89,16 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     if(!ctxs.empty())
     {
         // only do the following work if there are contexts that require this info
-        const auto* _rocp_agent      = queue_info_session.queue.get_agent().get_rocp_agent();
-        auto        _hsa_agent       = queue_info_session.queue.get_agent().get_hsa_agent();
-        auto        _queue_id        = queue_info_session.queue.get_id();
+        const auto* _rocp_agent      = queue_info_session.rocp_agent;
+        auto        _hsa_agent       = queue_info_session.hsa_agent;
+        auto        _queue_id        = queue_info_session.queue_id;
         auto        _signal          = queue_info_session.interrupt_signal;
         auto        _kern_id         = queue_info_session.kernel_id;
         const auto& _extern_corr_ids = queue_info_session.extern_corr_ids;
 
         auto dispatch_time = hsa_amd_profiling_dispatch_time_t{};
         auto dispatch_time_status =
-            queue_info_session.queue.ext_api().hsa_amd_profiling_get_dispatch_time_fn(
+            hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
                 _hsa_agent, _signal, &dispatch_time);
 
         // if we encounter this in CI, it will cause test to fail
@@ -185,16 +186,13 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     // Delete signals and packets, signal we have completed.
     if(queue_info_session.interrupt_signal.handle != 0u)
     {
-        queue_info_session.queue.core_api().hsa_signal_destroy_fn(
-            queue_info_session.interrupt_signal);
+        hsa::get_core_table()->hsa_signal_destroy_fn(queue_info_session.interrupt_signal);
     }
     if(queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle != 0u)
     {
-        queue_info_session.queue.core_api().hsa_signal_destroy_fn(
+        hsa::get_core_table()->hsa_signal_destroy_fn(
             queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal);
     }
-
-    queue_info_session.queue.async_complete();
 
     if(_corr_id)
     {
@@ -204,7 +202,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         _corr_id->ref_count.fetch_sub(1);
     }
 
+    queue_info_session.queue.async_complete();
     delete static_cast<Queue::queue_info_session_t*>(data);
+
     return false;
 }
 
@@ -260,7 +260,7 @@ WriteInterceptor(const void* packets,
 
     LOG_IF(FATAL, data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
 
-    static thread_local auto ctxs = context_array_t{};
+    auto ctxs = context_array_t{};
     context::get_active_contexts(ctxs, context_filter);
 
     auto& queue = *static_cast<Queue*>(data);
@@ -395,6 +395,9 @@ WriteInterceptor(const void* packets,
                                             .interrupt_signal = interrupt_signal,
                                             .tid              = thr_id,
                                             .kernel_id        = kernel_id,
+                                            .queue_id         = queue.get_id(),
+                                            .hsa_agent        = queue.get_agent().get_hsa_agent(),
+                                            .rocp_agent       = queue.get_agent().get_rocp_agent(),
                                             .correlation_id   = corr_id,
                                             .kernel_pkt       = kernel_pkt,
                                             .contexts         = ctxs,
@@ -405,15 +408,7 @@ WriteInterceptor(const void* packets,
 }
 }  // namespace
 
-Queue::~Queue()
-{
-    // Potentially replace with condition variable at some point
-    // but performance may not matter here.
-    while(_active_async_packets.load(std::memory_order_relaxed) > 0)
-    {
-        std::this_thread::sleep_for(std::chrono::milliseconds{1});
-    }
-}
+Queue::~Queue() { sync(); }
 
 void
 Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const
@@ -468,6 +463,28 @@ Queue::Queue(const AgentCache&  agent,
         << "Could not register interceptor";
 
     *queue = _intercept_queue;
+}
+
+void
+Queue::sync() const
+{
+    // Potentially replace with condition variable at some point
+    // but performance may not matter here.
+    constexpr auto max_wait_time  = std::chrono::milliseconds{1000};
+    constexpr auto query_interval = std::chrono::milliseconds{10};
+    auto           _orig_active   = _active_async_packets.load(std::memory_order_relaxed);
+    auto           _curr_active   = _orig_active;
+    auto           inactive       = common::yield(
+        [this, &_curr_active]() {
+            return ((_curr_active = _active_async_packets.load(std::memory_order_relaxed)) == 0);
+        },
+        max_wait_time,
+        query_interval);
+
+    LOG_IF(WARNING, !inactive)
+        << "rocprofiler-sdk Queue (instance=" << this << ") abandoned waiting for " << _orig_active
+        << " async completion callbacks after " << max_wait_time.count() << " msecs. There were "
+        << _curr_active << " async completion callbacks which were not delivered at that time.";
 }
 
 void

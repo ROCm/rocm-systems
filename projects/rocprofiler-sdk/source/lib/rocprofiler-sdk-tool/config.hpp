@@ -57,17 +57,19 @@ struct config
 {
     config();
 
-    bool        demangle           = get_env("ROCPROF_DEMANGLE_KERNELS", true);
-    bool        truncate           = get_env("ROCPROF_TRUNCATE_KERNELS", false);
-    bool        kernel_trace       = get_env("ROCPROF_KERNEL_TRACE", false);
-    bool        hsa_api_trace      = get_env("ROCPROF_HSA_API_TRACE", false);
-    bool        marker_api_trace   = get_env("ROCPROF_MARKER_API_TRACE", false);
-    bool        memory_copy_trace  = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
-    bool        counter_collection = get_env("ROCPROF_COUNTER_COLLECTION", false);
-    int         mpi_size           = get_mpi_size();
-    int         mpi_rank           = get_mpi_rank();
-    std::string output_path        = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
-    std::string output_file        = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
+    bool        demangle               = get_env("ROCPROF_DEMANGLE_KERNELS", true);
+    bool        truncate               = get_env("ROCPROF_TRUNCATE_KERNELS", false);
+    bool        kernel_trace           = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool        hsa_api_trace          = get_env("ROCPROF_HSA_API_TRACE", false);
+    bool        marker_api_trace       = get_env("ROCPROF_MARKER_API_TRACE", false);
+    bool        memory_copy_trace      = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
+    bool        counter_collection     = get_env("ROCPROF_COUNTER_COLLECTION", false);
+    bool        hip_api_trace          = get_env("ROCPROF_HIP_API_TRACE", false);
+    bool        hip_compiler_api_trace = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
+    int         mpi_size               = get_mpi_size();
+    int         mpi_rank               = get_mpi_rank();
+    std::string output_path = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
+    std::string output_file = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
     std::vector<std::string> kernel_names = {};
     std::set<std::string>    counters     = {};
 };

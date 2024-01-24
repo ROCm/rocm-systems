@@ -73,6 +73,16 @@ typedef struct
 } rocprofiler_callback_tracing_hip_api_data_t;
 
 /**
+ * @brief ROCProfiler HIP API Tracer Callback Data.
+ */
+typedef struct
+{
+    uint64_t                              size;  ///< size of this struct
+    rocprofiler_hip_compiler_api_args_t   args;
+    rocprofiler_hip_compiler_api_retval_t retval;
+} rocprofiler_callback_tracing_hip_compiler_api_data_t;
+
+/**
  * @brief ROCProfiler Marker Tracer Callback Data.
  */
 typedef struct

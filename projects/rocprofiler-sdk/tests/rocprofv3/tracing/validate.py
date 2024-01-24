@@ -17,11 +17,14 @@ def test_hsa_api_trace(hsa_input_data):
 
     correlation_ids = sorted(list(set(correlation_ids)))
 
+    hsa_api_calls_offset = 2  # roctxRangePush is first
+    num_marker_api_calls = 6  # six marker API calls
+
     # all correlation ids are unique
     assert len(correlation_ids) == len(hsa_input_data)
     # correlation ids are numbered from 1 to N
-    assert correlation_ids[0] == 1
-    assert correlation_ids[-1] == len(correlation_ids)
+    assert correlation_ids[0] == hsa_api_calls_offset
+    assert correlation_ids[-1] == len(correlation_ids) + num_marker_api_calls
 
     functions = list(set(functions))
     assert "hsa_amd_memory_async_copy_on_engine" in functions
@@ -61,6 +64,21 @@ def test_memory_copy_trace(memory_copy_input_data):
     assert int(row["Destination_Agent_Id"]) == 0
     assert int(row["Correlation_Id"]) > 0
     assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
+
+
+def test_marker_api_trace(marker_input_data):
+    functions = []
+    for row in marker_input_data:
+        assert row["Domain"] == "MARKER_API"
+        assert int(row["Process_Id"]) > 0
+        assert int(row["Thread_Id"]) == 0 or int(row["Thread_Id"]) >= int(
+            row["Process_Id"]
+        )
+        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
+        functions.append(row["Function"])
+
+    functions = list(set(functions))
+    assert "main" in functions
 
 
 if __name__ == "__main__":

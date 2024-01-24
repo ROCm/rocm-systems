@@ -113,7 +113,7 @@ get_active_contexts_impl()
 auto*&
 get_correlation_id_map()
 {
-    using data_type  = std::vector<std::unique_ptr<correlation_id>>;
+    using data_type  = common::container::stable_vector<std::unique_ptr<correlation_id>>;
     static auto*& _v = common::static_object<common::Synchronized<data_type>>::construct();
     return _v;
 }

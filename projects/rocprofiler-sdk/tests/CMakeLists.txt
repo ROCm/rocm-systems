@@ -27,6 +27,10 @@ set(CMAKE_HIP_STANDARD_REQUIRED ON)
 enable_testing()
 include(CTest)
 
+include(GNUInstallDirs)
+# always use lib instead of lib64
+set(CMAKE_INSTALL_LIBDIR "lib")
+
 # needed for validation
 find_package(Python3 REQUIRED)
 

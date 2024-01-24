@@ -220,7 +220,7 @@ public:
     void push_back(Tp&& t);
 
     template <typename... Args>
-    void emplace_back(Args&&... args);
+    reference emplace_back(Args&&... args);
 
     reference operator[](size_type i);
 
@@ -351,10 +351,10 @@ stable_vector<Tp, ChunkSizeV>::push_back(Tp&& t)
 
 template <typename Tp, size_t ChunkSizeV>
 template <typename... Args>
-void
+typename stable_vector<Tp, ChunkSizeV>::reference
 stable_vector<Tp, ChunkSizeV>::emplace_back(Args&&... args)
 {
-    last_chunk().emplace_back(std::forward<Args>(args)...);
+    return last_chunk().emplace_back(std::forward<Args>(args)...);
 }
 
 template <typename Tp, size_t ChunkSizeV>

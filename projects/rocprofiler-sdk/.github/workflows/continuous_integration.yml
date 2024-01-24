@@ -468,9 +468,17 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        apt-get install -y cmake libgtest-dev python3-pip libasan8 libtsan2
+        apt-get install -y cmake libgtest-dev python3-pip libasan8 libtsan2 software-properties-common
         python3 -m pip install -r requirements.txt
         python3 -m pip install pytest
+        add-apt-repository ppa:ubuntu-toolchain-r/test
+        apt-get update
+        apt-get install -y g++-13
+        update-alternatives --install $(which gcc) gcc $(which gcc-13) 100 --slave $(which g++) g++ $(which g++-13)
+        realpath $(which gcc)
+        realpath $(which g++)
+        gcc --version
+        g++ --version
 
     - name: Configure, Build, and Test
       timeout-minutes: 45

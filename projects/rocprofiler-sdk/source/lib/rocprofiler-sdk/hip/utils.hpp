@@ -25,12 +25,10 @@
 #include <rocprofiler-sdk/version.h>
 
 #include "lib/common/mpl.hpp"
+#include "lib/rocprofiler-sdk/hip/details/ostream.hpp"
 
 #include "fmt/core.h"
 #include "fmt/ranges.h"
-
-#include <hsa/hsa.h>
-#include <hsa/hsa_ext_amd.h>
 
 #include <sstream>
 #include <string>
@@ -39,17 +37,18 @@
 #include <utility>
 #include <vector>
 
-#if !defined(ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION)
-#    define ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION                                                \
-        ((10000 * HSA_AMD_INTERFACE_VERSION_MAJOR) + (100 * HSA_AMD_INTERFACE_VERSION_MINOR))
-#endif
-
 namespace rocprofiler
 {
-namespace hsa
+namespace hip
 {
 namespace utils
 {
+inline static std::ostream&
+operator<<(std::ostream& out, const hipDeviceProp_tR0000& v)
+{
+    return ::rocprofiler::hip::detail::operator<<(out, v);
+}
+
 template <typename Tp>
 auto
 stringize_impl(const Tp& _v)
@@ -99,88 +98,6 @@ stringize(Args... args)
 {
     return std::vector<std::pair<std::string, std::string>>{stringize_impl(args)...};
 }
-
-template <typename Tp>
-struct handle_formatter
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename Ctx>
-    auto format(const Tp& v, Ctx& ctx) const
-    {
-        return fmt::format_to(ctx.out(), "handle={}", v.handle);
-    }
-};
-
-template <typename Tp>
-struct handle_formatter<const Tp> : handle_formatter<Tp>
-{};
 }  // namespace utils
-}  // namespace hsa
+}  // namespace hip
 }  // namespace rocprofiler
-
-#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 10300
-namespace fmt
-{
-template <>
-struct formatter<hsa_agent_t> : rocprofiler::hsa::utils::handle_formatter<hsa_agent_t>
-{};
-
-template <>
-struct formatter<hsa_amd_memory_pool_t>
-: rocprofiler::hsa::utils::handle_formatter<hsa_amd_memory_pool_t>
-{};
-
-template <>
-struct formatter<hsa_amd_vmem_alloc_handle_t>
-: rocprofiler::hsa::utils::handle_formatter<hsa_amd_vmem_alloc_handle_t>
-{};
-
-template <>
-struct formatter<hsa_access_permission_t>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename Ctx>
-    auto format(hsa_access_permission_t v, Ctx& ctx) const
-    {
-        auto label = [v]() -> std::string_view {
-            switch(v)
-            {
-                case HSA_ACCESS_PERMISSION_NONE: return "NONE";
-                case HSA_ACCESS_PERMISSION_RO: return "READ_ONLY";
-                case HSA_ACCESS_PERMISSION_WO: return "WRITE_ONLY";
-                case HSA_ACCESS_PERMISSION_RW: return "READ_WRITE";
-            }
-            return "NONE";
-        }();
-        return fmt::format_to(ctx.out(), "{}", label);
-    }
-};
-
-template <>
-struct formatter<hsa_amd_memory_access_desc_t>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename Ctx>
-    auto format(const hsa_amd_memory_access_desc_t& v, Ctx& ctx) const
-    {
-        return fmt::format_to(
-            ctx.out(), "permissions={}, agent_handle={}", v.permissions, v.agent_handle);
-    }
-};
-}  // namespace fmt
-#endif

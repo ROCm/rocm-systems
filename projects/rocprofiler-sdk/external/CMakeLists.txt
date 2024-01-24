@@ -7,10 +7,15 @@ include(rocprofiler_utilities)
 
 set(BUILD_TESTING OFF)
 set(BUILD_SHARED_LIBS OFF)
+set(BUILD_OBJECT_LIBS OFF) # Specific to PTL
+set(BUILD_STATIC_LIBS ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
+set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
 
 # filesystem library
 if(ROCPROFILER_BUILD_GHC_FS)
+    # checkout submodule if not already checked out or clone repo if no .gitmodules file
     rocprofiler_checkout_git_submodule(
         RECURSIVE
         RELATIVE_PATH external/filesystem
@@ -28,13 +33,8 @@ endif()
 
 if(ROCPROFILER_BUILD_TESTS)
     if(ROCPROFILER_BUILD_GTEST)
-        set(INSTALL_GTEST
-            OFF
-            CACHE BOOL "")
-        set(BUILD_GMOCK
-            OFF
-            CACHE BOOL "")
-
+        # checkout submodule if not already checked out or clone repo if no .gitmodules
+        # file
         rocprofiler_checkout_git_submodule(
             RECURSIVE
             RELATIVE_PATH external/googletest
@@ -42,6 +42,8 @@ if(ROCPROFILER_BUILD_TESTS)
             REPO_URL https://github.com/google/googletest.git
             REPO_BRANCH "main")
 
+        set(BUILD_GMOCK OFF)
+        set(INSTALL_GTEST OFF)
         add_subdirectory(googletest EXCLUDE_FROM_ALL)
 
         if(NOT TARGET GTest::gtest)
@@ -61,6 +63,7 @@ if(ROCPROFILER_BUILD_TESTS)
         target_link_libraries(rocprofiler-gtest INTERFACE GTest::gtest)
     endif()
 
+    # checkout submodule if not already checked out or clone repo if no .gitmodules file
     rocprofiler_checkout_git_submodule(
         RECURSIVE
         RELATIVE_PATH external/cereal
@@ -124,6 +127,7 @@ else()
 endif()
 
 if(NOT TARGET PTL::ptl-static)
+    # checkout submodule if not already checked out or clone repo if no .gitmodules file
     rocprofiler_checkout_git_submodule(
         RELATIVE_PATH external/ptl
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -135,35 +139,7 @@ if(NOT TARGET PTL::ptl-static)
     set(PTL_USE_LOCKS ON)
     set(PTL_BUILD_EXAMPLES OFF)
     set(PTL_DEVELOPER_INSTALL OFF)
-
-    if(NOT DEFINED BUILD_OBJECT_LIBS)
-        set(BUILD_OBJECT_LIBS OFF)
-    endif()
-
-    if(NOT DEFINED BUILD_STATIC_LIBS)
-        set(BUILD_STATIC_LIBS OFF)
-    endif()
-
-    rocprofiler_save_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-                  CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-                  CMAKE_VISIBILITY_INLINES_HIDDEN)
-
-    set(BUILD_SHARED_LIBS OFF)
-    set(BUILD_STATIC_LIBS ON)
-    set(BUILD_OBJECT_LIBS OFF)
-    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-    set(CMAKE_CXX_VISIBILITY_PRESET "hidden")
-    set(CMAKE_VISIBILITY_INLINES_HIDDEN ON)
-
     add_subdirectory(ptl EXCLUDE_FROM_ALL)
-
-    rocprofiler_restore_variables(
-        BUILD_CONFIG
-        VARIABLES BUILD_SHARED_LIBS BUILD_STATIC_LIBS BUILD_OBJECT_LIBS
-                  CMAKE_POSITION_INDEPENDENT_CODE CMAKE_CXX_VISIBILITY_PRESET
-                  CMAKE_VISIBILITY_INLINES_HIDDEN)
 endif()
 
 # doxygen-awesome

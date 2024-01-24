@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -215,17 +216,34 @@ QueueController::get_queue(const hsa_queue_t& _hsa_queue) const
         _hsa_queue);
 }
 
+void
+QueueController::iterate_queues(const queue_iterator_cb_t& cb) const
+{
+    _queues.rlock([&cb](const queue_map_t& _queues_v) {
+        for(const auto& itr : _queues_v)
+        {
+            if(itr.second) cb(itr.second.get());
+        }
+    });
+}
+
 QueueController&
 get_queue_controller()
 {
-    static QueueController controller;
-    return controller;
+    static auto*& controller = common::static_object<QueueController>::construct();
+    return *(CHECK_NOTNULL(controller));
 }
 
 void
 queue_controller_init(HsaApiTable* table)
 {
     get_queue_controller().init(*table->core_, *table->amd_ext_);
+}
+
+void
+queue_controller_fini()
+{
+    get_queue_controller().iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }
 }  // namespace hsa
 }  // namespace rocprofiler

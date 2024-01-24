@@ -39,9 +39,10 @@
         {                                                                                          \
             auto _hip_api_print_lk = auto_lock_t{print_lock};                                      \
             fprintf(stderr,                                                                        \
-                    "%s:%d :: HIP error : %s\n",                                                   \
+                    "%s:%d :: HIP error %i: %s\n",                                                 \
                     __FILE__,                                                                      \
                     __LINE__,                                                                      \
+                    (int) error_,                                                                  \
                     hipGetErrorString(error_));                                                    \
             throw std::runtime_error("hip_api_call");                                              \
         }                                                                                          \

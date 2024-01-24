@@ -28,12 +28,14 @@ def test_data_structure(input_data):
     node_exists("code_objects", sdk_data["callback_records"])
     node_exists("kernel_symbols", sdk_data["callback_records"])
     node_exists("hsa_api_traces", sdk_data["callback_records"])
+    node_exists("hip_api_traces", sdk_data["callback_records"], 0)
     node_exists("marker_api_traces", sdk_data["callback_records"])
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatches", sdk_data["buffer_records"])
     node_exists("memory_copies", sdk_data["buffer_records"], 0)
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
+    node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
     node_exists("marker_api_traces", sdk_data["buffer_records"])
 
 
@@ -43,7 +45,7 @@ def test_timestamps(input_data):
 
     cb_start = {}
     cb_end = {}
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
             cid = itr["record"]["correlation_id"]["internal"]
             phase = itr["record"]["phase"]
@@ -77,7 +79,7 @@ def test_internal_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     api_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
             api_corr_ids.append(itr["record"]["correlation_id"]["internal"])
 
@@ -103,7 +105,7 @@ def test_external_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     extern_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
             assert itr["record"]["correlation_id"]["external"] > 0
             assert (
@@ -112,7 +114,7 @@ def test_external_correlation_ids(input_data):
             extern_corr_ids.append(itr["record"]["correlation_id"]["external"])
 
     extern_corr_ids = list(set(sorted(extern_corr_ids)))
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["correlation_id"]["external"] > 0
             assert itr["thread_id"] == itr["correlation_id"]["external"]

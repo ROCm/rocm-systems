@@ -21,10 +21,12 @@
 // SOFTWARE.
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip/table_api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+#include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
@@ -62,6 +64,7 @@ struct buffer_tracing_kind_string;
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(NONE)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HSA_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MEMORY_COPY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(KERNEL_DISPATCH)
@@ -154,6 +157,10 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         val = rocprofiler::hsa::async_copy::name_by_id(operation);
     else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_API)
         val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>(operation);
+    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
+        val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(operation);
+    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
+        val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>(operation);
     else
         return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
@@ -196,6 +203,10 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         ops = rocprofiler::hsa::async_copy::get_ids();
     else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_API)
         ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>();
+    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
+        ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>();
+    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
+        ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>();
     else
         return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 

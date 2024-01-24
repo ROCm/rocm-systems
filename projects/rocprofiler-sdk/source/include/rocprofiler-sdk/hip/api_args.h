@@ -22,67 +22,99 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/defines.h>
+
 #include <hip/hip_runtime.h>
+#include <hip/hip_runtime_api.h>
+#include <hip/hip_version.h>
+// must be included after
+#include <hip/hip_deprecated.h>
 
 typedef union rocprofiler_hip_api_retval_u
 {
-    int         int_retval;
-    const char* const_charp_retval;
-    hipError_t  hipError_t_retval;
+    int                  int_retval;
+    const char*          const_charp_retval;
+    hipError_t           hipError_t_retval;
+    hipChannelFormatDesc hipChannelFormatDesc_retval;
 } rocprofiler_hip_api_retval_t;
 
 typedef union rocprofiler_hip_api_args_u
 {
     struct
     {
-        dim3*        gridDim;
-        dim3*        blockDim;
-        size_t*      sharedMem;
-        hipStream_t* stream;
-    } __hipPopCallConfiguration;
+        uint32_t id;
+    } hipApiName;
     struct
     {
-        dim3        gridDim;
-        dim3        blockDim;
-        size_t      sharedMem;
-        hipStream_t stream;
-    } __hipPushCallConfiguration;
-    struct
-    {
-        hipArray**                    array;
+        hipArray_t*                   array;
         const HIP_ARRAY3D_DESCRIPTOR* pAllocateArray;
     } hipArray3DCreate;
     struct
     {
         HIP_ARRAY3D_DESCRIPTOR* pArrayDescriptor;
-        hipArray*               array;
+        hipArray_t              array;
     } hipArray3DGetDescriptor;
     struct
     {
-        hipArray**                  pHandle;
+        hipArray_t*                 pHandle;
         const HIP_ARRAY_DESCRIPTOR* pAllocateArray;
     } hipArrayCreate;
     struct
     {
-        hipArray* array;
+        hipArray_t array;
     } hipArrayDestroy;
     struct
     {
         HIP_ARRAY_DESCRIPTOR* pArrayDescriptor;
-        hipArray*             array;
+        hipArray_t            array;
     } hipArrayGetDescriptor;
     struct
     {
         hipChannelFormatDesc* desc;
         hipExtent*            extent;
         unsigned int*         flags;
-        hipArray*             array;
+        hipArray_t            array;
     } hipArrayGetInfo;
     struct
     {
-        int*                   device;
-        const hipDeviceProp_t* prop;
+        size_t*                     offset;
+        const textureReference*     tex;
+        const void*                 devPtr;
+        const hipChannelFormatDesc* desc;
+        size_t                      size;
+    } hipBindTexture;
+    struct
+    {
+        size_t*                     offset;
+        const textureReference*     tex;
+        const void*                 devPtr;
+        const hipChannelFormatDesc* desc;
+        size_t                      width;
+        size_t                      height;
+        size_t                      pitch;
+    } hipBindTexture2D;
+    struct
+    {
+        const textureReference*     tex;
+        hipArray_const_t            array;
+        const hipChannelFormatDesc* desc;
+    } hipBindTextureToArray;
+    struct
+    {
+        const textureReference*     tex;
+        hipMipmappedArray_const_t   mipmappedArray;
+        const hipChannelFormatDesc* desc;
+    } hipBindTextureToMipmappedArray;
+    struct
+    {
+        int*                        device;
+        const hipDeviceProp_tR0600* prop;
     } hipChooseDevice;
+    struct
+    {
+        int*                        device;
+        const hipDeviceProp_tR0000* prop;
+    } hipChooseDeviceR0000;
     struct
     {
         dim3        gridDim;
@@ -95,6 +127,13 @@ typedef union rocprofiler_hip_api_args_u
         hipSurfaceObject_t*    pSurfObject;
         const hipResourceDesc* pResDesc;
     } hipCreateSurfaceObject;
+    struct
+    {
+        hipTextureObject_t*               pTexObject;
+        const hipResourceDesc*            pResDesc;
+        const hipTextureDesc*             pTexDesc;
+        const struct hipResourceViewDesc* pResViewDesc;
+    } hipCreateTextureObject;
     struct
     {
         hipCtx_t*    ctx;
@@ -161,6 +200,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipCtxSetSharedMemConfig;
     struct
     {
+    } hipCtxSynchronize;
+    struct
+    {
         hipExternalMemory_t extMem;
     } hipDestroyExternalMemory;
     struct
@@ -171,6 +213,10 @@ typedef union rocprofiler_hip_api_args_u
     {
         hipSurfaceObject_t surfaceObject;
     } hipDestroySurfaceObject;
+    struct
+    {
+        hipTextureObject_t textureObject;
+    } hipDestroyTextureObject;
     struct
     {
         int* canAccessPeer;
@@ -296,6 +342,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipDevicePrimaryCtxSetFlags;
     struct
     {
+    } hipDeviceReset;
+    struct
+    {
         hipFuncCache_t cacheConfig;
     } hipDeviceSetCacheConfig;
     struct
@@ -320,6 +369,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipDeviceSetSharedMemConfig;
     struct
     {
+    } hipDeviceSynchronize;
+    struct
+    {
         size_t*     bytes;
         hipDevice_t device;
     } hipDeviceTotalMem;
@@ -327,6 +379,25 @@ typedef union rocprofiler_hip_api_args_u
     {
         int* driverVersion;
     } hipDriverGetVersion;
+    struct
+    {
+        hipError_t   hipError;
+        const char** errorString;
+    } hipDrvGetErrorName;
+    struct
+    {
+        hipError_t   hipError;
+        const char** errorString;
+    } hipDrvGetErrorString;
+    struct
+    {
+        hipGraphNode_t*       phGraphNode;
+        hipGraph_t            hGraph;
+        const hipGraphNode_t* dependencies;
+        size_t                numDependencies;
+        const HIP_MEMCPY3D*   copyParams;
+        hipCtx_t              ctx;
+    } hipDrvGraphAddMemcpyNode;
     struct
     {
         const hip_Memcpy2D* pCopy;
@@ -353,8 +424,8 @@ typedef union rocprofiler_hip_api_args_u
     } hipEventCreate;
     struct
     {
-        hipEvent_t*  event;
-        unsigned int flags;
+        hipEvent_t* event;
+        unsigned    flags;
     } hipEventCreateWithFlags;
     struct
     {
@@ -381,10 +452,10 @@ typedef union rocprofiler_hip_api_args_u
     } hipEventSynchronize;
     struct
     {
-        int           device1;
-        int           device2;
-        unsigned int* linktype;
-        unsigned int* hopcount;
+        int       device1;
+        int       device2;
+        uint32_t* linktype;
+        uint32_t* hopcount;
     } hipExtGetLinkTypeAndHopCount;
     struct
     {
@@ -412,32 +483,15 @@ typedef union rocprofiler_hip_api_args_u
     } hipExtMallocWithFlags;
     struct
     {
-        hipFunction_t f;
-        unsigned int  globalWorkSizeX;
-        unsigned int  globalWorkSizeY;
-        unsigned int  globalWorkSizeZ;
-        unsigned int  localWorkSizeX;
-        unsigned int  localWorkSizeY;
-        unsigned int  localWorkSizeZ;
-        size_t        sharedMemBytes;
-        hipStream_t   hStream;
-        void**        kernelParams;
-        void**        extra;
-        hipEvent_t    startEvent;
-        hipEvent_t    stopEvent;
-        unsigned int  flags;
-    } hipExtModuleLaunchKernel;
-    struct
-    {
-        hipStream_t*        stream;
-        unsigned int        cuMaskSize;
-        const unsigned int* cuMask;
+        hipStream_t*    stream;
+        uint32_t        cuMaskSize;
+        const uint32_t* cuMask;
     } hipExtStreamCreateWithCUMask;
     struct
     {
-        hipStream_t   stream;
-        unsigned int  cuMaskSize;
-        unsigned int* cuMask;
+        hipStream_t stream;
+        uint32_t    cuMaskSize;
+        uint32_t*   cuMask;
     } hipExtStreamGetCUMask;
     struct
     {
@@ -451,7 +505,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipFree;
     struct
     {
-        hipArray* array;
+        hipArray_t array;
     } hipFreeArray;
     struct
     {
@@ -474,8 +528,8 @@ typedef union rocprofiler_hip_api_args_u
     } hipFuncGetAttribute;
     struct
     {
-        hipFuncAttributes* attr;
-        const void*        func;
+        struct hipFuncAttributes* attr;
+        const void*               func;
     } hipFuncGetAttributes;
     struct
     {
@@ -519,9 +573,25 @@ typedef union rocprofiler_hip_api_args_u
     } hipGetDeviceFlags;
     struct
     {
-        hipDeviceProp_t* props;
-        hipDevice_t      device;
-    } hipGetDeviceProperties;
+        hipDeviceProp_tR0600* prop;
+        int                   deviceId;
+    } hipGetDevicePropertiesR0600;
+    struct
+    {
+        hipDeviceProp_tR0000* prop;
+        int                   deviceId;
+    } hipGetDevicePropertiesR0000;
+    struct
+    {
+        hipError_t hip_error;
+    } hipGetErrorName;
+    struct
+    {
+        hipError_t hipError;
+    } hipGetErrorString;
+    struct
+    {
+    } hipGetLastError;
     struct
     {
         hipArray_t*               levelArray;
@@ -538,6 +608,31 @@ typedef union rocprofiler_hip_api_args_u
         size_t*     size;
         const void* symbol;
     } hipGetSymbolSize;
+    struct
+    {
+        size_t*                 offset;
+        const textureReference* texref;
+    } hipGetTextureAlignmentOffset;
+    struct
+    {
+        hipResourceDesc*   pResDesc;
+        hipTextureObject_t textureObject;
+    } hipGetTextureObjectResourceDesc;
+    struct
+    {
+        struct hipResourceViewDesc* pResViewDesc;
+        hipTextureObject_t          textureObject;
+    } hipGetTextureObjectResourceViewDesc;
+    struct
+    {
+        hipTextureDesc*    pTexDesc;
+        hipTextureObject_t textureObject;
+    } hipGetTextureObjectTextureDesc;
+    struct
+    {
+        const textureReference** texref;
+        const void*              symbol;
+    } hipGetTextureReference;
     struct
     {
         hipGraphNode_t*       pGraphNode;
@@ -1025,22 +1120,6 @@ typedef union rocprofiler_hip_api_args_u
     } hipGraphicsUnregisterResource;
     struct
     {
-        hipFunction_t f;
-        unsigned int  globalWorkSizeX;
-        unsigned int  globalWorkSizeY;
-        unsigned int  globalWorkSizeZ;
-        unsigned int  blockDimX;
-        unsigned int  blockDimY;
-        unsigned int  blockDimZ;
-        size_t        sharedMemBytes;
-        hipStream_t   hStream;
-        void**        kernelParams;
-        void**        extra;
-        hipEvent_t    startEvent;
-        hipEvent_t    stopEvent;
-    } hipHccModuleLaunchKernel;
-    struct
-    {
         void**       ptr;
         size_t       size;
         unsigned int flags;
@@ -1117,7 +1196,16 @@ typedef union rocprofiler_hip_api_args_u
     } hipIpcOpenMemHandle;
     struct
     {
+        hipFunction_t f;
+    } hipKernelNameRef;
+    struct
+    {
         const void* hostFunction;
+        hipStream_t stream;
+    } hipKernelNameRefByPtr;
+    struct
+    {
+        const void* func;
     } hipLaunchByPtr;
     struct
     {
@@ -1161,14 +1249,14 @@ typedef union rocprofiler_hip_api_args_u
     } hipMalloc3D;
     struct
     {
-        hipArray_t*                 array;
-        const hipChannelFormatDesc* desc;
-        hipExtent                   extent;
-        unsigned int                flags;
+        hipArray_t*                        array;
+        const struct hipChannelFormatDesc* desc;
+        struct hipExtent                   extent;
+        unsigned int                       flags;
     } hipMalloc3DArray;
     struct
     {
-        hipArray**                  array;
+        hipArray_t*                 array;
         const hipChannelFormatDesc* desc;
         size_t                      width;
         size_t                      height;
@@ -1200,11 +1288,11 @@ typedef union rocprofiler_hip_api_args_u
     } hipMallocManaged;
     struct
     {
-        hipMipmappedArray_t*        mipmappedArray;
-        const hipChannelFormatDesc* desc;
-        hipExtent                   extent;
-        unsigned int                numLevels;
-        unsigned int                flags;
+        hipMipmappedArray_t*               mipmappedArray;
+        const struct hipChannelFormatDesc* desc;
+        struct hipExtent                   extent;
+        unsigned int                       numLevels;
+        unsigned int                       flags;
     } hipMallocMipmappedArray;
     struct
     {
@@ -1474,7 +1562,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipMemcpy2DFromArrayAsync;
     struct
     {
-        hipArray*     dst;
+        hipArray_t    dst;
         size_t        wOffset;
         size_t        hOffset;
         const void*   src;
@@ -1485,7 +1573,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipMemcpy2DToArray;
     struct
     {
-        hipArray*     dst;
+        hipArray_t    dst;
         size_t        wOffset;
         size_t        hOffset;
         const void*   src;
@@ -1497,12 +1585,12 @@ typedef union rocprofiler_hip_api_args_u
     } hipMemcpy2DToArrayAsync;
     struct
     {
-        const hipMemcpy3DParms* p;
+        const struct hipMemcpy3DParms* p;
     } hipMemcpy3D;
     struct
     {
-        const hipMemcpy3DParms* p;
-        hipStream_t             stream;
+        const struct hipMemcpy3DParms* p;
+        hipStream_t                    stream;
     } hipMemcpy3DAsync;
     struct
     {
@@ -1514,10 +1602,10 @@ typedef union rocprofiler_hip_api_args_u
     } hipMemcpyAsync;
     struct
     {
-        void*     dst;
-        hipArray* srcArray;
-        size_t    srcOffset;
-        size_t    count;
+        void*      dst;
+        hipArray_t srcArray;
+        size_t     srcOffset;
+        size_t     count;
     } hipMemcpyAtoH;
     struct
     {
@@ -1573,7 +1661,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipMemcpyFromSymbolAsync;
     struct
     {
-        hipArray*   dstArray;
+        hipArray_t  dstArray;
         size_t      dstOffset;
         const void* srcHost;
         size_t      count;
@@ -1619,7 +1707,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipMemcpyPeerAsync;
     struct
     {
-        hipArray*     dst;
+        hipArray_t    dst;
         size_t        wOffset;
         size_t        hOffset;
         const void*   src;
@@ -1817,7 +1905,7 @@ typedef union rocprofiler_hip_api_args_u
         const void*   image;
         unsigned int  numOptions;
         hipJitOption* options;
-        void**        optionsValues;
+        void**        optionValues;
     } hipModuleLoadDataEx;
     struct
     {
@@ -1860,14 +1948,14 @@ typedef union rocprofiler_hip_api_args_u
         int*        numBlocks;
         const void* f;
         int         blockSize;
-        size_t      dynamicSMemSize;
+        size_t      dynSharedMemPerBlk;
     } hipOccupancyMaxActiveBlocksPerMultiprocessor;
     struct
     {
         int*         numBlocks;
         const void*  f;
         int          blockSize;
-        size_t       dynamicSMemSize;
+        size_t       dynSharedMemPerBlk;
         unsigned int flags;
     } hipOccupancyMaxActiveBlocksPerMultiprocessorWithFlags;
     struct
@@ -1878,6 +1966,9 @@ typedef union rocprofiler_hip_api_args_u
         size_t      dynSharedMemPerBlk;
         int         blockSizeLimit;
     } hipOccupancyMaxPotentialBlockSize;
+    struct
+    {
+    } hipPeekAtLastError;
     struct
     {
         void*                data;
@@ -1897,6 +1988,12 @@ typedef union rocprofiler_hip_api_args_u
     } hipPointerSetAttribute;
     struct
     {
+    } hipProfilerStart;
+    struct
+    {
+    } hipProfilerStop;
+    struct
+    {
         int* runtimeVersion;
     } hipRuntimeGetVersion;
     struct
@@ -1905,7 +2002,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipSetDevice;
     struct
     {
-        unsigned int flags;
+        unsigned flags;
     } hipSetDeviceFlags;
     struct
     {
@@ -2023,9 +2120,9 @@ typedef union rocprofiler_hip_api_args_u
     {
         hipStream_t  stream;
         void*        ptr;
-        unsigned int value;
+        uint32_t     value;
         unsigned int flags;
-        unsigned int mask;
+        uint32_t     mask;
     } hipStreamWaitValue32;
     struct
     {
@@ -2039,7 +2136,7 @@ typedef union rocprofiler_hip_api_args_u
     {
         hipStream_t  stream;
         void*        ptr;
-        unsigned int value;
+        uint32_t     value;
         unsigned int flags;
     } hipStreamWriteValue32;
     struct
@@ -2051,9 +2148,46 @@ typedef union rocprofiler_hip_api_args_u
     } hipStreamWriteValue64;
     struct
     {
+        hipTextureObject_t*           pTexObject;
+        const HIP_RESOURCE_DESC*      pResDesc;
+        const HIP_TEXTURE_DESC*       pTexDesc;
+        const HIP_RESOURCE_VIEW_DESC* pResViewDesc;
+    } hipTexObjectCreate;
+    struct
+    {
+        hipTextureObject_t texObject;
+    } hipTexObjectDestroy;
+    struct
+    {
+        HIP_RESOURCE_DESC* pResDesc;
+        hipTextureObject_t texObject;
+    } hipTexObjectGetResourceDesc;
+    struct
+    {
+        HIP_RESOURCE_VIEW_DESC* pResViewDesc;
+        hipTextureObject_t      texObject;
+    } hipTexObjectGetResourceViewDesc;
+    struct
+    {
+        HIP_TEXTURE_DESC*  pTexDesc;
+        hipTextureObject_t texObject;
+    } hipTexObjectGetTextureDesc;
+    struct
+    {
         hipDeviceptr_t*         dev_ptr;
         const textureReference* texRef;
     } hipTexRefGetAddress;
+    struct
+    {
+        enum hipTextureAddressMode* pam;
+        const textureReference*     texRef;
+        int                         dim;
+    } hipTexRefGetAddressMode;
+    struct
+    {
+        enum hipTextureFilterMode* pfm;
+        const textureReference*    texRef;
+    } hipTexRefGetFilterMode;
     struct
     {
         unsigned int*           pFlags;
@@ -2075,6 +2209,11 @@ typedef union rocprofiler_hip_api_args_u
         hipMipmappedArray_t*    pArray;
         const textureReference* texRef;
     } hipTexRefGetMipMappedArray;
+    struct
+    {
+        enum hipTextureFilterMode* pfm;
+        const textureReference*    texRef;
+    } hipTexRefGetMipmapFilterMode;
     struct
     {
         float*                  pbias;
@@ -2102,6 +2241,12 @@ typedef union rocprofiler_hip_api_args_u
     } hipTexRefSetAddress2D;
     struct
     {
+        textureReference*          texRef;
+        int                        dim;
+        enum hipTextureAddressMode am;
+    } hipTexRefSetAddressMode;
+    struct
+    {
         textureReference* tex;
         hipArray_const_t  array;
         unsigned int      flags;
@@ -2111,6 +2256,11 @@ typedef union rocprofiler_hip_api_args_u
         textureReference* texRef;
         float*            pBorderColor;
     } hipTexRefSetBorderColor;
+    struct
+    {
+        textureReference*         texRef;
+        enum hipTextureFilterMode fm;
+    } hipTexRefSetFilterMode;
     struct
     {
         textureReference* texRef;
@@ -2129,6 +2279,11 @@ typedef union rocprofiler_hip_api_args_u
     } hipTexRefSetMaxAnisotropy;
     struct
     {
+        textureReference*         texRef;
+        enum hipTextureFilterMode fm;
+    } hipTexRefSetMipmapFilterMode;
+    struct
+    {
         textureReference* texRef;
         float             bias;
     } hipTexRefSetMipmapLevelBias;
@@ -2140,14 +2295,18 @@ typedef union rocprofiler_hip_api_args_u
     } hipTexRefSetMipmapLevelClamp;
     struct
     {
-        textureReference*  texRef;
-        hipMipmappedArray* mipmappedArray;
-        unsigned int       Flags;
+        textureReference*         texRef;
+        struct hipMipmappedArray* mipmappedArray;
+        unsigned int              Flags;
     } hipTexRefSetMipmappedArray;
     struct
     {
         hipStreamCaptureMode* mode;
     } hipThreadExchangeStreamCaptureMode;
+    struct
+    {
+        const textureReference* tex;
+    } hipUnbindTexture;
     struct
     {
         hipUserObject_t* object_out;
@@ -2173,4 +2332,330 @@ typedef union rocprofiler_hip_api_args_u
         unsigned int                          numExtSems;
         hipStream_t                           stream;
     } hipWaitExternalSemaphoresAsync;
+    struct
+    {
+        int                  x;
+        int                  y;
+        int                  z;
+        int                  w;
+        hipChannelFormatKind f;
+    } hipCreateChannelDesc;
+    struct
+    {
+        hipFunction_t f;
+        uint32_t      globalWorkSizeX;
+        uint32_t      globalWorkSizeY;
+        uint32_t      globalWorkSizeZ;
+        uint32_t      localWorkSizeX;
+        uint32_t      localWorkSizeY;
+        uint32_t      localWorkSizeZ;
+        size_t        sharedMemBytes;
+        hipStream_t   hStream;
+        void**        kernelParams;
+        void**        extra;
+        hipEvent_t    startEvent;
+        hipEvent_t    stopEvent;
+        uint32_t      flags;
+    } hipExtModuleLaunchKernel;
+    struct
+    {
+        hipFunction_t f;
+        uint32_t      globalWorkSizeX;
+        uint32_t      globalWorkSizeY;
+        uint32_t      globalWorkSizeZ;
+        uint32_t      localWorkSizeX;
+        uint32_t      localWorkSizeY;
+        uint32_t      localWorkSizeZ;
+        size_t        sharedMemBytes;
+        hipStream_t   hStream;
+        void**        kernelParams;
+        void**        extra;
+        hipEvent_t    startEvent;
+        hipEvent_t    stopEvent;
+    } hipHccModuleLaunchKernel;
+    struct
+    {
+        void*         dst;
+        const void*   src;
+        size_t        sizeBytes;
+        hipMemcpyKind kind;
+    } hipMemcpy_spt;
+    struct
+    {
+        const void*   symbol;
+        const void*   src;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+    } hipMemcpyToSymbol_spt;
+    struct
+    {
+        void*         dst;
+        const void*   symbol;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+    } hipMemcpyFromSymbol_spt;
+    struct
+    {
+        void*         dst;
+        size_t        dpitch;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+    } hipMemcpy2D_spt;
+    struct
+    {
+        void*            dst;
+        size_t           dpitch;
+        hipArray_const_t src;
+        size_t           wOffset;
+        size_t           hOffset;
+        size_t           width;
+        size_t           height;
+        hipMemcpyKind    kind;
+    } hipMemcpy2DFromArray_spt;
+    struct
+    {
+        const struct hipMemcpy3DParms* p;
+    } hipMemcpy3D_spt;
+    struct
+    {
+        void*  dst;
+        int    value;
+        size_t sizeBytes;
+    } hipMemset_spt;
+    struct
+    {
+        void*       dst;
+        int         value;
+        size_t      sizeBytes;
+        hipStream_t stream;
+    } hipMemsetAsync_spt;
+    struct
+    {
+        void*  dst;
+        size_t pitch;
+        int    value;
+        size_t width;
+        size_t height;
+    } hipMemset2D_spt;
+    struct
+    {
+        void*       dst;
+        size_t      pitch;
+        int         value;
+        size_t      width;
+        size_t      height;
+        hipStream_t stream;
+    } hipMemset2DAsync_spt;
+    struct
+    {
+        hipPitchedPtr pitchedDevPtr;
+        int           value;
+        hipExtent     extent;
+        hipStream_t   stream;
+    } hipMemset3DAsync_spt;
+    struct
+    {
+        hipPitchedPtr pitchedDevPtr;
+        int           value;
+        hipExtent     extent;
+    } hipMemset3D_spt;
+    struct
+    {
+        void*         dst;
+        const void*   src;
+        size_t        sizeBytes;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpyAsync_spt;
+    struct
+    {
+        const hipMemcpy3DParms* p;
+        hipStream_t             stream;
+    } hipMemcpy3DAsync_spt;
+    struct
+    {
+        void*         dst;
+        size_t        dpitch;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpy2DAsync_spt;
+    struct
+    {
+        void*         dst;
+        const void*   symbol;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpyFromSymbolAsync_spt;
+    struct
+    {
+        const void*   symbol;
+        const void*   src;
+        size_t        sizeBytes;
+        size_t        offset;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpyToSymbolAsync_spt;
+    struct
+    {
+        void*            dst;
+        hipArray_const_t src;
+        size_t           wOffsetSrc;
+        size_t           hOffset;
+        size_t           count;
+        hipMemcpyKind    kind;
+    } hipMemcpyFromArray_spt;
+    struct
+    {
+        hipArray_t    dst;
+        size_t        wOffset;
+        size_t        hOffset;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+    } hipMemcpy2DToArray_spt;
+    struct
+    {
+        void*            dst;
+        size_t           dpitch;
+        hipArray_const_t src;
+        size_t           wOffsetSrc;
+        size_t           hOffsetSrc;
+        size_t           width;
+        size_t           height;
+        hipMemcpyKind    kind;
+        hipStream_t      stream;
+    } hipMemcpy2DFromArrayAsync_spt;
+    struct
+    {
+        hipArray_t    dst;
+        size_t        wOffset;
+        size_t        hOffset;
+        const void*   src;
+        size_t        spitch;
+        size_t        width;
+        size_t        height;
+        hipMemcpyKind kind;
+        hipStream_t   stream;
+    } hipMemcpy2DToArrayAsync_spt;
+    struct
+    {
+        hipStream_t stream;
+    } hipStreamQuery_spt;
+    struct
+    {
+        hipStream_t stream;
+    } hipStreamSynchronize_spt;
+    struct
+    {
+        hipStream_t stream;
+        int*        priority;
+    } hipStreamGetPriority_spt;
+    struct
+    {
+        hipStream_t  stream;
+        hipEvent_t   event;
+        unsigned int flags;
+    } hipStreamWaitEvent_spt;
+    struct
+    {
+        hipStream_t   stream;
+        unsigned int* flags;
+    } hipStreamGetFlags_spt;
+    struct
+    {
+        hipStream_t         stream;
+        hipStreamCallback_t callback;
+        void*               userData;
+        unsigned int        flags;
+    } hipStreamAddCallback_spt;
+    struct
+    {
+        hipEvent_t  event;
+        hipStream_t stream;
+    } hipEventRecord_spt;
+    struct
+    {
+        const void* f;
+        dim3        gridDim;
+        dim3        blockDim;
+        void**      kernelParams;
+        uint32_t    sharedMemBytes;
+        hipStream_t hStream;
+    } hipLaunchCooperativeKernel_spt;
+    struct
+    {
+        const void* function_address;
+        dim3        numBlocks;
+        dim3        dimBlocks;
+        void**      args;
+        size_t      sharedMemBytes;
+        hipStream_t stream;
+    } hipLaunchKernel_spt;
+    struct
+    {
+        hipGraphExec_t graphExec;
+        hipStream_t    stream;
+    } hipGraphLaunch_spt;
+    struct
+    {
+        hipStream_t          stream;
+        hipStreamCaptureMode mode;
+    } hipStreamBeginCapture_spt;
+    struct
+    {
+        hipStream_t stream;
+        hipGraph_t* pGraph;
+    } hipStreamEndCapture_spt;
+    struct
+    {
+        hipStream_t             stream;
+        hipStreamCaptureStatus* pCaptureStatus;
+    } hipStreamIsCapturing_spt;
+    struct
+    {
+        hipStream_t             stream;
+        hipStreamCaptureStatus* pCaptureStatus;
+        unsigned long long*     pId;
+    } hipStreamGetCaptureInfo_spt;
+    struct
+    {
+        hipStream_t             stream;
+        hipStreamCaptureStatus* captureStatus_out;
+        unsigned long long*     id_out;
+        hipGraph_t*             graph_out;
+        const hipGraphNode_t**  dependencies_out;
+        size_t*                 numDependencies_out;
+    } hipStreamGetCaptureInfo_v2_spt;
+    struct
+    {
+        hipStream_t stream;
+        hipHostFn_t fn;
+        void*       userData;
+    } hipLaunchHostFunc_spt;
+    struct
+    {
+        hipStream_t stream;
+    } hipGetStreamDeviceId;
+    // struct
+    // {
+    //     hipGraphNode_t*               phGraphNode;
+    //     hipGraph_t                    hGraph;
+    //     const hipGraphNode_t*         dependencies;
+    //     size_t                        numDependencies;
+    //     const HIP_MEMSET_NODE_PARAMS* memsetParams;
+    //     hipCtx_t                      ctx;
+    // } hipDrvGraphAddMemsetNode;
 } rocprofiler_hip_api_args_t;

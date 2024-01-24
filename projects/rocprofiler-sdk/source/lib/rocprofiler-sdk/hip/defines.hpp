@@ -25,10 +25,12 @@
 #define IMPL_DETAIL_EXPAND(X) X
 #define IMPL_DETAIL_FOR_EACH_NARG(...)                                                             \
     IMPL_DETAIL_FOR_EACH_NARG_(__VA_ARGS__, IMPL_DETAIL_FOR_EACH_RSEQ_N())
-#define IMPL_DETAIL_FOR_EACH_NARG_(...)                                                       IMPL_DETAIL_EXPAND(IMPL_DETAIL_FOR_EACH_ARG_N(__VA_ARGS__))
-#define IMPL_DETAIL_FOR_EACH_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, N, ...) N
-#define IMPL_DETAIL_FOR_EACH_RSEQ_N()                                                         12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
-#define IMPL_DETAIL_CONCATENATE(X, Y)                                                         X##Y
+#define IMPL_DETAIL_FOR_EACH_NARG_(...) IMPL_DETAIL_EXPAND(IMPL_DETAIL_FOR_EACH_ARG_N(__VA_ARGS__))
+#define IMPL_DETAIL_FOR_EACH_ARG_N(                                                                \
+    _1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, N, ...)                      \
+    N
+#define IMPL_DETAIL_FOR_EACH_RSEQ_N() 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
+#define IMPL_DETAIL_CONCATENATE(X, Y) X##Y
 #define IMPL_DETAIL_FOR_EACH_(N, MACRO, PREFIX, ...)                                               \
     IMPL_DETAIL_EXPAND(IMPL_DETAIL_CONCATENATE(MACRO, N)(PREFIX, __VA_ARGS__))
 #define IMPL_DETAIL_FOR_EACH(MACRO, PREFIX, ...)                                                   \
@@ -55,6 +57,12 @@
     ADDR_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J), ADDR_MEMBER_1(PREFIX, K)
 #define ADDR_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L)                                 \
     ADDR_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K), ADDR_MEMBER_1(PREFIX, L)
+#define ADDR_MEMBER_13(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M)                              \
+    ADDR_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L), ADDR_MEMBER_1(PREFIX, M)
+#define ADDR_MEMBER_14(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M, N)                           \
+    ADDR_MEMBER_13(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M), ADDR_MEMBER_1(PREFIX, N)
+#define ADDR_MEMBER_15(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O)                        \
+    ADDR_MEMBER_14(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M, N), ADDR_MEMBER_1(PREFIX, O)
 
 #define NAMED_MEMBER_0(...)
 #define NAMED_MEMBER_1(PREFIX, FIELD)   std::make_pair(#FIELD, PREFIX.FIELD)
@@ -78,80 +86,53 @@
     NAMED_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J), NAMED_MEMBER_1(PREFIX, K)
 #define NAMED_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L)                                \
     NAMED_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K), NAMED_MEMBER_1(PREFIX, L)
+#define NAMED_MEMBER_13(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M)                             \
+    NAMED_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L), NAMED_MEMBER_1(PREFIX, M)
+#define NAMED_MEMBER_14(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M, N)                          \
+    NAMED_MEMBER_13(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M), NAMED_MEMBER_1(PREFIX, N)
+#define NAMED_MEMBER_15(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M, N, O)                       \
+    NAMED_MEMBER_14(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L, M, N), NAMED_MEMBER_1(PREFIX, O)
 
 #define GET_ADDR_MEMBER_FIELDS(VAR, ...)  IMPL_DETAIL_FOR_EACH(ADDR_MEMBER_, VAR, __VA_ARGS__)
 #define GET_NAMED_MEMBER_FIELDS(VAR, ...) IMPL_DETAIL_FOR_EACH(NAMED_MEMBER_, VAR, __VA_ARGS__)
 
-#define HSA_API_META_DEFINITION(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR)                     \
+#define HIP_API_INFO_DEFINITION_0(HIP_TABLE, HIP_API_ID, HIP_FUNC, HIP_FUNC_PTR)                   \
     namespace rocprofiler                                                                          \
     {                                                                                              \
-    namespace hsa                                                                                  \
+    namespace hip                                                                                  \
     {                                                                                              \
     template <>                                                                                    \
-    struct hsa_api_meta<HSA_API_ID>                                                                \
+    struct hip_api_info<HIP_TABLE, HIP_API_ID> : hip_domain_info<HIP_TABLE>                        \
     {                                                                                              \
-        static constexpr auto table_idx     = HSA_TABLE;                                           \
-        static constexpr auto operation_idx = HSA_API_ID;                                          \
-        static constexpr auto name          = #HSA_FUNC;                                           \
+        static constexpr auto table_idx     = HIP_TABLE;                                           \
+        static constexpr auto operation_idx = HIP_API_ID;                                          \
+        static constexpr auto name          = #HIP_FUNC;                                           \
                                                                                                    \
-        using this_type     = hsa_api_meta<operation_idx>;                                         \
-        using function_type = hsa_api_func<decltype(::HSA_FUNC)*>::function_type;                  \
+        using domain_type = hip_domain_info<table_idx>;                                            \
+        using this_type   = hip_api_info<table_idx, operation_idx>;                                \
+        using base_type   = hip_api_impl<table_idx, operation_idx>;                                \
                                                                                                    \
-        static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
-                                                                                                   \
-        template <typename TableT>                                                                 \
-        static auto& get_table(TableT& _v)                                                         \
-        {                                                                                          \
-            return hsa_table_lookup<table_idx>{}(_v);                                              \
-        }                                                                                          \
-                                                                                                   \
-        template <typename TableT>                                                                 \
-        static auto& get_table_func(TableT& _table)                                                \
-        {                                                                                          \
-            if constexpr(std::is_pointer<TableT>::value)                                           \
-            {                                                                                      \
-                assert(_table != nullptr && "nullptr to HSA table for " #HSA_FUNC " function");    \
-                return _table->HSA_FUNC_PTR;                                                       \
-            }                                                                                      \
-            else                                                                                   \
-            {                                                                                      \
-                return _table.HSA_FUNC_PTR;                                                        \
-            }                                                                                      \
-        }                                                                                          \
-                                                                                                   \
-        static auto& get_table_func() { return get_table_func(get_table()); }                      \
-    };                                                                                             \
-    }                                                                                              \
-    }
-
-#define HSA_API_INFO_DEFINITION_0(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR)                   \
-    namespace rocprofiler                                                                          \
-    {                                                                                              \
-    namespace hsa                                                                                  \
-    {                                                                                              \
-    template <>                                                                                    \
-    struct hsa_api_info<HSA_API_ID>                                                                \
-    {                                                                                              \
-        static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_API;          \
-        static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_API;            \
-        static constexpr auto table_idx           = HSA_TABLE;                                     \
-        static constexpr auto operation_idx       = HSA_API_ID;                                    \
-        static constexpr auto name                = #HSA_FUNC;                                     \
-                                                                                                   \
-        using this_type = hsa_api_info<operation_idx>;                                             \
-        using base_type = hsa_api_impl<operation_idx>;                                             \
+        using domain_type::callback_domain_idx;                                                    \
+        using domain_type::buffered_domain_idx;                                                    \
+        using domain_type::args_type;                                                              \
+        using domain_type::retval_type;                                                            \
+        using domain_type::callback_data_type;                                                     \
                                                                                                    \
         static constexpr auto offset()                                                             \
         {                                                                                          \
-            return offsetof(hsa_table_lookup<table_idx>::type, HSA_FUNC_PTR);                      \
+            return offsetof(hip_table_lookup<table_idx>::type, HIP_FUNC_PTR);                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
+        static_assert(offsetof(hip_table_lookup<table_idx>::type, HIP_FUNC_PTR) ==                 \
+                          (sizeof(size_t) + (operation_idx * sizeof(void*))),                      \
+                      "ABI error for " #HIP_FUNC);                                                 \
+                                                                                                   \
+        static auto& get_table() { return hip_table_lookup<table_idx>{}(); }                       \
                                                                                                    \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
         {                                                                                          \
-            return hsa_table_lookup<table_idx>{}(_v);                                              \
+            return hip_table_lookup<table_idx>{}(_v);                                              \
         }                                                                                          \
                                                                                                    \
         template <typename TableT>                                                                 \
@@ -159,12 +140,12 @@
         {                                                                                          \
             if constexpr(std::is_pointer<TableT>::value)                                           \
             {                                                                                      \
-                assert(_table != nullptr && "nullptr to HSA table for " #HSA_FUNC " function");    \
-                return _table->HSA_FUNC_PTR;                                                       \
+                assert(_table != nullptr && "nullptr to HIP table for " #HIP_FUNC " function");    \
+                return _table->HIP_FUNC_PTR;                                                       \
             }                                                                                      \
             else                                                                                   \
             {                                                                                      \
-                return _table.HSA_FUNC_PTR;                                                        \
+                return _table.HIP_FUNC_PTR;                                                        \
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
@@ -173,7 +154,7 @@
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
         {                                                                                          \
-            return _data.HSA_FUNC;                                                                 \
+            return _data.HIP_FUNC;                                                                 \
         }                                                                                          \
                                                                                                    \
         template <typename RetT, typename... Args>                                                 \
@@ -187,13 +168,9 @@
                                                                                                    \
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(rocprofiler_callback_tracing_hsa_api_data_t)         \
-        {                                                                                          \
-            return std::vector<void*>{};                                                           \
-        }                                                                                          \
+        static std::vector<void*> as_arg_addr(callback_data_type) { return std::vector<void*>{}; } \
                                                                                                    \
-        static std::vector<std::pair<std::string, std::string>> as_arg_list(                       \
-            rocprofiler_callback_tracing_hsa_api_data_t)                                           \
+        static std::vector<std::pair<std::string, std::string>> as_arg_list(callback_data_type)    \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -201,34 +178,44 @@
     }                                                                                              \
     }
 
-#define HSA_API_INFO_DEFINITION_V(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR, ...)              \
+#define HIP_API_INFO_DEFINITION_V(HIP_TABLE, HIP_API_ID, HIP_FUNC, HIP_FUNC_PTR, ...)              \
     namespace rocprofiler                                                                          \
     {                                                                                              \
-    namespace hsa                                                                                  \
+    namespace hip                                                                                  \
     {                                                                                              \
     template <>                                                                                    \
-    struct hsa_api_info<HSA_API_ID>                                                                \
+    struct hip_api_info<HIP_TABLE, HIP_API_ID> : hip_domain_info<HIP_TABLE>                        \
     {                                                                                              \
-        static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_API;          \
-        static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_API;            \
-        static constexpr auto table_idx           = HSA_TABLE;                                     \
-        static constexpr auto operation_idx       = HSA_API_ID;                                    \
-        static constexpr auto name                = #HSA_FUNC;                                     \
+        static constexpr auto table_idx     = HIP_TABLE;                                           \
+        static constexpr auto operation_idx = HIP_API_ID;                                          \
+        static constexpr auto name          = #HIP_FUNC;                                           \
                                                                                                    \
-        using this_type = hsa_api_info<operation_idx>;                                             \
-        using base_type = hsa_api_impl<operation_idx>;                                             \
+        using domain_type = hip_domain_info<table_idx>;                                            \
+        using this_type   = hip_api_info<table_idx, operation_idx>;                                \
+        using base_type   = hip_api_impl<table_idx, operation_idx>;                                \
+                                                                                                   \
+        static constexpr auto callback_domain_idx = domain_type::callback_domain_idx;              \
+        static constexpr auto buffered_domain_idx = domain_type::buffered_domain_idx;              \
+                                                                                                   \
+        using domain_type::args_type;                                                              \
+        using domain_type::retval_type;                                                            \
+        using domain_type::callback_data_type;                                                     \
                                                                                                    \
         static constexpr auto offset()                                                             \
         {                                                                                          \
-            return offsetof(hsa_table_lookup<table_idx>::type, HSA_FUNC_PTR);                      \
+            return offsetof(hip_table_lookup<table_idx>::type, HIP_FUNC_PTR);                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
+        static_assert(offsetof(hip_table_lookup<table_idx>::type, HIP_FUNC_PTR) ==                 \
+                          (sizeof(size_t) + (operation_idx * sizeof(void*))),                      \
+                      "ABI error for " #HIP_FUNC);                                                 \
+                                                                                                   \
+        static auto& get_table() { return hip_table_lookup<table_idx>{}(); }                       \
                                                                                                    \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
         {                                                                                          \
-            return hsa_table_lookup<table_idx>{}(_v);                                              \
+            return hip_table_lookup<table_idx>{}(_v);                                              \
         }                                                                                          \
                                                                                                    \
         template <typename TableT>                                                                 \
@@ -236,12 +223,12 @@
         {                                                                                          \
             if constexpr(std::is_pointer<TableT>::value)                                           \
             {                                                                                      \
-                assert(_table != nullptr && "nullptr to HSA table for " #HSA_FUNC " function");    \
-                return _table->HSA_FUNC_PTR;                                                       \
+                assert(_table != nullptr && "nullptr to HIP table for " #HIP_FUNC " function");    \
+                return _table->HIP_FUNC_PTR;                                                       \
             }                                                                                      \
             else                                                                                   \
             {                                                                                      \
-                return _table.HSA_FUNC_PTR;                                                        \
+                return _table.HIP_FUNC_PTR;                                                        \
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
@@ -250,13 +237,13 @@
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
         {                                                                                          \
-            return _data.HSA_FUNC;                                                                 \
+            return _data.HIP_FUNC;                                                                 \
         }                                                                                          \
                                                                                                    \
         template <typename RetT, typename... Args>                                                 \
         static auto get_functor(RetT (*)(Args...))                                                 \
         {                                                                                          \
-            if constexpr(std::is_void<RetT>::value)                                                \
+            if constexpr(std::is_same<RetT, void>::value)                                          \
                 return [](Args... args) -> RetT { base_type::functor(args...); };                  \
             else                                                                                   \
                 return [](Args... args) -> RetT { return base_type::functor(args...); };           \
@@ -264,14 +251,13 @@
                                                                                                    \
         static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
-        static std::vector<void*> as_arg_addr(                                                     \
-            rocprofiler_callback_tracing_hsa_api_data_t trace_data)                                \
+        static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
         {                                                                                          \
             return std::vector<void*>{                                                             \
                 GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
         }                                                                                          \
                                                                                                    \
-        static auto as_arg_list(rocprofiler_callback_tracing_hsa_api_data_t trace_data)            \
+        static auto as_arg_list(callback_data_type trace_data)                                     \
         {                                                                                          \
             return utils::stringize(                                                               \
                 GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
@@ -280,17 +266,19 @@
     }                                                                                              \
     }
 
-#define HSA_API_TABLE_LOOKUP_DEFINITION(TABLE_ID, TYPE, MEMBER)                                    \
+#define HIP_API_TABLE_LOOKUP_DEFINITION(TABLE_ID, TYPE, MEMBER)                                    \
     namespace rocprofiler                                                                          \
     {                                                                                              \
-    namespace hsa                                                                                  \
+    namespace hip                                                                                  \
     {                                                                                              \
     template <>                                                                                    \
-    struct hsa_table_lookup<TABLE_ID>                                                              \
+    struct hip_table_lookup<TABLE_ID>                                                              \
     {                                                                                              \
         using type = TYPE;                                                                         \
-        auto& operator()(hsa_api_table_t& _v) const { return _v.MEMBER; }                          \
-        auto& operator()(hsa_api_table_t* _v) const { return _v->MEMBER; }                         \
+        auto& operator()(hip_api_table_t& _v) const { return _v.MEMBER; }                          \
+        auto& operator()(hip_api_table_t* _v) const { return _v->MEMBER; }                         \
+        auto& operator()(type& _v) const { return _v; }                                            \
+        auto& operator()(type* _v) const { return *_v; }                                           \
         auto& operator()() const { return (*this)(get_table()); }                                  \
     };                                                                                             \
     }                                                                                              \

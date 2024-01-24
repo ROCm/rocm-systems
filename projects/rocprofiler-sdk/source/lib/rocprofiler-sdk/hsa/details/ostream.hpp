@@ -32,13 +32,12 @@ namespace rocprofiler
 {
 namespace hsa
 {
+namespace detail
+{
 static int              HSA_depth_max     = 1;
 static thread_local int HSA_depth_max_cnt = 0;
 static std::string_view HSA_structs_regex = {};
-// begin ostream ops for HSA
-// basic ostream ops
-namespace detail
-{
+
 template <typename T>
 inline static std::ostream&
 operator<<(std::ostream& out, const T& v)

@@ -41,6 +41,10 @@ target_compile_options(simple-transpose PRIVATE -W -Wall -Wextra -Wpedantic -Wsh
 find_package(Threads REQUIRED)
 target_link_libraries(simple-transpose PRIVATE Threads::Threads)
 
+find_package(rocprofiler-sdk-roctx REQUIRED)
+target_link_libraries(simple-transpose
+                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+
 install(
     TARGETS simple-transpose
     DESTINATION bin

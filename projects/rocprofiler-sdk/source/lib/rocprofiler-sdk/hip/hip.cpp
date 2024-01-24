@@ -20,23 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/common/defines.hpp"
-#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
-#include "lib/rocprofiler-sdk/hsa/types.hpp"
-#include "lib/rocprofiler-sdk/hsa/utils.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/hip/details/ostream.hpp"
+#include "lib/rocprofiler-sdk/hip/types.hpp"
+#include "lib/rocprofiler-sdk/hip/utils.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hsa/api_id.h>
 
 #include <glog/logging.h>
+#include <hip/driver_types.h>
+#include <hip/hip_runtime_api.h>
+// must be included after runtime api
+#include <hip/hip_deprecated.h>
 
 #include <atomic>
 #include <cstddef>
@@ -46,12 +47,33 @@
 
 namespace rocprofiler
 {
-namespace hsa
+namespace hip
 {
 namespace
 {
 struct null_type
 {};
+
+template <typename Tp>
+auto
+get_default_retval()
+{
+    if constexpr(std::is_pointer<Tp>::value)
+    {
+        Tp v = nullptr;
+        return v;
+    }
+    else if constexpr(std::is_same<Tp, hipError_t>::value)
+        return hipErrorUnknown;
+    else if constexpr(std::is_same<Tp, hipChannelFormatDesc>::value)
+        return hipChannelFormatDesc{};
+    else if constexpr(std::is_same<Tp, int>::value)
+        return -1;
+    else if constexpr(std::is_void<Tp>::value)
+        return null_type{};
+    else
+        static_assert(std::is_empty<Tp>::value, "Error! unsupported return type");
+}
 
 template <typename DataT, typename Tp>
 void
@@ -62,149 +84,64 @@ set_data_retval(DataT& _data, Tp _val)
         (void) _data;
         (void) _val;
     }
-    else if constexpr(std::is_same<Tp, hsa_signal_value_t>::value)
+    else if constexpr(std::is_same<Tp, hipError_t>::value)
     {
-        _data.hsa_signal_value_t_retval = _val;
+        _data.hipError_t_retval = _val;
     }
-    else if constexpr(std::is_same<Tp, uint64_t>::value)
+    else if constexpr(std::is_same<Tp, hipChannelFormatDesc>::value)
     {
-        _data.uint64_t_retval = _val;
+        _data.hipChannelFormatDesc_retval = _val;
     }
-    else if constexpr(std::is_same<Tp, uint32_t>::value)
+    else if constexpr(std::is_same<Tp, const char*>::value)
     {
-        _data.uint32_t_retval = _val;
+        _data.const_charp_retval = _val;
     }
-    else if constexpr(std::is_same<Tp, hsa_status_t>::value)
+    else if constexpr(std::is_same<Tp, void**>::value)
     {
-        _data.hsa_status_t_retval = _val;
+        _data.voidpp_retval = _val;
+    }
+    else if constexpr(std::is_same<Tp, int>::value)
+    {
+        _data.int_retval = _val;
     }
     else
     {
-        static_assert(std::is_void<Tp>::value, "Error! unsupported return type");
+        static_assert(std::is_empty<Tp>::value, "Error! unsupported return type");
     }
-}
-
-// helper to ensure that the version variable is initialized with the correct major version, minor
-// version (sizeof), and step version
-#define DEFINE_TABLE_VERSION_IMPL(VARIABLE, OBJECT, MAJOR_VERSION, STEP_VERSION)                   \
-    constexpr auto VARIABLE = hsa_table_version_t{MAJOR_VERSION, sizeof(OBJECT), STEP_VERSION, 0};
-
-// helper to ensure that the version variable is initialized with the correct major version, minor
-// version (sizeof), and step version
-#define DEFINE_TABLE_VERSION(ALIAS, NAME)                                                          \
-    DEFINE_TABLE_VERSION_IMPL(hsa_##ALIAS##_table_version,                                         \
-                              hsa_##ALIAS##_table_t,                                               \
-                              HSA_##NAME##_TABLE_MAJOR_VERSION,                                    \
-                              HSA_##NAME##_TABLE_STEP_VERSION)
-
-DEFINE_TABLE_VERSION(api, API)
-DEFINE_TABLE_VERSION(core, CORE_API)
-DEFINE_TABLE_VERSION(amd_ext, AMD_EXT_API)
-DEFINE_TABLE_VERSION(fini_ext, FINALIZER_API)
-DEFINE_TABLE_VERSION(img_ext, IMAGE_API)
-
-#undef DEFINE_TABLE_VERSION
-#undef DEFINE_TABLE_VERSION_IMPL
-
-template <typename Tp>
-Tp*&
-get_table_impl(hsa_table_version_t _version)
-{
-    auto*& val   = common::static_object<Tp>::construct();
-    val->version = _version;
-    return val;
 }
 }  // namespace
 
-hsa_table_version_t
-get_table_version()
-{
-    return hsa_api_table_version;
-}
-
-// helper to ensure that table type is paired with the correct table version
-#define GET_TABLE_IMPL(ALIAS) get_table_impl<hsa_##ALIAS##_table_t>(hsa_##ALIAS##_table_version);
-
-hsa_core_table_t*
-get_core_table()
-{
-    static auto*& val = GET_TABLE_IMPL(core);
-    return val;
-}
-
-hsa_amd_ext_table_t*
-get_amd_ext_table()
-{
-    static auto*& val = GET_TABLE_IMPL(amd_ext);
-    return val;
-}
-
-hsa_fini_ext_table_t*
-get_fini_ext_table()
-{
-    static auto*& val = GET_TABLE_IMPL(fini_ext);
-    return val;
-}
-
-hsa_img_ext_table_t*
-get_img_ext_table()
-{
-    static auto*& val = GET_TABLE_IMPL(img_ext);
-    return val;
-}
-
-#undef GET_TABLE_IMPL
-
-hsa_api_table_t&
+hip_api_table_t&
 get_table()
 {
-    static auto tbl = hsa_api_table_t{.version        = hsa_api_table_version,
-                                      .core_          = get_core_table(),
-                                      .amd_ext_       = get_amd_ext_table(),
-                                      .finalizer_ext_ = get_fini_ext_table(),
-                                      .image_ext_     = get_img_ext_table()};
-    return tbl;
+    static auto _compiler = hip_compiler_api_table_t{};
+    static auto _runtime  = hip_runtime_api_table_t{};
+    static auto _v        = []() {
+        _compiler.size = sizeof(_compiler);
+        _runtime.size  = sizeof(_runtime);
+        auto _val      = hip_api_table_t{&_compiler, &_runtime};
+        return _val;
+    }();
+    return _v;
 }
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 template <typename DataArgsT, typename... Args>
 auto
-hsa_api_impl<Idx>::set_data_args(DataArgsT& _data_args, Args... args)
+hip_api_impl<TableIdx, OpIdx>::set_data_args(DataArgsT& _data_args, Args... args)
 {
-    if constexpr(Idx == ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_rect)
-    {
-        auto _tuple                  = std::make_tuple(args...);
-        _data_args.dst               = std::get<0>(_tuple);
-        _data_args.dst_offset        = std::get<1>(_tuple);
-        _data_args.src               = std::get<2>(_tuple);
-        _data_args.src_offset        = std::get<3>(_tuple);
-        _data_args.range             = std::get<4>(_tuple);
-        _data_args.range__val        = *(std::get<4>(_tuple));
-        _data_args.copy_agent        = std::get<5>(_tuple);
-        _data_args.dir               = std::get<6>(_tuple);
-        _data_args.num_dep_signals   = std::get<7>(_tuple);
-        _data_args.dep_signals       = std::get<8>(_tuple);
-        _data_args.completion_signal = std::get<9>(_tuple);
-    }
-    else
-    {
-        _data_args = DataArgsT{args...};
-    }
+    _data_args = DataArgsT{args...};
 }
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 template <typename FuncT, typename... Args>
 auto
-hsa_api_impl<Idx>::exec(FuncT&& _func, Args&&... args)
+hip_api_impl<TableIdx, OpIdx>::exec(FuncT&& _func, Args&&... args)
 {
     using return_type = std::decay_t<std::invoke_result_t<FuncT, Args...>>;
 
     if(_func)
     {
-        static_assert(std::is_void<return_type>::value || std::is_enum<return_type>::value ||
-                          std::is_integral<return_type>::value,
-                      "Error! unsupported return type");
-
         if constexpr(std::is_void<return_type>::value)
         {
             _func(std::forward<Args>(args)...);
@@ -216,17 +153,17 @@ hsa_api_impl<Idx>::exec(FuncT&& _func, Args&&... args)
         }
     }
 
-    if constexpr(std::is_void<return_type>::value)
-        return null_type{};
-    else
-        return return_type{HSA_STATUS_ERROR};
+    using info_type = hip_api_info<TableIdx, OpIdx>;
+    LOG(ERROR) << "nullptr to next hip function for " << info_type::name << " ("
+               << info_type::operation_idx << ")";
+
+    return get_default_retval<return_type>();
 }
 
 namespace
 {
 using correlation_service     = context::correlation_tracing_service;
-using buffer_hsa_api_record_t = rocprofiler_buffer_tracing_hsa_api_record_t;
-using callback_hsa_api_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
+using buffer_hip_api_record_t = rocprofiler_buffer_tracing_hip_api_record_t;
 
 struct callback_context_data
 {
@@ -277,21 +214,13 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
 }
 }  // namespace
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 template <typename... Args>
 auto
-hsa_api_impl<Idx>::functor(Args&&... args)
+hip_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 {
-    using info_type = hsa_api_info<Idx>;
-
-    if(registration::get_fini_status() != 0)
-    {
-        auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
-        if constexpr(!std::is_same<decltype(_ret), null_type>::value)
-            return _ret;
-        else
-            return HSA_STATUS_SUCCESS;
-    }
+    using info_type           = hip_api_info<TableIdx, OpIdx>;
+    using callback_api_data_t = typename hip_domain_info<TableIdx>::callback_data_type;
 
     auto thr_id            = common::get_tid();
     auto callback_contexts = std::vector<callback_context_data>{};
@@ -310,12 +239,12 @@ hsa_api_impl<Idx>::functor(Args&&... args)
         if constexpr(!std::is_same<decltype(_ret), null_type>::value)
             return _ret;
         else
-            return HSA_STATUS_SUCCESS;
+            return 0;
     }
 
     auto  ref_count        = (has_pc_sampling) ? 4 : 2;
-    auto  buffer_record    = common::init_public_api_struct(buffer_hsa_api_record_t{});
-    auto  tracer_data      = common::init_public_api_struct(callback_hsa_api_data_t{});
+    auto  buffer_record    = common::init_public_api_struct(buffer_hip_api_record_t{});
+    auto  tracer_data      = callback_api_data_t{.size = sizeof(callback_api_data_t)};
     auto* corr_id          = correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
 
@@ -331,7 +260,7 @@ hsa_api_impl<Idx>::functor(Args&&... args)
         buffer_record.thread_id = thr_id;
     }
 
-    tracer_data.size = sizeof(rocprofiler_callback_tracing_hsa_api_data_t);
+    tracer_data.size = sizeof(callback_api_data_t);
     set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
 
     // invoke the callbacks
@@ -438,56 +367,97 @@ hsa_api_impl<Idx>::functor(Args&&... args)
     if constexpr(!std::is_same<decltype(_ret), null_type>::value)
         return _ret;
     else
-        return HSA_STATUS_SUCCESS;
+        return 0;
 }
-}  // namespace hsa
+}  // namespace hip
 }  // namespace rocprofiler
 
-#define ROCPROFILER_LIB_ROCPROFILER_HSA_HSA_CPP_IMPL 1
+#define ROCPROFILER_LIB_ROCPROFILER_HIP_HIP_CPP_IMPL 1
 
 // template specializations
-#include "hsa.def.cpp"
+#include "hip.def.cpp"
 
 namespace rocprofiler
 {
-namespace hsa
+namespace hip
 {
 namespace
 {
-template <size_t Idx, size_t... IdxTail>
-const char*
-name_by_id(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
+template <size_t TableIdx>
+struct api_id_bounds;
+
+template <>
+struct api_id_bounds<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>
 {
-    if(Idx == id) return hsa_api_info<Idx>::name;
-    if constexpr(sizeof...(IdxTail) > 0)
-        return name_by_id(id, std::index_sequence<IdxTail...>{});
+    static constexpr auto none = ROCPROFILER_HIP_API_ID_NONE;
+    static constexpr auto last = ROCPROFILER_HIP_API_ID_LAST;
+};
+
+template <>
+struct api_id_bounds<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>
+{
+    static constexpr auto none = ROCPROFILER_HIP_COMPILER_API_ID_NONE;
+    static constexpr auto last = ROCPROFILER_HIP_COMPILER_API_ID_LAST;
+};
+
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
+const char*
+name_by_id(const uint32_t id, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    if(OpIdx == id) return hip_api_info<TableIdx, OpIdx>::name;
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        return name_by_id<TableIdx>(id, std::index_sequence<OpIdxTail...>{});
     else
         return nullptr;
 }
 
-template <size_t Idx, size_t... IdxTail>
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
 uint32_t
-id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
+id_by_name(const char* name, std::index_sequence<OpIdx, OpIdxTail...>)
 {
-    if(std::string_view{hsa_api_info<Idx>::name} == std::string_view{name})
-        return hsa_api_info<Idx>::operation_idx;
-    if constexpr(sizeof...(IdxTail) > 0)
-        return id_by_name(name, std::index_sequence<IdxTail...>{});
+    if(std::string_view{hip_api_info<TableIdx, OpIdx>::name} == std::string_view{name})
+        return hip_api_info<TableIdx, OpIdx>::operation_idx;
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        return id_by_name<TableIdx>(name, std::index_sequence<OpIdxTail...>{});
     else
-        return ROCPROFILER_HSA_API_ID_NONE;
+        return api_id_bounds<TableIdx>::none;
 }
 
-template <size_t Idx, size_t... IdxTail>
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
+void
+get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    auto _idx = hip_api_info<TableIdx, OpIdx>::operation_idx;
+    if(_idx < api_id_bounds<TableIdx>::last) _id_list.emplace_back(_idx);
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        get_ids<TableIdx>(_id_list, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
+void
+get_names(std::vector<const char*>& _name_list, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    auto&& _name = hip_api_info<TableIdx, OpIdx>::name;
+    if(_name != nullptr && strnlen(_name, 1) > 0) _name_list.emplace_back(_name);
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        get_names<TableIdx>(_name_list, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t OpIdx, size_t... OpIdxTail>
 void
 iterate_args(const uint32_t                                     id,
-             const rocprofiler_callback_tracing_hsa_api_data_t& data,
+             const rocprofiler_callback_tracing_hip_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   func,
              void*                                              user_data,
-             std::index_sequence<Idx, IdxTail...>)
+             std::index_sequence<OpIdx, OpIdxTail...>)
 {
-    if(Idx == id)
+    if(OpIdx == id)
     {
-        using info_type = hsa_api_info<Idx>;
+        using info_type = hip_api_info<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi, OpIdx>;
         auto&& arg_list = info_type::as_arg_list(data);
         auto&& arg_addr = info_type::as_arg_addr(data);
         for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
@@ -502,41 +472,18 @@ iterate_args(const uint32_t                                     id,
             if(ret != 0) break;
         }
     }
-    if constexpr(sizeof...(IdxTail) > 0)
-        iterate_args(id, data, func, user_data, std::index_sequence<IdxTail...>{});
-}
-
-template <size_t... Idx>
-void
-get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
-{
-    auto _emplace = [](auto& _vec, uint32_t _v) {
-        if(_v < ROCPROFILER_HSA_API_ID_LAST) _vec.emplace_back(_v);
-    };
-
-    (_emplace(_id_list, hsa_api_info<Idx>::operation_idx), ...);
-}
-
-template <size_t... Idx>
-void
-get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
-{
-    auto _emplace = [](auto& _vec, const char* _v) {
-        if(_v != nullptr && strnlen(_v, 1) > 0) _vec.emplace_back(_v);
-    };
-
-    (_emplace(_name_list, hsa_api_info<Idx>::name), ...);
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        iterate_args(id, data, func, user_data, std::index_sequence<OpIdxTail...>{});
 }
 
 bool
-should_wrap_functor(const context::context_array_t&     _contexts,
-                    rocprofiler_callback_tracing_kind_t _callback_domain,
+should_wrap_functor(rocprofiler_callback_tracing_kind_t _callback_domain,
                     rocprofiler_buffer_tracing_kind_t   _buffered_domain,
                     int                                 _operation)
 {
     // we loop over all the *registered* contexts and see if any of them, at any point in time,
     // might require callback or buffered API tracing
-    for(const auto& itr : _contexts)
+    for(const auto& itr : context::get_registered_contexts())
     {
         if(!itr) continue;
 
@@ -553,81 +500,185 @@ should_wrap_functor(const context::context_array_t&     _contexts,
     return false;
 }
 
-template <size_t... Idx>
+template <size_t TableIdx, typename Tp, size_t OpIdx>
 void
-update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
+copy_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 {
-    auto _update = [](hsa_api_table_t* _orig_v, const auto& _contexts_v, auto _info) {
-        // check to see if there are any contexts which enable this operation in the HSA API domain
-        if(!should_wrap_functor(_contexts_v,
-                                _info.callback_domain_idx,
-                                _info.buffered_domain_idx,
-                                _info.operation_idx))
+    using table_type = typename hip_table_lookup<TableIdx>::type;
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = hip_api_info<TableIdx, OpIdx>{};
+
+        LOG(INFO) << "copying table entry for " << _info.name;
+
+        // make sure we don't access a field that doesn't exist in input table
+        if(_info.offset() >= _orig->size) return;
+
+        // 1. get the sub-table containing the function pointer in original table
+        // 2. get reference to function pointer in sub-table in original table
+        auto& _table = _info.get_table(_orig);
+        auto& _func  = _info.get_table_func(_table);
+        // 3. get the sub-table containing the function pointer in saved table
+        // 4. get reference to function pointer in sub-table in saved table
+        // 5. save the original function in the saved table
+        auto& _saved = _info.get_table(get_table());
+        auto& _ofunc = _info.get_table_func(_saved);
+        _ofunc       = _func;
+    }
+
+    (void) _orig;
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx>
+void
+update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
+{
+    using table_type = typename hip_table_lookup<TableIdx>::type;
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = hip_api_info<TableIdx, OpIdx>{};
+
+        LOG(INFO) << "updating table entry for " << _info.name;
+
+        // make sure we don't access a field that doesn't exist in input table
+        if(_info.offset() >= _orig->size) return;
+
+        // check to see if there are any contexts which enable this operation in the HIP API domain
+        if(!should_wrap_functor(
+               _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
             return;
 
-        // 1. get the sub-table containing the function pointer
-        // 2. make sure the function pointer offset exists in passed table
-        auto& _table = _info.get_table(_orig_v);
-        if(_info.offset() < _table->version.minor_id)
-        {
-            // 3. get reference to function pointer in sub-table
-            // 4. update function pointer with functor
-            auto& _func = _info.get_table_func(_table);
-            _func       = _info.get_functor(_func);
-        }
-    };
+        // 1. get the sub-table containing the function pointer in original table
+        // 2. get reference to function pointer in sub-table in original table
+        // 3. update function pointer with wrapper
+        auto& _table = _info.get_table(_orig);
+        auto& _func  = _info.get_table_func(_table);
+        _func        = _info.get_functor(_func);
+    }
 
-    auto _contexts = context::get_registered_contexts();
-    (_update(_orig, _contexts, hsa_api_info<Idx>{}), ...);
+    (void) _orig;
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+void
+copy_table(Tp* _orig, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    copy_table<TableIdx>(_orig, std::integral_constant<size_t, OpIdx>{});
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        copy_table<TableIdx>(_orig, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+void
+update_table(Tp* _orig, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    update_table<TableIdx>(_orig, std::integral_constant<size_t, OpIdx>{});
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        update_table<TableIdx>(_orig, std::index_sequence<OpIdxTail...>{});
 }
 }  // namespace
 
 // check out the assembly here... this compiles to a switch statement
+template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id(id, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    return name_by_id<TableIdx>(id, std::make_index_sequence<api_id_bounds<TableIdx>::last>{});
 }
 
+template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name)
 {
-    return id_by_name(name, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    return id_by_name<TableIdx>(name, std::make_index_sequence<api_id_bounds<TableIdx>::last>{});
+}
+
+template <size_t TableIdx>
+std::vector<uint32_t>
+get_ids()
+{
+    constexpr auto last_api_id = api_id_bounds<TableIdx>::last;
+    auto           _data       = std::vector<uint32_t>{};
+    _data.reserve(last_api_id);
+    get_ids<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
+    return _data;
+}
+
+template <size_t TableIdx>
+std::vector<const char*>
+get_names()
+{
+    constexpr auto last_api_id = api_id_bounds<TableIdx>::last;
+    auto           _data       = std::vector<const char*>{};
+    _data.reserve(last_api_id);
+    get_names<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
+    return _data;
 }
 
 void
 iterate_args(uint32_t                                           id,
-             const rocprofiler_callback_tracing_hsa_api_data_t& data,
+             const rocprofiler_callback_tracing_hip_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   callback,
              void*                                              user_data)
 {
     if(callback)
         iterate_args(
-            id, data, callback, user_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+            id, data, callback, user_data, std::make_index_sequence<ROCPROFILER_HIP_API_ID_LAST>{});
 }
 
-std::vector<uint32_t>
-get_ids()
-{
-    auto _data = std::vector<uint32_t>{};
-    _data.reserve(ROCPROFILER_HSA_API_ID_LAST);
-    get_ids(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
-    return _data;
-}
+// void
+// iterate_args(uint32_t                                           id,
+//              const rocprofiler_callback_tracing_hip_compiler_api_data_t& data,
+//              rocprofiler_callback_tracing_operation_args_cb_t   callback,
+//              void*                                              user_data)
+// {
+//     if(callback)
+//         iterate_args(
+//             id, data, callback, user_data,
+//             std::make_index_sequence<ROCPROFILER_HIP_COMPILER_API_ID_LAST>{});
+// }
 
-std::vector<const char*>
-get_names()
+#define INSTANTIATE_HIP_TABLE_FUNC(TABLE)                                                          \
+    template const char*              name_by_id<TABLE>(uint32_t);                                 \
+    template uint32_t                 id_by_name<TABLE>(const char*);                              \
+    template std::vector<uint32_t>    get_ids<TABLE>();                                            \
+    template std::vector<const char*> get_names<TABLE>();
+
+INSTANTIATE_HIP_TABLE_FUNC(ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi)
+INSTANTIATE_HIP_TABLE_FUNC(ROCPROFILER_HIP_API_TABLE_ID_CompilerApi)
+
+void
+copy_table(hip_compiler_api_table_t* _orig)
 {
-    auto _data = std::vector<const char*>{};
-    _data.reserve(ROCPROFILER_HSA_API_ID_LAST);
-    get_names(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
-    return _data;
+    if(_orig)
+        copy_table<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>(
+            _orig, std::make_index_sequence<ROCPROFILER_HIP_COMPILER_API_ID_LAST>{});
 }
 
 void
-update_table(hsa_api_table_t* _orig)
+copy_table(hip_runtime_api_table_t* _orig)
 {
-    if(_orig) update_table(_orig, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    if(_orig)
+        copy_table<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(
+            _orig, std::make_index_sequence<ROCPROFILER_HIP_API_ID_LAST>{});
 }
-}  // namespace hsa
+
+void
+update_table(hip_compiler_api_table_t* _orig)
+{
+    if(_orig)
+        update_table<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>(
+            _orig, std::make_index_sequence<ROCPROFILER_HIP_COMPILER_API_ID_LAST>{});
+}
+
+void
+update_table(hip_runtime_api_table_t* _orig)
+{
+    if(_orig)
+        update_table<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(
+            _orig, std::make_index_sequence<ROCPROFILER_HIP_API_ID_LAST>{});
+}
+}  // namespace hip
 }  // namespace rocprofiler

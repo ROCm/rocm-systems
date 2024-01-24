@@ -14,8 +14,8 @@ add_test(
     NAME rocprofv3-test-trace-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace --kernel-trace
-        --memory-copy-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out
-        $<TARGET_FILE:simple-transpose>)
+        --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
+        out $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -39,9 +39,27 @@ add_test(
         --kernel-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_kernel_trace.csv
         --memory-copy-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
+        --marker-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv)
+
+set(VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_hsa_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_kernel_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv)
 
 set_tests_properties(
     rocprofv3-test-trace-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS rocprofv3-test-trace-execute
-               FAIL_REGULAR_EXPRESSION "AssertionError")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               rocprofv3-test-trace-execute
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               REQUIRED_FILES
+               "${VALIDATION_FILES}"
+               ATTACHED_FILES_ON_FAIL
+               "${VALIDATION_FILES}")

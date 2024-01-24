@@ -12,6 +12,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "")
         CACHE STRING "Build type" FORCE)
 endif()
 
+include(GNUInstallDirs)
+
+# always use lib instead of lib64
+set(CMAKE_INSTALL_LIBDIR "lib")
+
 enable_testing()
 include(CTest)
 

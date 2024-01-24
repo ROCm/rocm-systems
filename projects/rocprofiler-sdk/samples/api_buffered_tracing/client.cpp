@@ -149,7 +149,8 @@ get_buffer_tracing_names()
         [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<buffer_name_info*>(data_v);
 
-            if(kindv == ROCPROFILER_BUFFER_TRACING_HSA_API)
+            if(kindv == ROCPROFILER_BUFFER_TRACING_HSA_API ||
+               kindv == ROCPROFILER_BUFFER_TRACING_HIP_API)
             {
                 const char* name = nullptr;
                 ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
@@ -171,7 +172,7 @@ get_buffer_tracing_names()
                          "query buffer tracing kind operation name");
         if(name) name_info_v->kind_names[kind] = name;
 
-        if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
+        if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API || kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
         {
             ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
                                  kind, tracing_kind_operation_cb, static_cast<void*>(data)),
@@ -273,6 +274,33 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             {
                 auto msg = std::stringstream{};
                 msg << "hsa api: start > end (" << record->start_timestamp << " > "
+                    << record->end_timestamp
+                    << "). diff = " << (record->start_timestamp - record->end_timestamp);
+                std::cerr << "threw an exception " << msg.str() << "\n" << std::flush;
+                // throw std::runtime_error{msg.str()};
+            }
+
+            static_cast<call_stack_t*>(user_data)->emplace_back(
+                source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+                header->kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
+        {
+            auto* record =
+                static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
+            auto info = std::stringstream{};
+            info << "tid=" << record->thread_id << ", context=" << context.handle
+                 << ", buffer_id=" << buffer_id.handle
+                 << ", cid=" << record->correlation_id.internal
+                 << ", extern_cid=" << record->correlation_id.external.value
+                 << ", kind=" << record->kind << ", operation=" << record->operation
+                 << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp
+                 << ", name=" << client_name_info.operation_names[record->kind][record->operation];
+
+            if(record->start_timestamp > record->end_timestamp)
+            {
+                auto msg = std::stringstream{};
+                msg << "hip api: start > end (" << record->start_timestamp << " > "
                     << record->end_timestamp
                     << "). diff = " << (record->start_timestamp - record->end_timestamp);
                 std::cerr << "threw an exception " << msg.str() << "\n" << std::flush;
@@ -419,6 +447,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                          client_ctx, ROCPROFILER_BUFFER_TRACING_HSA_API, nullptr, 0, client_buffer),
+                     "buffer tracing service configure");
+
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                         client_ctx, ROCPROFILER_BUFFER_TRACING_HIP_API, nullptr, 0, client_buffer),
                      "buffer tracing service configure");
 
     ROCPROFILER_CALL(

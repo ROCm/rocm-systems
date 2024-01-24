@@ -107,7 +107,7 @@ getMetricMap();
  * Get the metrics that apply to a specific agent. Supplied parameter
  * is the GFXIP of the agent.
  */
-const std::vector<Metric>&
+std::vector<Metric>
 getMetricsForAgent(const std::string&);
 
 /**

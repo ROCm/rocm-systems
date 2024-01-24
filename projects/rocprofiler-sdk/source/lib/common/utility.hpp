@@ -40,6 +40,7 @@
 #include <ratio>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <type_traits>
 #include <vector>
 
@@ -210,5 +211,35 @@ private:
     data_type    m_data         = {};
     functor_type m_destroy_func = {};
 };
+
+template <typename Tp = long, typename RatioT = std::ratio<1, 1000>>
+void
+yield(std::chrono::duration<Tp, RatioT> duration = std::chrono::milliseconds{10})
+{
+    std::this_thread::yield();
+    std::this_thread::sleep_for(duration);
+}
+
+template <typename PredicateT, typename Tp = long, typename RatioT = std::ratio<1, 1000>>
+bool
+yield(PredicateT&&                      predicate,
+      std::chrono::duration<Tp, RatioT> max_yield_time,
+      std::chrono::duration<Tp, RatioT> query_interval = std::chrono::milliseconds{10})
+{
+    auto now    = []() { return std::chrono::steady_clock::now(); };
+    auto start  = now();
+    auto result = false;
+    while(!(result = predicate()))
+    {
+        yield(query_interval);
+        if((now() - start) > max_yield_time)
+        {
+            break;
+        }
+    }
+
+    // return the result of the last predicate query
+    return result;
+}
 }  // namespace common
 }  // namespace rocprofiler

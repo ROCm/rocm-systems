@@ -181,14 +181,14 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         constexpr auto nanosec     = 1000000000UL;
         uint64_t       sysclock_hz = 0;
         ROCP_HSA_TABLE_CALL(ERROR,
-                            get_table().core_->hsa_system_get_info_fn(
+                            get_core_table()->hsa_system_get_info_fn(
                                 HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz));
         return (nanosec / sysclock_hz);
     }();
 
     auto* _data            = static_cast<async_copy_data*>(arg);
     auto  copy_time        = hsa_amd_profiling_async_copy_time_t{};
-    auto  copy_time_status = get_table().amd_ext_->hsa_amd_profiling_get_async_copy_time_fn(
+    auto  copy_time_status = get_amd_ext_table()->hsa_amd_profiling_get_async_copy_time_fn(
         _data->rocp_signal, &copy_time);
 
     // normalize
@@ -260,16 +260,16 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
             std::tie(rocp_amd_signal->start_ts, rocp_amd_signal->end_ts);
 
         const hsa_signal_value_t new_value =
-            get_table().core_->hsa_signal_load_relaxed_fn(_data->orig_signal) - 1;
+            get_core_table()->hsa_signal_load_relaxed_fn(_data->orig_signal) - 1;
 
         LOG_IF(ERROR, signal_value != new_value) << "bad original signal value in " << __FUNCTION__;
 
-        get_table().core_->hsa_signal_store_screlease_fn(_data->orig_signal, signal_value);
+        get_core_table()->hsa_signal_store_screlease_fn(_data->orig_signal, signal_value);
     }
 
     if(signal_value == 0)
     {
-        ROCP_HSA_TABLE_CALL(ERROR, get_table().core_->hsa_signal_destroy_fn(_data->rocp_signal));
+        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
         delete _data;
         get_active_signals()->fetch_sub(1);
     }
@@ -426,12 +426,12 @@ async_copy_impl(Args... args)
     constexpr auto           completion_signal_idx = arg_indices<Idx>::completion_signal_idx;
     auto&                    _completion_signal    = std::get<completion_signal_idx>(_tied_args);
     const hsa_signal_value_t _completion_signal_val =
-        get_table().core_->hsa_signal_load_scacquire_fn(_completion_signal);
+        get_core_table()->hsa_signal_load_scacquire_fn(_completion_signal);
 
     {
         const uint32_t     num_consumers = 0;
         const hsa_agent_t* consumers     = nullptr;
-        auto               _status       = get_table().core_->hsa_signal_create_fn(
+        auto               _status       = get_core_table()->hsa_signal_create_fn(
             _completion_signal_val, num_consumers, consumers, &_data->rocp_signal);
 
         if(_status != HSA_STATUS_SUCCESS)
@@ -449,18 +449,17 @@ async_copy_impl(Args... args)
     }
 
     {
-        auto _status =
-            get_table().amd_ext_->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
-                                                                  HSA_SIGNAL_CONDITION_LT,
-                                                                  _completion_signal_val,
-                                                                  async_copy_handler,
-                                                                  _data);
+        auto _status = get_amd_ext_table()->hsa_amd_signal_async_handler_fn(_data->rocp_signal,
+                                                                            HSA_SIGNAL_CONDITION_LT,
+                                                                            _completion_signal_val,
+                                                                            async_copy_handler,
+                                                                            _data);
 
         if(_status != HSA_STATUS_SUCCESS)
         {
             LOG(ERROR) << "hsa_amd_signal_async_handler returned non-zero error code " << _status;
 
-            ROCP_HSA_TABLE_CALL(ERROR, get_table().core_->hsa_signal_destroy_fn(_data->rocp_signal))
+            ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal))
                 << ":: failed to destroy signal after async handler failed";
 
             get_active_signals()->fetch_sub(1);

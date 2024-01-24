@@ -26,6 +26,9 @@ macro(ROCPROFILER_ACTIVATE_CLANG_TIDY)
                     "ROCPROFILER_ENABLE_CLANG_TIDY is ON but clang-tidy is not found!")
         endif()
 
+        rocprofiler_add_feature(ROCPROFILER_CLANG_TIDY_COMMAND
+                                "path to clang-tidy executable")
+
         set(CMAKE_CXX_CLANG_TIDY
             ${ROCPROFILER_CLANG_TIDY_COMMAND}
             -header-filter=${PROJECT_SOURCE_DIR}/source/.*

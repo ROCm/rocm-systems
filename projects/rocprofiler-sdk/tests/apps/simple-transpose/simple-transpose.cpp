@@ -24,7 +24,10 @@ THE SOFTWARE.
 #include <mutex>
 
 // hip header file
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
+
+// roctx header file
+#include <rocprofiler-sdk-roctx/roctx.h>
 
 #define WIDTH 1024
 
@@ -81,6 +84,8 @@ matrixTransposeCPUReference(float* output, float* input, const unsigned int widt
 int
 main()
 {
+    roctxRangePush("main");
+
     float* Matrix;
     float* TransposeMatrix;
     float* cpuTransposeMatrix;
@@ -113,6 +118,15 @@ main()
     // Memory transfer from host to device
     HIP_API_CALL(hipMemcpy(gpuMatrix, Matrix, NUM * sizeof(float), hipMemcpyHostToDevice));
 
+    auto tid = roctx_thread_id_t{};
+    roctxGetThreadId(&tid);
+    roctxProfilerPause(tid);
+    // Memory transfer that should be hidden by profiling tool
+    HIP_API_CALL(
+        hipMemcpy(gpuTransposeMatrix, gpuMatrix, NUM * sizeof(float), hipMemcpyDeviceToDevice));
+    roctxProfilerResume(tid);
+
+    roctxMark("pre-kernel-launch");
     // Lauching kernel from host
     hipLaunchKernelGGL(matrixTranspose,
                        dim3(WIDTH / THREADS_PER_BLOCK_X, WIDTH / THREADS_PER_BLOCK_Y),
@@ -122,6 +136,7 @@ main()
                        gpuTransposeMatrix,
                        gpuMatrix,
                        WIDTH);
+    roctxMark("post-kernel-launch");
 
     // Memory transfer from device to host
     HIP_API_CALL(
@@ -157,6 +172,8 @@ main()
     free(Matrix);
     free(TransposeMatrix);
     free(cpuTransposeMatrix);
+
+    roctxRangePop();
 
     return errors;
 }

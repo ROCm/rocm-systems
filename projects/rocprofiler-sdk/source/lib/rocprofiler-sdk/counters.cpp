@@ -143,7 +143,7 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_t                
                                              rocprofiler_available_counters_cb_t cb,
                                              void*                               user_data)
 {
-    const auto& metrics = rocprofiler::counters::getMetricsForAgent(std::string(agent.name));
+    auto metrics = rocprofiler::counters::getMetricsForAgent(agent.name);
     std::vector<rocprofiler_counter_id_t> ids;
     ids.reserve(metrics.size());
     for(const auto& metric : metrics)

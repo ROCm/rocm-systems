@@ -22,67 +22,48 @@
 
 #pragma once
 
-#include <hsa/hsa_api_trace.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+
+#include <hip/hip_version.h>
+
+#if HIP_VERSION_MAJOR < 6
+#    include "lib/rocprofiler-sdk/hip/details/hip_api_trace.hpp"
+#else
+#    include <hip/amd_detail/hip_api_trace.hpp>
+#endif
 
 #include <cstdint>
 #include <vector>
 
 namespace rocprofiler
 {
-namespace hsa
+namespace hip
 {
-using hsa_api_table_t      = ::HsaApiTable;
-using hsa_table_version_t  = ::ApiTableVersion;
-using hsa_core_table_t     = ::CoreApiTable;
-using hsa_amd_ext_table_t  = ::AmdExtTable;
-using hsa_fini_ext_table_t = ::FinalizerExtTable;
-using hsa_img_ext_table_t  = ::ImageExtTable;
+using hip_compiler_api_table_t = HipCompilerDispatchTable;
+using hip_runtime_api_table_t  = HipDispatchTable;
 
-hsa_api_table_t&
-get_table();
-
-hsa_table_version_t
-get_table_version();
-
-hsa_core_table_t*
-get_core_table();
-
-hsa_amd_ext_table_t*
-get_amd_ext_table();
-
-hsa_fini_ext_table_t*
-get_fini_ext_table();
-
-hsa_img_ext_table_t*
-get_img_ext_table();
-
-template <size_t Idx>
-struct hsa_table_lookup;
-
-template <size_t Idx>
-struct hsa_api_info;
-
-template <size_t Idx>
-struct hsa_api_meta;
-
-template <typename Tp>
-struct hsa_api_func;
-
-template <typename RetT, typename... Args>
-struct hsa_api_func<RetT (*)(Args...)>
+struct HipApiTable
 {
-    using return_type   = RetT;
-    using args_type     = std::tuple<Args...>;
-    using function_type = RetT (*)(Args...);
+    hip_compiler_api_table_t* compiler = nullptr;
+    hip_runtime_api_table_t*  runtime  = nullptr;
 };
 
-template <typename RetT, typename... Args>
-struct hsa_api_func<RetT (*)(Args...) noexcept> : hsa_api_func<RetT (*)(Args...)>
-{};
+using hip_api_table_t = HipApiTable;
 
-template <size_t Idx>
-struct hsa_api_impl
+hip_api_table_t&
+get_table();
+
+template <size_t OpIdx>
+struct hip_table_lookup;
+
+template <size_t TableIdx>
+struct hip_domain_info;
+
+template <size_t TableIdx, size_t OpIdx>
+struct hip_api_info;
+
+template <size_t TableIdx, size_t OpIdx>
+struct hip_api_impl : hip_domain_info<TableIdx>
 {
     template <typename DataArgsT, typename... Args>
     static auto set_data_args(DataArgsT&, Args... args);
@@ -94,25 +75,38 @@ struct hsa_api_impl
     static auto functor(Args&&... args);
 };
 
+template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id);
 
+template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name);
 
 void
 iterate_args(uint32_t                                           id,
-             const rocprofiler_callback_tracing_hsa_api_data_t& data,
+             const rocprofiler_callback_tracing_hip_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   callback,
              void*                                              user_data);
 
+template <size_t TableIdx>
 std::vector<const char*>
 get_names();
 
+template <size_t TableIdx>
 std::vector<uint32_t>
 get_ids();
 
 void
-update_table(hsa_api_table_t* _orig);
-}  // namespace hsa
+copy_table(hip_compiler_api_table_t* _orig);
+
+void
+copy_table(hip_runtime_api_table_t* _orig);
+
+void
+update_table(hip_compiler_api_table_t* _orig);
+
+void
+update_table(hip_runtime_api_table_t* _orig);
+}  // namespace hip
 }  // namespace rocprofiler

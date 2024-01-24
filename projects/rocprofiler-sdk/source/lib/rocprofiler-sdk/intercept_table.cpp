@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <hsa/hsa_api_trace.h>
+#include <hip/amd_detail/hip_api_trace.hpp>
 
 #include <cstdint>
 #include <mutex>
@@ -50,8 +51,9 @@ using library_sequence_t = std::integer_sequence<rocprofiler_runtime_library_t, 
 
 // this is used to loop over the different libraries
 constexpr auto intercept_library_seq = library_sequence_t<ROCPROFILER_HSA_LIBRARY,
-                                                          ROCPROFILER_HIP_LIBRARY,
-                                                          ROCPROFILER_MARKER_LIBRARY>{};
+                                                          ROCPROFILER_HIP_RUNTIME_LIBRARY,
+                                                          ROCPROFILER_MARKER_LIBRARY,
+                                                          ROCPROFILER_HIP_COMPILER_LIBRARY>{};
 
 // check that intercept_library_seq is up to date
 static_assert((1 << (intercept_library_seq.size())) == ROCPROFILER_LIBRARY_LAST,
@@ -161,6 +163,16 @@ template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
                                               uint64_t,
                                               uint64_t,
                                               std::tuple<roctxApiTable_t*>);
+
+template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
+                                              uint64_t,
+                                              uint64_t,
+                                              std::tuple<HipDispatchTable*>);
+
+template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
+                                              uint64_t,
+                                              uint64_t,
+                                              std::tuple<HipCompilerDispatchTable*>);
 }  // namespace intercept_table
 }  // namespace rocprofiler
 
@@ -177,8 +189,6 @@ rocprofiler_at_runtime_api_registration(rocprofiler_intercept_library_cb_t callb
 
     if((libs & ROCPROFILER_LIBRARY) == ROCPROFILER_LIBRARY)
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    else if((libs & ROCPROFILER_HIP_LIBRARY) == ROCPROFILER_HIP_LIBRARY)
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
     else if((libs & ROCPROFILER_MARKER_LIBRARY) == ROCPROFILER_MARKER_LIBRARY)
         return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 

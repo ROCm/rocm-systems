@@ -122,6 +122,18 @@ struct rocprofiler_tool_buffer_name_info_t
     rocprofiler_tool_buffer_kind_operation_names_t operation_names = {};
 };
 
+using rocprofiler_tool_callback_kind_names_t =
+    std::unordered_map<rocprofiler_callback_tracing_kind_t, const char*>;
+using rocprofiler_tool_callback_kind_operation_names_t =
+    std::unordered_map<rocprofiler_callback_tracing_kind_t,
+                       std::unordered_map<uint32_t, const char*>>;
+
+struct rocprofiler_tool_callback_name_info_t
+{
+    rocprofiler_tool_callback_kind_names_t           kind_names      = {};
+    rocprofiler_tool_callback_kind_operation_names_t operation_names = {};
+};
+
 // std::vector<std::string>
 // GetCounterNames();
 
@@ -147,3 +159,6 @@ populate_kernel_properties_data(rocprofiler_tool_kernel_properties_t* kernel_pro
 
 rocprofiler_tool_buffer_name_info_t
 get_buffer_id_names();
+
+rocprofiler_tool_callback_name_info_t
+get_callback_id_names();

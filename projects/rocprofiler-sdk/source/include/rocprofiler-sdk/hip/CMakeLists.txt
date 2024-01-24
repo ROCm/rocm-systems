@@ -3,7 +3,8 @@
 #   Installation of public HIP headers
 #
 #
-set(ROCPROFILER_HIP_HEADER_FILES api_args.h api_id.h)
+set(ROCPROFILER_HIP_HEADER_FILES api_args.h api_id.h compiler_api_args.h
+                                 compiler_api_id.h table_api_id.h)
 
 install(
     FILES ${ROCPROFILER_HIP_HEADER_FILES}

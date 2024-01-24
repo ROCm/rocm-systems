@@ -187,7 +187,7 @@ get_memory_unit(std::string _unit)
     using return_type = std::tuple<string_t, int64_t>;
     using inner_t     = std::tuple<string_t, string_t, int64_t>;
 
-    if(_unit.length() == 0) return return_type{"MB", units::megabyte};
+    if(_unit.empty()) return return_type{"MB", units::megabyte};
 
     for(auto& itr : _unit)
         itr = tolower(itr);
@@ -228,7 +228,7 @@ get_timing_unit(std::string _unit)
     using return_type = std::tuple<string_t, int64_t>;
     using inner_t     = std::tuple<string_t, strset_t, int64_t>;
 
-    if(_unit.length() == 0) return return_type{"sec", units::sec};
+    if(_unit.empty()) return return_type{"sec", units::sec};
 
     for(auto& itr : _unit)
         itr = tolower(itr);
@@ -264,7 +264,7 @@ get_frequncy_unit(std::string _unit)
     using return_type = std::tuple<string_t, int64_t>;
     using inner_t     = std::tuple<string_t, string_t, int64_t>;
 
-    if(_unit.length() == 0) return return_type{"MHz", units::megahertz};
+    if(_unit.empty()) return return_type{"MHz", units::megahertz};
 
     for(auto& itr : _unit)
         itr = tolower(itr);
@@ -295,7 +295,7 @@ get_power_unit(const std::string& _unit)
     using return_type = std::tuple<string_t, int64_t>;
     using inner_t     = std::tuple<string_t, string_t, int64_t>;
 
-    if(_unit.length() == 0) return return_type{"watts", units::watt};
+    if(_unit.empty()) return return_type{"watts", units::watt};
 
     auto _lunit = _unit;
     for(auto& itr : _lunit)

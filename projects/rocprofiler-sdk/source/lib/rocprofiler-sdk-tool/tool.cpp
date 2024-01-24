@@ -31,6 +31,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
+#include "rocprofiler-sdk/marker/api_id.h"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -61,7 +62,22 @@ auto&
 get_hsa_api_file()
 {
     static auto _v = tool::output_file{"hsa_api_trace",
-                                       tool::csv::hsa_csv_encoder{},
+                                       tool::csv::api_csv_encoder{},
+                                       {"Domain",
+                                        "Function",
+                                        "Process_Id",
+                                        "Thread_Id",
+                                        "Correlation_Id",
+                                        "Start_Timestamp",
+                                        "End_Timestamp"}};
+    return _v;
+}
+
+auto&
+get_hip_api_file()
+{
+    static auto _v = tool::output_file{"hip_api_trace",
+                                       tool::csv::api_csv_encoder{},
                                        {"Domain",
                                         "Function",
                                         "Process_Id",
@@ -133,32 +149,50 @@ get_memory_copy_trace_file()
     return _v;
 }
 
-rocprofiler_buffer_id_t&
-get_hsa_api_trace_buffer()
+struct marker_entry
 {
-    static rocprofiler_buffer_id_t hsa_api_buf = {};
-    return hsa_api_buf;
+    uint64_t                cid     = 0;
+    pid_t                   pid     = getpid();
+    pid_t                   tid     = rocprofiler::common::get_tid();
+    rocprofiler_user_data_t data    = {};
+    std::string             message = {};
+};
+
+auto&
+get_marker_api_file()
+{
+    static auto _v = tool::output_file{"marker_api_trace",
+                                       tool::csv::marker_csv_encoder{},
+                                       {"Domain",
+                                        "Function",
+                                        "Process_Id",
+                                        "Thread_Id",
+                                        "Correlation_Id",
+                                        "Start_Timestamp",
+                                        "End_Timestamp"}};
+    return _v;
 }
 
-rocprofiler_buffer_id_t&
-get_kernel_trace_buffer()
+struct buffer_ids
 {
-    static rocprofiler_buffer_id_t kernel_trace_buf = {};
-    return kernel_trace_buf;
-}
+    rocprofiler_buffer_id_t hsa_api_trace      = {};
+    rocprofiler_buffer_id_t hip_api_trace      = {};
+    rocprofiler_buffer_id_t kernel_trace       = {};
+    rocprofiler_buffer_id_t memory_copy_trace  = {};
+    rocprofiler_buffer_id_t counter_collection = {};
 
-rocprofiler_buffer_id_t&
-get_counter_collection_buffer()
-{
-    static rocprofiler_buffer_id_t counter_collection_buf = {};
-    return counter_collection_buf;
-}
+    auto as_array() const
+    {
+        return std::array<rocprofiler_buffer_id_t, 5>{
+            hsa_api_trace, hip_api_trace, kernel_trace, memory_copy_trace, counter_collection};
+    }
+};
 
-rocprofiler_buffer_id_t&
-get_memory_copy_trace_buffer()
+buffer_ids&
+get_buffers()
 {
-    static rocprofiler_buffer_id_t memory_copy_buf = {};
-    return memory_copy_buf;
+    static auto _v = buffer_ids{};
+    return _v;
 }
 
 using rocprofiler_kernel_symbol_data_t =
@@ -182,7 +216,8 @@ struct kernel_symbol_data : rocprofiler_kernel_symbol_data_t
 
 using kernel_symbol_data_map_t = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data>;
 auto kernel_data               = common::Synchronized<kernel_symbol_data_map_t, true>{};
-auto name_info                 = get_buffer_id_names();
+auto buffered_name_info        = get_buffer_id_names();
+auto callback_name_info        = get_callback_id_names();
 
 auto&
 get_client_ctx()
@@ -194,21 +229,182 @@ get_client_ctx()
 void
 flush()
 {
-    for(auto itr : {get_memory_copy_trace_buffer(),
-                    get_kernel_trace_buffer(),
-                    get_counter_collection_buffer(),
-                    get_hsa_api_trace_buffer()})
+    for(auto itr : get_buffers().as_array())
     {
         if(itr.handle > 0) ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
     }
 }
 
 void
-rocprofiler_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                             rocprofiler_user_data_t*              user_data,
-                             void*                                 data)
+cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t*              user_data,
+                       void*                                 cb_data)
 {
-    throw std::runtime_error{"not implemented"};
+    auto* ctx = static_cast<rocprofiler_context_id_t*>(cb_data);
+
+    if(ctx && record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
+    {
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
+           record.operation == ROCPROFILER_MARKER_API_ID_roctxProfilerPause)
+        {
+            ROCPROFILER_CALL(rocprofiler_stop_context(*ctx), "pausing context");
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
+                record.operation == ROCPROFILER_MARKER_API_ID_roctxProfilerResume)
+        {
+            ROCPROFILER_CALL(rocprofiler_start_context(*ctx), "resuming context");
+        }
+
+        auto ts = rocprofiler_timestamp_t{};
+        rocprofiler_get_timestamp(&ts);
+
+        const auto* kind_name = callback_name_info.kind_names.at(record.kind);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            user_data->value = ts;
+        }
+        else
+        {
+            const auto* op_name =
+                callback_name_info.operation_names.at(record.kind).at(record.operation);
+            auto ss = std::stringstream{};
+            tool::csv::marker_csv_encoder::write_row(ss,
+                                                     kind_name,
+                                                     op_name,
+                                                     getpid(),
+                                                     rocprofiler::common::get_tid(),
+                                                     record.correlation_id.internal,
+                                                     user_data->value,
+                                                     ts);
+            get_marker_api_file() << ss.str();
+        }
+    }
+}
+
+void
+callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
+                          rocprofiler_user_data_t*              user_data,
+                          void*                                 data)
+{
+    static thread_local auto stacked_range = std::vector<marker_entry>{};
+    static auto              global_range =
+        common::Synchronized<std::unordered_map<roctx_range_id_t, marker_entry>>{};
+
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
+    {
+        auto* marker_data =
+            static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+
+        auto ts = rocprofiler_timestamp_t{};
+        rocprofiler_get_timestamp(&ts);
+
+        const auto* kind_name = callback_name_info.kind_names.at(record.kind);
+        if(record.operation == ROCPROFILER_MARKER_API_ID_roctxMarkA)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            {
+                auto ss = std::stringstream{};
+                tool::csv::marker_csv_encoder::write_row(ss,
+                                                         kind_name,
+                                                         marker_data->args.roctxMarkA.message,
+                                                         getpid(),
+                                                         rocprofiler::common::get_tid(),
+                                                         record.correlation_id.internal,
+                                                         ts,
+                                                         ts);
+                get_marker_api_file() << ss.str();
+            }
+        }
+        else if(record.operation == ROCPROFILER_MARKER_API_ID_roctxRangePushA)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            {
+                if(marker_data->args.roctxRangePushA.message)
+                {
+                    auto& val      = stacked_range.emplace_back();
+                    val.message    = marker_data->args.roctxRangePushA.message;
+                    val.data.value = ts;
+                    val.cid        = record.correlation_id.internal;
+                }
+            }
+        }
+        else if(record.operation == ROCPROFILER_MARKER_API_ID_roctxRangePop)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            {
+                LOG_IF(FATAL, stacked_range.empty())
+                    << "roctxRangePop invoked more times than roctxRangePush on thread "
+                    << rocprofiler::common::get_tid();
+
+                auto val = stacked_range.back();
+                stacked_range.pop_back();
+
+                auto ss = std::stringstream{};
+                tool::csv::marker_csv_encoder::write_row(
+                    ss, kind_name, val.message, val.pid, val.tid, val.cid, val.data.value, ts);
+                get_marker_api_file() << ss.str();
+            }
+        }
+        else if(record.operation == ROCPROFILER_MARKER_API_ID_roctxRangeStartA)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
+               marker_data->args.roctxRangeStartA.message)
+            {
+                auto _id          = marker_data->retval.uint64_t_retval;
+                auto _entry       = marker_entry{};
+                _entry.cid        = record.correlation_id.internal;
+                _entry.data.value = ts;
+                _entry.message    = marker_data->args.roctxRangeStartA.message;
+
+                global_range.wlock(
+                    [_id, &_entry](auto& map) { map.emplace(_id, std::move(_entry)); });
+            }
+        }
+        else if(record.operation == ROCPROFILER_MARKER_API_ID_roctxRangeStop)
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            {
+                auto   _id    = marker_data->args.roctxRangeStop.id;
+                auto&& _entry = global_range.rlock(
+                    [](const auto& map, auto _key) { return map.at(_key); }, _id);
+
+                auto ss = std::stringstream{};
+                tool::csv::marker_csv_encoder::write_row(ss,
+                                                         kind_name,
+                                                         _entry.message,
+                                                         _entry.pid,
+                                                         0,
+                                                         _entry.cid,
+                                                         _entry.data.value,
+                                                         ts);
+                get_marker_api_file() << ss.str();
+
+                global_range.wlock([](auto& map, auto _key) { return map.erase(_key); }, _id);
+            }
+        }
+        else
+        {
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            {
+                user_data->value = ts;
+            }
+            else
+            {
+                const auto* op_name =
+                    callback_name_info.operation_names.at(record.kind).at(record.operation);
+                auto ss = std::stringstream{};
+                tool::csv::marker_csv_encoder::write_row(ss,
+                                                         kind_name,
+                                                         op_name,
+                                                         getpid(),
+                                                         rocprofiler::common::get_tid(),
+                                                         record.correlation_id.internal,
+                                                         user_data->value,
+                                                         ts);
+                get_marker_api_file() << ss.str();
+            }
+        }
+    }
 
     (void) record;
     (void) user_data;
@@ -248,12 +444,12 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void
-buffered_callback(rocprofiler_context_id_t /*context*/,
-                  rocprofiler_buffer_id_t /*buffer_id*/,
-                  rocprofiler_record_header_t** headers,
-                  size_t                        num_headers,
-                  void* /*user_data*/,
-                  uint64_t /*drop_count*/)
+buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
+                          rocprofiler_buffer_id_t /*buffer_id*/,
+                          rocprofiler_record_header_t** headers,
+                          size_t                        num_headers,
+                          void* /*user_data*/,
+                          uint64_t /*drop_count*/)
 {
     static auto _sync = std::mutex{};
     auto        _lk   = std::lock_guard<std::mutex>{_sync};
@@ -279,14 +475,15 @@ buffered_callback(rocprofiler_context_id_t /*context*/,
                 std::string kernel_name = kernel_data.rlock(
                     [](const kernel_symbol_data_map_t&                      kdata,
                        rocprofiler_buffer_tracing_kernel_dispatch_record_t* record_v) {
-                        return kdata.at(record_v->kernel_id).formatted_kernel_name;
+                        auto _name = kdata.at(record_v->kernel_id).formatted_kernel_name;
+                        return _name;
                     },
                     record);
 
                 auto kernel_trace_ss = std::stringstream{};
                 tool::csv::kernel_trace_csv_encoder::write_row(
                     kernel_trace_ss,
-                    name_info.kind_names.at(record->kind),
+                    buffered_name_info.kind_names.at(record->kind),
                     record->agent_id.handle,
                     record->queue_id.handle,
                     record->kernel_id,
@@ -311,10 +508,10 @@ buffered_callback(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
 
                 auto hsa_trace_ss = std::stringstream{};
-                tool::csv::hsa_csv_encoder::write_row(
+                tool::csv::api_csv_encoder::write_row(
                     hsa_trace_ss,
-                    name_info.kind_names.at(record->kind),
-                    name_info.operation_names.at(record->kind).at(record->operation),
+                    buffered_name_info.kind_names.at(record->kind),
+                    buffered_name_info.operation_names.at(record->kind).at(record->operation),
                     getpid(),
                     record->thread_id,
                     record->correlation_id.internal,
@@ -331,8 +528,8 @@ buffered_callback(rocprofiler_context_id_t /*context*/,
                 auto memory_copy_trace_ss = std::stringstream{};
                 tool::csv::memory_copy_csv_encoder::write_row(
                     memory_copy_trace_ss,
-                    name_info.kind_names.at(record->kind),
-                    name_info.operation_names.at(record->kind).at(record->operation),
+                    buffered_name_info.kind_names.at(record->kind),
+                    buffered_name_info.operation_names.at(record->kind).at(record->operation),
                     record->src_agent_id.handle,
                     record->dst_agent_id.handle,
                     record->correlation_id.internal,
@@ -340,6 +537,25 @@ buffered_callback(rocprofiler_context_id_t /*context*/,
                     record->end_timestamp);
 
                 get_memory_copy_trace_file() << memory_copy_trace_ss.str();
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
+
+                auto hip_trace_ss = std::stringstream{};
+                tool::csv::api_csv_encoder::write_row(
+                    hip_trace_ss,
+                    buffered_name_info.kind_names.at(record->kind),
+                    buffered_name_info.operation_names.at(record->kind).at(record->operation),
+                    getpid(),
+                    record->thread_id,
+                    record->correlation_id.internal,
+                    record->start_timestamp,
+                    record->end_timestamp);
+
+                get_hip_api_file() << hip_trace_ss.str();
             }
             else
             {
@@ -520,14 +736,60 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "create context failed");
 
+    auto code_obj_ctx = rocprofiler_context_id_t{};
+    ROCPROFILER_CALL(rocprofiler_create_context(&code_obj_ctx), "failed to create context");
+
     ROCPROFILER_CALL(
-        rocprofiler_configure_callback_tracing_service(get_client_ctx(),
+        rocprofiler_configure_callback_tracing_service(code_obj_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
                                                        nullptr,
                                                        0,
                                                        code_object_tracing_callback,
                                                        nullptr),
         "code object tracing configure failed");
+    ROCPROFILER_CALL(rocprofiler_start_context(code_obj_ctx), "start context failed");
+
+    if(tool::get_config().marker_api_trace)
+    {
+        auto operations = std::vector<uint32_t>{};
+        rocprofiler_iterate_callback_tracing_kind_operations(
+            ROCPROFILER_CALLBACK_TRACING_MARKER_API,
+            [](rocprofiler_callback_tracing_kind_t, uint32_t operation, void* data) {
+                auto* _ops = static_cast<std::vector<uint32_t>*>(data);
+                if(operation != ROCPROFILER_MARKER_API_ID_roctxProfilerPause &&
+                   operation != ROCPROFILER_MARKER_API_ID_roctxProfilerResume)
+                    _ops->emplace_back(operation);
+                return 0;
+            },
+            &operations);
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(get_client_ctx(),
+                                                           ROCPROFILER_CALLBACK_TRACING_MARKER_API,
+                                                           operations.data(),
+                                                           operations.size(),
+                                                           callback_tracing_callback,
+                                                           nullptr),
+            "callback tracing service failed to configure");
+
+        auto pause_resume_ctx = rocprofiler_context_id_t{};
+        ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
+
+        auto pause_resume_ops =
+            std::array<uint32_t, 2>{ROCPROFILER_MARKER_API_ID_roctxProfilerPause,
+                                    ROCPROFILER_MARKER_API_ID_roctxProfilerResume};
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_callback_tracing_service(pause_resume_ctx,
+                                                           ROCPROFILER_CALLBACK_TRACING_MARKER_API,
+                                                           pause_resume_ops.data(),
+                                                           pause_resume_ops.size(),
+                                                           cntrl_tracing_callback,
+                                                           static_cast<void*>(&get_client_ctx())),
+            "callback tracing service failed to configure");
+
+        ROCPROFILER_CALL(rocprofiler_start_context(pause_resume_ctx), "start context failed");
+    }
 
     if(tool::get_config().kernel_trace)
     {
@@ -535,9 +797,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    4096,
                                                    2048,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                                   buffered_callback,
+                                                   buffered_tracing_callback,
                                                    tool_data,
-                                                   &get_kernel_trace_buffer()),
+                                                   &get_buffers().kernel_trace),
                          "buffer creation");
 
         ROCPROFILER_CALL(
@@ -545,7 +807,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                                          nullptr,
                                                          0,
-                                                         get_kernel_trace_buffer()),
+                                                         get_buffers().kernel_trace),
             "buffer tracing service for kernel dispatch configure");
     }
 
@@ -555,9 +817,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    4096,
                                                    2048,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                                   buffered_callback,
+                                                   buffered_tracing_callback,
                                                    nullptr,
-                                                   &get_memory_copy_trace_buffer()),
+                                                   &get_buffers().memory_copy_trace),
                          "create memory copy buffer");
 
         ROCPROFILER_CALL(
@@ -565,7 +827,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
                                                          nullptr,
                                                          0,
-                                                         get_memory_copy_trace_buffer()),
+                                                         get_buffers().memory_copy_trace),
             "buffer tracing service for memory copy configure");
     }
 
@@ -575,9 +837,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    4096,
                                                    2048,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                                   buffered_callback,
+                                                   buffered_tracing_callback,
                                                    tool_data,
-                                                   &get_hsa_api_trace_buffer()),
+                                                   &get_buffers().hsa_api_trace),
                          "buffer creation");
 
         ROCPROFILER_CALL(
@@ -585,8 +847,42 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          ROCPROFILER_BUFFER_TRACING_HSA_API,
                                                          nullptr,
                                                          0,
-                                                         get_hsa_api_trace_buffer()),
-            "buffer tracing service for memory copy configure");
+                                                         get_buffers().hsa_api_trace),
+            "buffer tracing service for hsa api configure");
+    }
+
+    if(tool::get_config().hip_api_trace || tool::get_config().hip_compiler_api_trace)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                                   4096,
+                                                   2048,
+                                                   ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                   buffered_tracing_callback,
+                                                   tool_data,
+                                                   &get_buffers().hip_api_trace),
+                         "buffer creation");
+
+        if(tool::get_config().hip_api_trace)
+        {
+            ROCPROFILER_CALL(
+                rocprofiler_configure_buffer_tracing_service(get_client_ctx(),
+                                                             ROCPROFILER_BUFFER_TRACING_HIP_API,
+                                                             nullptr,
+                                                             0,
+                                                             get_buffers().hip_api_trace),
+                "buffer tracing service for hip api configure");
+        }
+
+        if(tool::get_config().hip_compiler_api_trace)
+        {
+            ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                                 get_client_ctx(),
+                                 ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+                                 nullptr,
+                                 0,
+                                 get_buffers().hip_api_trace),
+                             "buffer tracing service for hip compiler api configure");
+        }
     }
 
     if(tool::get_config().counter_collection)
@@ -595,14 +891,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    4096,
                                                    2048,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                                   buffered_callback,
+                                                   buffered_tracing_callback,
                                                    nullptr,
-                                                   &get_counter_collection_buffer()),
+                                                   &get_buffers().counter_collection),
                          "buffer creation failed");
 
         ROCPROFILER_CALL(
             rocprofiler_configure_buffered_dispatch_profile_counting_service(
-                get_client_ctx(), get_counter_collection_buffer(), dispatch_callback, nullptr),
+                get_client_ctx(), get_buffers().counter_collection, dispatch_callback, nullptr),
             "Could not setup buffered service");
     }
 

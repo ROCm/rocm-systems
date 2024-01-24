@@ -137,7 +137,8 @@ get_callback_id_names()
         [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<callback_name_info*>(data_v);
 
-            if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API)
+            if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API ||
+               kindv == ROCPROFILER_CALLBACK_TRACING_HIP_API)
             {
                 const char* name = nullptr;
                 ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
@@ -159,7 +160,8 @@ get_callback_id_names()
                          "query callback tracing kind operation name");
         if(name) name_info_v->kind_names[kind] = name;
 
-        if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
+        if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API ||
+           kind == ROCPROFILER_CALLBACK_TRACING_HIP_API)
         {
             ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operations(
                                  kind, tracing_kind_operation_cb, static_cast<void*>(data)),
@@ -264,6 +266,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_HSA_API,
+                                                       nullptr,
+                                                       0,
+                                                       tool_tracing_callback,
+                                                       tool_data),
+        "callback tracing service failed to configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(client_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_HIP_API,
                                                        nullptr,
                                                        0,
                                                        tool_tracing_callback,

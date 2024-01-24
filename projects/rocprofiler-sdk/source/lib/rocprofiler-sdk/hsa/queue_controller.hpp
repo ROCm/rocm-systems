@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <unordered_map>
 #include <vector>
@@ -39,6 +40,8 @@ namespace hsa
 class QueueController
 {
 public:
+    using queue_iterator_cb_t = std::function<void(const Queue*)>;
+
     QueueController() = default;
     // Initializes the QueueInterceptor. This must be delayed until
     // HSA has been inited.
@@ -65,6 +68,8 @@ public:
 
     const Queue* get_queue(const hsa_queue_t&) const;
 
+    void iterate_queues(const queue_iterator_cb_t&) const;
+
 private:
     using agent_callback_tuple_t =
         std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
@@ -85,5 +90,7 @@ get_queue_controller();
 void
 queue_controller_init(HsaApiTable* table);
 
+void
+queue_controller_fini();
 }  // namespace hsa
 }  // namespace rocprofiler

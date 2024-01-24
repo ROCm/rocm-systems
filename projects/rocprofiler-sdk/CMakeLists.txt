@@ -72,6 +72,11 @@ set(CMAKE_MODULE_PATH ${PROJECT_SOURCE_DIR}/cmake ${PROJECT_SOURCE_DIR}/cmake/Mo
 
 include(GNUInstallDirs) # install directories
 set(CMAKE_INSTALL_LIBDIR "lib") # rocm doesn't use lib64
+set(CMAKE_BUILD_RPATH "${PROJECT_BINARY_DIR}/lib:\$ORIGIN:\$ORIGIN/../lib")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH
+    OFF
+    CACHE BOOL "")
+mark_as_advanced(CMAKE_INSTALL_RPATH_USE_LINK_PATH)
 
 set(ROCPROFILER_INTERNAL_BUILD_DOCS
     OFF

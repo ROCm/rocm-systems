@@ -127,7 +127,14 @@ struct record_header_buffer
     auto is_full() const;
 
 private:
-    std::atomic<int32_t> m_locked  = {0};
+    /// this is an explicit write lock that does not guard against deadlocking like lock()
+    void write_lock();
+
+    /// this is an explicit write unlock that does not guard against deadlocking like unlock()
+    void write_unlock();
+
+private:
+    std::atomic<int64_t> m_locked  = {0};
     std::atomic<size_t>  m_index   = {};
     std::shared_mutex    m_shared  = {};
     base_buffer_t        m_buffer  = {};
@@ -144,14 +151,14 @@ inline void
 record_header_buffer::lock()
 {
     auto n = m_locked.fetch_add(1, std::memory_order_release);
-    if(n == 0) m_shared.lock();
+    if(n == 0) write_lock();
 }
 
 inline void
 record_header_buffer::unlock()
 {
-    auto n = m_locked.fetch_add(-1, std::memory_order_release);
-    if(n <= 1) m_shared.unlock();
+    auto n = m_locked.fetch_sub(1, std::memory_order_release);
+    if(n <= 1) write_unlock();
 }
 
 inline void
@@ -164,6 +171,18 @@ inline void
 record_header_buffer::read_unlock()
 {
     m_shared.unlock_shared();
+}
+
+inline void
+record_header_buffer::write_lock()
+{
+    m_shared.lock();
+}
+
+inline void
+record_header_buffer::write_unlock()
+{
+    m_shared.unlock();
 }
 
 inline bool
@@ -212,21 +231,22 @@ template <typename Tp>
 bool
 record_header_buffer::emplace(uint64_t _hash, Tp& _v)
 {
-    if(is_locked() || m_headers.empty()) return false;
+    if(m_headers.empty()) return false;
 
-    // request N bytes in the buffer (where N=sizeof(Tp)) and if
-    // available, copy _v into the buffer region
-    auto _create_record = [](auto& _buf, auto& _data) {
-        constexpr auto buffer_sz = sizeof(Tp);
-        void*          _ptr      = _buf.request(buffer_sz, false);
-        if(_ptr) new(_ptr) Tp{_data};
-        return _ptr;
-    };
+    constexpr auto request_size = sizeof(Tp);
+
+    // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
+    // the lock will be short-lived so hopefully, it will scale fine
+    write_lock();
+    auto* _addr = m_buffer.request(request_size, false);
+    write_unlock();
 
     read_lock();
-    auto _addr = _create_record(m_buffer, _v);
     if(_addr)
     {
+        // placement new
+        new(_addr) Tp{_v};
+
         // if there is space in the buffer, atomically get an index
         // for where the header record should be placed.
         // NOTE: m_headers was resized to be large enough to accomodate
@@ -245,21 +265,22 @@ template <typename Tp>
 bool
 record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
 {
-    if(is_locked() || m_headers.empty()) return false;
+    if(m_headers.empty()) return false;
 
-    // request N bytes in the buffer (where N=sizeof(Tp)) and if
-    // available, copy _v into the buffer region
-    auto _create_record = [](auto& _buf, auto& _data) {
-        constexpr auto buffer_sz = sizeof(Tp);
-        void*          _ptr      = _buf.request(buffer_sz, false);
-        if(_ptr) new(_ptr) Tp{_data};
-        return _ptr;
-    };
+    constexpr auto request_size = sizeof(Tp);
+
+    // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
+    // the lock will be short-lived so hopefully, it will scale fine
+    write_lock();
+    auto* _addr = m_buffer.request(request_size, false);
+    write_unlock();
 
     read_lock();
-    auto _addr = _create_record(m_buffer, _v);
     if(_addr)
     {
+        // placement new
+        new(_addr) Tp{_v};
+
         // if there is space in the buffer, atomically get an index
         // for where the header record should be placed.
         // NOTE: m_headers was resized to be large enough to accomodate

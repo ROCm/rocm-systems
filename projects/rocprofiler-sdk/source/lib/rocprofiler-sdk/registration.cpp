@@ -26,6 +26,7 @@
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
@@ -51,6 +52,7 @@
 #include <cctype>
 #include <cstdint>
 #include <fstream>
+#include <hip/amd_detail/hip_api_trace.hpp>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -515,10 +517,17 @@ set_fini_status(int v)
 void
 initialize()
 {
-    if(get_init_status() != 0) return;
+    LOG(INFO) << "rocprofiler initialize called...";
+
+    if(get_init_status() != 0)
+    {
+        LOG(INFO) << "rocprofiler initialize ignored...";
+        return;
+    }
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
+        LOG(INFO) << "rocprofiler initialize started...";
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
@@ -558,6 +567,7 @@ finalize()
     std::call_once(_once, []() {
         set_fini_status(-1);
         hsa::async_copy_fini();
+        hsa::queue_controller_fini();
         hsa::code_object_shutdown();
         if(get_init_status() > 0)
         {
@@ -588,6 +598,8 @@ rocprofiler_is_finalized(int* status)
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
+    LOG(INFO) << "forcing rocprofiler configuration";
+
     auto& forced_config = rocprofiler::registration::get_forced_configure();
 
     // init status may be -1 (currently initializing) or 1 (already initialized).
@@ -632,9 +644,47 @@ rocprofiler_set_api_table(const char* name,
     {
         // pass to hip init
         LOG_IF(ERROR, num_tables > 1)
-            << " rocprofiler expected HIP library to pass 1 API table, not " << num_tables;
+            << " rocprofiler expected HIP library to pass 1 API table for " << name << ", not "
+            << num_tables;
 
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        auto* hip_runtime_api_table = static_cast<HipDispatchTable*>(*tables);
+
+        // any internal modifications to the HipDispatchTable need to be done before we make the
+        // copy or else those modifications will be lost when HIP API tracing is enabled
+        // because the HIP API tracing invokes the function pointers from the copy below
+        rocprofiler::hip::copy_table(hip_runtime_api_table);
+
+        // install rocprofiler API wrappers
+        rocprofiler::hip::update_table(hip_runtime_api_table);
+
+        rocprofiler::intercept_table::notify_runtime_api_registration(
+            ROCPROFILER_HIP_RUNTIME_LIBRARY,
+            lib_version,
+            lib_instance,
+            std::make_tuple(hip_runtime_api_table));
+    }
+    else if(std::string_view{name} == "hip_compiler")
+    {
+        // pass to hip init
+        LOG_IF(ERROR, num_tables > 1)
+            << " rocprofiler expected HIP library to pass 1 API table for " << name << ", not "
+            << num_tables;
+
+        auto* hip_compiler_api_table = static_cast<HipCompilerDispatchTable*>(*tables);
+
+        // any internal modifications to the HipCompilerDispatchTable need to be done before we make
+        // the copy or else those modifications will be lost when HIP API tracing is enabled because
+        // the HIP API tracing invokes the function pointers from the copy below
+        rocprofiler::hip::copy_table(hip_compiler_api_table);
+
+        // install rocprofiler API wrappers
+        rocprofiler::hip::update_table(hip_compiler_api_table);
+
+        rocprofiler::intercept_table::notify_runtime_api_registration(
+            ROCPROFILER_HIP_COMPILER_LIBRARY,
+            lib_version,
+            lib_instance,
+            std::make_tuple(hip_compiler_api_table));
     }
     else if(std::string_view{name} == "hsa")
     {

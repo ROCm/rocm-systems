@@ -218,17 +218,16 @@ getMetricMap()
     return map;
 }
 
-const std::vector<Metric>&
+std::vector<Metric>
 getMetricsForAgent(const std::string& agent)
 {
-    static const std::vector<Metric> empty;
-    const auto&                      map = *CHECK_NOTNULL(getMetricMap());
+    const auto& map = *CHECK_NOTNULL(getMetricMap());
     if(const auto* metric_ptr = rocprofiler::common::get_val(map, agent))
     {
         return *metric_ptr;
     }
 
-    return empty;
+    return std::vector<Metric>{};
 }
 
 bool

@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
@@ -113,6 +114,9 @@ public:
         hsa_signal_t               interrupt_signal = {};
         rocprofiler_thread_id_t    tid              = common::get_tid();
         rocprofiler_kernel_id_t    kernel_id        = 0;
+        rocprofiler_queue_id_t     queue_id         = {};
+        hsa_agent_t                hsa_agent        = {};
+        const rocprofiler_agent_t* rocp_agent       = nullptr;
         context::correlation_id*   correlation_id   = nullptr;
         rocprofiler_packet         kernel_pkt       = {};
         context_array_t            contexts         = {};
@@ -169,6 +173,7 @@ public:
     // have comleted.
     void async_started() { _active_async_packets++; }
     void async_complete() { _active_async_packets--; }
+    void sync() const;
 
     void register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb);
     void remove_callback(ClientID id);

@@ -36,6 +36,7 @@ target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
                                                   ${ROCPROFILER_LIB_HEADERS})
 
 add_subdirectory(hsa)
+add_subdirectory(hip)
 add_subdirectory(context)
 add_subdirectory(counters)
 add_subdirectory(aql)
@@ -88,7 +89,6 @@ set_target_properties(
     PROPERTIES OUTPUT_NAME rocprofiler-sdk
                SOVERSION ${PROJECT_VERSION_MAJOR}
                VERSION ${PROJECT_VERSION}
-               SKIP_BUILD_RPATH OFF
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN"
                DEFINE_SYMBOL rocprofiler_EXPORTS)
