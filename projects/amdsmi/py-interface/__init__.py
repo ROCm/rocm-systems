@@ -98,8 +98,7 @@ from .amdsmi_interface import amdsmi_get_gpu_vram_usage
 from .amdsmi_interface import amdsmi_get_power_info
 from .amdsmi_interface import amdsmi_get_clock_info
 
-from .amdsmi_interface import amdsmi_get_pcie_link_status
-from .amdsmi_interface import amdsmi_get_pcie_link_caps
+from .amdsmi_interface import amdsmi_get_pcie_info
 from .amdsmi_interface import amdsmi_get_gpu_bad_page_info
 
 # # Process Information

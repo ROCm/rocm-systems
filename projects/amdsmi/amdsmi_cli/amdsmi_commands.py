@@ -347,7 +347,7 @@ class AMDSMICommands():
                 logging.debug("Failed to get bdf for gpu %s | %s", gpu_id, e.get_error_info())
 
             try:
-                link_caps = amdsmi_interface.amdsmi_get_pcie_link_caps(args.gpu)
+                link_caps = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)
                 bus_info.update(link_caps)
                 if bus_info['max_pcie_speed'] % 1000 != 0:
                     pcie_speed_GTs_value = round(bus_info['max_pcie_speed'] / 1000, 1)
@@ -358,9 +358,9 @@ class AMDSMICommands():
 
                 slot_type = bus_info.pop('pcie_slot_type')
                 if isinstance(slot_type, int):
-                    slot_types = amdsmi_interface.amdsmi_wrapper.amdsmi_pcie_slot_type_t__enumvalues
+                    slot_types = amdsmi_interface.amdsmi_wrapper.amdsmi_card_form_factor_t__enumvalues
                     if slot_type in slot_types:
-                        bus_info['slot_type'] = slot_types[slot_type].replace("AMDSMI_SLOT_TYPE__", "")
+                        bus_info['slot_type'] = slot_types[slot_type].replace("AMDSMI_CARD_FORM_FACTOR_", "")
                     else:
                         bus_info['slot_type'] = "Unknown"
                 else:
@@ -1381,7 +1381,7 @@ class AMDSMICommands():
                              "max_packet_size": "N/A"}
 
                 try:
-                    pcie_link_status = amdsmi_interface.amdsmi_get_pcie_link_status(args.gpu)
+                    pcie_link_status = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)
 
                     if pcie_link_status['pcie_speed'] % 1000 != 0:
                         pcie_speed_GTs_value = round(pcie_link_status['pcie_speed'] / 1000, 1)

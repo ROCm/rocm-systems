@@ -92,8 +92,7 @@ GPU device and CPU device on the same socket. Moreover, for MI200, it may have m
 To discover the sockets in the system, `amdsmi_get_socket_handles()` is called to get list of sockets
 handles, which in turn can be used to query the devices in that socket using `amdsmi_get_processor_handles()`. The device handler is used to distinguish the detected devices from one another. It is important to note that a device may end up with a different device handles after restart application, so a device handle should not be relied upon to be constant over process.
 
-To discover the cpu sockets in the system, `amdsmi_get_cpusocket_handles()` is called to get list of cpu sockets
-handles, which in turn can be used to query the cpu cores in that cpu socket using `amdsmi_get_cpucore_handles()`. The cpu core handler is used to distinguish the detected cpu cores from one another.
+The list of socket handles discovered using `amdsmi_get_socket_handles()`,can also be used to query the cpus in that socket using `amdsmi_get_processor_handles_by_type()`, which in turn can then be used to query the cores in that cpu using `amdsmi_get_processor_handles_by_type()` again.
 
 
 ## Hello AMD SMI

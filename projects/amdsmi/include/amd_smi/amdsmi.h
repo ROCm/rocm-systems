@@ -76,16 +76,17 @@ typedef enum {
 } amdsmi_init_flags_t;
 
 /* Maximum size definitions AMDSMI */
-#define AMDSMI_MAX_MM_IP_COUNT	      8
-#define AMDSMI_MAX_DATE_LENGTH	      32 /**< YYYY-MM-DD:HH:MM:SS.MSC */
-#define AMDSMI_MAX_STRING_LENGTH	      64
-#define AMDSMI_NORMAL_STRING_LENGTH      32
-#define AMDSMI_MAX_DEVICES		      32
-#define AMDSMI_MAX_NAME		      32
+#define AMDSMI_MAX_MM_IP_COUNT        8
+#define AMDSMI_MAX_DATE_LENGTH        32 /**< YYYY-MM-DD:HH:MM:SS.MSC */
+#define AMDSMI_MAX_STRING_LENGTH      64
+#define AMDSMI_NORMAL_STRING_LENGTH   32
+#define AMDSMI_MAX_DEVICES            32
+#define AMDSMI_MAX_NAME               32
 #define AMDSMI_MAX_DRIVER_VERSION_LENGTH 80
 #define AMDSMI_PRODUCT_NAME_LENGTH 128
 #define AMDSMI_MAX_CONTAINER_TYPE    2
 #define AMDSMI_MAX_CACHE_TYPES 10
+#define AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK 64
 
 #define AMDSMI_GPU_UUID_SIZE 38
 
@@ -147,10 +148,10 @@ typedef enum {
  */
 
 //! Year should follow the IP driver package version: 22.40/23.10 and similar
-#define AMDSMI_LIB_VERSION_YEAR 23
+#define AMDSMI_LIB_VERSION_YEAR 24
 
 //! Major version should be changed for every header change (adding/deleting APIs, changing names, fields of structures, etc.)
-#define AMDSMI_LIB_VERSION_MAJOR 4
+#define AMDSMI_LIB_VERSION_MAJOR 2
 
 //! Minor version should be updated for each API change, but without changing headers
 #define AMDSMI_LIB_VERSION_MINOR 0
@@ -170,8 +171,8 @@ typedef enum {
 } amdsmi_mm_ip_t;
 
 typedef enum {
-	CONTAINER_LXC,
-	CONTAINER_DOCKER,
+  CONTAINER_LXC,
+  CONTAINER_DOCKER,
 } amdsmi_container_types_t;
 
 //! opaque handler point to underlying implementation
@@ -476,9 +477,9 @@ typedef struct {
 } amdsmi_vram_usage_t;
 
 typedef struct {
-	amdsmi_range_t supported_freq_range;
-	amdsmi_range_t current_freq_range;
-	uint32_t reserved[8];
+  amdsmi_range_t supported_freq_range;
+  amdsmi_range_t current_freq_range;
+  uint32_t reserved[8];
 } amdsmi_frequency_range_t;
 
 typedef union {
@@ -490,6 +491,34 @@ typedef union {
   } fields;
   uint64_t as_uint;
 } amdsmi_bdf_t;
+
+typedef enum {
+  AMDSMI_CARD_FORM_FACTOR_PCIE,
+  AMDSMI_CARD_FORM_FACTOR_OAM,
+  AMDSMI_CARD_FORM_FACTOR_UNKNOWN
+} amdsmi_card_form_factor_t;
+
+typedef struct {
+  struct pcie_static_ {
+    uint16_t max_pcie_lanes;              //!< maximum number of PCIe lanes
+    uint32_t max_pcie_speed;              //!< maximum PCIe speed
+    uint32_t pcie_interface_version;      //!< PCIe interface version
+    amdsmi_card_form_factor_t slot_type;  //!< card form factor
+    uint64_t reserved[10];
+  } pcie_static;
+  struct pcie_metric_ {
+    uint32_t pcie_speed;                  //!< current PCIe speed in MT/s
+    uint16_t pcie_lanes;                  //!< current PCIe width
+    uint32_t pcie_bandwidth;              //!< current PCIe bandwidth Mb/s
+    uint64_t pcie_replay_count;           //!< total number of the replays issued on the PCIe link
+    uint64_t pcie_l0_to_recovery_count;   //!< total number of times the PCIe link transitioned from L0 to the recovery state
+    uint64_t pcie_replay_roll_over_count; //!< total number of replay rollovers issued on the PCIe link
+    uint64_t pcie_nak_sent_count;         //!< total number of NAKs issued on the PCIe link by the device
+    uint64_t pcie_nak_received_count;     //!< total number of NAKs issued on the PCIe link by the receiver
+    uint64_t reserved[13];
+  } pcie_metric;
+  uint64_t reserved[32];
+} amdsmi_pcie_info_t;
 
 typedef struct {
   uint64_t power_cap;
@@ -554,7 +583,28 @@ typedef struct {
   uint16_t reserved[37];
 } amdsmi_asic_info_t;
 
-typedef struct{
+typedef enum {
+  AMDSMI_LINK_TYPE_PCIE,
+  AMDSMI_LINK_TYPE_XGMI,
+  AMDSMI_LINK_TYPE_NOT_APPLICABLE,
+  AMDSMI_LINK_TYPE_UNKNOWN
+} amdsmi_link_type_t;
+
+typedef struct {
+  uint32_t num_links;   //!< number of links
+  struct _links {
+    amdsmi_bdf_t bdf;
+    uint32_t bit_rate;  //!< current link speed in Gb/s
+    uint32_t max_bandwidth;   //!< max bandwidth of the link
+    amdsmi_link_type_t link_type;   //!< type of the link
+    uint64_t read;  //!< total data received for each link in KB
+    uint64_t write;   //!< total data transfered for each link in KB
+    uint64_t reserved[2];
+  } links[AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK];
+  uint64_t reserved[7];
+} amdsmi_link_metrics_t;
+
+typedef struct {
   amdsmi_vram_type_t vram_type;
   amdsmi_vram_vendor_type_t vram_vendor;
   uint64_t vram_size_mb;
@@ -562,18 +612,18 @@ typedef struct{
 
 
 typedef struct {
-	char  driver_name[AMDSMI_MAX_STRING_LENGTH];
-	char  driver_version[AMDSMI_MAX_STRING_LENGTH];
-	char  driver_date[AMDSMI_MAX_STRING_LENGTH];
+  char  driver_version[AMDSMI_MAX_STRING_LENGTH];
+  char  driver_date[AMDSMI_MAX_STRING_LENGTH];
+  char  driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
 
 typedef struct {
-  bool  is_master;
   char  model_number[AMDSMI_NORMAL_STRING_LENGTH];
   char  product_serial[AMDSMI_NORMAL_STRING_LENGTH];
   char  fru_id[AMDSMI_NORMAL_STRING_LENGTH];
-  char  manufacturer_name[AMDSMI_NORMAL_STRING_LENGTH];
   char  product_name[AMDSMI_PRODUCT_NAME_LENGTH];
+  char  manufacturer_name[AMDSMI_NORMAL_STRING_LENGTH];
+  uint32_t reserved[32];
 } amdsmi_board_info_t;
 
 typedef struct {
@@ -1272,7 +1322,7 @@ typedef struct {
   /*
    * v1.2 additions
    */
-	// PMFW attached timestamp (10ns resolution)
+  // PMFW attached timestamp (10ns resolution)
   uint64_t firmware_timestamp;
 
 
@@ -1334,7 +1384,7 @@ typedef struct {
    */
   // JPEG activity % per AID
   uint16_t jpeg_activity[AMDSMI_MAX_NUM_JPEG];
-  
+
   // Memory Bandwidth Usage Accumulated (GB/sec)
   uint64_t mem_bandwidth_acc;
 
@@ -1389,27 +1439,6 @@ typedef struct {
     uint64_t uncorrectable_count;          //!< Accumulated uncorrectable errors
     uint64_t reserved[2];
 } amdsmi_error_count_t;
-
-/**
- * @brief This is a enum translation for pcie_slot_type
- */
-typedef enum {
-  AMDSMI_SLOT_TYPE__PCIE = 0,
-  AMDSMI_SLOT_TYPE__CEM = 1,
-  AMDSMI_SLOT_TYPE__OAM = 2,
-  AMDSMI_SLOT_TYPE__RESERVED = 3,
-} amdsmi_pcie_slot_type_t;
-
-/**
- * @brief This structure holds pcie info.
- */
-typedef struct {
-	uint16_t pcie_lanes;
-	uint32_t pcie_speed;
-	uint32_t pcie_interface_version;
-	amdsmi_pcie_slot_type_t pcie_slot_type;   // 0: PCIE, 1: CEM, 2: OAM, 3: Reserved
-	uint32_t reserved[4];
-} amdsmi_pcie_info_t;
 
 /**
  * @brief This structure contains information specific to a process.
@@ -2688,37 +2717,6 @@ amdsmi_get_utilization_count(amdsmi_processor_handle processor_handle,
                 uint64_t *timestamp);
 
 /**
- *  @brief Get current PCIE info of the device with provided processor handle. It is not supported
- *  on virtual machine guest
- *
- *  @details Given a processor handle @p processor_handle, this function returns PCIE info of the
- *  given device.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[out] info amdsmi_pcie_info_t struct which will hold all the extracted PCIE info data.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_pcie_link_status(amdsmi_processor_handle processor_handle,
-                                              amdsmi_pcie_info_t *info);
-
-/**
- *  @brief Get max PCIe capabilities of the device with provided processor handle.
- *
- *  @details Given a processor handle @p processor_handle, this function returns PCIe caps info of the
- *  given device.
- *
- *  @param[in] processor_handle a processor handle
- *
- *  @param[out] info amdsmi_pcie_info_t struct which will hold all the extracted PCIe caps data.
- *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
- */
-amdsmi_status_t amdsmi_get_pcie_link_caps(amdsmi_processor_handle processor_handle,
-                                            amdsmi_pcie_info_t *info);
-
-/**
  *  @brief Get the performance level of the device. It is not supported on virtual
  *  machine guest
  *
@@ -3681,6 +3679,19 @@ amdsmi_reset_gpu_xgmi_error(amdsmi_processor_handle processor_handle);
  */
 
 /**
+ *  @brief Return link metric information
+ *
+ *  @param[in] processor_handle PF of a processor for which to query
+ *
+ *  @param[out] link_metrics reference to the link metrics struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle,
+          amdsmi_link_metrics_t *link_metrics);
+
+/**
  *  @brief Retrieve the NUMA CPU node number for a device
  *
  *  @details Given a processor handle @p processor_handle, and a pointer to an
@@ -4195,6 +4206,19 @@ amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle, uint32_t sen
           amdsmi_power_cap_info_t *info);
 
 /**
+ *  @brief Returns the PCIe info for the GPU.
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] info Reference to the PCIe information
+ *  returned by the library. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle,
+          amdsmi_pcie_info_t *info);
+
+/**
  *  @brief          Returns XGMI information for the GPU.
  *
  *  @param[in]      processor_handle Device which to query
@@ -4280,7 +4304,7 @@ amdsmi_get_power_info(amdsmi_processor_handle processor_handle, amdsmi_power_inf
  *
  *  @param[in] processor_handle PF of a processor for which to query
  *
- *  @param[out] status Reference to bool. Must be allocated by user.
+ *  @param[out] enabled Reference to bool. Must be allocated by user.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */

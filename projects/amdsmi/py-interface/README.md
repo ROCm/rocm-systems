@@ -761,7 +761,7 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_get_pcie_link_status
+### amdsmi_get_pcie_info
 
 Description: Returns the pcie link status for the given GPU.
 It is not supported on virtual machine guest
@@ -778,7 +778,7 @@ Field | Description
 `pcie_speed`| current pcie speed
 `pcie_interface_version`| current pcie generation
 
-Exceptions that can be thrown by `amdsmi_get_pcie_link_status` function:
+Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiRetryException`
@@ -793,47 +793,10 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            pcie_link_status = amdsmi_get_pcie_link_status(device)
+            pcie_link_status = amdsmi_get_pcie_info(device)
             print(pcie_link_status["pcie_lanes"])
             print(pcie_link_status["pcie_speed"])
             print(pcie_link_status["pcie_interface_version"])
-except AmdSmiException as e:
-    print(e)
-```
-
-### amdsmi_get_pcie_link_caps
-
-Description:  Returns the max pcie link capabilities for the given GPU
-
-Input parameters:
-
-* `processor_handle` device which to query
-
-Output: Dictionary with fields
-
-Field | Description
----|---
-`pcie_lanes` | Number of PCIe lanes
-`pcie_speed` | PCIe speed in MT/s
-
-Exceptions that can be thrown by `amdsmi_get_pcie_link_caps` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-* `AmdSmiParameterException`
-
-Example:
-
-```python
-try:
-    devices = amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            pcie_caps = amdsmi_get_pcie_link_caps(device)
-            print(pcie_caps['pcie_lanes'])
-            print(pcie_caps['pcie_speed'])
 except AmdSmiException as e:
     print(e)
 ```

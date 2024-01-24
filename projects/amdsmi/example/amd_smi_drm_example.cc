@@ -392,22 +392,16 @@ int main() {
 
             // Get PCIe status
             amdsmi_pcie_info_t pcie_info = {};
-            ret = amdsmi_get_pcie_link_status(processor_handles[j], &pcie_info);
+            ret = amdsmi_get_pcie_info(processor_handles[j], &pcie_info);
             CHK_AMDSMI_RET(ret)
-            printf("    Output of amdsmi_get_pcie_link_status:\n");
-            printf("\tCurrent PCIe lanes: %d\n", pcie_info.pcie_lanes);
-            printf("\tCurrent PCIe speed: %d\n", pcie_info.pcie_speed);
-            printf("\tCurrent PCIe Interface Version: %d\n", pcie_info.pcie_interface_version);
-            printf("\tPCIe slot type: %d\n\n", pcie_info.pcie_slot_type);
-
-            // Get PCIe caps
-            amdsmi_pcie_info_t pcie_caps_info = {};
-            ret = amdsmi_get_pcie_link_caps(processor_handles[j], &pcie_caps_info);
-            CHK_AMDSMI_RET(ret)
-            printf("    Output of amdsmi_get_pcie_link_caps:\n");
-            printf("\tPCIe max lanes: %d\n", pcie_caps_info.pcie_lanes);
-            printf("\tPCIe max speed: %d\n", pcie_caps_info.pcie_speed);
-            printf("\tPCIe Interface Version: %d\n\n", pcie_caps_info.pcie_interface_version);
+            printf("    Output of amdsmi_get_pcie_info:\n");
+            printf("\tCurrent PCIe lanes: %d\n", pcie_info.pcie_metric.pcie_lanes);
+            printf("\tCurrent PCIe speed: %d\n", pcie_info.pcie_metric.pcie_speed);
+            printf("\tCurrent PCIe Interface Version: %d\n",
+                                    pcie_info.pcie_static.pcie_interface_version);
+            printf("\tPCIe slot type: %d\n", pcie_info.pcie_static.slot_type);
+            printf("\tPCIe max lanes: %d\n", pcie_info.pcie_static.max_pcie_lanes);
+            printf("\tPCIe max speed: %d\n", pcie_info.pcie_static.max_pcie_speed);
 
             // Get VRAM temperature limit
             int64_t temperature = 0;

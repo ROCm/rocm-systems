@@ -919,6 +919,29 @@ amdsmi_status_t
     return amd::smi::rsmi_to_amdsmi_status(rstatus);
 }
 
+
+amdsmi_status_t amdsmi_get_link_metrics(amdsmi_processor_handle processor_handle,
+          amdsmi_link_metrics_t *link_metrics) {
+    AMDSMI_CHECK_INIT();
+    if (link_metrics == nullptr)  return AMDSMI_STATUS_INVAL;
+
+    amdsmi_gpu_metrics_t metric_info = {};
+    amdsmi_status_t status =  amdsmi_get_gpu_metrics_info(
+            processor_handle, &metric_info);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return status;
+    link_metrics->num_links = AMDSMI_MAX_NUM_XGMI_LINKS;
+    for (unsigned int i = 0; i < link_metrics->num_links; i++) {
+        link_metrics->links[i].read = metric_info.xgmi_read_data_acc[i];
+        link_metrics->links[i].write = metric_info.xgmi_write_data_acc[i];
+        link_metrics->links[i].bit_rate = metric_info.xgmi_link_speed;
+        link_metrics->links[i].max_bandwidth = metric_info.xgmi_link_width;
+        link_metrics->links[i].link_type = AMDSMI_LINK_TYPE_XGMI;
+    }
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
 amdsmi_status_t
 amdsmi_topo_get_link_type(amdsmi_processor_handle processor_handle_src, amdsmi_processor_handle processor_handle_dst,
                         uint64_t *hops, amdsmi_io_link_type_t *type) {
@@ -1939,65 +1962,7 @@ amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle, unsigned in
     return status;
 }
 
-amdsmi_status_t
-amdsmi_get_pcie_link_status(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info){
-    AMDSMI_CHECK_INIT();
-
-    if (info == nullptr) {
-        return AMDSMI_STATUS_INVAL;
-    }
-    amdsmi_status_t status = AMDSMI_STATUS_SUCCESS;
-    amdsmi_gpu_metrics_t metric_info = {};
-    status =  amdsmi_get_gpu_metrics_info(
-            processor_handle, &metric_info);
-    if (status != AMDSMI_STATUS_SUCCESS)
-        return status;
-
-    info->pcie_lanes = metric_info.pcie_link_width;
-    // gpu metrics is inconsistent with pcie_speed values, if 0-6 then it needs to be translated
-    if (metric_info.pcie_link_speed <= 6) {
-        status = smi_amdgpu_get_pcie_speed_from_pcie_type(metric_info.pcie_link_speed, &info->pcie_speed); // mapping to MT/s
-    } else {
-        // gpu metrics returns pcie link speed in .1 GT/s ex. 160 vs 16
-        info->pcie_speed = metric_info.pcie_link_speed * 100;
-    }
-
-    switch (info->pcie_speed) {
-      case 2500:
-        info->pcie_interface_version = 1;
-        break;
-      case 5000:
-        info->pcie_interface_version = 2;
-        break;
-      case 8000:
-        info->pcie_interface_version = 3;
-        break;
-      case 16000:
-        info->pcie_interface_version = 4;
-        break;
-      case 32000:
-        info->pcie_interface_version = 5;
-        break;
-      case 64000:
-        info->pcie_interface_version = 6;
-        break;
-      default:
-        info->pcie_interface_version = 0;
-    }
-
-    // default to PCIe
-    info->pcie_slot_type = AMDSMI_SLOT_TYPE__PCIE;
-    rsmi_pcie_slot_type_t slot_type;
-    status = rsmi_wrapper(rsmi_dev_pcie_slot_type_get,
-            processor_handle, &slot_type);
-    if (status == AMDSMI_STATUS_SUCCESS) {
-        info->pcie_slot_type = static_cast<amdsmi_pcie_slot_type_t>(slot_type);
-    }
-
-    return AMDSMI_STATUS_SUCCESS;
-}
-
-amdsmi_status_t amdsmi_get_pcie_link_caps(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info) {
+amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, amdsmi_pcie_info_t *info) {
     AMDSMI_CHECK_INIT();
 
     if (info == nullptr) {
@@ -2029,7 +1994,7 @@ amdsmi_status_t amdsmi_get_pcie_link_caps(amdsmi_processor_handle processor_hand
         printf("Failed to open file: %s \n", path_max_link_width.c_str());
         return AMDSMI_STATUS_API_FAILED;
     }
-    info->pcie_lanes = (uint16_t)pcie_width;
+    info->pcie_static.max_pcie_lanes = (uint16_t)pcie_width;
 
     std::string path_max_link_speed = "/sys/class/drm/" +
         gpu_device->get_gpu_path() + "/device/max_link_speed";
@@ -2043,38 +2008,63 @@ amdsmi_status_t amdsmi_get_pcie_link_caps(amdsmi_processor_handle processor_hand
     }
 
     // pcie speed in sysfs returns in GT/s
-    info->pcie_speed = pcie_speed * 1000;
+    info->pcie_static.max_pcie_speed = pcie_speed * 1000;
 
-    switch (info->pcie_speed) {
+    switch (info->pcie_static.max_pcie_speed) {
       case 2500:
-        info->pcie_interface_version = 1;
+        info->pcie_static.pcie_interface_version = 1;
         break;
       case 5000:
-        info->pcie_interface_version = 2;
+        info->pcie_static.pcie_interface_version = 2;
         break;
       case 8000:
-        info->pcie_interface_version = 3;
+        info->pcie_static.pcie_interface_version = 3;
         break;
       case 16000:
-        info->pcie_interface_version = 4;
+        info->pcie_static.pcie_interface_version = 4;
         break;
       case 32000:
-        info->pcie_interface_version = 5;
+        info->pcie_static.pcie_interface_version = 5;
         break;
       case 64000:
-        info->pcie_interface_version = 6;
+        info->pcie_static.pcie_interface_version = 6;
         break;
       default:
-        info->pcie_interface_version = 0;
+        info->pcie_static.pcie_interface_version = 0;
     }
 
     // default to PCIe
-    info->pcie_slot_type = AMDSMI_SLOT_TYPE__PCIE;
+    info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_PCIE;
     rsmi_pcie_slot_type_t slot_type;
     status = rsmi_wrapper(rsmi_dev_pcie_slot_type_get,
             processor_handle, &slot_type);
     if (status == AMDSMI_STATUS_SUCCESS) {
-        info->pcie_slot_type = static_cast<amdsmi_pcie_slot_type_t>(slot_type);
+        switch (slot_type) {
+            case RSMI_PCIE_SLOT_OAM:
+                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_OAM;
+                break;
+            case RSMI_PCIE_SLOT_PCIE:
+                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_PCIE;
+                break;
+            default:
+                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_UNKNOWN;
+        }
+    }
+
+    // metrics
+    amdsmi_gpu_metrics_t metric_info = {};
+    status =  amdsmi_get_gpu_metrics_info(
+            processor_handle, &metric_info);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return status;
+
+    info->pcie_metric.pcie_lanes = metric_info.pcie_link_width;
+    // gpu metrics is inconsistent with pcie_speed values, if 0-6 then it needs to be translated
+    if (metric_info.pcie_link_speed <= 6) {
+        status = smi_amdgpu_get_pcie_speed_from_pcie_type(metric_info.pcie_link_speed, &info->pcie_metric.pcie_speed); // mapping to MT/s
+    } else {
+        // gpu metrics returns pcie link speed in .1 GT/s ex. 160 vs 16
+        info->pcie_metric.pcie_speed = metric_info.pcie_link_speed * 100;
     }
 
     return AMDSMI_STATUS_SUCCESS;

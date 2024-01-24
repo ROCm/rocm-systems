@@ -1557,7 +1557,7 @@ def amdsmi_get_gpu_asic_info(
         "market_name": asic_info.market_name.decode("utf-8"),
         "vendor_id": asic_info.vendor_id,
         "vendor_name": asic_info.vendor_name.decode("utf-8"),
-        "subvendor_id": hex(asic_info.subvendor_id),
+        "subvendor_id": asic_info.subvendor_id if asic_info.subvendor_id == '' else hex(asic_info.subvendor_id),
         "device_id": asic_info.device_id,
         "rev_id": asic_info.rev_id,
         "asic_serial": asic_info.asic_serial.decode("utf-8"),
@@ -2064,7 +2064,7 @@ def amdsmi_get_gpu_vram_usage(
     return {"vram_total": vram_info.vram_total, "vram_used": vram_info.vram_used}
 
 
-def amdsmi_get_pcie_link_status(
+def amdsmi_get_pcie_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
 ) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -2074,34 +2074,18 @@ def amdsmi_get_pcie_link_status(
 
     pcie_info = amdsmi_wrapper.amdsmi_pcie_info_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_pcie_link_status(
+        amdsmi_wrapper.amdsmi_get_pcie_info(
             processor_handle, ctypes.byref(pcie_info)
         )
     )
 
-    return {"pcie_speed": pcie_info.pcie_speed,
-            "pcie_lanes": pcie_info.pcie_lanes,
-            "pcie_interface_version": pcie_info.pcie_interface_version,
-            "pcie_slot_type": pcie_info.pcie_slot_type}
-
-def amdsmi_get_pcie_link_caps(
-    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Dict[str, Any]:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(
-            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
-        )
-
-    pcie_info = amdsmi_wrapper.amdsmi_pcie_info_t()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_pcie_link_caps(
-            processor_handle, ctypes.byref(pcie_info))
-    )
-
-    return {"max_pcie_speed": pcie_info.pcie_speed,
-            "max_pcie_lanes": pcie_info.pcie_lanes,
-            "pcie_interface_version": pcie_info.pcie_interface_version,
-            "pcie_slot_type": pcie_info.pcie_slot_type}
+    return {"pcie_speed": pcie_info.pcie_metric.pcie_speed,
+            "pcie_lanes": pcie_info.pcie_metric.pcie_lanes,
+            "pcie_interface_version": pcie_info.pcie_static.pcie_interface_version,
+            "max_pcie_speed": pcie_info.pcie_static.max_pcie_speed,
+            "max_pcie_lanes": pcie_info.pcie_static.max_pcie_lanes,
+            "pcie_interface_version": pcie_info.pcie_static.pcie_interface_version,
+            "pcie_slot_type": pcie_info.pcie_static.slot_type}
 
 
 def amdsmi_get_processor_handle_from_bdf(bdf):
