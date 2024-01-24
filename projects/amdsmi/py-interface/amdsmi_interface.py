@@ -21,7 +21,7 @@
 
 import ctypes
 import re
-from typing import Union, Any, Dict, List, Tuple
+from typing import Union, Any, Dict, List
 from enum import IntEnum
 from collections.abc import Iterable
 
@@ -348,7 +348,8 @@ class AmdSmiIoLinkType(IntEnum):
 class AmdSmiUtilizationCounterType(IntEnum):
     COARSE_GRAIN_GFX_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_GFX_ACTIVITY
     COARSE_GRAIN_MEM_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_MEM_ACTIVITY
-
+    UTILIZATION_COUNTER_FIRST = amdsmi_wrapper.AMDSMI_UTILIZATION_COUNTER_FIRST
+    UTILIZATION_COUNTER_LAST = amdsmi_wrapper.AMDSMI_UTILIZATION_COUNTER_LAST
 
 class AmdSmiProcessorType(IntEnum):
     UNKNOWN = amdsmi_wrapper.UNKNOWN
@@ -357,6 +358,11 @@ class AmdSmiProcessorType(IntEnum):
     NON_AMD_GPU = amdsmi_wrapper.NON_AMD_GPU
     NON_AMD_CPU = amdsmi_wrapper.NON_AMD_CPU
 
+class AmdSmiCacheTypeNames(Enum):
+    DATA_CACHE = 2
+    INST_CACHE = 4
+    CPU_CACHE = 8
+    SIMD_CACHE = 16
 
 class AmdSmiEventReader:
     def __init__(
@@ -1626,15 +1632,26 @@ def amdsmi_get_gpu_cache_info(
         inst_cache = bool(cache_flags & amdsmi_wrapper.CACHE_FLAGS_INST_CACHE)
         cpu_cache = bool(cache_flags & amdsmi_wrapper.CACHE_FLAGS_CPU_CACHE)
         simd_cache = bool(cache_flags & amdsmi_wrapper.CACHE_FLAGS_SIMD_CACHE)
-        cache_info_dict[f"cache {cache_index}"] = {"cache_size": cache_size,
+        cache_flag_list = []
+        if (data_cache):
+            cache_flag_list.append(
+                AmdSmiCacheTypeNames(amdsmi_wrapper.CACHE_FLAGS_DATA_CACHE).name)
+        if (inst_cache):
+            cache_flag_list.append(
+                AmdSmiCacheTypeNames(amdsmi_wrapper.CACHE_FLAGS_INST_CACHE).name)
+        if (cpu_cache):
+            cache_flag_list.append(
+                AmdSmiCacheTypeNames(amdsmi_wrapper.CACHE_FLAGS_CPU_CACHE).name)
+        if (simd_cache):
+            cache_flag_list.append(
+                AmdSmiCacheTypeNames(amdsmi_wrapper.CACHE_FLAGS_SIMD_CACHE).name)
+        cache_info_dict[f"cache {cache_index}"] = {
+                                                   "cache_flags": cache_flag_list,
+                                                   "cache_size": cache_size,
                                                    "cache_level": cache_level,
                                                    "max_num_cu_shared": max_num_cu_shared,
-                                                  "num_cache_instance": num_cache_instance}
-        if (data_cache): cache_info_dict[f"cache {cache_index}"]["data_cache"] = data_cache
-        if (inst_cache): cache_info_dict[f"cache {cache_index}"]["inst_cache"] = inst_cache
-        if (cpu_cache): cache_info_dict[f"cache {cache_index}"]["cpu_cache"] = cpu_cache
-        if (simd_cache): cache_info_dict[f"cache {cache_index}"]["simd_cache"] = simd_cache
-
+                                                   "num_cache_instance": num_cache_instance
+                                                   }
 
     if cache_info_dict == {}:
         raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NO_DATA)
@@ -3055,16 +3072,15 @@ def amdsmi_get_gpu_volt_metric(
     return voltage.value
 
 
-
 def amdsmi_get_utilization_count(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-    *counter_types: Tuple[AmdSmiUtilizationCounterType]
+    counter_types: List[AmdSmiUtilizationCounterType]
 ) -> List[Dict[str, Any]]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
-    if not len(counter_types):
+    if len(counter_types) == 0:
         raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_INVAL)
     counters = []
     for counter_type in counter_types:
@@ -3077,9 +3093,7 @@ def amdsmi_get_utilization_count(
 
     count = ctypes.c_uint32(len(counters))
     timestamp = ctypes.c_uint64()
-    util_counter_list = (amdsmi_wrapper.amdsmi_utilization_counter_t * len(counters))(
-        *counters
-    )
+    util_counter_list = (amdsmi_wrapper.amdsmi_utilization_counter_t * len(counters))(*counters)
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_utilization_count(
@@ -3091,9 +3105,11 @@ def amdsmi_get_utilization_count(
 
     result = [{"timestamp": timestamp.value}]
     for idx in range(count.value):
-        counter_type = amdsmi_wrapper.AMDSMI_UTILIZATION_COUNTER_TYPE__enumvalues[
+        counter_type = amdsmi_wrapper.amdsmi_utilization_counter_type_t__enumvalues[
             util_counter_list[idx].type
         ]
+        if counter_type == "AMDSMI_UTILIZATION_COUNTER_FIRST":
+            counter_type = "AMDSMI_COARSE_GRAIN_GPU_ACTIVITY"
         if counter_type == "AMDSMI_UTILIZATION_COUNTER_LAST":
             counter_type = "AMDSMI_COARSE_GRAIN_MEM_ACTIVITY"
         result.append(
@@ -3234,7 +3250,7 @@ def amdsmi_get_gpu_metrics_info(
         )
     )
 
-    return {
+    gpu_metrics_output = {
         "temperature_edge": gpu_metrics.temperature_edge,
         "temperature_hotspot": gpu_metrics.temperature_hotspot,
         "temperature_mem": gpu_metrics.temperature_mem,
@@ -3295,6 +3311,92 @@ def amdsmi_get_gpu_metrics_info(
         "pcie_nak_rcvd_count_acc": gpu_metrics.pcie_nak_rcvd_count_acc,
         "jpeg_activity": list(gpu_metrics.jpeg_activity),
     }
+
+    # Validate support for each gpu_metric
+    uint_16_values = ['temperature_edge', 'temperature_hotspot', 'temperature_mem',
+                     'temperature_vrgfx', 'temperature_vrsoc', 'temperature_vrmem',
+                     'average_gfx_activity', 'average_umc_activity', 'average_mm_activity',
+                     'average_socket_power', 'average_gfxclk_frequency', 'average_socclk_frequency',
+                     'average_uclk_frequency', 'average_vclk0_frequency', 'average_dclk0_frequency',
+                     'average_vclk1_frequency', 'average_dclk1_frequency', 'current_gfxclk',
+                     'current_socclk', 'current_uclk', 'current_vclk0', 'current_dclk0',
+                     'current_vclk1', 'current_dclk1', 'current_fan_speed', 'pcie_link_width',
+                     'pcie_link_speed', 'voltage_soc', 'voltage_gfx', 'voltage_mem',
+                     'current_socket_power', 'xgmi_link_width', 'xgmi_link_speed']
+
+    for value in uint_16_values:
+        if gpu_metrics_output[value] == 0xFFFF:
+            gpu_metrics_output[value] = "N/A"
+
+    uint_32_values = ['gfx_activity_acc', 'mem_activity_acc', 'mem_max_bandwidth',
+                      'pcie_nak_sent_count_acc', 'pcie_nak_rcvd_count_acc']
+
+    for value in uint_32_values:
+        if gpu_metrics_output[value] == 0xFFFFFFFF:
+            gpu_metrics_output[value] = "N/A"
+
+    uint_64_values = ['energy_accumulator', 'system_clock_counter', 'firmware_timestamp',
+                      'pcie_bandwidth_acc', 'pcie_bandwidth_inst',
+                      'pcie_l0_to_recov_count_acc', 'pcie_replay_count_acc',
+                      'pcie_replay_rover_count_acc', 'mem_bandwidth_acc']
+
+    for value in uint_64_values:
+        if gpu_metrics_output[value] == 0xFFFFFFFFFFFFFFFF:
+            gpu_metrics_output[value] = "N/A"
+
+    # Custom validation for specific gpu_metrics
+    if gpu_metrics_output['throttle_status'] == 0xFFFFFFFF:
+        gpu_metrics_output['throttle_status'] = "N/A"
+    else:
+        gpu_metrics_output['throttle_status'] = bool(gpu_metrics_output['throttle_status'])
+
+    for idx, temp in enumerate(gpu_metrics_output['temperature_hbm']):
+        if temp == 0xFFFF:
+            gpu_metrics_output['temperature_hbm'][idx] = "N/A"
+
+    if gpu_metrics_output['indep_throttle_status'] == 0xFFFFFFFFFFFFFFFF:
+        gpu_metrics_output['indep_throttle_status'] = "N/A"
+    else:
+        gpu_metrics_output['indep_throttle_status'] = bool(gpu_metrics_output['indep_throttle_status'])
+
+    for idx, activity in enumerate(gpu_metrics_output['vcn_activity']):
+        if activity == 0xFFFF:
+            gpu_metrics_output['vcn_activity'][idx] = "N/A"
+
+    if gpu_metrics_output['gfxclk_lock_status'] == 0xFFFFFFFF:
+        gpu_metrics_output['gfxclk_lock_status'] = "N/A"
+    else:
+        gpu_metrics_output['gfxclk_lock_status'] = bool(gpu_metrics_output['gfxclk_lock_status'])
+
+    for idx, data in enumerate(gpu_metrics_output['xgmi_read_data_acc']):
+        if data == 0xFFFFFFFFFFFFFFFF:
+            gpu_metrics_output['xgmi_read_data_acc'][idx] = "N/A"
+
+    for idx, data in enumerate(gpu_metrics_output['xgmi_write_data_acc']):
+        if data == 0xFFFFFFFFFFFFFFFF:
+            gpu_metrics_output['xgmi_write_data_acc'][idx] = "N/A"
+
+    for idx, clk in enumerate(gpu_metrics_output['current_gfxclks']):
+        if clk == 0xFFFF:
+            gpu_metrics_output['current_gfxclks'][idx] = "N/A"
+
+    for idx, clk in enumerate(gpu_metrics_output['current_socclks']):
+        if clk == 0xFFFF:
+            gpu_metrics_output['current_socclks'][idx] = "N/A"
+
+    for idx, clk in enumerate(gpu_metrics_output['current_vclk0s']):
+        if clk == 0xFFFF:
+            gpu_metrics_output['current_vclk0s'][idx] = "N/A"
+
+    for idx, clk in enumerate(gpu_metrics_output['current_dclk0s']):
+        if clk == 0xFFFF:
+            gpu_metrics_output['current_dclk0s'][idx] = "N/A"
+
+    for idx, activity in enumerate(gpu_metrics_output['jpeg_activity']):
+        if activity == 0xFFFF:
+            gpu_metrics_output['jpeg_activity'][idx] = "N/A"
+
+    return gpu_metrics_output
 
 
 def amdsmi_get_gpu_od_volt_curve_regions(

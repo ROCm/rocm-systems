@@ -42,11 +42,14 @@
  */
 #define _GNU_SOURCE 1 // REQUIRED: to utilize some GNU features/functions, see
                       // _GNU_SOURCE functions which check
+#include <assert.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <dirent.h>
-#include <dlfcn.h>
 #include <glob.h>
 #include <sys/utsname.h>
-#include <unistd.h>
+#include <dlfcn.h>
 
 #include <algorithm>
 #include <cassert>

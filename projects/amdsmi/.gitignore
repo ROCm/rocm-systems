@@ -34,3 +34,8 @@ device/
 
 # misc
 esmi_ib_library/
+
+# do NOT ignore these files
+!.clang-format
+!.clang-tidy
+!.clangd

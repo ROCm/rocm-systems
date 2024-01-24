@@ -52,8 +52,8 @@
 #include <fstream>
 #include <functional>
 #include <iostream>
-#include <algorithm>
 #include <memory>
+#include <algorithm>
 #include <set>
 #include <sstream>
 #include <string>
@@ -391,10 +391,6 @@ RocmSMI::Initialize(uint64_t flags) {
          << "\n | final update: device->bdfid() holds correct device bdf";
       LOG_TRACE(ss);
   }
-  if (ret != 0) {
-    throw amd::smi::rsmi_exception(RSMI_INITIALIZATION_ERROR,
-            "Failed to initialize rocm_smi library (amdgpu node discovery).");
-  }
 
   std::shared_ptr<amd::smi::Device> dev;
   // Sort index based on the BDF, collect BDF id firstly.
@@ -436,6 +432,7 @@ RocmSMI::Initialize(uint64_t flags) {
   std::map<std::pair<uint32_t, uint32_t>, std::shared_ptr<IOLink>>::iterator it;
   for (it = io_link_map_tmp.begin(); it != io_link_map_tmp.end(); it++)
     io_link_map_[it->first] = it->second;
+
 
   // Remove any drm nodes that don't have  a corresponding readable kfd node.
   // kfd nodes will not be added if their properties file is not readable.
@@ -480,6 +477,7 @@ RocmSMI::Initialize(uint64_t flags) {
   if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
     logSystemDetails();
   }
+
   // Leaving below to help debug temp file issues
   // displayAppTmpFilesContent();
   std::string amdGPUDeviceList = displayAllDevicePaths(devices_);

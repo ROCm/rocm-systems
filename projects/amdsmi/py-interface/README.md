@@ -475,13 +475,12 @@ Output: Dictionary of Dictionaries containing cache information
 
 Field | Description
 ---|---
-`cache #` |  upt 10 caches will be available
+`cache_index` | cache index - up to 10 caches will be available
+`cache_flags` | list of up to 4 cache property type strings. Ex. data ("DATA_CACHE"), instruction ("INST_CACHE"), CPU ("CPU_CACHE"), or SIMD ("SIMD_CACHE").
 `cache_size` | size of cache in KB
 `cache_level` | level of cache
-`data_cache` | True if data cache is enabled, false otherwise
-`instruction_cache` | True if instruction cache is enabled, false otherwise
-`cpu_cache` | True if cpu cache is enabled, false otherwise
-`simd_cache` | True if simd cache is enabled, false otherwise
+`max_num_cu_shared` |  max number of compute units shared
+`num_cache_instance` | number of cache instances
 
 Exceptions that can be thrown by `amdsmi_get_gpu_cache_info` function:
 

@@ -742,6 +742,10 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
         }
     }
 
+    // if vram type is greater than the max enum set it to unknown
+    if (info->vram_type > VRAM_TYPE__MAX)
+        info->vram_type = VRAM_TYPE_UNKNOWN;
+
     // map the vendor name to enum
     char brand[256];
     r = rsmi_wrapper(rsmi_dev_vram_vendor_get, processor_handle, brand, 255);

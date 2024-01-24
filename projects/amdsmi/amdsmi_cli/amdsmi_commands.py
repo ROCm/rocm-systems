@@ -106,7 +106,7 @@ class AMDSMICommands():
         if self.logger.is_human_readable_format():
             print(f'AMDSMI Tool: {__version__} | '\
                     f'AMDSMI Library version: {amdsmi_lib_version_str} | ' \
-                    f'ROCm version: {rocm_version_str}' )          
+                    f'ROCm version: {rocm_version_str}')
         elif self.logger.is_json_format() or self.logger.is_csv_format():
             self.logger.print_output()
 
@@ -559,16 +559,26 @@ class AMDSMICommands():
         if args.cache:
             try:
                 cache_info = amdsmi_interface.amdsmi_get_gpu_cache_info(args.gpu)
-                for cache_key, cache_dict in cache_info.items():
-                    for key, value in cache_dict.items():
-                        if key == 'cache_size' or key == 'cache_level' or \
-                            key == 'max_num_cu_shared' or key == 'num_cache_instance':
-                            continue
-                        if value:
-                            cache_info[cache_key][key] = "ENABLED"
+                logging.debug("Before dictionary modify | cache_info = " + str(cache_info))
+                for key, cache_values in cache_info.items():
+                    cache_properties = "N/A"
+                    if 'cache_flags' in list(cache_info[key].keys()):
+                        if isinstance(cache_values['cache_flags'], list):
+                            cache_properties = list(cache_values['cache_flags'])
+                            cache_values.pop('cache_flags') # remove cache_flags from output
+                    cache_info[key] = { # add properties to top of key's dictionary
+                                       'cache_properties': list(cache_properties),
+                                       **cache_info[key] # append remaining key's dictionary
+                                       }
+                logging.debug("After dictionary modify | cache_info = " + str(cache_info))
                 if self.logger.is_human_readable_format():
-                    for _ , cache_values in cache_info.items():
+                    for key, cache_values in cache_info.items():
                         cache_values['cache_size'] = f"{cache_values['cache_size']} KB"
+                        # take cache_properties out of list -> display as string, removing brackets
+                        update_cache_properties = str(cache_values['cache_properties'])
+                        update_cache_properties = update_cache_properties.replace("[","").replace("]", "")
+                        cache_values['cache_properties'] = update_cache_properties
+                logging.debug("After human_readable | cache_info = " + str(cache_info))
 
             except amdsmi_exception.AmdSmiLibraryException as e:
                 cache_info = "N/A"
@@ -1109,8 +1119,8 @@ class AMDSMICommands():
 
         # Put the metrics table in the debug logs
         try:
-            gpu_metric_output = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
-            gpu_metric_str = json.dumps(gpu_metric_output, indent=4)
+            gpu_metric_debug_output = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
+            gpu_metric_str = json.dumps(gpu_metric_debug_output, indent=4)
             logging.debug("GPU Metrics table for %s | %s", gpu_id, gpu_metric_str)
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Unabled to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
@@ -1133,8 +1143,12 @@ class AMDSMICommands():
                     engine_usage['gfx_activity'] = engine_usage.pop('gfx_activity')
                     engine_usage['umc_activity'] = engine_usage.pop('umc_activity')
                     engine_usage['mm_activity'] = engine_usage.pop('mm_activity')
-                    engine_usage['vcn_activity'] = gpu_metric_output.pop('vcn_activity')
-                    engine_usage['jpeg_activity'] = gpu_metric_output.pop('jpeg_activity')
+
+                    # TODO: move vcn_activity and jpeg_activity into amdsmi_get_gpu_activity
+                    gpu_metric_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
+                    engine_usage['vcn_activity'] = gpu_metric_info.pop('vcn_activity')
+                    engine_usage['jpeg_activity'] = gpu_metric_info.pop('jpeg_activity')
+
                     for key, value in engine_usage.items():
                         if not isinstance(value, list) and value > 100:
                             engine_usage[key] = "N/A"
@@ -1204,14 +1218,15 @@ class AMDSMICommands():
                     logging.debug("Failed to get power management status for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
-                    throttle_status = amdsmi_interface.amdsmi_get_gpu_metrics_throttle_status(args.gpu)
-                    if throttle_status:
-                        power_dict['throttle_status'] = "THROTTLED"
-                    else:
-                        power_dict['throttle_status'] = "UNTHROTTLED"
+                    power_dict['throttle_status'] = "N/A"
+                    throttle_status = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['throttle_status']
+                    if throttle_status != "N/A":
+                        if throttle_status:
+                            power_dict['throttle_status'] = "THROTTLED"
+                        else:
+                            power_dict['throttle_status'] = "UNTHROTTLED"
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get throttle status for gpu %s | %s", gpu_id, e.get_error_info())
-
 
                 values_dict['power'] = power_dict
         if "clock" in current_platform_args:
@@ -1261,8 +1276,8 @@ class AMDSMICommands():
                             logging.debug("Failed to get %s clock info for gpu %s | %s", clock_name, gpu_id, e.get_error_info())
 
                 try:
-                    is_clk_locked = amdsmi_interface.amdsmi_get_gpu_metrics_gfxclk_lock_status(args.gpu)
-                    if self.logger.is_human_readable_format():
+                    is_clk_locked = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['gfxclk_lock_status']
+                    if is_clk_locked != "N/A":
                         if is_clk_locked:
                             is_clk_locked = "LOCKED"
                         else:
@@ -1383,7 +1398,10 @@ class AMDSMICommands():
                     logging.debug("Failed to get pcie link status for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
-                    pci_replay_counter = amdsmi_interface.amdsmi_get_gpu_metrics_pcie_replay_count_acc(args.gpu)
+                    pci_replay_counter = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['pcie_replay_count_acc']
+                    if pci_replay_counter == "N/A":
+                        # raising exception here to fall back to sysfs
+                        raise amdsmi_exception.AmdSmiLibraryException(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
                     pcie_dict['replay_count'] = pci_replay_counter
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get pci replay counter for gpu %s | %s", gpu_id, e.get_error_info())
@@ -1396,22 +1414,23 @@ class AMDSMICommands():
                         logging.debug("Failed to get sysfs fallback pci replay counter for gpu %s | %s", gpu_id, err.get_error_info())
 
                 try:
-                    l0_to_recovery_counter = amdsmi_interface.amdsmi_get_gpu_metrics_pcie_l0_recov_count_acc(args.gpu)
+                    l0_to_recovery_counter = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['pcie_l0_to_recov_count_acc']
                     pcie_dict['l0_to_recovery_count'] = l0_to_recovery_counter
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     pcie_dict['l0_to_recovery_count'] = "N/A"
                     logging.debug("Failed to get pcie l0 to recovery counter for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
-                    pci_replay_rollover_counter = amdsmi_interface.amdsmi_get_gpu_metrics_pcie_replay_rover_count_acc(args.gpu)
-                    pcie_dict['replay_rollover_count'] = pci_replay_rollover_counter
+                    pci_replay_rollover_counter = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['pcie_replay_rover_count_acc']
+                    pcie_dict['replay_roll_over_count'] = pci_replay_rollover_counter
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     pcie_dict['replay_roll_over_count'] = "N/A"
                     logging.debug("Failed to get pcie replay rollover counter for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
-                    pcie_dict['nak_sent_count'] = "N/A"
-                    pcie_dict['nak_received_count'] = "N/A"
+                    gpu_metrics_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
+                    pcie_dict['nak_sent_count'] = gpu_metrics_info['pcie_nak_sent_count_acc']
+                    pcie_dict['nak_received_count'] = gpu_metrics_info['pcie_nak_rcvd_count_acc']
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     pcie_dict['nak_sent_count'] = "N/A"
                     pcie_dict['nak_received_count'] = "N/A"
@@ -2330,15 +2349,14 @@ class AMDSMICommands():
             logging.error("No GPU devices present")
             sys.exit(-1)
 
-
         if ((len(self.device_handles) and ((((not gpus) and (not cpus) and (not cores)) or gpus)
             and not cpu_options and not core_options))):
-            self.metric_gpu( args, multiple_devices, watching_output, gpu,
-                usage, watch, watch_time, iterations, power,
-                clock, temperature, ecc, ecc_block, pcie,
-                fan, voltage_curve, overdrive, perf_level,
-                xgmi_err, energy, mem_usage, schedule,
-                guard, guest_data, fb_usage, xgmi)
+            self.metric_gpu(args, multiple_devices, watching_output, gpu,
+                            usage, watch, watch_time, iterations, power,
+                            clock, temperature, ecc, ecc_block, pcie,
+                            fan, voltage_curve, overdrive, perf_level,
+                            xgmi_err, energy, mem_usage, schedule,
+                            guard, guest_data, fb_usage, xgmi)
 
 
         if ((len(self.cpu_handles) and ((((not gpus) and (not cpus) and (not cores)) or cpus)
@@ -3347,12 +3365,11 @@ class AMDSMICommands():
         if args.power_usage:
             try:
                 gpu_metrics_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
-                power_usage = gpu_metrics_info['current_socket_power']
-                if power_usage >= 0xFFFFFFFF:
-                    power_usage = gpu_metrics_info['average_socket_power']
-                    if power_usage >= 0xFFFFFFFF:
-                        power_usage = "N/A"
-                monitor_values['power_usage'] = power_usage
+
+                monitor_values['power_usage'] = gpu_metrics_info['current_socket_power']
+                if monitor_values['power_usage'] == "N/A": # Fallback to average_socket_power for older gpu_metrics versions
+                    monitor_values['power_usage'] = gpu_metrics_info['average_socket_power']
+
                 if self.logger.is_human_readable_format() and monitor_values['power_usage'] != "N/A":
                     monitor_values['power_usage'] = f"{monitor_values['power_usage']} W"
             except amdsmi_exception.AmdSmiLibraryException as e:
@@ -3369,7 +3386,7 @@ class AMDSMICommands():
                 logging.debug("Failed to get hotspot temperature on gpu %s | %s", gpu_id, e.get_error_info())
 
             try:
-                temperature = amdsmi_interface.amdsmi_get_gpu_metrics_temp_mem(args.gpu)
+                temperature = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['temperature_mem']
                 monitor_values['memory_temperature'] = temperature
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['memory_temperature'] = "N/A"
@@ -3385,7 +3402,7 @@ class AMDSMICommands():
             self.logger.table_header += 'MEM_TEMP'.rjust(10)
         if args.gfx:
             try:
-                gfx_util = amdsmi_interface.amdsmi_get_gpu_metrics_avg_gfx_activity(args.gpu)
+                gfx_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['average_gfx_activity']
                 monitor_values['gfx'] = gfx_util
                 if self.logger.is_human_readable_format():
                     monitor_values['gfx'] = f"{monitor_values['gfx']} %"
@@ -3407,7 +3424,7 @@ class AMDSMICommands():
             self.logger.table_header += 'GFX_CLOCK'.rjust(11)
         if args.mem:
             try:
-                mem_util = amdsmi_interface.amdsmi_get_gpu_metrics_avg_umc_activity(args.gpu)
+                mem_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['average_umc_activity']
                 monitor_values['mem'] = mem_util
                 if self.logger.is_human_readable_format():
                     monitor_values['mem'] = f"{monitor_values['mem']} %"
@@ -3430,7 +3447,7 @@ class AMDSMICommands():
         if args.encoder:
             try:
                 # Get List of vcn activity values
-                encoder_util = amdsmi_interface.amdsmi_get_gpu_metrics_vcn_activity(args.gpu)
+                encoder_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['vcn_activity']
                 encoding_activity_avg = []
                 for value in encoder_util:
                     if value < 150: # each encoder chiplet's value range should be a percent
@@ -3483,7 +3500,7 @@ class AMDSMICommands():
             self.logger.table_header += 'DEC_CLOCK'.rjust(11)
         if args.throttle_status:
             try:
-                throttle_status = amdsmi_interface.amdsmi_get_gpu_metrics_throttle_status(args.gpu)
+                throttle_status = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['throttle_status']
                 if throttle_status:
                     throttle_status = "THROTTLED"
                 else:

@@ -255,6 +255,7 @@ class Device {
     rsmi_status_t dev_log_gpu_metrics(std::ostringstream& outstream_metrics);
     AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
 
+
  private:
     std::shared_ptr<Monitor> monitor_;
     std::shared_ptr<PowerMon> power_monitor_;
@@ -276,7 +277,6 @@ class Device {
     int writeDevInfoStr(DevInfoTypes type, std::string valStr,
                         bool returnWriteErr = false);
     rsmi_status_t run_amdgpu_property_reinforcement_query(const AMDGpuPropertyQuery_t& amdgpu_property_query);
-
 
     uint64_t bdfid_;
     uint64_t kfd_gpu_id_;
