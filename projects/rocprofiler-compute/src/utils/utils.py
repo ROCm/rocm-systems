@@ -557,3 +557,21 @@ def get_hbm_stack_num(gpu_name, memory_partition):
         # Fixme: add proper numbers for other archs
         return -1
     
+def get_submodules(package_name):
+    """List all submodules for a target package
+    """
+    import importlib
+    import pkgutil
+
+    submodules = []
+    
+    # walk all submodules in target package
+    package = importlib.import_module(package_name)
+    for _, name, _ in pkgutil.walk_packages(package.__path__):
+        pretty_name = name.split("_", 1)[1].replace("_", "")
+        # ignore base submodule, add all other
+        if pretty_name != "base":
+            submodules.append(pretty_name)
+
+    return submodules
+    

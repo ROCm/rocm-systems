@@ -29,32 +29,34 @@ import os
 from pathlib import Path
 import shutil
 from utils.specs import get_machine_specs
-from utils.utils import demarcate, trace_logger, get_version, get_version_display, detect_rocprof, error
+from utils.utils import demarcate, trace_logger, get_version, get_version_display, detect_rocprof, error, get_submodules
 from argparser import omniarg_parser
 import config
 import pandas as pd
 import importlib
+
+SUPPORTED_ARCHS = {
+    "gfx906": {"mi50": ["MI50", "MI60"]},
+    "gfx908": {"mi100": ["MI100"]},
+    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+    "gfx940": {"mi300": ["MI300A_A0"]},
+    "gfx941": {"mi300": ["MI300X_A0"]},
+    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
+}
 
 class Omniperf:
     def __init__(self):
         self.__args = None
         self.__profiler_mode = None
         self.__analyze_mode = None
-        self.__soc_name = set() #TODO: Should we make this a list? To accommodate analyze mode 
+        self.__soc_name = set() # gpu name, or in case of analyze mode, all loaded gpu name(s)
         self.__soc = dict() # set of key, value pairs. Where arch->OmniSoc() obj
         self.__version = {
             "ver": None,
             "ver_pretty": None,
         }
         self.__options = {}
-        self.__supported_archs = {
-            "gfx906": {"mi50": ["MI50", "MI60"]},
-            "gfx908": {"mi100": ["MI100"]},
-            "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
-            "gfx940": {"mi300": ["MI300A_A0"]},
-            "gfx941": {"mi300": ["MI300X_A0"]},
-            "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
-        }
+        self.__supported_archs = SUPPORTED_ARCHS
 
         self.setup_logging()
         self.set_version()
@@ -115,7 +117,7 @@ class Omniperf:
         self.__version["ver"] = vData["version"]
         self.__version["ver_pretty"] = get_version_display(vData["version"], vData["sha"], vData["mode"])
         return
-
+    
     def detect_profiler(self):
         #TODO:
         # Currently this will only be called in profile mode
@@ -135,7 +137,7 @@ class Omniperf:
             elif str(rocprof_cmd).endswith("rocprofv2"):
                 self.__profiler_mode = "rocprofv2"
             else:
-                error("Incompatible profiler. Please review documentation.")
+                error("Incompatible profiler: %s. Supported profilers include: %s" % (rocprof_cmd, get_submodules('omniperf_profile')))
 
 
         return

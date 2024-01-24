@@ -27,6 +27,18 @@ import config
 from omniperf_soc.soc_base import OmniSoC_Base
 from utils.utils import demarcate, error
 
+SOC_PARAM = {
+    "numSE": 4,
+    "numCU": 60,
+    "numSIMD": 240,
+    "numWavesPerCU": 40,
+    "numSQC": 15,
+    "L2Banks": 16,
+    "LDSBanks": 32,
+    "Freq": 1725,
+    "mclk": 1000
+}
+
 class gfx906_soc (OmniSoC_Base):
     def __init__(self,args):
         super().__init__(args)
@@ -49,19 +61,7 @@ class gfx906_soc (OmniSoC_Base):
                 "TCC_channels": 16,
             }
         )
-        self.set_soc_param(
-            {
-                "numSE": 4,
-                "numCU": 60,
-                "numSIMD": 240,
-                "numWavesPerCU": 40,
-                "numSQC": 15,
-                "L2Banks": 16,
-                "LDSBanks": 32,
-                "Freq": 1725,
-                "mclk": 1000
-            }
-        )
+        self.set_soc_param(SOC_PARAM)
 
     #-----------------------
     # Required child methods

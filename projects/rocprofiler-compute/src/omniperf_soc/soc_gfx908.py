@@ -27,6 +27,18 @@ import config
 from omniperf_soc.soc_base import OmniSoC_Base
 from utils.utils import demarcate, error
 
+SOC_PARAM = {
+    "numSE": 8,
+    "numCU": 120,
+    "numSIMD": 480,
+    "numWavesPerCU": 40,
+    "numSQC": 30,
+    "L2Banks": 32,
+    "LDSBanks": 32,
+    "Freq": 1502,
+    "mclk": 1200
+}
+
 class gfx908_soc (OmniSoC_Base):
     def __init__(self,args):
         super().__init__(args)
@@ -49,19 +61,7 @@ class gfx908_soc (OmniSoC_Base):
                 "TCC_channels": 32,
             }
         )
-        self.set_soc_param(
-            {
-                "numSE": 8,
-                "numCU": 120,
-                "numSIMD": 480,
-                "numWavesPerCU": 40,
-                "numSQC": 30,
-                "L2Banks": 32,
-                "LDSBanks": 32,
-                "Freq": 1502,
-                "mclk": 1200
-            }
-        )
+        self.set_soc_param(SOC_PARAM)
 
     @demarcate
     def get_profiler_options(self):

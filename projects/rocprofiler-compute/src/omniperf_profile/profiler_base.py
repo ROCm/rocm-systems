@@ -81,7 +81,6 @@ class OmniProfiler_Base():
         # Remove old pmc_perf.txt input from perfmon dir
         os.remove(workload_perfmon_dir + "/pmc_perf.txt")
 
-    # joins disparate runs less dumbly than rocprof
     @demarcate
     def join_prof(self, out=None):
         """Manually join separated rocprof runs
@@ -150,7 +149,7 @@ class OmniProfiler_Base():
                 logging.info(msg)
 
         # now, we can:
-        #   A) throw away any of the "boring" duplicats
+        #   A) throw away any of the "boring" duplicates
         df = df[
             [
                 k

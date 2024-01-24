@@ -29,6 +29,18 @@ from utils.utils import demarcate, mibench
 from roofline import Roofline
 import logging
 
+SOC_PARAM = {
+    "numSE": 8,
+    "numCU": 110,
+    "numSIMD": 440,
+    "numWavesPerCU": 32,
+    "numSQC": 56,
+    "L2Banks": 32,
+    "LDSBanks": 32,
+    "Freq": 1700,
+    "mclk": 1600
+}
+
 class gfx90a_soc (OmniSoC_Base):
     def __init__(self,args):
         super().__init__(args)
@@ -54,19 +66,7 @@ class gfx90a_soc (OmniSoC_Base):
                 "TCC_channels": 32
             }
         )
-        self.set_soc_param(
-            {
-                "numSE": 8,
-                "numCU": 110,
-                "numSIMD": 440,
-                "numWavesPerCU": 32,
-                "numSQC": 56,
-                "L2Banks": 32,
-                "LDSBanks": 32,
-                "Freq": 1700,
-                "mclk": 1600
-            }
-        )
+        self.set_soc_param(SOC_PARAM)
         self.roofline_obj = Roofline(args)
 
     #-----------------------

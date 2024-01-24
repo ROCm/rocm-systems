@@ -29,10 +29,13 @@ import re
 import sys
 import socket
 import subprocess
+import importlib
+import logging
 
 from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
+from utils.utils import error
 
 @dataclass
 class MachineSpecs:
@@ -101,8 +104,26 @@ class MachineSpecs:
 
 
 def gpuinfo():
-    # Local var only for rocminfo searching
-    gpu_list = {"gfx906", "gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"}
+    from omniperf_base import SUPPORTED_ARCHS
+
+    gpu_info = {
+        "gpu_name": None,
+        "gpu_arch": None,
+        "L1": None,
+        "L2": None,
+        "max_sclk": None,
+        "num_CU": None,
+        "num_SIMD": None,
+        "num_SE": None,
+        "wave_size": None,
+        "grp_size": None,
+        "max_waves_per_cu": None,
+        "L2Banks": None,
+        "LDSBanks": None,
+        "numSQC": None,
+        "compute_partition": None,
+        "memory_partition": None,
+    }
 
     # Fixme: find better way to differentiate cards, GPU vs APU, etc.
     rocminfo_full = run(["rocminfo"])
@@ -110,135 +131,95 @@ def gpuinfo():
 
     for idx1, linetext in enumerate(rocminfo):
         gpu_arch = search(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", linetext)
-        if gpu_arch in gpu_list:
+        if gpu_arch in SUPPORTED_ARCHS.keys():
             break
-        if str(gpu_arch) in gpu_list:
+        if str(gpu_arch) in SUPPORTED_ARCHS.keys():
             gpu_arch = str(gpu_arch)
             break
-    if not gpu_arch in gpu_list:
-        return (
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-        )
+    if not gpu_arch in SUPPORTED_ARCHS.keys():
+        return gpu_info
 
-    L1, L2 = "", ""
+    gpu_info['L1'], gpu_info['L1'] = "", ""
     for idx2, linetext in enumerate(rocminfo[idx1 + 1 :]):
         key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            L1 = key
+            gpu_info['L1'] = key
             continue
 
         key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            L2 = key
+            gpu_info['L2'] = key
             continue
 
         key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
         if key != None:
-            max_sclk = key
+            gpu_info['max_sclk'] = key
             continue
 
         key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            num_CU = key
+            gpu_info['num_CU'] = key
             continue
 
         key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            num_SIMD = key
+            gpu_info['num_SIMD'] = key
             continue
 
         key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            num_SE = key
+            gpu_info['num_SE'] = key
             continue
 
         key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            wave_size = key
+            gpu_info['wave_size'] = key
             continue
 
         key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            grp_size = key
+            gpu_info['grp_size'] = key
             continue
 
         key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            max_waves_per_cu = key
+            gpu_info['max_waves_per_cu'] = key
             break
 
-    gpu_name = ""
-    L2Banks = ""
-    LDSBanks = "32"
-    numSQC = ""
-
-    if gpu_arch == "gfx906":
-        gpu_name = "MI50"
-        L2Banks = "16"
-        numSQC = str(int(num_CU) // 4)
-    elif gpu_arch == "gfx908":
-        gpu_name = "MI100"
-        L2Banks = "32"
-        numSQC = "48"
-    elif gpu_arch == "gfx90a":
-        L2Banks = "32"
-        gpu_name = "MI200"
-        numSQC = "56"
-    elif gpu_arch == "gfx940":
-        gpu_name = "MI300A_A0"
-        L2Banks = "16"
-        numSQC = "56"
-    elif gpu_arch == "gfx941":
-        gpu_name = "MI300X_A0"
-        L2Banks = "16"
-        numSQC = "56"
-    elif (gpu_arch == "gfx942") and ("MI300A" in rocminfo_full):
+    try:
+        soc_module = importlib.import_module('omniperf_soc.soc_'+gpu_arch)
+    except ModuleNotFoundError as e:
+        error("Arch %s marked as supported, but couldn't find class implementation %s." % (gpu_arch, e))
+    
+    # load arch specific info
+    try:
+        gpu_name = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
+        gpu_info['L2Banks'] = str(soc_module.SOC_PARAM['L2Banks'])
+        gpu_info['numSQC'] = str(soc_module.SOC_PARAM['numSQC'])
+        gpu_info['LDSBanks'] = str(soc_module.SOC_PARAM['LDSBanks'])
+    except KeyError as e:
+        error("Incomplete class definition for %s. Expected a field for %s in SOC_PARAM." % (gpu_arch, e))\
+    
+    # specify gpu name for gfx942 hardware
+    if gpu_name == "MI300":
+        gpu_name = list(SUPPORTED_ARCHS[gpu_arch].values())[0]
+    if (gpu_info['gpu_arch'] == "gfx942") and ("MI300A" in rocminfo_full):
         gpu_name = "MI300A_A1"
-        L2Banks = "16"
-        numSQC = "56"
-    elif (gpu_arch == "gfx942") and ("MI300A" not in rocminfo_full):
+    if (gpu_arch == "gfx942") and ("MI300A" not in rocminfo_full):
         gpu_name = "MI300X_A1"
-        L2Banks = "16"
-        numSQC = "56"
-    else:
-        print("\nInvalid SoC")
-        sys.exit(0)
+    
 
-    compute_partition = ""
-    memory_partition = ""
-    return (
-        gpu_name,
-        gpu_arch,
-        L1,
-        L2,
-        max_sclk,
-        num_CU,
-        num_SIMD,
-        num_SE,
-        wave_size,
-        grp_size,
-        max_waves_per_cu,
-        L2Banks,
-        LDSBanks,
-        numSQC,
-        compute_partition,
-        memory_partition,
-    )
+    gpu_info['gpu_name'] = gpu_name
+    gpu_info['gpu_arch'] = gpu_arch
+    gpu_info['compute_partition'] = ""
+    gpu_info['memory_partition'] = ""
+
+    # verify all fields are filled
+    for key, value in gpu_info.items():
+        if value is None:
+            logging.info("Warning: %s is missing from gpu_info dictionary." % key)
+
+    return gpu_info
 
 
 def run(cmd):
@@ -300,24 +281,7 @@ def get_machine_specs(devicenum):
             print("ensure you have valid ROCm installation.")
             sys.exit(1)
 
-    (
-        gpu_name,
-        gpu_arch,
-        L1,
-        L2,
-        max_sclk,
-        num_CU,
-        num_SIMD,
-        num_SE,
-        wave_size,
-        grp_size,
-        max_waves_per_cu,
-        L2Banks,
-        LDSBanks,
-        numSQC,
-        compute_partition,
-        memory_partition,
-    ) = gpuinfo()
+    gpu_info = gpuinfo()
 
     rocm_smi = run(["rocm-smi"])
 
@@ -372,23 +336,23 @@ def get_machine_specs(devicenum):
         ram,
         distro,
         rocm_version,
-        gpu_name,
-        gpu_arch,
+        gpu_info['gpu_name'],
+        gpu_info['gpu_arch'],
         vbios,
-        L1,
-        L2,
-        num_CU,
-        num_SIMD,
-        num_SE,
-        wave_size,
-        grp_size,
-        max_sclk,
+        gpu_info['L1'],
+        gpu_info['L2'],
+        gpu_info['num_CU'],
+        gpu_info['num_SIMD'],
+        gpu_info['num_SE'],
+        gpu_info['wave_size'],
+        gpu_info['grp_size'],
+        gpu_info['max_sclk'],
         cur_sclk,
         cur_mclk,
-        max_waves_per_cu,
-        L2Banks,
-        LDSBanks,
-        numSQC,
+        gpu_info['max_waves_per_cu'],
+        gpu_info['L2Banks'],
+        gpu_info['LDSBanks'],
+        gpu_info['numSQC'],
         hbmBW,
         compute_partition,
         memory_partition,
