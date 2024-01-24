@@ -507,7 +507,9 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
       // Collect count of compute units
       cu_count += kfd_node_map[gpu_id]->cu_count();
     } else {
-      return err;
+      //Some GFX revisions do not provide cu_occupancy debugfs method 
+      proc->cu_occupancy = CU_OCCUPANCY_INVALID;
+      cu_count = 0;
     }
   }
 

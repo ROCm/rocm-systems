@@ -2476,6 +2476,7 @@ def showPids(verbose):
         vramUsage = 'UNKNOWN'
         sdmaUsage = 'UNKNOWN'
         cuOccupancy = 'UNKNOWN'
+        cuOccupancyInvalid = 0xFFFFFFFF
         dv_indices = (c_uint32 * num_devices.value)()
         ret = rocmsmi.rsmi_compute_process_gpus_get(int(pid), None, byref(num_devices))
         if rsmi_ret_ok(ret, metric='get_gpu_compute_process'):
@@ -2491,7 +2492,8 @@ def showPids(verbose):
                 if rsmi_ret_ok(ret, metric='get_compute_process_info_by_pid'):
                     vramUsage = proc.vram_usage
                     sdmaUsage = proc.sdma_usage
-                    cuOccupancy = proc.cu_occupancy
+                    if proc.cu_occupancy != cuOccupancyInvalid:
+                        cuOccupancy = proc.cu_occupancy
                 else:
                     logging.debug('Unable to fetch process info by PID')
                 dataArray.append([pid, getProcessName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])
@@ -2500,7 +2502,8 @@ def showPids(verbose):
             if rsmi_ret_ok(ret, metric='get_compute_process_info_by_pid'):
                 vramUsage = proc.vram_usage
                 sdmaUsage = proc.sdma_usage
-                cuOccupancy = proc.cu_occupancy
+                if proc.cu_occupancy != cuOccupancyInvalid:
+                    cuOccupancy = proc.cu_occupancy
             else:
                 logging.debug('Unable to fetch process info by PID')
             dataArray.append([pid, getProcessName(pid), str(gpuNumber), str(vramUsage), str(sdmaUsage), str(cuOccupancy)])

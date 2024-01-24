@@ -1134,6 +1134,8 @@ typedef struct {
     uint32_t cu_occupancy;    //!< Compute Unit usage in percent
 } rsmi_process_info_t;
 
+//! CU occupancy invalidation value for the GFX revisions not providing cu_occupancy debugfs method 
+#define CU_OCCUPANCY_INVALID 0xFFFFFFFF
 
 /**
  * @brief Opaque handle to function-support object
