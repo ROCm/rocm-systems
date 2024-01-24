@@ -202,7 +202,7 @@ def gpuinfo():
     
     # specify gpu name for gfx942 hardware
     if gpu_name == "MI300":
-        gpu_name = list(SUPPORTED_ARCHS[gpu_arch].values())[0]
+        gpu_name = list(SUPPORTED_ARCHS[gpu_arch].values())[0][0]
     if (gpu_info['gpu_arch'] == "gfx942") and ("MI300A" in rocminfo_full):
         gpu_name = "MI300A_A1"
     if (gpu_arch == "gfx942") and ("MI300A" not in rocminfo_full):
