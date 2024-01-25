@@ -197,7 +197,7 @@ class PCTranslator:
             symbol = "Unkown symbol at 0x" + hex(addr)
 
         last_line = self.raw_code[-1]
-        newline = ['; ' + symbol, DONT_KNOW, last_line[2], 0, last_line[4], last_line[5], 0, 0, 0]
+        newline = ['; ' + symbol, DONT_KNOW, last_line[2], '', last_line[4], last_line[5], 0, 0, 0]
         self.raw_code.append(newline)
 
     def getcode(self, addr):
