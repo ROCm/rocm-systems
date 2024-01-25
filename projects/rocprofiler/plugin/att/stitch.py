@@ -334,7 +334,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
     if bIsAuto:
         try:
             firstinst = insts[0]
-            insts = insts[1:]
 
             if firstinst.type != PCINFO:
                 print('Warning: Waves without PCINFO')
@@ -347,7 +346,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             watchlist.addsymbol(firstinst.cycles)
             line = firstinst.cycles
             lineincrement = watchlist.getincrement(line)
-            pcskip.append(0)
         except KeyError as e:
             print('Auto error invalid addr', hex(e.args[0]))
             return None

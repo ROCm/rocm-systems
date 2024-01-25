@@ -552,8 +552,7 @@ if __name__ == "__main__":
             if gfxv is None:
                 continue
             if CSV_MODE == False and ftrace == 0:
-                print('Error: Only CSV mode is available for this version')
-                assert False
+                print('Generating occupancy information')
 
             for id, addr in enumerate(addrs):
                 kernel_addr[id] = addr
