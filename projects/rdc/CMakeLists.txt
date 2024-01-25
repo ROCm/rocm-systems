@@ -357,7 +357,7 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
     COMPONENT dev)
 
 # Prebuild packages to install
-install(FILES ${RAS_SOURCES}
+install(PROGRAMS ${RAS_SOURCES}
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/config
