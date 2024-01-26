@@ -770,7 +770,7 @@ public:
         return result;
     }
 
-    void swap(small_vector_impl& RHS);
+    void swap(small_vector_impl& RHS) noexcept;
 
     /// add the specified range to the end of the small_vector.
     template <typename ITp, typename = enable_if_convertible_to_input_iterator<ITp>>
@@ -1073,7 +1073,7 @@ public:
 
 template <typename T>
 void
-small_vector_impl<T>::swap(small_vector_impl<T>& RHS)
+small_vector_impl<T>::swap(small_vector_impl<T>& RHS) noexcept
 {
     if(this == &RHS) return;
 
@@ -1486,7 +1486,7 @@ namespace std
 template <typename T>
 inline void
 swap(rocprofiler::common::container::small_vector_impl<T>& LHS,
-     rocprofiler::common::container::small_vector_impl<T>& RHS)
+     rocprofiler::common::container::small_vector_impl<T>& RHS) noexcept
 {
     LHS.swap(RHS);
 }
@@ -1495,7 +1495,7 @@ swap(rocprofiler::common::container::small_vector_impl<T>& LHS,
 template <typename T, unsigned N>
 inline void
 swap(rocprofiler::common::container::small_vector<T, N>& LHS,
-     rocprofiler::common::container::small_vector<T, N>& RHS)
+     rocprofiler::common::container::small_vector<T, N>& RHS) noexcept
 {
     LHS.swap(RHS);
 }

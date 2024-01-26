@@ -100,9 +100,9 @@ struct static_vector
     auto*       data() { return m_data.data(); }
     const auto* data() const { return m_data.data(); }
 
-    void swap(this_type& _v);
+    void swap(this_type& _v) noexcept;
 
-    friend void swap(this_type& _lhs, this_type& _rhs) { _lhs.swap(_rhs); }
+    friend void swap(this_type& _lhs, this_type& _rhs) noexcept { _lhs.swap(_rhs); }
 
 private:
     void update_size(size_t);
@@ -172,7 +172,7 @@ static_vector<Tp, N, AtomicSizeV>::clear()
 
 template <typename Tp, size_t N, bool AtomicSizeV>
 void
-static_vector<Tp, N, AtomicSizeV>::swap(this_type& _v)
+static_vector<Tp, N, AtomicSizeV>::swap(this_type& _v) noexcept
 {
     if constexpr(AtomicSizeV)
     {

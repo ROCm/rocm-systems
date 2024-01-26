@@ -28,6 +28,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <glog/logging.h>
+
 #include "lib/rocprofiler-sdk/pc_sampling/parser/translation.hpp"
 
 template <>
@@ -258,8 +260,8 @@ _parse_buffer(generic_sample_t*       buffer,
                 break;
             }
             default:
-                std::cerr << "Index " << index << " - Invalid sample type: " << buffer[index].type
-                          << std::endl;
+                LOG(WARNING) << "Index " << index
+                             << " - Invalid sample type: " << buffer[index].type << "\n";
                 return PCSAMPLE_STATUS_INVALID_SAMPLE;
         }
     }

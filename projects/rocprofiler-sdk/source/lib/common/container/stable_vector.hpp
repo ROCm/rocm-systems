@@ -206,9 +206,9 @@ public:
     }
     bool operator!=(const this_type& c) const { return !operator==(c); }
 
-    void swap(this_type& v) { std::swap(m_chunks, v.m_chunks); }
+    void swap(this_type& v) noexcept { std::swap(m_chunks, v.m_chunks); }
 
-    friend void swap(this_type& l, this_type& r) { l.swap(r); }
+    friend void swap(this_type& l, this_type& r) noexcept { l.swap(r); }
 
     reference       front() { return m_chunks.front()->front(); }
     const_reference front() const { return front(); }

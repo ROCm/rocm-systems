@@ -24,6 +24,8 @@
 
 #include "lib/common/environment.hpp"
 
+#include <glog/logging.h>
+
 #include <unistd.h>
 #include <cctype>
 #include <cstdint>
@@ -212,8 +214,7 @@ get_memory_unit(std::string _unit)
         }
     }
 
-    std::cerr << "Warning!! No memory unit matching \"" << _unit << "\". Using default..."
-              << std::endl;
+    LOG(WARNING) << "Warning!! No memory unit matching \"" << _unit << "\". Using default...\n";
 
     return return_type{"MB", units::megabyte};
 }
@@ -249,8 +250,7 @@ get_timing_unit(std::string _unit)
         }
     }
 
-    std::cerr << "Warning!! No timing unit matching \"" << _unit << "\". Using default..."
-              << std::endl;
+    LOG(WARNING) << "Warning!! No timing unit matching \"" << _unit << "\". Using default...\n";
 
     return return_type{"sec", units::sec};
 }
@@ -280,8 +280,7 @@ get_frequncy_unit(std::string _unit)
         }
     }
 
-    std::cerr << "Warning!! No frequency unit matching \"" << _unit << "\". Using default..."
-              << std::endl;
+    LOG(WARNING) << "Warning!! No frequency unit matching \"" << _unit << "\". Using default...\n";
 
     return return_type{"MHz", units::megahertz};
 }
@@ -316,8 +315,7 @@ get_power_unit(const std::string& _unit)
         }
     }
 
-    std::cerr << "Warning!! No power unit matching \"" << _unit << "\". Using default..."
-              << std::endl;
+    LOG(WARNING) << "Warning!! No power unit matching \"" << _unit << "\". Using default...\n";
 
     return return_type{"watts", units::watt};
 }

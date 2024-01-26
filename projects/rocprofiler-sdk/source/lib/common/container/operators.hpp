@@ -162,10 +162,10 @@ struct dereferenceable : B
     P operator->() const { return ::std::addressof(*static_cast<const T&>(*this)); }
 };
 
-template <typename T, typename I, typename R, typename B = empty_base<T>>
+template <typename T, typename N, typename R, typename B = empty_base<T>>
 struct indexable : B
 {
-    R operator[](I n) const { return *(static_cast<const T&>(*this) + n); }
+    R operator[](N n) const { return *(static_cast<const T&>(*this) + n); }
 };
 
 template <typename T, typename B = empty_base<T>>
