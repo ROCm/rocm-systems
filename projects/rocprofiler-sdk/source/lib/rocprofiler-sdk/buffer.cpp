@@ -135,7 +135,14 @@ allocate_buffer()
 rocprofiler_status_t
 flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
-    if(registration::get_fini_status() > 0) return ROCPROFILER_STATUS_SUCCESS;
+    if(registration::get_fini_status() > 0)
+    {
+        LOG(ERROR) << "ignoring rocprofiler buffer flush (handle=" << buffer_id.handle
+                   << ") request after finalization";
+        return ROCPROFILER_STATUS_ERROR_FINALIZED;
+    }
+
+    if(registration::get_fini_status() < 0 && !wait) wait = true;
 
     auto offset = get_buffer_offset();
 
@@ -146,7 +153,11 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     auto* task_group =
         internal_threading::get_task_group(rocprofiler_callback_thread_t{buff->task_group_id});
 
-    if(wait && task_group) task_group->wait();
+    LOG_IF(FATAL, !task_group)
+        << "buffer (" << buffer_id.handle
+        << ") flush request received after the task group for handling request was destroyed";
+
+    if(wait) task_group->wait();
 
     // buffer is currently being flushed or destroyed
     if(buff->syncer.test_and_set())
@@ -162,6 +173,9 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     auto idx = buff->buffer_idx++;
 
     auto _task = [buffer_id, idx, offset]() {
+        LOG_IF(ERROR, registration::get_fini_status() > 0)
+            << "executing buffer (" << buffer_id.handle << ") flush task finalization!";
+
         auto& buff_v          = CHECK_NOTNULL(get_buffers())->at(buffer_id.handle - offset);
         auto& buff_internal_v = buff_v->get_internal_buffer(idx);
 
@@ -197,14 +211,11 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
         buff_v->syncer.clear();
     };
 
-    if(task_group)
+    task_group->exec(_task);
+    if(wait)
     {
-        task_group->exec(_task);
-        if(wait) task_group->join();
-    }
-    else
-    {
-        _task();
+        while(task_group->size() > 0)
+            task_group->join();
     }
 
     return ROCPROFILER_STATUS_SUCCESS;

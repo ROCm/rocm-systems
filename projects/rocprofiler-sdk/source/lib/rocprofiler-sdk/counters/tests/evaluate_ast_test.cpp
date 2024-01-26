@@ -591,7 +591,8 @@ TEST(evaluate_ast, counter_reduction_sum)
         return base_id;
     };
 
-    auto sum_vec = [](auto& a) {
+    auto sum_vec = [](auto& a) -> auto&
+    {
         for(size_t i = 1; i < a.size(); i++)
         {
             a[0].counter_value += a[i].counter_value;
@@ -671,7 +672,8 @@ TEST(evaluate_ast, counter_reduction_min)
         return base_id;
     };
 
-    auto min_vec = [](auto& a) {
+    auto min_vec = [](auto& a) -> auto&
+    {
         a[0].counter_value = std::min_element(a.begin(), a.end(), [](const auto& b, const auto& c) {
                                  return b.counter_value < c.counter_value;
                              })->counter_value;
@@ -750,7 +752,8 @@ TEST(evaluate_ast, counter_reduction_max)
         return base_id;
     };
 
-    auto max_vec = [](auto& a) {
+    auto max_vec = [](auto& a) -> auto&
+    {
         a[0].counter_value = std::max_element(a.begin(), a.end(), [](const auto& b, const auto& c) {
                                  return b.counter_value < c.counter_value;
                              })->counter_value;
@@ -829,7 +832,8 @@ TEST(evaluate_ast, counter_reduction_avg)
         return base_id;
     };
 
-    auto avg_vec = [](auto& a) {
+    auto avg_vec = [](auto& a) -> auto&
+    {
         for(size_t i = 1; i < a.size(); i++)
         {
             a[0].counter_value += a[i].counter_value;
@@ -910,7 +914,8 @@ TEST(evaluate_ast, evaluate_mixed_counters)
         return base_id;
     };
 
-    auto sum_vec = [](auto& a) {
+    auto sum_vec = [](auto& a) -> auto&
+    {
         for(size_t i = 1; i < a.size(); i++)
         {
             a[0].counter_value += a[i].counter_value;
