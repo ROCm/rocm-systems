@@ -208,6 +208,7 @@ def run_prof(fname, profiler_options, target, workload_dir):
         or os.path.basename(fname) == "pmc_perf_14.txt"
         or os.path.basename(fname) == "pmc_perf_15.txt"
         or os.path.basename(fname) == "pmc_perf_16.txt"
+        or os.path.basename(fname) == "pmc_perf_17.txt"
     ):
         new_env = os.environ.copy()
         new_env["ROCPROFILER_INDIVIDUAL_XCC_MODE"] = "1"
