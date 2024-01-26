@@ -20,8 +20,16 @@ add_test(
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(tracing-env "${PRELOAD_ENV}"
-                "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    set(LOG_LEVEL "warning") # info produces memory leak
+else()
+    set(LOG_LEVEL "info")
+endif()
+
+set(tracing-env
+    "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
 
 set_tests_properties(rocprofv3-test-trace-execute PROPERTIES LABELS "integration-tests"
                                                              ENVIRONMENT "${tracing-env}")
@@ -44,9 +52,9 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv)
 
 set(VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_hsa_api_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv)
 
 set_tests_properties(
@@ -58,8 +66,6 @@ set_tests_properties(
                DEPENDS
                rocprofv3-test-trace-execute
                FAIL_REGULAR_EXPRESSION
-               "AssertionError"
-               REQUIRED_FILES
-               "${VALIDATION_FILES}"
+               "AssertionError|HSA_API|HIP_API|MARKER_API|KERNEL_DISPATCH|CODE_OBJECT"
                ATTACHED_FILES_ON_FAIL
                "${VALIDATION_FILES}")

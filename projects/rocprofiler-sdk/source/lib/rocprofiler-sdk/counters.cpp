@@ -26,6 +26,7 @@
 #include <fmt/core.h>
 
 #include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
@@ -43,7 +44,7 @@ extern "C" {
  * @param [out] size
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char** name, size_t* size)
 {
     const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
@@ -71,11 +72,16 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
  * @param [out] instance_count number of instances the counter has
  * @return rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
+rocprofiler_status_t
+rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t   agent_id,
                                          rocprofiler_counter_id_t counter_id,
                                          size_t*                  instance_count)
 {
+    const rocprofiler_agent_t* agent = rocprofiler::agent::get_agent(agent_id);
+
+    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+    if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) return ROCPROFILER_STATUS_ERROR;
+
     const auto& id_map     = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
     const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
     if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
@@ -93,18 +99,8 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
     // For derived metrics, this can be more than one counter. In that case,
     // we return the maximum instance count among all underlying counters.
     auto req_counters = rocprofiler::counters::get_required_hardware_counters(
-        rocprofiler::counters::get_ast_map(), std::string(agent.name), *metric_ptr);
+        rocprofiler::counters::get_ast_map(), std::string(agent->name), *metric_ptr);
     if(!req_counters) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-
-    // NOTE: to look up instance information, we require HSA be init'd. Reason
-    // for this is the call to get instance information is an HSA call.
-    const auto* maybe_agent = rocprofiler::common::get_val(
-        rocprofiler::hsa::get_queue_controller().get_supported_agents(), agent.id.handle);
-    if(!maybe_agent)
-    {
-        LOG(ERROR) << "HSA must be loaded to obtain instance information.";
-        return ROCPROFILER_STATUS_ERROR;
-    }
 
     for(const auto& counter : *req_counters)
     {
@@ -116,7 +112,7 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
 
         try
         {
-            auto dims = rocprofiler::counters::getBlockDimensions(maybe_agent->name(), counter);
+            auto dims = rocprofiler::counters::getBlockDimensions(agent->name, counter);
             for(const auto& dim : dims)
             {
                 *instance_count = std::max(static_cast<size_t>(dim.size()), *instance_count);
@@ -138,12 +134,15 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
  * @param [out] counters_count
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_t                 agent,
+rocprofiler_status_t
+rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                              rocprofiler_available_counters_cb_t cb,
                                              void*                               user_data)
 {
-    auto metrics = rocprofiler::counters::getMetricsForAgent(agent.name);
+    const auto* agent = rocprofiler::agent::get_agent(agent_id);
+    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
+    auto metrics = rocprofiler::counters::getMetricsForAgent(agent->name);
     std::vector<rocprofiler_counter_id_t> ids;
     ids.reserve(metrics.size());
     for(const auto& metric : metrics)
@@ -151,7 +150,7 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_t                
         ids.push_back({.handle = metric.id()});
     }
 
-    return cb(ids.data(), ids.size(), user_data);
+    return cb(agent_id, ids.data(), ids.size(), user_data);
 }
 
 /**
@@ -161,7 +160,7 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_t                
  * @param [out] counter_id counter id associated with the record
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
                                     rocprofiler_counter_id_t*         counter_id)
 {
@@ -170,7 +169,7 @@ rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  id,
                                             rocprofiler_counter_dimension_id_t dim,
                                             size_t*                            pos)
@@ -180,7 +179,7 @@ rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  i
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_record_dimension_info(rocprofiler_counter_id_t,
                                         rocprofiler_counter_dimension_id_t   dim,
                                         rocprofiler_record_dimension_info_t* info)

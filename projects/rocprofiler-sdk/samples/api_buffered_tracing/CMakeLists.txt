@@ -31,7 +31,7 @@ add_library(buffered-api-tracing-client SHARED)
 target_sources(buffered-api-tracing-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     buffered-api-tracing-client
-    PRIVATE rocprofiler::rocprofiler rocprofiler::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
             rocprofiler::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)

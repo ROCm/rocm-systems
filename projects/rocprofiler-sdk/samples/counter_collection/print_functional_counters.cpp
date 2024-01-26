@@ -127,25 +127,27 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     if(cap.expected.empty())
     {
         std::vector<rocprofiler_counter_id_t> counters_needed;
-        ROCPROFILER_CALL(
-            rocprofiler_iterate_agent_supported_counters(
-                *agent,
-                [](rocprofiler_counter_id_t* counters, size_t num_counters, void* user_data) {
-                    std::vector<rocprofiler_counter_id_t>* vec =
-                        static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
-                    for(size_t i = 0; i < num_counters; i++)
-                    {
-                        vec->push_back(counters[i]);
-                    }
-                    return ROCPROFILER_STATUS_SUCCESS;
-                },
-                static_cast<void*>(&counters_needed)),
-            "Could not fetch supported counters");
+        ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
+                             agent->id,
+                             [](rocprofiler_agent_id_t,
+                                rocprofiler_counter_id_t* counters,
+                                size_t                    num_counters,
+                                void*                     user_data) {
+                                 std::vector<rocprofiler_counter_id_t>* vec =
+                                     static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
+                                 for(size_t i = 0; i < num_counters; i++)
+                                 {
+                                     vec->push_back(counters[i]);
+                                 }
+                                 return ROCPROFILER_STATUS_SUCCESS;
+                             },
+                             static_cast<void*>(&counters_needed)),
+                         "Could not fetch supported counters");
 
         for(auto& found_counter : counters_needed)
         {
             size_t expected = 0;
-            rocprofiler_query_counter_instance_count(*agent, found_counter, &expected);
+            rocprofiler_query_counter_instance_count(agent->id, found_counter, &expected);
             cap.remaining.push_back(found_counter);
             cap.expected.emplace(found_counter.handle, expected);
             const char* name;
@@ -165,7 +167,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
 
     // Select the next counter to collect.
     ROCPROFILER_CALL(
-        rocprofiler_create_profile_config(*agent, &(cap.remaining.back()), 1, &profile),
+        rocprofiler_create_profile_config(agent->id, &(cap.remaining.back()), 1, &profile),
         "Could not construct profile cfg");
 
     cap.remaining.pop_back();

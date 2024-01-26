@@ -25,11 +25,13 @@
 
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 extern "C" {
 /**
@@ -41,12 +43,15 @@ extern "C" {
  * @param [out] config_id Identifier for GPU counters group
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
+rocprofiler_status_t
+rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
                                   rocprofiler_counter_id_t*        counters_list,
                                   size_t                           counters_count,
                                   rocprofiler_profile_config_id_t* config_id)
 {
+    const auto* agent = ::rocprofiler::agent::get_agent(agent_id);
+    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
+
     std::shared_ptr<rocprofiler::counters::profile_config> config =
         std::make_shared<rocprofiler::counters::profile_config>();
 
@@ -57,7 +62,7 @@ rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
 
         const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
         if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-        if(!rocprofiler::counters::checkValidMetric(std::string(agent.name), *metric_ptr))
+        if(!rocprofiler::counters::checkValidMetric(std::string(agent->name), *metric_ptr))
         {
             return ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT;
         }
@@ -70,7 +75,7 @@ rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_destroy_profile_config(rocprofiler_profile_config_id_t config_id)
 {
     rocprofiler::counters::destroy_counter_profile(config_id.handle);

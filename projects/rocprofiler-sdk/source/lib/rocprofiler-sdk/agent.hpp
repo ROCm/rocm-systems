@@ -39,6 +39,9 @@ namespace agent
 std::vector<const rocprofiler_agent_t*>
 get_agents();
 
+const rocprofiler_agent_t*
+get_agent(rocprofiler_agent_id_t id);
+
 void
 construct_agent_cache(::HsaApiTable* table);
 

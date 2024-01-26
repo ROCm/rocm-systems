@@ -42,7 +42,7 @@ ROCPROFILER_EXTERN_C_INIT
  *        counters for an agent can be queried using
  *        @ref rocprofiler_iterate_agent_supported_counters.
  *
- * @param [in] agent Agent identifier
+ * @param [in] agent_id Agent identifier
  * @param [in] counters_list List of GPU counters
  * @param [in] counters_count Size of counters list
  * @param [out] config_id Identifier for GPU counters group
@@ -52,7 +52,7 @@ ROCPROFILER_EXTERN_C_INIT
  *
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_create_profile_config(rocprofiler_agent_t              agent,
+rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
                                   rocprofiler_counter_id_t*        counters_list,
                                   size_t                           counters_count,
                                   rocprofiler_profile_config_id_t* config_id)

@@ -31,7 +31,7 @@ add_library(intercept-table-client SHARED)
 target_sources(intercept-table-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     intercept-table-client
-    PRIVATE rocprofiler::rocprofiler rocprofiler::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
             rocprofiler::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)

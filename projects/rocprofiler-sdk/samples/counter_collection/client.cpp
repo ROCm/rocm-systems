@@ -157,20 +157,22 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     std::vector<rocprofiler_counter_id_t> gpu_counters;
 
     // Iterate through the agents and get the counters available on that agent
-    ROCPROFILER_CALL(
-        rocprofiler_iterate_agent_supported_counters(
-            *agent,
-            [](rocprofiler_counter_id_t* counters, size_t num_counters, void* user_data) {
-                std::vector<rocprofiler_counter_id_t>* vec =
-                    static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
-                for(size_t i = 0; i < num_counters; i++)
-                {
-                    vec->push_back(counters[i]);
-                }
-                return ROCPROFILER_STATUS_SUCCESS;
-            },
-            static_cast<void*>(&gpu_counters)),
-        "Could not fetch supported counters");
+    ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
+                         agent->id,
+                         [](rocprofiler_agent_id_t,
+                            rocprofiler_counter_id_t* counters,
+                            size_t                    num_counters,
+                            void*                     user_data) {
+                             std::vector<rocprofiler_counter_id_t>* vec =
+                                 static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
+                             for(size_t i = 0; i < num_counters; i++)
+                             {
+                                 vec->push_back(counters[i]);
+                             }
+                             return ROCPROFILER_STATUS_SUCCESS;
+                         },
+                         static_cast<void*>(&gpu_counters)),
+                     "Could not fetch supported counters");
 
     std::vector<rocprofiler_counter_id_t> collect_counters;
     // Look for the counters contained in counters_to_collect in gpu_counters
@@ -190,7 +192,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     // Create a colleciton profile for the counters
     rocprofiler_profile_config_id_t profile;
     ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                         *agent, collect_counters.data(), collect_counters.size(), &profile),
+                         agent->id, collect_counters.data(), collect_counters.size(), &profile),
                      "Could not construct profile cfg");
 
     profile_cache.emplace(agent->id.handle, profile);

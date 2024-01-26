@@ -31,28 +31,30 @@ add_library(callback-api-tracing-client SHARED)
 target_sources(callback-api-tracing-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     callback-api-tracing-client
-    PRIVATE rocprofiler::rocprofiler rocprofiler::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
             rocprofiler::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
+
 find_package(Threads REQUIRED)
+find_package(rocprofiler-sdk-roctx REQUIRED)
 
 add_executable(callback-api-tracing)
 target_sources(callback-api-tracing PRIVATE main.cpp)
 target_link_libraries(
-    callback-api-tracing PRIVATE callback-api-tracing-client Threads::Threads
-                                 rocprofiler::samples-build-flags)
+    callback-api-tracing
+    PRIVATE callback-api-tracing-client Threads::Threads
+            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx rocprofiler::samples-build-flags)
 
 add_test(NAME callback-api-tracing COMMAND $<TARGET_FILE:callback-api-tracing>)
 
+set(callback-api-tracing-env
+    ${ROCPROFILER_MEMCHECK_PRELOAD_ENV}
+    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
 set_tests_properties(
     callback-api-tracing
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "samples"
-        ENVIRONMENT
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-        FAIL_REGULAR_EXPRESSION
-        "threw an exception")
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${callback-api-tracing-env}"
+               FAIL_REGULAR_EXPRESSION "threw an exception")

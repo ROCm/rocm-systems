@@ -671,6 +671,16 @@ get_agents()
     return pointers;
 }
 
+const rocprofiler_agent_t*
+get_agent(rocprofiler_agent_id_t id)
+{
+    for(const auto& itr : get_agents())
+    {
+        if(itr && itr->id.handle == id.handle) return itr;
+    }
+    return nullptr;
+}
+
 void
 construct_agent_cache(::HsaApiTable* table)
 {

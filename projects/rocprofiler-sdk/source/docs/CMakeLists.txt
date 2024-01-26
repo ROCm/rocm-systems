@@ -40,25 +40,27 @@ function(DOCS_EXECUTE_PROCESS)
     endif()
 endfunction()
 
-if(NOT EXISTS ${PROJECT_BINARY_DIR}/external/miniconda)
+set(CONDA_ROOT ${PROJECT_BINARY_DIR}/external/miniconda)
+
+if(NOT EXISTS ${CONDA_ROOT})
     docs_execute_process(${SHELL_CMD} ${PROJECT_BINARY_DIR}/external/miniconda.sh -b -p
-                         ${PROJECT_BINARY_DIR}/external/miniconda)
-    docs_execute_process(${PROJECT_BINARY_DIR}/external/miniconda/bin/conda config --set
-                         always_yes yes)
-    docs_execute_process(${PROJECT_BINARY_DIR}/external/miniconda/bin/conda update -c
-                         defaults -n base conda)
+                         ${CONDA_ROOT})
+    docs_execute_process(${CONDA_ROOT}/bin/conda config --set always_yes yes)
+    docs_execute_process(${CONDA_ROOT}/bin/conda update -c defaults -n base conda)
 endif()
 
-if(NOT EXISTS ${PROJECT_BINARY_DIR}/external/miniconda/envs/rocprofiler-docs)
-    docs_execute_process(${PROJECT_BINARY_DIR}/external/miniconda/bin/conda env create -n
-                         rocprofiler-docs -f ${CMAKE_CURRENT_LIST_DIR}/environment.yml)
+if(NOT EXISTS ${CONDA_ROOT}/envs/rocprofiler-docs)
+    docs_execute_process(${CONDA_ROOT}/bin/conda env create -n rocprofiler-docs -f
+                         ${CMAKE_CURRENT_LIST_DIR}/environment.yml)
+    docs_execute_process(${CONDA_ROOT}/envs/rocprofiler-docs/bin/python -m pip install -r
+                         ${CMAKE_CURRENT_LIST_DIR}/requirements.txt)
 endif()
 
 file(
     WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh"
     "#!${SHELL_CMD} -e
 
-PATH=${PROJECT_BINARY_DIR}/external/miniconda/bin:\${PATH}
+PATH=${CONDA_ROOT}/bin:\${PATH}
 export PATH
 
 source activate

@@ -22,7 +22,8 @@
 
 #include "client.hpp"
 
-#include "hip/hip_runtime.h"
+#include <hip/hip_runtime.h>
+#include <rocprofiler-sdk-roctx/roctx.h>
 
 #include <chrono>
 #include <cstdio>
@@ -65,7 +66,7 @@ verify(int* in, int* out, int M, int N);
 }  // namespace
 
 __global__ void
-transpose_a(int* in, int* out, int M, int N);
+transpose_a(const int* in, int* out, int M, int N);
 
 void
 run(int rank, int tid, hipStream_t stream, int argc, char** argv);
@@ -75,6 +76,8 @@ main(int argc, char** argv)
 {
     client::setup();  // currently does nothing
     // client::start(); // currently will fail
+
+    auto range_id = roctxRangeStart("main");
 
     int rank = 0;
     for(int i = 1; i < argc; ++i)
@@ -114,18 +117,34 @@ main(int argc, char** argv)
     {
         std::vector<std::thread> _threads{};
         std::vector<hipStream_t> _streams(nthreads);
+        roctxMark("stream creation");
         for(size_t i = 0; i < nthreads; ++i)
             HIP_API_CALL(hipStreamCreate(&_streams.at(i)));
+        roctxMark("thread creation");
         for(size_t i = 1; i < nthreads; ++i)
             _threads.emplace_back(run, rank, i, _streams.at(i), argc, argv);
         run(rank, 0, _streams.at(0), argc, argv);
+        roctxMark("thread sync");
         for(auto& itr : _threads)
             itr.join();
+        roctxMark("stream destroy");
         for(size_t i = 0; i < nthreads; ++i)
             HIP_API_CALL(hipStreamDestroy(_streams.at(i)));
     }
+
     HIP_API_CALL(hipDeviceSynchronize());
+
+    auto tid = roctx_thread_id_t{};
+    // get the thread id recognized by rocprofiler-sdk from roctx
+    roctxGetThreadId(&tid);
+    // pause API tracing
+    roctxProfilerPause(tid);
+    // would not expect below to show up in profiler (depends on tool)
     HIP_API_CALL(hipDeviceReset());
+    // resume API tracing
+    roctxProfilerResume(tid);
+
+    roctxRangeStop(range_id);
 
     client::stop();
     client::shutdown();
@@ -134,7 +153,7 @@ main(int argc, char** argv)
 }
 
 __global__ void
-transpose_a(int* in, int* out, int M, int N)
+transpose_a(const int* in, int* out, int M, int N)
 {
     __shared__ int tile[shared_mem_tile_dim][shared_mem_tile_dim];
 
@@ -148,6 +167,10 @@ transpose_a(int* in, int* out, int M, int N)
 void
 run(int rank, int tid, hipStream_t stream, int argc, char** argv)
 {
+    auto run_name = std::stringstream{};
+    run_name << __FUNCTION__ << "(" << rank << ", " << tid << ")";
+    roctxRangePush(run_name.str().c_str());
+
     unsigned int M = 4960 * 2;
     unsigned int N = 4960 * 2;
     if(argc > 2) nitr = atoll(argv[2]);
@@ -157,8 +180,9 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
     _lk.unlock();
 
-    std::default_random_engine         _engine{std::random_device{}() * (rank + 1) * (tid + 1)};
-    std::uniform_int_distribution<int> _dist{0, 1000};
+    auto _seed   = std::random_device{}() * (rank + 1) * (tid + 1);
+    auto _engine = std::default_random_engine{_seed};
+    auto _dist   = std::uniform_int_distribution<int>{0, 1000};
 
     size_t size       = sizeof(int) * M * N;
     int*   inp_matrix = new int[size];
@@ -210,6 +234,8 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
 
     delete[] inp_matrix;
     delete[] out_matrix;
+
+    roctxRangePop();
 }
 
 namespace

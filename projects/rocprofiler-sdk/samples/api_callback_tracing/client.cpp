@@ -33,6 +33,9 @@
 
 #include "client.hpp"
 
+#include <rocprofiler-sdk/context.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -54,6 +57,7 @@
 #include <ratio>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <vector>
 namespace client
 {
@@ -129,6 +133,11 @@ print_call_stack(const call_stack_t& _call_stack)
 callback_name_info
 get_callback_id_names()
 {
+    static auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
+        ROCPROFILER_CALLBACK_TRACING_HSA_API,
+        ROCPROFILER_CALLBACK_TRACING_HIP_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_API};
+
     auto cb_name_info = callback_name_info{};
     //
     // callback for each kind operation
@@ -137,8 +146,7 @@ get_callback_id_names()
         [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
             auto* name_info_v = static_cast<callback_name_info*>(data_v);
 
-            if(kindv == ROCPROFILER_CALLBACK_TRACING_HSA_API ||
-               kindv == ROCPROFILER_CALLBACK_TRACING_HIP_API)
+            if(supported.count(kindv) > 0)
             {
                 const char* name = nullptr;
                 ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
@@ -160,8 +168,7 @@ get_callback_id_names()
                          "query callback tracing kind operation name");
         if(name) name_info_v->kind_names[kind] = name;
 
-        if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API ||
-           kind == ROCPROFILER_CALLBACK_TRACING_HIP_API)
+        if(supported.count(kind) > 0)
         {
             ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operations(
                                  kind, tracing_kind_operation_cb, static_cast<void*>(data)),
@@ -175,6 +182,27 @@ get_callback_id_names()
                      "iterating callback tracing kinds");
 
     return cb_name_info;
+}
+
+void
+tool_tracing_ctrl_callback(rocprofiler_callback_tracing_record_t record,
+                           rocprofiler_user_data_t*,
+                           void* client_data)
+{
+    auto* ctx = static_cast<rocprofiler_context_id_t*>(client_data);
+
+    if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
+       record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API &&
+       record.operation == ROCPROFILER_MARKER_API_ID_roctxProfilerPause)
+    {
+        ROCPROFILER_CALL(rocprofiler_stop_context(*ctx), "pausing client context");
+    }
+    else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
+            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API &&
+            record.operation == ROCPROFILER_MARKER_API_ID_roctxProfilerResume)
+    {
+        ROCPROFILER_CALL(rocprofiler_start_context(*ctx), "resuming client context");
+    }
 }
 
 void
@@ -226,6 +254,58 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     _mutex.unlock();
 }
 
+std::vector<uint32_t>
+tool_control_init(rocprofiler_context_id_t& primary_ctx)
+{
+    struct RoctxOperations
+    {
+        std::vector<uint32_t> core  = {};
+        std::vector<uint32_t> cntrl = {};
+    };
+
+    auto roctx_ops = RoctxOperations();
+
+    // get all the operations for ROCPROFILER_CALLBACK_TRACING_MARKER_API and
+    // separate them into two arrays; one which contains the pause/resume operations
+    // and one with everything else
+    ROCPROFILER_CALL(
+        rocprofiler_iterate_callback_tracing_kind_operations(
+            ROCPROFILER_CALLBACK_TRACING_MARKER_API,
+            [](rocprofiler_callback_tracing_kind_t, uint32_t operation_v, void* data_v) {
+                auto* roctx_ops_v = static_cast<RoctxOperations*>(data_v);
+                if(operation_v == ROCPROFILER_MARKER_API_ID_roctxProfilerPause ||
+                   operation_v == ROCPROFILER_MARKER_API_ID_roctxProfilerResume)
+                    roctx_ops_v->cntrl.emplace_back(operation_v);
+                else
+                    roctx_ops_v->core.emplace_back(operation_v);
+                return 0;
+            },
+            &roctx_ops),
+        "iterating callback tracing kind operations");
+
+    // Create a specialized (throw-away) context for handling ROCTx profiler pause and resume.
+    // A separate context is used because if the context that is associated with roctxProfilerPause
+    // disabled that same context, a call to roctxProfilerResume would be ignored because the
+    // context that enables the callback for that API call is disabled.
+    auto cntrl_ctx = rocprofiler_context_id_t{};
+    ROCPROFILER_CALL(rocprofiler_create_context(&cntrl_ctx), "control context creation failed");
+
+    // enable callback marker tracing with only the pause/resume operations
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(cntrl_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_MARKER_API,
+                                                       roctx_ops.cntrl.data(),
+                                                       roctx_ops.cntrl.size(),
+                                                       tool_tracing_ctrl_callback,
+                                                       &primary_ctx),
+        "callback tracing service failed to configure");
+
+    // start the context so that it is always active
+    ROCPROFILER_CALL(rocprofiler_start_context(cntrl_ctx), "start of control context");
+
+    return roctx_ops.core;
+}
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
@@ -263,6 +343,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation failed");
 
+    // enable the control
+    auto roctx_ops = tool_control_init(client_ctx);
+
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_HSA_API,
@@ -277,6 +360,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        ROCPROFILER_CALLBACK_TRACING_HIP_API,
                                                        nullptr,
                                                        0,
+                                                       tool_tracing_callback,
+                                                       tool_data),
+        "callback tracing service failed to configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(client_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_MARKER_API,
+                                                       roctx_ops.data(),
+                                                       roctx_ops.size(),
                                                        tool_tracing_callback,
                                                        tool_data),
         "callback tracing service failed to configure");

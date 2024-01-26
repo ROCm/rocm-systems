@@ -103,7 +103,7 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
  *        instance counting information. The reason for this restriction is that HSA
  *        is not yet loaded on tool_init.
  *
- * @param [in] agent rocprofiler agent
+ * @param [in] agent_id rocprofiler agent identifier
  * @param [in] counter_id counter id (obtained from iterate_agent_supported_counters)
  * @param [out] instance_count number of instances the counter has
  * @return ::rocprofiler_status_t
@@ -111,7 +111,7 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter not found
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
+rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t   agent_id,
                                          rocprofiler_counter_id_t counter_id,
                                          size_t* instance_count) ROCPROFILER_NONNULL(3);
 
@@ -119,6 +119,7 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
  * @brief Callback that gives a list of counters available on an agent. The
  *        counters variable is owned by rocprofiler and should not be free'd.
  *
+ * @param [in] agent_id Agent ID of the current callback
  * @param [in] counters An array of counters that are avialable on the agent
  *      @ref rocprofiler_iterate_agent_supported_counters was called on.
  * @param [in] num_counters Number of counters contained in counters
@@ -126,6 +127,7 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_t      agent,
  *      @ref rocprofiler_iterate_agent_supported_counters
  */
 typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
+    rocprofiler_agent_id_t    agent_id,
     rocprofiler_counter_id_t* counters,
     size_t                    num_counters,
     void*                     user_data);
@@ -133,7 +135,7 @@ typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
 /**
  * @brief Query Agent Counters Availability.
  *
- * @param [in] agent GPU agent
+ * @param [in] agent_id GPU agent identifier
  * @param [in] cb callback to caller to get counters
  * @param [in] user_data data to pass into the callback
  * @return ::rocprofiler_status_t
@@ -141,7 +143,7 @@ typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
  * @retval ROCPROFILER_STATUS_ERROR if no counters found for agent
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_t                 agent,
+rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                              rocprofiler_available_counters_cb_t cb,
                                              void* user_data) ROCPROFILER_NONNULL(2);
 

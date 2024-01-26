@@ -183,7 +183,7 @@ queue_cb(const std::shared_ptr<counter_callback_info>& info,
             if(prof_config->reqired_hw_counters.empty())
             {
                 auto& config     = *prof_config;
-                auto  agent_name = std::string(config.agent.name);
+                auto  agent_name = std::string(config.agent->name);
                 for(const auto& metric : config.metrics)
                 {
                     auto req_counters =
@@ -273,7 +273,7 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
 
     auto decoded_pkt = EvaluateAST::read_pkt(prof_config->pkt_generator.get(), *pkt);
     EvaluateAST::read_special_counters(
-        prof_config->agent, prof_config->required_special_counters, decoded_pkt);
+        *prof_config->agent, prof_config->required_special_counters, decoded_pkt);
 
     prof_config->packets.wlock([&](auto& pkt_vector) {
         if(pkt)

@@ -100,7 +100,7 @@ def generate_custom(args, cmake_args, ctest_args):
         ".*/counters/parser/.*",
     ]
     if args.coverage == "samples":
-        codecov_exclude += [".*/lib/common/.*"]
+        codecov_exclude += [".*/lib/common/.*", ".*/lib/rocprofiler-sdk-tool/.*"]
 
     COVERAGE_EXCLUDE = ";".join(codecov_exclude)
 

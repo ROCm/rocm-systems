@@ -45,7 +45,7 @@ namespace counters
 // This profile can be shared among many rocprof contexts.
 struct profile_config
 {
-    rocprofiler_agent_t           agent{};
+    const rocprofiler_agent_t*    agent = nullptr;
     std::vector<counters::Metric> metrics{};
     // HW counters that must be collected to compute the above
     // metrics (derived metrics are broken down into hw counters

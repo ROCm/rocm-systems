@@ -31,7 +31,7 @@ add_library(code-object-tracing-client SHARED)
 target_sources(code-object-tracing-client PRIVATE client.cpp)
 target_link_libraries(
     code-object-tracing-client
-    PRIVATE rocprofiler::rocprofiler rocprofiler::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
             rocprofiler::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)

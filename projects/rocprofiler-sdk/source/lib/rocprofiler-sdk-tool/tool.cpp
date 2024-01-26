@@ -31,10 +31,11 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
-#include "rocprofiler-sdk/marker/api_id.h"
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/internal_threading.h>
+#include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <glog/logging.h>
@@ -229,10 +230,17 @@ get_client_ctx()
 void
 flush()
 {
+    LOG(INFO) << "flushing buffers...";
     for(auto itr : get_buffers().as_array())
     {
-        if(itr.handle > 0) ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
+        if(itr.handle > 0)
+        {
+            LOG(INFO) << "flushing buffer " << itr.handle;
+            ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
+            ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
+        }
     }
+    LOG(INFO) << "Buffers flushed";
 }
 
 void
@@ -634,36 +642,38 @@ get_agent_profile(const rocprofiler_agent_t* agent)
         },
         [agent, &profile](agent_counter_map_t& data_v) {
             auto counters_v = counter_vec_t{};
-            ROCPROFILER_CALL(
-                rocprofiler_iterate_agent_supported_counters(
-                    *agent,
-                    [](rocprofiler_counter_id_t* counters, size_t num_counters, void* user_data) {
-                        auto* vec = static_cast<counter_vec_t*>(user_data);
-                        for(size_t i = 0; i < num_counters; i++)
-                        {
-                            const char* name = nullptr;
-                            size_t      len  = 0;
+            ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
+                                 agent->id,
+                                 [](rocprofiler_agent_id_t,
+                                    rocprofiler_counter_id_t* counters,
+                                    size_t                    num_counters,
+                                    void*                     user_data) {
+                                     auto* vec = static_cast<counter_vec_t*>(user_data);
+                                     for(size_t i = 0; i < num_counters; i++)
+                                     {
+                                         const char* name = nullptr;
+                                         size_t      len  = 0;
 
-                            ROCPROFILER_CALL(
-                                rocprofiler_query_counter_name(counters[i], &name, &len),
-                                "Could not query name");
+                                         ROCPROFILER_CALL(rocprofiler_query_counter_name(
+                                                              counters[i], &name, &len),
+                                                          "Could not query name");
 
-                            if(name && len > 0)
-                            {
-                                if(tool::get_config().counters.count(name) > 0)
-                                    vec->emplace_back(counters[i]);
-                            }
-                        }
-                        return ROCPROFILER_STATUS_SUCCESS;
-                    },
-                    static_cast<void*>(&counters_v)),
-                "iterate agent supported counters");
+                                         if(name && len > 0)
+                                         {
+                                             if(tool::get_config().counters.count(name) > 0)
+                                                 vec->emplace_back(counters[i]);
+                                         }
+                                     }
+                                     return ROCPROFILER_STATUS_SUCCESS;
+                                 },
+                                 static_cast<void*>(&counters_v)),
+                             "iterate agent supported counters");
 
             if(!counters_v.empty())
             {
                 auto profile_v = rocprofiler_profile_config_id_t{};
                 ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                                     *agent, counters_v.data(), counters_v.size(), &profile_v),
+                                     agent->id, counters_v.data(), counters_v.size(), &profile_v),
                                  "Could not construct profile cfg");
                 profile = profile_v;
             }
@@ -734,6 +744,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     client_finalizer = fini_func;
 
+    constexpr uint64_t buffer_size      = 4096;
+    constexpr uint64_t buffer_watermark = 4096;
+
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "create context failed");
 
     auto code_obj_ctx = rocprofiler_context_id_t{};
@@ -794,8 +807,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().kernel_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
-                                                   4096,
-                                                   2048,
+                                                   buffer_size,
+                                                   buffer_watermark,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                    buffered_tracing_callback,
                                                    tool_data,
@@ -814,8 +827,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().memory_copy_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
-                                                   4096,
-                                                   2048,
+                                                   buffer_size,
+                                                   buffer_watermark,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                    buffered_tracing_callback,
                                                    nullptr,
@@ -834,8 +847,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().hsa_api_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
-                                                   4096,
-                                                   2048,
+                                                   buffer_size,
+                                                   buffer_watermark,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                    buffered_tracing_callback,
                                                    tool_data,
@@ -854,8 +867,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().hip_api_trace || tool::get_config().hip_compiler_api_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
-                                                   4096,
-                                                   2048,
+                                                   buffer_size,
+                                                   buffer_watermark,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                    buffered_tracing_callback,
                                                    tool_data,
@@ -888,8 +901,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().counter_collection)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
-                                                   4096,
-                                                   2048,
+                                                   buffer_size,
+                                                   buffer_watermark,
                                                    ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                    buffered_tracing_callback,
                                                    nullptr,
@@ -902,11 +915,24 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             "Could not setup buffered service");
     }
 
-    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context failed");
+    for(auto itr : get_buffers().as_array())
+    {
+        if(itr.handle > 0)
+        {
+            auto cb_thread = rocprofiler_callback_thread_t{};
 
-    std::atexit([]() {
-        if(client_finalizer && client_identifier) client_finalizer(*client_identifier);
-    });
+            LOG(INFO) << "creating dedicated callback thread for buffer " << itr.handle;
+            ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_thread),
+                             "creating callback thread");
+
+            LOG(INFO) << "assigning buffer " << itr.handle << " to callback thread "
+                      << cb_thread.handle;
+            ROCPROFILER_CALL(rocprofiler_assign_callback_thread(itr, cb_thread),
+                             "assigning callback thread");
+        }
+    }
+
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context failed");
 
     return 0;
 }

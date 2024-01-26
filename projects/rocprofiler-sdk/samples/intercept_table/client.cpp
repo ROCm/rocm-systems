@@ -282,9 +282,10 @@ rocprofiler_configure(uint32_t                 version,
     client_tool_data->emplace_back(
         client::source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
 
-    rocprofiler_at_runtime_api_registration(client::api_registration_callback,
-                                            ROCPROFILER_HSA_LIBRARY,
-                                            static_cast<void*>(client_tool_data));
+    ROCPROFILER_CALL(rocprofiler_at_runtime_api_registration(client::api_registration_callback,
+                                                             ROCPROFILER_HSA_LIBRARY,
+                                                             static_cast<void*>(client_tool_data)),
+                     "runtime api registration");
 
     // create configure data
     static auto cfg =

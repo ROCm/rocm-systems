@@ -96,6 +96,12 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          c
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
+    static auto unsupported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
+        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
+        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+        ROCPROFILER_BUFFER_TRACING_EXTERNAL_CORRELATION};
+    if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
 
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
