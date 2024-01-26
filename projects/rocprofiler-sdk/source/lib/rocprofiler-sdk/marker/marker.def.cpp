@@ -22,41 +22,78 @@
 
 #include "lib/rocprofiler-sdk/marker/defines.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
+#include "rocprofiler-sdk/marker/table_api_id.h"
 
 namespace rocprofiler
 {
 namespace marker
 {
 template <>
-struct roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>
+struct roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_LAST>
 {
-    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_MARKER_API;
-    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_MARKER_API;
-    using args_type                           = rocprofiler_marker_api_args_t;
-    using retval_type                         = rocprofiler_marker_api_retval_t;
-    using callback_data_type                  = rocprofiler_callback_tracing_marker_api_data_t;
+    using args_type          = rocprofiler_marker_api_args_t;
+    using retval_type        = rocprofiler_marker_api_retval_t;
+    using callback_data_type = rocprofiler_callback_tracing_marker_api_data_t;
+    using buffer_data_type   = rocprofiler_buffer_tracing_marker_api_record_t;
+};
+
+template <>
+struct roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>
+: roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_LAST>
+{
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API;
+    static constexpr auto none                = ROCPROFILER_MARKER_CORE_API_ID_NONE;
+    static constexpr auto last                = ROCPROFILER_MARKER_CORE_API_ID_LAST;
+    using enum_type                           = rocprofiler_marker_core_api_id_t;
+};
+
+template <>
+struct roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>
+: roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_LAST>
+{
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API;
+    static constexpr auto none                = ROCPROFILER_MARKER_CONTROL_API_ID_NONE;
+    static constexpr auto last                = ROCPROFILER_MARKER_CONTROL_API_ID_LAST;
+    using enum_type                           = rocprofiler_marker_control_api_id_t;
+};
+
+template <>
+struct roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>
+: roctx_domain_info<ROCPROFILER_MARKER_API_TABLE_ID_LAST>
+{
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API;
+    static constexpr auto none                = ROCPROFILER_MARKER_NAME_API_ID_NONE;
+    static constexpr auto last                = ROCPROFILER_MARKER_NAME_API_ID_LAST;
+    using enum_type                           = rocprofiler_marker_name_api_id_t;
 };
 }  // namespace marker
 }  // namespace rocprofiler
 
-#if defined(ROCPROFILER_LIB_ROCPROFILER_MARKER_MARKER_CPP_IMPL) &&                                 \
-    ROCPROFILER_LIB_ROCPROFILER_MARKER_MARKER_CPP_IMPL == 1
+#if defined(ROCPROFILER_LIB_ROCPROFILER_SDK_MARKER_MARKER_CPP_IMPL) &&                             \
+    ROCPROFILER_LIB_ROCPROFILER_SDK_MARKER_MARKER_CPP_IMPL == 1
 
 // clang-format off
-MARKER_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, roctx_api_table_t)
+MARKER_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore, roctx_core_api_table_t)
+MARKER_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl, roctx_ctrl_api_table_t)
+MARKER_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_MARKER_API_TABLE_ID_RoctxName, roctx_name_api_table_t)
 
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxMarkA, roctxMarkA, roctxMarkA_fn, message)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxRangePushA, roctxRangePushA, roctxRangePushA_fn, message)
-MARKER_API_INFO_DEFINITION_0(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxRangePop, roctxRangePop, roctxRangePop_fn)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxRangeStartA, roctxRangeStartA, roctxRangeStartA_fn, message)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxRangeStop, roctxRangeStop, roctxRangeStop_fn, id)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxProfilerPause, roctxProfilerPause, roctxProfilerPause_fn, tid)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxProfilerResume, roctxProfilerResume, roctxProfilerResume_fn, tid)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxNameOsThread, roctxNameOsThread, roctxNameOsThread_fn, name)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxNameHsaAgent, roctxNameHsaAgent, roctxNameHsaAgent_fn, name, agent)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxNameHipDevice, roctxNameHipDevice, roctxNameHipDevice_fn, name, device_id)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxNameHipStream, roctxNameHipStream, roctxNameHipStream_fn, name, stream)
-MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, ROCPROFILER_MARKER_API_ID_roctxGetThreadId, roctxGetThreadId, roctxGetThreadId_fn, tid)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore, ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA, roctxMarkA, roctxMarkA_fn, message)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore, ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA, roctxRangePushA, roctxRangePushA_fn, message)
+MARKER_API_INFO_DEFINITION_0(ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore, ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop, roctxRangePop, roctxRangePop_fn)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore, ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA, roctxRangeStartA, roctxRangeStartA_fn, message)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore, ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop, roctxRangeStop, roctxRangeStop_fn, id)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore, ROCPROFILER_MARKER_CORE_API_ID_roctxGetThreadId, roctxGetThreadId, roctxGetThreadId_fn, tid)
+
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl, ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause, roctxProfilerPause, roctxProfilerPause_fn, tid)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl, ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume, roctxProfilerResume, roctxProfilerResume_fn, tid)
+
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxName, ROCPROFILER_MARKER_NAME_API_ID_roctxNameOsThread, roctxNameOsThread, roctxNameOsThread_fn, name)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxName, ROCPROFILER_MARKER_NAME_API_ID_roctxNameHsaAgent, roctxNameHsaAgent, roctxNameHsaAgent_fn, name, agent)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxName, ROCPROFILER_MARKER_NAME_API_ID_roctxNameHipDevice, roctxNameHipDevice, roctxNameHipDevice_fn, name, device_id)
+MARKER_API_INFO_DEFINITION_V(ROCPROFILER_MARKER_API_TABLE_ID_RoctxName, ROCPROFILER_MARKER_NAME_API_ID_roctxNameHipStream, roctxNameHipStream, roctxNameHipStream_fn, name, stream)
 // clang-format on
 
 #else

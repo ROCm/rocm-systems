@@ -130,8 +130,12 @@ get_callback_tracing_names()
 {
     static const auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
         ROCPROFILER_CALLBACK_TRACING_HSA_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_API};
+        ROCPROFILER_CALLBACK_TRACING_HIP_API,
+        ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,
+    };
 
     auto cb_name_info = callback_name_info{};
     //
@@ -184,8 +188,12 @@ get_buffer_tracing_names()
 {
     static const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
         ROCPROFILER_BUFFER_TRACING_HSA_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_API,
-        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY};
+        ROCPROFILER_BUFFER_TRACING_HIP_API,
+        ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+        ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
+        ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,
+        ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API};
 
     auto cb_name_info = buffer_name_info{};
     //
@@ -402,7 +410,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         hip_api_cb_records.emplace_back(
             hip_api_callback_record_t{ts, record, *data, std::move(args)});
     }
-    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API ||
+            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API ||
+            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
     {
         auto* data = static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
         marker_api_cb_records.emplace_back(marker_api_callback_record_t{ts, record, *data});
@@ -467,7 +477,9 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 hsa_api_bf_records.emplace_back(*record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_marker_api_record_t*>(header->payload);
@@ -642,7 +654,25 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(marker_api_callback_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_MARKER_API,
+                                                       ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                                                       nullptr,
+                                                       0,
+                                                       tool_tracing_callback,
+                                                       nullptr),
+        "hsa api tracing service configure");
+
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         marker_api_callback_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+                         nullptr,
+                         0,
+                         tool_tracing_callback,
+                         nullptr),
+                     "hsa api tracing service configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(marker_api_callback_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,
                                                        nullptr,
                                                        0,
                                                        tool_tracing_callback,
@@ -715,7 +745,23 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,
-                                                     ROCPROFILER_BUFFER_TRACING_MARKER_API,
+                                                     ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
+                                                     nullptr,
+                                                     0,
+                                                     marker_api_buffered_buffer),
+        "buffer tracing service configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,
+                                                     nullptr,
+                                                     0,
+                                                     marker_api_buffered_buffer),
+        "buffer tracing service configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(marker_api_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,
                                                      nullptr,
                                                      0,
                                                      marker_api_buffered_buffer),

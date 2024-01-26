@@ -77,7 +77,13 @@ inline auto
 get_callback_tracing_names()
 {
     static const auto supported_kinds = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
-        ROCPROFILER_CALLBACK_TRACING_HSA_API, ROCPROFILER_CALLBACK_TRACING_MARKER_API};
+        ROCPROFILER_CALLBACK_TRACING_HSA_API,
+        ROCPROFILER_CALLBACK_TRACING_HIP_API,
+        ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+        ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,
+    };
 
     auto cb_name_info = callback_name_info{};
     //
@@ -141,7 +147,13 @@ inline buffer_name_info
 get_buffer_tracing_names()
 {
     static const auto supported_kinds = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_HSA_API, ROCPROFILER_BUFFER_TRACING_MARKER_API};
+        ROCPROFILER_BUFFER_TRACING_HSA_API,
+        ROCPROFILER_BUFFER_TRACING_HIP_API,
+        ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
+        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+        ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
+        ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,
+        ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API};
 
     auto cb_name_info = buffer_name_info{};
     //

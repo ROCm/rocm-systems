@@ -35,6 +35,15 @@ ROCTX_EXTERN_C_INIT
 #define ROCTX_API_TABLE_VERSION_MAJOR 0
 #define ROCTX_API_TABLE_VERSION_STEP  0
 
+#define ROCTX_CORE_API_TABLE_VERSION_MAJOR 0
+#define ROCTX_CORE_API_TABLE_VERSION_STEP  0
+
+#define ROCTX_CONTROL_API_TABLE_VERSION_MAJOR 0
+#define ROCTX_CONTROL_API_TABLE_VERSION_STEP  0
+
+#define ROCTX_RESOURCE_API_TABLE_VERSION_MAJOR 0
+#define ROCTX_RESOURCE_API_TABLE_VERSION_STEP  0
+
 typedef uint64_t roctx_range_id_t;
 typedef void (*roctxMarkA_fn_t)(const char* message);
 typedef int (*roctxRangePushA_fn_t)(const char* message);
@@ -49,21 +58,31 @@ typedef int (*roctxNameHipDevice_fn_t)(const char* name, int device_id);
 typedef int (*roctxNameHipStream_fn_t)(const char* name, const struct ihipStream_t* stream);
 typedef int (*roctxGetThreadId_fn_t)(roctx_thread_id_t* tid);
 
-typedef struct roctxApiTable_t
+typedef struct roctxCoreApiTable_t
+{
+    uint64_t              size;
+    roctxMarkA_fn_t       roctxMarkA_fn;
+    roctxRangePushA_fn_t  roctxRangePushA_fn;
+    roctxRangePop_fn_t    roctxRangePop_fn;
+    roctxRangeStartA_fn_t roctxRangeStartA_fn;
+    roctxRangeStop_fn_t   roctxRangeStop_fn;
+    roctxGetThreadId_fn_t roctxGetThreadId_fn;
+} roctxCoreApiTable_t;
+
+typedef struct roctxControlApiTable_t
 {
     uint64_t                 size;
-    roctxMarkA_fn_t          roctxMarkA_fn;
-    roctxRangePushA_fn_t     roctxRangePushA_fn;
-    roctxRangePop_fn_t       roctxRangePop_fn;
-    roctxRangeStartA_fn_t    roctxRangeStartA_fn;
-    roctxRangeStop_fn_t      roctxRangeStop_fn;
     roctxProfilerPause_fn_t  roctxProfilerPause_fn;
     roctxProfilerResume_fn_t roctxProfilerResume_fn;
-    roctxNameOsThread_fn_t   roctxNameOsThread_fn;
-    roctxNameHsaAgent_fn_t   roctxNameHsaAgent_fn;
-    roctxNameHipDevice_fn_t  roctxNameHipDevice_fn;
-    roctxNameHipStream_fn_t  roctxNameHipStream_fn;
-    roctxGetThreadId_fn_t    roctxGetThreadId_fn;
-} roctxApiTable_t;
+} roctxControlApiTable_t;
+
+typedef struct roctxNameApiTable_t
+{
+    uint64_t                size;
+    roctxNameOsThread_fn_t  roctxNameOsThread_fn;
+    roctxNameHsaAgent_fn_t  roctxNameHsaAgent_fn;
+    roctxNameHipDevice_fn_t roctxNameHipDevice_fn;
+    roctxNameHipStream_fn_t roctxNameHipStream_fn;
+} roctxNameApiTable_t;
 
 ROCTX_EXTERN_C_FINI

@@ -50,7 +50,7 @@ ROCPROFILER_EXTERN_C_INIT
 
 /**
  * @brief Callback type when a new runtime library is loaded. @see
- * rocprofiler_at_runtime_api_registration
+ * rocprofiler_at_intercept_table_registration
  * @param [in] type Type of API table
  * @param [in] lib_version Major, minor, and patch version of library encoded into single number
  * similar to @ref ROCPROFILER_VERSION
@@ -58,9 +58,9 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [in] tables An array of pointers to the API tables
  * @param [in] num_tables The size of the array of pointers to the API tables
  * @param [in] user_data The pointer to the data provided to @ref
- * rocprofiler_at_runtime_api_registration
+ * rocprofiler_at_intercept_table_registration
  */
-typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_runtime_library_t type,
+typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_intercept_table_t type,
                                                    uint64_t                      lib_version,
                                                    uint64_t                      lib_instance,
                                                    void**                        tables,
@@ -69,9 +69,9 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_runtime_library_t
 
 /**
  * @brief Invoke this function to receive callbacks when a ROCm library registers its API
- * intercept table with rocprofiler. Use the @ref rocprofiler_runtime_library_t enumeration for
+ * intercept table with rocprofiler. Use the @ref rocprofiler_intercept_table_t enumeration for
  * specifying which raw API tables the tool would like to have access to. E.g. including @ref
- * ROCPROFILER_HSA_LIBRARY in the @ref rocprofiler_at_runtime_api_registration function call
+ * ROCPROFILER_HSA_TABLE in the @ref rocprofiler_at_intercept_table_registration function call
  * communicates to rocprofiler that, when rocprofiler receives a `HsaApiTable` instance, the tool
  * would like rocprofiler to provide it access too.
  *
@@ -81,41 +81,42 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_runtime_library_t
  * `rocprofiler_configure` symbol is visible in the application's symbol table. The vast majority of
  * tools will want to use the @ref CALLBACK_TRACING_SERVICE to trace these runtime APIs, however,
  * some tools may want or require installing their own intercept functions in lieu of receiving
- * these callbacks and those tools should use the @ref rocprofiler_at_runtime_api_registration to
- * install their intercept functions. There are no restrictions to where or how early this function
- * can be invoked but it will return ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if it is
- * invoked after rocprofiler has requested all the tool configurations. Thus, it is highly
+ * these callbacks and those tools should use the @ref rocprofiler_at_intercept_table_registration
+ * to install their intercept functions. There are no restrictions to where or how early this
+ * function can be invoked but it will return ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if it
+ * is invoked after rocprofiler has requested all the tool configurations. Thus, it is highly
  * recommended to invoke this function within the @ref rocprofiler_configure function or the
  * callback passed to the @ref rocprofiler_force_configure function -- the reason for this
- * recommendation is that if @ref rocprofiler_at_runtime_api_registration is invoked in one of these
- * locations, rocprofiler can guarantee that the tool will be passed the API table because, at the
- * first instance of a runtime registering it's API table, rocprofiler will ensure that, in the case
- * of the former, rocprofiler will invoke all of the @ref rocprofiler_configure symbols that are
- * visible before checking the list of tools which want to receive the API tables and, in the case
- * of the latter, @ref rocprofiler_force_configure will fail with error code @ref
+ * recommendation is that if @ref rocprofiler_at_intercept_table_registration is invoked in one of
+ * these locations, rocprofiler can guarantee that the tool will be passed the API table because, at
+ * the first instance of a runtime registering it's API table, rocprofiler will ensure that, in the
+ * case of the former, rocprofiler will invoke all of the @ref rocprofiler_configure symbols that
+ * are visible before checking the list of tools which want to receive the API tables and, in the
+ * case of the latter, @ref rocprofiler_force_configure will fail with error code @ref
  * ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED if a runtime has already been registered (and,
  * therefore, already scanned and invoked the visible @ref rocprofiler_configure symbols and
- * completed the tool initialization). If @ref rocprofiler_at_runtime_api_registration is invoked
- * outside of these recommended places, even if it is done before the `main` function starts (e.g.
- * in a library init/constructor function), it is possible that another library, such as ROCm-aware
- * MPI, caused the HIP and HSA runtime libraries to be initialized when that library was loaded. In
- * this aforementioned scenario, if the ROCm-aware MPI library library init/constructor function
- * runs before your library init/constructor function, rocprofiler will have already processed the
- * API table and will not provide the API table to the tool due to the fact that the API may already
- * be in use and, thus, any modifications to the table might result in thread-safety violations or
- * more disastrous consequences.
+ * completed the tool initialization). If @ref rocprofiler_at_intercept_table_registration is
+ * invoked outside of these recommended places, even if it is done before the `main` function starts
+ * (e.g. in a library init/constructor function), it is possible that another library, such as
+ * ROCm-aware MPI, caused the HIP and HSA runtime libraries to be initialized when that library was
+ * loaded. In this aforementioned scenario, if the ROCm-aware MPI library library init/constructor
+ * function runs before your library init/constructor function, rocprofiler will have already
+ * processed the API table and will not provide the API table to the tool due to the fact that the
+ * API may already be in use and, thus, any modifications to the table might result in thread-safety
+ * violations or more disastrous consequences.
  *
  * @param [in] callback Callback to tool invoked when a runtime registers their API table with
  * rocprofiler
- * @param [in] libs Bitwise-or of libraries, e.g. `ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY
- * | ROCPROFILER_MARKER_LIBRARY` means the callbacks will be invoked whenever the HSA, HIP, and
- * ROCTx libraries register the intercept table.
+ * @param [in] libs Bitwise-or of libraries, e.g. `ROCPROFILER_HSA_TABLE |
+ * ROCPROFILER_HIP_RUNTIME_TABLE | ROCPROFILER_MARKER_CORE_TABLE` means the callbacks will be
+ * invoked whenever the HSA, HIP runtime, and ROCTx core API tables register their intercept
+ * table(s).
  * @param [in] data Data to provide to callback(s)
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_SUCCESS Callback was registered for specified runtime(s)
  * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED rocprofiler has already initialized
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT this error code is returned if
- * `ROCPROFILER_LIBRARY` is included in bitwise-or of the libs
+ * `ROCPROFILER_TABLE` is included in bitwise-or of the libs
  * @retval ::ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED this error code is returned if one of the
  * specified libraries does not have support for API intercept tables (which should not be the case
  * by the time this code is publicly released)
@@ -152,14 +153,14 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_runtime_library_t
  * // this is the function that gets called when the HSA runtime
  * // intercept table is registered with rocprofiler
  * void
- * api_registration_callback(rocprofiler_runtime_library_t type,
+ * api_registration_callback(rocprofiler_intercept_table_t type,
  *                           uint64_t                        lib_version,
  *                           uint64_t                        lib_instance,
  *                           void**                          tables,
  *                           uint64_t                        num_tables,
  *                           void*                           user_data)
  * {
- *     if(type != ROCPROFILER_HSA_LIBRARY)
+ *     if(type != ROCPROFILER_HSA_TABLE)
  *         throw std::runtime_error{"unexpected library type: " +
  *                                  std::to_string(static_cast<int>(type))};
  *     if(lib_instance != 0) throw std::runtime_error{"multiple instances of HSA runtime library"};
@@ -203,20 +204,20 @@ typedef void (*rocprofiler_intercept_library_cb_t)(rocprofiler_runtime_library_t
  *     id->name = "ExampleTool";
  *
  *     // specify that we only want to intercept the HSA library
- *     rocprofiler_at_runtime_api_registration(api_registration_callback,
- *                                             ROCPROFILER_HSA_LIBRARY, nullptr);
+ *     rocprofiler_at_intercept_table_registration(api_registration_callback,
+ *                                             ROCPROFILER_HSA_TABLE, nullptr);
  *
  *     return nullptr;
  * }
  * @endcode
  *
  * @example intercept_table/client.cpp
- * Example demonstrating @ref rocprofiler_at_runtime_api_registration usage
+ * Example demonstrating @ref rocprofiler_at_intercept_table_registration usage
  */
 rocprofiler_status_t
-rocprofiler_at_runtime_api_registration(rocprofiler_intercept_library_cb_t callback,
-                                        int                                libs,
-                                        void*                              data) ROCPROFILER_API;
+rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t callback,
+                                            int                                libs,
+                                            void* data) ROCPROFILER_API;
 
 /** @} */
 

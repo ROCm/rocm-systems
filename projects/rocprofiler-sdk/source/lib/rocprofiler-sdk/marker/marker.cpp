@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -68,19 +69,24 @@ set_data_retval(DataT& _data, Tp _val)
         _data.int32_t_retval = _val;
     else if constexpr(std::is_same<int64_t, Tp>::value)
         _data.int64_t_retval = _val;
-    else if constexpr(std::is_same<uint64_t, Tp>::value)
-        _data.uint64_t_retval = _val;
+    else if constexpr(std::is_same<roctx_range_id_t, Tp>::value)
+        _data.roctx_range_id_t_retval = _val;
     else
         static_assert(std::is_empty<Tp>::value, "Error! unsupported return type");
 }
-}  // namespace
 
-roctx_api_table_t&
-get_table()
+template <typename Tp>
+Tp*
+get_table_impl()
 {
-    static auto _v = common::init_public_api_struct(roctx_api_table_t{});
+    static auto*& _v = common::static_object<Tp>::construct(common::init_public_api_struct(Tp{}));
     return _v;
 }
+
+template <size_t TableIdx>
+auto*
+get_table();
+}  // namespace
 
 template <size_t TableIdx, size_t OpIdx>
 template <typename DataArgsT, typename... Args>
@@ -332,7 +338,7 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 }  // namespace marker
 }  // namespace rocprofiler
 
-#define ROCPROFILER_LIB_ROCPROFILER_MARKER_MARKER_CPP_IMPL 1
+#define ROCPROFILER_LIB_ROCPROFILER_SDK_MARKER_MARKER_CPP_IMPL 1
 
 // template specializations
 #include "marker.def.cpp"
@@ -343,16 +349,6 @@ namespace marker
 {
 namespace
 {
-template <size_t TableIdx>
-struct api_id_bounds;
-
-template <>
-struct api_id_bounds<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>
-{
-    static constexpr auto none = ROCPROFILER_MARKER_API_ID_NONE;
-    static constexpr auto last = ROCPROFILER_MARKER_API_ID_LAST;
-};
-
 template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
 const char*
 name_by_id(const uint32_t id, std::index_sequence<OpIdx, OpIdxTail...>)
@@ -375,7 +371,7 @@ id_by_name(const char* name, std::index_sequence<OpIdx, OpIdxTail...>)
     if constexpr(sizeof...(OpIdxTail) > 0)
         return id_by_name<TableIdx>(name, std::index_sequence<OpIdxTail...>{});
     else
-        return api_id_bounds<TableIdx>::none;
+        return roctx_domain_info<TableIdx>::none;
 }
 
 template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
@@ -383,7 +379,7 @@ void
 get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<OpIdx, OpIdxTail...>)
 {
     auto _idx = roctx_api_info<TableIdx, OpIdx>::operation_idx;
-    if(_idx < api_id_bounds<TableIdx>::last) _id_list.emplace_back(_idx);
+    if(_idx < roctx_domain_info<TableIdx>::last) _id_list.emplace_back(_idx);
 
     if constexpr(sizeof...(OpIdxTail) > 0)
         get_ids<TableIdx>(_id_list, std::index_sequence<OpIdxTail...>{});
@@ -400,7 +396,7 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<OpIdx, OpIdx
         get_names<TableIdx>(_name_list, std::index_sequence<OpIdxTail...>{});
 }
 
-template <size_t OpIdx, size_t... OpIdxTail>
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
 void
 iterate_args(const uint32_t                                        id,
              const rocprofiler_callback_tracing_marker_api_data_t& data,
@@ -410,7 +406,7 @@ iterate_args(const uint32_t                                        id,
 {
     if(OpIdx == id)
     {
-        using info_type = roctx_api_info<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi, OpIdx>;
+        using info_type = roctx_api_info<TableIdx, OpIdx>;
         auto&& arg_list = info_type::as_arg_list(data);
         auto&& arg_addr = info_type::as_arg_addr(data);
         for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
@@ -426,7 +422,7 @@ iterate_args(const uint32_t                                        id,
         }
     }
     if constexpr(sizeof...(OpIdxTail) > 0)
-        iterate_args(id, data, func, user_data, std::index_sequence<OpIdxTail...>{});
+        iterate_args<TableIdx>(id, data, func, user_data, std::index_sequence<OpIdxTail...>{});
 }
 
 bool
@@ -475,7 +471,7 @@ copy_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         // 3. get the sub-table containing the function pointer in saved table
         // 4. get reference to function pointer in sub-table in saved table
         // 5. save the original function in the saved table
-        auto& _saved = _info.get_table(get_table());
+        auto& _saved = _info.get_table(*get_table<TableIdx>());
         auto& _ofunc = _info.get_table_func(_saved);
         _ofunc       = _func;
     }
@@ -539,21 +535,22 @@ template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id<TableIdx>(id, std::make_index_sequence<api_id_bounds<TableIdx>::last>{});
+    return name_by_id<TableIdx>(id, std::make_index_sequence<roctx_domain_info<TableIdx>::last>{});
 }
 
 template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name)
 {
-    return id_by_name<TableIdx>(name, std::make_index_sequence<api_id_bounds<TableIdx>::last>{});
+    return id_by_name<TableIdx>(name,
+                                std::make_index_sequence<roctx_domain_info<TableIdx>::last>{});
 }
 
 template <size_t TableIdx>
 std::vector<uint32_t>
 get_ids()
 {
-    constexpr auto last_api_id = api_id_bounds<TableIdx>::last;
+    constexpr auto last_api_id = roctx_domain_info<TableIdx>::last;
     auto           _data       = std::vector<uint32_t>{};
     _data.reserve(last_api_id);
     get_ids<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
@@ -564,13 +561,14 @@ template <size_t TableIdx>
 std::vector<const char*>
 get_names()
 {
-    constexpr auto last_api_id = api_id_bounds<TableIdx>::last;
+    constexpr auto last_api_id = roctx_domain_info<TableIdx>::last;
     auto           _data       = std::vector<const char*>{};
     _data.reserve(last_api_id);
     get_names<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
     return _data;
 }
 
+template <size_t TableIdx>
 void
 iterate_args(uint32_t                                              id,
              const rocprofiler_callback_tracing_marker_api_data_t& data,
@@ -578,35 +576,49 @@ iterate_args(uint32_t                                              id,
              void*                                                 user_data)
 {
     if(callback)
-        iterate_args(id,
-                     data,
-                     callback,
-                     user_data,
-                     std::make_index_sequence<ROCPROFILER_MARKER_API_ID_LAST>{});
+        iterate_args<TableIdx>(id,
+                               data,
+                               callback,
+                               user_data,
+                               std::make_index_sequence<roctx_domain_info<TableIdx>::last>{});
 }
 
-#define INSTANTIATE_MARKER_TABLE_FUNC(TABLE)                                                       \
-    template const char*              name_by_id<TABLE>(uint32_t);                                 \
-    template uint32_t                 id_by_name<TABLE>(const char*);                              \
-    template std::vector<uint32_t>    get_ids<TABLE>();                                            \
-    template std::vector<const char*> get_names<TABLE>();
-
-INSTANTIATE_MARKER_TABLE_FUNC(ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi)
-
+template <typename TableT>
 void
-copy_table(roctx_api_table_t* _orig)
+copy_table(TableT* _orig)
 {
+    constexpr auto TableIdx = roctx_table_id_lookup<TableT>::value;
     if(_orig)
-        copy_table<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>(
-            _orig, std::make_index_sequence<ROCPROFILER_MARKER_API_ID_LAST>{});
+        copy_table<TableIdx>(_orig, std::make_index_sequence<roctx_domain_info<TableIdx>::last>{});
 }
 
+template <typename TableT>
 void
-update_table(roctx_api_table_t* _orig)
+update_table(TableT* _orig)
 {
+    constexpr auto TableIdx = roctx_table_id_lookup<TableT>::value;
     if(_orig)
-        update_table<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>(
-            _orig, std::make_index_sequence<ROCPROFILER_MARKER_API_ID_LAST>{});
+        update_table<TableIdx>(_orig,
+                               std::make_index_sequence<roctx_domain_info<TableIdx>::last>{});
 }
+
+using iterate_args_data_t = rocprofiler_callback_tracing_marker_api_data_t;
+using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
+
+#define INSTANTIATE_MARKER_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                       \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                   \
+    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
+    template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
+    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
+    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
+    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
+    template void                     iterate_args<TABLE_IDX>(                                     \
+        uint32_t, const iterate_args_data_t&, iterate_args_cb_t, void*);
+
+INSTANTIATE_MARKER_TABLE_FUNC(roctx_core_api_table_t, ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore)
+INSTANTIATE_MARKER_TABLE_FUNC(roctx_ctrl_api_table_t, ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl)
+INSTANTIATE_MARKER_TABLE_FUNC(roctx_name_api_table_t, ROCPROFILER_MARKER_API_TABLE_ID_RoctxName)
+
+#undef INSTANTIATE_MARKER_TABLE_FUNC
 }  // namespace marker
 }  // namespace rocprofiler

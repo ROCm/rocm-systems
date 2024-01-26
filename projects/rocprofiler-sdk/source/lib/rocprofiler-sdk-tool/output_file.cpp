@@ -34,10 +34,17 @@ namespace fs = common::filesystem;
 std::pair<std::ostream*, void (*)(std::ostream*&)>
 get_output_stream(const std::string& fname, const std::string& ext)
 {
-    auto output_path      = fs::path{tool::format(tool::get_config().output_path)};
-    auto output_file_name = tool::format(tool::get_config().output_file);
+    auto cfg_output_path = tool::format(tool::get_config().output_path);
 
-    if(output_path.string().empty()) return {&std::clog, [](auto*&) {}};
+    if(cfg_output_path == "stdout" || cfg_output_path == "STDOUT")
+        return {&std::cout, [](auto*&) {}};
+    else if(cfg_output_path == "stderr" || cfg_output_path == "STDERR")
+        return {&std::cout, [](auto*&) {}};
+    else if(cfg_output_path.empty())
+        return {&std::clog, [](auto*&) {}};
+
+    auto output_path      = fs::path{cfg_output_path};
+    auto output_file_name = tool::format(tool::get_config().output_file);
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
         throw std::runtime_error{
@@ -50,13 +57,23 @@ get_output_stream(const std::string& fname, const std::string& ext)
     if(!_ofs && !*_ofs)
         throw std::runtime_error{fmt::format("Failed to open {} for output", output_file)};
 
-    LOG(ERROR) << "Results File: " << output_file;
+    LOG(ERROR) << "Opened result file: " << output_file;
 
     return {_ofs, [](std::ostream*& v) {
                 if(v) dynamic_cast<std::ofstream*>(v)->close();
                 delete v;
                 v = nullptr;
             }};
+}
+
+output_file::~output_file()
+{
+    if(m_stream)
+        LOG(INFO) << "Closing result file: " << m_name;
+    else
+        LOG(WARNING) << "output_file::~output_file does not have a output stream instance!";
+
+    m_dtor(m_stream);
 }
 }  // namespace tool
 }  // namespace rocprofiler

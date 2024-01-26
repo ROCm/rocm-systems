@@ -29,9 +29,9 @@
 
 typedef union rocprofiler_marker_api_retval_u
 {
-    int32_t  int32_t_retval;
-    int64_t  int64_t_retval;
-    uint64_t uint64_t_retval;
+    int32_t          int32_t_retval;
+    int64_t          int64_t_retval;
+    roctx_range_id_t roctx_range_id_t_retval;
 } rocprofiler_marker_api_retval_t;
 
 typedef union rocprofiler_marker_api_args_u
@@ -55,6 +55,10 @@ typedef union rocprofiler_marker_api_args_u
     {
         roctx_range_id_t id;
     } roctxRangeStop;
+    struct
+    {
+        roctx_thread_id_t* tid;
+    } roctxGetThreadId;
     struct
     {
         roctx_thread_id_t tid;
@@ -82,8 +86,4 @@ typedef union rocprofiler_marker_api_args_u
         const char*                name;
         const struct ihipStream_t* stream;
     } roctxNameHipStream;
-    struct
-    {
-        roctx_thread_id_t* tid;
-    } roctxGetThreadId;
 } rocprofiler_marker_api_args_t;

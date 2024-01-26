@@ -33,13 +33,19 @@ namespace rocprofiler
 {
 namespace marker
 {
-using roctx_api_table_t = ::roctxApiTable_t;
+using roctx_core_api_table_t = ::roctxCoreApiTable_t;
+using roctx_ctrl_api_table_t = ::roctxControlApiTable_t;
+using roctx_name_api_table_t = ::roctxNameApiTable_t;
 
-roctx_api_table_t&
+template <typename Tp>
+Tp*
 get_table();
 
 template <size_t OpIdx>
 struct roctx_table_lookup;
+
+template <typename Tp>
+struct roctx_table_id_lookup;
 
 template <size_t TableIdx>
 struct roctx_domain_info;
@@ -68,6 +74,7 @@ template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name);
 
+template <size_t TableIdx>
 void
 iterate_args(uint32_t                                              id,
              const rocprofiler_callback_tracing_marker_api_data_t& data,
@@ -82,10 +89,12 @@ template <size_t TableIdx>
 std::vector<uint32_t>
 get_ids();
 
+template <typename TableT>
 void
-copy_table(roctx_api_table_t* _orig);
+copy_table(TableT* _orig);
 
+template <typename TableT>
 void
-update_table(roctx_api_table_t* _orig);
+update_table(TableT* _orig);
 }  // namespace marker
 }  // namespace rocprofiler

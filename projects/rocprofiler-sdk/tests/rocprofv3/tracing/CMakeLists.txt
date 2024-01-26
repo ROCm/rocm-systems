@@ -31,8 +31,16 @@ set(tracing-env
     "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
     "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
 
-set_tests_properties(rocprofv3-test-trace-execute PROPERTIES LABELS "integration-tests"
-                                                             ENVIRONMENT "${tracing-env}")
+set_tests_properties(
+    rocprofv3-test-trace-execute
+    PROPERTIES
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${tracing-env}"
+        FAIL_REGULAR_EXPRESSION
+        "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
+    )
 
 foreach(FILENAME validate.py conftest.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
@@ -66,6 +74,6 @@ set_tests_properties(
                DEPENDS
                rocprofv3-test-trace-execute
                FAIL_REGULAR_EXPRESSION
-               "AssertionError|HSA_API|HIP_API|MARKER_API|KERNEL_DISPATCH|CODE_OBJECT"
+               "AssertionError"
                ATTACHED_FILES_ON_FAIL
                "${VALIDATION_FILES}")

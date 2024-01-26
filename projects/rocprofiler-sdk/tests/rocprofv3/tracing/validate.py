@@ -51,6 +51,8 @@ def test_memory_copy_trace(memory_copy_input_data):
     for row in memory_copy_input_data:
         assert row["Kind"] == "MEMORY_COPY"
 
+    assert len(memory_copy_input_data) == 2
+
     row = memory_copy_input_data[0]
     assert row["Direction"] == "HOST_TO_DEVICE"
     assert int(row["Source_Agent_Id"]) == 0
@@ -69,7 +71,11 @@ def test_memory_copy_trace(memory_copy_input_data):
 def test_marker_api_trace(marker_input_data):
     functions = []
     for row in marker_input_data:
-        assert row["Domain"] == "MARKER_API"
+        assert row["Domain"] in [
+            "MARKER_CORE_API",
+            "MARKER_CONTROL_API",
+            "MARKER_NAME_API",
+        ]
         assert int(row["Process_Id"]) > 0
         assert int(row["Thread_Id"]) == 0 or int(row["Thread_Id"]) >= int(
             row["Process_Id"]

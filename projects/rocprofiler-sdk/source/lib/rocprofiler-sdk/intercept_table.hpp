@@ -32,9 +32,9 @@ namespace intercept_table
 {
 template <typename... ApiTableT>
 void
-notify_runtime_api_registration(rocprofiler_runtime_library_t lib,
-                                uint64_t                      lib_version,
-                                uint64_t                      lib_instance,
-                                std::tuple<ApiTableT*...>     tables);
+notify_intercept_table_registration(rocprofiler_intercept_table_t lib,
+                                    uint64_t                      lib_version,
+                                    uint64_t                      lib_instance,
+                                    std::tuple<ApiTableT*...>     tables);
 }
 }  // namespace rocprofiler

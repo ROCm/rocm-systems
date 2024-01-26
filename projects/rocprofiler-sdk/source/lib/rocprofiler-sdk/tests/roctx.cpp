@@ -101,14 +101,14 @@ tool_tracing_ctrl_callback(rocprofiler_callback_tracing_record_t record,
     auto* cb_data = static_cast<callback_data*>(client_data);
 
     if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER &&
-       record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API &&
-       record.operation == ROCPROFILER_MARKER_API_ID_roctxProfilerPause)
+       record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API &&
+       record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause)
     {
         ROCPROFILER_CALL(rocprofiler_stop_context(cb_data->client_ctx), "pausing client context");
     }
     else if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
-            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API &&
-            record.operation == ROCPROFILER_MARKER_API_ID_roctxProfilerResume)
+            record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API &&
+            record.operation == ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume)
     {
         ROCPROFILER_CALL(rocprofiler_start_context(cb_data->client_ctx), "resuming client context");
     }
@@ -132,8 +132,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     static auto name_map = get_callback_tracing_names();
 
     EXPECT_EQ(name_map.kind_names.size(), ROCPROFILER_CALLBACK_TRACING_LAST);
-    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_CALLBACK_TRACING_MARKER_API).size(),
-              ROCPROFILER_MARKER_API_ID_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API).size(),
+              ROCPROFILER_MARKER_CORE_API_ID_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API).size(),
+              ROCPROFILER_MARKER_CONTROL_API_ID_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API).size(),
+              ROCPROFILER_MARKER_NAME_API_ID_LAST);
 
     std::cout << "[" << __FILE__ << ":" << __LINE__ << "] "
               << name_map.operation_names[record.kind][record.operation] << "\n"
@@ -181,9 +185,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operation_args(
                          record, info_data_cb, static_cast<void*>(&info_data_v)),
                      "Failure iterating trace operation args");
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_API)
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API)
     {
-        if(record.operation != ROCPROFILER_MARKER_API_ID_roctxRangePop)
+        if(record.operation != ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop)
         {
             EXPECT_GT(info_data_v.num_args, 0)
                 << name_map.operation_names[record.kind][record.operation]
@@ -210,8 +214,12 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
     static auto name_map = get_buffer_tracing_names();
 
     EXPECT_EQ(name_map.kind_names.size(), ROCPROFILER_BUFFER_TRACING_LAST);
-    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_API).size(),
-              ROCPROFILER_MARKER_API_ID_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API).size(),
+              ROCPROFILER_MARKER_CORE_API_ID_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API).size(),
+              ROCPROFILER_MARKER_CONTROL_API_ID_LAST);
+    EXPECT_EQ(name_map.operation_names.at(ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API).size(),
+              ROCPROFILER_MARKER_NAME_API_ID_LAST);
 
     auto v_records = std::vector<rocprofiler_buffer_tracing_marker_api_record_t*>{};
     v_records.reserve(num_headers);
@@ -224,7 +232,8 @@ tool_tracing_buffered(rocprofiler_context_id_t      context,
         auto hash = rocprofiler_record_header_compute_hash(header->category, header->kind);
         EXPECT_EQ(header->hash, hash);
         EXPECT_TRUE(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                    header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_API);
+                    (header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API ||
+                     header->kind == ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API));
 
         v_records.emplace_back(
             static_cast<rocprofiler_buffer_tracing_marker_api_record_t*>(header->payload));
@@ -300,39 +309,32 @@ TEST(rocprofiler_lib, roctx_callback_tracing)
         ROCPROFILER_CALL(rocprofiler_create_context(&cb_data->client_ctx),
                          "failed to create context");
 
-        auto operations = std::vector<uint32_t>{};
-        rocprofiler_iterate_callback_tracing_kind_operations(
-            ROCPROFILER_CALLBACK_TRACING_MARKER_API,
-            [](rocprofiler_callback_tracing_kind_t, uint32_t operation, void* data) {
-                auto* _ops = static_cast<std::vector<uint32_t>*>(data);
-                if(operation != ROCPROFILER_MARKER_API_ID_roctxProfilerPause &&
-                   operation != ROCPROFILER_MARKER_API_ID_roctxProfilerResume)
-                    _ops->emplace_back(operation);
-                return 0;
-            },
-            &operations);
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             cb_data->client_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                             nullptr,
+                             0,
+                             tool_tracing_callback,
+                             client_data),
+                         "callback tracing service failed to configure");
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_tracing_service(cb_data->client_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_MARKER_API,
-                                                           operations.data(),
-                                                           operations.size(),
-                                                           tool_tracing_callback,
-                                                           client_data),
-            "callback tracing service failed to configure");
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             cb_data->client_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,
+                             nullptr,
+                             0,
+                             tool_tracing_callback,
+                             client_data),
+                         "callback tracing service failed to configure");
 
-        auto pause_resume_ops =
-            std::array<uint32_t, 2>{ROCPROFILER_MARKER_API_ID_roctxProfilerPause,
-                                    ROCPROFILER_MARKER_API_ID_roctxProfilerResume};
-
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_tracing_service(pause_resume_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_MARKER_API,
-                                                           pause_resume_ops.data(),
-                                                           pause_resume_ops.size(),
-                                                           tool_tracing_ctrl_callback,
-                                                           client_data),
-            "callback tracing service failed to configure");
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             pause_resume_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+                             nullptr,
+                             0,
+                             tool_tracing_ctrl_callback,
+                             client_data),
+                         "callback tracing service failed to configure");
 
         int valid_ctx = 0;
         ROCPROFILER_CALL(rocprofiler_context_is_valid(cb_data->client_ctx, &valid_ctx),
@@ -416,19 +418,16 @@ TEST(rocprofiler_lib, roctx_buffered_tracing)
         cb_data->client_fini_func = fini_func;
 
         auto pause_resume_ctx = rocprofiler_context_id_t{};
-        auto pause_resume_ops =
-            std::array<uint32_t, 2>{ROCPROFILER_MARKER_API_ID_roctxProfilerPause,
-                                    ROCPROFILER_MARKER_API_ID_roctxProfilerResume};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
-        ROCPROFILER_CALL(
-            rocprofiler_configure_callback_tracing_service(pause_resume_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_MARKER_API,
-                                                           pause_resume_ops.data(),
-                                                           pause_resume_ops.size(),
-                                                           tool_tracing_ctrl_callback,
-                                                           client_data),
-            "callback tracing service failed to configure");
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             pause_resume_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+                             nullptr,
+                             0,
+                             tool_tracing_ctrl_callback,
+                             client_data),
+                         "callback tracing service failed to configure");
         ROCPROFILER_CALL(rocprofiler_start_context(pause_resume_ctx),
                          "rocprofiler context start failed");
 
@@ -444,23 +443,19 @@ TEST(rocprofiler_lib, roctx_buffered_tracing)
                                                    &cb_data->client_buffer),
                          "buffer creation failed");
 
-        auto operations = std::vector<uint32_t>{};
-        rocprofiler_iterate_buffer_tracing_kind_operations(
-            ROCPROFILER_BUFFER_TRACING_MARKER_API,
-            [](rocprofiler_buffer_tracing_kind_t, uint32_t operation, void* data) {
-                auto* _ops = static_cast<std::vector<uint32_t>*>(data);
-                if(operation != ROCPROFILER_MARKER_API_ID_roctxProfilerPause &&
-                   operation != ROCPROFILER_MARKER_API_ID_roctxProfilerResume)
-                    _ops->emplace_back(operation);
-                return 0;
-            },
-            &operations);
+        ROCPROFILER_CALL(
+            rocprofiler_configure_buffer_tracing_service(cb_data->client_ctx,
+                                                         ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
+                                                         nullptr,
+                                                         0,
+                                                         cb_data->client_buffer),
+            "buffer tracing service failed to configure");
 
         ROCPROFILER_CALL(
             rocprofiler_configure_buffer_tracing_service(cb_data->client_ctx,
-                                                         ROCPROFILER_BUFFER_TRACING_MARKER_API,
-                                                         operations.data(),
-                                                         operations.size(),
+                                                         ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,
+                                                         nullptr,
+                                                         0,
                                                          cb_data->client_buffer),
             "buffer tracing service failed to configure");
 

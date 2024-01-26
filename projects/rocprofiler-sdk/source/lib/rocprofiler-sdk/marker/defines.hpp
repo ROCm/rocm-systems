@@ -274,13 +274,28 @@
     {                                                                                              \
     namespace marker                                                                               \
     {                                                                                              \
+    namespace                                                                                      \
+    {                                                                                              \
+    template <>                                                                                    \
+    auto* get_table<TABLE_ID>()                                                                    \
+    {                                                                                              \
+        return get_table_impl<TYPE>();                                                             \
+    }                                                                                              \
+    }                                                                                              \
+                                                                                                   \
     template <>                                                                                    \
     struct roctx_table_lookup<TABLE_ID>                                                            \
     {                                                                                              \
         using type = TYPE;                                                                         \
-        auto& operator()(roctx_api_table_t& _v) const { return _v; }                               \
-        auto& operator()(roctx_api_table_t* _v) const { return *_v; }                              \
-        auto& operator()() const { return (*this)(get_table()); }                                  \
+        auto& operator()(type& _v) const { return _v; }                                            \
+        auto& operator()(type* _v) const { return *_v; }                                           \
+        auto& operator()() const { return (*this)(get_table<TABLE_ID>()); }                        \
+    };                                                                                             \
+                                                                                                   \
+    template <>                                                                                    \
+    struct roctx_table_id_lookup<TYPE>                                                             \
+    {                                                                                              \
+        static constexpr auto value = TABLE_ID;                                                    \
     };                                                                                             \
     }                                                                                              \
     }

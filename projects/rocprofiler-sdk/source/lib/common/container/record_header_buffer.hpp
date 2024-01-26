@@ -134,11 +134,12 @@ private:
     void write_unlock();
 
 private:
-    std::atomic<int64_t> m_locked  = {0};
-    std::atomic<size_t>  m_index   = {};
-    std::shared_mutex    m_shared  = {};
-    base_buffer_t        m_buffer  = {};
-    record_vec_t         m_headers = {};
+    std::atomic<int64_t> m_requested = {0};
+    std::atomic<int64_t> m_locked    = {0};
+    std::atomic<size_t>  m_index     = {};
+    std::shared_mutex    m_shared    = {};
+    base_buffer_t        m_buffer    = {};
+    record_vec_t         m_headers   = {};
 };
 
 inline bool
@@ -218,7 +219,7 @@ record_header_buffer::free() const
 inline auto
 record_header_buffer::is_empty() const
 {
-    return m_buffer.is_empty() || m_headers.empty();
+    return (m_buffer.is_empty() && m_requested.load() == 0) || m_headers.empty();
 }
 
 inline auto
@@ -235,6 +236,9 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
 
     constexpr auto request_size = sizeof(Tp);
 
+    // notify there was a request
+    m_requested.fetch_add(1);
+
     // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
     // the lock will be short-lived so hopefully, it will scale fine
     write_lock();
@@ -244,20 +248,25 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
     read_lock();
     if(_addr)
     {
-        // placement new
-        new(_addr) Tp{_v};
-
         // if there is space in the buffer, atomically get an index
         // for where the header record should be placed.
         // NOTE: m_headers was resized to be large enough to accomodate
         // sizeof(Tp) == 1 for every entry in buffer
-        auto                        idx    = m_index.fetch_add(1, std::memory_order_release);
+        auto idx = m_index.fetch_add(1, std::memory_order_release);
+
+        // placement new
+        new(_addr) Tp{_v};
+
         rocprofiler_record_header_t record = {};
         record.hash                        = _hash;
         record.payload                     = _addr;
         m_headers.at(idx)                  = record;
     }
     read_unlock();
+
+    // remove notification of request
+    m_requested.fetch_sub(1);
+
     return (_addr != nullptr);
 }
 
@@ -269,6 +278,9 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
 
     constexpr auto request_size = sizeof(Tp);
 
+    // notify there was a request
+    m_requested.fetch_add(1);
+
     // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
     // the lock will be short-lived so hopefully, it will scale fine
     write_lock();
@@ -278,20 +290,25 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
     read_lock();
     if(_addr)
     {
-        // placement new
-        new(_addr) Tp{_v};
-
         // if there is space in the buffer, atomically get an index
         // for where the header record should be placed.
         // NOTE: m_headers was resized to be large enough to accomodate
         // sizeof(Tp) == 1 for every entry in buffer
-        auto idx                   = m_index.fetch_add(1, std::memory_order_release);
+        auto idx = m_index.fetch_add(1, std::memory_order_release);
+
+        // placement new
+        new(_addr) Tp{_v};
+
         m_headers.at(idx)          = rocprofiler_record_header_t{};
         m_headers.at(idx).category = _category;
         m_headers.at(idx).kind     = _kind;
         m_headers.at(idx).payload  = _addr;
     }
     read_unlock();
+
+    // remove notification of request
+    m_requested.fetch_sub(1);
+
     return (_addr != nullptr);
 }
 

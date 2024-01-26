@@ -49,7 +49,7 @@ struct output_file
     template <size_t N>
     output_file(std::string name, csv::csv_encoder<N>, std::array<std::string_view, N>&& header);
 
-    ~output_file() { m_dtor(m_stream); }
+    ~output_file();
 
     output_file(const output_file&) = delete;
     output_file& operator=(const output_file&) = delete;
@@ -60,13 +60,7 @@ struct output_file
     std::ostream& operator<<(T&& value)
     {
         auto _lk = std::unique_lock<std::mutex>{m_mutex};
-        return ((m_stream) ? *m_stream : std::cerr) << std::forward<T>(value);
-    }
-
-    std::ostream& operator<<(std::ostream& (*func)(std::ostream&) )
-    {
-        auto _lk = std::unique_lock<std::mutex>{m_mutex};
-        return ((m_stream) ? *m_stream : std::cerr) << func;
+        return ((m_stream) ? *m_stream : std::cerr) << std::forward<T>(value) << std::flush;
     }
 
     operator bool() const { return m_stream != nullptr; }

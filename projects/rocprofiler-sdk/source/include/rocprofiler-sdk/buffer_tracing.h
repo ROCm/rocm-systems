@@ -54,13 +54,14 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                          size;             ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;             ///< ::ROCPROFILER_CALLBACK_TRACING_HIP_API
-    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
-    rocprofiler_tracing_operation_t   operation;        ///< ::rocprofiler_hip_api_id_t
-    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+    uint64_t                          size;            ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;            ///< ::ROCPROFILER_CALLBACK_TRACING_HIP_API
+    rocprofiler_correlation_id_t      correlation_id;  ///< correlation ids for record
+    rocprofiler_tracing_operation_t
+        operation;  ///< ::rocprofiler_hip_api_id_t or ::rocprofiler_hip_compiler_api_id_t
+    rocprofiler_timestamp_t start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t thread_id;        ///< id for thread generating this record
 } rocprofiler_buffer_tracing_hip_api_record_t;
 
 /**
@@ -69,14 +70,16 @@ typedef struct
 typedef struct
 {
     uint64_t                          size;  ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_CALLBACK_TRACING_MARKER_API
-    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
-    rocprofiler_tracing_operation_t   operation;        ///< ::rocprofiler_marker_api_id_t
-    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
-    uint64_t                          marker_id;        ///< rocprofiler_marker_id_t
-    // const char* message; // (Need Review?)
+    rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                                             ///< ::ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
+                                             ///< or ::ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API
+    rocprofiler_correlation_id_t correlation_id;  ///< correlation ids for record
+    rocprofiler_tracing_operation_t
+        operation;  ///< ::rocprofiler_marker_core_api_id_t, ::rocprofiler_marker_control_api_id_t,
+                    ///< or ::rocprofiler_marker_name_api_id_t
+    rocprofiler_timestamp_t start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t thread_id;        ///< id for thread generating this record
 } rocprofiler_buffer_tracing_marker_api_record_t;
 
 /**

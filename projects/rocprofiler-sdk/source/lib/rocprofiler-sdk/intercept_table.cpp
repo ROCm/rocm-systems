@@ -46,21 +46,23 @@ namespace intercept_table
 {
 namespace
 {
-template <rocprofiler_runtime_library_t... Idx>
-using library_sequence_t = std::integer_sequence<rocprofiler_runtime_library_t, Idx...>;
+template <rocprofiler_intercept_table_t... Idx>
+using library_sequence_t = std::integer_sequence<rocprofiler_intercept_table_t, Idx...>;
 
 // this is used to loop over the different libraries
-constexpr auto intercept_library_seq = library_sequence_t<ROCPROFILER_HSA_LIBRARY,
-                                                          ROCPROFILER_HIP_RUNTIME_LIBRARY,
-                                                          ROCPROFILER_MARKER_LIBRARY,
-                                                          ROCPROFILER_HIP_COMPILER_LIBRARY>{};
+constexpr auto intercept_library_seq = library_sequence_t<ROCPROFILER_HSA_TABLE,
+                                                          ROCPROFILER_HIP_RUNTIME_TABLE,
+                                                          ROCPROFILER_HIP_COMPILER_TABLE,
+                                                          ROCPROFILER_MARKER_CORE_TABLE,
+                                                          ROCPROFILER_MARKER_CONTROL_TABLE,
+                                                          ROCPROFILER_MARKER_NAME_TABLE>{};
 
 // check that intercept_library_seq is up to date
-static_assert((1 << (intercept_library_seq.size())) == ROCPROFILER_LIBRARY_LAST,
+static_assert((1 << (intercept_library_seq.size() - 1)) == ROCPROFILER_TABLE_LAST,
               "Update intercept_library_seq to include new libraries");
 
 // data structure holding list of callbacks
-template <rocprofiler_runtime_library_t LibT>
+template <rocprofiler_intercept_table_t LibT>
 struct intercept
 {
     static constexpr auto value = LibT;
@@ -71,7 +73,7 @@ struct intercept
 };
 
 // static accessor for intercept instance
-template <rocprofiler_runtime_library_t LibT>
+template <rocprofiler_intercept_table_t LibT>
 auto&
 get_intercept()
 {
@@ -80,7 +82,7 @@ get_intercept()
 }
 
 // adds callbacks to intercept instance(s)
-template <rocprofiler_runtime_library_t... Idx>
+template <rocprofiler_intercept_table_t... Idx>
 void
 update_intercepts(rocprofiler_intercept_library_cb_t cb,
                   int                                libs,
@@ -109,13 +111,13 @@ get_void_array(std::tuple<Tp*...> data, std::index_sequence<Idx...>)
 };
 
 // invokes creation notifiers
-template <typename... ApiTableT, rocprofiler_runtime_library_t... Idx>
+template <typename... ApiTableT, rocprofiler_intercept_table_t... Idx>
 void
-execute_intercepts(rocprofiler_runtime_library_t lib,
+execute_intercepts(rocprofiler_intercept_table_t lib,
                    uint64_t                      lib_version,
                    uint64_t                      lib_instance,
                    std::tuple<ApiTableT*...>     tables,
-                   std::integer_sequence<rocprofiler_runtime_library_t, Idx...>)
+                   std::integer_sequence<rocprofiler_intercept_table_t, Idx...>)
 {
     auto execute = [lib, lib_version, lib_instance, tables](auto& notifier) {
         if(((lib & notifier.value) == notifier.value))
@@ -145,52 +147,59 @@ execute_intercepts(rocprofiler_runtime_library_t lib,
 
 template <typename... ApiTableT>
 void
-notify_runtime_api_registration(rocprofiler_runtime_library_t lib,
-                                uint64_t                      lib_version,
-                                uint64_t                      lib_instance,
-                                std::tuple<ApiTableT*...>     tables)
+notify_intercept_table_registration(rocprofiler_intercept_table_t lib,
+                                    uint64_t                      lib_version,
+                                    uint64_t                      lib_instance,
+                                    std::tuple<ApiTableT*...>     tables)
 {
     execute_intercepts(lib, lib_version, lib_instance, tables, intercept_library_seq);
 }
 
 // template instantiation for HsaApiTable
-template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
-                                              uint64_t,
-                                              uint64_t,
-                                              std::tuple<HsaApiTable*>);
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
+                                                  std::tuple<HsaApiTable*>);
 
-template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
-                                              uint64_t,
-                                              uint64_t,
-                                              std::tuple<roctxApiTable_t*>);
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
+                                                  std::tuple<roctxCoreApiTable_t*>);
 
-template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
-                                              uint64_t,
-                                              uint64_t,
-                                              std::tuple<HipDispatchTable*>);
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
+                                                  std::tuple<roctxControlApiTable_t*>);
 
-template void notify_runtime_api_registration(rocprofiler_runtime_library_t,
-                                              uint64_t,
-                                              uint64_t,
-                                              std::tuple<HipCompilerDispatchTable*>);
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
+                                                  std::tuple<roctxNameApiTable_t*>);
+
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
+                                                  std::tuple<HipDispatchTable*>);
+
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
+                                                  std::tuple<HipCompilerDispatchTable*>);
 }  // namespace intercept_table
 }  // namespace rocprofiler
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_at_runtime_api_registration(rocprofiler_intercept_library_cb_t callback,
-                                        int                                libs,
-                                        void*                              data)
+rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t callback,
+                                            int                                libs,
+                                            void*                              data)
 {
     // if this function is invoked after initialization, we cannot guarantee that the runtime
     // intercept API has not already be registered and returned to the runtime.
     if(rocprofiler::registration::get_init_status() > 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    if((libs & ROCPROFILER_LIBRARY) == ROCPROFILER_LIBRARY)
-        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
-    else if((libs & ROCPROFILER_MARKER_LIBRARY) == ROCPROFILER_MARKER_LIBRARY)
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    LOG_IF(WARNING, libs == 0) << "invoking " << __FUNCTION__ << " with a value of zero is a no-op";
 
     rocprofiler::intercept_table::update_intercepts(
         callback, libs, data, rocprofiler::intercept_table::intercept_library_seq);

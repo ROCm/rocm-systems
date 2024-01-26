@@ -128,12 +128,14 @@ typedef enum  // NOLINT(performance-enum-size)
 typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_CALLBACK_TRACING_NONE = 0,
-    ROCPROFILER_CALLBACK_TRACING_HSA_API,           ///< Callbacks for HSA functions
-    ROCPROFILER_CALLBACK_TRACING_HIP_API,           ///< Callbacks for HIP functions
-    ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,  ///< Callbacks for HIP compiler functions
-    ROCPROFILER_CALLBACK_TRACING_MARKER_API,        ///< Callbacks for ROCTx functions
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,       ///< Callbacks for code object info
-    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,   ///< Callbacks for kernel dispatches
+    ROCPROFILER_CALLBACK_TRACING_HSA_API,             ///< Callbacks for HSA functions
+    ROCPROFILER_CALLBACK_TRACING_HIP_API,             ///< Callbacks for HIP functions
+    ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,    ///< Callbacks for HIP compiler functions
+    ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,     ///< Callbacks for ROCTx functions
+    ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,  ///< Callbacks for ROCTx functions
+    ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,     ///< Callbacks for ROCTx functions
+    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,         ///< Callbacks for code object info
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,     ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -146,7 +148,9 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_HSA_API,               ///< Buffer HSA function calls
     ROCPROFILER_BUFFER_TRACING_HIP_API,               ///< Buffer HIP function calls
     ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,      ///< Buffer HIP compiler function calls
-    ROCPROFILER_BUFFER_TRACING_MARKER_API,            ///< Buffer ROCTx function calls
+    ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,       ///< Buffer ROCTx core function calls
+    ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,    ///< Buffer ROCTx name function calls
+    ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,       ///< Buffer ROCTx name function calls
     ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,           ///< Buffer memory copy info
     ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,       ///< Buffer kernel dispatch info
     ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,        ///< Buffer page migration info
@@ -218,19 +222,31 @@ typedef enum  // NOLINT(performance-enum-size)
 
 /**
  * @brief Enumeration for specifying runtime libraries supported by rocprofiler. This enumeration is
- * used for intercept tables and thread creation callbacks. @see INTERCEPT_TABLE and @see
- * INTERNAL_THREADING.
+ * used for thread creation callbacks. @see INTERNAL_THREADING.
  */
 typedef enum
 {
-    ROCPROFILER_LIBRARY              = (1 << 0),
-    ROCPROFILER_HSA_LIBRARY          = (1 << 1),
-    ROCPROFILER_HIP_LIBRARY          = (1 << 2),
-    ROCPROFILER_HIP_RUNTIME_LIBRARY  = ROCPROFILER_HIP_LIBRARY,
-    ROCPROFILER_MARKER_LIBRARY       = (1 << 3),
-    ROCPROFILER_HIP_COMPILER_LIBRARY = (1 << 4),
-    ROCPROFILER_LIBRARY_LAST         = ROCPROFILER_HIP_COMPILER_LIBRARY,
+    ROCPROFILER_LIBRARY        = (1 << 0),
+    ROCPROFILER_HSA_LIBRARY    = (1 << 1),
+    ROCPROFILER_HIP_LIBRARY    = (1 << 2),
+    ROCPROFILER_MARKER_LIBRARY = (1 << 3),
+    ROCPROFILER_LIBRARY_LAST   = ROCPROFILER_MARKER_LIBRARY,
 } rocprofiler_runtime_library_t;
+
+/**
+ * @brief Enumeration for specifying intercept tables supported by rocprofiler. This enumeration is
+ * used for intercept tables. @see INTERCEPT_TABLE.
+ */
+typedef enum
+{
+    ROCPROFILER_HSA_TABLE            = (1 << 0),
+    ROCPROFILER_HIP_RUNTIME_TABLE    = (1 << 1),
+    ROCPROFILER_HIP_COMPILER_TABLE   = (1 << 2),
+    ROCPROFILER_MARKER_CORE_TABLE    = (1 << 3),
+    ROCPROFILER_MARKER_CONTROL_TABLE = (1 << 4),
+    ROCPROFILER_MARKER_NAME_TABLE    = (1 << 5),
+    ROCPROFILER_TABLE_LAST           = ROCPROFILER_MARKER_NAME_TABLE,
+} rocprofiler_intercept_table_t;
 
 //--------------------------------------------------------------------------------------//
 //

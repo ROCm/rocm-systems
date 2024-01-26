@@ -27,18 +27,30 @@
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_MARKER_API_ID_NONE       = -1,
-    ROCPROFILER_MARKER_API_ID_roctxMarkA = 0,
-    ROCPROFILER_MARKER_API_ID_roctxRangePushA,
-    ROCPROFILER_MARKER_API_ID_roctxRangePop,
-    ROCPROFILER_MARKER_API_ID_roctxRangeStartA,
-    ROCPROFILER_MARKER_API_ID_roctxRangeStop,
-    ROCPROFILER_MARKER_API_ID_roctxProfilerPause,
-    ROCPROFILER_MARKER_API_ID_roctxProfilerResume,
-    ROCPROFILER_MARKER_API_ID_roctxNameOsThread,
-    ROCPROFILER_MARKER_API_ID_roctxNameHsaAgent,
-    ROCPROFILER_MARKER_API_ID_roctxNameHipDevice,
-    ROCPROFILER_MARKER_API_ID_roctxNameHipStream,
-    ROCPROFILER_MARKER_API_ID_roctxGetThreadId,
-    ROCPROFILER_MARKER_API_ID_LAST,
-} rocprofiler_marker_api_id_t;
+    ROCPROFILER_MARKER_CORE_API_ID_NONE       = -1,
+    ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA = 0,
+    ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA,
+    ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop,
+    ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA,
+    ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop,
+    ROCPROFILER_MARKER_CORE_API_ID_roctxGetThreadId,
+    ROCPROFILER_MARKER_CORE_API_ID_LAST,
+} rocprofiler_marker_core_api_id_t;
+
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_MARKER_CONTROL_API_ID_NONE               = -1,
+    ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerPause = 0,
+    ROCPROFILER_MARKER_CONTROL_API_ID_roctxProfilerResume,
+    ROCPROFILER_MARKER_CONTROL_API_ID_LAST,
+} rocprofiler_marker_control_api_id_t;
+
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_MARKER_NAME_API_ID_NONE              = -1,
+    ROCPROFILER_MARKER_NAME_API_ID_roctxNameOsThread = 0,
+    ROCPROFILER_MARKER_NAME_API_ID_roctxNameHsaAgent,
+    ROCPROFILER_MARKER_NAME_API_ID_roctxNameHipDevice,
+    ROCPROFILER_MARKER_NAME_API_ID_roctxNameHipStream,
+    ROCPROFILER_MARKER_NAME_API_ID_LAST,
+} rocprofiler_marker_name_api_id_t;

@@ -65,7 +65,9 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(NONE)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HSA_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CORE_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CONTROL_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_NAME_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MEMORY_COPY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(KERNEL_DISPATCH)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(PAGE_MIGRATION)
@@ -161,8 +163,13 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         val = rocprofiler::hsa::name_by_id(operation);
     else if(kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
         val = rocprofiler::hsa::async_copy::name_by_id(operation);
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_API)
-        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>(operation);
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API)
+        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>(operation);
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API)
+        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>(
+            operation);
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API)
+        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>(operation);
     else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
         val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(operation);
     else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
@@ -207,8 +214,12 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         ops = rocprofiler::hsa::get_ids();
     else if(kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
         ops = rocprofiler::hsa::async_copy::get_ids();
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_API)
-        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxApi>();
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API)
+        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>();
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API)
+        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>();
+    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API)
+        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>();
     else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
         ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>();
     else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)

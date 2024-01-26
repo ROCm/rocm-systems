@@ -173,14 +173,14 @@ generate_wrapper(const char* name, RetT (*func)(Args...))
     TABLE->FUNC##_fn = generate_wrapper<__COUNTER__>(#FUNC, TABLE->FUNC##_fn)
 
 void
-api_registration_callback(rocprofiler_runtime_library_t type,
+api_registration_callback(rocprofiler_intercept_table_t type,
                           uint64_t                      lib_version,
                           uint64_t                      lib_instance,
                           void**                        tables,
                           uint64_t                      num_tables,
                           void*                         user_data)
 {
-    if(type != ROCPROFILER_HSA_LIBRARY)
+    if(type != ROCPROFILER_HSA_TABLE)
         throw std::runtime_error{"unexpected library type: " +
                                  std::to_string(static_cast<int>(type))};
     if(lib_instance != 0) throw std::runtime_error{"multiple instances of HSA runtime library"};
@@ -282,10 +282,11 @@ rocprofiler_configure(uint32_t                 version,
     client_tool_data->emplace_back(
         client::source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
 
-    ROCPROFILER_CALL(rocprofiler_at_runtime_api_registration(client::api_registration_callback,
-                                                             ROCPROFILER_HSA_LIBRARY,
-                                                             static_cast<void*>(client_tool_data)),
-                     "runtime api registration");
+    ROCPROFILER_CALL(
+        rocprofiler_at_intercept_table_registration(client::api_registration_callback,
+                                                    ROCPROFILER_HSA_TABLE,
+                                                    static_cast<void*>(client_tool_data)),
+        "runtime api registration");
 
     // create configure data
     static auto cfg =

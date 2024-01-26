@@ -657,8 +657,8 @@ rocprofiler_set_api_table(const char* name,
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_runtime_api_table);
 
-        rocprofiler::intercept_table::notify_runtime_api_registration(
-            ROCPROFILER_HIP_RUNTIME_LIBRARY,
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_HIP_RUNTIME_TABLE,
             lib_version,
             lib_instance,
             std::make_tuple(hip_runtime_api_table));
@@ -680,8 +680,8 @@ rocprofiler_set_api_table(const char* name,
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_compiler_api_table);
 
-        rocprofiler::intercept_table::notify_runtime_api_registration(
-            ROCPROFILER_HIP_COMPILER_LIBRARY,
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_HIP_COMPILER_TABLE,
             lib_version,
             lib_instance,
             std::make_tuple(hip_compiler_api_table));
@@ -715,30 +715,42 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::update_table(hsa_api_table);
 
         // allow tools to install API wrappers
-        rocprofiler::intercept_table::notify_runtime_api_registration(
-            ROCPROFILER_HSA_LIBRARY, lib_version, lib_instance, std::make_tuple(hsa_api_table));
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_HSA_TABLE, lib_version, lib_instance, std::make_tuple(hsa_api_table));
     }
     else if(std::string_view{name} == "roctx")
     {
         // pass to roctx init
-        LOG_IF(ERROR, num_tables > 1)
+        LOG_IF(ERROR, num_tables >= 3)
             << " rocprofiler expected ROCTX library to pass 1 API table, not " << num_tables;
 
-        auto* roctx_api_table = static_cast<roctxApiTable_t*>(*tables);
+        auto* roctx_core = static_cast<roctxCoreApiTable_t*>(tables[0]);
+        auto* roctx_ctrl = static_cast<roctxControlApiTable_t*>(tables[1]);
+        auto* roctx_name = static_cast<roctxNameApiTable_t*>(tables[2]);
 
         // any internal modifications to the roctxApiTable_t need to be done before we make
         // the copy or else those modifications will be lost when ROCTx tracing is enabled because
         // the ROCTx tracing invokes the function pointers from the copy below
-        rocprofiler::marker::copy_table(roctx_api_table);
+        rocprofiler::marker::copy_table(roctx_core);
+        rocprofiler::marker::copy_table(roctx_ctrl);
+        rocprofiler::marker::copy_table(roctx_name);
 
         // install rocprofiler API wrappers
-        rocprofiler::marker::update_table(roctx_api_table);
+        rocprofiler::marker::update_table(roctx_core);
+        rocprofiler::marker::update_table(roctx_ctrl);
+        rocprofiler::marker::update_table(roctx_name);
 
-        rocprofiler::intercept_table::notify_runtime_api_registration(
-            ROCPROFILER_MARKER_LIBRARY,
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_MARKER_CORE_TABLE, lib_version, lib_instance, std::make_tuple(roctx_core));
+
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_MARKER_CONTROL_TABLE,
             lib_version,
             lib_instance,
-            std::make_tuple(roctx_api_table));
+            std::make_tuple(roctx_ctrl));
+
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_MARKER_NAME_TABLE, lib_version, lib_instance, std::make_tuple(roctx_name));
     }
     else
     {

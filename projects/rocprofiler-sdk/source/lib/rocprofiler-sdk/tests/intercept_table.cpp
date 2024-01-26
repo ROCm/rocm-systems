@@ -40,6 +40,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <initializer_list>
 #include <iostream>
 #include <random>
 #include <sstream>
@@ -216,7 +217,7 @@ generate_wrapper(const char* name, RetT (*func)(Args...))
     TABLE->FUNC##_fn = generate_wrapper<__COUNTER__>(#FUNC, TABLE->FUNC##_fn)
 
 void
-api_registration_callback(rocprofiler_runtime_library_t type,
+api_registration_callback(rocprofiler_intercept_table_t type,
                           uint64_t                      lib_version,
                           uint64_t                      lib_instance,
                           void**                        tables,
@@ -227,7 +228,7 @@ api_registration_callback(rocprofiler_runtime_library_t type,
 
     cb_data->client_workflow_count++;
 
-    EXPECT_EQ(type, ROCPROFILER_HSA_LIBRARY) << "unexpected library type: " << type;
+    EXPECT_EQ(type, ROCPROFILER_HSA_TABLE) << "unexpected library type: " << type;
     EXPECT_EQ(lib_instance, 0) << "multiple instances of HSA runtime library";
     EXPECT_EQ(num_tables, 1) << "expected only one table of type HsaApiTable";
     EXPECT_GT(lib_version, 0) << "expected library version > 0";
@@ -238,6 +239,26 @@ api_registration_callback(rocprofiler_runtime_library_t type,
     GENERATE_WRAPPER(hsa_api_table->core_, hsa_iterate_agents);
     GENERATE_WRAPPER(hsa_api_table->core_, hsa_shut_down);
 }
+
+using init_list_t           = std::initializer_list<int>;
+auto valid_intercept_combos = init_list_t{
+    (ROCPROFILER_HSA_TABLE | ROCPROFILER_HIP_RUNTIME_TABLE | ROCPROFILER_HIP_COMPILER_TABLE |
+     ROCPROFILER_MARKER_CORE_TABLE | ROCPROFILER_MARKER_CONTROL_TABLE |
+     ROCPROFILER_MARKER_NAME_TABLE),
+    (ROCPROFILER_HSA_TABLE | ROCPROFILER_HIP_RUNTIME_TABLE | ROCPROFILER_HIP_COMPILER_TABLE |
+     ROCPROFILER_MARKER_CORE_TABLE | ROCPROFILER_MARKER_CONTROL_TABLE),
+    (ROCPROFILER_HSA_TABLE | ROCPROFILER_HIP_RUNTIME_TABLE | ROCPROFILER_HIP_COMPILER_TABLE |
+     ROCPROFILER_MARKER_CORE_TABLE),
+    (ROCPROFILER_HSA_TABLE | ROCPROFILER_HIP_RUNTIME_TABLE | ROCPROFILER_HIP_COMPILER_TABLE),
+    (ROCPROFILER_HSA_TABLE | ROCPROFILER_HIP_RUNTIME_TABLE),
+    (ROCPROFILER_HSA_TABLE),
+    (ROCPROFILER_HIP_RUNTIME_TABLE | ROCPROFILER_HIP_COMPILER_TABLE |
+     ROCPROFILER_MARKER_CORE_TABLE | ROCPROFILER_MARKER_CONTROL_TABLE |
+     ROCPROFILER_MARKER_NAME_TABLE),
+    (ROCPROFILER_HIP_COMPILER_TABLE | ROCPROFILER_MARKER_CORE_TABLE |
+     ROCPROFILER_MARKER_CONTROL_TABLE | ROCPROFILER_MARKER_NAME_TABLE),
+    (ROCPROFILER_MARKER_CORE_TABLE | ROCPROFILER_MARKER_CONTROL_TABLE |
+     ROCPROFILER_MARKER_NAME_TABLE)};
 }  // namespace
 
 TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
@@ -321,34 +342,14 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
         cb_data.client_id       = client_id;
         cb_data.client_id->name = ::testing::UnitTest::GetInstance()->current_test_info()->name();
 
-        ROCPROFILER_CALL_EXPECT(
-            rocprofiler_at_runtime_api_registration(api_registration_callback,
-                                                    ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY |
-                                                        ROCPROFILER_HIP_LIBRARY |
-                                                        ROCPROFILER_MARKER_LIBRARY,
-                                                    static_cast<void*>(&cb_data)),
-            "function should return invalid argument if ROCPROFILER_LIBRARY included",
-            ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
-
-        using init_list_t = std::initializer_list<int>;
-        for(auto itr : init_list_t{(ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-                                    ROCPROFILER_HIP_COMPILER_LIBRARY | ROCPROFILER_MARKER_LIBRARY),
-                                   (ROCPROFILER_HSA_LIBRARY | ROCPROFILER_MARKER_LIBRARY),
-                                   (ROCPROFILER_MARKER_LIBRARY)})
+        for(auto itr : valid_intercept_combos)
         {
             ROCPROFILER_CALL_EXPECT(
-                rocprofiler_at_runtime_api_registration(
+                rocprofiler_at_intercept_table_registration(
                     api_registration_callback, itr, static_cast<void*>(&cb_data)),
                 "test should be updated if new (non-HSA, non-HIP) intercept table is supported",
-                ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED);
+                ROCPROFILER_STATUS_SUCCESS);
         }
-
-        ROCPROFILER_CALL(rocprofiler_at_runtime_api_registration(
-                             api_registration_callback,
-                             ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-                                 ROCPROFILER_HIP_COMPILER_LIBRARY,
-                             static_cast<void*>(&cb_data)),
-                         "HSA and HIP intercept table registration failed");
 
         return &cfg_result;
     };
@@ -381,7 +382,13 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
 
     cb_data.client_fini_func(*cb_data.client_id);
 
-    EXPECT_EQ(cb_data.client_workflow_count, 3);
+    size_t num_hsa_intercepts = 0;
+    for(auto itr : valid_intercept_combos)
+    {
+        if((itr & ROCPROFILER_HSA_TABLE) == ROCPROFILER_HSA_TABLE) ++num_hsa_intercepts;
+    }
+
+    EXPECT_EQ(cb_data.client_workflow_count, num_hsa_intercepts + 2);
 
     for(auto itr : cb_data.client_callback_count)
     {
@@ -498,43 +505,14 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
         cb_data.client_id       = client_id;
         cb_data.client_id->name = ::testing::UnitTest::GetInstance()->current_test_info()->name();
 
-        ROCPROFILER_CALL_EXPECT(
-            rocprofiler_at_runtime_api_registration(
-                api_registration_callback,
-                ROCPROFILER_LIBRARY | ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-                    ROCPROFILER_HIP_COMPILER_LIBRARY | ROCPROFILER_MARKER_LIBRARY,
-                static_cast<void*>(&cb_data)),
-            "function should return invalid argument if ROCPROFILER_LIBRARY included",
-            ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT);
-
-        using init_list_t = std::initializer_list<int>;
-        for(auto itr : init_list_t{(ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-                                    ROCPROFILER_HIP_COMPILER_LIBRARY | ROCPROFILER_MARKER_LIBRARY),
-                                   (ROCPROFILER_HSA_LIBRARY | ROCPROFILER_MARKER_LIBRARY),
-                                   (ROCPROFILER_HIP_LIBRARY | ROCPROFILER_MARKER_LIBRARY),
-                                   (ROCPROFILER_HIP_COMPILER_LIBRARY | ROCPROFILER_MARKER_LIBRARY),
-                                   (ROCPROFILER_MARKER_LIBRARY)})
+        for(auto itr : valid_intercept_combos)
         {
             ROCPROFILER_CALL_EXPECT(
-                rocprofiler_at_runtime_api_registration(
+                rocprofiler_at_intercept_table_registration(
                     api_registration_callback, itr, static_cast<void*>(&cb_data)),
                 "test should be updated if new (non-HSA, non-HIP) intercept table is supported",
-                ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED);
+                ROCPROFILER_STATUS_SUCCESS);
         }
-
-        ROCPROFILER_CALL_EXPECT(rocprofiler_at_runtime_api_registration(
-                                    api_registration_callback,
-                                    ROCPROFILER_HSA_LIBRARY | ROCPROFILER_MARKER_LIBRARY,
-                                    static_cast<void*>(&cb_data)),
-                                "test should be updated if ROCTx intercept table is supported",
-                                ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED);
-
-        ROCPROFILER_CALL(rocprofiler_at_runtime_api_registration(
-                             api_registration_callback,
-                             ROCPROFILER_HSA_LIBRARY | ROCPROFILER_HIP_LIBRARY |
-                                 ROCPROFILER_HIP_COMPILER_LIBRARY,
-                             static_cast<void*>(&cb_data)),
-                         "HSA and HIP API intercept table registration failed");
 
         return &cfg_result;
     };
@@ -578,7 +556,13 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
 
     cb_data.client_fini_func(*cb_data.client_id);
 
-    EXPECT_EQ(cb_data.client_workflow_count, 3);
+    size_t num_hsa_intercepts = 0;
+    for(auto itr : valid_intercept_combos)
+    {
+        if((itr & ROCPROFILER_HSA_TABLE) == ROCPROFILER_HSA_TABLE) ++num_hsa_intercepts;
+    }
+
+    EXPECT_EQ(cb_data.client_workflow_count, num_hsa_intercepts + 2);
 
     auto get_tool_count = [](std::string_view func_name) {
         // we already checked that first == second so we can just check first here
