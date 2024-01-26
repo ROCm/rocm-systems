@@ -119,7 +119,9 @@ endforeach()
 
 set(CPACK_DEBIAN_PACKAGE_EPOCH 0)
 set(CPACK_DEB_COMPONENT_INSTALL ON)
-set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON) # auto-generate deps based on shared libs
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS
+    ON
+    CACHE BOOL "") # auto-generate deps based on shared libs
 set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON) # generate list of shared libs provided by
                                              # package
 set(CPACK_DEBIAN_TESTS_PACKAGE_SHLIBDEPS OFF) # disable for tests package
@@ -160,7 +162,9 @@ endif()
 
 set(CPACK_RPM_PACKAGE_EPOCH 0)
 set(CPACK_RPM_COMPONENT_INSTALL ON)
-set(CPACK_RPM_PACKAGE_AUTOREQ ON) # auto-generate deps based on shared libs
+set(CPACK_RPM_PACKAGE_AUTOREQ
+    ON
+    CACHE BOOL "") # auto-generate deps based on shared libs
 set(CPACK_RPM_PACKAGE_AUTOPROV ON) # generate list of shared libs provided by package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOREQ OFF) # disable for tests package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOPROV OFF) # disable for tests package
