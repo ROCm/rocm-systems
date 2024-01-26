@@ -38,7 +38,7 @@ function(DOCS_EXECUTE_PROCESS)
         message(STATUS "stderr:\n${_ERR}")
         message(STATUS "stdout:\n${_OUT}")
         string(REPLACE ";" " " _CMD "${ARGN}")
-        message(WARNING "command failure: ${_CMD}")
+        message(FATAL_ERROR "command failure: ${_CMD}")
     endif()
 endfunction()
 
@@ -62,20 +62,40 @@ file(
     WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh"
     "#!${SHELL_CMD} -e
 
-# this is where conda thinks the HOME directory is
-HOME=${DOCS_WD}
-export HOME
+set -x
 
 PATH=${CONDA_ROOT}/bin:\${PATH}
 export PATH
 
-source activate
+source ${CONDA_ROOT}/bin/activate
+which conda
+
 conda activate rocprofiler-docs
-${PROJECT_SOURCE_DIR}/source/scripts/update-docs.sh 1> /dev/null
-rm -r ${PROJECT_SOURCE_DIR}/build-docs
+which python
+
+WORK_DIR=${PROJECT_SOURCE_DIR}/source/docs
+SOURCE_DIR=${PROJECT_SOURCE_DIR}
+
+cd \${SOURCE_DIR}
+
+cmake -B build-docs \${SOURCE_DIR} -DROCPROFILER_INTERNAL_BUILD_DOCS=ON
+
+cd \${WORK_DIR}
+
+cmake -DSOURCE_DIR=\${SOURCE_DIR} -P \${WORK_DIR}/generate-doxyfile.cmake
+
+doxygen rocprofiler-sdk.dox
+doxygen rocprofiler-sdk.dox
+
+doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/html
+
+make html SPHINXOPTS=\"-W --keep-going -n\"
+
+rm -rf ${PROJECT_SOURCE_DIR}/build-docs
 ")
 
-add_custom_target(docs ALL ${SHELL_CMD} ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+add_custom_target(docs ALL ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} -- ${SHELL_CMD}
+                           ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
 
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/_build/html/
