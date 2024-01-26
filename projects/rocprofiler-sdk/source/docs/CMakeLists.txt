@@ -13,6 +13,8 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
+set(DOCS_WD ${PROJECT_BINARY_DIR}/external)
+
 if(NOT EXISTS ${PROJECT_BINARY_DIR}/external/miniconda.sh)
     file(DOWNLOAD https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
          ${PROJECT_BINARY_DIR}/external/miniconda.sh)
@@ -25,7 +27,7 @@ function(DOCS_EXECUTE_PROCESS)
     message(STATUS "[rocprofiler][docs] Executing: ${_MSG}")
 
     execute_process(
-        COMMAND ${ARGN}
+        COMMAND ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} -- ${ARGN}
         RESULT_VARIABLE _RET
         OUTPUT_VARIABLE _OUT
         ERROR_VARIABLE _ERR
@@ -59,6 +61,10 @@ endif()
 file(
     WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh"
     "#!${SHELL_CMD} -e
+
+# this is where conda thinks the HOME directory is
+HOME=${DOCS_WD}
+export HOME
 
 PATH=${CONDA_ROOT}/bin:\${PATH}
 export PATH
