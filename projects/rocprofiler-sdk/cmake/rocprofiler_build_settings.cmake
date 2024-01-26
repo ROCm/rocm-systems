@@ -59,8 +59,9 @@ target_link_libraries(rocprofiler-build-flags INTERFACE rocprofiler::rocprofiler
 # ----------------------------------------------------------------------------------------#
 # set the compiler flags
 #
-rocprofiler_target_compile_options(rocprofiler-build-flags
-                                   INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas")
+rocprofiler_target_compile_options(
+    rocprofiler-build-flags INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas"
+                                      "-Wno-missing-field-initializers")
 
 # ----------------------------------------------------------------------------------------#
 # extra flags for debug information in debug or optimized binaries
@@ -120,8 +121,7 @@ endif()
 rocprofiler_target_compile_options(
     rocprofiler-developer-flags
     LANGUAGES C CXX
-    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra" "-Wvla"
-              "-Wno-missing-field-initializers")
+    INTERFACE "-Werror" "-Wdouble-promotion" "-Wshadow" "-Wextra" "-Wvla")
 
 if(ROCPROFILER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-build-flags
