@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - id: get_build_number
-        run: echo "LATEST_BUILD_NUMBER=$(wget -qO- 'http://rocm-ci.amd.com/job/compute-rocm-dkms-no-npi-hipclang/lastSuccessfulBuild/buildNumber')" >> $GITHUB_OUTPUT
+        run: echo "LATEST_BUILD_NUMBER=$(wget -qO- 'http://rocm-ci.amd.com/job/compute-rocm-dkms-component-staging-profiler/lastSuccessfulBuild/buildNumber')" >> $GITHUB_OUTPUT
 
   # Changed job name from mi200-ubuntu to vega20-ubuntu
   # TODO: Change it back when re-enabling on mi200
@@ -69,11 +69,11 @@ jobs:
     # TODO: Uncomment this when re-enabling tests on the mi200 as it contains --memory and --cpus flag for the mi200. Remove these 2 options when running on vega20.
     # vega20 machine only has 24 cpus available.
     # container:
-    #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+    #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-component-staging-profiler:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
     #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     container:
-      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-component-staging-profiler:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
       options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
@@ -198,11 +198,11 @@ jobs:
     # TODO: Uncomment this when re-enabling tests on the mi200 as it contains --memory and --cpus flag for the mi200. Remove these 2 options when running on vega20.
     # vega20 machine only has 24 cpus available.
     container:
-      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-component-staging-profiler:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
       options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     # container:
-    #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+    #   image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-component-staging-profiler:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
     #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number
@@ -447,7 +447,7 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     container:
-      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-no-npi-hipclang:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
+      image: compute-artifactory.amd.com:5000/rocm-plus-docker/compute-rocm-dkms-component-staging-profiler:${{ needs.get_latest_mainline_build_number.outputs.LATEST_BUILD_NUMBER }}-${{ matrix.os }}-stg1
       options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
 
     needs: get_latest_mainline_build_number

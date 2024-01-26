@@ -152,9 +152,9 @@ if __name__ == "__main__":
         hash = log.stdout.decode("utf-8").strip()
         info = {}
         for bitr, titr in filenames.items():
-            info[
-                bitr
-            ] = f"![code coverage {bitr}]({repo_url}/blob/{hash}/{titr}?raw=True)"
+            info[bitr] = (
+                f"![code coverage {bitr}]({repo_url}/blob/{hash}/{titr}?raw=True)"
+            )
 
         os.chdir(inidir)
 
