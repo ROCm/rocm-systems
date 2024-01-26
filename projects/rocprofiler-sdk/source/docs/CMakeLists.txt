@@ -13,14 +13,31 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.24)
     cmake_policy(SET CMP0135 NEW)
 endif()
 
-set(DOCS_WD ${PROJECT_BINARY_DIR}/external)
+set(DOCS_WD ${CMAKE_CURRENT_BINARY_DIR})
+set(CONDA_ROOT ${PROJECT_BINARY_DIR}/external/miniconda)
+
+find_program(SHELL_CMD NAMES bash sh REQUIRED)
+find_program(CHMOD_CMD NAMES chmod)
 
 if(NOT EXISTS ${PROJECT_BINARY_DIR}/external/miniconda.sh)
-    file(DOWNLOAD https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
-         ${PROJECT_BINARY_DIR}/external/miniconda.sh)
-endif()
+    message(
+        STATUS
+            "Downloading https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh"
+        )
+    file(
+        DOWNLOAD https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh
+        ${PROJECT_BINARY_DIR}/external/miniconda.sh
+        STATUS MINICONDA_DOWNLOAD_RET
+        INACTIVITY_TIMEOUT 60
+        SHOW_PROGRESS)
 
-find_program(SHELL_CMD NAME bash sh REQUIRED)
+    if(NOT MINICONDA_DOWNLOAD_RET EQUAL 0)
+        message(
+            FATAL_ERROR
+                "Download to ${PROJECT_BINARY_DIR}/external/miniconda.sh from https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh failed"
+            )
+    endif()
+endif()
 
 function(DOCS_EXECUTE_PROCESS)
     string(REPLACE ";" " " _MSG "${ARGN}")
@@ -42,36 +59,42 @@ function(DOCS_EXECUTE_PROCESS)
     endif()
 endfunction()
 
-set(CONDA_ROOT ${PROJECT_BINARY_DIR}/external/miniconda)
-
-if(NOT EXISTS ${CONDA_ROOT})
-    docs_execute_process(${SHELL_CMD} ${PROJECT_BINARY_DIR}/external/miniconda.sh -b -p
-                         ${CONDA_ROOT})
-    docs_execute_process(${CONDA_ROOT}/bin/conda config --set always_yes yes)
-    docs_execute_process(${CONDA_ROOT}/bin/conda update -c defaults -n base conda)
-endif()
-
-if(NOT EXISTS ${CONDA_ROOT}/envs/rocprofiler-docs)
-    docs_execute_process(${CONDA_ROOT}/bin/conda env create -n rocprofiler-docs -f
-                         ${CMAKE_CURRENT_LIST_DIR}/environment.yml)
-    docs_execute_process(${CONDA_ROOT}/envs/rocprofiler-docs/bin/python -m pip install -r
-                         ${CMAKE_CURRENT_LIST_DIR}/requirements.txt)
-endif()
-
 file(
     WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh"
-    "#!${SHELL_CMD} -e
+    "#!${SHELL_CMD}
 
+set -e
 set -x
 
-PATH=${CONDA_ROOT}/bin:\${PATH}
+HOME=${DOCS_WD}
+export HOME
+
+env
+
+if [ ! -d '${CONDA_ROOT}' ]; then
+    chmod +x ${PROJECT_BINARY_DIR}/external/miniconda.sh
+    ${PROJECT_BINARY_DIR}/external/miniconda.sh -b -p ${CONDA_ROOT}
+fi
+
+PATH=${PROJECT_BINARY_DIR}/external/miniconda/bin:\${PATH}
 export PATH
 
 source ${CONDA_ROOT}/bin/activate
-which conda
+
+conda config --set always_yes yes
+conda update -c defaults -n base conda
+
+if [ ! -d '${CONDA_ROOT}/envs/rocprofiler-docs' ]; then
+    ${CONDA_ROOT}/bin/conda env create -n rocprofiler-docs -f ${CMAKE_CURRENT_LIST_DIR}/environment.yml
+fi
+
+which python
 
 conda activate rocprofiler-docs
+
 which python
+
+python -m pip install -r ${CMAKE_CURRENT_LIST_DIR}/requirements.txt
 
 WORK_DIR=${PROJECT_SOURCE_DIR}/source/docs
 SOURCE_DIR=${PROJECT_SOURCE_DIR}
@@ -94,8 +117,14 @@ make html SPHINXOPTS=\"-W --keep-going -n\"
 rm -rf ${PROJECT_SOURCE_DIR}/build-docs
 ")
 
-add_custom_target(docs ALL ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} -- ${SHELL_CMD}
-                           ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+if(CHMOD_CMD)
+    docs_execute_process(${CHMOD_CMD} +x ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+    add_custom_target(docs ALL ${CMAKE_COMMAND} -E env HOME=${DOCS_WD}
+                               ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+else()
+    add_custom_target(docs ALL ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} ${SHELL_CMD}
+                               ${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh)
+endif()
 
 install(
     DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/_build/html/
