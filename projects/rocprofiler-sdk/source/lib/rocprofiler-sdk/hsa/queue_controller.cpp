@@ -77,8 +77,8 @@ destroy_queue(hsa_queue_t* hsa_queue)
 }
 
 constexpr rocprofiler_agent_t default_agent =
-    rocprofiler_agent_t{sizeof(rocprofiler_agent_t),
-                        rocprofiler_agent_id_t{std::numeric_limits<uint64_t>::max()}};
+    rocprofiler_agent_t{.size = sizeof(rocprofiler_agent_t),
+                        .id   = rocprofiler_agent_id_t{std::numeric_limits<uint64_t>::max()}};
 }  // namespace
 
 void
