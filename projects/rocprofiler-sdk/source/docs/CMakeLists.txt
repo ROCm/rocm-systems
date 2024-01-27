@@ -44,7 +44,7 @@ function(DOCS_EXECUTE_PROCESS)
     message(STATUS "[rocprofiler][docs] Executing: ${_MSG}")
 
     execute_process(
-        COMMAND ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} -- ${ARGN}
+        COMMAND ${CMAKE_COMMAND} -E env HOME=${DOCS_WD} ${ARGN}
         RESULT_VARIABLE _RET
         OUTPUT_VARIABLE _OUT
         ERROR_VARIABLE _ERR

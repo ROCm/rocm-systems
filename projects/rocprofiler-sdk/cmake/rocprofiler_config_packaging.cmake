@@ -2,6 +2,14 @@
 # configure packaging settings
 #
 
+function(rocprofiler_set_package_depends _VARIABLE _VALUE _INFO)
+    string(REPLACE ";" ", " _DEPENDS "${_VALUE}")
+    set(${_VARIABLE}
+        "${_DEPENDS}"
+        CACHE STRING "${_INFO} package dependencies" FORCE)
+    rocprofiler_add_feature(${_VARIABLE} "${_INFO} package dependencies")
+endfunction()
+
 # Add packaging directives
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME}-sdk)
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
@@ -102,9 +110,12 @@ foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
 
     string(TOUPPER "${COMPONENT_GROUP}" UCOMPONENT)
     set(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_NAME "${_NAME}")
-    set(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_DEPENDS "${_DEP}")
     set(CPACK_RPM_${UCOMPONENT}_PACKAGE_NAME "${_NAME}")
-    set(CPACK_RPM_${UCOMPONENT}_PACKAGE_REQUIRES "${_DEP}")
+
+    rocprofiler_set_package_depends(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_DEPENDS "${_DEP}"
+                                    "Debian")
+    rocprofiler_set_package_depends(CPACK_RPM_${UCOMPONENT}_PACKAGE_REQUIRES "${_DEP}"
+                                    "RedHat")
 
     foreach(COMPONENT ${COMPONENT_GROUP_${COMPONENT_GROUP}_COMPONENTS})
         cpack_add_component(${COMPONENT} REQUIRED GROUP "${COMPONENT_GROUP}")
@@ -143,11 +154,8 @@ if(rocm_version_FOUND)
     set(_ROCM_SMI_SUFFIX
         " (>= ${rocm_version_MAJOR_VERSION}.0.0.${rocm_version_NUMERIC_VERSION})")
 endif()
-string(REPLACE ";" ", " _DEBIAN_PACKAGE_DEPENDS "${_DEBIAN_PACKAGE_DEPENDS}")
-set(CPACK_DEBIAN_PACKAGE_DEPENDS
-    "${_DEBIAN_PACKAGE_DEPENDS}"
-    CACHE STRING "Debian package dependencies" FORCE)
-rocprofiler_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS "Debian package dependencies")
+rocprofiler_set_package_depends(CPACK_DEBIAN_PACKAGE_DEPENDS "${_DEBIAN_PACKAGE_DEPENDS}"
+                                "Debian")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 # -------------------------------------------------------------------------------------- #

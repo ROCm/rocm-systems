@@ -116,6 +116,8 @@ jobs:
           --gpu-targets ${{ env.GPU_LIST }}
           ${{ matrix.ci-flags }}
           --
+          -DROCPROFILER_DEP_ROCMCORE=ON
+          -DROCPROFILER_BUILD_DOCS=ON
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler/v2
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
