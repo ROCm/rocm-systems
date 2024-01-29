@@ -60,7 +60,7 @@ class Roofline:
         if hasattr(self.__args, 'mem_level') and self.__args.mem_level != "ALL":
             self.__run_parameters['mem_level'] = self.__args.mem_level
         if hasattr(self.__args, 'sort') and self.__args.sort != "ALL":
-            self.__run_parameters['sort_type'] = self.__args.mem_level
+            self.__run_parameters['sort_type'] = self.__args.sort
 
         self.validate_parameters()
 
@@ -84,12 +84,12 @@ class Roofline:
         """Generate a set of empirical roofline plots given a directory containing required profiling and benchmarking data
         """
         # Create arithmetic intensity data that will populate the roofline model
-        logging.debug("[roofline] Path: ", self.__run_parameters['path_to_dir'])
+        logging.debug("[roofline] Path: %s" % self.__run_parameters['path_to_dir'])
         self.__ai_data = calc_ai(self.__run_parameters['sort_type'], ret_df)
         
         logging.debug("[roofline] AI at each mem level:")
         for i in self.__ai_data:
-            logging.debug(i, "->", self.__ai_data[i])
+            logging.debug("%s -> %s" % (i, self.__ai_data[i]))
         logging.debug("\n")
 
         # Generate a roofline figure for each data type
@@ -188,7 +188,7 @@ class Roofline:
             roofline_parameters=self.__run_parameters,
             dtype=dtype,
         )
-        logging.debug("[roofline] Ceiling data:\n", self.__ceiling_data)
+        logging.debug("[roofline] Ceiling data:\n%s" % self.__ceiling_data)
 
         #######################
         # Plot ceilings

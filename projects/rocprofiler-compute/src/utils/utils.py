@@ -193,7 +193,7 @@ def run_prof(fname, profiler_options, target, workload_dir):
     fbase = os.path.splitext(os.path.basename(fname))[0]
     m_specs = specs.get_machine_specs(0)
     
-    logging.debug("pmc file:", os.path.basename(fname))
+    logging.debug("pmc file: %s" % str(os.path.basename(fname)))
 
     # standard rocprof options
     default_options = [

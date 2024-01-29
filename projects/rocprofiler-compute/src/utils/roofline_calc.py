@@ -116,7 +116,7 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
         )
     for i in range(0, len(cacheHierarchy)):
         # Plot BW line  
-        logging.debug("[roofline] Current cache level is ", cacheHierarchy[i])
+        logging.debug("[roofline] Current cache level is %s" % cacheHierarchy[i])
         curr_bw = cacheHierarchy[i] + "Bw"
         peakBw = float(benchmark_data[curr_bw][roofline_parameters['device_id']])
 

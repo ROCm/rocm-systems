@@ -105,16 +105,16 @@ class webui_analysis(OmniAnalyze_Base):
         def generate_from_filter(
             disp_filt, kernel_filter, gcd_filter, norm_filt, top_n_filt, div_children
         ):
-            logging.debug("[analysis] gui normalization is ", norm_filt)
+            logging.debug("[analysis] gui normalization is %s" % norm_filt)
 
             base_data = self.initalize_runs() # Re-initalizes everything
             panel_configs = copy.deepcopy(arch_configs.panel_configs)
             # Generate original raw df
             base_data[base_run].raw_pmc = file_io.create_df_pmc(self.dest_dir, self.get_args().verbose)
-            logging.debug("[analysis] gui dispatch filter is ", disp_filt)
-            logging.debug("[analysis] gui kernel filter is ", kernel_filter)
-            logging.debug("[analysis] gui gpu filter is ", gcd_filter)
-            logging.debug("[analysis] gui top-n filter is ", top_n_filt)
+            logging.debug("[analysis] gui dispatch filter is %s" % disp_filt)
+            logging.debug("[analysis] gui kernel filter is %s" % kernel_filter)
+            logging.debug("[analysis] gui gpu filter is %s" % gcd_filter)
+            logging.debug("[analysis] gui top-n filter is %s" % top_n_filt)
             base_data[base_run].filter_kernel_ids = kernel_filter
             base_data[base_run].filter_gpu_ids = gcd_filter
             base_data[base_run].filter_dispatch_ids = disp_filt
