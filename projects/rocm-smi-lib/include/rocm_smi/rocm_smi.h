@@ -3169,6 +3169,29 @@ rsmi_status_t
 rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
                                                         uint64_t *fw_version);
 
+/**
+ *  @brief Get the graphics version for a GPU device
+ *
+ *  @details Given a device ID @p dv_ind and a uint64_t pointer
+ *  @p gfx_version, this function will write the graphics version.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] gfx_version The device graphics version number indicated by
+ *  KFD. If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS. If device does not support this value,
+ *  will return ::RSMI_STATUS_NOT_SUPPORTED and a maximum UINT64 value as
+ *  @p gfx_version.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
+                                                  uint64_t *gfx_version);
+
 /** @} */  // end of VersQuer
 
 /*****************************************************************************/

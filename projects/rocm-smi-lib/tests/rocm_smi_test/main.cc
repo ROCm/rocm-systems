@@ -139,6 +139,10 @@ TEST(rsmitstReadOnly, TestVersionRead) {
   TestVersionRead tst;
   RunGenericTest(&tst);
 }
+TEST(rsmitstReadOnly, TestSysInfoRead) {
+  TestSysInfoRead tst;
+  RunGenericTest(&tst);
+}
 TEST(rsmitstReadOnly, FanRead) {
   TestFanRead tst;
   RunGenericTest(&tst);
@@ -193,10 +197,6 @@ TEST(rsmitstReadWrite, TestFrequenciesReadWrite) {
 }
 TEST(rsmitstReadWrite, TestPciReadWrite) {
   TestPciReadWrite tst;
-  RunGenericTest(&tst);
-}
-TEST(rsmitstReadOnly, TestSysInfoRead) {
-  TestSysInfoRead tst;
   RunGenericTest(&tst);
 }
 TEST(rsmitstReadOnly, TestGPUBusyRead) {
