@@ -40,13 +40,22 @@ ROCPROFILER_EXTERN_C_INIT
  */
 typedef struct
 {
-    uint64_t                          size;             ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;             ///< ::ROCPROFILER_CALLBACK_TRACING_HSA_API
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
     rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
-    rocprofiler_tracing_operation_t   operation;        ///< ::rocprofiler_hsa_api_id_t
     rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
     rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+    /// ::ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+    /// ::ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API, or
+    /// ::ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API
+    /// @var operation
+    /// @brief ::rocprofiler_hsa_core_api_id_t, ::rocprofiler_hsa_amd_ext_api_id_t,
+    /// ::rocprofiler_hsa_image_ext_api_id_t, or ::rocprofiler_hsa_finalize_ext_api_id_t
 } rocprofiler_buffer_tracing_hsa_api_record_t;
 
 /**
@@ -54,14 +63,19 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                          size;            ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;            ///< ::ROCPROFILER_CALLBACK_TRACING_HIP_API
-    rocprofiler_correlation_id_t      correlation_id;  ///< correlation ids for record
-    rocprofiler_tracing_operation_t
-        operation;  ///< ::rocprofiler_hip_api_id_t or ::rocprofiler_hip_compiler_api_id_t
-    rocprofiler_timestamp_t start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_thread_id_t thread_id;        ///< id for thread generating this record
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API or
+    /// ::ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API
+    /// @var operation
+    /// @brief ::rocprofiler_hip_runtime_api_id_t or ::rocprofiler_hip_compiler_api_id_t
 } rocprofiler_buffer_tracing_hip_api_record_t;
 
 /**
@@ -70,16 +84,19 @@ typedef struct
 typedef struct
 {
     uint64_t                          size;  ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-                                             ///< ::ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
-                                             ///< or ::ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API
-    rocprofiler_correlation_id_t correlation_id;  ///< correlation ids for record
-    rocprofiler_tracing_operation_t
-        operation;  ///< ::rocprofiler_marker_core_api_id_t, ::rocprofiler_marker_control_api_id_t,
-                    ///< or ::rocprofiler_marker_name_api_id_t
-    rocprofiler_timestamp_t start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_thread_id_t thread_id;        ///< id for thread generating this record
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+    /// ::ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API, or
+    /// ::ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API
+    /// @brief ::rocprofiler_marker_core_api_id_t, ::rocprofiler_marker_control_api_id_t, or
+    /// ::rocprofiler_marker_name_api_id_t
 } rocprofiler_buffer_tracing_marker_api_record_t;
 
 /**
@@ -88,13 +105,18 @@ typedef struct
 typedef struct
 {
     uint64_t                            size;  ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t   kind;  ///< ::ROCPROFILER_BUFFER_TRACING_MEMORY_COPY
+    rocprofiler_buffer_tracing_kind_t   kind;
+    rocprofiler_memory_copy_operation_t operation;
     rocprofiler_correlation_id_t        correlation_id;   ///< correlation ids for record
-    rocprofiler_memory_copy_operation_t operation;        ///< memory copy direction
     rocprofiler_timestamp_t             start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t             end_timestamp;    ///< end time in nanoseconds
     rocprofiler_agent_id_t              dst_agent_id;     ///< destination agent of copy
     rocprofiler_agent_id_t              src_agent_id;     ///< source agent of copy
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_MEMORY_COPY
+    /// @var operation
+    /// @brief memory copy direction (::rocprofiler_memory_copy_operation_t)
 } rocprofiler_buffer_tracing_memory_copy_record_t;
 
 /**
@@ -141,29 +163,6 @@ typedef struct
     rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
     // Not Sure What is the info needed here?
 } rocprofiler_buffer_tracing_scratch_memory_record_t;
-
-/**
- * @brief ROCProfiler Buffer Queue Scheduling Tracer Record. Not implemented.
- */
-typedef struct
-{
-    uint64_t                          size;  ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY
-    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
-    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
-    // Not Sure What is the info needed here?
-} rocprofiler_buffer_tracing_queue_scheduling_record_t;
-
-/**
- * @brief ROCProfiler Buffer External Correlation Tracer Record. Not implemented.
- */
-typedef struct
-{
-    uint64_t                          size;
-    rocprofiler_buffer_tracing_kind_t kind;
-    rocprofiler_correlation_id_t      correlation_id;
-} rocprofiler_buffer_tracing_correlation_record_t;
 
 /**
  * @brief Callback function for mapping @ref rocprofiler_buffer_tracing_kind_t ids to

@@ -128,14 +128,19 @@ typedef enum  // NOLINT(performance-enum-size)
 typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_CALLBACK_TRACING_NONE = 0,
-    ROCPROFILER_CALLBACK_TRACING_HSA_API,             ///< Callbacks for HSA functions
-    ROCPROFILER_CALLBACK_TRACING_HIP_API,             ///< Callbacks for HIP functions
-    ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,    ///< Callbacks for HIP compiler functions
-    ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,     ///< Callbacks for ROCTx functions
-    ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,  ///< Callbacks for ROCTx functions
-    ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,     ///< Callbacks for ROCTx functions
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,         ///< Callbacks for code object info
-    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,     ///< Callbacks for kernel dispatches
+    ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,       ///< @see ::rocprofiler_hsa_core_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,    ///< @see ::rocprofiler_hsa_amd_ext_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,  ///< @see ::rocprofiler_hsa_image_ext_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,  ///< @see
+                                                        ///< ::rocprofiler_hsa_finalize_ext_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,       ///< @see ::rocprofiler_hip_runtime_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,    ///< @see ::rocprofiler_hip_compiler_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,     ///< @see ::rocprofiler_marker_core_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,  ///< @see
+                                                      ///< ::rocprofiler_marker_control_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
+    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,      ///< @see ::rocprofiler_code_object_operation_t
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -145,19 +150,20 @@ typedef enum  // NOLINT(performance-enum-size)
 typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_BUFFER_TRACING_NONE = 0,
-    ROCPROFILER_BUFFER_TRACING_HSA_API,               ///< Buffer HSA function calls
-    ROCPROFILER_BUFFER_TRACING_HIP_API,               ///< Buffer HIP function calls
-    ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,      ///< Buffer HIP compiler function calls
-    ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,       ///< Buffer ROCTx core function calls
-    ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,    ///< Buffer ROCTx name function calls
-    ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,       ///< Buffer ROCTx name function calls
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,           ///< Buffer memory copy info
-    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,       ///< Buffer kernel dispatch info
-    ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,        ///< Buffer page migration info
-    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,        ///< Buffer scratch memory reclaimation info
-    ROCPROFILER_BUFFER_TRACING_EXTERNAL_CORRELATION,  ///< Buffer external correlation info
-    // To determine if this is possible to implement?
-    // ROCPROFILER_BUFFER_TRACING_QUEUE_SCHEDULING,
+    ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,          ///< @see ::rocprofiler_hsa_core_api_id_t
+    ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,       ///< @see ::rocprofiler_hsa_amd_ext_api_id_t
+    ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,     ///< @see ::rocprofiler_hsa_image_ext_api_id_t
+    ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,  ///< @see
+                                                      ///< ::rocprofiler_hsa_finalize_ext_api_id_t
+    ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,       ///< @see ::rocprofiler_hip_runtime_api_id_t
+    ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,      ///< @see ::rocprofiler_hip_compiler_api_id_t
+    ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,       ///< @see ::rocprofiler_marker_core_api_id_t
+    ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,  ///< @see ::rocprofiler_marker_control_api_id_t
+    ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
+    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,         ///< @see ::rocprofiler_memory_copy_operation_t
+    ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,     ///< Buffer kernel dispatch info
+    ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,      ///< Buffer page migration info
+    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
     ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_buffer_tracing_kind_t;
 
@@ -169,9 +175,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_NONE = 0,  ///< Unknown code object operation
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD,      ///< Code object containing kernel symbols
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER,  ///< Kernel symbols
-    // ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER,
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST,
-} rocprofiler_callback_tracing_code_object_operation_t;
+} rocprofiler_code_object_operation_t;
 
 /**
  * @brief Memory Copy Operation.

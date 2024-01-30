@@ -21,12 +21,15 @@
 // SOFTWARE.
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hip/table_api_id.h>
+#include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
+#include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -60,8 +63,11 @@ template <size_t Idx>
 struct callback_tracing_kind_string;
 
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(NONE)
-ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HSA_API)
-ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HSA_CORE_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HSA_AMD_EXT_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HSA_IMAGE_EXT_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HSA_FINALIZE_EXT_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_RUNTIME_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(HIP_COMPILER_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CONTROL_API)
@@ -145,21 +151,69 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
     const char* val = nullptr;
-    if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
-        val = rocprofiler::hsa::name_by_id(operation);
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API)
-        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>(operation);
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
-        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>(
-            operation);
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API)
-        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>(operation);
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_HIP_API)
-        val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(operation);
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API)
-        val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>(operation);
-    else
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    switch(kind)
+    {
+        case ROCPROFILER_CALLBACK_TRACING_NONE:
+        case ROCPROFILER_CALLBACK_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_Core>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_AmdExt>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_ImageExt>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
+        {
+            val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
+        {
+            val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>(
+                operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
+        {
+            val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxName>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
+        {
+            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Runtime>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+        {
+            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Compiler>(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
+        {
+            val = rocprofiler::hsa::code_object::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
+    };
 
     if(!val)
     {
@@ -195,20 +249,69 @@ rocprofiler_iterate_callback_tracing_kind_operations(
     void*                                            data)
 {
     auto ops = std::vector<uint32_t>{};
-    if(kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
-        ops = rocprofiler::hsa::get_ids();
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API)
-        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>();
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
-        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>();
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API)
-        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>();
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_HIP_API)
-        ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>();
-    else if(kind == ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API)
-        ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>();
-    else
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+
+    switch(kind)
+    {
+        case ROCPROFILER_CALLBACK_TRACING_NONE:
+        case ROCPROFILER_CALLBACK_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_Core>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_AmdExt>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_ImageExt>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxName>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Runtime>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Compiler>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
+        {
+            ops = rocprofiler::hsa::code_object::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
+    };
 
     for(const auto& itr : ops)
     {
@@ -224,50 +327,91 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
     rocprofiler_callback_tracing_operation_args_cb_t callback,
     void*                                            user_data)
 {
-    if(record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
+    switch(record.kind)
     {
-        rocprofiler::hsa::iterate_args(
-            record.operation,
-            *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
-            callback,
-            user_data);
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
-    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API)
-    {
-        rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>(
-            record.operation,
-            *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
-            callback,
-            user_data);
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
-    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
-    {
-        rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>(
-            record.operation,
-            *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
-            callback,
-            user_data);
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
-    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API)
-    {
-        rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>(
-            record.operation,
-            *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
-            callback,
-            user_data);
-        return ROCPROFILER_STATUS_SUCCESS;
-    }
-    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_API)
-    {
-        rocprofiler::hip::iterate_args(
-            record.operation,
-            *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
-            callback,
-            user_data);
-        return ROCPROFILER_STATUS_SUCCESS;
+        case ROCPROFILER_CALLBACK_TRACING_NONE:
+        case ROCPROFILER_CALLBACK_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API:
+        {
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_Core>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API:
+        {
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API:
+        {
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_ImageExt>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
+        {
+            rocprofiler::hsa::iterate_args<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
+        {
+            rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API:
+        {
+            rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API:
+        {
+            rocprofiler::marker::iterate_args<ROCPROFILER_MARKER_TABLE_ID_RoctxName>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+        case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
+        {
+            rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
+                callback,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
+        case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
     }
 
     return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;

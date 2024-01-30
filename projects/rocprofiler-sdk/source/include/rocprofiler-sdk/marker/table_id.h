@@ -25,8 +25,9 @@
 // NOLINTNEXTLINE(performance-enum-size)
 typedef enum
 {
-    ROCPROFILER_HIP_API_TABLE_ID_NONE        = -1,
-    ROCPROFILER_HIP_API_TABLE_ID_CompilerApi = 0,
-    ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi,
-    ROCPROFILER_HIP_API_TABLE_ID_LAST,
-} rocprofiler_hip_table_api_id_t;
+    ROCPROFILER_MARKER_TABLE_ID_NONE      = -1,
+    ROCPROFILER_MARKER_TABLE_ID_RoctxCore = 0,
+    ROCPROFILER_MARKER_TABLE_ID_RoctxControl,
+    ROCPROFILER_MARKER_TABLE_ID_RoctxName,
+    ROCPROFILER_MARKER_TABLE_ID_LAST,
+} rocprofiler_marker_table_id_t;

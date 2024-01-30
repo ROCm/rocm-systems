@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/version.h>
+
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ext_finalize.h>
 #include <hsa/hsa_ext_image.h>
-#include <rocprofiler-sdk/version.h>
 
 typedef union rocprofiler_hsa_api_retval_u
 {
@@ -35,6 +37,10 @@ typedef union rocprofiler_hsa_api_retval_u
     hsa_signal_value_t hsa_signal_value_t_retval;
     hsa_status_t       hsa_status_t_retval;
 } rocprofiler_hsa_api_retval_t;
+
+typedef hsa_status_t (*hsa_ext_program_iterate_modules_cb_t)(hsa_ext_program_t program,
+                                                             hsa_ext_module_t  module,
+                                                             void*             data);
 
 typedef union rocprofiler_hsa_api_args_u
 {
@@ -1034,7 +1040,6 @@ typedef union rocprofiler_hsa_api_args_u
         const hsa_pitched_ptr_t* src;
         const hsa_dim3_t*        src_offset;
         const hsa_dim3_t*        range;
-        hsa_dim3_t               range__val;
         hsa_agent_t              copy_agent;
         hsa_amd_copy_direction_t dir;
         uint32_t                 num_dep_signals;
@@ -1232,6 +1237,47 @@ typedef union rocprofiler_hsa_api_args_u
         size_t                            image_data_slice_pitch;
         hsa_ext_image_t*                  image;
     } hsa_ext_image_create_with_layout;
+    // finalize ext
+    struct
+    {
+        hsa_machine_model_t               machine_model;
+        hsa_profile_t                     profile;
+        hsa_default_float_rounding_mode_t default_float_rounding_mode;
+        const char*                       options;
+        hsa_ext_program_t*                program;
+    } hsa_ext_program_create;
+    struct
+    {
+        hsa_ext_program_t program;
+    } hsa_ext_program_destroy;
+    struct
+    {
+        hsa_ext_program_t program;
+        hsa_ext_module_t  module;
+    } hsa_ext_program_add_module;
+    struct
+    {
+        hsa_ext_program_t                    program;
+        hsa_ext_program_iterate_modules_cb_t callback;
+        void*                                data;
+    } hsa_ext_program_iterate_modules;
+    struct
+    {
+        hsa_ext_program_t      program;
+        hsa_ext_program_info_t attribute;
+        void*                  value;
+    } hsa_ext_program_get_info;
+    struct
+    {
+        hsa_ext_program_t            program;
+        hsa_isa_t                    isa;
+        int32_t                      call_convention;
+        hsa_ext_control_directives_t control_directives;
+        const char*                  options;
+        hsa_code_object_type_t       code_object_type;
+        hsa_code_object_t*           code_object;
+    } hsa_ext_program_finalize;
+    //
 #if HSA_AMD_EXT_API_TABLE_MAJOR_VERSION >= 0x02
     struct
     {

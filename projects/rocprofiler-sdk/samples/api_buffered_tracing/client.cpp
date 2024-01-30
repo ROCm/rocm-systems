@@ -42,8 +42,10 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "common/call_stack.hpp"
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
+#include "common/name_info.hpp"
 
 #include <atomic>
 #include <cassert>
@@ -61,32 +63,19 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_set>
 #include <vector>
 
 namespace client
 {
 namespace
 {
-struct source_location
-{
-    std::string function = {};
-    std::string file     = {};
-    uint32_t    line     = 0;
-    std::string context  = {};
-};
+using common::buffer_name_info;
+using common::call_stack_t;
+using common::source_location;
 
-using call_stack_t        = std::vector<source_location>;
-using buffer_kind_names_t = std::map<rocprofiler_buffer_tracing_kind_t, const char*>;
-using buffer_kind_operation_names_t =
-    std::map<rocprofiler_buffer_tracing_kind_t, std::map<uint32_t, const char*>>;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data_t>;
-
-struct buffer_name_info
-{
-    buffer_kind_names_t           kind_names      = {};
-    buffer_kind_operation_names_t operation_names = {};
-};
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
@@ -98,94 +87,7 @@ kernel_symbol_map_t           client_kernels   = {};
 void
 print_call_stack(const call_stack_t& _call_stack)
 {
-    auto ofname = std::string{"api_buffered_trace.log"};
-    if(auto* eofname = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE")) ofname = eofname;
-
-    std::ostream* ofs     = nullptr;
-    auto          cleanup = std::function<void(std::ostream*&)>{};
-
-    if(ofname == "stdout")
-        ofs = &std::cout;
-    else if(ofname == "stderr")
-        ofs = &std::cerr;
-    else
-    {
-        ofs = new std::ofstream{ofname};
-        if(ofs && *ofs)
-            cleanup = [](std::ostream*& _os) { delete _os; };
-        else
-        {
-            std::cerr << "Error outputting to " << ofname << ". Redirecting to stderr...\n";
-            ofname = "stderr";
-            ofs    = &std::cerr;
-        }
-    }
-
-    std::cout << "Outputting collected data to " << ofname << "...\n" << std::flush;
-
-    size_t n = 0;
-    for(const auto& itr : _call_stack)
-    {
-        *ofs << std::left << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size()
-             << " [" << common::fs::path{itr.file}.filename() << ":" << itr.line << "] "
-             << std::setw(20) << itr.function;
-        if(!itr.context.empty()) *ofs << " :: " << itr.context;
-        *ofs << "\n";
-    }
-
-    *ofs << std::flush;
-
-    if(cleanup) cleanup(ofs);
-}
-
-buffer_name_info
-get_buffer_tracing_names()
-{
-    auto cb_name_info = buffer_name_info{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<buffer_name_info*>(data_v);
-
-            if(kindv == ROCPROFILER_BUFFER_TRACING_HSA_API ||
-               kindv == ROCPROFILER_BUFFER_TRACING_HIP_API)
-            {
-                const char* name = nullptr;
-                ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
-                                     kindv, operation, &name, nullptr),
-                                 "query buffer tracing kind operation name");
-                if(name) name_info_v->operation_names[kindv][operation] = name;
-            }
-            return 0;
-        };
-
-    //
-    //  callback for each buffer kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_buffer_tracing_kind_t kind, void* data) {
-        //  store the buffer kind name
-        auto*       name_info_v = static_cast<buffer_name_info*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_name(kind, &name, nullptr),
-                         "query buffer tracing kind operation name");
-        if(name) name_info_v->kind_names[kind] = name;
-
-        if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API || kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
-        {
-            ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
-                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
-                             "iterating buffer tracing kind operations");
-        }
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kinds(tracing_kind_cb,
-                                                              static_cast<void*>(&cb_name_info)),
-                     "iterating buffer tracing kinds");
-
-    return cb_name_info;
+    common::print_call_stack("api_buffered_trace.log", _call_stack);
 }
 
 void
@@ -257,7 +159,10 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             throw std::runtime_error{"rocprofiler_record_header_t (category | kind) != hash"};
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                header->kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
+                (header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
+                 header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
+                 header->kind == ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API ||
+                 header->kind == ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API))
         {
             auto* record =
                 static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
@@ -284,7 +189,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                 source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                header->kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
+                header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API)
         {
             auto* record =
                 static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
@@ -399,7 +304,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
 
-    client_name_info = get_buffer_tracing_names();
+    client_name_info = common::get_buffer_tracing_names();
 
     for(const auto& itr : client_name_info.operation_names)
     {
@@ -445,13 +350,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &client_buffer),
                      "buffer creation");
 
-    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-                         client_ctx, ROCPROFILER_BUFFER_TRACING_HSA_API, nullptr, 0, client_buffer),
-                     "buffer tracing service configure");
+    for(auto itr : {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
+                    ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+                    ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                    ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API})
+    {
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                             client_ctx, itr, nullptr, 0, client_buffer),
+                         "buffer tracing service configure");
+    }
 
-    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-                         client_ctx, ROCPROFILER_BUFFER_TRACING_HIP_API, nullptr, 0, client_buffer),
-                     "buffer tracing service configure");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(
+            client_ctx, ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API, nullptr, 0, client_buffer),
+        "buffer tracing service configure");
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(

@@ -84,6 +84,8 @@ struct static_object
 
     static Tp* get() { return m_object; }
 
+    static constexpr bool is_trivial_standard_layout();
+
 private:
     static Tp*                                             m_object;
     static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
@@ -96,20 +98,30 @@ template <typename Tp, typename ContextT>
 std::array<std::byte, static_buffer_size<Tp>()> static_object<Tp, ContextT>::m_buffer = {};
 
 template <typename Tp, typename ContextT>
+constexpr bool
+static_object<Tp, ContextT>::is_trivial_standard_layout()
+{
+    return (std::is_standard_layout<Tp>::value && std::is_trivial<Tp>::value);
+}
+
+template <typename Tp, typename ContextT>
 template <typename... Args>
 Tp*&
 static_object<Tp, ContextT>::construct(Args&&... args)
 {
-    static auto _once = std::once_flag{};
-    std::call_once(_once, []() {
-        register_static_dtor([]() {
-            if(static_object<Tp, ContextT>::m_object)
-            {
-                static_object<Tp, ContextT>::m_object->~Tp();
-                static_object<Tp, ContextT>::m_object = nullptr;
-            }
+    if constexpr(!is_trivial_standard_layout())
+    {
+        static auto _once = std::once_flag{};
+        std::call_once(_once, []() {
+            register_static_dtor([]() {
+                if(static_object<Tp, ContextT>::m_object)
+                {
+                    static_object<Tp, ContextT>::m_object->~Tp();
+                    static_object<Tp, ContextT>::m_object = nullptr;
+                }
+            });
         });
-    });
+    }
 
     LOG_IF(FATAL, m_object)
         << "reconstructing static object. Use get() function to retrieve pointer";

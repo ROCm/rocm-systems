@@ -25,9 +25,10 @@
 // NOLINTNEXTLINE(performance-enum-size)
 typedef enum
 {
-    ROCPROFILER_HSA_API_TABLE_ID_NONE    = -1,
-    ROCPROFILER_HSA_API_TABLE_ID_CoreApi = 0,
-    ROCPROFILER_HSA_API_TABLE_ID_AmdExt,
-    ROCPROFILER_HSA_API_TABLE_ID_ImageExt,
-    ROCPROFILER_HSA_API_TABLE_ID_LAST,
-} rocprofiler_hsa_table_api_id_t;
+    ROCPROFILER_HSA_TABLE_ID_NONE = -1,
+    ROCPROFILER_HSA_TABLE_ID_Core = 0,
+    ROCPROFILER_HSA_TABLE_ID_AmdExt,
+    ROCPROFILER_HSA_TABLE_ID_ImageExt,
+    ROCPROFILER_HSA_TABLE_ID_FinalizeExt,
+    ROCPROFILER_HSA_TABLE_ID_LAST,
+} rocprofiler_hsa_table_id_t;

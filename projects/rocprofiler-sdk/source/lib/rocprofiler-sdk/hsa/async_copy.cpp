@@ -22,22 +22,25 @@
 
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/common/defines.hpp"
-#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
-#include "rocprofiler-sdk/fwd.h"
-#include "rocprofiler-sdk/hsa/api_id.h"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hsa/api_id.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
 
 #include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
 #include <cstdlib>
+#include <type_traits>
 
 #define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
     auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
@@ -70,7 +73,7 @@ using context_t              = context::context;
 using context_array_t        = common::container::small_vector<const context_t*>;
 using external_corr_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
 
-template <size_t Idx>
+template <size_t OpIdx>
 struct async_copy_info;
 
 #define SPECIALIZE_ASYNC_COPY_INFO(DIRECTION)                                                      \
@@ -109,7 +112,7 @@ id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
     if constexpr(sizeof...(IdxTail) > 0)
         return id_by_name(name, std::index_sequence<IdxTail...>{});
     else
-        return ROCPROFILER_HSA_API_ID_NONE;
+        return ROCPROFILER_HSA_AMD_EXT_API_ID_NONE;
 }
 
 template <size_t... Idx>
@@ -117,7 +120,7 @@ void
 get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
 {
     auto _emplace = [](auto& _vec, uint32_t _v) {
-        if(_v < ROCPROFILER_HSA_API_ID_LAST) _vec.emplace_back(_v);
+        if(_v < static_cast<uint32_t>(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST)) _vec.emplace_back(_v);
     };
 
     (_emplace(_id_list, async_copy_info<Idx>::operation_idx), ...);
@@ -231,8 +234,8 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
                     auto record = rocprofiler_buffer_tracing_memory_copy_record_t{
                         sizeof(rocprofiler_buffer_tracing_memory_copy_record_t),
                         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                        _corr_id_v,
                         _data->direction,
+                        _corr_id_v,
                         copy_time.start * sysclock_period,
                         copy_time.end * sysclock_period,
                         _data->dst_agent,
@@ -279,16 +282,16 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 
 enum async_copy_id
 {
-    async_copy_id           = ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy,
-    async_copy_on_engine_id = ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_on_engine,
-    async_copy_rect_id      = ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_rect,
+    async_copy_id           = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy,
+    async_copy_on_engine_id = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_on_engine,
+    async_copy_rect_id      = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_rect,
 };
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 auto&
 get_next_dispatch()
 {
-    using function_t     = typename hsa_api_meta<Idx>::function_type;
+    using function_t     = typename hsa_api_meta<TableIdx, OpIdx>::function_type;
     static function_t _v = nullptr;
     return _v;
 }
@@ -317,11 +320,11 @@ invoke(FuncT&& _func, ArgsT&& _args, std::index_sequence<Idx...>)
     return std::forward<FuncT>(_func)(std::get<Idx>(_args)...);
 }
 
-template <size_t Idx, typename... Args>
+template <size_t TableIdx, size_t OpIdx, typename... Args>
 hsa_status_t
 async_copy_impl(Args... args)
 {
-    using meta_type = hsa_api_meta<Idx>;
+    using meta_type = hsa_api_meta<TableIdx, OpIdx>;
 
     constexpr auto N = sizeof...(Args);
 
@@ -331,8 +334,9 @@ async_copy_impl(Args... args)
     // no active contexts so just execute original
     if(ctxs.empty())
     {
-        return invoke(
-            get_next_dispatch<Idx>(), std::move(_tied_args), std::make_index_sequence<N>{});
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     // determine the direction of the memory copy
@@ -341,8 +345,8 @@ async_copy_impl(Args... args)
     auto _dst_agent_id = rocprofiler_agent_id_t{};
     {
         // indices in the tuple with references to the arguments
-        constexpr auto dst_agent_idx = arg_indices<Idx>::dst_agent_idx;
-        constexpr auto src_agent_idx = arg_indices<Idx>::src_agent_idx;
+        constexpr auto dst_agent_idx = arg_indices<OpIdx>::dst_agent_idx;
+        constexpr auto src_agent_idx = arg_indices<OpIdx>::src_agent_idx;
 
         // extract the completion signal argument and the destination hsa_agent_t
         auto _hsa_dst_agent = std::get<dst_agent_idx>(_tied_args);
@@ -411,8 +415,9 @@ async_copy_impl(Args... args)
     // if no contexts remain, execute as usual
     if(ctxs.empty())
     {
-        return invoke(
-            get_next_dispatch<Idx>(), std::move(_tied_args), std::make_index_sequence<N>{});
+        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                      std::move(_tied_args),
+                      std::make_index_sequence<N>{});
     }
 
     // at this point, we want to install our own signal handler
@@ -423,7 +428,7 @@ async_copy_impl(Args... args)
     _data->direction = _direction;
     _data->contexts  = ctxs;  // avoid using move in case code below accidentally uses ctxs
 
-    constexpr auto           completion_signal_idx = arg_indices<Idx>::completion_signal_idx;
+    constexpr auto           completion_signal_idx = arg_indices<OpIdx>::completion_signal_idx;
     auto&                    _completion_signal    = std::get<completion_signal_idx>(_tied_args);
     const hsa_signal_value_t _completion_signal_val =
         get_core_table()->hsa_signal_load_scacquire_fn(_completion_signal);
@@ -439,8 +444,9 @@ async_copy_impl(Args... args)
             LOG(ERROR) << "hsa_signal_create returned non-zero error code " << _status;
 
             delete _data;
-            return invoke(
-                get_next_dispatch<Idx>(), std::move(_tied_args), std::make_index_sequence<N>{});
+            return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                          std::move(_tied_args),
+                          std::make_index_sequence<N>{});
         }
         else
         {
@@ -465,8 +471,9 @@ async_copy_impl(Args... args)
             get_active_signals()->fetch_sub(1);
 
             delete _data;
-            return invoke(
-                get_next_dispatch<Idx>(), std::move(_tied_args), std::make_index_sequence<N>{});
+            return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                          std::move(_tied_args),
+                          std::make_index_sequence<N>{});
         }
     }
 
@@ -486,49 +493,67 @@ async_copy_impl(Args... args)
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
 
-    return invoke(get_next_dispatch<Idx>(), std::move(_tied_args), std::make_index_sequence<N>{});
+    return invoke(
+        get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
 }
 
-template <size_t Idx, typename RetT, typename... Args>
+template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>
 auto get_async_copy_impl(RetT (*)(Args...))
 {
-    return &async_copy_impl<Idx, Args...>;
+    return &async_copy_impl<TableIdx, OpIdx, Args...>;
 }
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 void
-async_copy_save(hsa_api_table_t* _orig)
+async_copy_save(hsa_amd_ext_table_t* _orig)
 {
-    auto  _meta              = hsa_api_meta<Idx>{};
-    auto& _table             = _meta.get_table(_orig);
-    auto& _func              = _meta.get_table_func(_table);
-    get_next_dispatch<Idx>() = _func;
+    static_assert(
+        std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
+        "unexpected type");
+
+    auto  _meta                          = hsa_api_meta<TableIdx, OpIdx>{};
+    auto& _table                         = _meta.get_table(_orig);
+    auto& _func                          = _meta.get_table_func(_table);
+    get_next_dispatch<TableIdx, OpIdx>() = _func;
 }
 
-template <size_t... Idx>
+template <size_t TableIdx, size_t... OpIdx>
 void
-async_copy_save(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
+async_copy_save(hsa_amd_ext_table_t* _orig, std::index_sequence<OpIdx...>)
 {
-    (async_copy_save<Idx>(_orig), ...);
+    static_assert(
+        std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
+        "unexpected type");
+
+    (async_copy_save<TableIdx, OpIdx>(_orig), ...);
 }
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 void
-async_copy_wrap(hsa_api_table_t* _orig)
+async_copy_wrap(hsa_amd_ext_table_t* _orig)
 {
-    auto  _meta  = hsa_api_meta<Idx>{};
+    static_assert(
+        std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
+        "unexpected type");
+
+    auto  _meta  = hsa_api_meta<TableIdx, OpIdx>{};
     auto& _table = _meta.get_table(_orig);
     auto& _func  = _meta.get_table_func(_table);
 
-    CHECK_NOTNULL(get_next_dispatch<Idx>());
-    _func = get_async_copy_impl<Idx>(_func);
+    auto& _dispatch = get_next_dispatch<TableIdx, OpIdx>();
+    CHECK_NOTNULL(_dispatch);
+    _func = get_async_copy_impl<TableIdx, OpIdx>(_func);
 }
 
-template <size_t... Idx>
+template <size_t TableIdx, size_t... OpIdx>
 void
-async_copy_wrap(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
+async_copy_wrap(hsa_amd_ext_table_t* _orig, std::index_sequence<OpIdx...>)
 {
-    (async_copy_wrap<Idx>(_orig), ...);
+    static_assert(
+        std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
+        "unexpected type");
+
+    (async_copy_wrap<TableIdx, OpIdx>(_orig), ...);
 }
 
 using async_copy_index_seq_t =
@@ -571,15 +596,17 @@ get_names()
 void
 async_copy_init(hsa_api_table_t* _orig)
 {
-    if(_orig)
+    if(_orig && _orig->amd_ext_)
     {
-        async_copy::async_copy_save(_orig, async_copy::async_copy_index_seq_t{});
+        async_copy::async_copy_save<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
+            _orig->amd_ext_, async_copy::async_copy_index_seq_t{});
 
         auto ctxs = context::get_registered_contexts(async_copy::context_filter);
         if(!ctxs.empty())
         {
             _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
-            async_copy::async_copy_wrap(_orig, async_copy::async_copy_index_seq_t{});
+            async_copy::async_copy_wrap<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
+                _orig->amd_ext_, async_copy::async_copy_index_seq_t{});
         }
     }
 }
@@ -588,11 +615,25 @@ void
 async_copy_fini()
 {
     if(!async_copy::get_active_signals()) return;
-    while(async_copy::get_active_signals()->load() > 0)
-    {
-        std::this_thread::yield();
-        std::this_thread::sleep_for(std::chrono::milliseconds{50});
-    }
+
+    // Potentially replace with condition variable at some point
+    // but performance may not matter here.
+    constexpr auto max_wait_time  = std::chrono::milliseconds{1000};
+    constexpr auto query_interval = std::chrono::milliseconds{10};
+    auto           _orig_active = async_copy::get_active_signals()->load(std::memory_order_relaxed);
+    auto           _curr_active = _orig_active;
+    auto           inactive     = common::yield(
+        [&_curr_active]() {
+            return ((_curr_active =
+                         async_copy::get_active_signals()->load(std::memory_order_relaxed)) == 0);
+        },
+        max_wait_time,
+        query_interval);
+
+    LOG_IF(WARNING, !inactive)
+        << "rocprofiler-sdk abandoned waiting for " << _orig_active
+        << " async copy signal callbacks after " << max_wait_time.count() << " msecs. There were "
+        << _curr_active << " async copy signal callbacks which were not delivered at that time.";
 }
 }  // namespace hsa
 }  // namespace rocprofiler

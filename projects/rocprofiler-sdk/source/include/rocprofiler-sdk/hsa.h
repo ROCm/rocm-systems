@@ -34,7 +34,7 @@
 
 #include <rocprofiler-sdk/hsa/api_args.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
-#include <rocprofiler-sdk/hsa/table_api_id.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
 
 #include <hsa/hsa.h>
 

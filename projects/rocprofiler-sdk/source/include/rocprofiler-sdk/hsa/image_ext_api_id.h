@@ -22,12 +22,26 @@
 
 #pragma once
 
-// NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+#include <rocprofiler-sdk/version.h>
+
+/**
+ * @brief ROCProfiler enumeration of HSA Image Extended API tracing operations
+ */
+typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_MARKER_API_TABLE_ID_NONE      = -1,
-    ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore = 0,
-    ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl,
-    ROCPROFILER_MARKER_API_TABLE_ID_RoctxName,
-    ROCPROFILER_MARKER_API_TABLE_ID_LAST,
-} rocprofiler_marker_table_api_id_t;
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_NONE = -1,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_get_capability,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_data_get_info,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_create,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_import,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_export,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_copy,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_clear,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_destroy,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_sampler_create,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_sampler_destroy,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_get_capability_with_layout,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_data_get_info_with_layout,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_hsa_ext_image_create_with_layout,
+    ROCPROFILER_HSA_IMAGE_EXT_API_ID_LAST,
+} rocprofiler_hsa_image_ext_api_id_t;

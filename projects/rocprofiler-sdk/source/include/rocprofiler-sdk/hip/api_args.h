@@ -36,10 +36,87 @@ typedef union rocprofiler_hip_api_retval_u
     const char*          const_charp_retval;
     hipError_t           hipError_t_retval;
     hipChannelFormatDesc hipChannelFormatDesc_retval;
+    void**               voidpp_retval;
 } rocprofiler_hip_api_retval_t;
 
 typedef union rocprofiler_hip_api_args_u
 {
+    // compiler
+    struct
+    {
+        dim3*        gridDim;
+        dim3*        blockDim;
+        size_t*      sharedMem;
+        hipStream_t* stream;
+    } __hipPopCallConfiguration;
+    struct
+    {
+        dim3        gridDim;
+        dim3        blockDim;
+        size_t      sharedMem;
+        hipStream_t stream;
+    } __hipPushCallConfiguration;
+    struct
+    {
+        const void* data;
+    } __hipRegisterFatBinary;
+    struct
+    {
+        void**       modules;
+        const void*  hostFunction;
+        char*        deviceFunction;
+        const char*  deviceName;
+        unsigned int threadLimit;
+        uint3*       tid;
+        uint3*       bid;
+        dim3*        blockDim;
+        dim3*        gridDim;
+        int*         wSize;
+    } __hipRegisterFunction;
+    struct
+    {
+        void*       hipModule;
+        void**      pointer;
+        void*       init_value;
+        const char* name;
+        size_t      size;
+        unsigned    align;
+    } __hipRegisterManagedVar;
+    struct
+    {
+        void** modules;
+        void*  var;
+        char*  hostVar;
+        char*  deviceVar;
+        int    type;
+        int    ext;
+    } __hipRegisterSurface;
+    struct
+    {
+        void** modules;
+        void*  var;
+        char*  hostVar;
+        char*  deviceVar;
+        int    type;
+        int    norm;
+        int    ext;
+    } __hipRegisterTexture;
+    struct
+    {
+        void** modules;
+        void*  var;
+        char*  hostVar;
+        char*  deviceVar;
+        int    ext;
+        size_t size;
+        int    constant;
+        int    global;
+    } __hipRegisterVar;
+    struct
+    {
+        void** modules;
+    } __hipUnregisterFatBinary;
+    // runtime
     struct
     {
         uint32_t id;

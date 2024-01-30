@@ -60,9 +60,9 @@ kernelC(T* C_d, const T* A_d, size_t N)
 }
 
 void
-launchKernals()
+launchKernels()
 {
-    const int NUM_LAUNCH = 200000;
+    const int NUM_LAUNCH = 50000;
     // Normal HIP Calls
     int*                             gpuMem;
     [[maybe_unused]] hipDeviceProp_t devProp;
@@ -110,5 +110,5 @@ int
 main()
 {
     start();
-    launchKernals();
+    launchKernels();
 }

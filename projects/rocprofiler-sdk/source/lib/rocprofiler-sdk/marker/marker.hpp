@@ -75,19 +75,19 @@ uint32_t
 id_by_name(const char* name);
 
 template <size_t TableIdx>
-void
-iterate_args(uint32_t                                              id,
-             const rocprofiler_callback_tracing_marker_api_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t      callback,
-             void*                                                 user_data);
-
-template <size_t TableIdx>
 std::vector<const char*>
 get_names();
 
 template <size_t TableIdx>
 std::vector<uint32_t>
 get_ids();
+
+template <size_t TableIdx>
+void
+iterate_args(uint32_t                                              id,
+             const rocprofiler_callback_tracing_marker_api_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t      callback,
+             void*                                                 user_data);
 
 template <typename TableT>
 void

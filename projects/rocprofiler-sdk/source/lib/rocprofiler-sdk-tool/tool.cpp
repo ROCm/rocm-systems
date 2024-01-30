@@ -506,7 +506,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 get_kernel_trace_file() << kernel_trace_ss.str();
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API ||
+                    header->kind == ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
@@ -542,7 +545,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 get_memory_copy_trace_file() << memory_copy_trace_ss.str();
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_API ||
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
             {
                 auto* record =
@@ -824,13 +827,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    &get_buffers().hsa_api_trace),
                          "buffer creation");
 
-        ROCPROFILER_CALL(
-            rocprofiler_configure_buffer_tracing_service(get_client_ctx(),
-                                                         ROCPROFILER_BUFFER_TRACING_HSA_API,
-                                                         nullptr,
-                                                         0,
-                                                         get_buffers().hsa_api_trace),
-            "buffer tracing service for hsa api configure");
+        for(auto itr : {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
+                        ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+                        ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                        ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API})
+        {
+            ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                                 get_client_ctx(), itr, nullptr, 0, get_buffers().hsa_api_trace),
+                             "buffer tracing service for hsa api configure");
+        }
     }
 
     if(tool::get_config().hip_api_trace || tool::get_config().hip_compiler_api_trace)
@@ -846,13 +851,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
         if(tool::get_config().hip_api_trace)
         {
-            ROCPROFILER_CALL(
-                rocprofiler_configure_buffer_tracing_service(get_client_ctx(),
-                                                             ROCPROFILER_BUFFER_TRACING_HIP_API,
-                                                             nullptr,
-                                                             0,
-                                                             get_buffers().hip_api_trace),
-                "buffer tracing service for hip api configure");
+            ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                                 get_client_ctx(),
+                                 ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
+                                 nullptr,
+                                 0,
+                                 get_buffers().hip_api_trace),
+                             "buffer tracing service for hip api configure");
         }
 
         if(tool::get_config().hip_compiler_api_trace)

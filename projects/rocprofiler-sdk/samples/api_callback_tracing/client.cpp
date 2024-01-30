@@ -39,8 +39,10 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "common/call_stack.hpp"
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
+#include "common/name_info.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -63,24 +65,9 @@ namespace client
 {
 namespace
 {
-struct source_location
-{
-    std::string function = {};
-    std::string file     = {};
-    uint32_t    line     = 0;
-    std::string context  = {};
-};
-
-using call_stack_t          = std::vector<source_location>;
-using callback_kind_names_t = std::map<rocprofiler_callback_tracing_kind_t, const char*>;
-using callback_kind_operation_names_t =
-    std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
-
-struct callback_name_info
-{
-    callback_kind_names_t           kind_names      = {};
-    callback_kind_operation_names_t operation_names = {};
-};
+using common::call_stack_t;
+using common::callback_name_info;
+using common::source_location;
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
@@ -89,103 +76,7 @@ rocprofiler_context_id_t      client_ctx       = {};
 void
 print_call_stack(const call_stack_t& _call_stack)
 {
-    auto ofname = std::string{"api_callback_trace.log"};
-    if(auto* eofname = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE")) ofname = eofname;
-
-    std::ostream* ofs     = nullptr;
-    auto          cleanup = std::function<void(std::ostream*&)>{};
-
-    if(ofname == "stdout")
-        ofs = &std::cout;
-    else if(ofname == "stderr")
-        ofs = &std::cerr;
-    else
-    {
-        ofs = new std::ofstream{ofname};
-        if(ofs && *ofs)
-            cleanup = [](std::ostream*& _os) { delete _os; };
-        else
-        {
-            std::cerr << "Error outputting to " << ofname << ". Redirecting to stderr...\n";
-            ofname = "stderr";
-            ofs    = &std::cerr;
-        }
-    }
-
-    std::cout << "Outputting collected data to " << ofname << "...\n" << std::flush;
-
-    size_t n = 0;
-    *ofs << std::left;
-    for(const auto& itr : _call_stack)
-    {
-        *ofs << std::left << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size()
-             << " [" << common::fs::path{itr.file}.filename() << ":" << itr.line << "] "
-             << std::setw(20) << itr.function;
-        if(!itr.context.empty()) *ofs << " :: " << itr.context;
-        *ofs << "\n";
-    }
-
-    *ofs << std::flush;
-
-    if(cleanup) cleanup(ofs);
-}
-
-callback_name_info
-get_callback_id_names()
-{
-    static auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
-        ROCPROFILER_CALLBACK_TRACING_HSA_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,
-    };
-
-    auto cb_name_info = callback_name_info{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<callback_name_info*>(data_v);
-
-            if(supported.count(kindv) > 0)
-            {
-                const char* name = nullptr;
-                ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
-                                     kindv, operation, &name, nullptr),
-                                 "query callback tracing kind operation name");
-                if(name) name_info_v->operation_names[kindv][operation] = name;
-            }
-            return 0;
-        };
-
-    //
-    //  callback for each callback kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_callback_tracing_kind_t kind, void* data) {
-        //  store the callback kind name
-        auto*       name_info_v = static_cast<callback_name_info*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_name(kind, &name, nullptr),
-                         "query callback tracing kind operation name");
-        if(name) name_info_v->kind_names[kind] = name;
-
-        if(supported.count(kind) > 0)
-        {
-            ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operations(
-                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
-                             "iterating callback tracing kind operations");
-        }
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kinds(tracing_kind_cb,
-                                                                static_cast<void*>(&cb_name_info)),
-                     "iterating callback tracing kinds");
-
-    return cb_name_info;
+    common::print_call_stack("api_callback_trace.log", _call_stack);
 }
 
 void
@@ -291,7 +182,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
 
-    callback_name_info name_info = get_callback_id_names();
+    callback_name_info name_info = common::get_callback_id_names();
 
     for(const auto& itr : name_info.operation_names)
     {
@@ -322,18 +213,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // enable the control
     tool_control_init(client_ctx);
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_callback_tracing_service(client_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_HSA_API,
-                                                       nullptr,
-                                                       0,
-                                                       tool_tracing_callback,
-                                                       tool_data),
-        "callback tracing service failed to configure");
+    for(auto itr : {ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+                    ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+                    ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                    ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API})
+    {
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             client_ctx, itr, nullptr, 0, tool_tracing_callback, tool_data),
+                         "callback tracing service failed to configure");
+    }
 
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_HIP_API,
+                                                       ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
                                                        nullptr,
                                                        0,
                                                        tool_tracing_callback,

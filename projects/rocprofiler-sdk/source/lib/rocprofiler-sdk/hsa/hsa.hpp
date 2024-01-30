@@ -60,10 +60,16 @@ get_img_ext_table();
 template <size_t Idx>
 struct hsa_table_lookup;
 
-template <size_t Idx>
+template <typename Tp>
+struct hsa_table_id_lookup;
+
+template <size_t TableIdx>
+struct hsa_domain_info;
+
+template <size_t TableIdx, size_t OpIdx>
 struct hsa_api_info;
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 struct hsa_api_meta;
 
 template <typename Tp>
@@ -81,7 +87,7 @@ template <typename RetT, typename... Args>
 struct hsa_api_func<RetT (*)(Args...) noexcept> : hsa_api_func<RetT (*)(Args...)>
 {};
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 struct hsa_api_impl
 {
     template <typename DataArgsT, typename... Args>
@@ -94,25 +100,35 @@ struct hsa_api_impl
     static auto functor(Args&&... args);
 };
 
+template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id);
 
+template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name);
 
+template <size_t TableIdx>
+std::vector<const char*>
+get_names();
+
+template <size_t TableIdx>
+std::vector<uint32_t>
+get_ids();
+
+template <size_t TableIdx>
 void
 iterate_args(uint32_t                                           id,
              const rocprofiler_callback_tracing_hsa_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   callback,
              void*                                              user_data);
 
-std::vector<const char*>
-get_names();
-
-std::vector<uint32_t>
-get_ids();
-
+template <typename TableT>
 void
-update_table(hsa_api_table_t* _orig);
+copy_table(TableT* _orig);
+
+template <typename TableT>
+void
+update_table(TableT* _orig);
 }  // namespace hsa
 }  // namespace rocprofiler

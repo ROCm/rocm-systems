@@ -162,8 +162,7 @@ hip_api_impl<TableIdx, OpIdx>::exec(FuncT&& _func, Args&&... args)
 
 namespace
 {
-using correlation_service     = context::correlation_tracing_service;
-using buffer_hip_api_record_t = rocprofiler_buffer_tracing_hip_api_record_t;
+using correlation_service = context::correlation_tracing_service;
 
 struct callback_context_data
 {
@@ -221,6 +220,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 {
     using info_type           = hip_api_info<TableIdx, OpIdx>;
     using callback_api_data_t = typename hip_domain_info<TableIdx>::callback_data_type;
+    using buffered_api_data_t = typename hip_domain_info<TableIdx>::buffered_data_type;
 
     auto thr_id            = common::get_tid();
     auto callback_contexts = std::vector<callback_context_data>{};
@@ -243,7 +243,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
     }
 
     auto  ref_count        = (has_pc_sampling) ? 4 : 2;
-    auto  buffer_record    = common::init_public_api_struct(buffer_hip_api_record_t{});
+    auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
     auto  tracer_data      = callback_api_data_t{.size = sizeof(callback_api_data_t)};
     auto* corr_id          = correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
@@ -383,23 +383,6 @@ namespace hip
 {
 namespace
 {
-template <size_t TableIdx>
-struct api_id_bounds;
-
-template <>
-struct api_id_bounds<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>
-{
-    static constexpr auto none = ROCPROFILER_HIP_API_ID_NONE;
-    static constexpr auto last = ROCPROFILER_HIP_API_ID_LAST;
-};
-
-template <>
-struct api_id_bounds<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>
-{
-    static constexpr auto none = ROCPROFILER_HIP_COMPILER_API_ID_NONE;
-    static constexpr auto last = ROCPROFILER_HIP_COMPILER_API_ID_LAST;
-};
-
 template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
 const char*
 name_by_id(const uint32_t id, std::index_sequence<OpIdx, OpIdxTail...>)
@@ -422,7 +405,7 @@ id_by_name(const char* name, std::index_sequence<OpIdx, OpIdxTail...>)
     if constexpr(sizeof...(OpIdxTail) > 0)
         return id_by_name<TableIdx>(name, std::index_sequence<OpIdxTail...>{});
     else
-        return api_id_bounds<TableIdx>::none;
+        return hip_domain_info<TableIdx>::none;
 }
 
 template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
@@ -430,7 +413,7 @@ void
 get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<OpIdx, OpIdxTail...>)
 {
     auto _idx = hip_api_info<TableIdx, OpIdx>::operation_idx;
-    if(_idx < api_id_bounds<TableIdx>::last) _id_list.emplace_back(_idx);
+    if(_idx < hip_domain_info<TableIdx>::last) _id_list.emplace_back(_idx);
 
     if constexpr(sizeof...(OpIdxTail) > 0)
         get_ids<TableIdx>(_id_list, std::index_sequence<OpIdxTail...>{});
@@ -447,17 +430,17 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<OpIdx, OpIdx
         get_names<TableIdx>(_name_list, std::index_sequence<OpIdxTail...>{});
 }
 
-template <size_t OpIdx, size_t... OpIdxTail>
+template <size_t TableIdx, typename DataT, size_t OpIdx, size_t... OpIdxTail>
 void
-iterate_args(const uint32_t                                     id,
-             const rocprofiler_callback_tracing_hip_api_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t   func,
-             void*                                              user_data,
+iterate_args(const uint32_t                                   id,
+             const DataT&                                     data,
+             rocprofiler_callback_tracing_operation_args_cb_t func,
+             void*                                            user_data,
              std::index_sequence<OpIdx, OpIdxTail...>)
 {
     if(OpIdx == id)
     {
-        using info_type = hip_api_info<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi, OpIdx>;
+        using info_type = hip_api_info<TableIdx, OpIdx>;
         auto&& arg_list = info_type::as_arg_list(data);
         auto&& arg_addr = info_type::as_arg_addr(data);
         for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
@@ -473,7 +456,7 @@ iterate_args(const uint32_t                                     id,
         }
     }
     if constexpr(sizeof...(OpIdxTail) > 0)
-        iterate_args(id, data, func, user_data, std::index_sequence<OpIdxTail...>{});
+        iterate_args<TableIdx>(id, data, func, user_data, std::index_sequence<OpIdxTail...>{});
 }
 
 bool
@@ -585,21 +568,21 @@ template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id<TableIdx>(id, std::make_index_sequence<api_id_bounds<TableIdx>::last>{});
+    return name_by_id<TableIdx>(id, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
 template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name)
 {
-    return id_by_name<TableIdx>(name, std::make_index_sequence<api_id_bounds<TableIdx>::last>{});
+    return id_by_name<TableIdx>(name, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
 template <size_t TableIdx>
 std::vector<uint32_t>
 get_ids()
 {
-    constexpr auto last_api_id = api_id_bounds<TableIdx>::last;
+    constexpr auto last_api_id = hip_domain_info<TableIdx>::last;
     auto           _data       = std::vector<uint32_t>{};
     _data.reserve(last_api_id);
     get_ids<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
@@ -610,13 +593,14 @@ template <size_t TableIdx>
 std::vector<const char*>
 get_names()
 {
-    constexpr auto last_api_id = api_id_bounds<TableIdx>::last;
+    constexpr auto last_api_id = hip_domain_info<TableIdx>::last;
     auto           _data       = std::vector<const char*>{};
     _data.reserve(last_api_id);
     get_names<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
     return _data;
 }
 
+template <size_t TableIdx>
 void
 iterate_args(uint32_t                                           id,
              const rocprofiler_callback_tracing_hip_api_data_t& data,
@@ -624,61 +608,44 @@ iterate_args(uint32_t                                           id,
              void*                                              user_data)
 {
     if(callback)
-        iterate_args(
-            id, data, callback, user_data, std::make_index_sequence<ROCPROFILER_HIP_API_ID_LAST>{});
+        iterate_args<TableIdx>(id,
+                               data,
+                               callback,
+                               user_data,
+                               std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
-// void
-// iterate_args(uint32_t                                           id,
-//              const rocprofiler_callback_tracing_hip_compiler_api_data_t& data,
-//              rocprofiler_callback_tracing_operation_args_cb_t   callback,
-//              void*                                              user_data)
-// {
-//     if(callback)
-//         iterate_args(
-//             id, data, callback, user_data,
-//             std::make_index_sequence<ROCPROFILER_HIP_COMPILER_API_ID_LAST>{});
-// }
-
-#define INSTANTIATE_HIP_TABLE_FUNC(TABLE)                                                          \
-    template const char*              name_by_id<TABLE>(uint32_t);                                 \
-    template uint32_t                 id_by_name<TABLE>(const char*);                              \
-    template std::vector<uint32_t>    get_ids<TABLE>();                                            \
-    template std::vector<const char*> get_names<TABLE>();
-
-INSTANTIATE_HIP_TABLE_FUNC(ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi)
-INSTANTIATE_HIP_TABLE_FUNC(ROCPROFILER_HIP_API_TABLE_ID_CompilerApi)
-
+template <typename TableT>
 void
-copy_table(hip_compiler_api_table_t* _orig)
+copy_table(TableT* _orig)
 {
+    constexpr auto TableIdx = hip_table_id_lookup<TableT>::value;
     if(_orig)
-        copy_table<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>(
-            _orig, std::make_index_sequence<ROCPROFILER_HIP_COMPILER_API_ID_LAST>{});
+        copy_table<TableIdx>(_orig, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
+template <typename TableT>
 void
-copy_table(hip_runtime_api_table_t* _orig)
+update_table(TableT* _orig)
 {
+    constexpr auto TableIdx = hip_table_id_lookup<TableT>::value;
     if(_orig)
-        copy_table<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(
-            _orig, std::make_index_sequence<ROCPROFILER_HIP_API_ID_LAST>{});
+        update_table<TableIdx>(_orig, std::make_index_sequence<hip_domain_info<TableIdx>::last>{});
 }
 
-void
-update_table(hip_compiler_api_table_t* _orig)
-{
-    if(_orig)
-        update_table<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>(
-            _orig, std::make_index_sequence<ROCPROFILER_HIP_COMPILER_API_ID_LAST>{});
-}
+using hip_api_data_t   = rocprofiler_callback_tracing_hip_api_data_t;
+using hip_op_args_cb_t = rocprofiler_callback_tracing_operation_args_cb_t;
 
-void
-update_table(hip_runtime_api_table_t* _orig)
-{
-    if(_orig)
-        update_table<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(
-            _orig, std::make_index_sequence<ROCPROFILER_HIP_API_ID_LAST>{});
-}
+#define INSTANTIATE_HIP_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                          \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                   \
+    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
+    template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
+    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
+    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
+    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
+    template void iterate_args<TABLE_IDX>(uint32_t, const hip_api_data_t&, hip_op_args_cb_t, void*);
+
+INSTANTIATE_HIP_TABLE_FUNC(hip_runtime_api_table_t, ROCPROFILER_HIP_TABLE_ID_Runtime)
+INSTANTIATE_HIP_TABLE_FUNC(hip_compiler_api_table_t, ROCPROFILER_HIP_TABLE_ID_Compiler)
 }  // namespace hip
 }  // namespace rocprofiler

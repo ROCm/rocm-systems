@@ -22,37 +22,19 @@
 
 #pragma once
 
-#include <hsa/hsa_api_trace.h>
+#include <rocprofiler-sdk/version.h>
 
-#include <cstdint>
-#include <vector>
-
-namespace rocprofiler
+/**
+ * @brief ROCProfiler enumeration of HSA Image Extended API tracing operations
+ */
+typedef enum  // NOLINT(performance-enum-size)
 {
-namespace hsa
-{
-namespace code_object
-{
-const char*
-name_by_id(uint32_t id);
-
-uint32_t
-id_by_name(const char* name);
-
-std::vector<const char*>
-get_names();
-
-std::vector<uint32_t>
-get_ids();
-}  // namespace code_object
-
-void
-code_object_init(HsaApiTable* table);
-
-uint64_t
-get_kernel_id(uint64_t kernel_object);
-
-void
-code_object_shutdown();
-}  // namespace hsa
-}  // namespace rocprofiler
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_NONE                   = -1,
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_create = 0,
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_destroy,
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_add_module,
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_iterate_modules,
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_get_info,
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_hsa_ext_program_finalize,
+    ROCPROFILER_HSA_FINALIZE_EXT_API_ID_LAST,
+} rocprofiler_hsa_finalize_ext_api_id_t;

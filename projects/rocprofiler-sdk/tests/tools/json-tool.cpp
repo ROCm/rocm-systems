@@ -129,12 +129,16 @@ callback_name_info
 get_callback_tracing_names()
 {
     static const auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
-        ROCPROFILER_CALLBACK_TRACING_HSA_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_API,
+        ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+        ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+        ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+        ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
+        ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
         ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
         ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
         ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
         ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,
+        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
     };
 
     auto cb_name_info = callback_name_info{};
@@ -187,13 +191,17 @@ buffer_name_info
 get_buffer_tracing_names()
 {
     static const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_HSA_API,
-        ROCPROFILER_BUFFER_TRACING_HIP_API,
+        ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
+        ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+        ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+        ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
+        ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
         ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
-        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
         ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
         ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API};
+        ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,
+        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+    };
 
     auto cb_name_info = buffer_name_info{};
     //
@@ -394,7 +402,10 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             kernel_symbol_records.emplace_back(kernel_symbol_callback_record_t{ts, record, data_v});
         }
     }
-    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_API)
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API ||
+            record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API ||
+            record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API ||
+            record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API)
     {
         auto* data = static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
@@ -402,7 +413,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         hsa_api_cb_records.emplace_back(
             hsa_api_callback_record_t{ts, record, *data, std::move(args)});
     }
-    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_API)
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API ||
+            record.kind == ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API)
     {
         auto* data = static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
@@ -470,7 +482,10 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING)
         {
-            if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
+            if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
+               header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
+               header->kind == ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API ||
+               header->kind == ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
@@ -486,7 +501,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 marker_api_bf_records.emplace_back(*record);
             }
-            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API)
             {
                 auto* record =
                     static_cast<rocprofiler_buffer_tracing_hip_api_record_t*>(header->payload);
@@ -625,18 +640,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         ROCPROFILER_CALL(rocprofiler_create_context(itr.second), "context creation");
     }
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_callback_tracing_service(hsa_api_callback_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_HSA_API,
-                                                       nullptr,
-                                                       0,
-                                                       tool_tracing_callback,
-                                                       nullptr),
-        "hsa api callback tracing service configure");
+    for(auto itr : {ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
+                    ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
+                    ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
+                    ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API})
+    {
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             hsa_api_callback_ctx, itr, nullptr, 0, tool_tracing_callback, nullptr),
+                         "hsa api callback tracing service configure");
+    }
 
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(hip_api_callback_ctx,
-                                                       ROCPROFILER_CALLBACK_TRACING_HIP_API,
+                                                       ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
                                                        nullptr,
                                                        0,
                                                        tool_tracing_callback,
@@ -727,17 +743,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &memory_copy_buffer),
                      "buffer creation");
 
-    ROCPROFILER_CALL(
-        rocprofiler_configure_buffer_tracing_service(hsa_api_buffered_ctx,
-                                                     ROCPROFILER_BUFFER_TRACING_HSA_API,
-                                                     nullptr,
-                                                     0,
-                                                     hsa_api_buffered_buffer),
-        "buffer tracing service configure");
+    for(auto itr : {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
+                    ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
+                    ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
+                    ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API})
+    {
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                             hsa_api_buffered_ctx, itr, nullptr, 0, hsa_api_buffered_buffer),
+                         "buffer tracing service configure");
+    }
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(hip_api_buffered_ctx,
-                                                     ROCPROFILER_BUFFER_TRACING_HIP_API,
+                                                     ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
                                                      nullptr,
                                                      0,
                                                      hip_api_buffered_buffer),

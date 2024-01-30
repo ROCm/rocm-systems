@@ -8,7 +8,12 @@ def test_hsa_api_trace(hsa_input_data):
     functions = []
     correlation_ids = []
     for row in hsa_input_data:
-        assert row["Domain"] == "HSA_API"
+        assert row["Domain"] in (
+            "HSA_CORE_API",
+            "HSA_AMD_EXT_API",
+            "HSA_IMAGE_EXT_API",
+            "HSA_FINALIZE_EXT_API",
+        )
         assert int(row["Process_Id"]) > 0
         assert int(row["Thread_Id"]) >= int(row["Process_Id"])
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])

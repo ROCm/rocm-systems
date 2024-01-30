@@ -31,6 +31,8 @@
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
+#include <hsa/hsa_ext_finalize.h>
+#include <hsa/hsa_ext_image.h>
 
 #include <sstream>
 #include <string>
@@ -180,6 +182,43 @@ struct formatter<hsa_amd_memory_access_desc_t>
     {
         return fmt::format_to(
             ctx.out(), "permissions={}, agent_handle={}", v.permissions, v.agent_handle);
+    }
+};
+
+template <>
+struct formatter<hsa_ext_program_t> : rocprofiler::hsa::utils::handle_formatter<hsa_ext_program_t>
+{};
+
+template <>
+struct formatter<hsa_ext_control_directives_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(const hsa_ext_control_directives_t& v, Ctx& ctx) const
+    {
+        return fmt::format_to(
+            ctx.out(),
+            "control_directives_mask={}, break_exceptions_mask={}, detect_exceptions_mask={}, "
+            "max_dynamic_group_size={}, max_flat_grid_size={}, max_flat_workgroup_size={}, "
+            "required_grid_size=({},{},{}), required_workgroup_size=({},{},{}), required_dim={}",
+            v.control_directives_mask,
+            v.break_exceptions_mask,
+            v.detect_exceptions_mask,
+            v.max_dynamic_group_size,
+            v.max_flat_grid_size,
+            v.max_flat_workgroup_size,
+            v.required_grid_size[0],
+            v.required_grid_size[1],
+            v.required_grid_size[2],
+            v.required_workgroup_size.x,
+            v.required_workgroup_size.y,
+            v.required_workgroup_size.z,
+            v.required_dim);
     }
 };
 }  // namespace fmt

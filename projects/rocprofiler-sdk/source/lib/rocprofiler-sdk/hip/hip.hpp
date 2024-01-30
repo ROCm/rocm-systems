@@ -56,6 +56,9 @@ get_table();
 template <size_t OpIdx>
 struct hip_table_lookup;
 
+template <typename Tp>
+struct hip_table_id_lookup;
+
 template <size_t TableIdx>
 struct hip_domain_info;
 
@@ -83,12 +86,6 @@ template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name);
 
-void
-iterate_args(uint32_t                                           id,
-             const rocprofiler_callback_tracing_hip_api_data_t& data,
-             rocprofiler_callback_tracing_operation_args_cb_t   callback,
-             void*                                              user_data);
-
 template <size_t TableIdx>
 std::vector<const char*>
 get_names();
@@ -97,16 +94,19 @@ template <size_t TableIdx>
 std::vector<uint32_t>
 get_ids();
 
+template <size_t TableIdx>
 void
-copy_table(hip_compiler_api_table_t* _orig);
+iterate_args(uint32_t                                           id,
+             const rocprofiler_callback_tracing_hip_api_data_t& data,
+             rocprofiler_callback_tracing_operation_args_cb_t   callback,
+             void*                                              user_data);
 
+template <typename TableT>
 void
-copy_table(hip_runtime_api_table_t* _orig);
+copy_table(TableT* _orig);
 
+template <typename TableT>
 void
-update_table(hip_compiler_api_table_t* _orig);
-
-void
-update_table(hip_runtime_api_table_t* _orig);
+update_table(TableT* _orig);
 }  // namespace hip
 }  // namespace rocprofiler

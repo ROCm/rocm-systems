@@ -110,6 +110,9 @@ template <typename Tp>
 Tp*&
 get_table_impl(hsa_table_version_t _version)
 {
+    static_assert(common::static_object<Tp>::is_trivial_standard_layout(),
+                  "This HSA API table is not a trivial, standard layout type as it should be");
+
     auto*& val   = common::static_object<Tp>::construct();
     val->version = _version;
     return val;
@@ -166,36 +169,18 @@ get_table()
     return tbl;
 }
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 template <typename DataArgsT, typename... Args>
 auto
-hsa_api_impl<Idx>::set_data_args(DataArgsT& _data_args, Args... args)
+hsa_api_impl<TableIdx, OpIdx>::set_data_args(DataArgsT& _data_args, Args... args)
 {
-    if constexpr(Idx == ROCPROFILER_HSA_API_ID_hsa_amd_memory_async_copy_rect)
-    {
-        auto _tuple                  = std::make_tuple(args...);
-        _data_args.dst               = std::get<0>(_tuple);
-        _data_args.dst_offset        = std::get<1>(_tuple);
-        _data_args.src               = std::get<2>(_tuple);
-        _data_args.src_offset        = std::get<3>(_tuple);
-        _data_args.range             = std::get<4>(_tuple);
-        _data_args.range__val        = *(std::get<4>(_tuple));
-        _data_args.copy_agent        = std::get<5>(_tuple);
-        _data_args.dir               = std::get<6>(_tuple);
-        _data_args.num_dep_signals   = std::get<7>(_tuple);
-        _data_args.dep_signals       = std::get<8>(_tuple);
-        _data_args.completion_signal = std::get<9>(_tuple);
-    }
-    else
-    {
-        _data_args = DataArgsT{args...};
-    }
+    _data_args = DataArgsT{args...};
 }
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 template <typename FuncT, typename... Args>
 auto
-hsa_api_impl<Idx>::exec(FuncT&& _func, Args&&... args)
+hsa_api_impl<TableIdx, OpIdx>::exec(FuncT&& _func, Args&&... args)
 {
     using return_type = std::decay_t<std::invoke_result_t<FuncT, Args...>>;
 
@@ -277,12 +262,12 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
 }
 }  // namespace
 
-template <size_t Idx>
+template <size_t TableIdx, size_t OpIdx>
 template <typename... Args>
 auto
-hsa_api_impl<Idx>::functor(Args&&... args)
+hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 {
-    using info_type = hsa_api_info<Idx>;
+    using info_type = hsa_api_info<TableIdx, OpIdx>;
 
     if(registration::get_fini_status() != 0)
     {
@@ -454,40 +439,64 @@ namespace hsa
 {
 namespace
 {
-template <size_t Idx, size_t... IdxTail>
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
 const char*
-name_by_id(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
+name_by_id(const uint32_t id, std::index_sequence<OpIdx, OpIdxTail...>)
 {
-    if(Idx == id) return hsa_api_info<Idx>::name;
-    if constexpr(sizeof...(IdxTail) > 0)
-        return name_by_id(id, std::index_sequence<IdxTail...>{});
+    if(OpIdx == id) return hsa_api_info<TableIdx, OpIdx>::name;
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        return name_by_id<TableIdx>(id, std::index_sequence<OpIdxTail...>{});
     else
         return nullptr;
 }
 
-template <size_t Idx, size_t... IdxTail>
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
 uint32_t
-id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
+id_by_name(const char* name, std::index_sequence<OpIdx, OpIdxTail...>)
 {
-    if(std::string_view{hsa_api_info<Idx>::name} == std::string_view{name})
-        return hsa_api_info<Idx>::operation_idx;
-    if constexpr(sizeof...(IdxTail) > 0)
-        return id_by_name(name, std::index_sequence<IdxTail...>{});
+    if(std::string_view{hsa_api_info<TableIdx, OpIdx>::name} == std::string_view{name})
+        return hsa_api_info<TableIdx, OpIdx>::operation_idx;
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        return id_by_name<TableIdx>(name, std::index_sequence<OpIdxTail...>{});
     else
-        return ROCPROFILER_HSA_API_ID_NONE;
+        return hsa_domain_info<TableIdx>::none;
 }
 
-template <size_t Idx, size_t... IdxTail>
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
+void
+get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    uint32_t _idx = hsa_api_info<TableIdx, OpIdx>::operation_idx;
+    if(_idx < hsa_domain_info<TableIdx>::last) _id_list.emplace_back(_idx);
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        get_ids<TableIdx>(_id_list, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx, size_t OpIdx, size_t... OpIdxTail>
+void
+get_names(std::vector<const char*>& _name_list, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    auto&& _name = hsa_api_info<TableIdx, OpIdx>::name;
+    if(_name != nullptr && strnlen(_name, 1) > 0) _name_list.emplace_back(_name);
+
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        get_names<TableIdx>(_name_list, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx, size_t OpIdx, size_t... IdxTail>
 void
 iterate_args(const uint32_t                                     id,
              const rocprofiler_callback_tracing_hsa_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   func,
              void*                                              user_data,
-             std::index_sequence<Idx, IdxTail...>)
+             std::index_sequence<OpIdx, IdxTail...>)
 {
-    if(Idx == id)
+    if(OpIdx == id)
     {
-        using info_type = hsa_api_info<Idx>;
+        using info_type = hsa_api_info<TableIdx, OpIdx>;
         auto&& arg_list = info_type::as_arg_list(data);
         auto&& arg_addr = info_type::as_arg_addr(data);
         for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
@@ -503,29 +512,7 @@ iterate_args(const uint32_t                                     id,
         }
     }
     if constexpr(sizeof...(IdxTail) > 0)
-        iterate_args(id, data, func, user_data, std::index_sequence<IdxTail...>{});
-}
-
-template <size_t... Idx>
-void
-get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
-{
-    auto _emplace = [](auto& _vec, uint32_t _v) {
-        if(_v < ROCPROFILER_HSA_API_ID_LAST) _vec.emplace_back(_v);
-    };
-
-    (_emplace(_id_list, hsa_api_info<Idx>::operation_idx), ...);
-}
-
-template <size_t... Idx>
-void
-get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
-{
-    auto _emplace = [](auto& _vec, const char* _v) {
-        if(_v != nullptr && strnlen(_v, 1) > 0) _vec.emplace_back(_v);
-    };
-
-    (_emplace(_name_list, hsa_api_info<Idx>::name), ...);
+        iterate_args<TableIdx>(id, data, func, user_data, std::index_sequence<IdxTail...>{});
 }
 
 bool
@@ -553,48 +540,131 @@ should_wrap_functor(const context::context_array_t&     _contexts,
     return false;
 }
 
-template <size_t... Idx>
+template <size_t TableIdx, typename Tp, size_t OpIdx>
 void
-update_table(hsa_api_table_t* _orig, std::index_sequence<Idx...>)
+copy_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 {
-    auto _update = [](hsa_api_table_t* _orig_v, const auto& _contexts_v, auto _info) {
-        // check to see if there are any contexts which enable this operation in the HSA API domain
-        if(!should_wrap_functor(_contexts_v,
+    using table_type = typename hsa_table_lookup<TableIdx>::type;
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = hsa_api_info<TableIdx, OpIdx>{};
+
+        LOG(INFO) << "copying table entry for " << _info.name;
+
+        // make sure we don't access a field that doesn't exist in input table
+        if(_info.offset() >= _orig->version.minor_id) return;
+
+        // 1. get the sub-table containing the function pointer in original table
+        // 2. get reference to function pointer in sub-table in original table
+        auto& _table = _info.get_table(_orig);
+        auto& _func  = _info.get_table_func(_table);
+        // 3. get the sub-table containing the function pointer in saved table
+        // 4. get reference to function pointer in sub-table in saved table
+        // 5. save the original function in the saved table
+        auto& _saved = _info.get_table(hsa_table_lookup<TableIdx>{}());
+        auto& _ofunc = _info.get_table_func(_saved);
+        _ofunc       = _func;
+    }
+
+    (void) _orig;
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx>
+void
+update_table(const context::context_array_t& _contexts,
+             Tp*                             _orig,
+             std::integral_constant<size_t, OpIdx>)
+{
+    using table_type = typename hsa_table_lookup<TableIdx>::type;
+
+    if constexpr(std::is_same<table_type, Tp>::value)
+    {
+        auto _info = hsa_api_info<TableIdx, OpIdx>{};
+
+        LOG(INFO) << "updating table entry for " << _info.name;
+
+        // make sure we don't access a field that doesn't exist in input table
+        if(_info.offset() >= _orig->version.minor_id) return;
+
+        // check to see if there are any contexts which enable this operation in the ROCTX API
+        // domain
+        if(!should_wrap_functor(_contexts,
                                 _info.callback_domain_idx,
                                 _info.buffered_domain_idx,
                                 _info.operation_idx))
             return;
 
-        // 1. get the sub-table containing the function pointer
-        // 2. make sure the function pointer offset exists in passed table
-        auto& _table = _info.get_table(_orig_v);
-        if(_info.offset() < _table->version.minor_id)
-        {
-            // 3. get reference to function pointer in sub-table
-            // 4. update function pointer with functor
-            auto& _func = _info.get_table_func(_table);
-            _func       = _info.get_functor(_func);
-        }
-    };
+        // 1. get the sub-table containing the function pointer in original table
+        // 2. get reference to function pointer in sub-table in original table
+        // 3. update function pointer with wrapper
+        auto& _table = _info.get_table(_orig);
+        auto& _func  = _info.get_table_func(_table);
+        _func        = _info.get_functor(_func);
+    }
 
-    auto _contexts = context::get_registered_contexts();
-    (_update(_orig, _contexts, hsa_api_info<Idx>{}), ...);
+    (void) _orig;
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+void
+copy_table(Tp* _orig, std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    copy_table<TableIdx>(_orig, std::integral_constant<size_t, OpIdx>{});
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        copy_table<TableIdx>(_orig, std::index_sequence<OpIdxTail...>{});
+}
+
+template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+void
+update_table(const context::context_array_t& _contexts,
+             Tp*                             _orig,
+             std::index_sequence<OpIdx, OpIdxTail...>)
+{
+    update_table<TableIdx>(_contexts, _orig, std::integral_constant<size_t, OpIdx>{});
+    if constexpr(sizeof...(OpIdxTail) > 0)
+        update_table<TableIdx>(_contexts, _orig, std::index_sequence<OpIdxTail...>{});
 }
 }  // namespace
 
 // check out the assembly here... this compiles to a switch statement
+template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id(id, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    return name_by_id<TableIdx>(id, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
 }
 
+template <size_t TableIdx>
 uint32_t
 id_by_name(const char* name)
 {
-    return id_by_name(name, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    return id_by_name<TableIdx>(name, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
 }
 
+template <size_t TableIdx>
+std::vector<uint32_t>
+get_ids()
+{
+    constexpr auto last_api_id = hsa_domain_info<TableIdx>::last;
+    auto           _data       = std::vector<uint32_t>{};
+    _data.reserve(last_api_id);
+    get_ids<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
+    return _data;
+}
+
+template <size_t TableIdx>
+std::vector<const char*>
+get_names()
+{
+    constexpr auto last_api_id = hsa_domain_info<TableIdx>::last;
+    auto           _data       = std::vector<const char*>{};
+    _data.reserve(last_api_id);
+    get_names<TableIdx>(_data, std::make_index_sequence<last_api_id>{});
+    return _data;
+}
+
+template <size_t TableIdx>
 void
 iterate_args(uint32_t                                           id,
              const rocprofiler_callback_tracing_hsa_api_data_t& data,
@@ -602,32 +672,53 @@ iterate_args(uint32_t                                           id,
              void*                                              user_data)
 {
     if(callback)
-        iterate_args(
-            id, data, callback, user_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+        iterate_args<TableIdx>(id,
+                               data,
+                               callback,
+                               user_data,
+                               std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
 }
 
-std::vector<uint32_t>
-get_ids()
-{
-    auto _data = std::vector<uint32_t>{};
-    _data.reserve(ROCPROFILER_HSA_API_ID_LAST);
-    get_ids(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
-    return _data;
-}
-
-std::vector<const char*>
-get_names()
-{
-    auto _data = std::vector<const char*>{};
-    _data.reserve(ROCPROFILER_HSA_API_ID_LAST);
-    get_names(_data, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
-    return _data;
-}
-
+template <typename TableT>
 void
-update_table(hsa_api_table_t* _orig)
+copy_table(TableT* _orig)
 {
-    if(_orig) update_table(_orig, std::make_index_sequence<ROCPROFILER_HSA_API_ID_LAST>{});
+    constexpr auto TableIdx = hsa_table_id_lookup<TableT>::value;
+    if(_orig)
+        copy_table<TableIdx>(_orig, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
 }
+
+template <typename TableT>
+void
+update_table(TableT* _orig)
+{
+    constexpr auto TableIdx = hsa_table_id_lookup<TableT>::value;
+    if(_orig)
+    {
+        auto _contexts = context::get_registered_contexts();
+        update_table<TableIdx>(
+            _contexts, _orig, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
+    }
+}
+
+using iterate_args_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
+using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
+
+#define INSTANTIATE_MARKER_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                       \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                   \
+    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
+    template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
+    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
+    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
+    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
+    template void                     iterate_args<TABLE_IDX>(                                     \
+        uint32_t, const iterate_args_data_t&, iterate_args_cb_t, void*);
+
+INSTANTIATE_MARKER_TABLE_FUNC(hsa_core_table_t, ROCPROFILER_HSA_TABLE_ID_Core)
+INSTANTIATE_MARKER_TABLE_FUNC(hsa_amd_ext_table_t, ROCPROFILER_HSA_TABLE_ID_AmdExt)
+INSTANTIATE_MARKER_TABLE_FUNC(hsa_img_ext_table_t, ROCPROFILER_HSA_TABLE_ID_ImageExt)
+INSTANTIATE_MARKER_TABLE_FUNC(hsa_fini_ext_table_t, ROCPROFILER_HSA_TABLE_ID_FinalizeExt)
+
+#undef INSTANTIATE_MARKER_TABLE_FUNC
 }  // namespace hsa
 }  // namespace rocprofiler

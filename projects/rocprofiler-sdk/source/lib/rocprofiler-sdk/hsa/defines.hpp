@@ -22,65 +22,7 @@
 
 #pragma once
 
-#define IMPL_DETAIL_EXPAND(X) X
-#define IMPL_DETAIL_FOR_EACH_NARG(...)                                                             \
-    IMPL_DETAIL_FOR_EACH_NARG_(__VA_ARGS__, IMPL_DETAIL_FOR_EACH_RSEQ_N())
-#define IMPL_DETAIL_FOR_EACH_NARG_(...)                                                       IMPL_DETAIL_EXPAND(IMPL_DETAIL_FOR_EACH_ARG_N(__VA_ARGS__))
-#define IMPL_DETAIL_FOR_EACH_ARG_N(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, N, ...) N
-#define IMPL_DETAIL_FOR_EACH_RSEQ_N()                                                         12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0
-#define IMPL_DETAIL_CONCATENATE(X, Y)                                                         X##Y
-#define IMPL_DETAIL_FOR_EACH_(N, MACRO, PREFIX, ...)                                               \
-    IMPL_DETAIL_EXPAND(IMPL_DETAIL_CONCATENATE(MACRO, N)(PREFIX, __VA_ARGS__))
-#define IMPL_DETAIL_FOR_EACH(MACRO, PREFIX, ...)                                                   \
-    IMPL_DETAIL_FOR_EACH_(IMPL_DETAIL_FOR_EACH_NARG(__VA_ARGS__), MACRO, PREFIX, __VA_ARGS__)
-
-#define ADDR_MEMBER_0(...)
-#define ADDR_MEMBER_1(PREFIX, FIELD)      static_cast<void*>(&PREFIX.FIELD)
-#define ADDR_MEMBER_2(PREFIX, A, B)       ADDR_MEMBER_1(PREFIX, A), ADDR_MEMBER_1(PREFIX, B)
-#define ADDR_MEMBER_3(PREFIX, A, B, C)    ADDR_MEMBER_2(PREFIX, A, B), ADDR_MEMBER_1(PREFIX, C)
-#define ADDR_MEMBER_4(PREFIX, A, B, C, D) ADDR_MEMBER_3(PREFIX, A, B, C), ADDR_MEMBER_1(PREFIX, D)
-#define ADDR_MEMBER_5(PREFIX, A, B, C, D, E)                                                       \
-    ADDR_MEMBER_4(PREFIX, A, B, C, D), ADDR_MEMBER_1(PREFIX, E)
-#define ADDR_MEMBER_6(PREFIX, A, B, C, D, E, F)                                                    \
-    ADDR_MEMBER_5(PREFIX, A, B, C, D, E), ADDR_MEMBER_1(PREFIX, F)
-#define ADDR_MEMBER_7(PREFIX, A, B, C, D, E, F, G)                                                 \
-    ADDR_MEMBER_6(PREFIX, A, B, C, D, E, F), ADDR_MEMBER_1(PREFIX, G)
-#define ADDR_MEMBER_8(PREFIX, A, B, C, D, E, F, G, H)                                              \
-    ADDR_MEMBER_7(PREFIX, A, B, C, D, E, F, G), ADDR_MEMBER_1(PREFIX, H)
-#define ADDR_MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I)                                           \
-    ADDR_MEMBER_8(PREFIX, A, B, C, D, E, F, G, H), ADDR_MEMBER_1(PREFIX, I)
-#define ADDR_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J)                                       \
-    ADDR_MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I), ADDR_MEMBER_1(PREFIX, J)
-#define ADDR_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K)                                    \
-    ADDR_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J), ADDR_MEMBER_1(PREFIX, K)
-#define ADDR_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L)                                 \
-    ADDR_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K), ADDR_MEMBER_1(PREFIX, L)
-
-#define NAMED_MEMBER_0(...)
-#define NAMED_MEMBER_1(PREFIX, FIELD)   std::make_pair(#FIELD, PREFIX.FIELD)
-#define NAMED_MEMBER_2(PREFIX, A, B)    NAMED_MEMBER_1(PREFIX, A), NAMED_MEMBER_1(PREFIX, B)
-#define NAMED_MEMBER_3(PREFIX, A, B, C) NAMED_MEMBER_2(PREFIX, A, B), NAMED_MEMBER_1(PREFIX, C)
-#define NAMED_MEMBER_4(PREFIX, A, B, C, D)                                                         \
-    NAMED_MEMBER_3(PREFIX, A, B, C), NAMED_MEMBER_1(PREFIX, D)
-#define NAMED_MEMBER_5(PREFIX, A, B, C, D, E)                                                      \
-    NAMED_MEMBER_4(PREFIX, A, B, C, D), NAMED_MEMBER_1(PREFIX, E)
-#define NAMED_MEMBER_6(PREFIX, A, B, C, D, E, F)                                                   \
-    NAMED_MEMBER_5(PREFIX, A, B, C, D, E), NAMED_MEMBER_1(PREFIX, F)
-#define NAMED_MEMBER_7(PREFIX, A, B, C, D, E, F, G)                                                \
-    NAMED_MEMBER_6(PREFIX, A, B, C, D, E, F), NAMED_MEMBER_1(PREFIX, G)
-#define NAMED_MEMBER_8(PREFIX, A, B, C, D, E, F, G, H)                                             \
-    NAMED_MEMBER_7(PREFIX, A, B, C, D, E, F, G), NAMED_MEMBER_1(PREFIX, H)
-#define NAMED_MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I)                                          \
-    NAMED_MEMBER_8(PREFIX, A, B, C, D, E, F, G, H), NAMED_MEMBER_1(PREFIX, I)
-#define NAMED_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J)                                      \
-    NAMED_MEMBER_9(PREFIX, A, B, C, D, E, F, G, H, I), NAMED_MEMBER_1(PREFIX, J)
-#define NAMED_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K)                                   \
-    NAMED_MEMBER_10(PREFIX, A, B, C, D, E, F, G, H, I, J), NAMED_MEMBER_1(PREFIX, K)
-#define NAMED_MEMBER_12(PREFIX, A, B, C, D, E, F, G, H, I, J, K, L)                                \
-    NAMED_MEMBER_11(PREFIX, A, B, C, D, E, F, G, H, I, J, K), NAMED_MEMBER_1(PREFIX, L)
-
-#define GET_ADDR_MEMBER_FIELDS(VAR, ...)  IMPL_DETAIL_FOR_EACH(ADDR_MEMBER_, VAR, __VA_ARGS__)
-#define GET_NAMED_MEMBER_FIELDS(VAR, ...) IMPL_DETAIL_FOR_EACH(NAMED_MEMBER_, VAR, __VA_ARGS__)
+#include "lib/common/defines.hpp"
 
 #define HSA_API_META_DEFINITION(HSA_TABLE, HSA_API_ID, HSA_FUNC, HSA_FUNC_PTR)                     \
     namespace rocprofiler                                                                          \
@@ -88,13 +30,13 @@
     namespace hsa                                                                                  \
     {                                                                                              \
     template <>                                                                                    \
-    struct hsa_api_meta<HSA_API_ID>                                                                \
+    struct hsa_api_meta<HSA_TABLE, HSA_API_ID>                                                     \
     {                                                                                              \
         static constexpr auto table_idx     = HSA_TABLE;                                           \
         static constexpr auto operation_idx = HSA_API_ID;                                          \
         static constexpr auto name          = #HSA_FUNC;                                           \
                                                                                                    \
-        using this_type     = hsa_api_meta<operation_idx>;                                         \
+        using this_type     = hsa_api_meta<table_idx, operation_idx>;                              \
         using function_type = hsa_api_func<decltype(::HSA_FUNC)*>::function_type;                  \
                                                                                                    \
         static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
@@ -130,16 +72,18 @@
     namespace hsa                                                                                  \
     {                                                                                              \
     template <>                                                                                    \
-    struct hsa_api_info<HSA_API_ID>                                                                \
+    struct hsa_api_info<HSA_TABLE, HSA_API_ID>                                                     \
     {                                                                                              \
-        static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_API;          \
-        static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_API;            \
-        static constexpr auto table_idx           = HSA_TABLE;                                     \
-        static constexpr auto operation_idx       = HSA_API_ID;                                    \
-        static constexpr auto name                = #HSA_FUNC;                                     \
+        static constexpr auto callback_domain_idx =                                                \
+            hsa_domain_info<HSA_TABLE>::callback_domain_idx;                                       \
+        static constexpr auto buffered_domain_idx =                                                \
+            hsa_domain_info<HSA_TABLE>::buffered_domain_idx;                                       \
+        static constexpr auto table_idx     = HSA_TABLE;                                           \
+        static constexpr auto operation_idx = HSA_API_ID;                                          \
+        static constexpr auto name          = #HSA_FUNC;                                           \
                                                                                                    \
-        using this_type = hsa_api_info<operation_idx>;                                             \
-        using base_type = hsa_api_impl<operation_idx>;                                             \
+        using this_type = hsa_api_info<table_idx, operation_idx>;                                  \
+        using base_type = hsa_api_impl<table_idx, operation_idx>;                                  \
                                                                                                    \
         static constexpr auto offset()                                                             \
         {                                                                                          \
@@ -207,16 +151,18 @@
     namespace hsa                                                                                  \
     {                                                                                              \
     template <>                                                                                    \
-    struct hsa_api_info<HSA_API_ID>                                                                \
+    struct hsa_api_info<HSA_TABLE, HSA_API_ID>                                                     \
     {                                                                                              \
-        static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_API;          \
-        static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_API;            \
-        static constexpr auto table_idx           = HSA_TABLE;                                     \
-        static constexpr auto operation_idx       = HSA_API_ID;                                    \
-        static constexpr auto name                = #HSA_FUNC;                                     \
+        static constexpr auto callback_domain_idx =                                                \
+            hsa_domain_info<HSA_TABLE>::callback_domain_idx;                                       \
+        static constexpr auto buffered_domain_idx =                                                \
+            hsa_domain_info<HSA_TABLE>::buffered_domain_idx;                                       \
+        static constexpr auto table_idx     = HSA_TABLE;                                           \
+        static constexpr auto operation_idx = HSA_API_ID;                                          \
+        static constexpr auto name          = #HSA_FUNC;                                           \
                                                                                                    \
-        using this_type = hsa_api_info<operation_idx>;                                             \
-        using base_type = hsa_api_impl<operation_idx>;                                             \
+        using this_type = hsa_api_info<table_idx, operation_idx>;                                  \
+        using base_type = hsa_api_impl<table_idx, operation_idx>;                                  \
                                                                                                    \
         static constexpr auto offset()                                                             \
         {                                                                                          \
@@ -280,7 +226,7 @@
     }                                                                                              \
     }
 
-#define HSA_API_TABLE_LOOKUP_DEFINITION(TABLE_ID, TYPE, MEMBER)                                    \
+#define HSA_API_TABLE_LOOKUP_DEFINITION(TABLE_ID, TYPE, NAME)                                      \
     namespace rocprofiler                                                                          \
     {                                                                                              \
     namespace hsa                                                                                  \
@@ -289,9 +235,15 @@
     struct hsa_table_lookup<TABLE_ID>                                                              \
     {                                                                                              \
         using type = TYPE;                                                                         \
-        auto& operator()(hsa_api_table_t& _v) const { return _v.MEMBER; }                          \
-        auto& operator()(hsa_api_table_t* _v) const { return _v->MEMBER; }                         \
-        auto& operator()() const { return (*this)(get_table()); }                                  \
+        auto& operator()(type& _v) const { return _v; }                                            \
+        auto& operator()(type* _v) const { return *_v; }                                           \
+        auto& operator()() const { return (*this)(get_##NAME##_table()); }                         \
+    };                                                                                             \
+                                                                                                   \
+    template <>                                                                                    \
+    struct hsa_table_id_lookup<TYPE>                                                               \
+    {                                                                                              \
+        static constexpr auto value = TABLE_ID;                                                    \
     };                                                                                             \
     }                                                                                              \
     }

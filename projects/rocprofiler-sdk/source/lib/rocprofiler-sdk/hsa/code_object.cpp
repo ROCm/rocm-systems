@@ -57,6 +57,113 @@ namespace rocprofiler
 {
 namespace hsa
 {
+namespace code_object
+{
+namespace
+{
+using context_t              = context::context;
+using context_array_t        = common::container::small_vector<const context_t*>;
+using external_corr_id_map_t = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
+
+template <size_t OpIdx>
+struct code_object_info;
+
+#define SPECIALIZE_CODE_OBJECT_INFO(OPERATION)                                                     \
+    template <>                                                                                    \
+    struct code_object_info<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_##OPERATION>                  \
+    {                                                                                              \
+        static constexpr auto operation_idx =                                                      \
+            ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_##OPERATION;                                  \
+        static constexpr auto name = #OPERATION;                                                   \
+    };
+
+SPECIALIZE_CODE_OBJECT_INFO(NONE)
+SPECIALIZE_CODE_OBJECT_INFO(LOAD)
+SPECIALIZE_CODE_OBJECT_INFO(DEVICE_KERNEL_SYMBOL_REGISTER)
+
+#undef SPECIALIZE_CODE_OBJECT_INFO
+
+template <size_t Idx, size_t... IdxTail>
+const char*
+name_by_id(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
+{
+    if(Idx == id) return code_object_info<Idx>::name;
+    if constexpr(sizeof...(IdxTail) > 0)
+        return name_by_id(id, std::index_sequence<IdxTail...>{});
+    else
+        return nullptr;
+}
+
+template <size_t Idx, size_t... IdxTail>
+uint32_t
+id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
+{
+    if(std::string_view{code_object_info<Idx>::name} == std::string_view{name})
+        return code_object_info<Idx>::operation_idx;
+    if constexpr(sizeof...(IdxTail) > 0)
+        return id_by_name(name, std::index_sequence<IdxTail...>{});
+    else
+        return ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_NONE;
+}
+
+template <size_t... Idx>
+void
+get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
+{
+    auto _emplace = [](auto& _vec, uint32_t _v) {
+        if(_v < static_cast<uint32_t>(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST))
+            _vec.emplace_back(_v);
+    };
+
+    (_emplace(_id_list, code_object_info<Idx>::operation_idx), ...);
+}
+
+template <size_t... Idx>
+void
+get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
+{
+    auto _emplace = [](auto& _vec, const char* _v) {
+        if(_v != nullptr && strnlen(_v, 1) > 0) _vec.emplace_back(_v);
+    };
+
+    (_emplace(_name_list, code_object_info<Idx>::name), ...);
+}
+}  // namespace
+
+// check out the assembly here... this compiles to a switch statement
+const char*
+name_by_id(uint32_t id)
+{
+    return name_by_id(id,
+                      std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+}
+
+uint32_t
+id_by_name(const char* name)
+{
+    return id_by_name(name,
+                      std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+}
+
+std::vector<uint32_t>
+get_ids()
+{
+    auto _data = std::vector<uint32_t>{};
+    _data.reserve(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST);
+    get_ids(_data, std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+    return _data;
+}
+
+std::vector<const char*>
+get_names()
+{
+    auto _data = std::vector<const char*>{};
+    _data.reserve(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST);
+    get_names(_data, std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+    return _data;
+}
+}  // namespace code_object
+
 namespace
 {
 using hsa_loader_table_t      = hsa_ven_amd_loader_1_01_pfn_t;

@@ -708,11 +708,16 @@ rocprofiler_set_api_table(const char* name,
         // any internal modifications to the HsaApiTable need to be done before we make the
         // copy or else those modifications will be lost when HSA API tracing is enabled
         // because the HSA API tracing invokes the function pointers from the copy below
-        auto& saved_hsa_api_table = rocprofiler::hsa::get_table();
-        ::copyTables(hsa_api_table, &saved_hsa_api_table);
+        rocprofiler::hsa::copy_table(hsa_api_table->core_);
+        rocprofiler::hsa::copy_table(hsa_api_table->amd_ext_);
+        rocprofiler::hsa::copy_table(hsa_api_table->image_ext_);
+        rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_);
 
         // install rocprofiler API wrappers
-        rocprofiler::hsa::update_table(hsa_api_table);
+        rocprofiler::hsa::update_table(hsa_api_table->core_);
+        rocprofiler::hsa::update_table(hsa_api_table->amd_ext_);
+        rocprofiler::hsa::update_table(hsa_api_table->image_ext_);
+        rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_);
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(

@@ -615,9 +615,9 @@ using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
     template void                     iterate_args<TABLE_IDX>(                                     \
         uint32_t, const iterate_args_data_t&, iterate_args_cb_t, void*);
 
-INSTANTIATE_MARKER_TABLE_FUNC(roctx_core_api_table_t, ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore)
-INSTANTIATE_MARKER_TABLE_FUNC(roctx_ctrl_api_table_t, ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl)
-INSTANTIATE_MARKER_TABLE_FUNC(roctx_name_api_table_t, ROCPROFILER_MARKER_API_TABLE_ID_RoctxName)
+INSTANTIATE_MARKER_TABLE_FUNC(roctx_core_api_table_t, ROCPROFILER_MARKER_TABLE_ID_RoctxCore)
+INSTANTIATE_MARKER_TABLE_FUNC(roctx_ctrl_api_table_t, ROCPROFILER_MARKER_TABLE_ID_RoctxControl)
+INSTANTIATE_MARKER_TABLE_FUNC(roctx_name_api_table_t, ROCPROFILER_MARKER_TABLE_ID_RoctxName)
 
 #undef INSTANTIATE_MARKER_TABLE_FUNC
 }  // namespace marker

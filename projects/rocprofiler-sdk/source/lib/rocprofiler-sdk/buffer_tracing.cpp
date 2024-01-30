@@ -21,7 +21,9 @@
 // SOFTWARE.
 
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hip/table_api_id.h>
+#include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -62,8 +64,11 @@ template <size_t Idx>
 struct buffer_tracing_kind_string;
 
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(NONE)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(HSA_API)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HSA_CORE_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HSA_AMD_EXT_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HSA_IMAGE_EXT_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HSA_FINALIZE_EXT_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_RUNTIME_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(HIP_COMPILER_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CORE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CONTROL_API)
@@ -72,7 +77,6 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(MEMORY_COPY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(KERNEL_DISPATCH)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(PAGE_MIGRATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(SCRATCH_MEMORY)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(EXTERNAL_CORRELATION)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -99,9 +103,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          c
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     static auto unsupported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-        ROCPROFILER_BUFFER_TRACING_EXTERNAL_CORRELATION};
+        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY};
     if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
@@ -159,23 +161,71 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
     const char* val = nullptr;
-    if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
-        val = rocprofiler::hsa::name_by_id(operation);
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
-        val = rocprofiler::hsa::async_copy::name_by_id(operation);
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API)
-        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>(operation);
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API)
-        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>(
-            operation);
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API)
-        val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>(operation);
-    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
-        val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>(operation);
-    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
-        val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>(operation);
-    else
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    switch(kind)
+    {
+        case ROCPROFILER_BUFFER_TRACING_NONE:
+        case ROCPROFILER_BUFFER_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_CORE_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_Core>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_AmdExt>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_ImageExt>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API:
+        {
+            val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MEMORY_COPY:
+        {
+            val = rocprofiler::hsa::async_copy::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API:
+        {
+            val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API:
+        {
+            val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>(
+                operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API:
+        {
+            val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxName>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
+        {
+            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Runtime>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
+        {
+            val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Compiler>(operation);
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
+        case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
+        case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
+    };
 
     if(!val)
     {
@@ -210,22 +260,70 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
     void*                                          data)
 {
     auto ops = std::vector<uint32_t>{};
-    if(kind == ROCPROFILER_BUFFER_TRACING_HSA_API)
-        ops = rocprofiler::hsa::get_ids();
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
-        ops = rocprofiler::hsa::async_copy::get_ids();
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API)
-        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxCore>();
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API)
-        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxControl>();
-    else if(kind == ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API)
-        ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_API_TABLE_ID_RoctxName>();
-    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_API)
-        ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_API_TABLE_ID_RuntimeApi>();
-    else if(kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
-        ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_API_TABLE_ID_CompilerApi>();
-    else
-        return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+    switch(kind)
+    {
+        case ROCPROFILER_BUFFER_TRACING_NONE:
+        case ROCPROFILER_BUFFER_TRACING_LAST:
+        {
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_CORE_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_Core>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_AmdExt>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_ImageExt>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API:
+        {
+            ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MEMORY_COPY:
+        {
+            ops = rocprofiler::hsa::async_copy::get_ids();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API:
+        {
+            ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxName>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Runtime>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API:
+        {
+            ops = rocprofiler::hip::get_ids<ROCPROFILER_HIP_TABLE_ID_Compiler>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
+        case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
+        case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
+    }
 
     for(const auto& itr : ops)
     {

@@ -24,6 +24,4 @@
 
 #include <rocprofiler-sdk/hip/api_args.h>
 #include <rocprofiler-sdk/hip/api_id.h>
-#include <rocprofiler-sdk/hip/compiler_api_args.h>
-#include <rocprofiler-sdk/hip/compiler_api_id.h>
-#include <rocprofiler-sdk/hip/table_api_id.h>
+#include <rocprofiler-sdk/hip/table_id.h>
