@@ -26,7 +26,7 @@ import os
 import logging
 from omniperf_profile.profiler_base import OmniProfiler_Base
 from utils.utils import demarcate
-from utils.csv_processor import kernel_name_shortener
+from utils.kernel_name_shortener import kernel_name_shortener
 
 class rocprof_v2_profiler(OmniProfiler_Base):
     def __init__(self,profiling_args,profiler_mode,soc):

@@ -25,7 +25,7 @@
 from omniperf_analyze.analysis_base import OmniAnalyze_Base
 from utils.utils import demarcate, error
 from utils import file_io, parser, tty
-from utils.csv_processor import kernel_name_shortener
+from utils.kernel_name_shortener import kernel_name_shortener
 
 class cli_analysis(OmniAnalyze_Base):
 

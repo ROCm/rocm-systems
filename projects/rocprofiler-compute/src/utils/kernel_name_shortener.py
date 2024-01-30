@@ -22,41 +22,33 @@
 # SOFTWARE.
 ##############################################################################el
 
-import argparse
-import collections
 import os
-import subprocess
 import sys
-import re
-import pandas as pd
-import getpass
-from pymongo import MongoClient
-from tqdm import tqdm
-import glob
-import re
 import logging
+import glob 
+import re
+import subprocess
+import pandas as pd
+
+from utils.utils import error
 
 cache = dict()
-
-supported_arch = {"gfx906": "mi50", "gfx908": "mi100", "gfx90a": "mi200"}
-MAX_SERVER_SEL_DELAY = 5000  # 5 sec connection timeout
-
 
 # Note: shortener is now dependent on a rocprof install with llvm
 def kernel_name_shortener(workload_dir, level):
     def shorten_file(df, level):
         global cache
 
-        columnName = ""
-        if "KernelName" in df:
-            columnName = "KernelName"
+        column_name = ""
+        if "Kernel_Name" in df:
+            column_name = "Kernel_Name"
         if "Name" in df:
-            columnName = "Name"
+            column_name = "Name"
 
-        if columnName == "KernelName" or columnName == "Name":
+        if column_name == "Kernel_Name" or column_name == "Name":
             # loop through all indices
             for index in df.index:
-                original_name = df.loc[index, columnName]
+                original_name = df.loc[index, column_name]
                 if original_name in cache:
                     continue
 
@@ -122,7 +114,7 @@ def kernel_name_shortener(workload_dir, level):
                 if new_name == None or new_name == "":
                     cache[original_name] = demangled_name
 
-            df[columnName] = df[columnName].map(cache)
+            df[column_name] = df[column_name].map(cache)
 
         return df
 
@@ -130,12 +122,7 @@ def kernel_name_shortener(workload_dir, level):
     if level < 5:
         cpp_filt = os.path.join("/usr", "bin", "c++filt")
         if not os.path.isfile(cpp_filt):
-            logging.error(
-                "Error: Could not resolve c++filt in expected directory: {}".format(
-                    cpp_filt
-                )
-            )
-            sys.exit(1)
+            error("Could not resolve c++filt in expected directory: %s" % cpp_filt)
 
         for fpath in glob.glob(workload_dir + "/*.csv"):
             try:
@@ -147,116 +134,6 @@ def kernel_name_shortener(workload_dir, level):
                 modified_df = shorten_file(orig_df, level)
                 modified_df.to_csv(fpath, index=False)
             except pd.errors.EmptyDataError:
-                logging.debug("[profiling] Skipping shortening on empty csv " + str(fpath))
+                logging.debug("[profiling] Skipping shortening on empty csv: %s" % str(fpath))
 
-        logging.info("[profiling] KernelName shortening complete!")
-
-
-# Verify target directory and setup connection
-def parse(args, profileAndExport):
-    host = args.host
-    port = str(args.port)
-    username = args.username
-
-    if profileAndExport:
-        workload = args.workload + "/" + args.target + "/"
-    else:
-        workload = args.workload
-
-    # Verify directory path is valid
-    print("Pulling data from ", workload)
-    if os.path.isdir(workload):
-        print("The directory exists")
-    else:
-        raise argparse.ArgumentTypeError("Directory does not exist")
-
-    sysInfoPath = workload + "/sysinfo.csv"
-    if os.path.isfile(sysInfoPath):
-        print("Found sysinfo file")
-        sysInfo = pd.read_csv(sysInfoPath)
-        # Extract SoC
-        arch = sysInfo["gpu_soc"][0]
-        soc = supported_arch[arch]
-        # Extract name
-        name = sysInfo["workload_name"][0]
-    else:
-        print("Unable to parse SoC or workload name from sysinfo.csv")
-        sys.exit(1)
-
-    db = "omniperf_" + str(args.team) + "_" + str(name) + "_" + soc
-
-    if args.password == "":
-        try:
-            password = getpass.getpass()
-        except Exception as error:
-            print("PASSWORD ERROR", error)
-        else:
-            print("Password recieved")
-    else:
-        password = args.password
-
-    if db.find(".") != -1 or db.find("-") != -1:
-        raise ValueError("'-' and '.' are not permited in workload name", db)
-
-    connectionInfo = {
-        "username": username,
-        "password": password,
-        "host": host,
-        "port": port,
-        "workload": workload,
-        "db": db,
-    }
-
-    return connectionInfo
-
-
-def convert_folder(connectionInfo):
-    # Test connection
-    connection_str = (
-        "mongodb://"
-        + connectionInfo["username"]
-        + ":"
-        + connectionInfo["password"]
-        + "@"
-        + connectionInfo["host"]
-        + ":"
-        + connectionInfo["port"]
-        + "/?authSource=admin"
-    )
-    client = MongoClient(connection_str, serverSelectionTimeoutMS=MAX_SERVER_SEL_DELAY)
-    try:
-        client.server_info()
-    except:
-        print("ERROR: Unable to connect to the server")
-        sys.exit(1)
-
-    i = 0
-    file = "blank"
-    for file in tqdm(os.listdir(connectionInfo["workload"])):
-        if file.endswith(".csv"):
-            print(connectionInfo["workload"] + "/" + file)
-            try:
-                fileName = file[0 : file.find(".")]
-                cmd = (
-                    "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
-                ).format(
-                    connectionInfo["username"],
-                    connectionInfo["password"],
-                    connectionInfo["host"],
-                    connectionInfo["port"],
-                    connectionInfo["db"],
-                    connectionInfo["workload"] + "/" + file,
-                    fileName,
-                )
-                os.system(cmd)
-                i += 1
-            except pd.errors.EmptyDataError:
-                print("Skipping empty csv " + file)
-
-    mydb = client["workload_names"]
-    mycol = mydb["names"]
-    value = {"name": connectionInfo["db"]}
-    newValue = {"name": connectionInfo["db"]}
-    mycol.replace_one(value, newValue, upsert=True)
-    print("{} collections added.".format(i))
-    print("Workload name uploaded")
+        logging.info("[profiling] Kernel_Name shortening complete.")

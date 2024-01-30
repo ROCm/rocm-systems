@@ -27,7 +27,7 @@ import os
 
 from omniperf_profile.profiler_base import OmniProfiler_Base
 from utils.utils import demarcate, replace_timestamps
-from utils.csv_processor import kernel_name_shortener
+from utils.kernel_name_shortener import kernel_name_shortener
 
 
 class rocprof_v1_profiler(OmniProfiler_Base):
