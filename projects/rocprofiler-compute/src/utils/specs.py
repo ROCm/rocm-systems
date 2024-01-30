@@ -30,7 +30,6 @@ import sys
 import socket
 import subprocess
 import importlib
-import logging
 import config
 import pandas as pd
 
@@ -38,7 +37,7 @@ from datetime import datetime
 from math import ceil
 from dataclasses import dataclass, field, fields
 from pathlib import Path as path
-from utils.utils import error, get_hbm_stack_num, get_version
+from utils.utils import get_hbm_stack_num, get_version, console_error, console_warning, console_log
 from utils.tty import get_table_string
 
 VERSION_LOC = [
@@ -64,7 +63,7 @@ def detect_arch(_rocminfo):
             gpu_arch = str(gpu_arch)
             break
     if not gpu_arch in SUPPORTED_ARCHS.keys():
-        error("[profiling] Cannot find a supported arch in rocminfo")
+        console_error("Cannot find a supported arch in rocminfo")
     else:
         return (gpu_arch, idx1)
 
@@ -84,12 +83,12 @@ def generate_machine_specs(args, sysinfo: dict = None):
         try:
             sysinfo_ver = str(sysinfo["version"])
         except KeyError:
-            error(
+            console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
             )
         version = get_version(config.omniperf_home)["version"]
         if sysinfo_ver != version[: version.find(".")]:
-            error(
+            console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
             )
         return MachineSpecs(**sysinfo)
@@ -172,7 +171,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
     try:
         soc_module = importlib.import_module("omniperf_soc.soc_" + specs.gpu_arch)
     except ModuleNotFoundError as e:
-        error(
+        console_error(
             "Arch %s marked as supported, but couldn't find class implementation %s."
             % (specs.gpu_arch, e)
         )
@@ -513,16 +512,15 @@ class MachineSpecs:
                     ):
                         pass
                     else:
-                        # TODO: use proper logging function when that's merged
-                        logging.warning(
-                            f"WARNING: Incomplete class definition for {self.gpu_arch}. "
+                        console_warning(
+                            f"Incomplete class definition for {self.gpu_arch}. "
                             f"Expecting populated {name} but detected None."
                         )
                         all_populated = False
                 data[name] = value
 
         if not all_populated:
-            error("Missing specs fields for %s" % self.gpu_arch)
+            console_error("Missing specs fields for %s" % self.gpu_arch)
         return pd.DataFrame(data, index=[0])
 
     def __repr__(self):
@@ -539,7 +537,7 @@ class MachineSpecs:
                         if name == "version":
                             topstr += f"Output version: {value}\n"
                         else:
-                            error(f"Unknown out of table printing field: {name}")
+                            console_error(f"Unknown out of table printing field: {name}")
                         continue
                     if "name" in field.metadata:
                         name = field.metadata["name"]
@@ -573,17 +571,16 @@ def get_rocm_ver():
         # check if ROCM_VER is supplied externally
         ROCM_VER_USER = os.getenv("ROCM_VER")
         if ROCM_VER_USER is not None:
-            logging.info(
-                "Overriding missing ROCm version detection with ROCM_VER = %s"
-                % ROCM_VER_USER
+            console_log(
+                "profiling",
+                "Overriding missing ROCm version detection with ROCM_VER = %s" % ROCM_VER_USER
             )
             rocm_ver = ROCM_VER_USER
         else:
             _rocm_path = os.getenv("ROCM_PATH", "/opt/rocm")
-            error(
-                "Unable to detect a complete local ROCm installation.\nThe expected %s/.info/ versioning directory is missing. Please ensure you have valid ROCm installation."
-                % _rocm_path
-            )
+            console_warning("Unable to detect a complete local ROCm installation.")
+            console_warning("The expected %s/.info/ versioning directory is missing." % _rocm_path)
+            console_error("Ensure you have valid ROCm installation.")
     return rocm_ver
 
 
@@ -591,18 +588,16 @@ def run(cmd, exit_on_error=False):
     try:
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     except FileNotFoundError as e:
-        error(
+        console_error(
             f"Unable to parse specs. Can't find ROCm asset: {e.filename}\nTry passing a path to an existing workload results in 'analyze' mode."
         )
 
     if exit_on_error:
         if cmd[0] == "rocm-smi":
             if p.returncode != 2 and p.returncode != 0:
-                logging.error("ERROR: No GPU detected. Unable to load rocm-smi")
-                sys.exit(1)
+                console_error("No GPU detected. Unable to load rocm-smi")
         elif p.returncode != 0:
-            logging.error("ERROR: command [%s] failed with non-zero exit code" % cmd)
-            sys.exit(1)
+            console_error("Command [%s] failed with non-zero exit code" % cmd)
     return p.stdout.decode("utf-8")
 
 
@@ -638,7 +633,7 @@ def total_xcds(archname, compute_partition):
     mi300a_archs = ["mi300a_a0", "mi300a_a1"]
     mi300x_archs = ["mi300x_a0", "mi300x_a1"]
     if archname.lower() in mi300a_archs + mi300x_archs and compute_partition == "NA":
-        error("Invalid compute partition found for {}".format(archname))
+        console_error("Invalid compute partition found for {}".format(archname))
     if archname.lower() not in mi300a_archs + mi300x_archs:
         return 1
     # from the whitepaper
@@ -660,7 +655,7 @@ def total_xcds(archname, compute_partition):
     if compute_partition.lower() == "cpx":
         if archname.lower() in mi300x_archs:
             return 2
-    error(
+    console_error(
         "Unknown compute partition / arch found for {} / {}".format(
             compute_partition, archname
         )

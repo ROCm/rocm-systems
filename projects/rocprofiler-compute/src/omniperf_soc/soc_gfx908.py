@@ -25,7 +25,7 @@
 import os
 import config
 from omniperf_soc.soc_base import OmniSoC_Base
-from utils.utils import demarcate, error
+from utils.utils import demarcate, console_error
 
 
 class gfx908_soc(OmniSoC_Base):
@@ -79,7 +79,7 @@ class gfx908_soc(OmniSoC_Base):
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         if self.get_args().roof_only:
-            error("%s does not support roofline analysis" % self.get_arch())
+            console_error("%s does not support roofline analysis" % self.get_arch())
         # Perfmon filtering
         self.perfmon_filter(self.get_args().roof_only)
 

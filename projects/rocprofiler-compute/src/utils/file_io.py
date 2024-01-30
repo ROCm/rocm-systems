@@ -33,8 +33,8 @@ import collections
 from collections import OrderedDict
 from pathlib import Path
 from utils import schema
+from utils.utils import console_debug, console_error
 import config
-import logging
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -173,9 +173,8 @@ def create_df_pmc(raw_data_dir, verbose):
                 dfs.append(tmp_df)
                 coll_levels.append(f[:-4])
     final_df = pd.concat(dfs, keys=coll_levels, axis=1, copy=False)
-    # TODO: join instead of concat!
     if verbose >= 2:
-        print("pmc_raw_data final_df ", final_df.info())
+        console_debug("pmc_raw_data final_df $s" % final_df.info())
     return final_df
 
 
@@ -231,5 +230,4 @@ def is_single_panel_config(root_dir, supported_archs):
     elif counter == len(supported_archs):
         return False
     else:
-        logging.error("Found multiple panel config sets but incomplete for all archs!")
-        sys.exit(1)
+        console_error("Found multiple panel config sets but incomplete for all archs.")

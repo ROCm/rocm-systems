@@ -22,9 +22,8 @@
 # SOFTWARE.
 ##############################################################################el
 
-import logging
 from omniperf_profile.profiler_base import OmniProfiler_Base
-from utils.utils import demarcate
+from utils.utils import demarcate, console_log
 
 
 class rocscope_profiler(OmniProfiler_Base):
@@ -36,20 +35,29 @@ class rocscope_profiler(OmniProfiler_Base):
     # -----------------------
     @demarcate
     def pre_processing(self):
-        """Perform any pre-processing steps prior to profiling."""
-        self.__profiler = "rocscope"
-        logging.debug("[profiling] pre-processing using %s profiler" % self.__profiler)
-
+        """Perform any pre-processing steps prior to profiling.
+        """
+        self.__profiler="rocscope"
+        console_log(
+            "profiling",
+            "pre-processing using %s profiler" % self.__profiler
+        )
+        #TODO: Finish implementation
     @demarcate
     def run_profiling(self, version, prog):
-        """Run profiling."""
-        logging.debug(
-            "[profiling] performing profiling using %s profiler" % self.__profiler
+        """Run profiling.
+        """
+        console_log(
+            "profiling"
+            "performing profiling using %s profiler" % self.__profiler
         )
-
+        #TODO: Finish implementation
     @demarcate
     def post_processing(self):
-        """Perform any post-processing steps prior to profiling."""
-        logging.debug(
-            "[profiling] performing post-processing using %s profiler" % self.__profiler
+        """Perform any post-processing steps prior to profiling.
+        """
+        console_log(
+            "profiling"
+            "performing post-processing using %s profiler" % self.__profiler
         )
+        #TODO: Finish implementation

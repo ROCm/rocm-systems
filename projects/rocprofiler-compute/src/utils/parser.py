@@ -27,13 +27,12 @@ import sys
 import astunparse
 import re
 import os
+import warnings
 import pandas as pd
 import numpy as np
 from utils import schema
-from utils.utils import error
+from utils.utils import console_warning, console_error
 from pathlib import Path
-import logging
-import warnings
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -420,8 +419,7 @@ def calc_builtin_var(var, sys_info):
     elif isinstance(var, str) and var.startswith("$total_l2_chan"):
         return sys_info.total_l2_chan
     else:
-        print("Don't support", var)
-        sys.exit(1)
+        console_error("Built-in var \" %s \" is not supported" % var)
 
 
 def build_dfs(archConfigs, filter_metrics, sys_info):
@@ -679,7 +677,8 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
         and hasattr(raw_pmc_df["pmc_perf"], "GRBM_GUI_ACTIVE")
         and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
     ):
-        error("Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
+        console_warning("Dectected GRBM_GUI_ACTIVE == 0")
+        console_error("Hauting execution for warning above.")
 
     ammolite__se_per_gpu = sys_info.se_per_gpu
     ammolite__pipes_per_gpu = sys_info.pipes_per_gpu
@@ -859,7 +858,7 @@ def apply_filters(workload, dir, is_gui, debug):
             kernels_df = pd.read_csv(os.path.join(dir, "pmc_kernel_top.csv"))
             for kernel_id in workload.filter_kernel_ids:
                 if kernel_id >= len(kernels_df["Kernel_Name"]):
-                    error(
+                    console_error(
                         "{} is an invalid kernel id. Please enter an id between 0-{}".format(
                             kernel_id, len(kernels_df["Kernel_Name"]) - 1
                         )
@@ -885,7 +884,7 @@ def apply_filters(workload, dir, is_gui, debug):
             )
             ret_df = ret_df.loc[df_cleaned.isin(workload.filter_kernel_ids)]
         else:
-            error("Mixing kernel indices and string filters is not currently supported")
+            console_error("analyze", "Mixing kernel indices and string filters is not currently supported")
 
     if workload.filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
@@ -922,9 +921,7 @@ def load_kernel_top(workload, dir):
             if file.exists():
                 tmp[id] = pd.read_csv(file)
             else:
-                logging.info(
-                    "Warning: Issue loading top kernels. Check pmc_kernel_top.csv"
-                )
+                console_warning("Issue loading top kernels. Check pmc_kernel_top.csv")
         # NB: Special case for sysinfo. Probably room for improvement in this whole function design
         elif "from_csv_columnwise" in df.columns and id == 101:
             tmp[id] = workload.sys_info.transpose()
@@ -942,9 +939,7 @@ def load_kernel_top(workload, dir):
                 #   so tty could detect them and show them correctly in comparison.
                 tmp[id].columns = ["Info"]
             else:
-                logging.info(
-                    "Warning: Issue loading top kernels. Check pmc_kernel_top.csv"
-                )
+                console_warning("Issue loading top kernels. Check pmc_kernel_top.csv")
     workload.dfs.update(tmp)
 
 
@@ -988,8 +983,8 @@ def correct_sys_info(mspec, specs_correction: dict):
 
     for k, v in pairs.items():
         if not hasattr(mspec, str(k)):
-            error(
-                f"Invalid specs correction '{k}'. Please use --specs option to peak valid specs"
+            console_error(
+                "analyze", f"Invalid specs correction '{k}'. Please use --specs option to peak valid specs"
             )
         setattr(mspec, str(k), v)
     return mspec.get_class_members()

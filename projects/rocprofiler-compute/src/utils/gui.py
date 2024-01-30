@@ -29,6 +29,7 @@ import plotly.express as px
 import colorlover
 
 from utils import schema
+from utils.utils import console_error
 
 pd.set_option(
     "mode.chained_assignment", None
@@ -243,12 +244,7 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                 ).update_xaxes(range=[0, 110])
             )
     else:
-        print(
-            "ERROR: Table id {}. Cannot determine barchart type.".format(
-                table_config["id"]
-            )
-        )
-        sys.exit(-1)
+        console_error("Table id %s. Cannot determine barchart type." % table_config["id"])
 
     # update layout for each of the charts
     for fig in d_figs:

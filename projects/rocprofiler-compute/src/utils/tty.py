@@ -25,10 +25,10 @@
 import pandas as pd
 from pathlib import Path
 from tabulate import tabulate
-import sys
 import copy
 
 from utils import parser
+from utils.utils import console_warning, console_log
 
 hidden_columns = ["Tips", "coll_level"]
 hidden_sections = [1900, 2000]
@@ -135,7 +135,7 @@ def show_all(args, runs, archConfigs, output):
                                             0, 1
                                         )
                                         if args.verbose >= 2:
-                                            print("---------", header, t_df)
+                                            console_log("---------", header, t_df)
 
                                         t_df_pretty = (
                                             t_df.astype(float)
@@ -168,13 +168,8 @@ def show_all(args, runs, archConfigs, output):
                                                 violation_idx = t_df_pretty.index[
                                                     t_df_pretty.abs() > args.report_diff
                                                 ]
-                                                print(
-                                                    "DEBUG ERROR: Dataframe diff exceeds {} threshold requirement\nSee metric {}".format(
-                                                        str(args.report_diff) + "%",
-                                                        violation_idx.to_numpy(),
-                                                    )
-                                                )
-                                                print(df)
+                                                console_warning("Dataframe diff exceeds %s threshold requirement\nSee metric %s" % (str(args.report_diff) + "%", violation_idx.to_numpy()))
+                                                console_warning(df)
 
                                     else:
                                         cur_df_copy = copy.deepcopy(cur_df)

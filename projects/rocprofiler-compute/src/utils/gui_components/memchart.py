@@ -26,14 +26,14 @@ import sys
 
 from dash import html
 from dash_svg import Svg, G, Path, Rect, Text
+from utils.utils import console_error
 
 hidden_columns = ["Tips", "coll_level"]
 
 
 def insert_chart_data(mem_data, base_data):
     if len(mem_data) != 1:
-        print("Memory Chart config doesn't follow expected formatting")
-        sys.exit(1)
+        console_error("Memory Chart config doesn't follow expected formatting")
 
     table_config = mem_data[0]["metric_table"]
 

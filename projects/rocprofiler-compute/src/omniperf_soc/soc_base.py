@@ -23,14 +23,13 @@
 ##############################################################################el
 
 from abc import ABC, abstractmethod
-import logging
 import os
 import math
 import shutil
 import glob
 import re
 import numpy as np
-from utils.utils import demarcate
+from utils.utils import demarcate, console_debug, console_log
 from pathlib import Path
 
 from omniperf_base import SUPPORTED_ARCHS
@@ -229,9 +228,9 @@ class OmniSoC_Base:
                     ip = re.match(mpattern, fbase).group(1)
                     if ip in self.__args.ipblocks:
                         pmc_files_list.append(fname)
-                        logging.info("fname: " + fbase + ": Added")
+                        console_log("fname: " + fbase + ": Added")
                     else:
-                        logging.info("fname: " + fbase + ": Skipped")
+                        console_log("fname: " + fbase + ": Skipped")
 
             else:
                 # default: take all perfmons
@@ -251,19 +250,32 @@ class OmniSoC_Base:
     # ----------------------------------------------------
     @abstractmethod
     def profiling_setup(self):
-        """Perform any SoC-specific setup prior to profiling."""
-        logging.debug("[profiling] perform SoC profiling setup for %s" % self.__arch)
+        """Perform any SoC-specific setup prior to profiling.
+        """
+        console_debug(
+            "profiling",
+            "perform SoC profiling setup for %s" % self.__arch
+        )
+
 
     @abstractmethod
     def post_profiling(self):
-        """Perform any SoC-specific post profiling activities."""
-        logging.debug("[profiling] perform SoC post processing for %s" % self.__arch)
+        """Perform any SoC-specific post profiling activities.
+        """
+        console_debug(
+            "profiling",
+            "perform SoC post processing for %s" % self.__arch
+        )
 
     @abstractmethod
     def analysis_setup(self):
-        """Perform any SoC-specific setup prior to analysis."""
-        logging.debug("[analysis] perform SoC analysis setup for %s" % self.__arch)
-
+        """Perform any SoC-specific setup prior to analysis.
+        """
+        console_debug(
+            "analysis",
+            "perform SoC analysis setup for %s" % self.__arch
+        )
+        
 
 @demarcate
 def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):

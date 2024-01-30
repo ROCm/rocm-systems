@@ -23,7 +23,7 @@
 ##############################################################################el
 
 from omniperf_analyze.analysis_base import OmniAnalyze_Base
-from utils.utils import demarcate, error
+from utils.utils import demarcate, console_error
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 
@@ -37,7 +37,7 @@ class cli_analysis(OmniAnalyze_Base):
         """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
         if self.get_args().random_port:
-            error("--gui flag is required to enable --random-port")
+            console_error("--gui flag is required to enable --random-port")
         for d in self.get_args().path:
             # demangle and overwrite original 'Kernel_Name'
             kernel_name_shortener(d[0], self.get_args().kernel_verbose)

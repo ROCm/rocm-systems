@@ -23,9 +23,8 @@
 ##############################################################################el
 
 import os
-import logging
 from omniperf_profile.profiler_base import OmniProfiler_Base
-from utils.utils import demarcate
+from utils.utils import demarcate, console_log
 from utils.kernel_name_shortener import kernel_name_shortener
 
 
@@ -68,10 +67,17 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         """Run profiling."""
         if self.ready_to_profile:
             if self.get_args().roof_only:
-                logging.info("[roofline] Generating pmc_perf.csv")
+                console_log(
+                    "roofline",
+                    "Generating pmc_perf.csv (roofline counters only)."
+                )
+            # Log profiling options and setup filtering
             super().run_profiling(version, prog)
         else:
-            logging.info("[roofline] Detected existing pmc_perf.csv")
+            console_log(
+                "roofline",
+                "Detected existing pmc_perf.csv"
+            )
 
     @demarcate
     def post_processing(self):
