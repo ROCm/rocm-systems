@@ -119,10 +119,6 @@ class Omniperf:
         return
     
     def detect_profiler(self):
-        #TODO:
-        # Currently this will only be called in profile mode
-        # could we also utilize this function to detect "profiler origin" in analyze mode,
-        # or is there a better place to do this?
         if self.__args.lucky == True or self.__args.summaries == True or self.__args.use_rocscope:
             if not shutil.which("rocscope"):
                 logging.error("Rocscope must be in PATH")
@@ -130,7 +126,6 @@ class Omniperf:
             else:
                 self.__profiler_mode = "rocscope"
         else:
-            #TODO: Add detection logic for rocprofv2
             rocprof_cmd = detect_rocprof()
             if str(rocprof_cmd).endswith("rocprof"):
                 self.__profiler_mode = "rocprofv1"
@@ -237,9 +232,20 @@ class Omniperf:
         return
 
     @demarcate
-    def update_DB(self):
+    def update_db(self):
         self.print_graphic()
-        #TODO: Add a DB workflow
+        from utils.db_connector import DatabaseConnector
+        db_connection = DatabaseConnector(self.__args)
+        
+        #-----------------------
+        # run database workflow
+        #-----------------------
+        db_connection.pre_processing()
+        if self.__args.upload:
+            db_connection.db_import()
+        else:
+            db_connection.db_remove()
+        
         return
 
     @demarcate
@@ -260,8 +266,8 @@ class Omniperf:
         #-----------------------
         # run analysis workflow
         #-----------------------
-
         analyzer.sanitize()
+        
         # Load required SoC(s) from input
         for d in analyzer.get_args().path:
             sys_info = pd.read_csv(Path(d[0], "sysinfo.csv"))

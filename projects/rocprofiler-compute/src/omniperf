@@ -38,7 +38,7 @@ def main():
     if mode == "profile":
         omniperf.run_profiler()
     elif mode == "database":
-        omniperf.update_DB()
+        omniperf.update_db()
     elif mode == "analyze":
         omniperf.run_analysis()
     else:

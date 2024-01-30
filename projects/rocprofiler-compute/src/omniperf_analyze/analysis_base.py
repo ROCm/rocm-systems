@@ -29,7 +29,7 @@ import sys
 import copy
 from collections import OrderedDict
 from pathlib import Path
-from utils.utils import demarcate, error
+from utils.utils import demarcate, error, is_workload_empty
 from utils import schema, file_io, parser
 import pandas as pd
 from tabulate import tabulate
@@ -158,6 +158,9 @@ class OmniAnalyze_Base():
             dir[0] = full_path
             if not os.path.isdir(dir[0]):
                 error("Invalid directory {}\nPlease try again.".format(dir[0]))
+            # validate profiling data
+            is_workload_empty(dir[0])
+        
     
     #----------------------------------------------------
     # Required methods to be implemented by child classes

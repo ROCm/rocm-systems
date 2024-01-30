@@ -575,4 +575,16 @@ def get_submodules(package_name):
             submodules.append(pretty_name)
 
     return submodules
+
+def is_workload_empty(path):
+    """Peek workload directory to verify valid profiling output
+    """
+    pmc_perf_path = path + "/pmc_perf.csv"
+    if os.path.isfile(pmc_perf_path):
+        temp_df = pd.read_csv(pmc_perf_path)
+        if temp_df.dropna().empty:
+            error("[profiling] Error. Found empty cells in %s.\nProfiling data could be corrupt." % pmc_perf_path)
+
+    else:
+        error("[profiling] Error. Cannot find pmc_perf.csv in %s" % path)
     
