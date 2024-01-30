@@ -9,7 +9,6 @@ configure_file(${CMAKE_CURRENT_LIST_DIR}/version.h.in
 set(ROCPROFILER_HEADER_FILES
     # core headers
     rocprofiler.h
-    rocprofiler_plugin.h
     # secondary headers
     agent.h
     agent_profile.h

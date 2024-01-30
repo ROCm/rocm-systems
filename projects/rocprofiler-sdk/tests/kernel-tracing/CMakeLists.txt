@@ -10,6 +10,11 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
+set(PYTEST_ARGS)
+if(ROCPROFILER_MEMCHECK MATCHES "(Address|Thread)Sanitizer")
+    set(PYTEST_ARGS -k "not test_total_runtime")
+endif()
+
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
     set(PRELOAD_ENV
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:rocprofiler-sdk-json-tool>")
@@ -36,9 +41,10 @@ foreach(FILENAME validate.py pytest.ini conftest.py)
                    ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
 endforeach()
 
-add_test(NAME test-kernel-tracing-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
-                 ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json)
+add_test(
+    NAME test-kernel-tracing-validate
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py ${PYTEST_ARGS}
+            --input ${CMAKE_CURRENT_BINARY_DIR}/kernel-tracing-test.json)
 
 set_tests_properties(
     test-kernel-tracing-validate

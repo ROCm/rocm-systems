@@ -89,11 +89,11 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     if(!ctxs.empty())
     {
         // only do the following work if there are contexts that require this info
-        const auto* _rocp_agent      = queue_info_session.rocp_agent;
-        auto        _hsa_agent       = queue_info_session.hsa_agent;
-        auto        _queue_id        = queue_info_session.queue_id;
-        auto        _signal          = queue_info_session.interrupt_signal;
-        auto        _kern_id         = queue_info_session.kernel_id;
+        const auto* _rocp_agent = queue_info_session.rocp_agent;
+        auto        _hsa_agent  = queue_info_session.hsa_agent;
+        auto        _queue_id   = queue_info_session.queue_id;
+        auto        _signal     = queue_info_session.kernel_pkt.kernel_dispatch.completion_signal;
+        auto        _kern_id    = queue_info_session.kernel_id;
         const auto& _extern_corr_ids = queue_info_session.extern_corr_ids;
 
         auto dispatch_time = hsa_amd_profiling_dispatch_time_t{};

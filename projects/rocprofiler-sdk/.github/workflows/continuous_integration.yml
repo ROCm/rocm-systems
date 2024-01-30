@@ -226,7 +226,7 @@ jobs:
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
       id: load-coverage
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         key: ${{ github.event.pull_request.base.sha }}-codecov
         path: .codecov/**
@@ -308,7 +308,7 @@ jobs:
 
     - name: Save XML Code Coverage
       id: save-coverage
-      uses: actions/cache/save@v3
+      uses: actions/cache/save@v4
       with:
         key: ${{ github.sha }}-codecov
         path: |
@@ -355,7 +355,7 @@ jobs:
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 5
-      uses: thollander/actions-comment-pull-request@v2
+      uses: thollander/actions-comment-pull-request@v2.4.3
       with:
         comment_tag: codecov-report
         filePath: .codecov/report.md

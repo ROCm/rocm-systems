@@ -74,6 +74,20 @@ def test_timestamps(input_data):
         assert api_end <= itr["end_timestamp"]
 
 
+def test_total_runtime(input_data):
+    sdk_data = input_data["rocprofiler-sdk-json-tool"]
+
+    runtime_data = []
+    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
+        elapsed = itr["end_timestamp"] - itr["start_timestamp"]
+        runtime_data.append(elapsed)  # in nanoseconds
+
+    expected_runtime = 1.0e3  # one second in milliseconds
+
+    assert (sum(runtime_data) * 1.0e-6) >= (0.9 * expected_runtime)
+    assert (sum(runtime_data) * 1.0e-6) <= (1.1 * expected_runtime)
+
+
 def test_internal_correlation_ids(input_data):
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
