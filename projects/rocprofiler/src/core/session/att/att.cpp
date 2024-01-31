@@ -273,36 +273,37 @@ void AttTracer::AddAttRecord(
     rocprofiler::warning("Warning: ATT received a UTC memory error!\n");
   if (status == HSA_STATUS_ERROR) fatal("Thread Trace Error!");
 
+  size_t max_sample_id = 0;
+  for (auto& trace_data_it : data)
+    max_sample_id = std::max<size_t>(max_sample_id, trace_data_it.sample_id+1);
+
   // Allocate memory for shader_engine_data
-  record->shader_engine_data = static_cast<rocprofiler_record_se_att_data_t*>(
-      calloc(data.size(), sizeof(rocprofiler_record_se_att_data_t)));
+  record->shader_engine_data_count = max_sample_id;
+  record->shader_engine_data = static_cast<rocprofiler_record_se_att_data_t*>(calloc(
+    max_sample_id,
+    sizeof(rocprofiler_record_se_att_data_t)
+  ));
 
-  std::vector<hsa_ven_amd_aqlprofile_info_data_t>::iterator trace_data_it;
-
-  uint32_t se_index = 0;
   // iterate over the trace data collected from each shader engine
-  for (trace_data_it = data.begin(); trace_data_it != data.end(); trace_data_it++) {
-    const void* data_ptr = trace_data_it->trace_data.ptr;
-    const uint32_t data_size = trace_data_it->trace_data.size;
+  for (auto& trace_data_it : data)
+  {
+    auto& trace = trace_data_it.trace_data;
 
     void* buffer = NULL;
-    if (data_size != 0) {
+    if (trace.ptr && trace.size) {
       // Allocate buffer on CPU to copy out trace data
-      buffer = Packet::AllocateSysMemory(gpu_agent, data_size, &agent_info.cpu_pool_);
+      buffer = Packet::AllocateSysMemory(gpu_agent, trace.size, &agent_info.cpu_pool_);
       if (buffer == NULL) fatal("Trace data buffer allocation failed");
 
       auto status =
-          hsasupport_singleton.GetCoreApiTable().hsa_memory_copy_fn(buffer, data_ptr, data_size);
+          hsasupport_singleton.GetCoreApiTable().hsa_memory_copy_fn(buffer, trace.ptr, trace.size);
       if (status != HSA_STATUS_SUCCESS) fatal("Trace data memcopy to host failed");
 
-      record->shader_engine_data[se_index].buffer_ptr = buffer;
-      record->shader_engine_data[se_index].buffer_size = data_size;
-      ++se_index;
-
+      record->shader_engine_data[trace_data_it.sample_id].buffer_ptr = buffer;
+      record->shader_engine_data[trace_data_it.sample_id].buffer_size = trace.size;
       // TODO: clear output buffers after copying
     }
   }
-  record->shader_engine_data_count = data.size();
 }
 
 hsa_status_t AttTracer::attTraceDataCallback(

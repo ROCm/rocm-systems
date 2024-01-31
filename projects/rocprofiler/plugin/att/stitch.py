@@ -436,16 +436,17 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 if "flat_" in as_line[0]:
                     inc_ordering = True
 
-                if not bGFX9 and "store" in as_line[0]:
-                    VSMEM_INST.append([reverse_map[line], num_inflight])
-                    NUM_VSMEM += 1
-                    if inc_ordering:
-                        vsmem_ordering = 1
-                else:
-                    VLMEM_INST.append([reverse_map[line], num_inflight])
-                    NUM_VLMEM += 1
-                    if inc_ordering:
-                        vlmem_ordering = 1
+                if not "_inv" in as_line[0] and not "_wb" in as_line[0]:
+                    if not bGFX9 and "store" in as_line[0]:
+                        VSMEM_INST.append([reverse_map[line], num_inflight])
+                        NUM_VSMEM += 1
+                        if inc_ordering:
+                            vsmem_ordering = 1
+                    else:
+                        VLMEM_INST.append([reverse_map[line], num_inflight])
+                        NUM_VLMEM += 1
+                        if inc_ordering:
+                            vlmem_ordering = 1
             elif inst.type == FLAT:
                 smem_ordering = 1
                 vlmem_ordering = 1
