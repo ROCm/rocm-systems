@@ -6,7 +6,7 @@
    :maxdepth: 4
 ```
 
-**1. How do I export profiling data I've already generated using Omniperf?**
+**1. How do I export profiling data I have already generated using Omniperf?**
 
 In order to interact with the Grafana GUI you must sync data with the MongoDB backend. This interaction is done through ***database*** mode.
 
@@ -35,11 +35,23 @@ $ export LANG=C.UTF-8
 
 1. Open MobaXterm
 2. In the top ribbon, select `Tunneling`
-![Tunnel Button](images/tunnel_demo1.png)
+``` {image} images/tunnel_demo1.png
+:alt: MobaXterm Tunnel Button
+:class: bg-primary
+:align: center
+```
 This pop up will appear
-![Pop up](images/tunnel_demo2.png)
+``` {image} images/tunnel_demo2.png
+:alt: MobaXterm Pop Up
+:class: bg-primary
+:align: center
+```
 3. Press `New SSH tunnel`
-![Pop up](images/tunnel_demo3.png)
+``` {image} images/tunnel_demo3.png
+:alt: MobaXterm Pop Up
+:class: bg-primary
+:align: center
+```
 4. Configure tunnel accordingly
 
    Local clients

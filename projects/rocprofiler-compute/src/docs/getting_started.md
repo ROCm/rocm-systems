@@ -10,13 +10,13 @@
 
 1. **Launch & Profile the target application with the command line profiler**
    
-    The command line profiler launches the target application, calls the rocProfiler API, and collects profile results for the specified kernels, dispatches, and/or IP blocks.  If not specified, Omniperf will default to collecting all available counters for all kernels/dispatches launched by the user's executable.
+    The command line profiler launches the target application, calls the rocProfiler API via the rocProf binary, and collects profile results for the specified kernels, dispatches, and/or hardware components.  If not specified, Omniperf will default to collecting all available counters for all kernels/dispatches launched by the user's executable.
 
     To collect the default set of data for all kernels in the target application, launch, e.g.:
     ```shell
-    $ omniperf profile -n vcopy_data -- ./vcopy -n 1048576 -b 256
+    $ omniperf profile -n vcopy_data -- ./vcopy 1048576 256
     ```
-    The app runs, each kernel is launched, and profiling results are generated. By default, results are written to (e.g.,) ./workloads/vcopy_data (configurable via the `-n` argument). To collect all requested profile information, it may be required to replay kernels multiple times.
+    The app runs, each kernel is launched, and profiling results are generated. By default, results are written to e.g., ./workloads/vcopy_data (configurable via the `-n` argument). To collect all requested profile information, it may be required to replay kernels multiple times.
 
 2. **Customize data collection**
     
@@ -25,19 +25,20 @@
 
     Some common filters include:
 
-    - `-k`/`--kernel` enables filtering kernels by name. `-d`/`--dispatch` enables filtering based on dispatch ID
-    - `-b`/`--ipblocks` enables collects metrics for only the specified (one or more) IP Blocks.
+    - `-k`/`--kernel` enables filtering kernels by name. 
+    - `-d`/`--dispatch` enables filtering based on dispatch ID.
+    - `-b`/`--ipblocks` enables collects metrics for only the specified (one or more) hardware component blocks.
 
-    To view available metrics by IP Block you can use the `--list-metrics` argument to view a list of all available metrics organized by IP Block.
+    To view available metrics by IP Block you can use the `--list-metrics` argument:
     ```shell
     $ omniperf analyze --list-metrics <sys_arch>
     ```
 
 3. **Analyze at the command line**
    
-   After generating a local output folder (./workloads/\<name>), the command line tool can also be used to quickly interface with profiling results. View different metrics derived from your profiled results and get immediate access all metrics organized by IP block.
+   After generating a local output folder (./workloads/\<name>), the command line tool can also be used to quickly interface with profiling results. View different metrics derived from your profiled results and get immediate access all metrics organized by IP blocks.
 
-   If no kernel, dispatch, or ipblock filters are applied at this stage, analysis will be reflective of the entirety of the profiling data.
+   If no kernel, dispatch, or hardware block filters are applied at this stage, analysis will be reflective of the entirety of the profiling data.
 
    To interact with profiling results from a different session, users just provide the workload path.  `-p`/`--path` enables users to analyze existing profiling data in the Omniperf CLI.
 
@@ -55,7 +56,7 @@
 ### Modes
 Modes change the fundamental behavior of the Omniperf command line tool. Depending on which mode is chosen, different command line options become available.
 
-- **Profile**: Target application is launched on the local system utilizing AMD’s [ROC Profiler](https://github.com/ROCm-Developer-Tools/rocprofiler). Depending on the profiling options chosen, selected kernels, dispatches, and/or IP Blocks in the application are profiled and results are stored locally in an output folder (./workloads/\<name>).
+- **Profile**: Target application is launched on the local system using AMD’s [ROC Profiler](https://github.com/ROCm-Developer-Tools/rocprofiler). Depending on the profiling options chosen, selected kernels, dispatches, and/or hardware components in the application are profiled and results are stored locally in an output folder (./workloads/\<name>).
 
     ```shell
     $ omniperf profile --help
@@ -65,7 +66,7 @@ Modes change the fundamental behavior of the Omniperf command line tool. Dependi
 
     To gererate a lightweight GUI interface users can add the `--gui` flag to their analysis command.
 
-    This mode is designed to be a middle ground to the highly detailed Omniperf Grafana GUI and is great for users who want immediate access to an IP Block they’re already familiar with.
+    This mode is designed to be a middle ground to the highly detailed Omniperf Grafana GUI and is great for users who want immediate access to a hardware component they’re already familiar with.
 
     ```shell
     $ omniperf analyze --help

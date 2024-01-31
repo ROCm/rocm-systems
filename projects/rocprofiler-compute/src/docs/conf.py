@@ -32,13 +32,13 @@ def install(package):
 # -- Project information -----------------------------------------------------
 
 project = "Omniperf"
-copyright = "2022, Audacious Software Group"
+copyright = "2023-2024, Audacious Software Group"
 author = "Audacious Software Group"
 
 # The short X.Y version
 version = repo_version
 # The full version, including alpha/beta/rc tags
-release = ""
+release = repo_version
 
 # -- General configuration ---------------------------------------------------
 
@@ -52,9 +52,12 @@ extensions = [
     "myst_parser",
 ]
 
-myst_heading_anchors = 2
+show_authors = True
+
+myst_heading_anchors = 4
 # enable replacement of (tm) & friends
-myst_enable_extensions = ["replacements"]
+myst_enable_extensions = ["replacements", "dollarmath"]
+
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
@@ -112,6 +115,10 @@ html_theme = "sphinx_rtd_theme"
 # so a file named "default.css" will overwrite the builtin "default.css".
 html_static_path = ["_static"]
 
+latex_elements = {
+   "sphinxsetup": 'verbatimwrapslines=true, verbatimforcewraps=true',
+}
+
 
 # -- Options for HTMLHelp output ---------------------------------------------
 
@@ -130,7 +137,7 @@ html_theme_options = {
     # Toc options
     "collapse_navigation": True,
     "sticky_navigation": True,
-    "navigation_depth": 4,
+    "navigation_depth": 5,
     "includehidden": True,
     "titles_only": False,
 }
@@ -162,6 +169,7 @@ def setup(app):
     app.add_transform(AutoStructify)
     app.add_config_value("docstring_replacements", {}, True)
     app.connect("source-read", replaceString)
+    app.add_css_file("css/custom.css")
 
 
 # function to replace version string througout documentation

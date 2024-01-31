@@ -23,7 +23,7 @@ the MI200 platform.
 $ hipcc vcopy.cpp -o vcopy
 $ ls
 vcopy   vcopy.cpp
-$ ./vcopy -n 1048576 -b 256
+$ ./vcopy 1048576 256
 Finished allocating vectors on the CPU
 Finished allocating vectors on the GPU
 Finished copying vectors to the GPU
@@ -37,49 +37,50 @@ Releasing CPU memory
 ```
 
 ## Omniperf Profiling
-The *omniperf* script, available through the [Omniperf](https://github.com/AMDResearch/omniperf) repository, is used to aquire all necessary perfmon data through analysis of compute workloads.
+The *omniperf* script, available through the Omniperf repository, is used to aquire all necessary performance monitoring data through analysis of compute workloads.
 
 **omniperf help:**
 ```shell-session
 $ omniperf profile --help
-usage: 
-            
+ROC Profiler:  /usr/bin/rocprof
+
+usage:
+
 omniperf profile --name <workload_name> [profile options] [roofline options] -- <profile_cmd>
 
-            
+
 
 -------------------------------------------------------------------------------
-            
+
 Examples:
-            
-        omniperf profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
-            
-        omniperf profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy -n 1048576 -b 256
-            
-        omniperf profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
-            
-        omniperf profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
-            
-        omniperf profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
-            
+
+        omniperf profile -n vcopy_all -- ./vcopy 1048576 256
+
+        omniperf profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy 1048576 256
+
+        omniperf profile -n vcopy_kernel -k vecCopy -- ./vcopy 1048576 256
+
+        omniperf profile -n vcopy_disp -d 0 -- ./vcopy 1048576 256
+
+        omniperf profile -n vcopy_roof --roof-only -- ./vcopy 1048576 256
+
 -------------------------------------------------------------------------------
 
-        
+
 
 Help:
-  -h, --help                       show this help message and exit
+  -h, --help                      show this help message and exit
 
 General Options:
-  -v, --version                    show program's version number and exit
-  -V, --verbose                    Increase output verbosity
+  -v, --version                   show program's version number and exit
+  -V, --verbose                   Increase output verbosity
 
 Profile Options:
   -n , --name                                           Assign a name to workload.
   -p , --path                                           Specify path to save workload.
-                                                        (DEFAULT: {os.getcwd()}/workloads/<name>)
+                                                        (DEFAULT: /home/colramos/GitHub/omniperf/workloads/<name>)
   -k  [ ...], --kernel  [ ...]                          Kernel filtering.
-  -d  [ ...], --dispatch  [ ...]                        Dispatch ID filtering.
-  -b  [ ...], --ipblocks  [ ...]                        IP block filtering:
+  -b  [ ...], --ipblocks  [ ...]                        Hardware block filtering:
                                                            SQ
                                                            SQC
                                                            TA
@@ -89,19 +90,16 @@ Profile Options:
                                                            SPI
                                                            CPC
                                                            CPF
-  --join-type                                           Choose how to join rocprof runs: (DEFAULT: grid)
-                                                           kernel (i.e. By unique kernel name dispatches)
-                                                           grid (i.e. By unique kernel name + grid size dispatches)
+  -d  [ ...], --dispatch  [ ...]                        Dispatch ID filtering.
   --no-roof                                             Profile without collecting roofline data.
   -- [ ...]                                             Provide command for profiling after double dash.
-  --kernel-verbose                                      Specify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)
 
 Standalone Roofline Options:
   --roof-only                                           Profile roofline data only.
   --sort                                                Overlay top kernels or top dispatches: (DEFAULT: kernels)
                                                            kernels
                                                            dispatches
-  -m  [ ...], --mem-level  [ ...]                       Filter by memory level: (DEFAULT: ALL)
+  -m , --mem-level                                      Filter by memory level: (DEFAULT: ALL)
                                                            HBM
                                                            L2
                                                            vL1D
@@ -110,45 +108,47 @@ Standalone Roofline Options:
   --kernel-names                                        Include kernel names in roofline plot.
 ```
 
+- The `-k` \<kernel> flag allows for kernel filtering, which is compatible with the current rocProf utility.
+
+- The `-d` \<dispatch> flag allows for dispatch ID filtering,  which is compatible with the current rocProf utility.
+
+- The `-b` \<ipblocks> allows system profiling on one or more selected hardware components to speed up the profiling process. One can gradually include more hardware components, without overwriting performance data acquired on other hardware components.
+
+
 The following sample command profiles the *vcopy* workload.
 
 **vcopy profiling:**
 ```shell-session
 $ omniperf profile --name vcopy -- ./vcopy 1048576 256
-ROC Profiler: /opt/rocm-5.2.1/bin/rocprof
-Execution mode = profile
-  ___                  _                  __ 
- / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-| |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+Resolving rocprof
+ROC Profiler:  /usr/bin/rocprof
 
-SoC = mi200
-Profiler choice = rocprofv1
-omniperf ver: 1.0.10
-Path: {os.getcwd()}/workloads/vcopy/mi200
-Target: mi200
-Command: ./vcopy -n 1048576 -b 256
-Kernel Selection: None
-Dispatch Selection: None
+-------------
+Profile only
+-------------
+
+omniperf ver:  1.0.8-PR1
+Path:  /home/colramos/GitHub/omniperf-pub/workloads
+Target:  mi200
+Command:  /home/colramos/vcopy 1048576 256
+Kernel Selection:  None
+Dispatch Selection:  None
 IP Blocks: All
-KernelName verbose: 2
+Log:  /home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/log.txt
 
-Current input file: {os.getcwd()}/workloads/vcopy/mi200/perfmon/pmc_perf_2.txt
-RPL: on '231120_142934' from '/opt/rocm-5.2.1' in '{os.getcwd()}'
-RPL: profiling '""./vcopy -n 1048576 -b 256""'
-RPL: input file '{os.getcwd()}/workloads/vcopy/mi200/perfmon/pmc_perf_2.txt'
-RPL: output dir '/tmp/rpl_data_231120_142934_262088'
-RPL: result dir '/tmp/rpl_data_231120_142934_262088/input0_results_231120_142934'
-ROCProfiler: input from "/tmp/rpl_data_231120_142934_262088/input0.xml"
+/home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/perfmon/SQ_INST_LEVEL_SMEM.txt
+RPL: on '230411_165021' from '/opt/rocm-5.2.1' in '/home/colramos/GitHub/omniperf-pub'
+RPL: profiling '""/home/colramos/vcopy 1048576 256""'
+RPL: input file '/home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/perfmon/SQ_INST_LEVEL_SMEM.txt'
+RPL: output dir '/tmp/rpl_data_230411_165021_26406'
+RPL: result dir '/tmp/rpl_data_230411_165021_26406/input0_results_230411_165021'
+Finished allocating vectors on the CPU
+ROCProfiler: input from "/tmp/rpl_data_230411_165021_26406/input0.xml"
   gpu_index = 
   kernel = 
   range = 
-  26 metrics
-    SQ_INSTS_VALU_TRANS_F16, SQ_INSTS_VALU_ADD_F32, SQ_INSTS_VALU_MUL_F32, SQ_INSTS_VALU_FMA_F32, SQ_INSTS_VALU_TRANS_F32, SQ_INSTS_VALU_ADD_F64, SQ_INSTS_VALU_MUL_F64, SQ_INSTS_VALU_FMA_F64, TCP_VOLATILE_sum, TCP_TOTAL_ACCESSES_sum, TCP_TOTAL_READ_sum, TCP_TOTAL_WRITE_sum, TA_BUFFER_ATOMIC_WAVEFRONTS_sum, TA_BUFFER_TOTAL_CYCLES_sum, TD_ATOMIC_WAVEFRONT_sum, TD_STORE_WAVEFRONT_sum, SPI_RA_REQ_NO_ALLOC, SPI_RA_REQ_NO_ALLOC_CSN, CPC_CPC_STAT_STALL, CPC_UTCL1_STALL_ON_TRANSLATION, CPF_CPF_STAT_IDLE, CPF_CPF_TCIU_IDLE, TCC_REQ_sum, TCC_STREAMING_REQ_sum, TCC_HIT_sum, TCC_MISS_sum
-vcopy testing on GCD 0
-Finished allocating vectors on the CPU
+  3 metrics
+    SQ_INSTS_SMEM, SQ_INST_LEVEL_SMEM, SQ_ACCUM_PREV_HIRES
 Finished allocating vectors on the GPU
 Finished copying vectors to the GPU
 sw thinks it moved 1.000000 KB per wave 
@@ -158,11 +158,10 @@ Finished executing kernel
 Finished copying the output vector from the GPU to the CPU
 Releasing GPU memory
 Releasing CPU memory
- 
-...
 
-Empirical Roofline Calculation
-Copyright © 2022  Advanced Micro Devices, Inc. All rights reserved.
+... ...
+ROCPRofiler: 1 contexts collected, output directory /tmp/rpl_data_220527_130317_1787038/input_results_220527_130317
+File 'workloads/vcopy/mi200/timestamps.csv' is generating
 Total detected GPU devices: 2
 GPU Device 0: Profiling...
  99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
@@ -211,14 +210,14 @@ Peak MFMA FLOPs (F64), GPU ID: 1, workgroupSize:256, workgroups:16384, experimen
  99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
 Peak MFMA IOPs (I8), GPU ID: 1, workgroupSize:256, workgroups:16384, experiments:100, IOP:2147483648000, duration:14.3 ms, mean:150317.8 GOPS, stdev=203.5 GOPS
 ```
-You'll notice two stages in *default* Omniperf profiling. The first stage collects all the counters needed for Omniperf analysis (omitting any filters you've provided). The second stage collects data for the roofline analysis (this stage can be disabled using `--no-roof`)
+You will notice two stages in *default* Omniperf profiling. The first stage collects all the counters needed for Omniperf analysis (omitting any filters you have provided). The second stage collects data for the roofline analysis (this stage can be disabled using `--no-roof`)
 
-At the end of the profiling, all resulting csv files should be located in a SOC specific target directory, e.g.:
-  - "mi200" for the AMD Instinct (tm) MI-200 family of accelerators
-  - "mi100" for the AMD Instinct (tm) MI-100 family of accelerators
-etc.  The SOC names are generated as a part of Omniperf, and do not necessarily distinguish between different accelerators in the same family (e.g., an AMD Instinct (tm) MI-210 vs an MI-250)
+In this document, we use the term System on Chip (SoC) to refer to a particular family of accelerators. At the end of profiling, all resulting csv files should be located in a SoC specific target directory, e.g.:
+  - "mi200" for the AMD Instinct (tm) MI200 family of accelerators
+  - "mi100" for the AMD Instinct (tm) MI100 family of accelerators
+etc.  The SoC names are generated as a part of Omniperf, and do not necessarily distinguish between different accelerators in the same family (e.g., an AMD Instinct (tm) MI210 vs an MI250)
 
-> Note: Additionally, you'll notice a few extra files. An SoC parameters file, *sysinfo.csv*, is created to reflect the target device settings. All profiling output is stored in *log.txt*. Roofline specific benchmark results are stored in *roofline.csv*.
+> Note: Additionally, you will notice a few extra files. An SoC parameters file, *sysinfo.csv*, is created to reflect the target device settings. All profiling output is stored in *log.txt*. Roofline specific benchmark results are stored in *roofline.csv*.
 
 ```shell-session
 $ ls workloads/vcopy/mi200/
@@ -239,17 +238,17 @@ drwxrwxr-x 2 colramos colramos  4096 Apr 11 16:42 perfmon
 ```
 
 ### Filtering
-To reduce profiling time and the counters collected one may use profiling filters. Profiling filters and their functionality depend on the underlying profiler being used. While Omniperf is profiler agnostic, we've provided a detailed description of profiling filters available when using Omniperf with [rocProfiler](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/rocprof.html) below.
+To reduce profiling time and the counters collected one may use profiling filters. Profiling filters and their functionality depend on the underlying profiler being used. While Omniperf is profiler agnostic, we have provided a detailed description of profiling filters available when using Omniperf with [rocProf](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/rocprof.html) below.
 
 
 
 Filtering Options:
 
-- The `-k` \<kernel> flag allows for kernel filtering. Useage is equivalent with the current rocprof utility ([see details below](#kernel-filtering)).
+- The `-k` \<kernel> flag allows for kernel filtering. Useage is equivalent with the current rocProf utility ([see details below](#kernel-filtering)).
 
-- The `-d` \<dispatch> flag allows for dispatch ID filtering. Useage is equivalent with the current rocprof utility ([see details below](#dispatch-filtering)).
+- The `-d` \<dispatch> flag allows for dispatch ID filtering. Useage is equivalent with the current rocProf utility ([see details below](#dispatch-filtering)).
 
-- The `-b` \<ipblocks> allows system profiling on one or more selected IP blocks to speed up the profiling process. One can gradually incorporate more IP blocks, without overwriting performance data acquired on other IP blocks.
+- The `-b` \<ipblocks> allows system profiling on one or more selected hardware components to speed up the profiling process. One can gradually include more hardware components, without overwriting performance data acquired on other hardware components.
 
 ```{note}
 Be cautious while combining different profiling filters in the same call. Conflicting filters may result in error.
@@ -257,75 +256,80 @@ Be cautious while combining different profiling filters in the same call. Confli
 i.e. filtering dispatch X, but dispatch X does not match your kernel name filter
 ```
 
-#### IP Block Filtering
-One can profile a selected IP Block to speed up the profiling process. All profiling results are accumulated in the same target directory, without overwriting those for other IP blocks, hence enabling the incremental profiling and analysis.
+#### Hardware Component Filtering
+One can profile specific hardware components to speed up the profiling process. In Omniperf, we use the term IP block to refer to a hardware component or a group of hardware components. All profiling results are accumulated in the same target directory, without overwriting those for other hardware components, hence enabling the incremental profiling and analysis.
 
-The following example only gathers hardware counters for SQ and TCC, skipping all other IP Blocks:
+The following example only gathers hardware counters for the Shader Sequencer (SQ) and L2 Cache (TCC) components, skipping all other hardware components:
 ```shell-session
-$ omniperf profile --name vcopy -b SQ TCC -- ./sample/vcopy -n 1048576 -b 256
-ROC Profiler: /opt/rocm-5.2.1/bin/rocprof
-Execution mode = profile
-  ___                  _                  __ 
- / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-| |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+$ omniperf profile --name vcopy -b SQ TCC -- ./sample/vcopy 1048576 256
+Resolving rocprof
+ROC Profiler:  /usr/bin/rocprof
 
-SoC = mi200
-Profiler choice = rocprofv1
-fname: pmc_cpc_perf: Skipped
-fname: pmc_spi_perf: Skipped
-fname: pmc_cpf_perf: Skipped
-fname: pmc_tcp_perf: Skipped
-fname: pmc_sq_perf4: Added
-fname: pmc_tcc_perf: Added
-fname: pmc_sq_perf8: Added
-fname: pmc_ta_perf: Skipped
-fname: pmc_sq_perf1: Added
-fname: pmc_sq_perf3: Added
+
+-------------
+Profile only
+-------------
+
+omniperf ver:  1.0.8-PR1
+Path:  /home/colramos/GitHub/omniperf-pub/workloads
+Target:  mi200
+Command:  /home/colramos/vcopy 1048576 256
+Kernel Selection:  None
+Dispatch Selection:  None
+IP Blocks:  ['SQ', 'TCC']
+fname: pmc_sq_perf2: Added
 fname: pmc_td_perf: Skipped
 fname: pmc_tcc2_perf: Skipped
+fname: pmc_tcp_perf: Skipped
+fname: pmc_spi_perf: Skipped
+fname: pmc_sq_perf4: Added
 fname: pmc_sqc_perf1: Skipped
+fname: pmc_tcc_perf: Added
+fname: pmc_cpf_perf: Skipped
+fname: pmc_sq_perf8: Added
+fname: pmc_cpc_perf: Skipped
+fname: pmc_sq_perf1: Added
+fname: pmc_ta_perf: Skipped
+fname: pmc_sq_perf3: Added
 fname: pmc_sq_perf6: Added
-fname: pmc_sq_perf2: Added
-omniperf ver: 1.0.10
-Path: {os.getcwd()}/vcopy_/mi200
-Target: mi200
-Command: ./vcopy -n 1048576 -b 256
-Kernel Selection: None
-Dispatch Selection: None
-IP Blocks: ['sq', 'tcc']
-KernelName verbose: 2
+Log:  /home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/log.txt
 ...
 ```
 
 #### Kernel Filtering
-Kernel filtering is based on the name of the kernel(s) you'd like to isolate. Use a kernel name substring list to isolate desired kernels.
+Kernel filtering is based on the name of the kernel(s) you would like to isolate. Use a kernel name substring list to isolate desired kernels.
 
 The following example demonstrates profiling isolating the kernel matching substring "vecCopy":
 ```shell-session
-$ omniperf profile --name vcopy -k vecCopy -- ./vcopy -n 1048576 -b 256
-ROC Profiler: /opt/rocm-5.2.1/bin/rocprof
-Execution mode = profile
-  ___                  _                  __ 
- / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-| |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+$ omniperf profile --name vcopy -k vecCopy -- ./vcopy 1048576 256
+Resolving rocprof
+ROC Profiler:  /usr/bin/rocprof
 
-SoC = mi200
-Profiler choice = rocprofv1
-omniperf ver: 1.0.10
-Path: {os.getcwd()}/workloads/vcopy/mi200
-Target: mi200
-Command: ./vcopy -n 1048576 -b 256
-Kernel Selection: ['vecCopy']
-Dispatch Selection: None
+-------------
+Profile only
+-------------
+
+omniperf ver:  1.0.8-PR1
+Path:  /home/colramos/GitHub/omniperf-pub/workloads
+Target:  mi200
+Command:  /home/colramos/vcopy 1048576 256
+Kernel Selection:  ['vecCopy']
+Dispatch Selection:  None
 IP Blocks: All
-KernelName verbose: 2
-...
+Log:  /home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/log.txt
+
+/home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/perfmon/SQ_INST_LEVEL_SMEM.txt
+RPL: on '230411_170300' from '/opt/rocm-5.2.1' in '/home/colramos/GitHub/omniperf-pub'
+RPL: profiling '""/home/colramos/vcopy 1048576 256""'
+RPL: input file '/home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/perfmon/SQ_INST_LEVEL_SMEM.txt'
+RPL: output dir '/tmp/rpl_data_230411_170300_29696'
+RPL: result dir '/tmp/rpl_data_230411_170300_29696/input0_results_230411_170300'
+Finished allocating vectors on the CPU
+ROCProfiler: input from "/tmp/rpl_data_230411_170300_29696/input0.xml"
+  gpu_index = 
+  kernel = vecCopy
+
+... ...
 ```
 
 #### Dispatch Filtering
@@ -333,70 +337,76 @@ Dispatch filtering is based on the *global* dispatch index of kernels in a run.
 
 The following example profiles only the 0th dispatched kernel in execution of the application:
 ```shell-session
-$ omniperf profile --name vcopy -d 0 -- ./vcopy -n 1048576 -b 256
-ROC Profiler: /opt/rocm-5.2.1/bin/rocprof
-Execution mode = profile
-  ___                  _                  __ 
- / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-| |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+$ omniperf profile --name vcopy -d 0 -- ./vcopy 1048576 256
+Resolving rocprof
+ROC Profiler:  /usr/bin/rocprof
 
-SoC = mi200
-Profiler choice = rocprofv1
-omniperf ver: 1.0.10
-Path: {os.getcwd()}/workloads/vcopy/mi200
-Target: mi200
-Command: ./vcopy -n 1048576 -b 256
-Kernel Selection: None
-Dispatch Selection: ['0']
+-------------
+Profile only
+-------------
+
+omniperf ver:  1.0.8-PR1
+Path:  /home/colramos/GitHub/omniperf-pub/workloads
+Target:  mi200
+Command:  /home/colramos/vcopy 1048576 256
+Kernel Selection:  None
+Dispatch Selection:  ['0']
 IP Blocks: All
-KernelName verbose: 2
+Log:  /home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/log.txt
+
+/home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/perfmon/SQ_INST_LEVEL_SMEM.txt
+RPL: on '230411_170356' from '/opt/rocm-5.2.1' in '/home/colramos/GitHub/omniperf-pub'
+RPL: profiling '""/home/colramos/vcopy 1048576 256""'
+RPL: input file '/home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200/perfmon/SQ_INST_LEVEL_SMEM.txt'
+RPL: output dir '/tmp/rpl_data_230411_170356_30314'
+RPL: result dir '/tmp/rpl_data_230411_170356_30314/input0_results_230411_170356'
+Finished allocating vectors on the CPU
+ROCProfiler: input from "/tmp/rpl_data_230411_170356_30314/input0.xml"
+  gpu_index = 
+  kernel = 
+  range = 0
 ...
 ```
 
 
-
 ### Standalone Roofline
-If you're only interested in generating roofline analysis data try using `--roof-only`. This will only collect counters relevent to roofline, as well as generate a standalone .pdf output of your roofline plot. 
+If you are only interested in generating roofline analysis data try using `--roof-only`. This will only collect counters relevant to roofline, as well as generate a standalone .pdf output of your roofline plot. 
 
 Standalone Roofline Options:
 
-- The `--sort` \<desired_sort> allows you to specify whether you'd like to overlay top kernel or top dispatch data in your roofline plot.
+- The `--sort` \<desired_sort> allows you to specify whether you would like to overlay top kernel or top dispatch data in your roofline plot.
 
-- The `-m` \<cache_level> allows you to specify specific level(s) of cache you'd like to include in your roofline plot.
+- The `-m` \<cache_level> allows you to specify specific level(s) of cache you would like to include in your roofline plot.
 
 - The `--device` \<gpu_id> allows you to specify a device id to collect performace data from when running our roofline benchmark on your system.
 
-- If you'd like to distinguish different kernels in your .pdf roofline plot use `--kernel-names`. This will give each kernel a unique marker identifiable from the plot's key.
+- If you would like to distinguish different kernels in your .pdf roofline plot use `--kernel-names`. This will give each kernel a unique marker identifiable from the plot's key.
 
 
 #### Roofline Only
 The following example demonstrates profiling roofline data only:
 ```shell-session
-$ omniperf profile --name vcopy --roof-only -- ./vcopy -n 1048576 -b 256
-ROC Profiler: /opt/rocm-5.2.1/bin/rocprof
-Execution mode = profile
-  ___                  _                  __ 
- / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-| |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+$ omniperf profile --name vcopy --roof-only -- ./vcopy 1048576 256
+Resolving rocprof
+ROC Profiler:  /usr/bin/rocprof
 
-SoC = mi200
-Profiler choice = rocprofv1
-[roofline] Generating pmc_perf.csv
-omniperf ver: 1.0.10
-Path: {os.getcwd()}/workloads/vcopy/mi200
-Target: mi200
-Command: ./vcopy -n 1048576 -b 256
-Kernel Selection: None
-Dispatch Selection: None
-IP Blocks: All
-KernelName verbose: 2
-...
+
+--------
+Roofline only
+--------
+
+Checking for roofline.csv in  /home/colramos/GitHub/omniperf-pub/workloads/vcopy/mi200
+No roofline data found. Generating...
+Empirical Roofline Calculation
+Copyright © 2022  Advanced Micro Devices, Inc. All rights reserved.
+Total detected GPU devices: 4
+GPU Device 0: Profiling...
+ 99% [||||||||||||||||||||||||||||||||||||||||||||||||||||||||||| ]
+ ... ...
+Checking for roofline.csv in  /home/colramos/GitHub/omniperf-pub/workloads/mix/mi200
+Checking for sysinfo.csv in  /home/colramos/GitHub/omniperf-pub/workloads/mix/mi200
+Checking for pmc_perf.csv in  /home/colramos/GitHub/omniperf-pub/workloads/mix/mi200
+Empirical Roofline PDFs saved!
 ```
 An inspection of our workload output folder shows .pdf plots were generated successfully
 ```shell-session

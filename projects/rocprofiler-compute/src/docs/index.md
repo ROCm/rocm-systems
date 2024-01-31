@@ -12,5 +12,6 @@
    getting_started
    profiling
    analysis
+   performance_model
    faq
 ```

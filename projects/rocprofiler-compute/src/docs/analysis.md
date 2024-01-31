@@ -5,7 +5,7 @@
    :glob:
    :maxdepth: 4
 ```
-Omniperf offers several ways to interact with the metrics it generates from profiling. The option you choose will likey be influnced by your familiarity with the profiled application, computing enviroment, and experience with Omniperf.
+Omniperf offers several ways to interact with the metrics it generates from profiling. The option you choose will likely be influnced by your familiarity with the profiled application, computing enviroment, and experience with Omniperf.
 
 While analyzing with the CLI offers quick and straightforward access to Omniperf metrics from terminal, the GUI adds an extra layer of styling and interactiveness some users may prefer.
 
@@ -16,7 +16,7 @@ See sections below for more information on each.
 
 ### Features
 
-- All Omniperf built-in metrics.
+- All of Omniperf's built-in metrics.
 - Multiple runs base line comparison.
 - Metrics customization: pick up subset of build-in metrics or build your own profiling configuration.
 - Kernel, gpu-id, dispatch-id filters.
@@ -254,7 +254,7 @@ Analyze
 ```
 > **Note:** Some cells may be blank indicating a missing/unavailable hardware counter or NULL value
 
-3. Optimizatize application, iterate, and re-profile to inspect performance changes.
+3. Optimize application, iterate, and re-profile to inspect performance changes.
 4. Redo a comprehensive analysis with Omniperf CLI at any milestone or at the end.
 
 ### Demo
@@ -281,7 +281,7 @@ Analyze
   $ omniperf analyze -p workloads/vcopy/mi200/  -b 2  5.1.0
   ```
 
-  > Note: Users can filter single metric or the whole IP block by its id. In this case, 1 is the id for "system speed of light" and 5.1.0 the id for metric "GPU Busy Cycles".
+  > Note: Users can filter single metric or the whole hardware component by its id. In this case, 1 is the id for "system speed of light" and 5.1.0 the id for metric "GPU Busy Cycles".
 
 - Filter kernels
 
@@ -304,7 +304,7 @@ Analyze
 
   ```
 
-  Second, select the index of the kernel you'd like to filter (i.e. __vecCopy(double*, double*, double*, int, int) [clone .kd]__ at index __0__). Then, use this index to apply the filter via `-k/--kernels`.
+  Second, select the index of the kernel you would like to filter (i.e. __vecCopy(double*, double*, double*, int, int) [clone .kd]__ at index __0__). Then, use this index to apply the filter via `-k/--kernels`.
 
   ```shell-session
   $ omniperf -p workloads/vcopy/mi200/ -k 0
@@ -325,7 +325,7 @@ Analyze
   ... ...
   ```
   
-  > Note: You'll see your filtered kernel(s) indicated by a asterisk in the Top Stats table
+  > Note: You will see your filtered kernel(s) indicated by an asterisk in the Top Stats table
 
 
 - Baseline comparison
@@ -333,7 +333,7 @@ Analyze
   ```shell
   omniperf analyze -p workload1/path/  -p workload2/path/
   ```
-  > Note: You can also apply diffrent filters to each workload.
+  > Note: You can also apply different filters to each workload.
   
   OR
   ```shell
@@ -414,7 +414,7 @@ When no filters are applied, users will see five basic sections derived from the
 
 To dive deeper, use the top drop down menus to isolate particular
 kernel(s) or dispatch(s). You will then see the web page update with
-metrics specific to the filter you've applied.
+metrics specific to the filter you have applied.
 
 Once you have applied a filter, you will also see several additional
 sections become available with detailed metrics specific to that area
@@ -427,22 +427,22 @@ interface](https://amdresearch.github.io/omniperf/analysis.html#grafana-based-gu
 #### Features
 The Omniperf Grafana GUI Analyzer supports the following features to facilitate MI GPU performance profiling and analysis:
 
-- System and IP-Block Speed-of-Light (SOL)
+- System and Hardware Component (IP Block) Speed-of-Light (SOL)
 - Multiple normalization options, including per-cycle, per-wave, per-kernel and per-second.
 - Baseline comparisons 
 - Regex based Dispatch ID filtering
 - Roofline Analysis
-- Detailed per IP Block performance counters and metrics
-  - CPC/CPF
-  - SPI
-  - SQ
-  - SQC
-  - TA/TD
-  - TCP
-  - TCC (both aggregated and per-channel perf info)
+- Detailed performance counters and metrics per hardware component, e.g.,
+  - Command Processor - Fetch (CPF) / Command Processor - Controller (CPC)
+  - Workgroup Manager (SPI)
+  - Shader Sequencer (SQ)
+  - Shader Sequencer Controller (SQC)
+  - L1 Address Processing Unit, a.k.a. Texture Addresser (TA) / L1 Backend Data Processing Unit, a.k.a. Texture Data (TD)
+  - L1 Cache (TCP)
+  - L2 Cache (TCC) (both aggregated and per-channel perf info)
 
 ##### Speed-of-Light
-Speed-of-light panels are provided at both the system and per IP block level to help diagnosis performance bottlenecks. The performance numbers of the workload under testing are compared to the theoretical maximum, (e.g. floating point operations, bandwidth, cache hit rate, etc.), to indicate the available room to further utilize the hardware capability.
+Speed-of-light panels are provided at both the system and per hardware component level to help diagnosis performance bottlenecks. The performance numbers of the workload under testing are compared to the theoretical maximum, (e.g. floating point operations, bandwidth, cache hit rate, etc.), to indicate the available room to further utilize the hardware capability.
 
 ##### Multi Normalization
 
@@ -457,24 +457,24 @@ Omniperf enables baseline comparison to allow checking A/B effect. The current r
 
 For both the Current Workload and the Baseline Workload, one can independently setup the following filters to allow fine grained comparions:
 - Workload Name 
-- GPU ID filtering (multi selection)
-- Kernel Name filtering (multi selection)
+- GPU ID filtering (multi-selection)
+- Kernel Name filtering (multi-selection)
 - Dispatch ID filtering (Regex filtering)
-- Omniperf Panels (multi selection)
+- Omniperf Panels (multi-selection)
 
 ##### Regex based Dispatch ID filtering
-This release enables regex based dispatch ID filtering to flexibly choose the kernel invocations. One may refer to [Regex Numeric Range Generator](https://3widgets.com/), to generate typical number ranges. 
+This release enables Regular Expression (regex), a standard Linux string matching syntax, based dispatch ID filtering to flexibly choose the kernel invocations. One may refer to [Regex Numeric Range Generator](https://3widgets.com/), to generate typical number ranges.
 
-For example, if one wants to inspect Dispatch Range from 17 to 48, inclusive, the corresponding regex is : **(1[7-9]|[23]\d|4[0-8])**. The generated express can be copied over for filtering.
+For example, if one wants to inspect Dispatch Range from 17 to 48, inclusive, the corresponding regex is : **(1[7-9]|[23]\d|4[0-8])**. The generated expression can be copied over for filtering.
 
 ##### Incremental Profiling
 Omniperf supports incremental profiling to significantly speed up performance analysis.
 
-> Refer to [*IP Block profiling*](https://amdresearch.github.io/omniperf/profiling.html#ip-block-profiling) section for this command. 
+> Refer to [*Hardware Component Filtering*](https://amdresearch.github.io/omniperf/profiling.html#hardware-component-filtering) section for this command.
 
-By default, the entire application is profiled to collect perfmon counter for all IP blocks, giving a system level view of where the workload stands in terms of performance optimization opportunities and bottlenecks. 
+By default, the entire application is profiled to collect performance counters for all hardware blocks, giving a complete view of where the workload stands in terms of performance optimization opportunities and bottlenecks. 
 
-After that one may focus on only a few IP blocks, (e.g., L1 Cache or LDS) to closely check the effect of software optimizations, without performing application replay for all other IP Blocks. This saves lots of compute time. In addition, the prior profiling results for other IP blocks are not overwritten. Instead, they can be merged during the import to piece together the system view. 
+After that one may focus on only a few hardware components, (e.g., L1 Cache or LDS) to closely check the effect of software optimizations, without performing application replay for all other hardware components. This saves lots of compute time. In addition, the prior profiling results for other hardware components are not overwritten. Instead, they can be merged during the import to piece together the system view.
 
 ##### Color Coding
 The uniform color coding is applied to most visualizations (bars, table, diagrams etc). Typically, Yellow color means over 50%, while Red color mean over 90% percent, for easy inspection.
@@ -539,7 +539,7 @@ Connection Options:
   -p , --password                                       The user's password. (will be requested later if it's not set)
   -t , --team                                           Specify Team prefix.
   -w , --workload                                       Specify name of workload (to remove) or path to workload (to import)
-  -k , --kernel-verbose                                 Specify Kernel Name verbose level 1-5. 
+  -k , --kernelVerbose                                  Specify Kernel Name verbose level 1-5. 
                                                         Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)
 ```
 
@@ -594,7 +594,7 @@ There are currently 18 main panel categories available for analyzing the compute
 - Command Processor
   - Command Processor - Fetch (CPF)
   - Command Processor - Controller (CPC)
-- Shader Processing Input (SPI)
+- Workgroup Manager or Shader Processor Input (SPI)
   - SPI Stats
   - SPI Resource Allocations
 - Wavefront Launch
@@ -655,116 +655,357 @@ There are currently 18 main panel categories available for analyzing the compute
   - Per-channel L2-EA Read stall (I/O, GMI, HBM)
   - Per-channel L2-EA Write stall (I/O, GMI, HBM, Starve)
 
-Most panels are designed around a specific IP block to thoroughly understand its behavior. Additional panels, including custom panels, could also be added to aid the performance analysis.
+Most panels are designed around a specific hardware component block to thoroughly understand its behavior. Additional panels, including custom panels, could also be added to aid the performance analysis.
 
 ##### System Info Panel
-![System Info Panel](images/System_info_panel.png)
+``` {figure} images/system-info_panel.png
+:alt: System Info
+:figclass: figure
+:align: center
+
+System details logged from host machine.
+```
+
 ##### Kernel Statistics
 
 ###### Kernel Time Histogram
-![Kernel Time Histogram](images/Kernel_time_histogram.png)
+``` {figure} images/Kernel_time_histogram.png
+:alt: Kernel Time Histogram
+:figclass: figure
+:align: center
+
+Mapping application kernel launches to execution duration.
+```
 ###### Top Bottleneck Kernels
-![Top Bottleneck Kernels](images/Top_bottleneck_kernels.png)
+``` {figure} images/top-stat_panel.png
+:alt: Top Bottleneck Kernels
+:figclass: figure
+:align: center
+
+Top N kernels and relevant statistics. Sorted by total duration.
+```
 ###### Top Bottleneck Dispatches
-![Top Bottleneck Dispatches](images/Top_bottleneck_dispatches.png)
+``` {figure} images/Top_bottleneck_dispatches.png
+:alt: Top Bottleneck Dispatches
+:figclass: figure
+:align: center
+
+Top N kernel dispatches and relevant statistics. Sorted by total duration.
+```
 ###### Current and Baseline Dispatch IDs (Filtered)
-![Current and Baseline Dispatch IDs](images/Current_and_baseline_dispatch_ids.png)
+``` {figure} images/Current_and_baseline_dispatch_ids.png
+:alt: Current and Baseline Dispatch IDs
+:figclass: figure
+:align: center
+
+List of all kernel dispatches.
+```
 
 ##### System Speed-of-Light
-![System Speed-of-Light](images/System_speed_of_light.png)
+``` {figure} images/sol_panel.png
+:alt: System Speed-of-Light
+:figclass: figure
+:align: center
+
+Key metrics from various sections of Omniperf’s profiling report.
+```
 
 ##### Memory Chart Analysis
 > Note: The Memory Chart Analysis support multiple normalizations. Due to the space limit, all transactions, when normalized to per-sec, default to unit of Billion transactions per second.
 
-![Memory Chart Analysis](images/Memory_chart_analysis.png)
+``` {figure} images/memory-chart_panel.png
+:alt: Memory Chart Analysis
+:figclass: figure
+:align: center
 
-##### Roofline Analysis
-![Roofline Analysis](images/Roofline_analysis.png)
+A graphical representation of performance data for memory blocks on the GPU.
+```
+
+##### Empirical Roofline Analysis
+``` {figure} images/roofline_panel.png
+:alt: Roofline Analysis
+:figclass: figure
+:align: center
+
+Visualize achieved performance relative to a benchmarked peak performance.
+```
+
 ##### Command Processor
-![Command Processor](images/Command_processor.png)
-##### Shader Processing Input (SPI)
-![Shader Processing Input](images/Shader_processing_input.png)
-##### Wavefront Launch
-![Wavefront Launch](images/Wavefront_launch.png)
+###### Command Processor Fetcher
+``` {figure} images/cpc_panel.png
+:alt: Command Processor Fetcher
+:figclass: figure
+:align: center
+
+Fetches commands out of memory to hand them over to the Command Processor Fetcher (CPC) for processing
+```
+###### Command Processor Compute
+``` {figure} images/cpf_panel.png
+:alt: Command Processor Compute
+:figclass: figure
+:align: center
+
+The micro-controller running the command processing firmware that decodes the fetched commands, and (for kernels) passes them to the Workgroup Managers (SPIs) for scheduling.
+```
+
+##### Shader Processor Input (SPI)
+###### SPI Stats
+``` {figure} images/spi-stats_panel.png
+:alt: SPI Stats
+:figclass: figure
+:align: center
+
+TODO: Add caption after merge
+```
+###### SPI Resource Allocation
+``` {figure} images/spi-resource-allocation_panel.png
+:alt: SPI Resource Allocation
+:figclass: figure
+:align: center
+
+TODO: Add caption after merge
+```
+
+##### Wavefront
+###### Wavefront Launch Stats
+``` {figure} images/wavefront-launch-stats_panel.png
+:alt: Wavefront Launch Stats
+:figclass: figure
+:align: center
+
+General information about the kernel launch.
+```
+###### Wavefront Runtime Stats
+``` {figure} images/wavefront-runtime-stats_panel.png
+:alt: Wavefront Runtime Stats
+:figclass: figure
+:align: center
+
+High-level overview of the execution of wavefronts in a kernel.
+```
 
 ##### Compute Unit - Instruction Mix
 ###### Instruction Mix
-![Instruction Mix](images/Instruction_mix.png)
+``` {figure} images/cu-inst-mix_panel.png
+:alt: Instruction Mix
+:figclass: figure
+:align: center
+
+Breakdown of the various types of instructions executed by the user’s kernel, and which pipelines on the Compute Unit (CU) they were executed on.
+```
 ###### VALU Arithmetic Instruction Mix
-![VALU Arithmetic Instruction Mix](images/VALU_arithmetic_instruction_mix.png)
+``` {figure} images/cu-value-arith-instr-mix_panel.png
+:alt: VALU Arithmetic Instruction Mix
+:figclass: figure
+:align: center
+
+The various types of vector instructions that were issued to the vector arithmetic logic unit (VALU).
+```
 ###### MFMA Arithmetic Instruction Mix
-![MFMA Arithmetic Instruction Mix](images/MFMA_arithmetic_instruction_mix.png)
+``` {figure} images/cu-mafma-arith-instr-mix_panel.png
+:alt: MFMA Arithmetic Instruction Mix
+:figclass: figure
+:align: center
+
+The types of Matrix Fused Multiply-Add (MFMA) instructions that were issued.
+```
 ###### VMEM Arithmetic Instruction Mix
-![VMEM Arithmetic Instruction Mix](images/VMEM_arithmetic_intensity_mix.png)
+``` {figure} images/cu-vmem-instr-mix_panel.png
+:alt: VMEM Arithmetic Instruction Mix
+:figclass: figure
+:align: center
+
+The types of vector memory (VMEM) instructions that were issued.
+```
 
 ##### Compute Unit - Compute Pipeline
 ###### Speed-of-Light
-![Speed-of-Light](images/Comp_pipe_sol.png)
-###### Compute Pipeline Stats
-![Compute Pipeline Stats](images/Compute_pipeline_stats.png)
+``` {figure} images/cu-sol_panel.png
+:alt: Speed-of-Light
+:figclass: figure
+:align: center
+
+The number of floating-point and integer operations executed on the vector arithmetic logic unit (VALU) and Matrix Fused Multiply-Add (MFMA) units in various precisions.
+```
+###### Pipeline Stats
+``` {figure} images/cu-pipeline-stats_panel.png
+:alt: Pipeline Stats
+:figclass: figure
+:align: center
+
+More detailed metrics to analyze the several independent pipelines found in the Compute Unit (CU).
+```
 ###### Arithmetic Operations
-![Arithmetic Operations](images/Arithmetic_operations.png)
-###### Memory Latencies
-![Memory Latencies](images/Memory_latencies.png)
+``` {figure} images/cu-arith-ops_panel.png
+:alt: Arithmetic Operations
+:figclass: figure
+:align: center
+
+The total number of floating-point and integer operations executed in various precisions.
+```
 
 ##### Local Data Share (LDS)
 ###### Speed-of-Light
-![Speed-of-Light](images/LDS_sol.png)
+``` {figure} images/lds-sol_panel.png
+:alt: Speed-of-Light
+:figclass: figure
+:align: center
+
+Key metrics for the Local Data Share (LDS) as a comparison with the peak achievable values of those metrics.
+```
 ###### LDS Stats
-![LDS Stats](images/LDS_stats.png)
+``` {figure} images/lds-stats_panel.png
+:alt: LDS Stats
+:figclass: figure
+:align: center
+
+More detailed view of the Local Data Share (LDS) performance.
+```
 
 ##### Instruction Cache
 ###### Speed-of-Light
-![Speed-of-Light](images/Instruc_cache_sol.png)
+``` {figure} images/instr-cache-sol_panel.png
+:alt: Speed-of-Light
+:figclass: figure
+:align: center
+
+Key metrics of the L1 Instruction (L1I) cache as a comparison with the peak achievable values of those metrics.
+```
 ###### Instruction Cache Stats
-![Instruction Cache Stats](images/Instruction_cache_stats.png)
+``` {figure} images/instr-cache-accesses_panel.png
+:alt: Instruction Cache Stats
+:figclass: figure
+:align: center
+
+More detail on the hit/miss statistics of the L1 Instruction (L1I) cache.
+```
 
 ##### Scalar L1D Cache
 ###### Speed-of-Light
-![](images/L1D_sol.png)
-###### Constant Cache Stats
-![Constant Cache Stats](images/Vec_L1D_cache_accesses.png)
-###### Constant Cache - L2 Interface
-![Constant Cache - L2 Interface](images/Constant_cache_l2_interface.png)
+``` {figure} images/sl1d-sol_panel.png
+:alt: Speed-of-Light
+:figclass: figure
+:align: center
+
+Key metrics of the Scalar L1 Data (sL1D) cache as a comparison with the peak achievable values of those metrics.
+```
+###### Scalar L1D Cache Accesses
+``` {figure} images/sl1d-cache-accesses_panel.png
+:alt: Scalar L1D Cache Accesses
+:figclass: figure
+:align: center
+
+More detail on the types of accesses made to the Scalar L1 Data (sL1D) cache, and the hit/miss statistics.
+```
+###### Scalar L1D Cache - L2 Interface
+``` {figure} images/sl1d-l12-interface_panel.png
+:alt: Scalar L1D Cache - L2 Interface
+:figclass: figure
+:align: center
+
+More detail on the data requested across the Scalar L1 Data (sL1D) cache <-> L2 interface.
+```
 
 ##### Texture Address and Texture Data
-###### Texture Address (TA)
-![Texture Address](images/Texture_address.png)
-###### Texture Data (TD)
-![Texture Data](images/Texture_data.png)
+###### Texture Addresser
+``` {figure} images/ta_panel.png
+:alt: Texture Addresser
+:figclass: figure
+:align: center
 
-##### Vector L1D Cache
+Metric specific to texture addresser (TA) which receives commands (e.g., instructions) and write/atomic data from the Compute Unit (CU), and coalesces them into fewer requests for the cache to process.
+```
+###### Texture Data
+``` {figure} images/td_panel.png
+:alt: Texture Data
+:figclass: figure
+:align: center
+
+Metrics specific to texture data (TD) which routes data back to the requesting Compute Unit (CU).
+```
+
+##### Vector L1 Data Cache
 ###### Speed-of-Light
-![Speed-of-Light](images/Vec_L1D_cache_sol.png)
-###### Vector L1D Cache Accesses
-![Vector L1D Cache Accesses](images/Vec_L1D_cache_accesses.png)
-###### L1 Cache Stalls
-![L1 Cache Stalls](images/L1_cache_stalls.png)
-###### L1 - L2 Transactions
-![L1 - L2 Transactions](images/L1_l2_transactions.png)
-###### L1 - UTCL1 Interface Stats
-![L1 - UTCL1 Interface Stats](images/L1_utcl1_transactions.png)
+``` {figure} images/vl1d-sol_panel.png
+:alt: Speed-of-Light
+:figclass: figure
+:align: center
+
+Key metrics of the vector L1 data (vL1D) cache as a comparison with the peak achievable values of those metrics.
+```
+###### L1D Cache Stalls
+``` {figure} images/vl1d-cache-stalls_panel.png
+:alt: L1D Cache Stalls
+:figclass: figure
+:align: center
+
+More detail on where vector L1 data (vL1D) cache is stalled in the pipeline, which may indicate performance limiters of the cache.
+```
+###### L1D Cache Accesses
+``` {figure} images/vl1d-cache-accesses_panel.png
+:alt: L1D Cache Accesses
+:figclass: figure
+:align: center
+
+The type of requests incoming from the cache frontend, the number of requests that were serviced by the vector L1 data (vL1D) cache, and the number & type of outgoing requests to the L2 cache.
+```
+###### L1D - L2 Transactions
+``` {figure} images/vl1d-l2-transactions_panel.png
+:alt: L1D - L2 Transactions
+:figclass: figure
+:align: center
+
+A more granular look at the types of requests made to the L2 cache.
+```
+###### L1D Addr Translation
+``` {figure} images/vl1d-addr-translation_panel.png
+:alt: L1D Addr Translation
+:figclass: figure
+:align: center
+
+After a vector memory instruction has been processed/coalesced by the address processing unit of the vector L1 data (vL1D) cache, it must be translated from a virtual to physical address. These metrics provide more details on the L1 Translation Lookaside Buffer (TLB) which handles this process.
+```
 
 ##### L2 Cache
 ###### Speed-of-Light
-![Speed-of-Light](images/L2_cache_sol.png)
-###### L2 Cache Accesses
-![L2 Cache Accesses](images/L2_cache_accesses.png)
-###### L2 - EA Transactions
-![L2 - EA Transactions](images/L2_ea_transactions.png)
-###### L2 - EA Stalls
-![L2 - EA Stalls](images/L2_ea_stalls.png)
+``` {figure} images/l2-sol_panel.png
+:alt: Speed-of-Light
+:figclass: figure
+:align: center
 
-##### L2 Cache Per Channel Performance
-###### L1-L2 Transactions
-![L1-L2 Transactions](images/L1_l2_transactions_per_channel.png)
-###### L2-EA Transactions
-![L2-EA Transactions](images/L2_ea_transactions_per_channel.png)
-###### L2-EA Latencies
-![L2-EA Latencies](images/L2_ea_latencies_per_channel.png)
-###### L2-EA Stalls
-![L2-EA Stalls](images/L2_ea_stalls_per_channel.png)
-###### L2-EA Write Stalls
-![L2-EA Write Stalls](images/L2_ea_write_stalls_per_channel.png)
-###### L2-EA Write Starvation
-![L2-EA Write Starvation](images/L2_ea_write_starvation_per_channel.png)
+Key metrics about the performance of the L2 cache, aggregated over all the L2 channels, as a comparison with the peak achievable values of those metrics.
+```
+###### L2 Cache Accesses
+``` {figure} images/l2-accesses_panel.png
+:alt: L2 Cache Accesses
+:figclass: figure
+:align: center
+
+Incoming requests to the L2 cache from the vector L1 data (vL1D) cache and other clients (e.g., the sL1D and L1I caches).
+```
+###### L2 - Fabric Transactions
+``` {figure} images/l2-fabric-transactions_panel.png
+:alt: L2 - Fabric Transactions
+:figclass: figure
+:align: center
+
+More detail on the flow of requests through Infinity Fabric™.
+```
+###### L2 - Fabric Interface Stalls
+``` {figure} images/l2-fabric-interface-stalls_panel.png
+:alt: L2 - Fabric Interface Stalls
+:figclass: figure
+:align: center
+
+A breakdown of what types of requests in a kernel caused a stall (e.g., read vs write), and to which locations (e.g., to the accelerator’s local memory, or to remote accelerators/CPUs).
+```
+
+##### L2 Cache Per Channel
+###### Aggregate Stats
+``` {figure} images/l2-per-channel-agg-stats_panel.png
+:alt: Aggregate Stats
+:figclass: figure
+:align: center
+
+L2 Cache per channel performance at a glance. Metrics are aggregated over all available channels.
+```
