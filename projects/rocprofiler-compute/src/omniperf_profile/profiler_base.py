@@ -119,20 +119,20 @@ class OmniProfiler_Base():
 
         # TODO: check for any mismatch in joins
         duplicate_cols = {
-            "GPU_ID": [col for col in df.columns if "GPU_ID" in col],
-            "Grid_Size": [col for col in df.columns if "Grid_Size" in col],
-            "Workgroup_Size": [col for col in df.columns if "Workgroup_Size" in col],
-            "LDS_Per_Workgroup": [col for col in df.columns if "LDS_Per_Workgroup" in col],
-            "Scratch_Per_Workitem": [col for col in df.columns if "Scratch_Per_Workitem" in col],
-            "SGPR": [col for col in df.columns if "SGPR" in col],
+            "GPU_ID": [col for col in df.columns if col.startswith("GPU_ID")],
+            "Grid_Size": [col for col in df.columns if col.startswith("Grid_Size")],
+            "Workgroup_Size": [col for col in df.columns if col.startswith("Workgroup_Size")],
+            "LDS_Per_Workgroup": [col for col in df.columns if col.startswith("LDS_Per_Workgroup")],
+            "Scratch_Per_Workitem": [col for col in df.columns if col.startswith("Scratch_Per_Workitem")],
+            "SGPR": [col for col in df.columns if col.startswith("SGPR")],
         }
         # Check for vgpr counter in ROCm < 5.3
         if "vgpr" in df.columns:
-            duplicate_cols["vgpr"] = [col for col in df.columns if "vgpr" in col]
+            duplicate_cols["vgpr"] = [col for col in df.columns if col.startswith("vgpr")]
         # Check for vgpr counter in ROCm >= 5.3
         else:
-            duplicate_cols["Arch_VGPR"] = [col for col in df.columns if "Arch_VGPR" in col]
-            duplicate_cols["Accum_VGPR"] = [col for col in df.columns if "Accum_VGPR" in col]
+            duplicate_cols["Arch_VGPR"] = [col for col in df.columns if col.startswith("Arch_VGPR")]
+            duplicate_cols["Accum_VGPR"] = [col for col in df.columns if col.startswith("Accum_VGPR")]
         for key, cols in duplicate_cols.items():
             _df = df[cols]
             if not test_df_column_equality(_df):
