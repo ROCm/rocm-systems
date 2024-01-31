@@ -19,13 +19,14 @@ usage() {
   if [ -z "${EC}" ]; then EC=1; fi
   echo -e "${RESET}ROCProfilerV3 Run Script Usage:"
   echo -e "${GREEN}-h   | --help ${RESET}                For showing this message"
-#   echo -e "${GREEN}-i   | --input ${RESET}               For adding counters file path (every line in the text file represents a counter)"
+  #   echo -e "${GREEN}-i   | --input ${RESET}               For adding counters file path (every line in the text file represents a counter)"
   echo -e "${GREEN}--hsa-trace ${RESET}                  For Collecting HSA API Traces"
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel Dispatch Traces"
   echo -e "${GREEN}--memory-copy-trace ${RESET}          For Collecting Memory Copy Traces"
   echo -e "${GREEN}--marker-trace ${RESET}               For Collecting Marker (ROCTx) Traces"
   echo -e "${GREEN}--hip-trace ${RESET}                  For Collecting HIP Runtime Traces"
   echo -e "${GREEN}--hip-compiler-trace ${RESET}         For Collecting HIP Compiler generated code Traces"
+  echo -e "${GREEN}--sys-trace ${RESET}                  For Collecting HIP,HSA, Memory Copy, (marker)ROCTx, Kernel dispatch and HIP compiler traces\n"
   echo -e "${GREEN}-o   | --output-file ${RESET}         For the output file name"
   echo -e "\t#${GREY} usage e.g:(with current dir): rocprofv3 --hsa-trace -o <file_name> <executable>"
   echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv3 --hsa-trace -d <out_dir> -o <file_name> <executable>${RESET}\n"
@@ -101,6 +102,13 @@ while true; do
   elif [ "$1" == "--hip-compiler-trace" ]; then
     export ROCPROF_HIP_COMPILER_API_TRACE=1
     shift
+  elif [ "$1" == "--sys-trace" ]; then
+    export ROCPROF_HSA_API_TRACE=1
+    export ROCPROF_KERNEL_TRACE=1
+    export ROCPROF_MEMORY_COPY_TRACE=1
+    export ROCPROF_MARKER_API_TRACE=1
+    export ROCPROF_HIP_API_TRACE=1
+    shift
   elif [ "$1" == "--" ]; then
     shift
     break
@@ -140,9 +148,9 @@ if [ -n "${PMC_LINES:-}" ]; then
     fi
     ((COUNTER++))
     ROCP_TOOL_LIBRARIES="${ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so" \
-    LD_LIBRARY_PATH=${ROCM_DIR}/lib:${LD_LIBRARY_PATH} \
-    LD_PRELOAD="${ROCPROF_PRELOAD}:${ROCM_DIR}/lib/librocprofiler-sdk.so" \
-    "${@}"
+      LD_LIBRARY_PATH=${ROCM_DIR}/lib:${LD_LIBRARY_PATH} \
+      LD_PRELOAD="${ROCPROF_PRELOAD}:${ROCM_DIR}/lib/librocprofiler-sdk.so" \
+      "${@}"
     if [ -n "$ROCPROF_OUTPUT_PATH" ]; then
       echo -e "\nThe output path for the following counters: $ROCPROF_OUTPUT_PATH"
     fi
@@ -150,7 +158,7 @@ if [ -n "${PMC_LINES:-}" ]; then
 else
   # for non counter collection. e.g: tracing
   ROCP_TOOL_LIBRARIES="${ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so" \
-  LD_LIBRARY_PATH=${ROCM_DIR}/lib:${LD_LIBRARY_PATH} \
-  LD_PRELOAD="${ROCPROF_PRELOAD}:${ROCM_DIR}/lib/librocprofiler-sdk.so" \
-  "${@}"
+    LD_LIBRARY_PATH=${ROCM_DIR}/lib:${LD_LIBRARY_PATH} \
+    LD_PRELOAD="${ROCPROF_PRELOAD}:${ROCM_DIR}/lib/librocprofiler-sdk.so" \
+    "${@}"
 fi

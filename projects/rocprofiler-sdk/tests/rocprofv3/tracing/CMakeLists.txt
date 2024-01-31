@@ -77,3 +77,54 @@ set_tests_properties(
                "AssertionError"
                ATTACHED_FILES_ON_FAIL
                "${VALIDATION_FILES}")
+
+# sys-trace test: tests --sys-trace command and validates generated files
+
+add_test(
+    NAME rocprofv3-test-systrace-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out
+        $<TARGET_FILE:simple-transpose>)
+
+set_tests_properties(
+    rocprofv3-test-systrace-execute
+    PROPERTIES
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${tracing-env}"
+        FAIL_REGULAR_EXPRESSION
+        "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
+    )
+
+add_test(
+    NAME rocprofv3-test-systrace-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --hsa-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_hsa_api_trace.csv
+        --kernel-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_kernel_trace.csv
+        --memory-copy-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_memory_copy_trace.csv
+        --marker-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv)
+
+set(SYS_VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_memory_copy_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_hsa_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_kernel_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv)
+
+set_tests_properties(
+    rocprofv3-test-systrace-validate
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               rocprofv3-test-systrace-execute
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               ATTACHED_FILES_ON_FAIL
+               "${SYS_VALIDATION_FILES}")
