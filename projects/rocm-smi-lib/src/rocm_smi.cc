@@ -5143,11 +5143,12 @@ rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
                                             uint64_t *gfx_version) {
     TRY
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+    ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+       << " | Device #: " << dv_ind;
+    LOG_TRACE(ss);
     rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
     std::string version = "";
     const uint64_t undefined_gfx_version = std::numeric_limits<uint64_t>::max();
-    LOG_TRACE(ss);
     if (gfx_version == nullptr) {
       ret = RSMI_STATUS_INVALID_ARGS;
     } else {
@@ -5160,12 +5161,77 @@ rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
     }
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "
-       << " | Returning: " << getRSMIStatusString(ret)
+       << " | Returning: " << getRSMIStatusString(ret, false)
        << " | Device #: " << dv_ind
-       << " | Type: N/A"
-       << " | Data: " << ((gfx_version == nullptr) ? "nullptr": std::to_string(*gfx_version));
+       << " | Type: Target_graphics_version"
+       << " | Data: "
+       << ((gfx_version == nullptr) ? "nullptr" :
+           amd::smi::print_unsigned_hex_and_int(*gfx_version));
     LOG_TRACE(ss);
     return ret;
+    CATCH
+}
+
+rsmi_status_t rsmi_dev_guid_get(uint32_t dv_ind, uint64_t *guid) {
+    TRY
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+       << " | Device #: " << dv_ind;
+    LOG_TRACE(ss);
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    uint64_t kgd_gpu_id = 0;
+    rsmi_status_t resp = RSMI_STATUS_NOT_SUPPORTED;
+    int ret = kfd_node->KFDNode::get_gpu_id(&kgd_gpu_id);
+    resp = amd::smi::ErrnoToRsmiStatus(ret);
+
+    if (guid == nullptr) {
+      resp = RSMI_STATUS_INVALID_ARGS;
+    } else {
+      *guid = kgd_gpu_id;
+    }
+
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Returning: " << getRSMIStatusString(resp, false)
+       << " | Device #: " << dv_ind
+       << " | Type: GUID (gpu_id)"
+       << " | Data: " << ((guid == nullptr) ? "nullptr" :
+          amd::smi::print_unsigned_hex_and_int(*guid));
+    LOG_INFO(ss);
+    return resp;
+    CATCH
+}
+
+rsmi_status_t rsmi_dev_node_id_get(uint32_t dv_ind, uint32_t *node_id) {
+    TRY
+     std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | ======= start ======="
+       << " | Device #: " << dv_ind;
+    LOG_TRACE(ss);
+    GET_DEV_AND_KFDNODE_FROM_INDX
+    uint32_t kgd_node_id = std::numeric_limits<uint32_t>::max();
+    rsmi_status_t resp = RSMI_STATUS_NOT_SUPPORTED;
+    int ret = kfd_node->KFDNode::get_node_id(&kgd_node_id);
+    resp = amd::smi::ErrnoToRsmiStatus(ret);
+
+    if (node_id == nullptr) {
+      resp = RSMI_STATUS_INVALID_ARGS;
+    } else {
+      *node_id = kgd_node_id;
+      if (kgd_node_id == std::numeric_limits<uint32_t>::max()) {
+        resp = RSMI_STATUS_NOT_SUPPORTED;
+      }
+    }
+
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Returning: " << getRSMIStatusString(resp, false)
+       << " | Device #: " << dv_ind
+       << " | Type: node_id"
+       << " | Data: " << ((node_id == nullptr) ? "nullptr" :
+          amd::smi::print_unsigned_hex_and_int(*node_id));
+    LOG_INFO(ss);
+    return resp;
     CATCH
 }
 

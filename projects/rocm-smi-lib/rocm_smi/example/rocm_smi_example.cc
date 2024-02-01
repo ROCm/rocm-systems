@@ -796,6 +796,20 @@ int main() {
     ret = rsmi_dev_target_graphics_version_get(i, &val_ui64);
     std::cout << "\t**Target Graphics Version: " << std::dec
     << static_cast<uint64_t>(val_ui64) << "\n";
+    ret = rsmi_dev_guid_get(i, &val_ui64);
+    std::cout << "\t**GUID: " << std::dec
+    << static_cast<uint64_t>(val_ui64) << "\n";
+    ret = rsmi_dev_node_id_get(i, &val_ui32);
+    std::cout << "\t**Node ID: " << std::dec
+    << static_cast<uint32_t>(val_ui32) << "\n";
+    char vbios_version[256];
+    ret = rsmi_dev_vbios_version_get(i, vbios_version, 256);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << "\t**VBIOS Version: " << vbios_version << "\n";
+    } else {
+      std::cout << "\t**VBIOS Version: "
+      << amd::smi::getRSMIStatusString(ret, false) << "\n";
+    }
 
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';

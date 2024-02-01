@@ -1624,6 +1624,54 @@ rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
  */
 rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id);
 
+/**
+ *  @brief Get the GUID, also known as the GPU device id,
+ *  associated with the provided device index indicated by KFD.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint64_t
+ *  @p guid, this function will write the KFD GPU id value to the
+ *  uint64_t pointed to by @p guid.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] gpu_id a pointer to uint64_t to which the KFD gpu id will be
+ *  written. If the @p guid parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS. If the GPU ID is not supported with
+ *  the device index queried, gpu_id will return MAX UINT64 value an 
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED as a response.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS call was successful
+ * @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ * support this function with the given arguments
+ * @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_guid_get(uint32_t dv_ind, uint64_t *guid);
+
+/**
+ *  @brief Get the node id associated with the provided device index
+ *  indicated by KFD.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t
+ *  @p node_id, this function will write the KFD node id value to the
+ *  uint32_t pointed to by @p node_id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] node_id a pointer to uint64_t to which the KFD gpu id will be
+ *  written. If the @p node_id parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS. If @p node_id is not supported with
+ *  the device index queried, @p node_id will return MAX UINT64 value as an
+ *  argument and ::RSMI_STATUS_NOT_SUPPORTED as a response.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS call was successful
+ * @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ * support this function with the given arguments
+ * @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_node_id_get(uint32_t dv_ind, uint32_t *node_id);
+
 
 /** @} */  // end of IDQuer
 
@@ -3205,7 +3253,7 @@ rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
                                                         uint64_t *fw_version);
 
 /**
- *  @brief Get the graphics version for a GPU device
+ *  @brief Get the target graphics version for a GPU device
  *
  *  @details Given a device ID @p dv_ind and a uint64_t pointer
  *  @p gfx_version, this function will write the graphics version.

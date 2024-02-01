@@ -86,6 +86,10 @@ class KFDNode {
 
     // Get gfx target version from kfd
     int get_gfx_target_version(uint64_t* gfx_target_version);
+    // Get gpu_id (AKA GUID) version from kfd
+    int get_gpu_id(uint64_t *gpu_id);
+    // Get node id from kfd
+    int get_node_id(uint32_t *node_id);
 
  private:
     uint32_t node_indx_;

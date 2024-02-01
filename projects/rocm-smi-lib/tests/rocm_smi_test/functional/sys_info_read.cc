@@ -206,12 +206,33 @@ void TestSysInfoRead::Run(void) {
 
     err = rsmi_dev_target_graphics_version_get(i, &val_ui64);
     IF_VERB(STANDARD) {
-        std::cout << "\t**Graphics Target version: " << std::dec
+        std::cout << "\t**Target GFX version: " << std::dec
         << val_ui64 << "\n";
     }
     EXPECT_EQ(err, RSMI_STATUS_SUCCESS);
     EXPECT_NE(val_ui64, std::numeric_limits<uint64_t>::max());
     err = rsmi_dev_target_graphics_version_get(i, nullptr);
     EXPECT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+
+    err = rsmi_dev_guid_get(i, &val_ui64);
+    IF_VERB(STANDARD) {
+        std::cout << "\t**GUID: " << std::dec
+        << val_ui64 << "\n";
+    }
+    EXPECT_EQ(err, RSMI_STATUS_SUCCESS);
+    EXPECT_NE(val_ui64, std::numeric_limits<uint64_t>::max());
+    err = rsmi_dev_guid_get(i, nullptr);
+    EXPECT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+
+    err = rsmi_dev_node_id_get(i, &val_ui32);
+    IF_VERB(STANDARD) {
+        std::cout << "\t**Node ID: " << std::dec
+        << val_ui32 << "\n";
+    }
+    EXPECT_EQ(err, RSMI_STATUS_SUCCESS);
+    EXPECT_NE(val_ui32, std::numeric_limits<uint32_t>::max());
+    err = rsmi_dev_node_id_get(i, nullptr);
+    EXPECT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+
   }
 }
