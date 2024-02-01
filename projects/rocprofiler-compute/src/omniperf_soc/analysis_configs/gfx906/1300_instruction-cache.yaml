@@ -13,7 +13,7 @@ Panel Config:
         title: Speed-of-Light
         header:
           metric: Metric
-          value: Value
+          value: Avg
           unit: Unit
           tips: Tips
         style:
@@ -27,11 +27,16 @@ Panel Config:
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
             tips: 
-          Cache Hit:
+          Cache Hit Rate:
             value: AVG(((SQC_ICACHE_HITS * 100) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             unit: Pct of Peak
             tips: 
+          L1I-L2 Bandwidth:
+            value: AVG(((SQC_TC_INST_REQ * 100000) / (2 * ($sclk * $numSQC) 
+              * (EndNs - BeginNs))))
+            unit: Pct of Peak
+            tips:
 
     - metric_table:
         id: 1302
@@ -68,7 +73,7 @@ Panel Config:
             max: MAX((SQC_ICACHE_MISSES_DUPLICATE / $denom))
             unit: (Misses  + $normUnit)
             tips: 
-          Cache Hit:
+          Cache Hit Rate:
             avg: AVG(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES)
               + SQC_ICACHE_MISSES_DUPLICATE)))
             min: MIN(((100 * SQC_ICACHE_HITS) / ((SQC_ICACHE_HITS + SQC_ICACHE_MISSES) +
@@ -77,3 +82,27 @@ Panel Config:
               SQC_ICACHE_MISSES_DUPLICATE)))
             unit: pct
             tips: 
+          Instruction Fetch Latency:
+            avg: AVG((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
+            min: MIN((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
+            max: MAX((SQ_ACCUM_PREV_HIRES / SQ_IFETCH))
+            unit: Cycles
+            coll_level: SQ_IFETCH_LEVEL
+            tips:
+    - metric_table:
+        id: 1303
+        title: Instruction Cache - L2 Interface
+        header:
+          metric: Metric
+          mean: Mean
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          L1I-L2 Bandwidth:
+            mean: AVG(((SQC_TC_INST_REQ * 64) / $denom))
+            min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
+            max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
+            unit: (Bytes + $normUnit)
+            tips:

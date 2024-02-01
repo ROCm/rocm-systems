@@ -12,8 +12,8 @@ Panel Config:
         id: 1401
         title: Speed-of-Light
         header:
-          mertic: Metric
-          value: Value
+          metric: Metric
+          value: Avg
           unit: Unit
           tips: Tips
         style:
@@ -27,10 +27,15 @@ Panel Config:
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
             tips:
-          Cache Hit:
+          Cache Hit Rate:
             value:
               AVG((((SQC_DCACHE_HITS * 100) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
               if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
+            unit: Pct of Peak
+            tips:
+          sL1D-L2 BW:
+            value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 100000)
+                        / (2 * ($sclk * $numSQC) * (EndNs - BeginNs)))
             unit: Pct of Peak
             tips:
 
@@ -138,6 +143,12 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
+          sL1D-L2 BW:
+            mean: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64)) / $denom))
+            min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64)) / $denom))
+            max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64)) / $denom))
+            unit: (Bytes + $normUnit)
+            tips:
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))

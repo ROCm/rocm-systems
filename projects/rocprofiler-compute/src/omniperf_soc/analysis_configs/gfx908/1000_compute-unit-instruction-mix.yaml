@@ -10,7 +10,7 @@ Panel Config:
   data source:
     - metric_table:
         id: 1001
-        title: Instruction Mix
+        title: Overall Instruction Mix
         header:
           metric: Metric
           avg: Avg
@@ -18,11 +18,11 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        cli_style: 
+        style: 
           type: simple_bar
           label_txt: (# of instr + $normUnit)
         metric:
-          VALU - Vector:
+          VALU:
             avg: AVG(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
             min: MIN(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
             max: MAX(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
@@ -40,7 +40,7 @@ Panel Config:
             max: MAX((SQ_INSTS_LDS / $denom))
             unit: (instr + $normUnit)
             tips: 
-          VALU - MFMA:
+          MFMA:
             avg: None # No HW module
             min: None # No HW module
             max: None # No HW module
@@ -64,12 +64,6 @@ Panel Config:
             max: MAX((SQ_INSTS_BRANCH / $denom))
             unit: (instr + $normUnit)
             tips: 
-          GDS:
-            avg: AVG((SQ_INSTS_GDS / $denom))
-            min: MIN((SQ_INSTS_GDS / $denom))
-            max: MAX((SQ_INSTS_GDS / $denom))
-            unit: (instr + $normUnit)
-            tips: 
 
     - metric_table:
         id: 1002
@@ -81,7 +75,7 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        cli_style: 
+        style: 
           type: simple_bar
           label_txt: (# of instr + $normUnit)
         metric:
@@ -103,7 +97,7 @@ Panel Config:
             max: None # No perf counter
             unit: (instr + $normUnit)
             tips:
-          F16-Mult:
+          F16-MUL:
             avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
@@ -127,7 +121,7 @@ Panel Config:
             max: None # No perf counter
             unit: (instr + $normUnit)
             tips:
-          F32-Mult:
+          F32-MUL:
             avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
@@ -151,7 +145,7 @@ Panel Config:
             max: None # No perf counter
             unit: (instr + $normUnit)
             tips:
-          F64-Mult:
+          F64-MUL:
             avg: None # No perf counter
             min: None # No perf counter
             max: None # No perf counter
@@ -180,55 +174,100 @@ Panel Config:
         id: 1003
         title: VMEM Instr Mix
         header:
-          type: Type
-          count: Count
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
           tips: Tips
         metric:
-          Buffer Instr:
-            count: AVG((TA_BUFFER_WAVEFRONTS_sum / $denom))
-            tips: 
-          Buffer Read:
-            count: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
-            tips: 
-          Buffer Write:
-            count: AVG((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
-            tips: 
-          Buffer Atomic:
-            count: AVG((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
-            tips: 
-          Flat Instr:
-            count: AVG((TA_FLAT_WAVEFRONTS_sum / $denom))
-            tips: 
-          Flat Read:
-            count: AVG((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
-            tips: 
-          Flat Write:
-            count: AVG((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
-            tips: 
-          Flat Atomic:
-            count: AVG((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
-            tips: 
+          Global/Generic Instr:
+            avg: AVG((TA_FLAT_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_FLAT_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          Global/Generic Read:
+            avg: AVG((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          Global/Generic Write:
+            avg: AVG((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          Global/Generic Atomic:
+            avg: AVG((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          Spill/Stack Instr:
+            avg: AVG((TA_BUFFER_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_BUFFER_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          Spill/Stack Read:
+            avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          Spill/Stack Write:
+            avg: AVG((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
+          Spill/Stack Atomic:
+            avg: AVG((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
+            min: MIN((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
+            max: MAX((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
+            unit: (instr + $normUnit)
+            tips:
 
     - metric_table:
         id: 1004
         title: MFMA Arithmetic Instr Mix
         header:
-          type: Type
-          count: Count
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
           tips: Tips
         metric:
           MFMA-I8:
-            count: None # No HW module
-            tips:
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
+            unit: (instr + $normUnit)
+            tips: 
           MFMA-F16:
-            count: None # No HW module
-            tips:
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
+            unit: (instr + $normUnit)
+            tips: 
           MFMA-BF16:
-            count: None # No HW module
-            tips:
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
+            unit: (instr + $normUnit)
+            tips: 
           MFMA-F32:
-            count: None # No HW module
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
+            unit: (instr + $normUnit)
             tips:
           MFMA-F64:
-            count: None # No HW module
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
+            unit: (instr + $normUnit)
             tips:

@@ -6,11 +6,11 @@ Metric Description:
 # Define the panel properties and properties of each metric in the panel.
 Panel Config:
   id: 600
-  title: Shader Processor Input (SPI)
+  title: Workgroup Manager (SPI)
   data source:
     - metric_table:
         id: 601
-        title: SPI Stats
+        title: Workgroup Manager Utilizations
         header:
           metric: Metric
           avg: Avg
@@ -19,29 +19,35 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          GPU Busy:
-            avg: AVG(GRBM_GUI_ACTIVE)
-            min: MIN(GRBM_GUI_ACTIVE)
-            max: MAX(GRBM_GUI_ACTIVE)
-            unit: Cycles
+          Accelerator Utilization:
+            avg: AVG(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+            min: MIN(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+            max: MAX(100 * GRBM_GUI_ACTIVE / GRBM_COUNT)
+            unit: Pct
             tips: 
-          CS Busy:
-            avg: AVG(SPI_CSN_BUSY)
-            min: MIN(SPI_CSN_BUSY)
-            max: MAX(SPI_CSN_BUSY)
-            unit: Cycles
+          Scheduler-Pipe Utilization:
+            avg: AVG(100 * SPI_CSN_BUSY / (GRBM_GUI_ACTIVE * $numPipes * $numSE))
+            min: MIN(100 * SPI_CSN_BUSY / (GRBM_GUI_ACTIVE * $numPipes * $numSE))
+            max: MAX(100 * SPI_CSN_BUSY / (GRBM_GUI_ACTIVE * $numPipes * $numSE))
+            unit: Pct
             tips: 
-          SPI Busy:
-            avg: AVG(GRBM_SPI_BUSY)
-            min: MIN(GRBM_SPI_BUSY)
-            max: MAX(GRBM_SPI_BUSY)
-            unit: Cycles
+          Workgroup Manager Utilization:
+            avg: AVG(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+            min: MIN(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+            max: MAX(100 * GRBM_SPI_BUSY / GRBM_GUI_ACTIVE)
+            unit: Pct
             tips: 
-          SQ Busy:
-            avg: AVG(SQ_BUSY_CYCLES)
-            min: MIN(SQ_BUSY_CYCLES)
-            max: MAX(SQ_BUSY_CYCLES)
-            unit: Cycles
+          Shader Engine Utilization:
+            avg: AVG(100 * SQ_BUSY_CYCLES / (GRBM_GUI_ACTIVE * $numSE))
+            min: MIN(100 * SQ_BUSY_CYCLES / (GRBM_GUI_ACTIVE * $numSE))
+            max: MAX(100 * SQ_BUSY_CYCLES / (GRBM_GUI_ACTIVE * $numSE))
+            unit: Pct
+            tips: 
+          SIMD Utilization:
+            avg: AVG(100 * SQ_BUSY_CU_CYCLES / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(100 * SQ_BUSY_CU_CYCLES / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(100 * SQ_BUSY_CU_CYCLES / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
             tips: 
           Dispatched Workgroups:
             avg: AVG(SPI_CSN_NUM_THREADGROUPS)
@@ -54,105 +60,6 @@ Panel Config:
             min: MIN(SPI_CSN_WAVE)
             max: MAX(SPI_CSN_WAVE)
             unit: Wavefronts
-            tips: 
-          Wave Alloc Failed:
-            avg: AVG(SPI_RA_REQ_NO_ALLOC)
-            min: MIN(SPI_RA_REQ_NO_ALLOC)
-            max: MAX(SPI_RA_REQ_NO_ALLOC)
-            unit: Cycles
-            tips: 
-          Wave Alloc Failed - CS:
-            avg: AVG(SPI_RA_REQ_NO_ALLOC_CSN)
-            min: MIN(SPI_RA_REQ_NO_ALLOC_CSN)
-            max: MAX(SPI_RA_REQ_NO_ALLOC_CSN)
-            unit: Cycles
-            tips: 
-
-    - metric_table:
-        id: 602
-        title: SPI Resource Allocation
-        header:
-          metric: Metric
-          avg: Avg
-          min: Min
-          max: Max
-          unit: Unit
-          tips: Tips
-        metric:
-          Wave request Failed (CS):
-            avg: AVG(SPI_RA_REQ_NO_ALLOC_CSN)
-            min: MIN(SPI_RA_REQ_NO_ALLOC_CSN)
-            max: MAX(SPI_RA_REQ_NO_ALLOC_CSN)
-            unit: Cycles
-            tips: 
-          CS Stall:
-            avg: AVG(SPI_RA_RES_STALL_CSN)
-            min: MIN(SPI_RA_RES_STALL_CSN)
-            max: MAX(SPI_RA_RES_STALL_CSN)
-            unit: Cycles
-            tips: 
-          CS Stall Rate:
-            avg: AVG((((100 * SPI_RA_RES_STALL_CSN) / GRBM_SPI_BUSY) if (GRBM_SPI_BUSY !=
-              0) else None))
-            min: MIN((((100 * SPI_RA_RES_STALL_CSN) / GRBM_SPI_BUSY) if (GRBM_SPI_BUSY !=
-              0) else None))
-            max: MAX((((100 * SPI_RA_RES_STALL_CSN) / GRBM_SPI_BUSY) if (GRBM_SPI_BUSY !=
-              0) else None))
-            unit: pct
-            tips: 
-          Scratch Stall:
-            avg: AVG(SPI_RA_TMP_STALL_CSN)
-            min: MIN(SPI_RA_TMP_STALL_CSN)
-            max: MAX(SPI_RA_TMP_STALL_CSN)
-            unit: Cycles
-            tips: 
-          Insufficient SIMD Waveslots:
-            avg: AVG(SPI_RA_WAVE_SIMD_FULL_CSN)
-            min: MIN(SPI_RA_WAVE_SIMD_FULL_CSN)
-            max: MAX(SPI_RA_WAVE_SIMD_FULL_CSN)
-            unit: SIMD
-            tips: 
-          Insufficient SIMD VGPRs:
-            avg: AVG(SPI_RA_VGPR_SIMD_FULL_CSN)
-            min: MIN(SPI_RA_VGPR_SIMD_FULL_CSN)
-            max: MAX(SPI_RA_VGPR_SIMD_FULL_CSN)
-            unit: SIMD
-            tips: 
-          Insufficient SIMD SGPRs:
-            avg: AVG(SPI_RA_SGPR_SIMD_FULL_CSN)
-            min: MIN(SPI_RA_SGPR_SIMD_FULL_CSN)
-            max: MAX(SPI_RA_SGPR_SIMD_FULL_CSN)
-            unit: SIMD
-            tips: 
-          Insufficient CU LDS:
-            avg: AVG(SPI_RA_LDS_CU_FULL_CSN)
-            min: MIN(SPI_RA_LDS_CU_FULL_CSN)
-            max: MAX(SPI_RA_LDS_CU_FULL_CSN)
-            unit: CU
-            tips: 
-          Insufficient CU Barries:
-            avg: AVG(SPI_RA_BAR_CU_FULL_CSN)
-            min: MIN(SPI_RA_BAR_CU_FULL_CSN)
-            max: MAX(SPI_RA_BAR_CU_FULL_CSN)
-            unit: CU
-            tips: 
-          Insufficient Bulky Resource:
-            avg: AVG(SPI_RA_BULKY_CU_FULL_CSN)
-            min: MIN(SPI_RA_BULKY_CU_FULL_CSN)
-            max: MAX(SPI_RA_BULKY_CU_FULL_CSN)
-            unit: CU
-            tips: 
-          Reach CU Threadgroups Limit:
-            avg: AVG(SPI_RA_TGLIM_CU_FULL_CSN)
-            min: MIN(SPI_RA_TGLIM_CU_FULL_CSN)
-            max: MAX(SPI_RA_TGLIM_CU_FULL_CSN)
-            unit: Cycles
-            tips: 
-          Reach CU Wave Limit:
-            avg: AVG(SPI_RA_WVLIM_STALL_CSN)
-            min: MIN(SPI_RA_WVLIM_STALL_CSN)
-            max: MAX(SPI_RA_WVLIM_STALL_CSN)
-            unit: Cycles
             tips: 
           VGPR Writes:
             avg: AVG((((4 * SPI_VWC_CSC_WR) / SPI_CSN_WAVE) if (SPI_CSN_WAVE != 0) else
@@ -172,3 +79,89 @@ Panel Config:
               None))
             unit: Cycles/wave
             tips:
+    - metric_table:
+        id: 602
+        title: Workgroup Manager - Resource Allocation
+        header:
+          metric: Metric
+          avg: Avg
+          min: Min
+          max: Max
+          unit: Unit
+          tips: Tips
+        metric:
+          Not-scheduled Rate (Workgroup Manager):
+            avg: AVG((100 * SPI_RA_REQ_NO_ALLOC_CSN / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None)
+            min: MIN((100 * SPI_RA_REQ_NO_ALLOC_CSN / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None)
+            max: MAX((100 * SPI_RA_REQ_NO_ALLOC_CSN / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None)
+            unit: Pct
+            tips: 
+          Not-scheduled Rate (Scheduler-Pipe):
+            avg: AVG((100 * SPI_RA_REQ_NO_ALLOC / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None)
+            min: MIN((100 * SPI_RA_REQ_NO_ALLOC / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None)
+            max: MAX((100 * SPI_RA_REQ_NO_ALLOC / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None)
+            unit: Pct
+            tips: 
+          Scheduler-Pipe Stall Rate:
+            avg: AVG((((100 * SPI_RA_RES_STALL_CSN) / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None))
+            min: MIN((((100 * SPI_RA_RES_STALL_CSN) / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None))
+            max: MAX((((100 * SPI_RA_RES_STALL_CSN) / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY !=
+              0) else None))
+            unit: Pct
+            tips: 
+          Scratch Stall Rate:
+            avg: AVG((100 * SPI_RA_TMP_STALL_CSN / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY != 0) else None)
+            min: MIN((100 * SPI_RA_TMP_STALL_CSN / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY != 0) else None)
+            max: MAX((100 * SPI_RA_TMP_STALL_CSN / (GRBM_SPI_BUSY * $numSE)) if (GRBM_SPI_BUSY != 0) else None)
+            unit: Pct
+            tips: 
+          Insufficient SIMD Waveslots:
+            avg: AVG(100 * SPI_RA_WAVE_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(100 * SPI_RA_WAVE_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(100 * SPI_RA_WAVE_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
+            tips: 
+          Insufficient SIMD VGPRs:
+            avg: AVG(100 * SPI_RA_VGPR_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(100 * SPI_RA_VGPR_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(100 * SPI_RA_VGPR_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
+            tips: 
+          Insufficient SIMD SGPRs:
+            avg: AVG(100 * SPI_RA_SGPR_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(100 * SPI_RA_SGPR_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(100 * SPI_RA_SGPR_SIMD_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
+            tips: 
+          Insufficient CU LDS:
+            avg: AVG(400 * SPI_RA_LDS_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(400 * SPI_RA_LDS_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(400 * SPI_RA_LDS_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
+            tips: 
+          Insufficient CU Barriers:
+            avg: AVG(400 * SPI_RA_BAR_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(400 * SPI_RA_BAR_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(400 * SPI_RA_BAR_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
+            tips: 
+          Reached CU Workgroup Limit:
+            avg: AVG(400 * SPI_RA_TGLIM_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(400 * SPI_RA_TGLIM_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(400 * SPI_RA_TGLIM_CU_FULL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
+            tips: 
+          Reached CU Wavefront Limit:
+            avg: AVG(400 * SPI_RA_WVLIM_STALL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            min: MIN(400 * SPI_RA_WVLIM_STALL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            max: MAX(400 * SPI_RA_WVLIM_STALL_CSN / (GRBM_GUI_ACTIVE * $numCU))
+            unit: Pct
+            tips: 

@@ -30,7 +30,7 @@ Panel Config:
           value: Value
           unit: Unit
           peak: Peak
-          pop: PoP
+          pop: Pct of Peak
           tips: Tips
         metric:
           METRIC01:

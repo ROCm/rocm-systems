@@ -13,10 +13,10 @@ Panel Config:
         title: Speed-of-Light
         header:
           metric: Metric
-          value: Value
+          value: Avg
           unit: Unit
           tips: Tips
-        cli_style:
+        style:
           type: simple_bar
           range_color: [1, 100]
           label_txt: (%)
@@ -26,20 +26,24 @@ Panel Config:
             value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: Pct of Peak
             tips: 
+            unit: pct
           Access Rate:
             value: AVG(((200 * SQ_ACTIVE_INST_LDS) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: Pct of Peak
             tips: 
-          Bandwidth (Pct-of-Peak):
+            unit: pct
+          Theoretical Bandwidth (% of Peak):
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / (End_Timestamp - Start_Timestamp)) / (($sclk * $numCU) * 0.00128)))
             unit: Pct of Peak
             tips: 
+            unit: pct
           Bank Conflict Rate:
             value: AVG((((SQ_LDS_BANK_CONFLICT * 3.125) / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
               if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
             unit: Pct of Peak
             tips:
+            unit: pct
 
     - metric_table:
         id: 1202
@@ -58,7 +62,7 @@ Panel Config:
             max: MAX((SQ_INSTS_LDS / $denom))
             unit: (Instr  + $normUnit)
             tips: 
-          Bandwidth:
+          Theoretical Bandwidth:
             avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
               / $denom))
             min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
@@ -67,7 +71,14 @@ Panel Config:
               / $denom))
             unit: (Bytes  + $normUnit)
             tips: 
-          Bank Conficts/Access:
+          LDS Latency:
+            avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None))
+            min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None))
+            max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None))
+            unit: Cycles
+            coll_level: SQ_INST_LEVEL_LDS
+            tips: 
+          Bank Conflicts/Access:
             avg: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
               if ((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) != 0) else None))
             min: MIN(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
@@ -82,7 +93,7 @@ Panel Config:
             max: MAX((SQ_LDS_IDX_ACTIVE / $denom))
             unit: (Cycles  + $normUnit)
             tips: 
-          Atomic Cycles:
+          Atomic Return Cycles:
             avg: AVG((SQ_LDS_ATOMIC_RETURN / $denom))
             min: MIN((SQ_LDS_ATOMIC_RETURN / $denom))
             max: MAX((SQ_LDS_ATOMIC_RETURN / $denom))
@@ -110,12 +121,5 @@ Panel Config:
             avg: AVG((SQ_LDS_MEM_VIOLATIONS / $denom))
             min: MIN((SQ_LDS_MEM_VIOLATIONS / $denom))
             max: MAX((SQ_LDS_MEM_VIOLATIONS / $denom))
-            unit: ( + $normUnit)
-            tips: 
-          LDS Latency:
-            avg: AVG(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None))
-            min: MIN(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None))
-            max: MAX(((SQ_ACCUM_PREV_HIRES / SQ_INSTS_LDS) if (SQ_INSTS_LDS != 0) else None))
-            unit: Cycles
-            coll_level: SQ_INST_LEVEL_LDS
+            unit: (Accesses + $normUnit)
             tips: 

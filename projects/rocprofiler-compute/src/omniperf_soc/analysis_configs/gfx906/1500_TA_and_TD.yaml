@@ -6,11 +6,11 @@ Metric Description:
 # Define the panel properties and properties of each metric in the panel.
 Panel Config:
   id: 1500
-  title: Texture Addresser and Texture Data (TA/TD)
+  title: Address Processing Unit and Data Return Path (TA/TD)
   data source:
     - metric_table:
         id: 1501
-        title: TA
+        title: Address Processing Unit
         header:
           metric: Metric
           avg: Avg
@@ -19,25 +19,25 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          TA Busy:
+          Address Processing Unit Busy:
             avg: AVG(((100 * TA_TA_BUSY_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             min: MIN(((100 * TA_TA_BUSY_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             max: MAX(((100 * TA_TA_BUSY_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: pct
             tips: 
-          TC2TA Addr Stall:
+          Address Stall:
             avg: AVG(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             min: MIN(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             max: MAX(((100 * TA_ADDR_STALLED_BY_TC_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: pct
             tips: 
-          TC2TA Data Stall:
+          Data Stall:
             avg: AVG(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             min: MIN(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             max: MAX(((100 * TA_DATA_STALLED_BY_TC_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: pct
             tips: 
-          TD2TA Addr Stall:
+          Data-Processor → Address Stall:
             avg: AVG(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             min: MIN(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             max: MAX(((100 * TA_ADDR_STALLED_BY_TD_CYCLES_sum) / (GRBM_GUI_ACTIVE * $numCU)))
@@ -47,69 +47,69 @@ Panel Config:
             avg: AVG((TA_TOTAL_WAVEFRONTS_sum / $denom))
             min: MIN((TA_TOTAL_WAVEFRONTS_sum / $denom))
             max: MAX((TA_TOTAL_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Flat Instr:
+          Global/Generic Instructions:
             avg: AVG((TA_FLAT_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Flat Read Instr:
+          Global/Generic Read Instructions:
             avg: AVG((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_READ_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Flat Write Instr:
+          Global/Generic Write Instructions:
             avg: AVG((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_WRITE_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Flat Atomic Instr:
+          Global/Generic Atomic Instructions:
             avg: AVG((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
             min: MIN((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
             max: MAX((TA_FLAT_ATOMIC_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Buffer Instr:
+          Spill/Stack Instructions:
             avg: AVG((TA_BUFFER_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Buffer Read Instr:
+          Spill/Stack Read Instructions:
             avg: AVG((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_READ_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Buffer Write Instr:
+          Spill/Stack Write Instructions:
             avg: AVG((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_WRITE_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Buffer Atomic Instr:
+          Spill/Stack Atomic Instructions:
             avg: AVG((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
             min: MIN((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
             max: MAX((TA_BUFFER_ATOMIC_WAVEFRONTS_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Buffer Total Cylces:
+          Spill/Stack Total Cycles:
             avg: AVG((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
             min: MIN((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
             max: MAX((TA_BUFFER_TOTAL_CYCLES_sum / $denom))
             unit: (Cycles  + $normUnit)
             tips: 
-          Buffer Coalesced Read:
+          Spill/Stack Coalesced Read:
             avg: AVG((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
             min: MIN((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
             max: MAX((TA_BUFFER_COALESCED_READ_CYCLES_sum / $denom))
             unit: (Cycles  + $normUnit)
             tips: 
-          Buffer Coalesced Write:
+          Spill/Stack Coalesced Write:
             avg: AVG((TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom))
             min: MIN((TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom))
             max: MAX((TA_BUFFER_COALESCED_WRITE_CYCLES_sum / $denom))
@@ -118,7 +118,7 @@ Panel Config:
 
     - metric_table:
         id: 1502
-        title: TD
+        title: Data-Return Path
         header:
           metric: Metric
           avg: Avg
@@ -127,48 +127,48 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          TD Busy:
+          Data-Return Busy:
             avg: AVG(((100 * TD_TD_BUSY_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             min: MIN(((100 * TD_TD_BUSY_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             max: MAX(((100 * TD_TD_BUSY_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: pct
             tips: 
-          TC2TD Stall:
+          Cache RAM → Data-Return Stall:
             avg: AVG(((100 * TD_TC_STALL_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             min: MIN(((100 * TD_TC_STALL_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             max: MAX(((100 * TD_TC_STALL_sum) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: pct
             tips: 
-          SPI2TD Stall:
+          Workgroup manager → Data-Return Stall:
             avg: # No perf counter
             min: # No perf counter
             max: # No perf counter
             unit: pct
             tips:
-          Coalescable Instr:
+          Coalescable Instructions:
             avg: AVG((TD_COALESCABLE_WAVEFRONT_sum / $denom))
             min: MIN((TD_COALESCABLE_WAVEFRONT_sum / $denom))
             max: MAX((TD_COALESCABLE_WAVEFRONT_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Load Instr:
+          Read Instructions:
             avg: AVG((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
               / $denom))
             min: MIN((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
               / $denom))
             max: MAX((((TD_LOAD_WAVEFRONT_sum - TD_STORE_WAVEFRONT_sum) - TD_ATOMIC_WAVEFRONT_sum)
               / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Store Instr:
+          Write Instructions:
             avg: AVG((TD_STORE_WAVEFRONT_sum / $denom))
             min: MIN((TD_STORE_WAVEFRONT_sum / $denom))
             max: MAX((TD_STORE_WAVEFRONT_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 
-          Atomic Instr:
+          Atomic Instructions:
             avg: AVG((TD_ATOMIC_WAVEFRONT_sum / $denom))
             min: MIN((TD_ATOMIC_WAVEFRONT_sum / $denom))
             max: MAX((TD_ATOMIC_WAVEFRONT_sum / $denom))
-            unit: (Instr  + $normUnit)
+            unit: (Instructions  + $normUnit)
             tips: 

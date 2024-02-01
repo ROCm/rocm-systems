@@ -186,7 +186,7 @@ Panel Config:
      
     - metric_table:
         id: 1803
-        title: Requests (Requests)
+        title: L2 Requests (Requests)
         header:
           metric: Metric
           expr: Expression
@@ -199,12 +199,12 @@ Panel Config:
 
     - metric_table:
         id: 1804
-        title: L1-L2 Access (Requests)
+        title: L2 Access (Requests)
         header:
           metric: Metric
-          read req: L1-L2 Read
-          write req: L1-L2 Write
-          atomic req: L1-L2 Atomic
+          read req: L2 Read Req
+          write req: L2 Write Req
+          atomic req: L2 Atomic Req
         metric:
           "::_1":
             read req: AVG((TO_INT(TCC_READ[::_1]) / $denom))
@@ -216,12 +216,12 @@ Panel Config:
 
     - metric_table:
         id: 1805
-        title: L2-EA Access (Requests)
+        title: L2 - Fabric Access (Requests)
         header:
           metric: Metric
-          read req: L2-EA Read
-          write req: L2-EA Write
-          atomic req: L2-EA Atomic
+          read req: L2 - Fabric Read Req
+          write req: L2 - Fabric Write and Atomic Req
+          atomic req: L2 - Fabric Atomic Req
         metric:
           "::_1":
             read req: AVG((TO_INT(TCC_EA_RDREQ[::_1]) / $denom))
@@ -256,7 +256,7 @@ Panel Config:
 
     - metric_table:
         id: 1806
-        title: L2-EA Read Latency (Cycles)
+        title: L2 - Fabric Read Latency (Cycles)
         header:
           metric: Metric
           expr: Expression
@@ -271,7 +271,7 @@ Panel Config:
 
     - metric_table:
         id: 1807
-        title: L2-EA Write Latency (Cycles)
+        title: L2 - Fabric Write Latency (Cycles)
         header:
           metric: Metric
           expr: Expression
@@ -286,7 +286,7 @@ Panel Config:
 
     - metric_table:
         id: 1808
-        title: L2-EA Atomic Latency (Cycles)
+        title: L2 - Fabric Atomic Latency (Cycles)
         header:
           metric: Metric
           expr: Expression
@@ -300,35 +300,35 @@ Panel Config:
 
     - metric_table:
         id: 1809
-        title: L2-EA Read Stall (Cycles per normUnit)
+        title: L2 - Fabric Read Stall (Cycles per normUnit)
         header:
           metric: Metric
-          ea read stall - io: L2-EA Read Stall - IO
-          ea read stall - gmi: L2-EA Read Stall - GMI
-          ea read stall - dram: L2-EA Read Stall - DRAM
+          ea read stall - pcie: L2 - Fabric Read Stall (PCIe)
+          ea read stall - if: L2 - Fabric Read Stall (Infinity Fabric™)
+          ea read stall - hbm: L2 - Fabric Read Stall (HBM)
         metric:
           "::_1":
-            ea read stall - io: AVG((TO_INT(TCC_EA_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
-            ea read stall - gmi: AVG((TO_INT(TCC_EA_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
-            ea read stall - dram: AVG((TO_INT(TCC_EA_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
+            ea read stall - pcie: AVG((TO_INT(TCC_EA_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
+            ea read stall - if: AVG((TO_INT(TCC_EA_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+            ea read stall - hbm: AVG((TO_INT(TCC_EA_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
           placeholder_range:
             "::_1": 32
         cli_style: simple_multiple_bar
 
     - metric_table:
         id: 1810
-        title: L2-EA Write Stall (Cycles per normUnit)
+        title: L2 - Fabric Write Stall (Cycles per normUnit)
         header:
           metric: Metric
-          ea write stall - io: L2-EA Write Stall - IO
-          ea write stall - gmi: L2-EA Write Stall - GMI
-          ea write stall - dram: L2-EA Write Stall - DRAM
-          ea write stall - starve: L2-EA Write Stall - Starve
+          ea write stall - pcie: L2 - Fabric Write Stall (PCIe)
+          ea write stall - if: L2 - Fabric Write Stall (Infinity Fabric™)
+          ea write stall - hbm: L2 - Fabric Write Stall (HBM)
+          ea write stall - starve: L2 - Fabric Write Starve
         metric:
           "::_1":
-            ea write stall - io: AVG((TO_INT(TCC_EA_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
-            ea write stall - gmi: AVG((TO_INT(TCC_EA_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
-            ea write stall - dram: AVG((TO_INT(TCC_EA_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
+            ea write stall - pcie: AVG((TO_INT(TCC_EA_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
+            ea write stall - if: AVG((TO_INT(TCC_EA_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
+            ea write stall - hbm: AVG((TO_INT(TCC_EA_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
             ea write stall - starve: AVG((TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1]) / $denom))
           placeholder_range:
             "::_1": 32

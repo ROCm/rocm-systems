@@ -77,7 +77,7 @@ Panel Config:
             avg: AVG(Scratch_Per_Workitem)
             min: MIN(Scratch_Per_Workitem)
             max: MAX(Scratch_Per_Workitem)
-            unit: Bytes
+            unit: Bytes/Workitem
             tips: 
 
     - metric_table:
@@ -103,7 +103,7 @@ Panel Config:
             max: MAX(GRBM_GUI_ACTIVE)
             unit: Cycle
             tips: 
-          Instr/wavefront:
+          Instructions per wavefront:
             avg: AVG((SQ_INSTS / SQ_WAVES))
             min: MIN((SQ_INSTS / SQ_WAVES))
             max: MAX((SQ_INSTS / SQ_WAVES))
