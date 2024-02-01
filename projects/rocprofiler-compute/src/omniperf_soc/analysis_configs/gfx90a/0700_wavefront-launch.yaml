@@ -20,15 +20,15 @@ Panel Config:
           tips: Tips
         metric:
           Grid Size:
-            avg: AVG(grd)
-            min: MIN(grd)
-            max: MAX(grd)
+            avg: AVG(Grid_Size)
+            min: MIN(Grid_Size)
+            max: MAX(Grid_Size)
             unit: Work Items
             tips: 
           Workgroup Size:
-            avg: AVG(wgr)
-            min: MIN(wgr)
-            max: MAX(wgr)
+            avg: AVG(Workgroup_Size)
+            min: MIN(Workgroup_Size)
+            max: MAX(Workgroup_Size)
             unit: Work Items
             tips: 
           Total Wavefronts:
@@ -50,33 +50,33 @@ Panel Config:
             unit: Wavefronts
             tips: 
           VGPRs:
-            avg: AVG(arch_vgpr)
-            min: MIN(arch_vgpr)
-            max: MAX(arch_vgpr)
+            avg: AVG(Arch_VGPR)
+            min: MIN(Arch_VGPR)
+            max: MAX(Arch_VGPR)
             unit: Registers
             tips: 
           AGPRs:
-            avg: AVG(accum_vgpr)
-            min: MIN(accum_vgpr)
-            max: MAX(accum_vgpr)
+            avg: AVG(Accum_VGPR)
+            min: MIN(Accum_VGPR)
+            max: MAX(Accum_VGPR)
             unit: Registers
             tips: 
           SGPRs:
-            avg: AVG(sgpr)
-            min: MIN(sgpr)
-            max: MAX(sgpr)
+            avg: AVG(SGPR)
+            min: MIN(SGPR)
+            max: MAX(SGPR)
             unit: Registers
             tips: 
           LDS Allocation:
-            avg: AVG(lds)
-            min: MIN(lds)
-            max: MAX(lds)
+            avg: AVG(LDS_Per_Workgroup)
+            min: MIN(LDS_Per_Workgroup)
+            max: MAX(LDS_Per_Workgroup)
             unit: Bytes
             tips: 
           Scratch Allocation:
-            avg: AVG(scr)
-            min: MIN(scr)
-            max: MAX(scr)
+            avg: AVG(Scratch_Per_Workitem)
+            min: MIN(Scratch_Per_Workitem)
+            max: MAX(Scratch_Per_Workitem)
             unit: Bytes
             tips: 
 
@@ -92,9 +92,9 @@ Panel Config:
           tips: Tips
         metric:
           Kernel Time (Nanosec):
-            avg: AVG((EndNs - BeginNs))
-            min: MIN((EndNs - BeginNs))
-            max: MAX((EndNs - BeginNs))
+            avg: AVG((End_Timestamp - Start_Timestamp))
+            min: MIN((End_Timestamp - Start_Timestamp))
+            max: MAX((End_Timestamp - Start_Timestamp))
             unit: ns
             tips: 
           Kernel Time (Cycles):

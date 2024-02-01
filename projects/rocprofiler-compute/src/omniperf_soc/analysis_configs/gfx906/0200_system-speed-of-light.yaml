@@ -106,11 +106,11 @@ Panel Config:
             tips: 
           LDS BW:
             value: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
-              / (EndNs - BeginNs)))
+              / (End_Timestamp - Start_Timestamp)))
             unit: GB/sec
             peak: (($sclk * $numCU) * 0.128)
             pop: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
-              / (EndNs - BeginNs)) / (($sclk * $numCU) * 0.00128)))
+              / (End_Timestamp - Start_Timestamp)) / (($sclk * $numCU) * 0.00128)))
             tips: 
           LDS Bank Conflict:
             value: AVG(((SQ_LDS_BANK_CONFLICT / (SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT))
@@ -127,10 +127,10 @@ Panel Config:
             pop: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
             tips: 
           Instr Cache BW:
-            value: AVG(((SQC_ICACHE_REQ / (EndNs - BeginNs)) * 64))
+            value: AVG(((SQC_ICACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))
             unit: GB/s
             peak: ((($sclk / 1000) * 64) * $numSQC)
-            pop: ((100 * AVG(((SQC_ICACHE_REQ / (EndNs - BeginNs)) * 64))) / ((($sclk
+            pop: ((100 * AVG(((SQC_ICACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))) / ((($sclk
               / 1000) * 64) * $numSQC))
             tips: 
           Scalar L1D Cache Hit Rate:
@@ -142,10 +142,10 @@ Panel Config:
               if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES) != 0) else None))
             tips: 
           Scalar L1D Cache BW:
-            value: AVG(((SQC_DCACHE_REQ / (EndNs - BeginNs)) * 64))
+            value: AVG(((SQC_DCACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))
             unit: GB/s
             peak: ((($sclk / 1000) * 64) * $numSQC)
-            pop: ((100 * AVG(((SQC_DCACHE_REQ / (EndNs - BeginNs)) * 64))) / ((($sclk
+            pop: ((100 * AVG(((SQC_DCACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))) / ((($sclk
               / 1000) * 64) * $numSQC))
             tips: 
           Vector L1D Cache Hit Rate:
@@ -161,10 +161,10 @@ Panel Config:
               None))
             tips: 
           Vector L1D Cache BW:
-            value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: ((($sclk / 1000) * 64) * $numCU)
-            pop: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs))))
+            pop: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk / 1000) * 64) * $numCU))
             tips: 
           L2 Cache Hit Rate:
@@ -177,19 +177,19 @@ Panel Config:
             tips: 
           L2-Fabric Read BW:
             value: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / (EndNs - BeginNs)))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: $hbmBW
             pop: ((100 * AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
-              * 64)) / (EndNs - BeginNs)))) / $hbmBW)
+              * 64)) / (End_Timestamp - Start_Timestamp)))) / $hbmBW)
             tips: 
           L2-Fabric Write BW:
             value: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (EndNs - BeginNs)))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: $hbmBW
             pop: ((100 * AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
-              * 32)) / (EndNs - BeginNs)))) / $hbmBW)
+              * 32)) / (End_Timestamp - Start_Timestamp)))) / $hbmBW)
             tips: 
           L2-Fabric Read Latency:
             value: AVG(((TCC_EA_RDREQ_LEVEL_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum
@@ -214,10 +214,10 @@ Panel Config:
             coll_level: SQ_LEVEL_WAVES
             tips: 
           Instr Fetch BW:
-            value: AVG(((SQ_IFETCH / (EndNs - BeginNs)) * 32))
+            value: AVG(((SQ_IFETCH / (End_Timestamp - Start_Timestamp)) * 32))
             unit: GB/s
             peak: ((($sclk / 1000) * 32) * $numSQC)
-            pop: ((100 * AVG(((SQ_IFETCH / (EndNs - BeginNs)) * 32))) / ($numSQC
+            pop: ((100 * AVG(((SQ_IFETCH / (End_Timestamp - Start_Timestamp)) * 32))) / ($numSQC
               * (($sclk / 1000) * 32)))
             coll_level: SQ_IFETCH_LEVEL
             tips: 

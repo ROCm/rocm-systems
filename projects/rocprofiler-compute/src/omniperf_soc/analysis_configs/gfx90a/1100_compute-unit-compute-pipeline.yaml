@@ -27,32 +27,32 @@ Panel Config:
               + SQ_INSTS_VALU_TRANS_F16) + (2 * SQ_INSTS_VALU_FMA_F16))) + (64 * (((SQ_INSTS_VALU_ADD_F32
               + SQ_INSTS_VALU_MUL_F32) + SQ_INSTS_VALU_TRANS_F32) + (2 * SQ_INSTS_VALU_FMA_F32))))
               + (64 * (((SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64)
-              + (2 * SQ_INSTS_VALU_FMA_F64)))) / (EndNs - BeginNs)))) / (((($sclk
+              + (2 * SQ_INSTS_VALU_FMA_F64)))) / (End_Timestamp - Start_Timestamp)))) / (((($sclk
               * $numCU) * 64) * 2) / 1000))
             unit: Pct of Peak
             tips: 
           mfma_flops_bf16_pop:
-            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (EndNs - BeginNs))))
+            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk * $numCU) * 512) / 1000))
             unit: Pct of Peak
             tips: 
           mfma_flops_f16_pop:
-            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (EndNs - BeginNs))))
+            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F16 * 512) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk * $numCU) * 1024) / 1000))
             unit: Pct of Peak
             tips: 
           mfma_flops_f32_pop:
-            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) / (EndNs - BeginNs))))
+            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F32 * 512) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk * $numCU) * 256) / 1000))
             unit: Pct of Peak
             tips: 
           mfma_flops_f64_pop:
-            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (EndNs - BeginNs))))
+            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk * $numCU) * 256) / 1000))
             unit: Pct of Peak
             tips: 
           mfma_flops_i8_pop:
-            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (EndNs - BeginNs))))
+            value: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk * $numCU) * 1024) / 1000))
             unit: Pct of Peak
             tips: 

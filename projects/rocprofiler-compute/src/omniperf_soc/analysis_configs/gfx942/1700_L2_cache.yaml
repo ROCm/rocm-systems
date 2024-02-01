@@ -30,13 +30,13 @@ Panel Config:
           L2-EA Rd BW:
             value:
               AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / (EndNs - BeginNs)))
+              * 64)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             tips:
           L2-EA Wr BW:
             value:
               AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
-              * 32)) / (EndNs - BeginNs)))
+              * 32)) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             tips:
 

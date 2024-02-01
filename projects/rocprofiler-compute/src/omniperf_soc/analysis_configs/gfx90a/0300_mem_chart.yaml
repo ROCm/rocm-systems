@@ -82,15 +82,15 @@ Panel Config:
             tips:
           SGPR:
             #alias: sgpr_
-            value: ROUND(AVG(sgpr), 0)
+            value: ROUND(AVG(SGPR), 0)
             tips:
           LDS Allocation:
             #alias: lds_alloc_
-            value: ROUND(AVG(lds), 0)
+            value: ROUND(AVG(LDS_Per_Workgroup), 0)
             tips:
           Scratch Allocation:
             #alias: scratch_alloc_
-            value: ROUND(AVG(scr), 0)
+            value: ROUND(AVG(Scratch_Per_Workitem), 0)
             tips:
           Wavefronts:
             #alias: wavefronts_

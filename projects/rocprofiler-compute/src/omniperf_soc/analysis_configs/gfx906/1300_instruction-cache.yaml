@@ -24,7 +24,7 @@ Panel Config:
         metric:
           Bandwidth:
             value: AVG(((SQC_ICACHE_REQ * 100000) / (($sclk * $numSQC)
-              * (EndNs - BeginNs))))
+              * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
             tips: 
           Cache Hit:

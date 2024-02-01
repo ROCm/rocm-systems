@@ -32,7 +32,7 @@ Panel Config:
             tips: 
           Bandwidth (Pct-of-Peak):
             value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
-              / (EndNs - BeginNs)) / (($sclk * $numCU) * 0.00128)))
+              / (End_Timestamp - Start_Timestamp)) / (($sclk * $numCU) * 0.00128)))
             unit: Pct of Peak
             tips: 
           Bank Conflict Rate:

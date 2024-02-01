@@ -92,9 +92,9 @@ Panel Config:
           tips: Tips
         metric:
           Kernel Time (Nanosec):
-            avg: AVG((EndNs - BeginNs))
-            min: MIN((EndNs - BeginNs))
-            max: MAX((EndNs - BeginNs))
+            avg: AVG((End_Timestamp - Start_Timestamp))
+            min: MIN((End_Timestamp - Start_Timestamp))
+            max: MAX((End_Timestamp - Start_Timestamp))
             unit: ns
             tips:
           Kernel Time (Cycles):

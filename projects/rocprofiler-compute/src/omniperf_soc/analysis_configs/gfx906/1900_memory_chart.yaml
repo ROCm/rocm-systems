@@ -63,7 +63,7 @@ Panel Config:
             alias: vgpr_
             tips: 
           SGPR:
-            value: ROUND(AVG(sgpr), 0)
+            value: ROUND(AVG(SGPR), 0)
             alias: sgpr_
             tips: 
           LDS Allocation:
@@ -71,7 +71,7 @@ Panel Config:
             alias: lds_alloc_
             tips: 
           Scratch Allocation:
-            value: ROUND(AVG(scr), 0)
+            value: ROUND(AVG(Scratch_Per_Workitem), 0)
             alias: scratch_alloc_
             tips: 
           Wavefronts:

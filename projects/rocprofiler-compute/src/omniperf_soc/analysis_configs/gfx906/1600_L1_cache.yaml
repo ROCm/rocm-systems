@@ -33,7 +33,7 @@ Panel Config:
             unit: Pct of Peak
             tips: 
           Cache BW:
-            value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs))))
+            value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk / 1000) * 64) * $numCU))
             unit: Pct of Peak
             tips: 
@@ -141,9 +141,9 @@ Panel Config:
             unit: (Req  + $normUnit)
             tips: 
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (EndNs - BeginNs)))
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             tips:
           Cache Accesses:
