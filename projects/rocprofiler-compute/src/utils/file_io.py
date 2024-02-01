@@ -101,7 +101,7 @@ def create_df_kernel_top_stats(
         # NB: support ignoring the 1st n dispatched execution by '> n'
         #     The better way may be parsing python slice string
         if ">" in filter_dispatch_ids[0]:
-            m = re.match("\> (\d+)", filter_dispatch_ids[0])
+            m = re.match(r"\> (\d+)", filter_dispatch_ids[0])
             df = df[df["Dispatch_ID"] > int(m.group(1))]
         else:
             df = df.loc[df["Dispatch_ID"].astype(str).isin(filter_dispatch_ids)]

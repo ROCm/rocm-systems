@@ -184,9 +184,9 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
 # -------------------------------------------------------------------------------------
 #                              Overlay application performance
 # -------------------------------------------------------------------------------------
-# Calculate relevent metrics for ai calculation
+# Calculate relevant metrics for ai calculation
 def calc_ai(sort_type, ret_df):
-    """Given counter data, caclulate arithmetic intensity for each kernel in the application.
+    """Given counter data, calculate arithmetic intensity for each kernel in the application.
     """
     df = ret_df["pmc_perf"]
     # Sort by top kernels or top dispatches?

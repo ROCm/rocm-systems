@@ -784,7 +784,7 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
                                         print("~" * 40)
                                     except TypeError:
                                         print(
-                                            "skipping entry. Encounterd a missing counter"
+                                            "skipping entry. Encountered a missing counter"
                                         )
                                         print(expr, " has been assigned to None")
                                         print(np.nan)
@@ -794,7 +794,7 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
                                             == "'NoneType' object has no attribute 'get'"
                                         ):
                                             print(
-                                                "skipping entry. Encounterd a missing csv"
+                                                "skipping entry. Encountered a missing csv"
                                             )
                                             print(np.nan)
                                         else:
