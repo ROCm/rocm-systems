@@ -63,6 +63,7 @@ class MachineSpecs:
     L2Banks: str
     LDSBanks: str
     numSQC: str
+    numPipes: str
     hbmBW: str
     compute_partition: str
     memory_partition: str
@@ -96,6 +97,7 @@ class MachineSpecs:
             L2Banks:            {self.L2Banks}
             LDSBanks:           {self.LDSBanks}
             numSQC:             {self.numSQC}
+            numPipes:           {self.numPipes}
             hbmBW:              {self.hbmBW} MB/s
             compute_partition:  {self.compute_partition}
             memory_partition:   {self.memory_partition}
@@ -114,6 +116,7 @@ def gpuinfo():
         "max_sclk": None,
         "num_CU": None,
         "num_SIMD": None,
+        "numPipes": None,
         "num_SE": None,
         "wave_size": None,
         "grp_size": None,
@@ -197,6 +200,7 @@ def gpuinfo():
         gpu_info['L2Banks'] = str(soc_module.SOC_PARAM['L2Banks'])
         gpu_info['numSQC'] = str(soc_module.SOC_PARAM['numSQC'])
         gpu_info['LDSBanks'] = str(soc_module.SOC_PARAM['LDSBanks'])
+        gpu_info['numPipes'] = str(soc_module.SOC_PARAM['numPipes'])
     except KeyError as e:
         error("Incomplete class definition for %s. Expected a field for %s in SOC_PARAM." % (gpu_arch, e))\
     
@@ -358,6 +362,7 @@ def get_machine_specs(devicenum):
         gpu_info['L2Banks'],
         gpu_info['LDSBanks'],
         gpu_info['numSQC'],
+        gpu_info['numPipes'],
         hbmBW,
         compute_partition,
         memory_partition,

@@ -299,7 +299,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     header += "command,"
     header += "host_name,host_cpu,sbios,host_distro,host_kernel,host_rocmver,date,"
     header += "gpu_soc,vbios,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
-    header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,hbmBW,compute_partition,memory_partition,"
+    header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,numPipes,hbmBW,compute_partition,memory_partition,"
     header += "ip_blocks\n"
     sysinfo.write(header)
 
@@ -344,6 +344,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
         mspec.LDSBanks,
         mspec.GPU,
         mspec.numSQC,
+        mspec.numPipes,
         mspec.hbmBW,
         mspec.compute_partition,
         mspec.memory_partition,
