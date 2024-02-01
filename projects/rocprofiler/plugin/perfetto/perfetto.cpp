@@ -110,7 +110,6 @@ struct std::hash<TrackID>
 namespace {
 
 std::string process_name;
-static std::string output_file_name;
 
 std::string get_kernel_name(rocprofiler_record_profiler_t& profiler_record) {
   std::string kernel_name = "";
@@ -136,7 +135,7 @@ class perfetto_plugin_t {
   perfetto_plugin_t() {
     const char* output_dir = getenv("OUTPUT_PATH");
     const char* temp_file_name = getenv("OUT_FILE_NAME");
-    output_file_name = temp_file_name ? std::string(temp_file_name) + "_" : "";
+    std::string output_file_name = temp_file_name ? std::string(temp_file_name) + "_" : "";
 
     if (output_dir == nullptr) output_dir = "./";
 

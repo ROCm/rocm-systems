@@ -80,7 +80,6 @@ std::vector<std::string> GetCounterNames() {
   return counters;
 }
 
-static std::string output_file_name;
 class file_plugin_t {
  private:
   enum class output_type_t { COUNTER, TRACER, PC_SAMPLING };
@@ -109,7 +108,7 @@ class file_plugin_t {
       if (fail()) return;
 
       const char* output_dir = getenv("OUTPUT_PATH");
-      output_file_name = getenv("OUT_FILE_NAME") ? std::string(getenv("OUT_FILE_NAME")) : "";
+      std::string output_file_name = getenv("OUT_FILE_NAME") ? getenv("OUT_FILE_NAME") : "";
 
       if (output_dir == nullptr && getenv("OUT_FILE_NAME") == nullptr) {
         stream_.copyfmt(std::cout);
