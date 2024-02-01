@@ -1114,45 +1114,8 @@ amdsmi_status_t  amdsmi_get_gpu_metrics_info(
         amdsmi_gpu_metrics_t *pgpu_metrics) {
     AMDSMI_CHECK_INIT();
     // nullptr api supported
-    amdsmi_status_t ret =
-            rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle,
+    return rsmi_wrapper(rsmi_dev_gpu_metrics_info_get, processor_handle,
                     reinterpret_cast<rsmi_gpu_metrics_t*>(pgpu_metrics));
-    if (ret != AMDSMI_STATUS_SUCCESS) {
-        return ret;
-    }
-    // WARNING: TEMPORARY - awaiting 1.5 update from amdgpu driver/firmware
-    // intended to be removed later
-    // START: REMOVE WHATS BELOW ME
-    uint8_t content_ver = pgpu_metrics->common_header.content_revision;
-    int8_t format_ver = pgpu_metrics->common_header.format_revision;
-    const uint8_t expected_format_ver = 1;
-    const uint8_t expected_content_ver = 4;
-    if (ret == AMDSMI_STATUS_SUCCESS &&
-        (format_ver == expected_format_ver &&
-         content_ver <= expected_content_ver)) {
-        std::ostringstream ss;
-        ss << __PRETTY_FUNCTION__ << " | SET JPEG_ACTIVITY to MAX_UINT16, "
-           << "detected content version: " << std::dec << +content_ver
-           << "; format version: " << std::dec << +format_ver
-           << "; awaiting 1.5 metrics remove once released";
-        LOG_ALWAYS(ss);
-        std::fill_n(&pgpu_metrics->jpeg_activity[0],
-                    (sizeof(pgpu_metrics->jpeg_activity) /
-                     sizeof(pgpu_metrics->jpeg_activity[0])),
-                     std::numeric_limits<uint16_t>::max());
-        pgpu_metrics->pcie_nak_sent_count_acc =
-            static_cast<uint32_t>(std::numeric_limits<uint32_t>::max());
-        pgpu_metrics->pcie_nak_rcvd_count_acc =
-            static_cast<uint32_t>(std::numeric_limits<uint32_t>::max());
-    }
-    std::ostringstream ss;
-    const char *status_string;
-    amdsmi_status_code_to_string(ret, &status_string);
-    ss << __PRETTY_FUNCTION__
-       << " | END, returning status = " << status_string;
-    LOG_TRACE(ss);
-    // END: REMOVE WHATS ABOVE ME
-    return ret;
 }
 
 

@@ -561,26 +561,14 @@ class AMDSMICommands():
         if args.cache:
             try:
                 cache_info = amdsmi_interface.amdsmi_get_gpu_cache_info(args.gpu)
-                logging.debug("Before dictionary modify | cache_info = " + str(cache_info))
-                for key, cache_values in cache_info.items():
-                    cache_properties = "N/A"
-                    if 'cache_flags' in list(cache_info[key].keys()):
-                        if isinstance(cache_values['cache_flags'], list):
-                            cache_properties = list(cache_values['cache_flags'])
-                            cache_values.pop('cache_flags') # remove cache_flags from output
-                    cache_info[key] = { # add properties to top of key's dictionary
-                                       'cache_properties': list(cache_properties),
-                                       **cache_info[key] # append remaining key's dictionary
-                                       }
-                logging.debug("After dictionary modify | cache_info = " + str(cache_info))
+                logging.debug(f"cache_info dictionary = {cache_info}")
+
                 if self.logger.is_human_readable_format():
                     for key, cache_values in cache_info.items():
                         cache_values['cache_size'] = f"{cache_values['cache_size']} KB"
                         # take cache_properties out of list -> display as string, removing brackets
-                        update_cache_properties = str(cache_values['cache_properties'])
-                        update_cache_properties = update_cache_properties.replace("[","").replace("]", "")
-                        cache_values['cache_properties'] = update_cache_properties
-                logging.debug("After human_readable | cache_info = " + str(cache_info))
+                        cache_values['cache_properties'] = ", ".join(cache_values['cache_properties'])
+                logging.debug(f"After human_readable | cache_info = {cache_info}")
 
             except amdsmi_exception.AmdSmiLibraryException as e:
                 cache_info = "N/A"
@@ -1142,9 +1130,6 @@ class AMDSMICommands():
             if args.usage:
                 try:
                     engine_usage = amdsmi_interface.amdsmi_get_gpu_activity(args.gpu)
-                    engine_usage['gfx_activity'] = engine_usage.pop('gfx_activity')
-                    engine_usage['umc_activity'] = engine_usage.pop('umc_activity')
-                    engine_usage['mm_activity'] = engine_usage.pop('mm_activity')
 
                     # TODO: move vcn_activity and jpeg_activity into amdsmi_get_gpu_activity
                     gpu_metric_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
@@ -1152,20 +1137,17 @@ class AMDSMICommands():
                     engine_usage['jpeg_activity'] = gpu_metric_info.pop('jpeg_activity')
 
                     for key, value in engine_usage.items():
-
                         if self.logger.is_human_readable_format():
                             unit = '%'
                             if isinstance(value, list):
-                               engine_usage[key] =  [f"{v} {unit}" if str(v) != "N/A" else str(v) for v in engine_usage[key]]
-                               save_value = engine_usage[key]
-                               pretty_array = "["
-                               for i in range(len(save_value)):
-                                   if (i+1 != len(save_value)):
-                                       pretty_array += save_value[i] + ", "
-                                   else:
-                                       pretty_array += save_value[i] + "]"
-                               engine_usage[key] = pretty_array
-                            elif not isinstance(value, list) and engine_usage[key] != "N/A":
+                                for index, activity in enumerate(value):
+                                    if activity != "N/A":
+                                        engine_usage[key][index] = f"{activity} {unit}"
+
+                                # Convert list to a string for human readable format
+                                engine_usage[key] = '[' + ", ".join(engine_usage[key]) + ']'
+
+                            elif value != "N/A":
                                 engine_usage[key] = f"{value} {unit}"
 
                     values_dict['usage'] = engine_usage
@@ -1196,7 +1178,8 @@ class AMDSMICommands():
                     power_dict['current_power'] = power_info['current_socket_power']
 
                     if power_dict['current_power'] == "N/A":
-                        power_dict['average_power'] = power_info['average_socket_power']
+                        # For older gpu's when current power doesn't populate we use the average socket power instead
+                        power_dict['current_power'] = power_info['average_socket_power']
 
                     power_dict['current_gfx_voltage'] = power_info['gfx_voltage']
                     power_dict['current_soc_voltage'] = power_info['soc_voltage']
@@ -2653,7 +2636,7 @@ class AMDSMICommands():
         if not any([args.access, args.weight, args.hops, args.link_type, args.numa_bw]):
             args.access = args.weight = args.hops = args.link_type= args.numa_bw = True
 
-        # Clear the table header; TODO make this a function
+        # Clear the table header
         self.logger.table_header = ''.rjust(12)
 
         # Populate the possible gpus
@@ -3350,7 +3333,7 @@ class AMDSMICommands():
         # Get gpu_id for logging
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
-        # Clear the table header; TODO make this a function
+        # Clear the table header
         self.logger.table_header = ''
 
         # Store timestamp for watch output
@@ -3364,12 +3347,14 @@ class AMDSMICommands():
             try:
                 gpu_metrics_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
 
-                monitor_values['power_usage'] = gpu_metrics_info['current_socket_power']
-                if monitor_values['power_usage'] == "N/A": # Fallback to average_socket_power for older gpu_metrics versions
+                if gpu_metrics_info['current_socket_power'] != "N/A":
+                    monitor_values['power_usage'] = gpu_metrics_info['current_socket_power']
+                else: # Fallback to average_socket_power for older gpu_metrics versions
                     monitor_values['power_usage'] = gpu_metrics_info['average_socket_power']
 
                 if self.logger.is_human_readable_format() and monitor_values['power_usage'] != "N/A":
-                    monitor_values['power_usage'] = f"{monitor_values['power_usage']} W"
+                    unit = 'W'
+                    monitor_values['power_usage'] = f"{monitor_values['power_usage']} {unit}"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['power_usage'] = "N/A"
                 logging.debug("Failed to get power usage on gpu %s | %s", gpu_id, e.get_error_info())
@@ -3402,7 +3387,7 @@ class AMDSMICommands():
             try:
                 gfx_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['average_gfx_activity']
                 monitor_values['gfx'] = gfx_util
-                if self.logger.is_human_readable_format():
+                if self.logger.is_human_readable_format() and gfx_util != "N/A":
                     monitor_values['gfx'] = f"{monitor_values['gfx']} %"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['gfx'] = "N/A"
@@ -3413,7 +3398,7 @@ class AMDSMICommands():
             try:
                 gfx_clock = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['current_gfxclk']
                 monitor_values['gfx_clock'] = gfx_clock
-                if self.logger.is_human_readable_format():
+                if self.logger.is_human_readable_format() and gfx_clock != "N/A":
                     monitor_values['gfx_clock'] = f"{monitor_values['gfx_clock']} MHz"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['gfx_clock'] = "N/A"
@@ -3424,7 +3409,7 @@ class AMDSMICommands():
             try:
                 mem_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['average_umc_activity']
                 monitor_values['mem'] = mem_util
-                if self.logger.is_human_readable_format():
+                if self.logger.is_human_readable_format() and mem_util != "N/A":
                     monitor_values['mem'] = f"{monitor_values['mem']} %"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['mem'] = "N/A"
@@ -3435,7 +3420,7 @@ class AMDSMICommands():
             try:
                 mem_clock = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['current_uclk']
                 monitor_values['mem_clock'] = mem_clock
-                if self.logger.is_human_readable_format():
+                if self.logger.is_human_readable_format() and mem_clock != "N/A":
                     monitor_values['mem_clock'] = f"{monitor_values['mem_clock']} MHz"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['mem_clock'] = "N/A"
@@ -3448,13 +3433,15 @@ class AMDSMICommands():
                 encoder_util = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['vcn_activity']
                 encoding_activity_avg = []
                 for value in encoder_util:
-                    if value < 150: # each encoder chiplet's value range should be a percent
+                    if isinstance(value, int):
                         encoding_activity_avg.append(value)
+
                 # Averaging the possible encoding activity values
                 if encoding_activity_avg:
                     encoding_activity_avg = sum(encoding_activity_avg) / len(encoding_activity_avg)
                 else:
                     encoding_activity_avg = "N/A"
+
                 monitor_values['encoder'] = encoding_activity_avg
                 if self.logger.is_human_readable_format() and monitor_values['encoder'] != "N/A":
                     monitor_values['encoder'] = f"{monitor_values['encoder']} %"
@@ -3467,7 +3454,7 @@ class AMDSMICommands():
             try:
                 encoder_clock = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['current_vclk0']
                 monitor_values['encoder_clock'] = encoder_clock
-                if self.logger.is_human_readable_format():
+                if self.logger.is_human_readable_format() and encoder_clock != "N/A":
                     monitor_values['encoder_clock'] = f"{monitor_values['encoder_clock']} MHz"
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['encoder_clock'] = "N/A"
@@ -3499,10 +3486,11 @@ class AMDSMICommands():
         if args.throttle_status:
             try:
                 throttle_status = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['throttle_status']
-                if throttle_status:
-                    throttle_status = "THROTTLED"
-                else:
-                    throttle_status = "UNTHROTTLED"
+                if throttle_status != "N/A":
+                    if throttle_status:
+                        throttle_status = "THROTTLED"
+                    else:
+                        throttle_status = "UNTHROTTLED"
                 monitor_values['throttle_status'] = throttle_status
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['throttle_status'] = "N/A"

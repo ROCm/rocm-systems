@@ -660,9 +660,9 @@ typedef struct {
 typedef uint32_t amdsmi_process_handle_t;
 
 typedef struct {
-  char                  name[AMDSMI_NORMAL_STRING_LENGTH];
+  char name[AMDSMI_NORMAL_STRING_LENGTH];
   amdsmi_process_handle_t pid;
-  uint64_t              mem; /** in bytes */
+  uint64_t mem; /** in bytes */
   struct engine_usage_ {
     uint64_t gfx;
     uint64_t enc;
