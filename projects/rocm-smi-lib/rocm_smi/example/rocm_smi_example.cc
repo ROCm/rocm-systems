@@ -53,6 +53,7 @@
 #include <map>
 #include <vector>
 #include <type_traits>
+#include <cstring>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -780,6 +781,7 @@ int main() {
   uint32_t num_monitor_devs = 0;
   rsmi_gpu_metrics_t gpu_metrics;
   std::string val_str;
+
   RSMI_POWER_TYPE power_type = RSMI_INVALID_POWER;
 
   rsmi_num_monitor_devices(&num_monitor_devs);
@@ -791,8 +793,9 @@ int main() {
     ret = rsmi_dev_revision_get(i, &val_ui16);
     CHK_RSMI_RET_I(ret)
     std::cout << "\t**Dev.Rev.ID: 0x" << std::hex << val_ui16 << "\n";
-    ret = amd::smi::rsmi_get_gfx_target_version(i , &val_str);
-    std::cout << "\t**Target Graphics Version: " << val_str << "\n";
+    ret = rsmi_dev_target_graphics_version_get(i, &val_ui64);
+    std::cout << "\t**Target Graphics Version: " << std::dec
+    << static_cast<uint64_t>(val_ui64) << "\n";
 
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';

@@ -5087,6 +5087,36 @@ rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
   CATCH
 }
 
+rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
+                                            uint64_t *gfx_version) {
+    TRY
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+    rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
+    std::string version = "";
+    const uint64_t undefined_gfx_version = std::numeric_limits<uint64_t>::max();
+    LOG_TRACE(ss);
+    if (gfx_version == nullptr) {
+      ret = RSMI_STATUS_INVALID_ARGS;
+    } else {
+      *gfx_version = undefined_gfx_version;
+      ret = amd::smi::rsmi_get_gfx_target_version(dv_ind , &version);
+    }
+    if (ret == RSMI_STATUS_SUCCESS) {
+      version = amd::smi::removeString(version, "gfx");
+      *gfx_version = std::stoull(version);
+    }
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Returning: " << getRSMIStatusString(ret)
+       << " | Device #: " << dv_ind
+       << " | Type: N/A"
+       << " | Data: " << ((gfx_version == nullptr) ? "nullptr": std::to_string(*gfx_version));
+    LOG_TRACE(ss);
+    return ret;
+    CATCH
+}
+
 enum iterator_handle_type {
   FUNC_ITER = 0,
   VARIANT_ITER,

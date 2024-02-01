@@ -1144,16 +1144,31 @@ bool is_sudo_user() {
   return isRunningWithSudo;
 }
 
-rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
-  std::string *gfx_version) {
+// string output of gfx_<version>
+rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_version) {
   std::ostringstream ss;
   uint64_t kfd_gfx_version = 0;
   GET_DEV_AND_KFDNODE_FROM_INDX
 
   int ret = kfd_node->get_gfx_target_version(&kfd_gfx_version);
+  uint64_t orig_target_version = 0;
+  uint64_t major = 0;
+  uint64_t minor = 0;
+  uint64_t rev = 0;
   if (ret == 0) {
-    ss << "gfx" << kfd_gfx_version;
-    *gfx_version = ss.str();
+    orig_target_version = std::stoull(std::to_string(kfd_gfx_version));
+    // separate out parts -> put back into normal graphics version format
+    major = static_cast<uint64_t>((orig_target_version / 10000) * 100);
+    minor = static_cast<uint64_t>((orig_target_version % 10000 / 100) * 10);
+    if (minor == 0) major *= 10;  // 0 as a minor is correct, but bump up by 10
+    rev = static_cast<uint64_t>(orig_target_version % 100);
+    *gfx_version = "gfx" + std::to_string(major + minor + rev);
+    ss << __PRETTY_FUNCTION__
+    << " | " << std::dec << "kfd_target_version = " << orig_target_version
+    << "; major = " << major << "; minor = " << minor << "; rev = "
+    << rev << "\nReporting rsmi_get_gfx_target_version = " << *gfx_version
+    << "\n";
+    LOG_INFO(ss);
     return RSMI_STATUS_SUCCESS;
   } else {
     *gfx_version = "Unknown";

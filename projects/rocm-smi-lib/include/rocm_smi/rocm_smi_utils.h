@@ -123,6 +123,8 @@ std::string print_rsmi_od_volt_freq_regions(uint32_t num_regions,
 bool is_sudo_user();
 rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
   std::string *gfx_version);
+std::string removeString(const std::string origStr,
+                        const std::string &removeMe);
 template <typename T>
   std::string print_int_as_hex(T i, bool showHexNotation = true) {
   std::stringstream ss;

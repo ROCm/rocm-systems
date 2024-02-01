@@ -48,6 +48,7 @@
 
 #include <iostream>
 #include <string>
+#include <limits>
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
@@ -202,5 +203,15 @@ void TestSysInfoRead::Run(void) {
       err = rsmi_dev_firmware_version_get(i, block, nullptr);
       ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
     }
+
+    err = rsmi_dev_target_graphics_version_get(i, &val_ui64);
+    IF_VERB(STANDARD) {
+        std::cout << "\t**Graphics Target version: " << std::dec
+        << val_ui64 << "\n";
+    }
+    EXPECT_EQ(err, RSMI_STATUS_SUCCESS);
+    EXPECT_NE(val_ui64, std::numeric_limits<uint64_t>::max());
+    err = rsmi_dev_target_graphics_version_get(i, nullptr);
+    EXPECT_EQ(err, RSMI_STATUS_INVALID_ARGS);
   }
 }
