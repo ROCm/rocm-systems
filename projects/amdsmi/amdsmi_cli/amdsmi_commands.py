@@ -204,7 +204,7 @@ class AMDSMICommands():
                 try:
                     smu = amdsmi_interface.amdsmi_get_cpu_smu_fw_version(args.cpu)
                     static_dict["smu"] = {"FW_VERSION" : f"{ smu['smu_fw_major_ver_num']}"
-                                        f":{smu['smu_fw_minor_ver_num']}:{smu['smu_fw_debug_ver_num']}"}
+                                        f".{smu['smu_fw_minor_ver_num']}.{smu['smu_fw_debug_ver_num']}"}
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     static_dict["smu"] = "N/A"
                     logging.debug("Failed to get SMU FW for cpu %s | %s", cpu_id, e.get_error_info())
@@ -1121,8 +1121,8 @@ class AMDSMICommands():
 
         # Put the metrics table in the debug logs
         try:
-            gpu_metric_debug_output = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
-            gpu_metric_str = json.dumps(gpu_metric_debug_output, indent=4)
+            gpu_metric_debug_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
+            gpu_metric_str = json.dumps(gpu_metric_debug_info, indent=4)
             logging.debug("GPU Metrics table for %s | %s", gpu_id, gpu_metric_str)
         except amdsmi_exception.AmdSmiLibraryException as e:
             logging.debug("Unabled to load GPU Metrics table for %s | %s", gpu_id, e.err_info)
@@ -1152,10 +1152,6 @@ class AMDSMICommands():
                     engine_usage['jpeg_activity'] = gpu_metric_info.pop('jpeg_activity')
 
                     for key, value in engine_usage.items():
-                        if not isinstance(value, list) and value > 100:
-                            engine_usage[key] = "N/A"
-                        elif isinstance(value, list):
-                            engine_usage[key] =  ["N/A" if v > 100 else v for v in value]
 
                         if self.logger.is_human_readable_format():
                             unit = '%'

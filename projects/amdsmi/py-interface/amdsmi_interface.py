@@ -1697,11 +1697,17 @@ def amdsmi_get_gpu_activity(
         )
     )
 
-    return {
+    activity_dict = {
         "gfx_activity": engine_usage.gfx_activity,
         "umc_activity": engine_usage.umc_activity,
         "mm_activity": engine_usage.mm_activity,
     }
+
+    for key, value in activity_dict.items():
+        if value == 0xFFFF:
+            activity_dict[key] = "N/A"
+
+    return activity_dict
 
 
 def amdsmi_get_clock_info(
@@ -3290,8 +3296,6 @@ def amdsmi_get_gpu_metrics_info(
         "current_socclks": list(gpu_metrics.current_socclks),
         "current_vclk0s": list(gpu_metrics.current_vclk0s),
         "current_dclk0s": list(gpu_metrics.current_dclk0s),
-        "mem_bandwidth_acc": gpu_metrics.mem_bandwidth_acc,
-        "mem_max_bandwidth": gpu_metrics.mem_max_bandwidth,
         "pcie_nak_sent_count_acc": gpu_metrics.pcie_nak_sent_count_acc,
         "pcie_nak_rcvd_count_acc": gpu_metrics.pcie_nak_rcvd_count_acc,
         "jpeg_activity": list(gpu_metrics.jpeg_activity),
@@ -3313,8 +3317,7 @@ def amdsmi_get_gpu_metrics_info(
         if gpu_metrics_output[value] == 0xFFFF:
             gpu_metrics_output[value] = "N/A"
 
-    uint_32_values = ['gfx_activity_acc', 'mem_activity_acc', 'mem_max_bandwidth',
-                      'pcie_nak_sent_count_acc', 'pcie_nak_rcvd_count_acc']
+    uint_32_values = ['gfx_activity_acc','mem_activity_acc', 'pcie_nak_sent_count_acc', 'pcie_nak_rcvd_count_acc']
 
     for value in uint_32_values:
         if gpu_metrics_output[value] == 0xFFFFFFFF:
@@ -3323,7 +3326,7 @@ def amdsmi_get_gpu_metrics_info(
     uint_64_values = ['energy_accumulator', 'system_clock_counter', 'firmware_timestamp',
                       'pcie_bandwidth_acc', 'pcie_bandwidth_inst',
                       'pcie_l0_to_recov_count_acc', 'pcie_replay_count_acc',
-                      'pcie_replay_rover_count_acc', 'mem_bandwidth_acc']
+                      'pcie_replay_rover_count_acc']
 
     for value in uint_64_values:
         if gpu_metrics_output[value] == 0xFFFFFFFFFFFFFFFF:
@@ -3345,7 +3348,7 @@ def amdsmi_get_gpu_metrics_info(
         gpu_metrics_output['indep_throttle_status'] = bool(gpu_metrics_output['indep_throttle_status'])
 
     for idx, activity in enumerate(gpu_metrics_output['vcn_activity']):
-        if activity == 0xFFFF:
+        if activity == 0xFFFF or activity > 100:
             gpu_metrics_output['vcn_activity'][idx] = "N/A"
 
     if gpu_metrics_output['gfxclk_lock_status'] == 0xFFFFFFFF:
@@ -3378,7 +3381,7 @@ def amdsmi_get_gpu_metrics_info(
             gpu_metrics_output['current_dclk0s'][idx] = "N/A"
 
     for idx, activity in enumerate(gpu_metrics_output['jpeg_activity']):
-        if activity == 0xFFFF:
+        if activity == 0xFFFF or activity > 100:
             gpu_metrics_output['jpeg_activity'][idx] = "N/A"
 
     return gpu_metrics_output

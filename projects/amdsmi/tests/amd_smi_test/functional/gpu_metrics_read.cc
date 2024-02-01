@@ -135,65 +135,77 @@ void TestGpuMetricsRead::Run(void) {
           << smu.firmware_timestamp << '\n';
           std::cout << "\n";
           std::cout << "TEMPERATURES (C):\n";
-          std::cout << std::dec << "temperature_edge="
-          << smu.temperature_edge << '\n';
-          std::cout << std::dec << "temperature_hotspot="
-          << smu.temperature_hotspot << '\n';
-          std::cout << std::dec << "temperature_mem="
-          << smu.temperature_mem << '\n';
-          std::cout << std::dec << "temperature_vrgfx="
-          << smu.temperature_vrgfx << '\n';
-          std::cout << std::dec << "temperature_vrsoc="
-          << smu.temperature_vrsoc << '\n';
-          std::cout << std::dec << "temperature_vrmem="
-          << smu.temperature_vrmem << '\n';
+          std::cout << std::dec << "temperature_edge= "
+          << static_cast<uint16_t>(smu.temperature_edge) << '\n';
+          std::cout << std::dec << "temperature_hotspot= "
+          << static_cast<uint16_t>(smu.temperature_hotspot) << '\n';
+          std::cout << std::dec << "temperature_mem= "
+          << static_cast<uint16_t>(smu.temperature_mem) << '\n';
+          std::cout << std::dec << "temperature_vrgfx= "
+          << static_cast<uint16_t>(smu.temperature_vrgfx) << '\n';
+          std::cout << std::dec << "temperature_vrsoc= "
+          << static_cast<uint16_t>(smu.temperature_vrsoc) << '\n';
+          std::cout << std::dec << "temperature_vrmem= "
+          << static_cast<uint16_t>(smu.temperature_vrmem) << '\n';
           for (int i = 0; i < AMDSMI_NUM_HBM_INSTANCES; ++i) {
-            std::cout << "temperature_hbm[" << i << "]=" << std::dec <<
-                                               smu.temperature_hbm[i] << '\n';
+            std::cout << "temperature_hbm[" << i << "]= " << std::dec
+            << static_cast<uint16_t>(smu.temperature_hbm[i]) << '\n';
           }
           std::cout << "\n";
           std::cout << "UTILIZATION (%):\n";
           std::cout << std::dec << "average_gfx_activity="
-          << smu.average_gfx_activity << '\n';
+          << static_cast<uint16_t>(smu.average_gfx_activity) << '\n';
           std::cout << std::dec << "average_umc_activity="
-          << smu.average_umc_activity << '\n';
+          << static_cast<uint16_t>(smu.average_umc_activity) << '\n';
           std::cout << std::dec << "average_mm_activity="
-          << smu.average_mm_activity << '\n';
-          std::cout << std::dec << "jpeg_activity= [";
+          << static_cast<uint16_t>(smu.average_mm_activity) << '\n';
+          std::cout << std::dec << "vcn_activity= [";
           uint16_t size = static_cast<uint16_t>(
+            sizeof(smu.vcn_activity)/sizeof(smu.vcn_activity[0]));
+          for (uint16_t i= 0; i < size; i++) {
+            if (i+1 < size) {
+              std::cout << std::dec << static_cast<uint16_t>(smu.vcn_activity[i]) << ", ";
+            } else {
+              std::cout << std::dec << static_cast<uint16_t>(smu.vcn_activity[i]);
+            }
+          }
+          std::cout << std::dec << "]\n";
+          std::cout << "\n";
+          std::cout << std::dec << "jpeg_activity= [";
+          size = static_cast<uint16_t>(
             sizeof(smu.jpeg_activity)/sizeof(smu.jpeg_activity[0]));
           for (uint16_t i= 0; i < size; i++) {
             if (i+1 < size) {
-              std::cout << std::dec << smu.jpeg_activity[i] << ", ";
+              std::cout << std::dec << static_cast<uint16_t>(smu.jpeg_activity[i]) << ", ";
             } else {
-              std::cout << std::dec << smu.jpeg_activity[i];
+              std::cout << std::dec << static_cast<uint16_t>(smu.jpeg_activity[i]);
             }
           }
           std::cout << std::dec << "]\n";
           std::cout << "\n";
           std::cout << "POWER (W)/ENERGY (15.259uJ per 1ns):\n";
           std::cout << std::dec << "average_socket_power="
-          << smu.average_socket_power << '\n';
+          << static_cast<uint16_t>(smu.average_socket_power) << '\n';
           std::cout << std::dec << "current_socket_power="
-          << smu.current_socket_power << '\n';
+          << static_cast<uint16_t>(smu.current_socket_power) << '\n';
           std::cout << std::dec << "energy_accumulator="
-          << smu.energy_accumulator << '\n';
+          << static_cast<uint16_t>(smu.energy_accumulator) << '\n';
           std::cout << "\n";
           std::cout << "AVG CLOCKS (MHz):\n";
           std::cout << std::dec << "average_gfxclk_frequency="
-          << smu.average_gfxclk_frequency << '\n';
+          << static_cast<uint16_t>(smu.average_gfxclk_frequency) << '\n';
           std::cout << std::dec << "average_gfxclk_frequency="
-          << smu.average_gfxclk_frequency << '\n';
+          << static_cast<uint16_t>(smu.average_gfxclk_frequency) << '\n';
           std::cout << std::dec << "average_uclk_frequency="
-          << smu.average_uclk_frequency << '\n';
+          << static_cast<uint16_t>(smu.average_uclk_frequency) << '\n';
           std::cout << std::dec << "average_vclk0_frequency="
-          << smu.average_vclk0_frequency << '\n';
+          << static_cast<uint16_t>(smu.average_vclk0_frequency) << '\n';
           std::cout << std::dec << "average_dclk0_frequency="
-          << smu.average_dclk0_frequency << '\n';
+          << static_cast<uint16_t>(smu.average_dclk0_frequency) << '\n';
           std::cout << std::dec << "average_vclk1_frequency="
-          << smu.average_vclk1_frequency << '\n';
+          << static_cast<uint16_t>(smu.average_vclk1_frequency) << '\n';
           std::cout << std::dec << "average_dclk1_frequency="
-          << smu.average_dclk1_frequency << '\n';
+          << static_cast<uint16_t>(smu.average_dclk1_frequency) << '\n';
           std::cout << "\n";
           std::cout << "CURRENT CLOCKS (MHz):\n";
           std::cout << std::dec << "current_gfxclk="
@@ -203,9 +215,9 @@ void TestGpuMetricsRead::Run(void) {
             sizeof(smu.current_gfxclks)/sizeof(smu.current_gfxclks[0]));
           for (uint16_t i= 0; i < size; i++) {
             if (i+1 < size) {
-              std::cout << std::dec << smu.current_gfxclks[i] << ", ";
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_gfxclks[i]) << ", ";
             } else {
-              std::cout << std::dec << smu.current_gfxclks[i];
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_gfxclks[i]);
             }
           }
           std::cout << std::dec << "]\n";
@@ -216,24 +228,24 @@ void TestGpuMetricsRead::Run(void) {
             sizeof(smu.current_socclks)/sizeof(smu.current_socclks[0]));
           for (uint16_t i= 0; i < size; i++) {
             if (i+1 < size) {
-              std::cout << std::dec << smu.current_socclks[i] << ", ";
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_socclks[i]) << ", ";
             } else {
-              std::cout << std::dec << smu.current_socclks[i];
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_socclks[i]);
             }
           }
           std::cout << std::dec << "]\n";
           std::cout << std::dec << "current_uclk="
-          << smu.current_uclk << '\n';
+          << static_cast<uint16_t>(smu.current_uclk) << '\n';
           std::cout << std::dec << "current_vclk0="
-          << smu.current_vclk0 << '\n';
+          << static_cast<uint16_t>(smu.current_vclk0) << '\n';
           std::cout << std::dec << "current_vclk0s= [";
           size = static_cast<uint16_t>(
             sizeof(smu.current_vclk0s)/sizeof(smu.current_vclk0s[0]));
           for (uint16_t i= 0; i < size; i++) {
             if (i+1 < size) {
-              std::cout << std::dec << smu.current_vclk0s[i] << ", ";
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_vclk0s[i]) << ", ";
             } else {
-              std::cout << std::dec << smu.current_vclk0s[i];
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_vclk0s[i]);
             }
           }
           std::cout << std::dec << "]\n";
@@ -244,24 +256,24 @@ void TestGpuMetricsRead::Run(void) {
             sizeof(smu.current_dclk0s)/sizeof(smu.current_dclk0s[0]));
           for (uint16_t i= 0; i < size; i++) {
             if (i+1 < size) {
-              std::cout << std::dec << smu.current_dclk0s[i] << ", ";
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_dclk0s[i]) << ", ";
             } else {
-              std::cout << std::dec << smu.current_dclk0s[i];
+              std::cout << std::dec << static_cast<uint16_t>(smu.current_dclk0s[i]);
             }
           }
           std::cout << std::dec << "]\n";
           std::cout << std::dec << "current_vclk1="
-          << smu.current_vclk1 << '\n';
+          << static_cast<uint16_t>(smu.current_vclk1) << '\n';
           std::cout << std::dec << "current_dclk1="
-          << smu.current_dclk1 << '\n';
+          << static_cast<uint16_t>(smu.current_dclk1) << '\n';
           std::cout << "\n";
           std::cout << "TROTTLE STATUS:\n";
           std::cout << std::dec << "throttle_status="
-          << smu.throttle_status << '\n';
+          << static_cast<uint32_t>(smu.throttle_status) << '\n';
           std::cout << "\n";
           std::cout << "FAN SPEED:\n";
           std::cout << std::dec << "current_fan_speed="
-          << smu.current_fan_speed << '\n';
+          << static_cast<uint16_t>(smu.current_fan_speed) << '\n';
           std::cout << "\n";
           std::cout << "LINK WIDTH (number of lanes) /SPEED (0.1 GT/s):\n";
           std::cout << "pcie_link_width="
@@ -276,9 +288,9 @@ void TestGpuMetricsRead::Run(void) {
           std::cout << "\n";
           std::cout << "Utilization Accumulated(%):\n";
           std::cout << "gfx_activity_acc="
-          << std::dec << smu.gfx_activity_acc << '\n';
+          << std::dec << static_cast<uint32_t>(smu.gfx_activity_acc) << '\n';
           std::cout << "mem_activity_acc="
-          << std::dec << smu.mem_activity_acc  << '\n';
+          << std::dec << static_cast<uint32_t>(smu.mem_activity_acc)  << '\n';
 
           std::cout << "\n";
           std::cout << "XGMI ACCUMULATED DATA TRANSFER SIZE (KB):\n";
@@ -287,9 +299,9 @@ void TestGpuMetricsRead::Run(void) {
             sizeof(smu.xgmi_read_data_acc)/sizeof(smu.xgmi_read_data_acc[0]));
           for (uint16_t i= 0; i < size; i++) {
             if (i+1 < size) {
-              std::cout << std::dec << smu.xgmi_read_data_acc[i] << ", ";
+              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_read_data_acc[i]) << ", ";
             } else {
-              std::cout << std::dec << smu.xgmi_read_data_acc[i];
+              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_read_data_acc[i]);
             }
           }
           std::cout << std::dec << "]\n";
@@ -298,718 +310,55 @@ void TestGpuMetricsRead::Run(void) {
             sizeof(smu.xgmi_write_data_acc)/sizeof(smu.xgmi_write_data_acc[0]));
           for (uint16_t i= 0; i < size; i++) {
             if (i+1 < size) {
-              std::cout << std::dec << smu.xgmi_write_data_acc[i] << ", ";
+              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_write_data_acc[i]) << ", ";
             } else {
-              std::cout << std::dec << smu.xgmi_write_data_acc[i];
+              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_write_data_acc[i]);
             }
           }
           std::cout << std::dec << "]\n";
-          std::cout << "mem_bandwidth_acc=" << std::dec
-          << smu.mem_bandwidth_acc << "\n";
-          std::cout << "mem_max_bandwidth=" << std::dec
-          << smu.mem_max_bandwidth << "\n";
-          std::cout << "pcie_nak_sent_count_acc=" << std::dec
-          << smu.pcie_nak_sent_count_acc << "\n";
-          std::cout << "pcie_nak_rcvd_count_acc=" << std::dec
-          << smu.pcie_nak_rcvd_count_acc << "\n";
+
+          // Voltage (mV)
+          std::cout << "voltage_soc = "
+          << std::dec << static_cast<uint16_t>(smu.voltage_soc) << "\n";
+          std::cout << "voltage_soc = "
+          << std::dec << static_cast<uint16_t>(smu.voltage_gfx) << "\n";
+          std::cout << "voltage_mem = "
+          << std::dec << static_cast<uint16_t>(smu.voltage_mem) << "\n";
+
+          std::cout << "indep_throttle_status = "
+          << std::dec << static_cast<uint64_t>(smu.indep_throttle_status) << "\n";
+
+          // Clock Lock Status. Each bit corresponds to clock instance
+          std::cout << "gfxclk_lock_status (in hex) = "
+          << std::hex << static_cast<uint32_t>(smu.gfxclk_lock_status) << std::dec <<"\n";
+
+          // Bandwidth (GB/sec)
+          std::cout << "pcie_bandwidth_acc=" << std::dec
+          << static_cast<uint64_t>(smu.pcie_bandwidth_acc) << "\n";
+          std::cout << "pcie_bandwidth_inst=" << std::dec
+          << static_cast<uint64_t>(smu.pcie_bandwidth_inst) << "\n";
+
+          // Counts
+          std::cout << "pcie_l0_to_recov_count_acc= " << std::dec
+          << static_cast<uint64_t>(smu.pcie_l0_to_recov_count_acc) << "\n";
+          std::cout << "pcie_replay_count_acc= " << std::dec
+          << static_cast<uint64_t>(smu.pcie_replay_count_acc) << "\n";
+          std::cout << "pcie_replay_rover_count_acc= " << std::dec
+          << static_cast<uint64_t>(smu.pcie_replay_rover_count_acc) << "\n";
+          std::cout << "pcie_nak_rcvd_count_acc= " << std::dec
+          << static_cast<uint32_t>(smu.pcie_nak_rcvd_count_acc) << "\n";
+          std::cout << "pcie_replay_rover_count_acc= " << std::dec
+          << static_cast<uint64_t>(smu.pcie_replay_rover_count_acc) << "\n";
       }
     }
 
     // Verify api support checking functionality is working
     err =  amdsmi_get_gpu_metrics_info(processor_handles_[i], nullptr);
-    DISPLAY_AMDSMI_ERR(err);
+    if (err !=AMDSMI_STATUS_INVAL) {
+      DISPLAY_AMDSMI_ERR(err);
+    }
+    amdsmi_status_code_to_string(err, &status_string);
+    std::cout << "\t\t** amdsmi_get_gpu_metrics_info(nullptr check): " << status_string << "\n";
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
-
-
-  
-  auto val_ui16 = uint16_t(0);
-  auto val_ui32 = uint32_t(0);
-  auto val_ui64 = uint64_t(0);
-  auto status_code(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
-  for (uint32_t i = 0; i < num_monitor_devs(); ++i) {
-    PrintDeviceHeader(processor_handles_[i]);
-    std::cout << "Device #" << std::to_string(i) << "\n";
-
-    auto temp_edge_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_temp_edge(processor_handles_[i], &temp_edge_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_edge(): " << status_string << "\n";
-    }
-
-    auto temp_hotspot_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_temp_hotspot(processor_handles_[i], &temp_hotspot_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_hotspot(): " << status_string << "\n";
-    }
-
-    auto temp_mem_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_temp_mem(processor_handles_[i], &temp_mem_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_mem(): " << status_string << "\n";
-    }
-
-    auto temp_vrgfx_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_temp_vrgfx(processor_handles_[i], &temp_vrgfx_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_vrgfx(): " << status_string << "\n";
-    }
-
-    auto temp_vrsoc_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_temp_vrsoc(processor_handles_[i], &temp_vrsoc_value);
-   if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_vrsoc(): " << status_string << "\n";
-    }
-
-    auto temp_vrmem_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_temp_vrmem(processor_handles_[i], &temp_vrmem_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_vrmem(): " << status_string << "\n";
-    }
-
-    gpu_metric_temp_hbm_t temp_hbm_values;
-    status_code = amdsmi_get_gpu_metrics_temp_hbm(processor_handles_[i], &temp_hbm_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_hbm(): " << status_string << "\n";
-    }
-
-    auto temp_curr_socket_power_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_curr_socket_power(processor_handles_[i], &temp_curr_socket_power_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-   } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_socket_power(): " << status_string << "\n";
-    }
-
-    auto temp_energy_accum_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_energy_acc(processor_handles_[i], &temp_energy_accum_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_energy_acc(): " << status_string << "\n";
-    }
-
-    auto temp_avg_socket_power_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_socket_power(processor_handles_[i], &temp_avg_socket_power_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_temp_edge(): " << status_string << "\n";
-    }
-
-    auto temp_avg_gfx_activity_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_gfx_activity(processor_handles_[i], &temp_avg_gfx_activity_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_gfx_activity(): " << status_string << "\n";
-    }
-
-    auto temp_avg_umc_activity_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_umc_activity(processor_handles_[i], &temp_avg_umc_activity_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_umc_activity(): " << status_string << "\n";
-    }
-
-    auto temp_avg_mm_activity_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_mm_activity(processor_handles_[i], &temp_avg_mm_activity_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_mm_activity(): " << status_string << "\n";
-    }
-
-    gpu_metric_vcn_activity_t temp_vcn_values;
-    status_code = amdsmi_get_gpu_metrics_vcn_activity(processor_handles_[i], &temp_vcn_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_vcn_activity(): " << status_string << "\n";
-    }
-
-    auto temp_mem_activity_accum_value = val_ui32;
-    status_code = amdsmi_get_gpu_metrics_mem_activity_acc(processor_handles_[i], &temp_mem_activity_accum_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_mem_activity_acc(): " << status_string << "\n";
-    }
-
-    auto temp_gfx_activity_accum_value = val_ui32;
-    status_code = amdsmi_get_gpu_metrics_gfx_activity_acc(processor_handles_[i], &temp_gfx_activity_accum_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_gfx_activity_acc(): " << status_string << "\n";
-    }
-
-    auto temp_avg_gfx_clock_freq_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_gfx_clock_frequency(processor_handles_[i], &temp_avg_gfx_clock_freq_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_gfx_clock_frequency(): " << status_string << "\n";
-    }
-
-    auto temp_avg_soc_clock_freq_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_soc_clock_frequency(processor_handles_[i], &temp_avg_soc_clock_freq_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_soc_clock_frequency(): " << status_string << "\n";
-    }
-
-    auto temp_avg_uclock_freq_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_uclock_frequency(processor_handles_[i], &temp_avg_uclock_freq_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_uclock_frequency(): " << status_string << "\n";
-    }
-
-    auto temp_avg_vclock0_freq_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_vclock0_frequency(processor_handles_[i], &temp_avg_vclock0_freq_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_vclock0_frequency(): " << status_string << "\n";
-    }
-
-    auto temp_avg_dclock0_freq_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_dclock0_frequency(processor_handles_[i], &temp_avg_dclock0_freq_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_dclock0_frequency(): " << status_string << "\n";
-    }
-
-    auto temp_avg_vclock1_freq_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_vclock1_frequency(processor_handles_[i], &temp_avg_vclock1_freq_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_vclock1_frequency(): " << status_string << "\n";
-    }
-
-    auto temp_avg_dclock1_freq_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_avg_dclock1_frequency(processor_handles_[i], &temp_avg_dclock1_freq_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_avg_dclock1_frequency(): " << status_string << "\n";
-    }
-
-    auto temp_curr_vclk1_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_curr_vclk1(processor_handles_[i], &temp_curr_vclk1_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_vclk1(): " << status_string << "\n";
-    }
-
-    auto temp_curr_dclk1_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_curr_dclk1(processor_handles_[i], &temp_curr_dclk1_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_dclk1(): " << status_string << "\n";
-    }
-
-    auto temp_curr_uclk_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_curr_uclk(processor_handles_[i], &temp_curr_uclk_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_uclk(): " << status_string << "\n";
-    }
-
-    gpu_metric_curr_dclk0_t temp_curr_dclk0_values;
-    status_code = amdsmi_get_gpu_metrics_curr_dclk0(processor_handles_[i], &temp_curr_dclk0_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_dclk0(): " << status_string << "\n";
-    }
-
-    gpu_metric_curr_gfxclk_t temp_curr_gfxclk_values;
-    status_code = amdsmi_get_gpu_metrics_curr_gfxclk(processor_handles_[i], &temp_curr_gfxclk_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_gfxclk(): " << status_string << "\n";
-    }
-
-    gpu_metric_curr_socclk_t temp_curr_socclk_values;
-    status_code = amdsmi_get_gpu_metrics_curr_socclk(processor_handles_[i], &temp_curr_socclk_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_socclk(): " << status_string << "\n";
-    }
-
-    gpu_metric_curr_vclk0_t temp_curr_vclk0_values;
-    status_code = amdsmi_get_gpu_metrics_curr_vclk0(processor_handles_[i], &temp_curr_vclk0_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_vclk0(): " << status_string << "\n";
-    }
-
-    auto temp_indep_throttle_status_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_indep_throttle_status(processor_handles_[i], &temp_indep_throttle_status_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_indep_throttle_status(): " << status_string << "\n";
-    }
-
-    auto temp_throttle_status_value = val_ui32;
-    status_code = amdsmi_get_gpu_metrics_throttle_status(processor_handles_[i], &temp_throttle_status_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_throttle_status(): " << status_string << "\n";
-    }
-
-    auto temp_gfxclk_lock_status_value = val_ui32;
-    status_code = amdsmi_get_gpu_metrics_gfxclk_lock_status(processor_handles_[i], &temp_gfxclk_lock_status_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_gfxclk_lock_status(): " << status_string << "\n";
-    }
-
-    auto temp_curr_fan_speed_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_curr_fan_speed(processor_handles_[i], &temp_curr_fan_speed_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_curr_fan_speed(): " << status_string << "\n";
-    }
-
-    auto temp_pcie_link_width_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_pcie_link_width(processor_handles_[i], &temp_pcie_link_width_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_pcie_link_width(): " << status_string << "\n";
-    }
-
-    auto temp_pcie_link_speed_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_pcie_link_speed(processor_handles_[i], &temp_pcie_link_speed_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_pcie_link_speed(): " << status_string << "\n";
-    }
-
-    auto temp_pcie_bandwidth_accum_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_pcie_bandwidth_acc(processor_handles_[i], &temp_pcie_bandwidth_accum_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_pcie_bandwidth_acc(): " << status_string << "\n";
-    }
-
-    auto temp_pcie_bandwidth_inst_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_pcie_bandwidth_inst(processor_handles_[i], &temp_pcie_bandwidth_inst_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_pcie_bandwidth_inst(): " << status_string << "\n";
-    }
-
-    auto temp_pcie_l0_recov_count_accum_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_pcie_l0_recov_count_acc(processor_handles_[i], &temp_pcie_l0_recov_count_accum_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_pcie_l0_recov_count_acc(): " << status_string << "\n";
-    }
-
-    auto temp_pcie_replay_count_accum_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_pcie_replay_count_acc(processor_handles_[i], &temp_pcie_replay_count_accum_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_pcie_replay_count_acc(): " << status_string << "\n";
-    }
-
-    auto temp_pcie_replay_rover_count_accum_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_pcie_replay_rover_count_acc(processor_handles_[i], &temp_pcie_replay_rover_count_accum_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_pcie_replay_rover_count_acc(): " << status_string << "\n";
-    }
-
-    auto temp_xgmi_link_width_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_xgmi_link_width(processor_handles_[i], &temp_xgmi_link_width_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_xgmi_link_width(): " << status_string << "\n";
-    }
-
-    auto temp_xgmi_link_speed_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_xgmi_link_speed(processor_handles_[i], &temp_xgmi_link_speed_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_xgmi_link_speed(): " << status_string << "\n";
-    }
-
-    gpu_metric_xgmi_read_data_acc_t temp_xgmi_read_values;
-    status_code = amdsmi_get_gpu_metrics_xgmi_read_data(processor_handles_[i], &temp_xgmi_read_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_xgmi_read_data(): " << status_string << "\n";
-    }
-
-    gpu_metric_xgmi_write_data_acc_t temp_xgmi_write_values;
-    status_code = amdsmi_get_gpu_metrics_xgmi_write_data(processor_handles_[i], &temp_xgmi_write_values);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_xgmi_write_data(): " << status_string << "\n";
-    }
-
-    auto temp_voltage_soc_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_volt_soc(processor_handles_[i], &temp_voltage_soc_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_volt_soc(): " << status_string << "\n";
-    }
-
-    auto temp_voltage_gfx_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_volt_gfx(processor_handles_[i], &temp_voltage_gfx_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_volt_gfx(): " << status_string << "\n";
-    }
-
-    auto temp_voltage_mem_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_volt_mem(processor_handles_[i], &temp_voltage_mem_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_volt_mem(): " << status_string << "\n";
-    }
-
-    auto temp_system_clock_counter_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_system_clock_counter(processor_handles_[i], &temp_system_clock_counter_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_system_clock_counter(): " << status_string << "\n";
-    }
-
-    auto temp_firmware_timestamp_value = val_ui64;
-    status_code = amdsmi_get_gpu_metrics_firmware_timestamp(processor_handles_[i], &temp_firmware_timestamp_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_firmware_timestamp(): " << status_string << "\n";
-    }
-
-    auto temp_xcd_counter_value = val_ui16;
-    status_code = amdsmi_get_gpu_metrics_xcd_counter(processor_handles_[i], &temp_xcd_counter_value);
-    if (status_code != AMDSMI_STATUS_NOT_SUPPORTED) {
-      CHK_ERR_ASRT(status_code);
-    } else {
-      const char *status_string;
-      amdsmi_status_code_to_string(status_code, &status_string);
-      std::cout << "\t\t** amdsmi_get_gpu_metrics_xcd_counter(): " << status_string << "\n";
-    }
-
-    IF_VERB(STANDARD) {
-      std::cout << "\n";
-      std::cout << "\t[Temperature]" << "\n";
-      std::cout << "\t  -> temp_edge(): " << std::dec << temp_edge_value << "\n";
-      std::cout << "\t  -> temp_hotspot(): " << std::dec << temp_hotspot_value << "\n";
-      std::cout << "\t  -> temp_mem(): " << std::dec << temp_mem_value << "\n";
-      std::cout << "\t  -> temp_vrgfx(): " << std::dec << temp_vrgfx_value << "\n";
-      std::cout << "\t  -> temp_vrsoc(): " << std::dec << temp_vrsoc_value << "\n";
-      std::cout << "\t  -> temp_vrmem(): " << std::dec << temp_vrmem_value << "\n";
-      std::cout << "\t  -> temp_hbm(temp_hbm_values): [";
-      uint16_t size = static_cast<uint16_t>(
-          sizeof(temp_hbm_values) / sizeof(temp_hbm_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_hbm_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_hbm_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Power/Energy]" << "\n";
-      std::cout << "\t  -> current_socket_power(): " << std::dec << temp_curr_socket_power_value << "\n";
-      std::cout << "\t  -> energy_accum(): " << std::dec << temp_energy_accum_value << "\n";
-      std::cout << "\t  -> average_socket_power(): " << std::dec << temp_avg_socket_power_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Utilization]" << "\n";
-      std::cout << "\t  -> average_gfx_activity(): " << std::dec << temp_avg_gfx_activity_value << "\n";
-      std::cout << "\t  -> average_umc_activity(): " << std::dec << temp_avg_umc_activity_value << "\n";
-      std::cout << "\t  -> average_mm_activity(): " << std::dec << temp_avg_mm_activity_value << "\n";
-      std::cout << "\t  -> vcn_activity(temp_vcn_values): [";
-      size = static_cast<uint16_t>(
-          sizeof(temp_vcn_values) / sizeof(temp_vcn_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_vcn_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_vcn_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-      std::cout << "\t  -> mem_activity_accum(): " << std::dec << temp_mem_activity_accum_value << "\n";
-      std::cout << "\t  -> gfx_activity_accum(): " << std::dec << temp_gfx_activity_accum_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Average Clock]" << "\n";
-      std::cout << "\t  -> average_gfx_clock_frequency(): " << std::dec << temp_avg_gfx_clock_freq_value << "\n";
-      std::cout << "\t  -> average_soc_clock_frequency(): " << std::dec << temp_avg_soc_clock_freq_value << "\n";
-      std::cout << "\t  -> average_uclock_frequency(): " << std::dec << temp_avg_uclock_freq_value << "\n";
-      std::cout << "\t  -> average_vclock0_frequency(): " << std::dec << std::dec << temp_avg_vclock0_freq_value << "\n";
-      std::cout << "\t  -> average_dclock0_frequency(): " << std::dec << temp_avg_dclock0_freq_value << "\n";
-      std::cout << "\t  -> average_vclock1_frequency(): " << std::dec << temp_avg_vclock1_freq_value << "\n";
-      std::cout << "\t  -> average_dclock1_frequency(): " << std::dec << temp_avg_dclock1_freq_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Current Clock]" << "\n";
-      std::cout << "\t  -> current_vclock1(): " << std::dec << temp_curr_vclk1_value << "\n";
-      std::cout << "\t  -> current_dclock1(): " << std::dec << temp_curr_dclk1_value << "\n";
-      std::cout << "\t  -> current_uclock(): " << std::dec << temp_curr_uclk_value << "\n";
-      std::cout << "\t  -> current_dclk0(temp_curr_dclk0_values): [";
-      size = static_cast<uint16_t>(
-          sizeof(temp_curr_dclk0_values) / sizeof(temp_curr_dclk0_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_curr_dclk0_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_curr_dclk0_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-      std::cout << "\t  -> current_gfxclk(temp_curr_gfxclk_values): [";
-      size = static_cast<uint16_t>(
-          sizeof(temp_curr_gfxclk_values) / sizeof(temp_curr_gfxclk_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_curr_gfxclk_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_curr_gfxclk_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-      std::cout << "\t  -> current_soc_clock(temp_curr_socclk_values): [";
-      size = static_cast<uint16_t>(
-          sizeof(temp_curr_socclk_values) / sizeof(temp_curr_socclk_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_curr_socclk_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_curr_socclk_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-      std::cout << "\t  -> current_vclk0(temp_curr_vclk0_values): [";
-      size = static_cast<uint16_t>(
-          sizeof(temp_curr_vclk0_values) / sizeof(temp_curr_vclk0_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_curr_vclk0_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_curr_vclk0_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Throttle]" << "\n";
-      std::cout << "\t  -> indep_throttle_status(): " << std::dec << temp_indep_throttle_status_value << "\n";
-      std::cout << "\t  -> throttle_status(): " << std::dec << temp_throttle_status_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Gfx Clock Lock]" << "\n";
-      std::cout << "\t  -> gfxclk_lock_status(): " << std::dec << temp_gfxclk_lock_status_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Current Fan Speed]" << "\n";
-      std::cout << "\t  -> current_fan_speed(): " << std::dec << temp_curr_fan_speed_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Link/Bandwidth/Speed]" << "\n";
-      std::cout << "\t  -> pcie_link_width(): " << std::dec << temp_pcie_link_width_value << "\n";
-      std::cout << "\t  -> pcie_link_speed(): " << std::dec << temp_pcie_link_speed_value << "\n";
-      std::cout << "\t  -> pcie_bandwidth_accum(): " << std::dec << std::dec << temp_pcie_bandwidth_accum_value << "\n";
-      std::cout << "\t  -> pcie_bandwidth_inst(): " << std::dec << temp_pcie_bandwidth_inst_value << "\n";
-      std::cout << "\t  -> pcie_l0_recov_count_accum(): " << std::dec << std::dec << temp_pcie_l0_recov_count_accum_value << "\n";
-      std::cout << "\t  -> pcie_replay_count_accum(): " << std::dec << temp_pcie_replay_count_accum_value << "\n";
-      std::cout << "\t  -> pcie_replay_rollover_count_accum(): " << std::dec << temp_pcie_replay_rover_count_accum_value << "\n";
-      std::cout << "\t  -> xgmi_link_width(): " << std::dec << temp_xgmi_link_width_value << "\n";
-      std::cout << "\t  -> xgmi_link_speed(): " << std::dec << std::dec << temp_xgmi_link_speed_value << "\n";
-      std::cout << "\t  -> xgmi_read_data(temp_xgmi_read_values): ";
-      size = static_cast<uint16_t>(
-          sizeof(temp_xgmi_read_values) / sizeof(temp_xgmi_read_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_xgmi_read_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_xgmi_read_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-      std::cout << "\t  -> xgmi_write_data(temp_xgmi_write_values): [";
-      size = static_cast<uint16_t>(
-          sizeof(temp_xgmi_write_values) / sizeof(temp_xgmi_write_values[0]));
-      for (uint16_t i = 0; i < size; i++) {
-        if (i + 1 < size) {
-          std::cout << std::dec << temp_xgmi_write_values[i] << ", ";
-        } else {
-          std::cout << std::dec << temp_xgmi_write_values[i];
-        }
-      }
-      std::cout << std::dec << "]\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Voltage]" << "\n";
-      std::cout << "\t  -> voltage_soc(): " << std::dec << temp_voltage_soc_value << "\n";
-      std::cout << "\t  -> voltage_gfx(): " << std::dec << temp_voltage_gfx_value << "\n";
-      std::cout << "\t  -> voltage_mem(): " << std::dec << temp_voltage_mem_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[Timestamp]" << "\n";
-      std::cout << "\t  -> system_clock_counter(): " << std::dec << temp_system_clock_counter_value << "\n";
-      std::cout << "\t  -> firmware_timestamp(): " << std::dec << temp_firmware_timestamp_value << "\n";
-
-      std::cout << "\n";
-      std::cout << "\t[XCD Counter]" << "\n";
-      std::cout << "\t  -> xcd_counter(): " << std::dec << temp_xcd_counter_value << "\n";
-      std::cout << "\n\n";
-    }
-  }
-
 }
