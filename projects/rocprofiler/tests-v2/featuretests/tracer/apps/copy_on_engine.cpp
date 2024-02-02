@@ -194,7 +194,7 @@ static hsa_status_t AsyncCpyTest(async_mem_cpy_agent* dst, async_mem_cpy_agent* 
 
   // Initialize the system and destination buffers with a value so we can later
   // validate it has been overwritten
-  void* sysPtr = args->cpu.ptr;
+  void* sysPtr = dst->ptr;
   err = hsa_amd_memory_fill(src->ptr, val, sz / sizeof(uint32_t));
   RET_IF_HSA_ERR(err);
 
@@ -303,7 +303,7 @@ int main() {
                                        reinterpret_cast<void**>(&args.gpu2.ptr));
     RET_IF_HSA_ERR(err);
     fprintf(stdout, "Copying %lu bytes from gpu1 memory to gpu2 memory...\n", sz);
-    err = AsyncCpyTest(&args.gpu1, &args.gpu2, &args, sz, kTestFillValue3);
+    err = AsyncCpyTest(&args.gpu2, &args.gpu1, &args, sz, kTestFillValue3);
     RET_IF_HSA_ERR(err);
     fprintf(stdout, "Success!\n");
   }
