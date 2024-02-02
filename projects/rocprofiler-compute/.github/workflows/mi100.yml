@@ -25,7 +25,7 @@ jobs:
     name: ROCm v${{ matrix.version }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Python Path
         run: echo ${PYTHONPATH}
       - name: Install Python collateral (build and test)
