@@ -19,6 +19,7 @@ jobs:
       matrix:
         version: [5.5.1, 5.7.1]
     runs-on: [mi100, rhel9]
+    fail-fast: false
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
 #       PYTHONPATH: ${{ github.workspace }}/python-libs
