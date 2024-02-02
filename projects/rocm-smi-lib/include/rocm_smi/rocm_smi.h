@@ -1818,6 +1818,11 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
  *  @p power, this function will write the current average power consumption
  *  (in microwatts) to the uint64_t pointed to by @p power.
  *
+ *  @deprecated ::rsmi_dev_power_get() is preferred due to providing
+ *  backwards compatibility, which looks at both average and current power
+ *  values. Whereas ::rsmi_dev_power_ave_get only looks for average power
+ *  consumption. Newer ASICs will support current power only.
+ * 
  *  @param[in] dv_ind a device index
  *
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
@@ -1886,7 +1891,10 @@ rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power);
  *  @param[inout] type a pointer to RSMI_POWER_TYPE object. Returns the type
  *  of power retrieved from the device. Current power is ::RSMI_CURRENT_POWER
  *  and average power is ::RSMI_AVERAGE_POWER. If an error occurs,
- *  returns an invalid power type ::RSMI_INVALID_POWER.
+ *  returns an invalid power type ::RSMI_INVALID_POWER - example device
+ *  neither supports average power or current power.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
