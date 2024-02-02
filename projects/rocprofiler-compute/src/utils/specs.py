@@ -224,7 +224,7 @@ def gpuinfo():
 
 def run(cmd):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "rocm-smi" and p.returncode == 8:
+    if cmd[0] == "rocm-smi" and p.returncode != 0:
         print("ERROR: No GPU detected. Unable to load rocm-smi")
         sys.exit(1)
     return p.stdout.decode("utf-8")
