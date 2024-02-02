@@ -387,32 +387,40 @@ def getPidList():
     return
 
 
-def getAvgPower(device, silent=False):
-    """ Return the average power level of a given device
+def getPower(device):
+    """ Return dictionary of power responses.
 
     @param device: DRM device identifier
-    @param silent=Turn on to silence error output
-    (you plan to handle manually). Default is off.
-    """
-    power = c_uint32()
-    ret = rocmsmi.rsmi_dev_power_ave_get(device, 0, byref(power))
-    if rsmi_ret_ok(ret, device, 'get_power_avg', silent):
-        return str(power.value / 1000000)
-    return 'N/A'
 
-def getCurrentSocketPower(device, silent=False):
-    """ Return the current (also known as instant)
-    socket power of a given device
+    Response power dictionary:
+    {
+        'power': string wattage response or 'N/A' (for not RSMI_STATUS_SUCCESS),
+        'power_type': power type string - 'Current Socket' or 'Average',
+        'unit': W (Watt)
+        'ret': response of rsmi_dev_power_get(device, byref(power), byref(power_type))
+    }
 
-    @param device: DRM device identifier
-    @param silent=Turn on to silence error output
-    (you plan to handle manually). Default is off.
     """
-    power = c_uint32()
-    ret = rocmsmi.rsmi_dev_current_socket_power_get(device, byref(power))
-    if rsmi_ret_ok(ret, device, 'get_socket_power', silent):
-        return str(power.value / 1000000)
-    return 'N/A'
+   
+    power = c_int64(0)
+    power_type = rsmi_power_type_t()
+    power_ret_dict = {
+        'power': "N/A",
+        'power_type': "N/A",
+        'unit': 'W',
+        'ret': rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED
+    }
+    ret = rocmsmi.rsmi_dev_power_get(device, byref(power), byref(power_type))
+    if ret == rsmi_status_t.RSMI_STATUS_SUCCESS:
+        power_ret_dict = {
+            'power': str(power.value / 1000000),
+            'power_type': rsmi_power_type_dict[power_type.value],
+            'unit': 'W',
+            'ret': ret
+        }
+    else:
+        power_ret_dict['ret'] = ret
+    return power_ret_dict
 
 
 def getRasEnablement(device, block, silent=True):
@@ -492,8 +500,9 @@ def getPowerLabel(deviceList):
     if len(deviceList) < 1:
         return powerLabel
     device=deviceList[0]
-    power = getCurrentSocketPower(device, True)
-    if power != '0.0' and power != 'N/A':
+    power_dict = getPower(device)
+    if (power_dict['ret'] == rsmi_status_t.RSMI_STATUS_SUCCESS and 
+        power_dict['power_type'] == 'CURRENT SOCKET'):
         powerLabel = rsmi_power_label.CURRENT_SOCKET_POWER
     return powerLabel
 
@@ -1755,17 +1764,12 @@ def showAllConcise(deviceList):
         temp_val = str(getTemp(device, available_temp_type, silent))
         if temp_val != 'N/A':
             temp_val += degree_sign + 'C'
-        socketPwr = getCurrentSocketPower(device, True)
-        avgPwr = getAvgPower(device, True)
+        power_dict = getPower(device)
         powerVal = 'N/A'
-        if socketPwr != '0.0' and socketPwr != 'N/A':
-            socketPwr += 'W'
-            powerVal=socketPwr
-        elif avgPwr != '0.0' and avgPwr != 'N/A':
-            avgPwr += 'W'
-            powerVal=avgPwr
-        else:
-            powerVal = 'N/A'
+        if (power_dict['ret'] == rsmi_status_t.RSMI_STATUS_SUCCESS and 
+            power_dict['power_type'] != 'INVALID_POWER_TYPE'):
+            if power_dict['power'] != 0:
+                powerVal = power_dict['power'] + power_dict['unit']
         combined_partition = (getMemoryPartition(device, silent) + ", "
                              + getComputePartition(device, silent))
         sclk = showCurrentClocks([device], 'sclk', concise=silent)
@@ -2468,13 +2472,17 @@ def showPower(deviceList):
     secondaryPresent=False
     printLogSpacer(' Power Consumption ')
     for device in deviceList:
-        if str(getCurrentSocketPower(device, True)) != 'N/A':
-            printLog(device, 'Current Socket Graphics Package Power (W)', getCurrentSocketPower(device))
+        power_dict = getPower(device)
+        power = 'N/A'
+        if (power_dict['ret'] == rsmi_status_t.RSMI_STATUS_SUCCESS and 
+            power_dict['power_type'] != 'INVALID_POWER_TYPE'):
+           power = power_dict['power']
+           printLog(device, power_dict['power_type'].title() + ' Graphics Package Power (' 
+                    + power_dict['unit'] + ')',
+                    power)
         elif checkIfSecondaryDie(device):
             printLog(device, 'Average Graphics Package Power (W)', "N/A (Secondary die)")
             secondaryPresent=True
-        elif str(getAvgPower(device)) != '0.0':
-            printLog(device, 'Average Graphics Package Power (W)', getAvgPower(device))
         else:
             printErrLog(device, 'Unable to get Average or Current Socket Graphics Package Power Consumption')
     if secondaryPresent:

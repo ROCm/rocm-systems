@@ -662,3 +662,13 @@ class rsmi_power_label(str, Enum):
     AVG_POWER = '(Avg)'
     CURRENT_SOCKET_POWER = '(Socket)'
 
+class rsmi_power_type_t(c_int):
+  RSMI_AVERAGE_POWER = 0,
+  RSMI_CURRENT_POWER = 1,
+  RSMI_INVALID_POWER = 0xFFFFFFFF
+
+rsmi_power_type_dict = {
+    0: 'AVERAGE',
+    1: 'CURRENT SOCKET',
+    0xFFFFFFFF: 'INVALID_POWER_TYPE'
+}
