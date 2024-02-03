@@ -1,0 +1,6 @@
+,CPC_ME1_BUSY_FOR_PACKET_DECODE,GRBM_COUNT,GRBM_GUI_ACTIVE,SQ_ACCUM_PREV_HIRES,SQ_BUSY_CYCLES,SQ_CYCLES,SQ_WAVE_CYCLES,GPU_ID,kernel_name,test_name
+0,,,,,5.12,,,2.0,"vecCopy(double*, double*, double*, int, int) ",logger
+0,,,,,5.12,,,,"vecCopy(double*, double*, double*, int, int) ",logger
+0,2.6,1.92,1.92,4.42,5.12,1.92,4.47,,"vecCopy(double*, double*, double*, int, int) ",test_path
+0,2.6,1.92,1.92,4.42,5.12,1.92,4.47,,"vecCopy(double*, double*, double*, int, int) ",test_path
+0,2.6,1.92,1.92,4.42,5.12,1.92,4.47,,"vecCopy(double*, double*, double*, int, int) ",test_path

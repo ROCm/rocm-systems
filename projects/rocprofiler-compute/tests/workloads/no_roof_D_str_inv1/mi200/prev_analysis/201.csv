@@ -12,8 +12,8 @@ VALU Util,23.462074471354104,Pct,100,23.462074471354104
 MFMA Util,0.0,Pct,100,0.0
 VALU Active Threads/Wave,64.0,Threads,64,100.0
 IPC - Issue,1.0,Instr/cycle,5,20.0
-LDS BW,0.0,Gb/sec,22630.4,0.0
-LDS Bank Conflict,,Conflicts/access,32,
+LDS_Per_Workgroup BW,0.0,Gb/sec,22630.4,0.0
+LDS_Per_Workgroup Bank Conflict,,Conflicts/access,32,
 Instr Cache Hit Rate,99.99762469200526,Pct,100,99.99762469200526
 Instr Cache BW,1263.3392932593154,Gb/s,6092.8,20.734954261740338
 Scalar L1D Cache Hit Rate,99.99388577035882,Pct,100,99.99388577035882

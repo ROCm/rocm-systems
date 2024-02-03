@@ -1,7 +1,7 @@
 Metric,Count,Unit
 VALU - Vector,,Instr per wave
 VMEM,,Instr per wave
-LDS,0.0,Instr per wave
+LDS_Per_Workgroup,0.0,Instr per wave
 VALU - MFMA,,Instr per wave
 SALU,18.0,Instr per wave
 SMEM,8.0,Instr per wave

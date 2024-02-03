@@ -1,4 +1,4 @@
-Index,KernelName,gpu-id,queue-id,queue-index,pid,tid,grd,wgr,lds,scr,vgpr,sgpr,fbar,sig,obj,SQ_INSTS_LDS,SQ_INST_LEVEL_LDS,SQ_ACCUM_PREV_HIRES,DispatchNs,BeginNs,EndNs,CompleteNs
+Dispatch_ID,Kernel_Name,GPU_ID,queue-id,queue-index,pid,tid,grd,Workgroup_Size,LDS_Per_Workgroup,scr,vgpr,SGPR,fbar,sig,obj,SQ_INSTS_LDS,SQ_INST_LEVEL_LDS,SQ_ACCUM_PREV_HIRES,DispatchNs,Start_Timestamp,End_Timestamp,CompleteNs
 0,"__amd_rocclr_fillBuffer.kd",0,0,0,760307,760312,33554432,256,0,0,8,32,6464,0x0,0x7f0a03a04180,0,0,0,12073373706548791,12073373951177370,12073373951501368,12073373951611411
 1,"void benchmark_func<short, 256, 8u, 0u>(short, short*) [clone .kd]",0,0,2,760307,760312,32768,256,0,0,24,24,12480,0x0,0x7f0a03a35100,0,0,0,12073373965893753,12073373966201733,12073373966208773,12073373966219919
 2,"void benchmark_func<float, 256, 8u, 0u>(float, float*) [clone .kd]",0,0,4,760307,760312,4194304,256,0,0,24,24,12928,0x7f0b33d44900,0x7f0a03a35140,0,0,0,12073373966280211,12073373966497732,12073373966636931,12073373966640911

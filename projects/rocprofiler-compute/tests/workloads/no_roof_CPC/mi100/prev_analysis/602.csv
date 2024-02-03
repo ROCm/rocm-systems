@@ -6,7 +6,7 @@ Scratch Stall,,,,Cycles
 Insufficient SIMD Waveslots,,,,Simd
 Insufficient SIMD VGPRs,,,,Simd
 Insufficient SIMD SGPRs,,,,Simd
-Insufficient CU LDS,,,,Cu
+Insufficient CU LDS_Per_Workgroup,,,,Cu
 Insufficient CU Barries,,,,Cu
 Insufficient Bulky Resource,,,,Cu
 Reach CU Threadgroups Limit,,,,Cycles

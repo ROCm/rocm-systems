@@ -6,16 +6,16 @@ SMEM,,smem_
 VALU,,valu_
 MFMA,,mfma_
 VMEM,,vmem_
-LDS,,lds_
+LDS_Per_Workgroup,,lds_
 GWS,,gws_
 BR,,br_
 VGPR,12.0,vgpr_
 SGPR,24.0,sgpr_
-LDS Allocation,0.0,lds_alloc_
+LDS_Per_Workgroup Allocation,0.0,lds_alloc_
 Scratch Allocation,0.0,scratch_alloc_
 Wavefronts,,wavefronts_
 Workgroups,,workgroups_
-LDS Req,,lds_req_
+LDS_Per_Workgroup Req,,lds_req_
 IL1 Fetch,128.0,il1_fetch_
 IL1 Hit,99.0,il1_hit_
 IL1_L2 Rd,0.0,il1_l2_req_
@@ -46,10 +46,10 @@ Fabric_L2 Wr,,l2_fabric_wr_
 Fabric_l2 Atomic,,l2_fabric_atom_
 HBM Rd,,hbm_rd_
 HBM Wr,,hbm_wr_
-LDS Util,,lds_util_
+LDS_Per_Workgroup Util,,lds_util_
 VL1 Coalesce,,vl1_coales_
 VL1 Stall,,vl1_stall_
-LDS Lat,,lds_lat_
+LDS_Per_Workgroup Lat,,lds_lat_
 vL1D Lat,,sl1_lat_
 IL1 Lat,,il1_lat_
 Wave Occupancy,,wave_occ_

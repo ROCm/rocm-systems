@@ -1,4 +1,4 @@
-KernelName,Count,Sum(ns),Mean(ns),Median(ns),Pct
+Kernel_Name,Count,Sum(ns),Mean(ns),Median(ns),Pct
 "void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 512u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",1,6054197.0,6054197.0,6054197.0,9.181487611317175
 "void benchmark_func<int, 256, 8u, 512u>(int, int*) [clone .kd]",1,4527648.0,4527648.0,4527648.0,6.866400948037368
 "void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 256u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",1,3050539.0,3050539.0,3050539.0,4.626292477159215

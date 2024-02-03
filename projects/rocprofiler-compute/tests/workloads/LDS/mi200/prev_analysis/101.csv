@@ -1,5 +1,5 @@
 Info
-LDS
+LDS_Per_Workgroup
 06fa5f860366
 AMD EPYC 7282 16-Core Processor
 Ubuntu 20.04.5 LTS
@@ -23,4 +23,4 @@ gfx90a
 mi200
 56
 1638.4
-roofline|SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF
+roofline|SQ|LDS_Per_Workgroup|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF

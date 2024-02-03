@@ -6,7 +6,7 @@ Scratch Stall,0.0,0,0,Cycles
 Insufficient SIMD Waveslots,70306.61676646706,0,668384,Simd
 Insufficient SIMD VGPRs,647637.7964071856,0,45257691,Simd
 Insufficient SIMD SGPRs,0.0,0,0,Simd
-Insufficient CU LDS,0.0,0,0,Cu
+Insufficient CU LDS_Per_Workgroup,0.0,0,0,Cu
 Insufficient CU Barries,0.0,0,0,Cu
 Insufficient Bulky Resource,0.0,0,0,Cu
 Reach CU Threadgroups Limit,0.0,0,0,Cycles

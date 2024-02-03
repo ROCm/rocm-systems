@@ -1,4 +1,4 @@
-Index,KernelName,gpu-id
+Dispatch_ID,Kernel_Name,GPU_ID
 1,"void benchmark_func<short, 256, 8u, 0u>(short, short*) [clone .kd]",0
 2,"void benchmark_func<float, 256, 8u, 0u>(float, float*) [clone .kd]",0
 3,"void benchmark_func<HIP_vector_type<float, 2u>, 256, 8u, 0u>(HIP_vector_type<float, 2u>, HIP_vector_type<float, 2u>*) [clone .kd]",0

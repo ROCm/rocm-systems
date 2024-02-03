@@ -256,7 +256,7 @@ def test_no_roof_mixbench1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_no_roof_TA_mi100():
@@ -333,7 +333,7 @@ def test_analyze_K_str_inv3_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_K_str_inv3_mi200():
@@ -344,7 +344,7 @@ def test_K_str_inv3_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_LDS_mi100():
@@ -654,7 +654,7 @@ def test_analyze_no_roof_D_int_inv2_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_D_int_inv2_mi200():
@@ -665,7 +665,7 @@ def test_no_roof_D_int_inv2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_TD_mi100():
@@ -745,7 +745,7 @@ def test_no_roof_mixbench2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_roof_only_SPI_mi200():
@@ -789,7 +789,7 @@ def test_analyze_K_str_inv1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_K_str_inv1_mi200():
@@ -800,7 +800,7 @@ def test_K_str_inv1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_roof_only_TA_mi200():
@@ -1037,7 +1037,7 @@ def test_analyze_K_int_inv2_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_K_int_inv2_mi200():
@@ -1048,7 +1048,7 @@ def test_K_int_inv2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_roof_only_TCP_mi200():
@@ -1086,7 +1086,7 @@ def test_analyze_D_int_inv2_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_D_int_inv2_mi200():
@@ -1097,7 +1097,7 @@ def test_D_int_inv2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_roof_only_Axes3_mi200():
@@ -1263,7 +1263,7 @@ def test_analyze_no_roof_K_int_inv1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_K_int_inv1_mi200():
@@ -1274,7 +1274,7 @@ def test_no_roof_K_int_inv1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_no_roof_Axes1_mi100():
@@ -1365,7 +1365,7 @@ def test_analyze_K_str_inv2_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_K_str_inv2_mi200():
@@ -1376,7 +1376,7 @@ def test_K_str_inv2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_CPC_mi100():
@@ -1428,7 +1428,7 @@ def test_roof_only_mixbench2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_Axes4_mi100():
@@ -1572,7 +1572,7 @@ def test_analyze_no_roof_K_str_inv3_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_K_str_inv3_mi200():
@@ -1583,7 +1583,7 @@ def test_no_roof_K_str_inv3_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_no_roof_K_str_inv2_mi100():
@@ -1594,7 +1594,7 @@ def test_analyze_no_roof_K_str_inv2_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_K_str_inv2_mi200():
@@ -1605,7 +1605,7 @@ def test_no_roof_K_str_inv2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_D_str_inv2_mi100():
@@ -1679,7 +1679,7 @@ def test_analyze_CMD_INV_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_K_int_inv1_mi100():
@@ -1690,7 +1690,7 @@ def test_analyze_K_int_inv1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_K_int_inv1_mi200():
@@ -1701,7 +1701,7 @@ def test_K_int_inv1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_mixbench2_mi100():
@@ -1723,7 +1723,7 @@ def test_mixbench2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_roof_only_Double_N_flag_mi200():
@@ -1739,7 +1739,7 @@ def test_roof_only_Double_N_flag_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_no_roof_TD_mi100():
@@ -1879,7 +1879,7 @@ def test_no_roof_Double_N_flag_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_Double_N_flag_mi100():
@@ -1901,7 +1901,7 @@ def test_Double_N_flag_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_roof_only_K_int_inv1_mi200():
@@ -1933,7 +1933,7 @@ def test_analyze_no_roof_K_str_valid_1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_K_str_valid_1_mi200():
@@ -1965,7 +1965,7 @@ def test_roof_only_mixbench1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_dev1_mi100():
@@ -1996,7 +1996,7 @@ def test_analyze_no_roof_K_str_inv1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_K_str_inv1_mi200():
@@ -2007,7 +2007,7 @@ def test_no_roof_K_str_inv1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_K_str_valid_1_mi100():
@@ -2018,7 +2018,7 @@ def test_analyze_K_str_valid_1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_K_str_valid_1_mi200():
@@ -2051,7 +2051,7 @@ def test_mixbench1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_no_roof_CMD_INV_mi100():
@@ -2062,7 +2062,7 @@ def test_analyze_no_roof_CMD_INV_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_roof_only_D_str_inv1_mi200():
@@ -2122,7 +2122,7 @@ def test_analyze_D_int_inv1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_D_int_inv1_mi200():
@@ -2133,7 +2133,7 @@ def test_D_int_inv1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_K_str_valid_2_mi100():
@@ -2292,7 +2292,7 @@ def test_analyze_no_roof_D_int_inv1_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_D_int_inv1_mi200():
@@ -2303,7 +2303,7 @@ def test_no_roof_D_int_inv1_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_analyze_dispatches_mi100():
@@ -2347,7 +2347,7 @@ def test_analyze_no_roof_K_int_inv2_mi100():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 def test_no_roof_K_int_inv2_mi200():
@@ -2358,4 +2358,4 @@ def test_no_roof_K_int_inv2_mi200():
         ):
             omniperf.main()
     assert e.type == SystemExit
-    assert e.value.code == 0
+    assert e.value.code == 1

@@ -1,2 +1,2 @@
-KernelName,Count,Sum(ns),Mean(ns),Median(ns),Pct
+Kernel_Name,Count,Sum(ns),Mean(ns),Median(ns),Pct
 __amd_rocclr_fillBuffer.kd,1,323517.0,323517.0,323517.0,100.0

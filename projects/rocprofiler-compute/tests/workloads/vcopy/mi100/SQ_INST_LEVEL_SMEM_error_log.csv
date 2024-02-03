@@ -1,0 +1,5 @@
+,SQ_ACCUM_PREV_HIRES,SQ_INST_LEVEL_SMEM,GPU_ID,kernel_name,test_name
+0,9.15,9.24,2.0,"vecCopy(double*, double*, double*, int, int) ",logger
+0,9.15,9.24,,"vecCopy(double*, double*, double*, int, int) ",test_path
+0,9.15,9.24,,"vecCopy(double*, double*, double*, int, int) ",test_path
+0,9.15,9.24,,"vecCopy(double*, double*, double*, int, int) ",test_path

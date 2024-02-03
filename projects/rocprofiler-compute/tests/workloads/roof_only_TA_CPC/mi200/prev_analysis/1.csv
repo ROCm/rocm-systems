@@ -1,4 +1,4 @@
-KernelName,Count,Sum(ns),Mean(ns),Median(ns),Pct
+Kernel_Name,Count,Sum(ns),Mean(ns),Median(ns),Pct
 __amd_rocclr_fillBufferAligned.kd,1,29768910704.0,29768910704.0,29768910704.0,99.24263136572074
 "void benchmark_func<short, 256, 8u, 0u>(short, short*) [clone .kd]",1,6168175.0,6168175.0,6168175.0,0.0205632622507078
 "void benchmark_func<int, 256, 8u, 512u>(int, int*) [clone .kd]",1,4414856.0,4414856.0,4414856.0,0.0147181040951514

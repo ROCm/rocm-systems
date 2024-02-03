@@ -1,5 +1,5 @@
 Info
-LDS
+LDS_Per_Workgroup
 vesuvius
 AMD EPYC 7542 32-Core Processor
 ""
@@ -23,4 +23,4 @@ gfx908
 mi100
 48
 1228.8
-SQ|LDS|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF
+SQ|LDS_Per_Workgroup|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF

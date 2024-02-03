@@ -6,5 +6,5 @@ Saved Wavefronts,0.0,0,0,Wavefronts
 Restored Wavefronts,0.0,0,0,Wavefronts
 VGPRs,24.072289156626507,12,36,Registers
 SGPRs,24.0,24,24,Registers
-LDS Allocation,0.0,0,0,Bytes
+LDS_Per_Workgroup Allocation,0.0,0,0,Bytes
 Scratch Allocation,0.0,0,0,Bytes

@@ -1,0 +1,2 @@
+workload_name,command,host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,hbmBW,ip_blocks
+Baseline_mi100,"./sample/vcopy 1045876 256",t004-005.hpcfund,AMD EPYC 7V13 64-Core Processor,Rocky Linux 9.1 (Blue Onyx),5.14.0-162.18.1.el9_1.x86_64,5.5.1-74,Thu Oct  5 12:46:57 2023 (CDT),gfx908,8,120,4,64,40,1024,16,8192,1502,1200,300,1200,32,32,mi100,48,1228.8,SQ|LDS_Per_Workgroup|SQC|TA|TD|TCP|TCC|SPI|CPC|CPF
