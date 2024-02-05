@@ -222,11 +222,16 @@ def gpuinfo():
     return gpu_info
 
 
-def run(cmd):
+def run(cmd,exit_on_error=False):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    if cmd[0] == "rocm-smi" and p.returncode != 0:
-        print("ERROR: No GPU detected. Unable to load rocm-smi")
-        sys.exit(1)
+
+    if exit_on_error:
+        if cmd[0] == "rocm-smi" and p.returncode != 0:
+            logging.error("ERROR: No GPU detected. Unable to load rocm-smi")
+            sys.exit(1)
+        elif p.returncode != 0:
+            logging.error("ERROR: command [%s] failed with non-zero exit code" % cmd)
+            sys.exit(1)
     return p.stdout.decode("utf-8")
 
 
@@ -283,7 +288,7 @@ def get_machine_specs(devicenum):
 
     gpu_info = gpuinfo()
 
-    rocm_smi = run(["rocm-smi"])
+    rocm_smi = run(["rocm-smi"], exit_on_error=True)
 
     device = rf"^\s*{devicenum}(.*)"
 
@@ -311,7 +316,7 @@ def get_machine_specs(devicenum):
         cur_mclk = 0
 
     # FIXME with device
-    vbios = search(r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"]))
+    vbios = search(r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"], exit_on_error=True))
 
     # FIXME with spec
     hbmBW = str(int(cur_mclk) / 1000 * 4096 / 8 * 2)
