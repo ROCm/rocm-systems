@@ -57,6 +57,8 @@ struct correlation_id;
 namespace hsa
 {
 using ClientID = int64_t;
+using inst_pkt_t =
+    common::container::small_vector<std::pair<std::unique_ptr<AQLPacket>, ClientID>, 4>;
 
 union rocprofiler_packet
 {
@@ -92,6 +94,12 @@ union rocprofiler_packet
     rocprofiler_packet& operator=(const rocprofiler_packet&) = default;
     rocprofiler_packet& operator=(rocprofiler_packet&&) noexcept = default;
 };
+enum class queue_state
+{
+    normal       = 0,
+    to_destroy   = 1,
+    done_destroy = 2
+};
 
 // Interceptor for a single specific queue
 class Queue
@@ -109,8 +117,7 @@ public:
             std::unordered_map<const context_t*, rocprofiler_user_data_t>;
 
         Queue&                     queue;
-        std::unique_ptr<AQLPacket> inst_pkt         = {};
-        ClientID                   inst_pkt_id      = 0;
+        inst_pkt_t                 inst_pkt         = {};
         hsa_signal_t               interrupt_signal = {};
         rocprofiler_thread_id_t    tid              = common::get_tid();
         rocprofiler_kernel_id_t    kernel_id        = 0;
@@ -128,19 +135,16 @@ public:
     // the queue.
     using queue_cb_t = std::function<std::unique_ptr<AQLPacket>(
         const Queue&,
-        ClientID,
         const rocprofiler_packet&,
         uint64_t,
         const queue_info_session_t::external_corr_id_map_t&,
         const context::correlation_id*)>;
     // Signals the completion of the kernel packet.
     using completed_cb_t = std::function<void(const Queue&,
-                                              ClientID,
                                               const rocprofiler_packet&,
                                               const Queue::queue_info_session_t&,
-                                              std::unique_ptr<AQLPacket>)>;
+                                              inst_pkt_t&)>;
     using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
-
     Queue(const AgentCache&  agent,
           uint32_t           size,
           hsa_queue_type32_t type,
@@ -178,8 +182,14 @@ public:
     void register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb);
     void remove_callback(ClientID id);
 
-    const CoreApiTable& core_api() const { return _core_api; }
-    const AmdExtTable&  ext_api() const { return _ext_api; }
+    const CoreApiTable&             core_api() const { return _core_api; }
+    const AmdExtTable&              ext_api() const { return _ext_api; }
+    mutable std::mutex              cv_mutex;
+    mutable std::condition_variable cv_ready_signal;
+    hsa_signal_t                    block_signal;
+    hsa_signal_t                    ready_signal;
+    queue_state                     get_state() const;
+    void                            set_state(queue_state state);
 
 private:
     std::atomic<int>                                  _notifiers            = {0};
@@ -189,6 +199,7 @@ private:
     const AgentCache&                                 _agent;
     rocprofiler::common::Synchronized<callback_map_t> _callbacks       = {};
     hsa_queue_t*                                      _intercept_queue = nullptr;
+    queue_state                                       _state           = queue_state::normal;
 };
 
 inline rocprofiler_queue_id_t

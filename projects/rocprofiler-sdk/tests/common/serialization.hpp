@@ -233,6 +233,15 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_hsa_api_record_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_record_counter_t data)
+{
+    SAVE_DATA_FIELD(id);
+    SAVE_DATA_FIELD(counter_value);
+    SAVE_DATA_FIELD(corr_id);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_hip_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);

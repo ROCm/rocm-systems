@@ -22,8 +22,11 @@
 
 #pragma once
 
+#include "lib/common/container/small_vector.hpp"
+
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
+#include <deque>
 
 namespace rocprofiler
 {
@@ -53,14 +56,16 @@ struct AQLPacket
     AQLPacket(const AQLPacket&) = delete;
     AQLPacket& operator=(const AQLPacket&) = delete;
 
+    bool                             command_buf_mallocd    = false;
+    bool                             output_buffer_malloced = false;
+    bool                             empty                  = {true};
     hsa_ven_amd_aqlprofile_profile_t profile                = {};
     hsa_ext_amd_aql_pm4_packet_t     start                  = null_amd_aql_pm4_packet;
     hsa_ext_amd_aql_pm4_packet_t     stop                   = null_amd_aql_pm4_packet;
     hsa_ext_amd_aql_pm4_packet_t     read                   = null_amd_aql_pm4_packet;
-    bool                             command_buf_mallocd    = false;
-    bool                             output_buffer_malloced = false;
     memory_pool_free_func_t          free_func              = nullptr;
-    bool                             empty                  = {true};
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt = {};
+    common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt  = {};
 };
 
 inline AQLPacket::AQLPacket(memory_pool_free_func_t func)

@@ -49,3 +49,4 @@ add_subdirectory(async-copy-tracing)
 
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
+add_subdirectory(counter-collection)

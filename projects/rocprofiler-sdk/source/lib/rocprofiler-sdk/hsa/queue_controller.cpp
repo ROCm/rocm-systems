@@ -61,7 +61,11 @@ create_queue(hsa_agent_t        agent,
                                                      get_queue_controller().get_core_table(),
                                                      get_queue_controller().get_ext_table(),
                                                      queue);
+
+            get_queue_controller().profiler_serializer_register_ready_signal_handler(
+                new_queue->ready_signal, *queue);
             get_queue_controller().add_queue(*queue, std::move(new_queue));
+
             return HSA_STATUS_SUCCESS;
         }
     }
@@ -104,6 +108,48 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 void
 QueueController::destory_queue(hsa_queue_t* id)
 {
+    const auto*                  queue = get_queue_controller().get_queue(*id);
+    std::unique_lock<std::mutex> cvlock(queue->cv_mutex);
+    profiler_serializer([&](auto& data) {
+        /*Deletes the queue to be destructed from the dispatch ready.*/
+        data.dispatch_ready.erase(
+            std::remove_if(
+                data.dispatch_ready.begin(),
+                data.dispatch_ready.end(),
+                [&](auto& it) {
+                    /*Deletes the queue to be destructed from the dispatch ready.*/
+                    if(it->get_id().handle == queue->get_id().handle)
+                    {
+                        if(data.dispatch_queue &&
+                           data.dispatch_queue->get_id().handle == queue->get_id().handle)
+                        {
+                            // insert fatal condition here
+                            // ToDO [srnagara]: Need to find a solution rather than abort.
+                            LOG(FATAL)
+                                << "Queue is being destroyed while kernel launch is still active";
+                        }
+                        return true;
+                    }
+                    return false;
+                }),
+            data.dispatch_ready.end());
+        set_queue_state(queue_state::to_destroy, id);
+        /*
+          This lambda triggers the async ready handler.
+          The async ready handler then unregisters itself
+          and sets the queue state to done_destroy for which
+          the condition variable here is waiting for.
+        */
+        auto trigger_ready_async_handler = [queue]() {
+            get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(
+                queue->ready_signal, 0);
+        };
+        trigger_ready_async_handler();
+    });
+    queue->cv_ready_signal.wait(
+        cvlock, [queue] { return queue->get_state() == queue_state::done_destroy; });
+    if(queue->block_signal.handle != 0)
+        get_queue_controller().get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
 }
 
@@ -214,6 +260,103 @@ QueueController::get_queue(const hsa_queue_t& _hsa_queue) const
             return nullptr;
         },
         _hsa_queue);
+}
+
+template <typename FuncT>
+void
+QueueController::profiler_serializer(FuncT&& lambda)
+{
+    _profiler_serializer.wlock(std::forward<FuncT>(lambda));
+}
+
+namespace
+{
+/*
+    Function name:  AsyncSignalReadyHandler
+    Argument:    hsa signal value for which the async handler was called
+                 and pointer to the data.
+    Description: This async handler is invoked when the queue is ready
+                 to launch a kernel. It first, resets the queue's ready signal to 1.
+                 It then checks if there is any queue which has a kernel currently dispatched.
+                 If yes, it pushes the queue to the dispatch ready else
+                 it enables the dispatch for the given queue.
+    Return :     It returns true since we need this handler to be invoked
+                 each time the queue's ready signal (used for entire queue) is set to 0.
+                 If we had a separate signal for every dispatch in the queue then we don't
+                 need this to be invoked more than once in which case we would return false.
+*/
+bool
+profiler_serializer_ready_signal_handler(hsa_signal_value_t /* signal_value */, void* data)
+{
+    auto*       hsa_queue = static_cast<hsa_queue_t*>(data);
+    const auto* queue     = get_queue_controller().get_queue(*hsa_queue);
+    get_queue_controller().profiler_serializer([&](auto& serializer) {
+        {
+            std::lock_guard<std::mutex> cv_lock(queue->cv_mutex);
+            if(queue->get_state() == queue_state::to_destroy)
+            {
+                get_queue_controller().set_queue_state(queue_state::done_destroy, hsa_queue);
+                get_queue_controller().get_core_table().hsa_signal_destroy_fn(queue->ready_signal);
+                queue->cv_ready_signal.notify_one();
+                return;
+            }
+        }
+        get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(queue->ready_signal,
+                                                                              1);
+        if(serializer.dispatch_queue == nullptr)
+        {
+            get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(
+                queue->block_signal, 0);
+            serializer.dispatch_queue = queue;
+        }
+        else
+        {
+            serializer.dispatch_ready.push_back(queue);
+        }
+    });
+    return true;
+}
+}  // namespace
+
+void
+profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal)
+{
+    get_queue_controller().profiler_serializer([queue_block_signal](auto& serializer) {
+        assert(serializer.dispatch_queue != nullptr);
+        serializer.dispatch_queue = nullptr;
+        get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(queue_block_signal,
+                                                                              1);
+        if(!serializer.dispatch_ready.empty())
+        {
+            auto queue = serializer.dispatch_ready.front();
+            serializer.dispatch_ready.erase(serializer.dispatch_ready.begin());
+            get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(
+                queue->block_signal, 0);
+            serializer.dispatch_queue = queue;
+        }
+    });
+}
+
+void
+QueueController::set_queue_state(enum queue_state state, hsa_queue_t* hsa_queue)
+{
+    _queues.wlock([&](auto& map) { map[hsa_queue]->set_state(state); });
+}
+
+/*
+    Function name:  SignalAsyncReadyHandler.
+    Argument :      The signal value and pointer to the data to
+                    pass to the handler.
+    Description :   Registers a asynchronous callback function
+                    for the ready signal to be invoked when it goes to zero.
+*/
+void
+QueueController::profiler_serializer_register_ready_signal_handler(const hsa_signal_t& signal,
+                                                                   void*               data) const
+{
+    hsa_status_t status = get_ext_table().hsa_amd_signal_async_handler_fn(
+        signal, HSA_SIGNAL_CONDITION_EQ, 0, profiler_serializer_ready_signal_handler, data);
+    if(status != HSA_STATUS_SUCCESS) LOG(FATAL) << "hsa_amd_signal_async_handler failed";
 }
 
 void

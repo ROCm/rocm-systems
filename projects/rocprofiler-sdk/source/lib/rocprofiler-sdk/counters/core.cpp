@@ -37,6 +37,9 @@ namespace rocprofiler
 {
 namespace counters
 {
+using ClientID   = int64_t;
+using inst_pkt_t = common::container::
+    small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
 class CounterController
 {
 public:
@@ -136,9 +139,8 @@ destroy_counter_profile(uint64_t id)
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
 std::unique_ptr<rocprofiler::hsa::AQLPacket>
-queue_cb(const std::shared_ptr<counter_callback_info>& info,
-         const hsa::Queue&                             queue,
-         hsa::ClientID,
+queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
+         const hsa::Queue&                                               queue,
          const hsa::rocprofiler_packet&                                  pkt,
          uint64_t                                                        kernel_id,
          const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
@@ -245,8 +247,37 @@ queue_cb(const std::shared_ptr<counter_callback_info>& info,
         ret_pkt = prof_config->pkt_generator->construct_packet(
             hsa::get_queue_controller().get_ext_table());
     }
+    ret_pkt->before_krn_pkt.clear();
+    ret_pkt->after_krn_pkt.clear();
+    if(ret_pkt->empty) return ret_pkt;
 
     info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), prof_config); });
+
+    auto&& CreateBarrierPacket =
+        [](hsa_signal_t*                                                     dependency_signal,
+           hsa_signal_t*                                                     completion_signal,
+           common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3>& _packets) {
+            hsa::rocprofiler_packet barrier{};
+            barrier.barrier_and.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+            if(dependency_signal != nullptr) barrier.barrier_and.dep_signal[0] = *dependency_signal;
+            if(completion_signal != nullptr)
+                barrier.barrier_and.completion_signal = *completion_signal;
+            _packets.emplace_back(barrier.ext_amd_aql_pm4);
+        };
+
+    hsa_signal_t ready_signal = queue.ready_signal;
+    hsa_signal_t block_signal = queue.block_signal;
+    CreateBarrierPacket(nullptr, &ready_signal, ret_pkt->before_krn_pkt);
+    CreateBarrierPacket(&block_signal, &block_signal, ret_pkt->before_krn_pkt);
+
+    ret_pkt->before_krn_pkt.push_back(ret_pkt->start);
+    ret_pkt->before_krn_pkt.end()->completion_signal.handle = 0;
+    ret_pkt->after_krn_pkt.push_back(ret_pkt->stop);
+    ret_pkt->after_krn_pkt.push_back(ret_pkt->read);
+    for(auto& aql_pkt : ret_pkt->after_krn_pkt)
+    {
+        aql_pkt.completion_signal.handle = 0;
+    }
 
     return ret_pkt;
 }
@@ -257,19 +288,31 @@ queue_cb(const std::shared_ptr<counter_callback_info>& info,
 void
 completed_cb(const std::shared_ptr<counter_callback_info>& info,
              const hsa::Queue&,
-             hsa::ClientID,
              hsa::rocprofiler_packet,
-             const hsa::Queue::queue_info_session_t&      session,
-             std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt)
+             const hsa::Queue::queue_info_session_t& session,
+             inst_pkt_t&                             pkts)
 {
-    if(!info || !pkt) return;
+    if(!info || pkts.empty()) return;
 
     std::shared_ptr<profile_config> prof_config;
     // Get the Profile Config
+    std::unique_ptr<rocprofiler::hsa::AQLPacket> pkt = nullptr;
     info->packet_return_map.wlock([&](auto& data) {
-        prof_config = data.at(pkt.get());
-        data.erase(pkt.get());
+        for(auto& [aql_pkt, _] : pkts)
+        {
+            const auto* profile = rocprofiler::common::get_val(data, aql_pkt.get());
+            if(profile)
+            {
+                prof_config = *profile;
+                data.erase(aql_pkt.get());
+                pkt = std::move(aql_pkt);
+                return;
+            }
+        }
     });
+
+    if(!pkt) return;
+    hsa::profiler_serializer_kernel_completion_signal(session.queue.block_signal);
 
     auto decoded_pkt = EvaluateAST::read_pkt(prof_config->pkt_generator.get(), *pkt);
     EvaluateAST::read_special_counters(
@@ -333,21 +376,17 @@ start_context(const context::context* ctx)
             cb->queue_id = controller.add_callback(
                 std::nullopt,
                 [=](const hsa::Queue&                                               q,
-                    hsa::ClientID                                                   c,
                     const hsa::rocprofiler_packet&                                  kern_pkt,
                     uint64_t                                                        kernel_id,
                     const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
                     const context::correlation_id* correlation_id) {
-                    return queue_cb(cb, q, c, kern_pkt, kernel_id, extern_corr_ids, correlation_id);
+                    return queue_cb(cb, q, kern_pkt, kernel_id, extern_corr_ids, correlation_id);
                 },
                 // Completion CB
                 [=](const hsa::Queue&                       q,
-                    hsa::ClientID                           c,
                     hsa::rocprofiler_packet                 kern_pkt,
                     const hsa::Queue::queue_info_session_t& session,
-                    std::unique_ptr<hsa::AQLPacket>         aql) {
-                    completed_cb(cb, q, c, kern_pkt, session, std::move(aql));
-                });
+                    inst_pkt_t& aql) { completed_cb(cb, q, kern_pkt, session, aql); });
         }
         enabled = true;
     });

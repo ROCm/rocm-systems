@@ -36,6 +36,26 @@ namespace rocprofiler
 {
 namespace hsa
 {
+/*This is a profiler serializer. It should be instantiated
+only once for the profiler. The following is the
+description of each field.
+1. dispatch_queue - The queue to which the currently dispatched kernel
+        belongs to.
+        At any given time, in serialization only one kernel
+        can be executing.
+2. dispatch_ready- It is a software data structure which holds
+        the queues which have a kernel ready to be dispatched.
+        This stores the queues in FIFO order.
+3. serializer_mutex - The mutex is used for thread synchronization
+        while accessing the singleton instance of this structure.
+Currently, in case of profiling kernels are serialized by default.
+*/
+struct profiler_serializer_t
+{
+    const Queue*             dispatch_queue{nullptr};
+    std::deque<const Queue*> dispatch_ready;
+};
+
 // Tracks and manages HSA queues
 class QueueController
 {
@@ -69,6 +89,12 @@ public:
     const Queue* get_queue(const hsa_queue_t&) const;
 
     void iterate_queues(const queue_iterator_cb_t&) const;
+    void set_queue_state(queue_state state, hsa_queue_t* hsa_queue);
+    void profiler_serializer_register_ready_signal_handler(const hsa_signal_t& signal,
+                                                           void*               data) const;
+    void add_dispatch_ready(const Queue* queue);
+    template <typename FuncT>
+    void profiler_serializer(FuncT&& lambda);
 
 private:
     using agent_callback_tuple_t =
@@ -77,11 +103,12 @@ private:
     using client_id_map_t   = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using agent_cache_map_t = std::unordered_map<uint32_t, AgentCache>;
 
-    CoreApiTable                          _core_table       = {};
-    AmdExtTable                           _ext_table        = {};
-    common::Synchronized<queue_map_t>     _queues           = {};
-    common::Synchronized<client_id_map_t> _callback_cache   = {};
-    agent_cache_map_t                     _supported_agents = {};
+    CoreApiTable                                _core_table       = {};
+    AmdExtTable                                 _ext_table        = {};
+    common::Synchronized<queue_map_t>           _queues           = {};
+    common::Synchronized<client_id_map_t>       _callback_cache   = {};
+    agent_cache_map_t                           _supported_agents = {};
+    common::Synchronized<profiler_serializer_t> _profiler_serializer;
 };
 
 QueueController&
@@ -92,5 +119,9 @@ queue_controller_init(HsaApiTable* table);
 
 void
 queue_controller_fini();
+
+void
+profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
+
 }  // namespace hsa
 }  // namespace rocprofiler

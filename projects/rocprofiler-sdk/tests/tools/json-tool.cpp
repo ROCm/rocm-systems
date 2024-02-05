@@ -43,6 +43,8 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <glog/logging.h>
+
 #include <unistd.h>
 #include <atomic>
 #include <cassert>
@@ -57,6 +59,7 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -361,14 +364,122 @@ struct marker_api_callback_record_t
     }
 };
 
-auto code_object_records   = std::deque<code_object_callback_record_t>{};
-auto kernel_symbol_records = std::deque<kernel_symbol_callback_record_t>{};
-auto hsa_api_cb_records    = std::deque<hsa_api_callback_record_t>{};
-auto marker_api_cb_records = std::deque<marker_api_callback_record_t>{};
-auto hip_api_cb_records    = std::deque<hip_api_callback_record_t>{};
+auto code_object_records           = std::deque<code_object_callback_record_t>{};
+auto kernel_symbol_records         = std::deque<kernel_symbol_callback_record_t>{};
+auto hsa_api_cb_records            = std::deque<hsa_api_callback_record_t>{};
+auto marker_api_cb_records         = std::deque<marker_api_callback_record_t>{};
+auto counter_collection_bf_records = std::deque<rocprofiler_record_counter_t>{};
+auto hip_api_cb_records            = std::deque<hip_api_callback_record_t>{};
 
 rocprofiler_thread_id_t
 push_external_correlation();
+
+void
+counter_collection_buffered(rocprofiler_context_id_t, /*context*/
+                            rocprofiler_buffer_id_t,  /*buffer_id*/
+                            rocprofiler_record_header_t** headers,
+                            size_t                        num_headers,
+                            void*, /*user_data*/
+                            uint64_t /*drop_count*/)
+{
+    if(num_headers == 0)
+        throw std::runtime_error{"rocprofiler invoked a buffer callback with no headers "
+                                 "this should never happen"};
+
+    else if(headers == nullptr)
+        throw std::runtime_error{"rocprofiler invoked a buffer callback with a null pointer to the "
+                                 "array of headers. this should never happen"};
+    for(size_t i = 0; i < num_headers; ++i)
+    {
+        auto* header = headers[i];
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
+        {
+            auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
+            counter_collection_bf_records.emplace_back(*profiler_record);
+        }
+    }
+}
+
+void
+dispatch_callback(rocprofiler_queue_id_t, /*queue_id*/
+                  const rocprofiler_agent_t* agent,
+                  rocprofiler_correlation_id_t,        /*correlation_id*/
+                  const hsa_kernel_dispatch_packet_t*, /*dispatch_packet*/
+                  uint64_t,                            /*kernel_id*/
+                  void* /*callback_data_args*/,
+                  rocprofiler_profile_config_id_t* config)
+{
+    static std::shared_mutex                                             m_mutex       = {};
+    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
+
+    auto search_cache = [&]() {
+        if(auto pos = profile_cache.find(agent->id.handle); pos != profile_cache.end())
+        {
+            *config = pos->second;
+            return true;
+        }
+        return false;
+    };
+
+    {
+        auto rlock = std::shared_lock{m_mutex};
+        if(search_cache()) return;
+    }
+
+    auto wlock = std::unique_lock{m_mutex};
+    if(search_cache()) return;
+
+    // Counters we want to collect (here its SQ_WAVES_sum)
+    auto* counters_env = getenv("ROCPROF_COUNTERS");
+    if(std::string(counters_env) != "SQ_WAVES_sum")
+        LOG(FATAL) << "Counter not supported in the test tool";
+
+    std::set<std::string> counters_to_collect = {"SQ_WAVES_sum"};
+    // GPU Counter IDs
+    std::vector<rocprofiler_counter_id_t> gpu_counters;
+
+    // Iterate through the agents and get the counters available on that agent
+    ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
+                         agent->id,
+                         []([[maybe_unused]] rocprofiler_agent_id_t id,
+                            rocprofiler_counter_id_t*               counters,
+                            size_t                                  num_counters,
+                            void*                                   user_data) {
+                             std::vector<rocprofiler_counter_id_t>* vec =
+                                 static_cast<std::vector<rocprofiler_counter_id_t>*>(user_data);
+                             for(size_t i = 0; i < num_counters; i++)
+                             {
+                                 vec->push_back(counters[i]);
+                             }
+                             return ROCPROFILER_STATUS_SUCCESS;
+                         },
+                         static_cast<void*>(&gpu_counters)),
+                     "Could not fetch supported counters");
+
+    std::vector<rocprofiler_counter_id_t> collect_counters;
+    // Look for the counters contained in counters_to_collect in gpu_counters
+    for(auto& counter : gpu_counters)
+    {
+        const char* name;
+        size_t      size;
+        ROCPROFILER_CALL(rocprofiler_query_counter_name(counter, &name, &size),
+                         "Could not query name");
+        if(counters_to_collect.count(std::string(name)) > 0)
+        {
+            collect_counters.push_back(counter);
+        }
+    }
+
+    // Create a colleciton profile for the counters
+    rocprofiler_profile_config_id_t profile;
+    ROCPROFILER_CALL(rocprofiler_create_profile_config(
+                         agent->id, collect_counters.data(), collect_counters.size(), &profile),
+                     "Could not construct profile cfg");
+
+    profile_cache.emplace(agent->id.handle, profile);
+    // Return the profile to collect those counters for this dispatch
+    *config = profile;
+}
 
 void
 tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
@@ -584,12 +695,14 @@ rocprofiler_context_id_t hip_api_buffered_ctx    = {};
 rocprofiler_context_id_t marker_api_buffered_ctx = {};
 rocprofiler_context_id_t kernel_dispatch_ctx     = {};
 rocprofiler_context_id_t memory_copy_ctx         = {};
+rocprofiler_context_id_t counter_collection_ctx  = {};
 // buffers
 rocprofiler_buffer_id_t hsa_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t hip_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t marker_api_buffered_buffer = {};
 rocprofiler_buffer_id_t kernel_dispatch_buffer     = {};
 rocprofiler_buffer_id_t memory_copy_buffer         = {};
+rocprofiler_buffer_id_t counter_collection_buffer  = {};
 
 auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"HSA_API_CALLBACK", &hsa_api_callback_ctx},
@@ -600,13 +713,15 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"HIP_API_BUFFERED", &hip_api_buffered_ctx},
     {"MARKER_API_BUFFERED", &marker_api_buffered_ctx},
     {"KERNEL_DISPATCH", &kernel_dispatch_ctx},
-    {"MEMORY_COPY", &memory_copy_ctx}};
+    {"MEMORY_COPY", &memory_copy_ctx},
+    {"COUNTER_COLLECTION", &counter_collection_ctx}};
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 5>{&hsa_api_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 6>{&hsa_api_buffered_buffer,
                                                        &hip_api_buffered_buffer,
                                                        &marker_api_buffered_buffer,
                                                        &kernel_dispatch_buffer,
-                                                       &memory_copy_buffer};
+                                                       &memory_copy_buffer,
+                                                       &counter_collection_buffer};
 
 auto agents = std::vector<rocprofiler_agent_t>{};
 
@@ -785,6 +900,20 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                      marker_api_buffered_buffer),
         "buffer tracing service configure");
 
+    ROCPROFILER_CALL(rocprofiler_create_buffer(counter_collection_ctx,
+                                               4096,
+                                               2048,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               counter_collection_buffered,
+                                               nullptr,
+                                               &counter_collection_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffered_dispatch_profile_counting_service(
+            counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
+        "setup buffered service");
+
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(kernel_dispatch_ctx,
                                                      ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
@@ -885,7 +1014,8 @@ tool_fini(void* tool_data)
               << ", memory_copy_records=" << memory_copy_records.size()
               << ", hsa_api_bf_records=" << hsa_api_bf_records.size()
               << ", hip_api_bf_records=" << hip_api_bf_records.size()
-              << ", marker_api_bf_records=" << marker_api_bf_records.size() << " ...\n"
+              << ", marker_api_bf_records=" << marker_api_bf_records.size()
+              << ", counter_collection_records" << counter_collection_bf_records.size() << "...\n"
               << std::flush;
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
@@ -966,6 +1096,7 @@ tool_fini(void* tool_data)
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_bf_records));
             json_ar(cereal::make_nvp("hip_api_traces", hip_api_bf_records));
             json_ar(cereal::make_nvp("marker_api_traces", marker_api_bf_records));
+            json_ar(cereal::make_nvp("counter_collection", counter_collection_bf_records));
         } catch(std::exception& e)
         {
             std::cerr << "[" << getpid() << "][" << __FUNCTION__
@@ -994,6 +1125,11 @@ start()
     {
         if(itr.second && !is_active(*itr.second))
         {
+            if(itr.first == "COUNTER_COLLECTION")
+            {
+                auto* counters = getenv("ROCPROF_COUNTERS");
+                if(!counters) continue;
+            }
             ROCPROFILER_CALL(rocprofiler_start_context(*itr.second), "context start");
         }
     }

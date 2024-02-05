@@ -9,6 +9,7 @@ set(CMAKE_BUILD_RPATH "\$ORIGIN:\$ORIGIN/../lib")
 
 # applications used by integration tests which DO NOT link to rocprofiler-sdk-roctx
 add_subdirectory(simple-transpose)
+add_subdirectory(multistream)
 
 set(CMAKE_BUILD_RPATH
     "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"

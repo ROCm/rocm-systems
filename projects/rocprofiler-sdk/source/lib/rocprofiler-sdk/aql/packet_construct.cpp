@@ -160,6 +160,10 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
                     "could not generate stop packet");
     throw_if_failed(hsa_ven_amd_aqlprofile_read(&profile, &pkt.read),
                     "could not generate read packet");
+    pkt.start.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    pkt.stop.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    pkt.read.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+
     return pkt_ptr;
 }
 
