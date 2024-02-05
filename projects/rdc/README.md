@@ -47,7 +47,7 @@ By default (without using CMAKE_INSTALL_PREFIX option), gRPC will install to /us
 It is highly recommended to install gRPC into a unique directory.
 Below example installs gRPC into /opt/grpc
 
-    git clone -b v1.59.1 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
+    git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
     cd grpc
     export GRPC_ROOT=/opt/grpc
     cmake -B build \
