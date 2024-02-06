@@ -89,8 +89,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
-                                                "Shader Processor Input (SPI)",
-                                                href="#shader_processor_input_spi",
+                                                "Workgroup Manager (SPI)",
+                                                href="#workgroup_manager_spi",
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(

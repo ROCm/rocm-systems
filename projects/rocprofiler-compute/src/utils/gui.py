@@ -196,31 +196,31 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
 
     # Speed-of-light bar chart
     elif table_config["id"] in barchart_elements["sol"]:
-        display_df["Value"] = [
-            x.astype(float) if x != "" else float(0) for x in display_df["Value"]
+        display_df["Avg"] = [
+            x.astype(float) if x != "" else float(0) for x in display_df["Avg"]
         ]
         if table_config["id"] == 1701:
             # special layout for L2 Cache SOL
             d_figs.append(
                 px.bar(
                     display_df[display_df["Unit"] == "Pct"],
-                    x="Value",
+                    x="Avg",
                     y="Metric",
-                    color="Value",
+                    color="Avg",
                     range_color=[0, 100],
-                    labels={"Value": "%"},
+                    labels={"Avg": "%"},
                     height=220,
                     orientation="h",
-                ).update_xaxes(range=[0, 110], ticks="inside")
+                ).update_xaxes(range=[0, 110], ticks="inside", title="%")
             )  # append first % chart
             d_figs.append(
                 px.bar(
                     display_df[display_df["Unit"] == "Gb/s"],
-                    x="Value",
+                    x="Avg",
                     y="Metric",
-                    color="Value",
+                    color="Avg",
                     range_color=[0, 1638],
-                    labels={"Value": "GB/s"},
+                    labels={"Avg": "GB/s"},
                     height=220,
                     orientation="h",
                 ).update_xaxes(range=[0, 1638])
@@ -229,11 +229,11 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
             d_figs.append(
                 px.bar(
                     display_df,
-                    x="Value",
+                    x="Avg",
                     y="Metric",
-                    color="Value",
+                    color="Avg",
                     range_color=[0, 100],
-                    labels={"Value": "%"},
+                    labels={"Avg": "%"},
                     height=400,
                     orientation="h",
                 ).update_xaxes(range=[0, 110])

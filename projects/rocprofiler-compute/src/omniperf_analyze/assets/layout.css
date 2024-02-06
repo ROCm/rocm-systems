@@ -475,15 +475,15 @@ button.report:hover {
 /* ------------------------------------------------------------------ */
 /* SPI Section
 /* ------------------------------------------------------------------ */
-#shader_processor_input_spi {
+#workgroup_manager_spi {
    background: #2B2B2B;
    padding-top: 96px;
    padding-bottom: 66px;
    overflow: hidden;
 }
 
-#shader_processor_input_spi a, #shader_processor_input_spi a:visited { color: #fff; }
-#shader_processor_input_spi a:hover, #shader_processor_input_spi a:focus { color: #11ABB0; }
+#workgroup_manager_spi a, #workgroup_manager_spi a:visited { color: #fff; }
+#workgroup_manager_spi a:hover, #workgroup_manager_spi a:focus { color: #11ABB0; }
 
 
 /* ------------------------------------------------------------------ */
@@ -567,15 +567,15 @@ button.report:hover {
 /* ------------------------------------------------------------------ */
 /* TA/TD Section
 /* ------------------------------------------------------------------ */
-#texture_addresser_and_texture_data_tatd {
+#address_processing_unit_and_data_return_path_tatd {
    background: #2B2B2B;
    padding-top: 96px;
    padding-bottom: 66px;
    overflow: hidden;
 }
 
-#texture_addresser_and_texture_data_tatd a, #texture_addresser_and_texture_data_tatd a:visited { color: #fff; }
-#texture_addresser_and_texture_data_tatd a:hover, #texture_addresser_and_texture_data_tatd a:focus { color: #11ABB0; }
+#address_processing_unit_and_data_return_path_tatd a, #address_processing_unit_and_data_return_path_tatd a:visited { color: #fff; }
+#address_processing_unit_and_data_return_path_tatd a:hover, #address_processing_unit_and_data_return_path_tatd a:focus { color: #11ABB0; }
 
 /* ------------------------------------------------------------------ */
 /* Vector L1D Section

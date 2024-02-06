@@ -45,7 +45,7 @@ class webui_analysis(OmniAnalyze_Base):
         self.dest_dir = os.path.abspath(args.path[0][0])
         self.arch = None
         
-        self.__hidden_sections = ["Memory Chart", "Kernels"]
+        self.__hidden_sections = ["Memory Chart", "Kernels", "Roofline"]
         self.__hidden_columns = ["Tips", "coll_level"]
         # define different types of bar charts
         self.__barchart_elements = {
