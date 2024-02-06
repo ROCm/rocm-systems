@@ -687,8 +687,11 @@ dispatch_callback(rocprofiler_queue_id_t              queue_id,
         kernel_data.rlock([](const kernel_symbol_data_map_t& kdata,
                              uint64_t kernel_id_v) { return kdata.at(kernel_id_v); },
                           kernel_id);
-
     auto is_targeted_kernel = [&kernel_info]() {
+        // if kernel name is provided by user then by default all kernels in the application are
+        // targeted
+        if(tool::get_config().kernel_names.empty()) return true;
+
         for(const auto& name : tool::get_config().kernel_names)
         {
             if(name == kernel_info.truncated_kernel_name)

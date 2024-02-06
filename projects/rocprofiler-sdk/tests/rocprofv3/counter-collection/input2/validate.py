@@ -34,9 +34,9 @@ def test_validate_counter_collection_pmc2(input_dir: pd.DataFrame):
             with open(file_path, "r") as file:
                 df = pd.read_csv(file)
                 # check if kernel-name is present
-                assert len(df["kernel-name"]) > 0
+                assert len(df["Kernel-Name"]) > 0
                 # check if counter value is positive
-                assert len(df["counter_value"]) > 0
+                assert len(df["Counter_Value"]) > 0
 
 
 if __name__ == "__main__":

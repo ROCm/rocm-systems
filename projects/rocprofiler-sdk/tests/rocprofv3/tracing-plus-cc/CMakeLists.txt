@@ -1,5 +1,5 @@
 #
-#
+# rocprofv3 tool
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -23,11 +23,19 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace
         -o pmc3 $<TARGET_FILE:simple-transpose>)
 
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    set(LOG_LEVEL "warning") # info produces memory leak
+else()
+    set(LOG_LEVEL "info")
+endif()
+
 set(cc-tracing-env
-    "${PRELOAD_ENV}"
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+    "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
 
 set_tests_properties(
     rocprofv3-test-tracing-plus-cc-execute
@@ -43,7 +51,3 @@ set_tests_properties(
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                rocprofv3-test-tracing-plus-cc-execute FAIL_REGULAR_EXPRESSION
                "threw an exception")
-
-# Needs to be enabled once counter colelction tool support is merged
-set_tests_properties(rocprofv3-test-tracing-plus-cc-execute PROPERTIES DISABLED TRUE)
-set_tests_properties(rocprofv3-test-tracing-plus-cc-validate PROPERTIES DISABLED TRUE)

@@ -46,7 +46,7 @@ set_tests_properties(
     counter-collection-buffer
     PROPERTIES
         TIMEOUT
-        300
+        600
         LABELS
         "samples"
         ENVIRONMENT

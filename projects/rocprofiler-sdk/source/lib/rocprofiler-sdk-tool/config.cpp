@@ -191,10 +191,6 @@ parse_counters(std::string line)
             {
                 counters.emplace(counter);
             }
-            else
-            {
-                LOG(ERROR) << "invalid counter: " << counter;
-            }
         }
     }
 
