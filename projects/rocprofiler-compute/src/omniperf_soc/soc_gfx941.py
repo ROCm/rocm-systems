@@ -33,6 +33,7 @@ SOC_PARAM = {
     "numSE": 8,
     "numCU": 38,
     "numSIMD": 4,
+    "numPipes": 4,
     "numWavesPerCU": 32,
     "numSQC": 56,
     "L2Banks": 16,
