@@ -155,7 +155,7 @@ class OmniProfiler_Base():
                 k
                 for k in df.keys()
                 if not any(
-                    check in k
+                    k.startswith(check)
                     for check in [
                        # rocprofv2 headers
                         "GPU_ID_",

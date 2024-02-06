@@ -492,7 +492,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
         for data_source in panel["data source"]:
             for type, data_config in data_source.items():
                 if type == "metric_table":
-                    headers = ["Dispatch_ID"]
+                    headers = ["Metric_ID"]
                     data_source_idx = str(data_config["id"] // 100)
                     if (data_source_idx != 0 or
                         data_source_idx in filter_metrics
@@ -606,7 +606,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
 
                         i += 1
 
-                    df.set_index("Dispatch_ID", inplace=True)
+                    df.set_index("Metric_ID", inplace=True)
                     # df.set_index('Metric', inplace=True)
                     # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
                 elif type == "raw_csv_table":
@@ -982,7 +982,7 @@ def correct_sys_info(df, specs_correction):
     # header += "command,"
     # header += "host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,"
     # header += "gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
-    # header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,hbmBW,compute_partition,memory_partition,"
+    # header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,numPipes,hbmBW,compute_partition,memory_partition,"
     # header += "ip_blocks\n"
 
     name_map = {
@@ -1010,6 +1010,7 @@ def correct_sys_info(df, specs_correction):
         "L2Banks": "L2Banks",
         "LDSBanks": "LDSBanks",
         "numSQC": "numSQC",
+        "numPipes": "numPipes",
         "hbmBW": "hbmBW",
         "compute_partition": "compute_partition",
         "memory_partition": "memory_partition",
