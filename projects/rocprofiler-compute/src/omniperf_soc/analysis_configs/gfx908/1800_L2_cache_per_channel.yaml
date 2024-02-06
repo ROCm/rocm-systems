@@ -308,9 +308,9 @@ Panel Config:
           ea read stall - hbm: L2 - Fabric Read Stall (HBM)
         metric:
           "::_1":
-            ea read stall - pcie: AVG((TO_INT(TCC_EA_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
-            ea read stall - if: AVG((TO_INT(TCC_EA_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
-            ea read stall - hbm: AVG((TO_INT(TCC_EA_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
+            ea read stall - pcie: None # Missing perfmon
+            ea read stall - if: None # Missing perfmon
+            ea read stall - hbm: None # Missing perfmon
           placeholder_range:
             "::_1": 32
         cli_style: simple_multiple_bar
@@ -326,9 +326,9 @@ Panel Config:
           ea write stall - starve: L2 - Fabric Write Starve
         metric:
           "::_1":
-            ea write stall - pcie: AVG((TO_INT(TCC_EA_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
-            ea write stall - if: AVG((TO_INT(TCC_EA_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
-            ea write stall - hbm: AVG((TO_INT(TCC_EA_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
+            ea write stall - pcie: None # Missing perfmon
+            ea write stall - if: None # Missing perfmon
+            ea write stall - hbm: None # Missing perfmon
             ea write stall - starve: AVG((TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1]) / $denom))
           placeholder_range:
             "::_1": 32

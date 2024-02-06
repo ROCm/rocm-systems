@@ -18,14 +18,11 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
-          type: simple_bar
-          label_txt: (# of instr + $normUnit)
         metric:
           VALU:
-            avg: AVG(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
-            min: MIN(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
-            max: MAX(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
+            avg: None # No HW module
+            min: None # No HW module
+            max: None # No HW module
             unit: (instr + $normUnit)
             tips: 
           VMEM:
@@ -75,9 +72,6 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
-          type: simple_bar
-          label_txt: (# of instr + $normUnit)
         metric:
           INT-32:
             avg: None # No perf counter

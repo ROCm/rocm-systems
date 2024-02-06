@@ -244,9 +244,9 @@ Panel Config:
           ea read stall - dram: L2-EA Read Stall - DRAM
         metric:
           "::_1":
-            ea read stall - io: AVG((TO_INT(TCC_EA0_RDREQ_IO_CREDIT_STALL[::_1]) / $denom))
-            ea read stall - gmi: AVG((TO_INT(TCC_EA0_RDREQ_GMI_CREDIT_STALL[::_1]) / $denom))
-            ea read stall - dram: AVG((TO_INT(TCC_EA0_RDREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
+            ea read stall - io: None # Missing perfmon
+            ea read stall - gmi: None # Missing perfmon
+            ea read stall - dram: None # Missing perfmon
           placeholder_range:
             "::_1": $totalL2Banks
         cli_style: simple_multiple_bar
@@ -262,10 +262,10 @@ Panel Config:
           ea write stall - starve: L2-EA Write Stall - Starve
         metric:
           "::_1":
-            ea write stall - io: AVG((TO_INT(TCC_EA0_WRREQ_IO_CREDIT_STALL[::_1]) / $denom))
-            ea write stall - gmi: AVG((TO_INT(TCC_EA0_WRREQ_GMI_CREDIT_STALL[::_1]) / $denom))
-            ea write stall - dram: AVG((TO_INT(TCC_EA0_WRREQ_DRAM_CREDIT_STALL[::_1]) / $denom))
-            ea write stall - starve: AVG((TO_INT(TCC_TOO_MANY_EA0_WRREQS_STALL[::_1]) / $denom))
+            ea write stall - io: None # Missing perfmon
+            ea write stall - gmi: None # Missing perfmon
+            ea write stall - dram: None # Missing perfmon
+            ea write stall - starve: AVG((TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1]) / $denom))
           placeholder_range:
             "::_1": $totalL2Banks
         cli_style: simple_multiple_bar

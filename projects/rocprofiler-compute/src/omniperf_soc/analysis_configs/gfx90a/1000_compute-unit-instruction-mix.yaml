@@ -18,9 +18,6 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
-          type: simple_bar
-          label_txt: (# of instr + $normUnit)
         metric:
           VALU:
             avg: AVG(((SQ_INSTS_VALU - SQ_INSTS_MFMA) / $denom))
@@ -75,9 +72,6 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
-          type: simple_bar
-          label_txt: (# of instr + $normUnit)
         metric:
           INT32:
             avg: AVG((SQ_INSTS_VALU_INT32 / $denom))

@@ -18,11 +18,6 @@ Panel Config:
           peak: Peak
           pop: Pct of Peak
           tips: Tips
-        style:
-          type: simple_bar
-          range_color: [1, 100]
-          label_txt: (%)
-          xrange: [0, 110]
         metric:
           VALU FLOPs:
             value: None # No perf counter

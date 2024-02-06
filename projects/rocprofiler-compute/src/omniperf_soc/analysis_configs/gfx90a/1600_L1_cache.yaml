@@ -16,11 +16,6 @@ Panel Config:
           value: Avg
           unit: Unit
           tips: Tips
-        style:
-          type: simple_bar
-          range_color: [1, 100]
-          label_txt: (%)
-          xrange: [0, 110]
         metric:
           Hit rate:
             value: AVG(((100 - ((100 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum)
@@ -43,64 +38,44 @@ Panel Config:
             value: AVG(((((TA_TOTAL_WAVEFRONTS_sum * 64) * 100) / (TCP_TOTAL_ACCESSES_sum
               * 4)) if (TCP_TOTAL_ACCESSES_sum != 0) else None))
             unit: Pct of Peak
-            tips: 
+            tips:
+        comparable: false # for now
+        cli_style: simple_bar
 
     - metric_table:
         id: 1602
-        title: L1D Cache Stalls
+        title: L1D Cache Stalls (%)
         header:
           metric: Metric
-          avg: Avg
-          min: Min
-          max: Max
-          unit: unit
+          expr: Expression
           tips: Tips
         metric:
           Stalled on L2 Data:
-            avg: AVG((((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-              != 0) else None))
-            min: MIN((((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-              != 0) else None))
-            max: MAX((((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-              != 0) else None))
-            unit: pct
-            tips: 
+            expr:
+              (((100 * TCP_PENDING_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
+              != 0) else None)
+            tips:
           Stalled on L2 Req:
-            avg: AVG((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-              != 0) else None))
-            min: MIN((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-              != 0) else None))
-            max: MAX((((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
-              != 0) else None))
-            unit: pct
-            tips: 
+            expr:
+              (((100 * TCP_TCR_TCP_STALL_CYCLES_sum) / TCP_GATE_EN1_sum) if (TCP_GATE_EN1_sum
+              != 0) else None)
+            tips:
           Tag RAM Stall (Read):
-            avg: AVG((((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            min: MIN((((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            max: MAX((((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            unit: pct
-            tips: 
+            expr:
+              (((100 * TCP_READ_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
+              if (TCP_GATE_EN1_sum != 0) else None)
+            tips:
           Tag RAM Stall (Write):
-            avg: AVG((((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            min: MIN((((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            max: MAX((((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            unit: pct
-            tips: 
+            expr:
+              (((100 * TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
+              if (TCP_GATE_EN1_sum != 0) else None)
+            tips:
           Tag RAM Stall (Atomic):
-            avg: AVG((((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            min: MIN((((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            max: MAX((((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
-              if (TCP_GATE_EN1_sum != 0) else None))
-            unit: pct
-            tips: 
+            expr:
+              (((100 * TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum) / TCP_GATE_EN1_sum)
+              if (TCP_GATE_EN1_sum != 0) else None)
+            tips:
+        cli_style: simple_box
 
     - metric_table:
         id: 1603
@@ -258,8 +233,6 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
-          type: simple_multi_bar
         metric:
           NC - Read:
             xfer: Read

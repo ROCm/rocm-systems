@@ -67,7 +67,7 @@ Panel Config:
 
     - metric_table:
         id: 502
-        title: Command Processor Compute
+        title: Packet Processor
         header:
           metric: Metric
           avg: Avg

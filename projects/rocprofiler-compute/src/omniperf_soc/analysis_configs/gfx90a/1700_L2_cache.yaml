@@ -16,15 +16,13 @@ Panel Config:
           value: Avg
           unit: Unit
           tips: Tips
-        style:
-          type: simple_bar
         metric:
           Utilization:
             value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($L2Banks) * GRBM_GUI_ACTIVE)))
             unit: pct
             tips:
           Bandwidth:
-            value: ((100 * AVG(((TCC_REQ_sum * 128) / (EndNs - BeginNs)))) / ((($sclk / 1000) * 128) * TO_INT($L2Banks)))
+            value: ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp)))) / ((($sclk / 1000) * 128) * TO_INT($L2Banks)))
             unit: pct
             tips: 
           Hit Rate:
@@ -142,27 +140,15 @@ Panel Config:
             unit: Cycles
             tips:
           Read Stall:
-            avg: AVG((((100 * ((TCC_EA_RDREQ_IO_CREDIT_STALL_sum + TCC_EA_RDREQ_GMI_CREDIT_STALL_sum)
-              + TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum !=
-              0) else None))
-            min: MIN((((100 * ((TCC_EA_RDREQ_IO_CREDIT_STALL_sum + TCC_EA_RDREQ_GMI_CREDIT_STALL_sum)
-              + TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum !=
-              0) else None))
-            max: MAX((((100 * ((TCC_EA_RDREQ_IO_CREDIT_STALL_sum + TCC_EA_RDREQ_GMI_CREDIT_STALL_sum)
-              + TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum !=
-              0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
           Write Stall:
-            avg: AVG((((100 * ((TCC_EA_WRREQ_IO_CREDIT_STALL_sum + TCC_EA_WRREQ_GMI_CREDIT_STALL_sum)
-              + TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum !=
-              0) else None))
-            min: MIN((((100 * ((TCC_EA_WRREQ_IO_CREDIT_STALL_sum + TCC_EA_WRREQ_GMI_CREDIT_STALL_sum)
-              + TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum !=
-              0) else None))
-            max: MAX((((100 * ((TCC_EA_WRREQ_IO_CREDIT_STALL_sum + TCC_EA_WRREQ_GMI_CREDIT_STALL_sum)
-              + TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum)) / TCC_BUSY_sum) if (TCC_BUSY_sum !=
-              0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
 
@@ -313,49 +299,49 @@ Panel Config:
           Read - PCIe Stall:
             type: PCIe Stall
             transaction: Read
-            avg: AVG(((100 * (TCC_EA_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            min: MIN(((100 * (TCC_EA_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            max: MAX(((100 * (TCC_EA_RDREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
           Read - Infinity Fabric™ Stall:
             type: Infinity Fabric™ Stall
             transaction: Read
-            avg: AVG(((100 * (TCC_EA_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            min: MIN(((100 * (TCC_EA_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            max: MAX(((100 * (TCC_EA_RDREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
           Read - HBM Stall:
             type: HBM Stall
             transaction: Read
-            avg: AVG(((100 * (TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            min: MIN(((100 * (TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            max: MAX(((100 * (TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
           Write - PCIe Stall:
             type: PCIe Stall
             transaction: Write
-            avg: AVG(((100 * (TCC_EA_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            min: MIN(((100 * (TCC_EA_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            max: MAX(((100 * (TCC_EA_WRREQ_IO_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
           Write - Infinity Fabric™ Stall:
             type: Infinity Fabric™ Stall
             transaction: Write
-            avg: AVG(((100 * (TCC_EA_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            min: MIN(((100 * (TCC_EA_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            max: MAX(((100 * (TCC_EA_WRREQ_GMI_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
           Write - HBM Stall:
             type: HBM Stall
             transaction: Write
-            avg: AVG(((100 * (TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            min: MIN(((100 * (TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
-            max: MAX(((100 * (TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum / TCC_BUSY_sum)) if (TCC_BUSY_sum != 0) else None))
+            avg: None # Missing perfmon
+            min: None # Missing perfmon
+            max: None # Missing perfmon
             unit: pct
             tips:
           Write - Credit Starvation:

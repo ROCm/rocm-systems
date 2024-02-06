@@ -12,18 +12,25 @@ Panel Config:
         id: 1401
         title: Speed-of-Light
         header:
-          mertic: Metric
-          value: Value
+          metric: Metric
+          value: Avg
+          unit: Unit
           tips: Tips
         metric:
           Bandwidth:
             value: AVG(((SQC_DCACHE_REQ * 100000) / (($sclk * $numSQC)
               * (End_Timestamp - Start_Timestamp))))
+            unit: Pct of Peak
             tips:
-          Cache Hit:
-            value:
-              AVG((((SQC_DCACHE_HITS * 100) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
+          Cache Hit Rate:
+            value: AVG((((SQC_DCACHE_HITS * 100) / (SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE))
               if ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
+            unit: Pct of Peak
+            tips:
+          sL1D-L2 BW:
+            value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 100000)
+                        / (2 * ($sclk * $numSQC) * (End_Timestamp - Start_Timestamp)))
+            unit: Pct of Peak
             tips:
         comparable: false # for now
         cli_style: simple_bar
@@ -63,30 +70,24 @@ Panel Config:
             max: MAX((SQC_DCACHE_MISSES_DUPLICATE / $denom))
             unit: (Req  + $normUnit)
             tips:
-          Cache Hit:
-            avg:
-              AVG((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
+          Cache Hit Rate:
+            avg: AVG((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE)) if (((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
-            min:
-              MIN((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
+            min: MIN((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE)) if (((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
-            max:
-              MAX((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
+            max: MAX((((100 * SQC_DCACHE_HITS) / ((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE)) if (((SQC_DCACHE_HITS + SQC_DCACHE_MISSES)
               + SQC_DCACHE_MISSES_DUPLICATE) != 0) else None))
             unit: pct
             tips:
           Read Req (Total):
-            avg:
-              AVG((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
+            avg: AVG((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
               + SQC_DCACHE_REQ_READ_8) + SQC_DCACHE_REQ_READ_16) / $denom))
-            min:
-              MIN((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
+            min: MIN((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
               + SQC_DCACHE_REQ_READ_8) + SQC_DCACHE_REQ_READ_16) / $denom))
-            max:
-              MAX((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
+            max: MAX((((((SQC_DCACHE_REQ_READ_1 + SQC_DCACHE_REQ_READ_2) + SQC_DCACHE_REQ_READ_4)
               + SQC_DCACHE_REQ_READ_8) + SQC_DCACHE_REQ_READ_16) / $denom))
             unit: (Req  + $normUnit)
             tips:
@@ -138,6 +139,12 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
+          sL1D-L2 BW:
+            avg: AVG(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64)) / $denom))
+            min: MIN(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64)) / $denom))
+            max: MAX(((((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 64)) / $denom))
+            unit: (Bytes + $normUnit)
+            tips:
           Read Req:
             avg: AVG((SQC_TC_DATA_READ_REQ / $denom))
             min: MIN((SQC_TC_DATA_READ_REQ / $denom))
@@ -156,7 +163,7 @@ Panel Config:
             max: MAX((SQC_TC_DATA_ATOMIC_REQ / $denom))
             unit: (Req  + $normUnit)
             tips:
-          Stall:
+          Stall Cycles:
             avg: AVG((SQC_TC_STALL / $denom))
             min: MIN((SQC_TC_STALL / $denom))
             max: MAX((SQC_TC_STALL / $denom))

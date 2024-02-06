@@ -78,8 +78,9 @@ Panel Config:
             tips:
           VGPR:
             #alias: vgpr_
-            value: ROUND(AVG(vgpr), 0)
+            value: ROUND(AVG(Arch_VGPR), 0)
             tips:
+          # Todo: add AGPRs
           SGPR:
             #alias: sgpr_
             value: ROUND(AVG(SGPR), 0)

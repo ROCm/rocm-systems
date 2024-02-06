@@ -68,19 +68,19 @@ Panel Config:
             peak: $numCU
             pop: ((100 * $numActiveCUs) / $numCU)
             tips: 
-          SALU Utililization:
+          SALU Utilization:
             value: AVG(((100 * SQ_ACTIVE_INST_SCA) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: pct
             peak: 100
             pop: AVG(((100 * SQ_ACTIVE_INST_SCA) / (GRBM_GUI_ACTIVE * $numCU)))
             tips: 
-          VALU Utililization:
+          VALU Utilization:
             value: AVG(((100 * SQ_ACTIVE_INST_VALU) / (GRBM_GUI_ACTIVE * $numCU)))
             unit: pct
             peak: 100
             pop: AVG(((100 * SQ_ACTIVE_INST_VALU) / (GRBM_GUI_ACTIVE * $numCU)))
             tips:
-          MFMA Utililization:
+          MFMA Utilization:
             value: None # No HW module
             unit: pct
             peak: 100
@@ -164,10 +164,10 @@ Panel Config:
               + TCC_MISS_sum) != 0) else None))
             tips: 
           L2 Cache BW:
-            value: AVG(((TCC_REQ_sum * 64) / (EndNs - BeginNs)))
+            value: AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: ((($sclk / 1000) * 64) * TO_INT($L2Banks))
-            pop: ((100 * AVG(((TCC_REQ_sum * 64) / (EndNs - BeginNs))))
+            pop: ((100 * AVG(((TCC_REQ_sum * 64) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk / 1000) * 64) * TO_INT($L2Banks)))
             tips: 
           L2-Fabric Read BW:
@@ -222,10 +222,10 @@ Panel Config:
             pop: AVG(((100 * SQC_ICACHE_HITS) / (SQC_ICACHE_HITS + SQC_ICACHE_MISSES)))
             tips: 
           L1I BW:
-            value: AVG(((SQC_ICACHE_REQ / (EndNs - BeginNs)) * 64))
+            value: AVG(((SQC_ICACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))
             unit: GB/s
             peak: ((($sclk / 1000) * 64) * $numSQC)
-            pop: ((100 * AVG(((SQC_ICACHE_REQ / (EndNs - BeginNs)) * 64))) / ((($sclk
+            pop: ((100 * AVG(((SQC_ICACHE_REQ / (End_Timestamp - Start_Timestamp)) * 64))) / ((($sclk
               / 1000) * 64) * $numSQC))
             tips:
           L1I Fetch Latency:

@@ -47,7 +47,7 @@ Panel Config:
             tips:
           MFMA:
             #alias: mfma_
-            value: ROUND(AVG((SQ_INSTS_MFMA / $denom)), 0)
+            value: None # No perf counter
             tips:
           VMEM:
             #alias: vmem_
@@ -78,7 +78,7 @@ Panel Config:
             tips:
           VGPR:
             #alias: vgpr_
-            value: ROUND(AVG(vgpr), 0)
+            value: ROUND(AVG(Arch_VGPR), 0)
             tips:
           SGPR:
             #alias: sgpr_

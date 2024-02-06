@@ -18,18 +18,13 @@ Panel Config:
           peak: Peak
           pop: Pct of Peak
           tips: Tips
-        style:
-          type: simple_bar
-          range_color: [1, 100]
-          label_txt: (%)
-          xrange: [0, 110]
         metric:
           VALU FLOPs:
             value: AVG(((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16) + SQ_INSTS_VALU_TRANS_F16)
               + (2 * SQ_INSTS_VALU_FMA_F16))) + (64 * (((SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32)
               + SQ_INSTS_VALU_TRANS_F32) + (2 * SQ_INSTS_VALU_FMA_F32)))) + (64 * (((SQ_INSTS_VALU_ADD_F64
               + SQ_INSTS_VALU_MUL_F64) + SQ_INSTS_VALU_TRANS_F64) + (2 * SQ_INSTS_VALU_FMA_F64))))
-              / (EndNs - BeginNs)))
+              / (End_Timestamp - Start_Timestamp)))
             unit: GFLOP
             peak: (((($sclk * $numCU) * 64) * 2) / 1000)
             pop: ((100 * AVG(((((64 * (((SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16)

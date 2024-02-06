@@ -114,7 +114,6 @@ Panel Config:
             unit: pct
             peak: 100
             pop: AVG((((100 * SQ_ACTIVE_INST_MISC) / GRBM_GUI_ACTIVE) / $numCU))
-            unit: pct
             tips: 
           VALU Active Threads:
             value: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
@@ -182,10 +181,10 @@ Panel Config:
               + TCC_MISS_sum) != 0) else None))
             tips: 
           L2 Cache BW:
-            value: AVG(((TCC_REQ_sum * 128) / (EndNs - BeginNs)))
+            value: AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
             peak: ((($sclk / 1000) * 128) * TO_INT($L2Banks))
-            pop: ((100 * AVG(((TCC_REQ_sum * 128) / (EndNs - BeginNs))))
+            pop: ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp))))
               / ((($sclk / 1000) * 128) * TO_INT($L2Banks)))
             tips: 
           L2-Fabric Read BW:

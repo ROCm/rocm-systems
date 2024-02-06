@@ -18,9 +18,6 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
-          type: simple_bar
-          label_txt: (# of instr + $normUnit)
         metric:
           VALU:
             avg: None # No HW module
@@ -75,9 +72,6 @@ Panel Config:
           max: Max
           unit: Unit
           tips: Tips
-        style: 
-          type: simple_bar
-          label_txt: (# of instr + $normUnit)
         metric:
           INT-32:
             avg: None # No HW module
