@@ -311,6 +311,16 @@ install(
              src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
              src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
     DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
+# src/omniperf_soc
+install(
+    DIRECTORY src/omniperf_soc
+    TYPE BIN
+    PATTERN "__pycache__" EXCLUDE)
+# src/omniperf_profile
+install(
+    DIRECTORY src/omniperf_profile
+    TYPE BIN
+    PATTERN "__pycache__" EXCLUDE)
 
 # samples
 install(DIRECTORY sample TYPE DATA)
