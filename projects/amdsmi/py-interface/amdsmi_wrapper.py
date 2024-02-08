@@ -813,20 +813,20 @@ struct_amdsmi_vbios_info_t._fields_ = [
 
 amdsmi_vbios_info_t = struct_amdsmi_vbios_info_t
 
-# values for enumeration 'amdsmi_cache_flags_type_t'
-amdsmi_cache_flags_type_t__enumvalues = {
-    1: 'CACHE_FLAGS_ENABLED',
-    2: 'CACHE_FLAGS_DATA_CACHE',
-    4: 'CACHE_FLAGS_INST_CACHE',
-    8: 'CACHE_FLAGS_CPU_CACHE',
-    16: 'CACHE_FLAGS_SIMD_CACHE',
+# values for enumeration 'amdsmi_cache_properties_type_t'
+amdsmi_cache_properties_type_t__enumvalues = {
+    1: 'CACHE_PROPERTIES_ENABLED',
+    2: 'CACHE_PROPERTIES_DATA_CACHE',
+    4: 'CACHE_PROPERTIES_INST_CACHE',
+    8: 'CACHE_PROPERTIES_CPU_CACHE',
+    16: 'CACHE_PROPERTIES_SIMD_CACHE',
 }
-CACHE_FLAGS_ENABLED = 1
-CACHE_FLAGS_DATA_CACHE = 2
-CACHE_FLAGS_INST_CACHE = 4
-CACHE_FLAGS_CPU_CACHE = 8
-CACHE_FLAGS_SIMD_CACHE = 16
-amdsmi_cache_flags_type_t = ctypes.c_uint32 # enum
+CACHE_PROPERTIES_ENABLED = 1
+CACHE_PROPERTIES_DATA_CACHE = 2
+CACHE_PROPERTIES_INST_CACHE = 4
+CACHE_PROPERTIES_CPU_CACHE = 8
+CACHE_PROPERTIES_SIMD_CACHE = 16
+amdsmi_cache_properties_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_gpu_cache_info_t(Structure):
     pass
 
@@ -835,9 +835,9 @@ class struct_cache_(Structure):
 
 struct_cache_._pack_ = 1 # source:False
 struct_cache_._fields_ = [
-    ('cache_size_kb', ctypes.c_uint32),
+    ('cache_size', ctypes.c_uint32),
     ('cache_level', ctypes.c_uint32),
-    ('flags', ctypes.c_uint32),
+    ('properties', ctypes.c_uint32),
     ('max_num_cu_shared', ctypes.c_uint32),
     ('num_cache_instance', ctypes.c_uint32),
     ('reserved', ctypes.c_uint32 * 3),
@@ -2294,6 +2294,12 @@ amdsmi_get_metrics_table.argtypes = [amdsmi_processor_handle, ctypes.POINTER(str
 amdsmi_first_online_core_on_cpu_socket = _libraries['libamd_smi.so'].amdsmi_first_online_core_on_cpu_socket
 amdsmi_first_online_core_on_cpu_socket.restype = amdsmi_status_t
 amdsmi_first_online_core_on_cpu_socket.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
+amdsmi_get_cpu_family = _libraries['libamd_smi.so'].amdsmi_get_cpu_family
+amdsmi_get_cpu_family.restype = amdsmi_status_t
+amdsmi_get_cpu_family.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
+amdsmi_get_cpu_model = _libraries['libamd_smi.so'].amdsmi_get_cpu_model
+amdsmi_get_cpu_model.restype = amdsmi_status_t
+amdsmi_get_cpu_model.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
 amdsmi_get_esmi_err_msg = _libraries['libamd_smi.so'].amdsmi_get_esmi_err_msg
 amdsmi_get_esmi_err_msg.restype = amdsmi_status_t
 amdsmi_get_esmi_err_msg.argtypes = [amdsmi_status_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
@@ -2415,9 +2421,9 @@ __all__ = \
     'AMDSMI_VRAM_VENDOR__WINBOND', 'AMDSMI_XGMI_STATUS_ERROR',
     'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
     'AMDSMI_XGMI_STATUS_NO_ERRORS', 'AMD_APU', 'AMD_CPU',
-    'AMD_CPU_CORE', 'AMD_GPU', 'CACHE_FLAGS_CPU_CACHE',
-    'CACHE_FLAGS_DATA_CACHE', 'CACHE_FLAGS_ENABLED',
-    'CACHE_FLAGS_INST_CACHE', 'CACHE_FLAGS_SIMD_CACHE',
+    'AMD_CPU_CORE', 'AMD_GPU', 'CACHE_PROPERTIES_CPU_CACHE',
+    'CACHE_PROPERTIES_DATA_CACHE', 'CACHE_PROPERTIES_ENABLED',
+    'CACHE_PROPERTIES_INST_CACHE', 'CACHE_PROPERTIES_SIMD_CACHE',
     'CLK_TYPE_DCEF', 'CLK_TYPE_DCLK0', 'CLK_TYPE_DCLK1',
     'CLK_TYPE_DF', 'CLK_TYPE_FIRST', 'CLK_TYPE_GFX', 'CLK_TYPE_MEM',
     'CLK_TYPE_PCIE', 'CLK_TYPE_SOC', 'CLK_TYPE_SYS', 'CLK_TYPE_VCLK0',
@@ -2465,7 +2471,7 @@ __all__ = \
     'VRAM_TYPE_GDDR6', 'VRAM_TYPE_HBM', 'VRAM_TYPE_UNKNOWN',
     'VRAM_TYPE__MAX', 'WR_BW0', 'amd_metrics_table_header_t',
     'amdsmi_asic_info_t', 'amdsmi_bdf_t', 'amdsmi_bit_field_t',
-    'amdsmi_board_info_t', 'amdsmi_cache_flags_type_t',
+    'amdsmi_board_info_t', 'amdsmi_cache_properties_type_t',
     'amdsmi_card_form_factor_t', 'amdsmi_clk_info_t',
     'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
     'amdsmi_container_types_t', 'amdsmi_counter_command_t',
@@ -2490,8 +2496,9 @@ __all__ = \
     'amdsmi_get_cpu_current_xgmi_bw', 'amdsmi_get_cpu_ddr_bw',
     'amdsmi_get_cpu_dimm_power_consumption',
     'amdsmi_get_cpu_dimm_temp_range_and_refresh_rate',
-    'amdsmi_get_cpu_dimm_thermal_sensor', 'amdsmi_get_cpu_fclk_mclk',
-    'amdsmi_get_cpu_hsmp_proto_ver', 'amdsmi_get_cpu_prochot_status',
+    'amdsmi_get_cpu_dimm_thermal_sensor', 'amdsmi_get_cpu_family',
+    'amdsmi_get_cpu_fclk_mclk', 'amdsmi_get_cpu_hsmp_proto_ver',
+    'amdsmi_get_cpu_model', 'amdsmi_get_cpu_prochot_status',
     'amdsmi_get_cpu_pwr_svi_telemetry_all_rails',
     'amdsmi_get_cpu_smu_fw_version',
     'amdsmi_get_cpu_socket_c0_residency',

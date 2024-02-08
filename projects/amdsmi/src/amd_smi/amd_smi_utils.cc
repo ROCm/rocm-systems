@@ -522,6 +522,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(uint32_t device_id, char 
             break;
         case 0x73a1:
         case 0x73ae:
+        case 0x73bf:
             strcpy(market_name, "NAVI21");
             break;
         case 0x74b4:

@@ -445,22 +445,21 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(
 
     info->num_cache_types = rsmi_info.num_cache_types;
     for (unsigned int i =0; i < rsmi_info.num_cache_types; i++) {
-        info->cache[i].cache_size_kb = rsmi_info.cache[i].cache_size_kb;
+        info->cache[i].cache_size = rsmi_info.cache[i].cache_size_kb;
         info->cache[i].cache_level = rsmi_info.cache[i].cache_level;
         info->cache[i].max_num_cu_shared = rsmi_info.cache[i].max_num_cu_shared;
         info->cache[i].num_cache_instance = rsmi_info.cache[i].num_cache_instance;
         // convert from sysfs type to CRAT type(HSA Cache Affinity type)
-        info->cache[i].flags = 0;
+        info->cache[i].properties = 0;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_DATA)
-            info->cache[i].flags |= CACHE_FLAGS_DATA_CACHE;
+            info->cache[i].properties |= CACHE_PROPERTIES_DATA_CACHE;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_INSTRUCTION)
-            info->cache[i].flags |= CACHE_FLAGS_INST_CACHE;
+            info->cache[i].properties |= CACHE_PROPERTIES_INST_CACHE;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_CPU)
-            info->cache[i].flags |= CACHE_FLAGS_CPU_CACHE;
+            info->cache[i].properties |= CACHE_PROPERTIES_CPU_CACHE;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_HSACU)
-            info->cache[i].flags |= CACHE_FLAGS_SIMD_CACHE;
+            info->cache[i].properties |= CACHE_PROPERTIES_SIMD_CACHE;
     }
-
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -3078,6 +3077,38 @@ amdsmi_status_t amdsmi_first_online_core_on_cpu_socket(amdsmi_processor_handle p
         return amdsmi_errno_to_esmi_status(status);
 
     *pcore_ind = online_core;
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cpu_family(uint32_t *cpu_family)
+{
+    amdsmi_status_t status;
+    uint32_t family;
+
+    AMDSMI_CHECK_INIT();
+
+    status = amd::smi::AMDSmiSystem::getInstance().get_cpu_family(&family);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    *cpu_family = family;
+
+    return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_cpu_model(uint32_t *cpu_model)
+{
+    amdsmi_status_t status;
+    uint32_t model;
+
+    AMDSMI_CHECK_INIT();
+
+    status = amd::smi::AMDSmiSystem::getInstance().get_cpu_model(&model);
+    if (status != AMDSMI_STATUS_SUCCESS)
+        return amdsmi_errno_to_esmi_status(status);
+
+    *cpu_model = model;
 
     return AMDSMI_STATUS_SUCCESS;
 }

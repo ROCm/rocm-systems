@@ -1970,6 +1970,18 @@ class AMDSMICommands():
             if (args.cpu_metrics_table):
                 static_dict["metrics_table"] = {}
                 try:
+                    cpu_fam = amdsmi_interface.amdsmi_get_cpu_family()
+                    static_dict["metrics_table"]["cpu_family"] = cpu_fam
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    static_dict["metrics_table"]["cpu_family"] = "N/A"
+                    logging.debug("Failed to get cpu family | %s", e.get_error_info())
+                try:
+                    cpu_mod = amdsmi_interface.amdsmi_get_cpu_model()
+                    static_dict["metrics_table"]["cpu_model"] = cpu_mod
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    static_dict["metrics_table"]["cpu_model"] = "N/A"
+                    logging.debug("Failed to get cpu model | %s", e.get_error_info())
+                try:
                     metrics_table = amdsmi_interface.amdsmi_get_metrics_table(args.cpu)
                     static_dict["metrics_table"]["response"] = metrics_table
                 except amdsmi_exception.AmdSmiLibraryException as e:

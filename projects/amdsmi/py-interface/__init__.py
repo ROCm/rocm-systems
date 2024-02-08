@@ -72,6 +72,8 @@ try:
     from .amdsmi_interface import amdsmi_get_metrics_table_version
     from .amdsmi_interface import amdsmi_get_metrics_table
     from .amdsmi_interface import amdsmi_first_online_core_on_cpu_socket
+    from .amdsmi_interface import amdsmi_get_cpu_family
+    from .amdsmi_interface import amdsmi_get_cpu_model
 except AttributeError:
     pass
 

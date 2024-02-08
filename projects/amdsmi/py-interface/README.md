@@ -472,11 +472,26 @@ Input parameters:
 * `processor_handle` device which to query
 
 Output: Dictionary of Dictionaries containing cache information
+Schema: { cache_index:
+            {
+            cache_properties:
+                {
+                    "type": "array",
+                    "items": {
+                         "type": "string"
+                    }
+                },
+            cache_size: {"type" : "number"},
+            cache_level: {"type" : "number"},
+            max_num_cu_shared: {"type" : "number"},
+            num_cache_instance: {"type" : "number"}
+            }
+        }
 
 Field | Description
 ---|---
-`cache_index` | cache index - up to 10 caches will be available
-`cache_flags` | list of up to 4 cache property type strings. Ex. data ("DATA_CACHE"), instruction ("INST_CACHE"), CPU ("CPU_CACHE"), or SIMD ("SIMD_CACHE").
+`cache_index` | cache index is a string of format "cache_#" up to 10 caches will be available
+`cache_properties` | list of up to 4 cache property type strings. Ex. data ("DATA_CACHE"), instruction ("INST_CACHE"), CPU ("CPU_CACHE"), or SIMD ("SIMD_CACHE").
 `cache_size` | size of cache in KB
 `cache_level` | level of cache
 `max_num_cu_shared` |  max number of compute units shared
@@ -2091,7 +2106,7 @@ Output: Dictionary with fields
 `average_umc_activity` | Average umc (Universal Memory Controller) activity | %
 `average_mm_activity` | Average mm (multimedia) engine activity | %
 `average_socket_power` | Average socket power | W
-`energy_accumulator` | Energy accumulated with a 15.3 uJ resolution over 1ns | uJ 
+`energy_accumulator` | Energy accumulated with a 15.3 uJ resolution over 1ns | uJ
 `system_clock_counter` | System clock counter | ns
 `average_gfxclk_frequency` | Average gfx clock frequency | MHz
 `average_socclk_frequency` | Average soc clock frequency | MHz
@@ -2119,7 +2134,7 @@ Output: Dictionary with fields
 `voltage_soc` | soc voltage | mV
 `voltage_gfx` | gfx voltage | mV
 `voltage_mem` | mem voltage | mV
-`indep_throttle_status` | ASIC independent throttle status (see drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h for bit flags) | 
+`indep_throttle_status` | ASIC independent throttle status (see drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h for bit flags) |
 `current_socket_power` | Current socket power (also known as instant socket power) | W
 `vcn_activity` | List of VCN encode/decode engine utilization per AID | %
 `gfxclk_lock_status` | Clock lock status. Each bit corresponds to clock instance. |
@@ -6020,6 +6035,46 @@ try:
         for processor in processor_handles:
             pcore_ind = amdsmi_first_online_core_on_cpu_socket(processor)
             print(pcore_ind)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_family
+
+Description: Get cpu family.
+
+Output: cpu family
+
+Exceptions that can be thrown by `amdsmi_get_cpu_family` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+     cpu_family = amdsmi_get_cpu_family()
+     print(cpu_family)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_cpu_model
+
+Description: Get cpu model.
+
+Output: cpu model
+
+Exceptions that can be thrown by `amdsmi_get_cpu_model` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+     cpu_model = amdsmi_get_cpu_model()
+     print(cpu_model)
 except AmdSmiException as e:
     print(e)
 ```

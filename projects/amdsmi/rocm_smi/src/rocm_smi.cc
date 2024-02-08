@@ -738,7 +738,7 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   ret = GetDevValueVec(type, dv_ind, &val_vec);
   if (val_vec.size() < 2 ) ret = RSMI_STATUS_FILE_ERROR;
 
-  if (ret == RSMI_STATUS_FILE_ERROR || val_vec.size() != 2) {
+  if (ret == RSMI_STATUS_FILE_ERROR) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
        << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
        << "-> reporting RSMI_STATUS_NOT_SUPPORTED";

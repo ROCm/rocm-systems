@@ -2681,4 +2681,4 @@ GENERATE_LEGEND        = YES
 
 DOT_CLEANUP            = YES
 
-ALIASES += usecase{1}="\xrefitem usecase \"Use cases\" \"Use cases\" \1"
+ALIASES += platform{1}="\xrefitem platform \"Platform\" \"Platforms\" \1"
