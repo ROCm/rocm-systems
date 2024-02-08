@@ -191,7 +191,7 @@ def update_line_graph(
 
 def reset_input_filters(workloads, max_points, verbosity):
     sortOptions = ["Alphabetical", "Max Speedup", "Min Speedup", "Impact"]
-    if type(workloads) == str:
+    if isinstance(workloads, str):
         workloads = [workloads]
 
     input_filters = [
@@ -241,9 +241,11 @@ def build_causal_layout(
     ]
 
     app.layout = html.Div(
-        style={"backgroundColor": "rgb(255, 255, 255)"}
-        if light_mode
-        else {"backgroundColor": "rgb(50, 50, 50)"}
+        style=(
+            {"backgroundColor": "rgb(255, 255, 255)"}
+            if light_mode
+            else {"backgroundColor": "rgb(50, 50, 50)"}
+        )
     )
 
     line_graph1, line_graph2 = build_line_graph()

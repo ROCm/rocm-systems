@@ -69,6 +69,14 @@ void set_state(State);
 uint32_t
 device_count();
 
+struct settings
+{
+    bool busy      = true;
+    bool temp      = true;
+    bool power     = true;
+    bool mem_usage = true;
+};
+
 struct data
 {
     using msec_t    = std::chrono::milliseconds;

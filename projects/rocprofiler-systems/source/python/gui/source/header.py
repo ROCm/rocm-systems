@@ -186,7 +186,7 @@ def get_header(dropDownMenuItems, input_filters):
     ul = html.Div(
         id="nav-center",
         className="nav-center",
-        children=filter_children
+        children=filter_children,
         # [
         # html.Li(className="filter", children=filter_children),
         # refresh(),

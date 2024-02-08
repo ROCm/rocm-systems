@@ -44,7 +44,9 @@
 
 #include <timemory/backends/threading.hpp>
 #include <timemory/components/timing/backends.hpp>
+#include <timemory/mpl/type_traits.hpp>
 #include <timemory/units.hpp>
+#include <timemory/utility/delimit.hpp>
 #include <timemory/utility/locking.hpp>
 
 #include <rocm_smi/rocm_smi.h>
@@ -58,8 +60,8 @@
 #include <sys/resource.h>
 #include <thread>
 
-#define OMNITRACE_ROCM_SMI_CALL(ERROR_CODE)                                              \
-    ::omnitrace::rocm_smi::check_error(ERROR_CODE, __FILE__, __LINE__)
+#define OMNITRACE_ROCM_SMI_CALL(...)                                                     \
+    ::omnitrace::rocm_smi::check_error(__FILE__, __LINE__, __VA_ARGS__)
 
 namespace omnitrace
 {
@@ -70,6 +72,13 @@ using sampler_instances = thread_data<bundle_t, category::rocm_smi>;
 
 namespace
 {
+auto&
+get_settings(uint32_t _dev_id)
+{
+    static auto _v = std::unordered_map<uint32_t, rocm_smi::settings>{};
+    return _v[_dev_id];
+}
+
 bool&
 is_initialized()
 {
@@ -78,9 +87,16 @@ is_initialized()
 }
 
 void
-check_error(rsmi_status_t _code, const char* _file, int _line)
+check_error(const char* _file, int _line, rsmi_status_t _code, bool* _option = nullptr)
 {
-    if(_code == RSMI_STATUS_SUCCESS) return;
+    if(_code == RSMI_STATUS_SUCCESS)
+        return;
+    else if(_code == RSMI_STATUS_NOT_SUPPORTED && _option)
+    {
+        *_option = false;
+        return;
+    }
+
     const char* _msg = nullptr;
     auto        _err = rsmi_status_string(_code, &_msg);
     if(_err != RSMI_STATUS_SUCCESS)
@@ -120,24 +136,29 @@ data::sample(uint32_t _dev_id)
     m_dev_id = _dev_id;
     m_ts     = _ts;
 
-#define OMNITRACE_RSMI_GET(FUNCTION, ...)                                                \
-    try                                                                                  \
+#define OMNITRACE_RSMI_GET(OPTION, FUNCTION, ...)                                        \
+    if(OPTION)                                                                           \
     {                                                                                    \
-        OMNITRACE_ROCM_SMI_CALL(FUNCTION(__VA_ARGS__));                                  \
-    } catch(std::runtime_error & _e)                                                     \
-    {                                                                                    \
-        OMNITRACE_VERBOSE_F(                                                             \
-            0, "[%s] Exception: %s. Disabling future samples from rocm-smi...\n",        \
-            #FUNCTION, _e.what());                                                       \
-        get_state().store(State::Disabled);                                              \
+        try                                                                              \
+        {                                                                                \
+            OMNITRACE_ROCM_SMI_CALL(FUNCTION(__VA_ARGS__), &OPTION);                     \
+        } catch(std::runtime_error & _e)                                                 \
+        {                                                                                \
+            OMNITRACE_VERBOSE_F(                                                         \
+                0, "[%s] Exception: %s. Disabling future samples from rocm-smi...\n",    \
+                #FUNCTION, _e.what());                                                   \
+            get_state().store(State::Disabled);                                          \
+        }                                                                                \
     }
 
-    OMNITRACE_RSMI_GET(rsmi_dev_busy_percent_get, _dev_id, &m_busy_perc);
-    OMNITRACE_RSMI_GET(rsmi_dev_temp_metric_get, _dev_id, RSMI_TEMP_TYPE_EDGE,
-                       RSMI_TEMP_CURRENT, &m_temp);
-    OMNITRACE_RSMI_GET(rsmi_dev_power_ave_get, _dev_id, 0, &m_power);
-    OMNITRACE_RSMI_GET(rsmi_dev_memory_usage_get, _dev_id, RSMI_MEM_TYPE_VRAM,
-                       &m_mem_usage);
+    OMNITRACE_RSMI_GET(get_settings(m_dev_id).busy, rsmi_dev_busy_percent_get, _dev_id,
+                       &m_busy_perc);
+    OMNITRACE_RSMI_GET(get_settings(m_dev_id).temp, rsmi_dev_temp_metric_get, _dev_id,
+                       RSMI_TEMP_TYPE_EDGE, RSMI_TEMP_CURRENT, &m_temp);
+    OMNITRACE_RSMI_GET(get_settings(m_dev_id).power, rsmi_dev_power_ave_get, _dev_id, 0,
+                       &m_power);
+    OMNITRACE_RSMI_GET(get_settings(m_dev_id).mem_usage, rsmi_dev_memory_usage_get,
+                       _dev_id, RSMI_MEM_TYPE_VRAM, &m_mem_usage);
 
 #undef OMNITRACE_RSMI_GET
 }
@@ -249,7 +270,19 @@ data::post_process(uint32_t _dev_id)
     OMNITRACE_CI_THROW(!_thread_info, "Missing thread info for thread 0");
     if(!_thread_info) return;
 
+    auto _settings = get_settings(_dev_id);
+
     auto _process_perfetto = [&]() {
+        auto _idx = std::array<uint64_t, 4>{};
+        {
+            _idx.fill(_idx.size());
+            uint64_t nidx = 0;
+            if(_settings.busy) _idx.at(0) = nidx++;
+            if(_settings.temp) _idx.at(1) = nidx++;
+            if(_settings.power) _idx.at(2) = nidx++;
+            if(_settings.mem_usage) _idx.at(3) = nidx++;
+        }
+
         for(auto& itr : _rocm_smi)
         {
             using counter_track = perfetto_counter_track<data>;
@@ -259,10 +292,15 @@ data::post_process(uint32_t _dev_id)
                 auto addendum = [&](const char* _v) {
                     return JOIN(" ", "GPU", _v, JOIN("", '[', _dev_id, ']'), "(S)");
                 };
-                counter_track::emplace(_dev_id, addendum("Busy"), "%");
-                counter_track::emplace(_dev_id, addendum("Temperature"), "deg C");
-                counter_track::emplace(_dev_id, addendum("Power"), "watts");
-                counter_track::emplace(_dev_id, addendum("Memory Usage"), "megabytes");
+
+                if(_settings.busy) counter_track::emplace(_dev_id, addendum("Busy"), "%");
+                if(_settings.temp)
+                    counter_track::emplace(_dev_id, addendum("Temperature"), "deg C");
+                if(_settings.power)
+                    counter_track::emplace(_dev_id, addendum("Power"), "watts");
+                if(_settings.mem_usage)
+                    counter_track::emplace(_dev_id, addendum("Memory Usage"),
+                                           "megabytes");
             }
             uint64_t _ts = itr.m_ts;
             if(!_thread_info->is_valid_time(_ts)) continue;
@@ -271,11 +309,19 @@ data::post_process(uint32_t _dev_id)
             double _temp  = itr.m_temp / 1.0e3;
             double _power = itr.m_power / 1.0e6;
             double _usage = itr.m_mem_usage / static_cast<double>(units::megabyte);
-            TRACE_COUNTER("device_busy", counter_track::at(_dev_id, 0), _ts, _busy);
-            TRACE_COUNTER("device_temp", counter_track::at(_dev_id, 1), _ts, _temp);
-            TRACE_COUNTER("device_power", counter_track::at(_dev_id, 2), _ts, _power);
-            TRACE_COUNTER("device_memory_usage", counter_track::at(_dev_id, 3), _ts,
-                          _usage);
+
+            if(_settings.busy)
+                TRACE_COUNTER("device_busy", counter_track::at(_dev_id, _idx.at(0)), _ts,
+                              _busy);
+            if(_settings.temp)
+                TRACE_COUNTER("device_temp", counter_track::at(_dev_id, _idx.at(1)), _ts,
+                              _temp);
+            if(_settings.power)
+                TRACE_COUNTER("device_power", counter_track::at(_dev_id, _idx.at(2)), _ts,
+                              _power);
+            if(_settings.mem_usage)
+                TRACE_COUNTER("device_memory_usage",
+                              counter_track::at(_dev_id, _idx.at(3)), _ts, _usage);
         }
     };
 
@@ -287,6 +333,11 @@ data::post_process(uint32_t _dev_id)
     // timemory + MPI here causes hangs for some reason. it is unclear why
     using samp_bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
                                                  sampling_gpu_power, sampling_gpu_memory>;
+
+    trait::runtime_enabled<sampling_gpu_busy>::set(_settings.busy);
+    trait::runtime_enabled<sampling_gpu_temp>::set(_settings.temp);
+    trait::runtime_enabled<sampling_gpu_power>::set(_settings.power);
+    trait::runtime_enabled<sampling_gpu_memory>::set(_settings.mem_usage);
 
     using entry_t     = critical_trace::entry;
     auto _gpu_entries = critical_trace::get_entries(
@@ -391,6 +442,8 @@ setup()
 
     data::device_list = _devices;
 
+    auto _metrics = get_setting_value<std::string>("OMNITRACE_ROCM_SMI_METRICS");
+
     try
     {
         for(auto itr : _devices)
@@ -398,6 +451,30 @@ setup()
             uint16_t dev_id = 0;
             OMNITRACE_ROCM_SMI_CALL(rsmi_dev_id_get(itr, &dev_id));
             // dev_id holds the device ID of device i, upon a successful call
+
+            if(_metrics && !_metrics->empty())
+            {
+                using key_pair_t     = std::pair<std::string_view, bool&>;
+                const auto supported = std::unordered_map<std::string_view, bool&>{
+                    key_pair_t{ "busy", get_settings(dev_id).busy },
+                    key_pair_t{ "temp", get_settings(dev_id).temp },
+                    key_pair_t{ "power", get_settings(dev_id).power },
+                    key_pair_t{ "mem_usage", get_settings(dev_id).mem_usage },
+                };
+
+                get_settings(dev_id) = { false, false, false, false };
+                for(const auto& metric : tim::delimit(*_metrics, ",;:\t\n "))
+                {
+                    auto iitr = supported.find(metric);
+                    if(iitr == supported.end())
+                        OMNITRACE_FAIL_F("unsupported rocm-smi metric: %s\n",
+                                         metric.c_str());
+
+                    OMNITRACE_VERBOSE_F(1, "Enabling rocm-smi metric '%s'\n",
+                                        metric.c_str());
+                    iitr->second = true;
+                }
+            }
         }
 
         is_initialized() = true;

@@ -135,7 +135,7 @@ PYBIND11_MODULE(libpyomnitrace, omni)
             }
             if(!_cmd_line.empty())
             {
-                _cmd_line.substr(_cmd_line.find_first_not_of(' '));
+                _cmd_line = _cmd_line.substr(_cmd_line.find_first_not_of(' '));
                 tim::set_env("OMNITRACE_COMMAND_LINE", _cmd_line, 0);
             }
             omnitrace_init("trace", false, _cmd.c_str());

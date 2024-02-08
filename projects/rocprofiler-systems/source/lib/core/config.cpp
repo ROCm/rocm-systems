@@ -647,6 +647,11 @@ configure_settings(bool _init)
         "is collected on every available device",
         "", "rocprofiler", "rocm", "hardware_counters");
 
+    OMNITRACE_CONFIG_SETTING(std::string, "OMNITRACE_ROCM_SMI_METRICS",
+                             "rocm-smi metrics to collect: busy, temp, power, mem_usage",
+                             "busy,temp,power,mem_usage", "backend", "rocm_smi", "rocm",
+                             "process_sampling", "advanced");
+
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CRITICAL_TRACE_DEBUG",
                              "Enable debugging for critical trace", _omnitrace_debug,
                              "debugging", "critical_trace", "advanced");
