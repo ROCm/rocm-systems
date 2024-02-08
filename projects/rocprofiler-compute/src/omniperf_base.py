@@ -27,22 +27,9 @@ import sys
 import os
 from pathlib import Path
 import shutil
-<<<<<<< HEAD
-from utils.specs import generate_machine_specs
-from utils.utils import (
-    demarcate,
-    trace_logger,
-    get_version,
-    get_version_display,
-    detect_rocprof,
-    error,
-    get_submodules,
-)
-=======
-from utils.specs import get_machine_specs
+from utils.specs import MachineSpecs, generate_machine_specs
 from utils.utils import demarcate, get_version, get_version_display, detect_rocprof, get_submodules, console_log, console_error
 from utils.logger import setup_logging
->>>>>>> All logging should use call new functions
 from argparser import omniarg_parser
 import config
 import pandas as pd
@@ -75,9 +62,9 @@ class Omniperf:
         self.__supported_archs = SUPPORTED_ARCHS
         self.__mspec: MachineSpecs = None  # to be initalized in load_soc_specs()
 
-        setup_logging()
         self.set_version()
         self.parse_args()
+        setup_logging(self.__args.verbose)
 
         self.__mode = self.__args.mode
 
@@ -85,15 +72,9 @@ class Omniperf:
             self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
-<<<<<<< HEAD
-
-        logging.info("Execution mode = %s" % self.__mode)
-
-=======
         
         console_log("Execution mode = %s" % self.__mode)
    
->>>>>>> All logging should use call new functions
     def print_graphic(self):
         """Log program name as ascii art to terminal."""
         ascii_art = r"""
@@ -103,38 +84,8 @@ class Omniperf:
 | |_| | | | | | | | | | | |_) |  __/ |  |  _|
  \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
                         |_|                  
-<<<<<<< HEAD
 """
-        logging.info(ascii_art)
-
-    def setup_logging(self):
-        # register a trace level logger
-        logging.TRACE = logging.DEBUG - 5
-        logging.addLevelName(logging.TRACE, "TRACE")
-        setattr(logging, "TRACE", logging.TRACE)
-        setattr(logging, "trace", trace_logger)
-
-        # demonstrate override of default loglevel via env variable
-        loglevel = logging.INFO
-        if "OMNIPERF_LOGLEVEL" in os.environ.keys():
-            loglevel = os.environ["OMNIPERF_LOGLEVEL"]
-            if loglevel in {"DEBUG", "debug"}:
-                loglevel = logging.DEBUG
-            elif loglevel in {"TRACE", "trace"}:
-                loglevel = logging.TRACE
-            elif loglevel in {"INFO", "info"}:
-                loglevel = logging.INFO
-            elif loglevel in {"ERROR", "error"}:
-                loglevel = logging.ERROR
-            else:
-                print("Ignoring unsupported OMNIPERF_LOGLEVEL setting (%s)" % loglevel)
-                sys.exit(1)
-
-        logging.basicConfig(format="%(message)s", level=loglevel, stream=sys.stdout)
-=======
-'''
         print(ascii_art)
->>>>>>> All logging should use call new functions
 
     def get_mode(self):
         return self.__mode
@@ -146,7 +97,7 @@ class Omniperf:
             vData["version"], vData["sha"], vData["mode"]
         )
         return
-
+    
     def detect_profiler(self):
         if (
             self.__args.lucky == True
@@ -164,18 +115,10 @@ class Omniperf:
             elif str(rocprof_cmd).endswith("rocprofv2"):
                 self.__profiler_mode = "rocprofv2"
             else:
-<<<<<<< HEAD
-                error(
-                    "Incompatible profiler: %s. Supported profilers include: %s"
-                    % (rocprof_cmd, get_submodules("omniperf_profile"))
-                )
-=======
                 console_error("Incompatible profiler: %s. Supported profilers include: %s" % (rocprof_cmd, get_submodules('omniperf_profile')))
-
->>>>>>> All logging should use call new functions
-
         return
 
+    
     def detect_analyze(self):
         if self.__args.gui:
             self.__analyze_mode = "web_ui"
@@ -195,29 +138,13 @@ class Omniperf:
 
         # NB: This checker is a bit redundent. We already check this in specs module
         if arch not in self.__supported_archs.keys():
-<<<<<<< HEAD
-            error("%s is an unsupported SoC" % arch)
+            console_error("%s is an unsupported SoC" % arch)
 
         soc_module = importlib.import_module("omniperf_soc.soc_" + arch)
         soc_class = getattr(soc_module, arch + "_soc")
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
         return
-=======
-            console_error("%s is an unsupported SoC" % arch)
-        else:
-            self.__soc_name.add(target)
-            if hasattr(self.__args, 'target'):
-                self.__args.target = target
 
-            soc_module = importlib.import_module('omniperf_soc.soc_'+arch)
-            soc_class = getattr(soc_module, arch+'_soc')
-            self.__soc[arch] = soc_class(self.__args)
-
-        console_log("SoC = %s" % self.__soc_name)
-        return arch
->>>>>>> All logging should use call new functions
-
-    @demarcate
     def parse_args(self):
         parser = argparse.ArgumentParser(
             description="Command line interface for AMD's GPU profiler, Omniperf",

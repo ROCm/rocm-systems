@@ -39,8 +39,9 @@ def main():
         error(f"Error setting locale: {e}")
 
     omniperf = Omniperf()
+    
     mode = omniperf.get_mode()
-
+    
     # major omniperf execution modes
     if mode == "profile":
         omniperf.run_profiler()
