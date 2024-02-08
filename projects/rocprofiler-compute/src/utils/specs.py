@@ -297,7 +297,7 @@ def get_machine_specs(devicenum):
     device = rf"^\s*{devicenum}(.*)"
 
     hostname = socket.gethostname()
-    sbios = (
+    sbios = str(
         path("/sys/class/dmi/id/bios_vendor").read_text().strip()
         + path("/sys/class/dmi/id/bios_version").read_text().strip()
     )
