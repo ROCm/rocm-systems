@@ -364,12 +364,16 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     case RDC_FI_POWER_USAGE:
-      value->status = rsmi_dev_power_ave_get(gpu_index, RSMI_TEMP_CURRENT, &i64);
+    {
+      RSMI_POWER_TYPE power_type = RSMI_CURRENT_POWER;
+      // below call should handle both socket power and regular power
+      value->status = rsmi_dev_power_get(gpu_index, &i64, &power_type);
       value->type = INTEGER;
       if (value->status == RSMI_STATUS_SUCCESS) {
         value->value.l_int = static_cast<int64_t>(i64);
       }
       break;
+    }
     case RDC_FI_GPU_CLOCK:
     case RDC_FI_MEM_CLOCK:
       rsmi_frequencies_t f;
@@ -403,6 +407,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         sensor_type = RSMI_TEMP_TYPE_MEMORY;
       }
       value->status = rsmi_dev_temp_metric_get(gpu_index, sensor_type, RSMI_TEMP_CURRENT, &val_i64);
+
+      // fallback to hotspot temperature as some card may not have edge temperature.
+      if (sensor_type == RSMI_TEMP_TYPE_EDGE
+            && value->status == RSMI_STATUS_NOT_SUPPORTED) {
+        sensor_type = RSMI_TEMP_TYPE_JUNCTION;
+        value->status = rsmi_dev_temp_metric_get(gpu_index, sensor_type,
+            RSMI_TEMP_CURRENT, &val_i64);
+      }
 
       value->type = INTEGER;
       if (value->status == RSMI_STATUS_SUCCESS) {

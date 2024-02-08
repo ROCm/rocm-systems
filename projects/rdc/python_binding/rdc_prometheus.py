@@ -85,7 +85,7 @@ def get_field_ids(args):
 
     if len(field_id_str)> 0 :
         for f in field_id_str:
-            field_id = rdc.get_field_id_from_name(f)
+            field_id = rdc.get_field_id_from_name(str.encode(f))
             if field_id.value == rdc_field_t.RDC_FI_INVALID:
                 print("Invalid field '%s' will be ignored." % (f))
             else:

@@ -65,7 +65,7 @@ def config_func(config):
         if key == 'field_ids':
             field_ids = []
             for f in node.values:
-                field_id = rdc.get_field_id_from_name(f)
+                field_id = rdc.get_field_id_from_name(str.encode(f))
                 if field_id.value == rdc_field_t.RDC_FI_INVALID:
                     print("Invalid field '%s' will be ignored." % (f))
                 else:
