@@ -63,22 +63,38 @@ rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  i
                                             size_t* pos) ROCPROFILER_NONNULL(3);
 
 /**
- * @brief Return information about the dimension for a specified counter. This call
- *        is primary for future use not related to this alpha since the only dimension
- *        supported is 0 (flat array without dimension).
+ * @brief Callback that gives a list of available dimensions for a counter
+ *
+ * @param [in] id Counter id the dimension data is for
+ * @param [in] dim_info An array of dimensions for the counter
+ *      @ref rocprofiler_iterate_counter_dimensions was called on.
+ * @param [in] num_dims Number of dimensions
+ * @param [in] user_data User data supplied by
+ *      @ref rocprofiler_iterate_agent_supported_counters
+ */
+typedef rocprofiler_status_t (*rocprofiler_available_dimensions_cb_t)(
+    rocprofiler_counter_id_t                   id,
+    const rocprofiler_record_dimension_info_t* dim_info,
+    size_t                                     num_dims,
+    void*                                      user_data);
+
+/**
+ * @brief Return information about the dimensions that exists for a specific counter
+ *        and the extent of each dimension.
  *
  * @param [in] id counter id to query dimension info for.
- * @param [in]  dim dimension (currently only 0 is allowed)
- * @param [out] info info on the dimension (name, instance_size)
+ * @param [in] info_cb Callback to return dimension information for counter
+ * @param [in] user_data data to pass into the callback
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if dimension exists
- * @retval ROCPROFILER_STATUS_ERROR if the dimension does not
+ * @retval ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED if HSA is not loaded when this is called
+ * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter is not found
+ * @retval ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND if counter does not have this dimension
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_record_dimension_info(rocprofiler_counter_id_t             id,
-                                        rocprofiler_counter_dimension_id_t   dim,
-                                        rocprofiler_record_dimension_info_t* info)
-    ROCPROFILER_NONNULL(3);
+rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
+                                       rocprofiler_available_dimensions_cb_t info_cb,
+                                       void*                                 user_data);
 
 /**
  * @brief Query Counter name. Name is a pointer controlled by rocprofiler and

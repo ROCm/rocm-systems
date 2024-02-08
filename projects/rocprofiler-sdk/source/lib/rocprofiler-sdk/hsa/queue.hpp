@@ -156,10 +156,14 @@ public:
           AmdExtTable        ext_api,
           hsa_queue_t**      queue);
 
-    ~Queue();
+    Queue(const AgentCache& agent)
+    : _agent(agent)
+    {}
 
-    const hsa_queue_t* intercept_queue() const { return _intercept_queue; };
-    const AgentCache&  get_agent() const { return _agent; }
+    virtual ~Queue();
+
+    const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };
+    virtual const AgentCache& get_agent() const { return _agent; }
 
     void create_signal(uint32_t attribute, hsa_signal_t* signal) const;
     void signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const;
@@ -167,7 +171,7 @@ public:
     template <typename FuncT>
     void signal_callback(FuncT&& func) const;
 
-    rocprofiler_queue_id_t get_id() const;
+    virtual rocprofiler_queue_id_t get_id() const;
 
     // Fast check to see if we have any callbacks we need to notify
     int get_notifiers() const { return _notifiers; }

@@ -25,6 +25,12 @@
 #include <fmt/core.h>
 #include <glog/logging.h>
 
+#include <rocprofiler-sdk/fwd.h>
+
+#include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+
 namespace rocprofiler
 {
 namespace aql
@@ -59,6 +65,53 @@ get_block_counters(hsa_agent_t agent, const hsa_ven_amd_aqlprofile_event_t& even
                                              static_cast<int64_t>(event.block_name)));
     }
     return max_block_counters;
+}
+
+rocprofiler_status_t
+set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
+                       hsa_agent_t                        agent,
+                       hsa_ven_amd_aqlprofile_event_t     event,
+                       uint32_t                           sample_id)
+{
+    auto callback =
+        [](int, int sid, int, int coordinate, const char*, void* userdata) -> hsa_status_t {
+        if(const auto* rocprof_id =
+               rocprofiler::common::get_val(counters::aqlprofile_id_to_rocprof_instance(), sid))
+        {
+            counters::set_dim_in_rec(*static_cast<rocprofiler_counter_instance_id_t*>(userdata),
+                                     *rocprof_id,
+                                     static_cast<size_t>(coordinate));
+        }
+        return HSA_STATUS_SUCCESS;
+    };
+
+    if(hsa_ven_amd_aqlprofile_iterate_event_coord(
+           agent, event, sample_id, callback, static_cast<void*>(&id)) != HSA_STATUS_SUCCESS)
+    {
+        return ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD;
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+get_dim_info(hsa_agent_t                    agent,
+             hsa_ven_amd_aqlprofile_event_t event,
+             uint32_t                       sample_id,
+             std::map<int, uint64_t>&       dims)
+{
+    auto callback = [](int, int id, int extent, int, const char*, void* userdata) -> hsa_status_t {
+        auto& map = *static_cast<std::map<int, uint64_t>*>(userdata);
+        map.emplace(id, extent);
+        return HSA_STATUS_SUCCESS;
+    };
+
+    if(hsa_ven_amd_aqlprofile_iterate_event_coord(
+           agent, event, sample_id, callback, static_cast<void*>(&dims)) != HSA_STATUS_SUCCESS)
+    {
+        return ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD;
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }  // namespace aql
 }  // namespace rocprofiler

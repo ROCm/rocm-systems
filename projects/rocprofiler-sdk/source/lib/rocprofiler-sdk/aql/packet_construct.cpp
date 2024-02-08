@@ -190,6 +190,19 @@ AQLPacketConstruct::event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event)
     return nullptr;
 }
 
+const std::vector<hsa_ven_amd_aqlprofile_event_t>&
+AQLPacketConstruct::get_counter_events(const counters::Metric& metric) const
+{
+    for(const auto& prof_metric : _metrics)
+    {
+        if(prof_metric.metric.id() == metric.id())
+        {
+            return prof_metric.instances;
+        }
+    }
+    throw std::runtime_error(fmt::format("Cannot Find Events for {}", metric));
+}
+
 void
 AQLPacketConstruct::can_collect()
 {

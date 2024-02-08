@@ -79,7 +79,14 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT,  ///< Function invoked with one or more invalid
                                                 ///< arguments
     ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT,  ///< Invalid metric supplied to agent.
-    ROCPROFILER_STATUS_ERROR_FINALIZED,  ///< invalid because rocprofiler has been finalized
+    ROCPROFILER_STATUS_ERROR_FINALIZED,       ///< invalid because rocprofiler has been finalized
+    ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED,  ///< Call requires HSA to be loaded before performed
+    ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND,   ///< Dimension is not found for counter
+    ROCPROFILER_STATUS_ERROR_PROFILE_COUNTER_NOT_FOUND,  ///< Profile could not find counter for GPU
+                                                         ///< agent
+    ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED,      ///< AST could not be generated correctly
+    ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND,              ///< AST was not found
+    ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD,  ///< Event coordinate was not found by AQL profile
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
@@ -479,6 +486,8 @@ typedef struct
 {
     const char* name;
     size_t      instance_size;
+    rocprofiler_counter_dimension_id_t
+        id;  //<< Id for this dimension used by @ref rocprofiler_query_record_dimension_position
 } rocprofiler_record_dimension_info_t;
 
 /**

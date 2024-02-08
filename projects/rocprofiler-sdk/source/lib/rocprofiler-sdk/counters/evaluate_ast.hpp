@@ -104,9 +104,9 @@ public:
      *        of this AST. Can throw if the AST is invalid (i.e. dimension mismatch in
      *        child nodes of this AST). This is done in a recursive fashion.
      *
-     * @return DimensionTypes dimension of the output of this AST.
+     * @return std::vector<MetricDimension> dimension of the output of this AST.
      */
-    DimensionTypes set_dimensions();
+    std::vector<MetricDimension> set_dimensions();
 
     bool validate_raw_ast(const std::unordered_map<std::string, Metric>& metrics);
 
@@ -152,11 +152,11 @@ public:
         const std::set<counters::Metric>& required_special_counters,
         std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>& out_map);
 
-    NodeType                        type() const { return _type; }
-    ReduceOperation                 reduce_op() const { return _reduce_op; }
-    const std::vector<EvaluateAST>& children() const { return _children; }
-    const Metric&                   metric() const { return _metric; }
-    DimensionTypes                  dimension_types() const { return _dimension_types; }
+    NodeType                            type() const { return _type; }
+    ReduceOperation                     reduce_op() const { return _reduce_op; }
+    const std::vector<EvaluateAST>&     children() const { return _children; }
+    const Metric&                       metric() const { return _metric; }
+    const std::vector<MetricDimension>& dimension_types() const { return _dimension_types; }
 
     /**
      * @brief When an evaluation is complete, set the output id of the results. This is called
@@ -166,6 +166,8 @@ public:
      */
     void set_out_id(std::vector<rocprofiler_record_counter_t>& results) const;
 
+    const rocprofiler_counter_id_t& out_id() const { return _out_id; }
+
 private:
     NodeType                                                       _type{NONE};
     ReduceOperation                                                _reduce_op{REDUCE_NONE};
@@ -173,7 +175,7 @@ private:
     double                                                         _raw_value{0};
     std::vector<EvaluateAST>                                       _children;
     std::string                                                    _agent;
-    DimensionTypes                                                 _dimension_types{DIMENSION_LAST};
+    std::vector<MetricDimension>                                   _dimension_types{};
     std::vector<rocprofiler_record_counter_t>                      _static_value;
     std::unordered_set<rocprofiler_profile_counter_instance_types> _reduce_dimension_set;
     bool                                                           _expanded{false};
@@ -197,6 +199,8 @@ std::optional<std::set<Metric>>
 get_required_hardware_counters(const std::unordered_map<std::string, EvaluateASTMap>& asts,
                                const std::string&                                     agent,
                                const Metric&                                          metric);
+int64_t
+get_agent_property(std::string_view property, const rocprofiler_agent_t& agent);
 }  // namespace counters
 }  // namespace rocprofiler
 

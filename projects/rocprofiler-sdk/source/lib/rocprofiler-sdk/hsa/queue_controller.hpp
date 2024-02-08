@@ -54,13 +54,17 @@ struct profiler_serializer_t
 {
     const Queue*             dispatch_queue{nullptr};
     std::deque<const Queue*> dispatch_ready;
+    bool                     enabled{true};
 };
 
 // Tracks and manages HSA queues
 class QueueController
 {
 public:
-    using queue_iterator_cb_t = std::function<void(const Queue*)>;
+    using agent_callback_tuple_t =
+        std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
+    using queue_iterator_cb_t    = std::function<void(const Queue*)>;
+    using callback_iterator_cb_t = std::function<void(ClientID, const agent_callback_tuple_t&)>;
 
     QueueController() = default;
     // Initializes the QueueInterceptor. This must be delayed until
@@ -96,9 +100,16 @@ public:
     template <typename FuncT>
     void profiler_serializer(FuncT&& lambda);
 
+    void iterate_callbacks(const callback_iterator_cb_t&) const;
+
+    /**
+     * Disable serialization for QueueController, has no effect if counter collection
+     * is not in use (which defaults to no serialization mechanism). Should only be used for
+     * testing.
+     */
+    void disable_serialization();
+
 private:
-    using agent_callback_tuple_t =
-        std::tuple<rocprofiler_agent_t, Queue::queue_cb_t, Queue::completed_cb_t>;
     using queue_map_t       = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
     using client_id_map_t   = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using agent_cache_map_t = std::unordered_map<uint32_t, AgentCache>;

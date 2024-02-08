@@ -23,8 +23,12 @@
 #pragma once
 
 #include <functional>
+#include <map>
+#include <string>
 
 #include <hsa/hsa_ven_amd_aqlprofile.h>
+
+#include <rocprofiler-sdk/fwd.h>
 
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
@@ -39,5 +43,19 @@ get_query_info(hsa_agent_t agent, const counters::Metric& metric);
 // Query HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS from aqlprofiler
 uint32_t
 get_block_counters(hsa_agent_t agent, const hsa_ven_amd_aqlprofile_event_t& event);
+
+// Query dimimension ids for counter event. Returns AQLProfiler ID -> extent
+rocprofiler_status_t
+get_dim_info(hsa_agent_t                    agent,
+             hsa_ven_amd_aqlprofile_event_t event,
+             uint32_t                       sample_id,
+             std::map<int, uint64_t>&       dims);
+
+// Set dimension ids into id for sample
+rocprofiler_status_t
+set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
+                       hsa_agent_t                        agent,
+                       hsa_ven_amd_aqlprofile_event_t     event,
+                       uint32_t                           sample_id);
 }  // namespace aql
 }  // namespace rocprofiler

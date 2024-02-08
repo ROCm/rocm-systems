@@ -13,6 +13,8 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#define PRINT_ONLY_FAILING true
+
 /**
  * Tests the collection of all counters on the agent the test is run on.
  */
@@ -55,13 +57,92 @@ get_buffer()
     return buf;
 }
 
+// Struct to validate that all dimension values are present. Does
+// so by creating a tree of dimension values expected. If all are marked as
+// having values, then all values are present in the output.
+struct validate_dim_presence
+{
+    validate_dim_presence() {}
+
+    void maybe_forward(const rocprofiler_record_dimension_info_t& dim)
+    {
+        if(sub_vectors.empty())
+        {
+            for(size_t i = 0; i < dim.instance_size; i++)
+            {
+                sub_vectors.emplace_back(std::make_unique<validate_dim_presence>());
+                sub_vectors.back()->vector_pos = std::make_pair(dim, i);
+            }
+        }
+        else
+        {
+            for(auto& vec : sub_vectors)
+            {
+                vec->maybe_forward(dim);
+            }
+        }
+    }
+
+    void mark_seen(const rocprofiler_counter_instance_id_t& id)
+    {
+        if(sub_vectors.empty())
+        {
+            has_value = true;
+            return;
+        }
+        size_t pos = 0;
+        ROCPROFILER_CALL(rocprofiler_query_record_dimension_position(
+                             id, sub_vectors.at(0)->vector_pos.first.id, &pos),
+                         "Could not query position");
+        sub_vectors.at(pos)->mark_seen(id);
+    }
+
+    bool check_seen(std::stringstream&                                                   out,
+                    std::vector<std::pair<rocprofiler_record_dimension_info_t, size_t>>& pos_stack)
+    {
+        bool ret = true;
+        if(sub_vectors.empty())
+        {
+            if(!has_value)
+            {
+                ret = false;
+                out << "\tMissing Value at [";
+            }
+            else
+            {
+                out << "\tHas Value at [";
+            }
+            for(const auto& [dim, pos] : pos_stack)
+            {
+                out << dim.name << ":" << pos << ",";
+            }
+            out << "]\n";
+            return ret;
+        }
+
+        for(size_t i = 0; i < sub_vectors.size(); i++)
+        {
+            pos_stack.push_back(sub_vectors[i]->vector_pos);
+            if(!sub_vectors[i]->check_seen(out, pos_stack)) ret = false;
+            pos_stack.pop_back();
+        }
+        return ret;
+    }
+
+    std::pair<rocprofiler_record_dimension_info_t, size_t> vector_pos;
+    std::vector<std::unique_ptr<validate_dim_presence>>    sub_vectors;
+    bool                                                   has_value{false};
+};
+
 struct CaptureRecords
 {
     std::shared_mutex m_mutex{};
     // <counter id handle, expected instances>
-    std::map<uint64_t, size_t>            expected{};
-    std::map<uint64_t, std::string>       expected_counter_names{};
-    std::vector<rocprofiler_counter_id_t> remaining{};
+    std::map<uint64_t, size_t> expected{};
+    // expected dims that we should see data for
+    std::map<uint64_t, validate_dim_presence> expected_data_dims{};
+    std::map<uint64_t, std::string>           expected_counter_names{};
+    std::vector<rocprofiler_counter_id_t>     remaining{};
     // <counter_id handle, instances seen>
     std::map<uint64_t, size_t> captured{};
 };
@@ -82,8 +163,9 @@ buffered_callback(rocprofiler_context_id_t,
                   void*,
                   uint64_t)
 {
-    auto&                      cap   = *get_capture();
-    auto                       wlock = std::unique_lock{cap.m_mutex};
+    auto& cap   = *get_capture();
+    auto  wlock = std::unique_lock{cap.m_mutex};
+
     std::map<uint64_t, size_t> seen_counters;
     for(size_t i = 0; i < num_headers; ++i)
     {
@@ -95,6 +177,7 @@ buffered_callback(rocprofiler_context_id_t,
             rocprofiler_counter_id_t counter;
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             rocprofiler_query_record_counter_id(record->id, &counter);
+            cap.expected_data_dims.at(counter.handle).mark_seen(record->id);
             seen_counters.emplace(counter.handle, 0).first->second++;
         }
     }
@@ -146,15 +229,38 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
 
         for(auto& found_counter : counters_needed)
         {
-            size_t expected = 0;
-            rocprofiler_query_counter_instance_count(agent->id, found_counter, &expected);
-            cap.remaining.push_back(found_counter);
-            cap.expected.emplace(found_counter.handle, expected);
             const char* name;
             size_t      name_size;
             ROCPROFILER_CALL(rocprofiler_query_counter_name(found_counter, &name, &name_size),
                              "Could not query name");
             cap.expected_counter_names.emplace(found_counter.handle, std::string(name));
+            size_t expected = 0;
+            ROCPROFILER_CALL(
+                rocprofiler_query_counter_instance_count(agent->id, found_counter, &expected),
+                "COULD NOT QUERY INSTANCES");
+            cap.remaining.push_back(found_counter);
+            cap.expected.emplace(found_counter.handle, expected);
+
+            auto& info_vector =
+                cap.expected_data_dims.emplace(found_counter.handle, validate_dim_presence{})
+                    .first->second;
+
+            ROCPROFILER_CALL(rocprofiler_iterate_counter_dimensions(
+                                 found_counter,
+                                 [](rocprofiler_counter_id_t,
+                                    const rocprofiler_record_dimension_info_t* dim_info,
+                                    size_t                                     num_dims,
+                                    void*                                      user_data) {
+                                     validate_dim_presence* dim_presence =
+                                         static_cast<validate_dim_presence*>(user_data);
+                                     for(size_t i = 0; i < num_dims; i++)
+                                     {
+                                         dim_presence->maybe_forward(dim_info[i]);
+                                     }
+                                     return ROCPROFILER_STATUS_SUCCESS;
+                                 },
+                                 static_cast<void*>(&info_vector)),
+                             "Could not fetch dimension info");
         }
         if(cap.expected.empty())
         {
@@ -247,10 +353,24 @@ tool_fini(void*)
                       << " (" << name << ")"
                       << " expected " << expected << " instances and got " << *actual_size << "\n";
         }
-        else
+        else if(!actual_size)
         {
             std::clog << "[ERROR] Counter ID: " << counter_id << " (" << name
                       << ") is missing from output\n";
+        }
+        else
+        {
+            // Counter collected OK
+            std::stringstream                                                   ss;
+            std::vector<std::pair<rocprofiler_record_dimension_info_t, size_t>> stack;
+            bool passed = cap.expected_data_dims.at(counter_id).check_seen(ss, stack);
+            if(!PRINT_ONLY_FAILING || !passed)
+            {
+                std::clog << (passed ? "[OK] " : "[ERROR] ") << "Counter ID: " << counter_id << " ("
+                          << name << ")"
+                          << " Expected: " << expected << " Got: " << *actual_size << "\n";
+                std::clog << ss.str();
+            }
         }
     }
 }

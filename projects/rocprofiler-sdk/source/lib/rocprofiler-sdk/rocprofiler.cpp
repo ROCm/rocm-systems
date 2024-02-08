@@ -75,7 +75,18 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT,
                           "Metric is not valid for the agent")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_FINALIZED,
                           "Invalid request because rocprofiler has finalized")
-
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED,
+                          "Function call requires that HSA is loaded")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND,
+                          "Dimension is not found for counter")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PROFILE_COUNTER_NOT_FOUND,
+                          "Profile could not find counter for GPU")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED,
+                          "AST could not be generated correctly")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND, "AST was not found")
+ROCPROFILER_STATUS_STRING(
+    ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD,
+    "AQL Profiler was not able to find event coordinates for defined counters")
 template <size_t Idx, size_t... Tail>
 const char*
 get_status_name(rocprofiler_status_t status, std::index_sequence<Idx, Tail...>)

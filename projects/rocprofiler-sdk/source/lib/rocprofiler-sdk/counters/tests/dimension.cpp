@@ -22,8 +22,51 @@
 
 #include <gtest/gtest.h>
 
+#include <fmt/core.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_ext_amd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
+#include "lib/rocprofiler-sdk/buffer.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
+#include "rocprofiler-sdk/registration.h"
+
+namespace
+{
+void
+check_dim_pos(rocprofiler_counter_instance_id_t                                 test_id,
+              rocprofiler::counters::rocprofiler_profile_counter_instance_types dim,
+              size_t                                                            expected)
+{
+    EXPECT_EQ(rec_to_dim_pos(test_id, dim), expected);
+    size_t pos = 0;
+    rocprofiler_query_record_dimension_position(
+        test_id, static_cast<rocprofiler_counter_dimension_id_t>(dim), &pos);
+    EXPECT_EQ(pos, expected);
+}
+
+void
+check_counter_id(rocprofiler_counter_instance_id_t id, uint64_t expected_handle)
+{
+    rocprofiler_counter_id_t api_id = {.handle = 0};
+    rocprofiler_query_record_counter_id(id, &api_id);
+    EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(id).handle, expected_handle);
+    EXPECT_EQ(rocprofiler::counters::rec_to_counter_id(id).handle, api_id.handle);
+}
+}  // namespace
 
 TEST(dimension, set_get)
 {
@@ -41,7 +84,7 @@ TEST(dimension, set_get)
     set_counter_in_rec(test_id, test_counter);
     // 0x0141000000000000 = decimal counter id 321 << DIM_BIT_LENGTH
     EXPECT_EQ(test_id, 0x0141000000000000);
-    EXPECT_EQ(rec_to_counter_id(test_id).handle, 321);
+    check_counter_id(test_id, 321);
 
     // Test multiples of i, setting/getting those values across all
     // dimensions
@@ -51,7 +94,7 @@ TEST(dimension, set_get)
         {
             auto dim = static_cast<rocprofiler_profile_counter_instance_types>(i);
             set_dim_in_rec(test_id, dim, i);
-            EXPECT_EQ(rec_to_dim_pos(test_id, dim), i);
+            check_dim_pos(test_id, dim, i);
             set_dim_in_rec(test_id, dim, i * multi_factor);
             for(size_t j = 1; j < static_cast<size_t>(ROCPROFILER_DIMENSION_LAST); j++)
             {
@@ -59,10 +102,10 @@ TEST(dimension, set_get)
                 set_dim_in_rec(test_id,
                                static_cast<rocprofiler_profile_counter_instance_types>(j),
                                max_counter_val);
-                EXPECT_EQ(rec_to_dim_pos(
-                              test_id, static_cast<rocprofiler_profile_counter_instance_types>(j)),
-                          max_counter_val);
-                EXPECT_EQ(rec_to_dim_pos(test_id, dim), i * multi_factor);
+                check_dim_pos(test_id,
+                              static_cast<rocprofiler_profile_counter_instance_types>(j),
+                              max_counter_val);
+                check_dim_pos(test_id, dim, i * multi_factor);
             }
 
             for(size_t j = static_cast<size_t>(ROCPROFILER_DIMENSION_LAST - 1); j > 0; j--)
@@ -71,9 +114,9 @@ TEST(dimension, set_get)
                 set_dim_in_rec(test_id,
                                static_cast<rocprofiler_profile_counter_instance_types>(j),
                                max_counter_val);
-                EXPECT_EQ(rec_to_dim_pos(test_id, (rocprofiler_profile_counter_instance_types) j),
-                          max_counter_val);
-                EXPECT_EQ(rec_to_dim_pos(test_id, dim), i * multi_factor);
+                check_dim_pos(
+                    test_id, (rocprofiler_profile_counter_instance_types) j, max_counter_val);
+                check_dim_pos(test_id, dim, i * multi_factor);
             }
 
             // Check that name exists
@@ -87,18 +130,217 @@ TEST(dimension, set_get)
     {
         auto dim = static_cast<rocprofiler_profile_counter_instance_types>(i);
         set_dim_in_rec(test_id, dim, i * 5);
-        EXPECT_EQ(rec_to_dim_pos(test_id, dim), i * 5);
+        check_dim_pos(test_id, dim, i * 5);
         set_dim_in_rec(test_id, dim, i * 3);
-        EXPECT_EQ(rec_to_dim_pos(test_id, dim), i * 3);
+        check_dim_pos(test_id, dim, i * 3);
     }
 
     test_counter.handle = 123;
     set_counter_in_rec(test_id, test_counter);
-    EXPECT_EQ(rec_to_counter_id(test_id).handle, 123);
+    check_counter_id(test_id, 123);
 
     // Test that all bits can be set/fetched for dims, 0xFAFBFCFDFEFF is a random
     // collection of 48 bits.
     set_dim_in_rec(test_id, ROCPROFILER_DIMENSION_NONE, 0xFAFBFCFDFEFF);
-    EXPECT_EQ(rec_to_dim_pos(test_id, ROCPROFILER_DIMENSION_NONE), 0xFAFBFCFDFEFF);
-    EXPECT_EQ(rec_to_counter_id(test_id).handle, 123);
+    check_dim_pos(test_id, ROCPROFILER_DIMENSION_NONE, 0xFAFBFCFDFEFF);
+    check_counter_id(test_id, 123);
+}
+
+using namespace rocprofiler;
+
+namespace
+{
+AmdExtTable&
+get_ext_table()
+{
+    static auto _v = []() {
+        auto val                                  = AmdExtTable{};
+        val.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info;
+        val.hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools;
+        val.hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate;
+        val.hsa_amd_memory_pool_free_fn           = hsa_amd_memory_pool_free;
+        val.hsa_amd_agent_memory_pool_get_info_fn = hsa_amd_agent_memory_pool_get_info;
+        val.hsa_amd_agents_allow_access_fn        = hsa_amd_agents_allow_access;
+        return val;
+    }();
+    return _v;
+}
+
+CoreApiTable&
+get_api_table()
+{
+    static auto _v = []() {
+        auto val                  = CoreApiTable{};
+        val.hsa_iterate_agents_fn = hsa_iterate_agents;
+        val.hsa_agent_get_info_fn = hsa_agent_get_info;
+        val.hsa_queue_create_fn   = hsa_queue_create;
+        val.hsa_queue_destroy_fn  = hsa_queue_destroy;
+        return val;
+    }();
+    return _v;
+}
+
+auto
+findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
+{
+    std::vector<counters::Metric> ret;
+    auto                          all_counters = counters::getMetricMap();
+
+    LOG(ERROR) << "Looking up counters for " << std::string(agent.name());
+    auto gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
+    if(!gfx_metrics)
+    {
+        LOG(ERROR) << "No counters found for " << std::string(agent.name());
+        return ret;
+    }
+
+    for(auto& counter : *gfx_metrics)
+    {
+        if(metrics.count(counter.name()) > 0 || metrics.empty())
+        {
+            ret.push_back(counter);
+        }
+    }
+    return ret;
+}
+
+void
+test_init()
+{
+    HsaApiTable table;
+    table.amd_ext_ = &get_ext_table();
+    table.core_    = &get_api_table();
+    agent::construct_agent_cache(&table);
+    hsa::get_queue_controller().init(get_api_table(), get_ext_table());
+}
+
+}  // namespace
+
+TEST(dimension, block_dim_test)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    auto agents = hsa::get_queue_controller().get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    for(const auto& [_, agent] : agents)
+    {
+        auto metrics = findDeviceMetrics(agent, {});
+        ASSERT_FALSE(metrics.empty());
+        ASSERT_TRUE(agent.get_rocp_agent());
+        // aql::AQLPacketConstruct pkt(agent, metrics);
+        // auto                    test_pkt = pkt.construct_packet(get_ext_table());
+        for(const auto& metric : metrics)
+        {
+            /**
+             * Calculate expected dimensions from AQL Profiler
+             */
+            std::unordered_map<counters::rocprofiler_profile_counter_instance_types, uint64_t>
+                rocp_dims;
+            LOG(ERROR) << metric.name() << " " << metric.special();
+            if(!metric.special().empty())
+            {
+                rocp_dims[counters::rocprofiler_profile_counter_instance_types::
+                              ROCPROFILER_DIMENSION_INSTANCE] = 1;
+            }
+            else if(!metric.expression().empty())
+            {
+                continue;
+            }
+            else
+            {
+                aql::AQLPacketConstruct pkt_gen(agent, {metric});
+                const auto&             events = pkt_gen.get_counter_events(metric);
+                for(const auto& event : events)
+                {
+                    std::map<int, uint64_t> dims;
+                    auto status = aql::get_dim_info(agent.get_hsa_agent(), event, 0, dims);
+                    CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS)
+                        << rocprofiler_get_status_string(status);
+                    for(const auto& [id, extent] : dims)
+                    {
+                        if(const auto* inst_type = rocprofiler::common::get_val(
+                               counters::aqlprofile_id_to_rocprof_instance(), id))
+                        {
+                            rocp_dims.emplace(*inst_type, 0).first->second = extent;
+                        }
+                    }
+                }
+            }
+
+            /**
+             * Compare with actual
+             */
+            auto dims = getBlockDimensions(agent.name(), metric);
+            EXPECT_FALSE(dims.empty());
+            EXPECT_EQ(dims.size(), rocp_dims.size());
+            for(const auto& dim : dims)
+            {
+                const auto* ptr = rocprofiler::common::get_val(rocp_dims, dim.type());
+                ASSERT_TRUE(ptr) << fmt::format("{}", dim);
+                EXPECT_EQ(*ptr, dim.size()) << fmt::format("{}", dim);
+                EXPECT_EQ(std::string(counters::dimension_map().at(dim.type())), dim.name())
+                    << fmt::format("{}", dim);
+            }
+
+            /**
+             * Check this value exists in the dimension cache
+             */
+            const auto* dim_cache =
+                rocprofiler::common::get_val(counters::get_dimension_cache(), metric.id());
+            ASSERT_TRUE(dim_cache);
+            EXPECT_EQ(fmt::format("{}", fmt::join(dims, "|")),
+                      fmt::format("{}", fmt::join(*dim_cache, "|")));
+
+            /**
+             * Check counter instance count public API
+             */
+            size_t instance_count            = 0;
+            size_t calculated_instance_count = 0;
+            rocprofiler_query_counter_instance_count(
+                agent.get_rocp_agent()->id, {.handle = metric.id()}, &instance_count);
+            for(const auto& dim : dims)
+            {
+                if(calculated_instance_count == 0)
+                    calculated_instance_count = dim.size();
+                else if(dim.size() > 0)
+                    calculated_instance_count = dim.size() * calculated_instance_count;
+            }
+            EXPECT_EQ(instance_count, calculated_instance_count);
+
+            /**
+             * Check the public API returns this value
+             */
+            rocprofiler_iterate_counter_dimensions(
+                {.handle = metric.id()},
+                [](rocprofiler_counter_id_t,
+                   const rocprofiler_record_dimension_info_t* dim_info,
+                   size_t                                     num_dims,
+                   void*                                      user_data) -> rocprofiler_status_t {
+                    auto expected_dims = *static_cast<
+                        std::unordered_map<counters::rocprofiler_profile_counter_instance_types,
+                                           uint64_t>*>(user_data);
+                    EXPECT_EQ(num_dims, expected_dims.size());
+                    for(size_t i = 0; i < num_dims; i++)
+                    {
+                        const auto* lookup_ptr = rocprofiler::common::get_val(
+                            expected_dims,
+                            static_cast<counters::rocprofiler_profile_counter_instance_types>(
+                                dim_info[i].id));
+                        EXPECT_TRUE(lookup_ptr);
+                        if(!lookup_ptr) return ROCPROFILER_STATUS_ERROR;
+                        EXPECT_EQ(*lookup_ptr, dim_info[i].instance_size);
+                        EXPECT_EQ(
+                            counters::dimension_map().at(
+                                static_cast<counters::rocprofiler_profile_counter_instance_types>(
+                                    dim_info[i].id)),
+                            std::string(dim_info[i].name));
+                    }
+                    return ROCPROFILER_STATUS_SUCCESS;
+                },
+                static_cast<void*>(&rocp_dims));
+        }
+    }
+
+    hsa_shut_down();
 }

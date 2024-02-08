@@ -68,6 +68,13 @@ typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
  *        one dispatch (denoted by correlation id). Will trigger the
  *        callback based on the parameters setup in buffer_id_t.
  *
+ *        NOTE: Interface is up for comment as to whether restrictions
+ *        on agent should be made here (limiting the CB based on agent)
+ *        or if the restriction should be performed by the tool in
+ *        @ref rocprofiler_profile_counting_dispatch_callback_t (i.e.
+ *        tool code checking the agent param to see if they want to profile
+ *        it).
+ *
  *        Interface is up for comment as to whether restrictions
  *        on agent should be made here (limiting the CB based on agent)
  *        or if the restriction should be performed by the tool in

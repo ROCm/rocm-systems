@@ -29,10 +29,12 @@
 
 #include <fmt/core.h>
 
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
+#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
 namespace rocprofiler
@@ -45,35 +47,82 @@ getBlockDimensions(std::string_view agent, const Metric& metric)
     if(!metric.special().empty())
     {
         // Special non-hardware counters without dimension data
-        return std::vector<MetricDimension>{
-            {dimension_map().at(ROCPROFILER_DIMENSION_NONE), 1, ROCPROFILER_DIMENSION_NONE}};
+        return std::vector<MetricDimension>{{dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
+                                             1,
+                                             ROCPROFILER_DIMENSION_INSTANCE}};
     }
+
+    std::unordered_map<rocprofiler_profile_counter_instance_types, uint64_t> count;
+
+    std::vector<MetricDimension> ret;
 
     for(const auto& [_, maybe_agent] : hsa::get_queue_controller().get_supported_agents())
     {
         if(maybe_agent.name() == agent)
         {
-            // To be returned when instance counting is functional with AQL profiler
-            // return std::vector<MetricDimension>{
-            //     {dimension_map().at(ROCPROFILER_DIMENSION_SHADER_ENGINE),
-            //      maybe_agent.get_rocp_agent()->num_shader_banks,
-            //      ROCPROFILER_DIMENSION_SHADER_ENGINE},
-            //     {dimension_map().at(ROCPROFILER_DIMENSION_XCC),
-            //      maybe_agent.get_rocp_agent()->num_xcc,
-            //      ROCPROFILER_DIMENSION_XCC},
-            //     {dimension_map().at(ROCPROFILER_DIMENSION_CU),
-            //      maybe_agent.get_rocp_agent()->cu_count,
-            //      ROCPROFILER_DIMENSION_CU},
-            //     {dimension_map().at(ROCPROFILER_DIMENSION_AGENT),
-            //      maybe_agent.get_rocp_agent()->id.handle,
-            //      ROCPROFILER_DIMENSION_AGENT}};
             aql::AQLPacketConstruct pkt_gen(maybe_agent, {metric});
-            return std::vector<MetricDimension>{
-                {metric.block(), pkt_gen.get_all_events().size(), ROCPROFILER_DIMENSION_NONE}};
+            const auto&             events = pkt_gen.get_counter_events(metric);
+
+            for(const auto& event : events)
+            {
+                std::map<int, uint64_t> dims;
+                auto status = aql::get_dim_info(maybe_agent.get_hsa_agent(), event, 0, dims);
+                CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS)
+                    << rocprofiler_get_status_string(status);
+
+                for(const auto& [id, extent] : dims)
+                {
+                    if(const auto* inst_type =
+                           rocprofiler::common::get_val(aqlprofile_id_to_rocprof_instance(), id))
+                    {
+                        count.emplace(*inst_type, 0).first->second = extent;
+                    }
+                    else
+                    {
+                        LOG(ERROR) << "Unknown AQL Profiler Dimension " << id << " " << extent;
+                    }
+                }
+            }
         }
     }
 
-    return {};
+    ret.reserve(count.size());
+    for(const auto& [dim, size] : count)
+    {
+        ret.emplace_back(dimension_map().at(dim), size, dim);
+    }
+
+    return ret;
+}
+
+const std::unordered_map<uint64_t, std::vector<MetricDimension>>&
+get_dimension_cache()
+{
+    static auto*& cache =
+        common::static_object<std::unordered_map<uint64_t, std::vector<MetricDimension>>>::
+            construct([]() -> std::unordered_map<uint64_t, std::vector<MetricDimension>> {
+                std::unordered_map<uint64_t, std::vector<MetricDimension>> dims;
+                /**
+                 * Fails if HSA is not loaded by retruning nothing. This should not remain after
+                 * AQL is transistioned away from HSA.
+                 */
+                if(rocprofiler::hsa::get_queue_controller().get_supported_agents().empty())
+                {
+                    return {};
+                }
+
+                const auto& asts = counters::get_ast_map();
+                for(const auto& [gfx, metrics] : asts)
+                {
+                    for(const auto& [_, ast] : metrics)
+                    {
+                        auto ast_copy = ast;
+                        dims.emplace(ast.out_id().handle, ast_copy.set_dimensions());
+                    }
+                }
+                return dims;
+            }());
+    return *cache;
 }
 
 }  // namespace counters

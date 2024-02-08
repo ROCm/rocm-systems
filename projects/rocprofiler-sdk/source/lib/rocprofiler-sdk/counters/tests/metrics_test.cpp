@@ -27,6 +27,8 @@
 
 #include <algorithm>
 
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
@@ -173,5 +175,19 @@ TEST(metrics, check_agent_valid)
                 EXPECT_EQ(counters::checkValidMetric(gfx, metric), false);
             }
         }
+    }
+}
+
+TEST(metrics, check_public_api_query)
+{
+    const auto* id_map = counters::getMetricIdMap();
+    for(const auto& [id, metric] : *id_map)
+    {
+        const char* name = nullptr;
+        size_t      size = 0;
+        ASSERT_EQ(rocprofiler_query_counter_name({.handle = id}, &name, &size),
+                  ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_EQ(std::string(name), metric.name());
+        EXPECT_EQ(size, metric.name().size());
     }
 }

@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <map>
 #include <unordered_map>
 
 #include <rocprofiler-sdk/fwd.h>
@@ -41,12 +42,13 @@ enum rocprofiler_profile_counter_instance_types
     ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
     ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
     ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension
-    ROCPROFILER_DIMENSION_PMC_CHANNEL,    ///< PMC Channel dimension of result
+    ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays
     ROCPROFILER_DIMENSION_CU,             ///< Number of compute units
+    ROCPROFILER_DIMENSION_INSTANCE,       ///< Number of instances
     ROCPROFILER_DIMENSION_LAST
 };
 
-const std::unordered_map<rocprofiler_profile_counter_instance_types, std::string>&
+const std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view>&
 dimension_map();
 
 inline rocprofiler_counter_id_t
@@ -61,6 +63,9 @@ set_counter_in_rec(rocprofiler_counter_instance_id_t& id, rocprofiler_counter_id
 inline size_t
 rec_to_dim_pos(rocprofiler_counter_instance_id_t          id,
                rocprofiler_profile_counter_instance_types dim);
+
+const std::unordered_map<int, rocprofiler_profile_counter_instance_types>&
+aqlprofile_id_to_rocprof_instance();
 
 }  // namespace counters
 }  // namespace rocprofiler

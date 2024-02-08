@@ -56,6 +56,11 @@ public:
     const counters::Metric* event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const;
     std::vector<hsa_ven_amd_aqlprofile_event_t> get_all_events() const;
 
+    const std::vector<hsa_ven_amd_aqlprofile_event_t>& get_counter_events(
+        const counters::Metric&) const;
+
+    hsa_agent_t hsa_agent() const { return _agent.get_hsa_agent(); }
+
 private:
     struct AQLProfileMetric
     {

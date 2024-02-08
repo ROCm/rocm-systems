@@ -269,6 +269,12 @@ QueueController::profiler_serializer(FuncT&& lambda)
     _profiler_serializer.wlock(std::forward<FuncT>(lambda));
 }
 
+void
+QueueController::disable_serialization()
+{
+    profiler_serializer([](auto& serializer) { serializer.enabled = false; });
+}
+
 namespace
 {
 /*
@@ -291,6 +297,7 @@ profiler_serializer_ready_signal_handler(hsa_signal_value_t /* signal_value */, 
     auto*       hsa_queue = static_cast<hsa_queue_t*>(data);
     const auto* queue     = get_queue_controller().get_queue(*hsa_queue);
     get_queue_controller().profiler_serializer([&](auto& serializer) {
+        if(!serializer.enabled) return;
         {
             std::lock_guard<std::mutex> cv_lock(queue->cv_mutex);
             if(queue->get_state() == queue_state::to_destroy)
@@ -322,6 +329,7 @@ void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal)
 {
     get_queue_controller().profiler_serializer([queue_block_signal](auto& serializer) {
+        if(!serializer.enabled) return;
         assert(serializer.dispatch_queue != nullptr);
         serializer.dispatch_queue = nullptr;
         get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(queue_block_signal,
@@ -366,6 +374,17 @@ QueueController::iterate_queues(const queue_iterator_cb_t& cb) const
         for(const auto& itr : _queues_v)
         {
             if(itr.second) cb(itr.second.get());
+        }
+    });
+}
+
+void
+QueueController::iterate_callbacks(const callback_iterator_cb_t& cb) const
+{
+    _callback_cache.rlock([&cb](const auto& map) {
+        for(const auto& [cid, tuple] : map)
+        {
+            cb(cid, tuple);
         }
     });
 }

@@ -22,27 +22,70 @@
 
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
+#include <hsa/hsa_ven_amd_aqlprofile.h>
 #include <string>
 #include <unordered_map>
 
+#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 
 namespace rocprofiler
 {
 namespace counters
 {
-const std::unordered_map<rocprofiler_profile_counter_instance_types, std::string>&
+const std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view>&
 dimension_map()
 {
-    static std::unordered_map<rocprofiler_profile_counter_instance_types, std::string> map = {
-        {ROCPROFILER_DIMENSION_NONE, "DIMENSION_NONE"},
-        {ROCPROFILER_DIMENSION_XCC, "DIMENSION_XCC"},
-        {ROCPROFILER_DIMENSION_SHADER_ENGINE, "DIMENSION_SHADER_ENGINE"},
-        {ROCPROFILER_DIMENSION_AGENT, "DIMENSION_AGENT"},
-        {ROCPROFILER_DIMENSION_PMC_CHANNEL, "DIMENSION_PMC_CHANNEL"},
-        {ROCPROFILER_DIMENSION_CU, "DIMENSION_CU"},
+    static std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view> map = {
+        {ROCPROFILER_DIMENSION_NONE, std::string_view("DIMENSION_NONE")},
+        {ROCPROFILER_DIMENSION_XCC, std::string_view("DIMENSION_XCC")},
+        {ROCPROFILER_DIMENSION_SHADER_ENGINE, std::string_view("DIMENSION_SHADER_ENGINE")},
+        {ROCPROFILER_DIMENSION_AGENT, std::string_view("DIMENSION_AGENT")},
+        {ROCPROFILER_DIMENSION_SHADER_ARRAY, std::string_view("DIMENSION_SHADER_ARRAY")},
+        {ROCPROFILER_DIMENSION_CU, std::string_view("DIMENSION_CU")},
+        {ROCPROFILER_DIMENSION_INSTANCE, std::string_view("DIMENSION_INSTANCE")},
     };
     return map;
+}
+
+const std::unordered_map<int, rocprofiler_profile_counter_instance_types>&
+aqlprofile_id_to_rocprof_instance()
+{
+    using dims_map_t = std::unordered_map<int, rocprofiler_profile_counter_instance_types>;
+
+    static auto*& aql_to_rocprof_dims =
+        common::static_object<dims_map_t>::construct([]() -> dims_map_t {
+            dims_map_t data;
+
+            aqlprofile_iterate_event_ids(
+                [](int id, const char* name, void* userdata) -> hsa_status_t {
+                    const std::unordered_map<std::string_view,
+                                             rocprofiler_profile_counter_instance_types>
+                        aql_string_to_dim = {
+                            {"XCD", ROCPROFILER_DIMENSION_XCC},
+                            {"SE", ROCPROFILER_DIMENSION_SHADER_ENGINE},
+                            {"SA", ROCPROFILER_DIMENSION_SHADER_ARRAY},
+                            {"CU", ROCPROFILER_DIMENSION_CU},
+                            {"INSTANCE", ROCPROFILER_DIMENSION_INSTANCE},
+                        };
+
+                    if(const auto* inst_type =
+                           rocprofiler::common::get_val(aql_string_to_dim, name))
+                    {
+                        // Supported instance type
+                        auto& map = *static_cast<
+                            std::unordered_map<int, rocprofiler_profile_counter_instance_types>*>(
+                            userdata);
+                        map.emplace(id, *inst_type);
+                    }
+                    return HSA_STATUS_SUCCESS;
+                },
+                static_cast<void*>(&data));
+            return data;
+        }());
+
+    return *aql_to_rocprof_dims;
 }
 
 }  // namespace counters

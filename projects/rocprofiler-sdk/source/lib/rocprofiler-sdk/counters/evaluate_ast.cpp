@@ -21,13 +21,16 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
-#include <fmt/core.h>
 
 #include <exception>
-#include <optional>
-
 #include <numeric>
+#include <optional>
 #include <stdexcept>
+
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
@@ -221,41 +224,47 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
     }
 }
 
-DimensionTypes
+std::vector<MetricDimension>
 EvaluateAST::set_dimensions()
 {
-    if(_dimension_types != DIMENSION_LAST)
+    if(!_dimension_types.empty())
     {
         return _dimension_types;
     }
 
-    auto get_dim_types = [&](auto& metric) {
-        int dim_types = 0;
-        for(const auto& dim : getBlockDimensions(_agent, metric))
-        {
-            dim_types |= (dim.type() != ROCPROFILER_DIMENSION_NONE) ? (0x1 << dim.type()) : 0;
-        }
-        return static_cast<DimensionTypes>(dim_types);
-    };
+    auto get_dim_types = [&](auto& metric) { return getBlockDimensions(_agent, metric); };
 
     switch(_type)
     {
         case NONE:
         case RANGE_NODE:
         case CONSTANT_NODE:
-        case NUMBER_NODE: break;
+        case NUMBER_NODE:
+        {
+            _dimension_types =
+                std::vector<MetricDimension>{{dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
+                                              1,
+                                              ROCPROFILER_DIMENSION_INSTANCE}};
+        }
+        break;
         case ADDITION_NODE:
         case SUBTRACTION_NODE:
         case MULTIPLY_NODE:
         case DIVIDE_NODE:
         {
-            if(_children[0].set_dimensions() != _children[1].set_dimensions() &&
-               _children[0].type() != NUMBER_NODE && _children[1].type() != NUMBER_NODE)
-                throw std::runtime_error(fmt::format("Dimension mis-mismatch: {} and {}",
-                                                     _children[0].metric(),
-                                                     _children[1].metric()));
-            _dimension_types = (_children[0].type() != NUMBER_NODE) ? _children[0].set_dimensions()
-                                                                    : _children[1].set_dimensions();
+            auto first  = _children[0].set_dimensions();
+            auto second = _children[1].set_dimensions();
+            // - first.size() > 1 && second.size() > 1
+            // This is an explicit compatibility change to allow existing integer * COUNTER
+            // derived counters to function
+            if(first != second && first.size() > 1 && second.size() > 1)
+                throw std::runtime_error(
+                    fmt::format("Dimension mis-mismatch: {} (dims: {}) and {} (dims: {})",
+                                _children[0].metric(),
+                                fmt::join(_children[0].set_dimensions(), ","),
+                                _children[1].metric(),
+                                fmt::join(_children[1].set_dimensions(), ",")));
+            _dimension_types = first.size() > second.size() ? first : second;
         }
         break;
         case REFERENCE_NODE:
@@ -265,19 +274,11 @@ EvaluateAST::set_dimensions()
         break;
         case REDUCE_NODE:
         {
-            // There is only one child node in case of REDUCE_NODE and that
-            // child node denotes the expression on which the reduce is applied.
-            // The resulting dimension of REDUCE_NODE will be the child's dimension
-            // minus the dimensions specified in the reduce_dimension_set.
-            int original_dim  = static_cast<int>(_children[0].set_dimensions());
-            int turn_off_dims = 0;
-            for(auto dim : _reduce_dimension_set)
-            {
-                turn_off_dims |= (dim != ROCPROFILER_DIMENSION_NONE) ? (0x1 << dim) : 1;
-            }
-            int final_dims   = _reduce_dimension_set.empty() ? ROCPROFILER_DIMENSION_NONE
-                                                             : (original_dim & ~turn_off_dims);
-            _dimension_types = static_cast<DimensionTypes>(final_dims);
+            // Reduction down to a single instance supported for now.
+            _dimension_types =
+                std::vector<MetricDimension>{{dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
+                                              1,
+                                              ROCPROFILER_DIMENSION_INSTANCE}};
         }
         break;
         case SELECT_NODE:
@@ -387,11 +388,12 @@ using property_function_t = int64_t (*)(const rocprofiler_agent_t&);
             return static_cast<int64_t>(value);                                                    \
         })                                                                                         \
     }
+}  // namespace
 
 int64_t
-get_agent_property(const std::string& property, const rocprofiler_agent_t& agent)
+get_agent_property(std::string_view property, const rocprofiler_agent_t& agent)
 {
-    static std::unordered_map<std::string, property_function_t> props = {
+    static std::unordered_map<std::string_view, property_function_t> props = {
         GEN_MAP_ENTRY("cpu_cores_count", agent_info.cpu_cores_count),
         GEN_MAP_ENTRY("simd_count", agent_info.simd_count),
         GEN_MAP_ENTRY("mem_banks_count", agent_info.mem_banks_count),
@@ -427,10 +429,8 @@ get_agent_property(const std::string& property, const rocprofiler_agent_t& agent
         return (*func)(agent);
     }
 
-    LOG(ERROR) << fmt::format("Unsupported special property {}", property);
     return 0.0;
 }
-}  // namespace
 
 void
 EvaluateAST::read_special_counters(
@@ -477,7 +477,14 @@ EvaluateAST::read_pkt(const aql::AQLPacketConstruct* pkt_gen, hsa::AQLPacket& pk
             auto& next_rec = vec.emplace_back();
             set_counter_in_rec(next_rec.id, {.handle = metric->id()});
             // Actual dimension info needs to be used here in the future
-            set_dim_in_rec(next_rec.id, ROCPROFILER_DIMENSION_NONE, vec.size() - 1);
+            auto aql_status = aql::set_dim_id_from_sample(next_rec.id,
+                                                          it.pkt_gen->hsa_agent(),
+                                                          info_data->pmc_data.event,
+                                                          info_data->sample_id);
+            CHECK_EQ(aql_status, ROCPROFILER_STATUS_SUCCESS)
+                << rocprofiler_get_status_string(aql_status);
+
+            // set_dim_in_rec(next_rec.id, ROCPROFILER_DIMENSION_NONE, vec.size() - 1);
             // Note: in the near future we need to use hw_counter here instead
             next_rec.counter_value = info_data->pmc_data.result;
             return HSA_STATUS_SUCCESS;

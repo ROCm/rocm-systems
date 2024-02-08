@@ -25,9 +25,12 @@
 
 #include <fmt/core.h>
 
+#include "lib/common/container/small_vector.hpp"
+#include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
@@ -73,55 +76,27 @@ rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char**
  * @return rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t   agent_id,
+rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t,
                                          rocprofiler_counter_id_t counter_id,
                                          size_t*                  instance_count)
 {
-    const rocprofiler_agent_t* agent = rocprofiler::agent::get_agent(agent_id);
-
-    if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
-    if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) return ROCPROFILER_STATUS_ERROR;
-
-    const auto& id_map     = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
-    const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
-    if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-
     *instance_count = 0;
-    // Special counters do not have hardware metrics and will always have an instance
-    // count of 1 (i.e. MAX_WAVE_SIZE)
-    if(!metric_ptr->special().empty())
+
+    if(rocprofiler::counters::get_dimension_cache().empty())
     {
-        *instance_count = 1;
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
 
-    // Returns the set of hardware counters needed to evaluate the metric.
-    // For derived metrics, this can be more than one counter. In that case,
-    // we return the maximum instance count among all underlying counters.
-    auto req_counters = rocprofiler::counters::get_required_hardware_counters(
-        rocprofiler::counters::get_ast_map(), std::string(agent->name), *metric_ptr);
-    if(!req_counters) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+    const auto* dims = rocprofiler::common::get_val(rocprofiler::counters::get_dimension_cache(),
+                                                    counter_id.handle);
+    if(!dims) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 
-    for(const auto& counter : *req_counters)
+    for(const auto& metric_dim : *dims)
     {
-        if(!counter.special().empty())
-        {
-            *instance_count = std::max(size_t(1), *instance_count);
-            continue;
-        }
-
-        try
-        {
-            auto dims = rocprofiler::counters::getBlockDimensions(agent->name, counter);
-            for(const auto& dim : dims)
-            {
-                *instance_count = std::max(static_cast<size_t>(dim.size()), *instance_count);
-            }
-        } catch(std::runtime_error& err)
-        {
-            LOG(ERROR) << fmt::format("Could not lookup instance count for counter {}", counter);
-            return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
-        }
+        if(*instance_count == 0)
+            *instance_count = metric_dim.size();
+        else if(metric_dim.size() > 0)
+            *instance_count = metric_dim.size() * *instance_count;
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -180,20 +155,36 @@ rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  i
 }
 
 rocprofiler_status_t
-rocprofiler_query_record_dimension_info(rocprofiler_counter_id_t,
-                                        rocprofiler_counter_dimension_id_t   dim,
-                                        rocprofiler_record_dimension_info_t* info)
+rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
+                                       rocprofiler_available_dimensions_cb_t info_cb,
+                                       void*                                 user_data)
 {
-    if(const auto* ptr = rocprofiler::common::get_val(
-           rocprofiler::counters::dimension_map(),
-           static_cast<rocprofiler::counters::rocprofiler_profile_counter_instance_types>(dim)))
+    if(rocprofiler::counters::get_dimension_cache().empty())
     {
-        info->name = ptr->c_str();
-        // TODO: Needs info on the instance size per block to fill in.
-        //       counter_id will be used to lookup this information.
-        info->instance_size = 0;
-        return ROCPROFILER_STATUS_SUCCESS;
+        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
     }
-    return ROCPROFILER_STATUS_ERROR;
+
+    const auto* dims =
+        rocprofiler::common::get_val(rocprofiler::counters::get_dimension_cache(), id.handle);
+    if(!dims) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+
+    // This is likely faster than a map lookup given the limited number of dims.
+    rocprofiler::common::container::small_vector<rocprofiler_record_dimension_info_t, 6> user_dims;
+    for(const auto& internal_dim : *dims)
+    {
+        auto& dim         = user_dims.emplace_back();
+        dim.name          = internal_dim.name().c_str();
+        dim.instance_size = internal_dim.size();
+        dim.id            = static_cast<rocprofiler_counter_dimension_id_t>(internal_dim.type());
+    }
+
+    if(user_dims.empty())
+    {
+        return ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND;
+    }
+
+    info_cb(id, user_dims.data(), user_dims.size(), user_data);
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }

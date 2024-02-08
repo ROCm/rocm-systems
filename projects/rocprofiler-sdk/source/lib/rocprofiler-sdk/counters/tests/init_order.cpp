@@ -106,6 +106,8 @@ private:
     MetricIdMap copy_ = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
 };
 
+namespace
+{
 metric_map_order&
 get_metric_map()
 {
@@ -145,6 +147,7 @@ get_buffer()
     static rocprofiler_buffer_id_t buf = {};
     return buf;
 }
+}  // namespace
 
 // Test that metrics map remains in scope at exit
 TEST(counters_init_order, metric_map_order)

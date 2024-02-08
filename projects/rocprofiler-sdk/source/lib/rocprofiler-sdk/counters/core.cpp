@@ -37,9 +37,6 @@ namespace rocprofiler
 {
 namespace counters
 {
-using ClientID   = int64_t;
-using inst_pkt_t = common::container::
-    small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
 class CounterController
 {
 public:
@@ -133,6 +130,113 @@ destroy_counter_profile(uint64_t id)
     get_controller().destroy_profile(id);
 }
 
+std::shared_ptr<profile_config>
+get_profile_config(rocprofiler_profile_config_id_t id)
+{
+    try
+    {
+        return get_controller().get_profile_cfg(id);
+    } catch(std::out_of_range&)
+    {
+        return nullptr;
+    }
+}
+
+rocprofiler_status_t
+counter_callback_info::setup_profile_config(const hsa::AgentCache&           agent,
+                                            std::shared_ptr<profile_config>& profile)
+{
+    if(profile->pkt_generator || !profile->reqired_hw_counters.empty())
+    {
+        return ROCPROFILER_STATUS_SUCCESS;
+    }
+
+    // Sets up the packet generator for the profile. This must be delayed until after HSA is loaded.
+    // This call needs to be thread protected in that only one thread must be setting up profile at
+    // the same time.
+
+    auto& config     = *profile;
+    auto  agent_name = std::string(config.agent->name);
+    for(const auto& metric : config.metrics)
+    {
+        auto req_counters = get_required_hardware_counters(get_ast_map(), agent_name, metric);
+
+        if(!req_counters)
+        {
+            LOG(ERROR) << fmt::format("Could not find counter {}", metric.name());
+            return ROCPROFILER_STATUS_ERROR_PROFILE_COUNTER_NOT_FOUND;
+        }
+
+        // Special metrics are those that are not hw counters but other
+        // constants like MAX_WAVE_SIZE
+        for(const auto& req_metric : *req_counters)
+        {
+            if(req_metric.special().empty())
+            {
+                config.reqired_hw_counters.insert(req_metric);
+            }
+            else
+            {
+                config.required_special_counters.insert(req_metric);
+            }
+        }
+
+        const auto& asts      = get_ast_map();
+        const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
+        if(!agent_map)
+        {
+            LOG(ERROR) << fmt::format("Coult not build AST for {}", agent_name);
+            return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
+        }
+
+        const auto* counter_ast = rocprofiler::common::get_val(*agent_map, metric.name());
+        if(!counter_ast)
+        {
+            LOG(ERROR) << fmt::format("Coult not find AST for {}", metric.name());
+            return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
+        }
+        config.asts.push_back(*counter_ast);
+        config.asts.back().set_dimensions();
+    }
+
+    profile->pkt_generator = std::make_unique<rocprofiler::aql::AQLPacketConstruct>(
+        agent,
+        std::vector<counters::Metric>{profile->reqired_hw_counters.begin(),
+                                      profile->reqired_hw_counters.end()});
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& ret_pkt,
+                                  const hsa::AgentCache&                        agent,
+                                  std::shared_ptr<profile_config>&              profile)
+{
+    rocprofiler_status_t status;
+    // Check packet cache
+    profile->packets.wlock([&](auto& pkt_vector) {
+        status = counter_callback_info::setup_profile_config(agent, profile);
+        if(!pkt_vector.empty() && status == ROCPROFILER_STATUS_SUCCESS)
+        {
+            ret_pkt = std::move(pkt_vector.back());
+            pkt_vector.pop_back();
+        }
+    });
+
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+    if(!ret_pkt)
+    {
+        // If we do not have a packet in the cache, create one.
+        ret_pkt =
+            profile->pkt_generator->construct_packet(hsa::get_queue_controller().get_ext_table());
+    }
+
+    ret_pkt->before_krn_pkt.clear();
+    ret_pkt->after_krn_pkt.clear();
+    packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), profile); });
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 /**
  * Callback we get from HSA interceptor when a kernel packet is being enqueued.
  *
@@ -174,84 +278,10 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
     CHECK(prof_config);
 
     std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt;
+    auto status = info->get_packet(ret_pkt, queue.get_agent(), prof_config);
+    CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(status);
 
-    // Check packet cache
-    prof_config->packets.wlock([&](auto& pkt_vector) {
-        // Delay packet generator construction until first HSA packet is processed
-        // This ensures that HSA exists
-        if(!prof_config->pkt_generator)
-        {
-            // One time setup of profile config
-            if(prof_config->reqired_hw_counters.empty())
-            {
-                auto& config     = *prof_config;
-                auto  agent_name = std::string(config.agent->name);
-                for(const auto& metric : config.metrics)
-                {
-                    auto req_counters =
-                        get_required_hardware_counters(get_ast_map(), agent_name, metric);
-
-                    if(!req_counters)
-                    {
-                        throw std::runtime_error(
-                            fmt::format("Could not find counter {}", metric.name()));
-                    }
-
-                    // Special metrics are those that are not hw counters but other
-                    // constants like MAX_WAVE_SIZE
-                    for(const auto& req_metric : *req_counters)
-                    {
-                        if(req_metric.special().empty())
-                        {
-                            config.reqired_hw_counters.insert(req_metric);
-                        }
-                        else
-                        {
-                            config.required_special_counters.insert(req_metric);
-                        }
-                    }
-
-                    const auto& asts      = get_ast_map();
-                    const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
-                    if(!agent_map)
-                        throw std::runtime_error(
-                            fmt::format("Coult not build AST for {}", agent_name));
-                    const auto* counter_ast =
-                        rocprofiler::common::get_val(*agent_map, metric.name());
-                    if(!counter_ast)
-                    {
-                        throw std::runtime_error(
-                            fmt::format("Coult not find AST for {}", metric.name()));
-                    }
-                    config.asts.push_back(*counter_ast);
-                    config.asts.back().set_dimensions();
-                }
-            }
-
-            prof_config->pkt_generator = std::make_unique<rocprofiler::aql::AQLPacketConstruct>(
-                queue.get_agent(),
-                std::vector<counters::Metric>{prof_config->reqired_hw_counters.begin(),
-                                              prof_config->reqired_hw_counters.end()});
-        }
-
-        if(!pkt_vector.empty())
-        {
-            ret_pkt = std::move(pkt_vector.back());
-            pkt_vector.pop_back();
-        }
-    });
-
-    if(!ret_pkt)
-    {
-        // If we do not have a packet in the cache, create one.
-        ret_pkt = prof_config->pkt_generator->construct_packet(
-            hsa::get_queue_controller().get_ext_table());
-    }
-    ret_pkt->before_krn_pkt.clear();
-    ret_pkt->after_krn_pkt.clear();
     if(ret_pkt->empty) return ret_pkt;
-
-    info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), prof_config); });
 
     auto&& CreateBarrierPacket =
         [](hsa_signal_t*                                                     dependency_signal,
@@ -312,7 +342,11 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
     });
 
     if(!pkt) return;
-    hsa::profiler_serializer_kernel_completion_signal(session.queue.block_signal);
+
+    if(!pkt->empty)
+    {
+        hsa::profiler_serializer_kernel_completion_signal(session.queue.block_signal);
+    }
 
     auto decoded_pkt = EvaluateAST::read_pkt(prof_config->pkt_generator.get(), *pkt);
     EvaluateAST::read_special_counters(
