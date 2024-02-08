@@ -783,23 +783,18 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
                                         )
                                         print("~" * 40)
                                     except TypeError:
-                                        print(
-                                            "skipping entry. Encountered a missing counter"
-                                        )
-                                        print(expr, " has been assigned to None")
-                                        print(np.nan)
+                                        console_warning("Skipping entry. Encountered a missing counter\n{} has been assigned to None\n{}".format(expr, np.nan))
                                     except AttributeError as ae:
                                         if (
                                             str(ae)
                                             == "'NoneType' object has no attribute 'get'"
                                         ):
-                                            print(
-                                                "skipping entry. Encountered a missing csv"
-                                            )
-                                            print(np.nan)
+                                            console_warning("Skipping entry. Encountered a missing csv\n{}".format(np.nan))
                                         else:
-                                            print(ae)
-                                            sys.exit(1)
+                                            console_error(
+                                                "analysis",
+                                                str(ae)
+                                            )
 
                                 # print("eval_metric", id, expr)
                                 try:
@@ -819,8 +814,10 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
                                     ):
                                         row[expr] = ""
                                     else:
-                                        print(ae)
-                                        sys.exit(1)
+                                        console_error(
+                                            "analysis",
+                                            str(ae)
+                                        )
 
                             else:
                                 # If not insert nan, the whole col might be treated
@@ -845,8 +842,10 @@ def apply_filters(workload, dir, is_gui, debug):
             .isin([workload.filter_gpu_ids])
         ]
         if ret_df.empty:
-            print("{} is an invalid gpu-id".format(workload.filter_gpu_ids))
-            sys.exit(1)
+            console_error(
+                "analysis",
+                "{} is an invalid gpu-id".format(workload.filter_gpu_ids)
+            )
 
     # NB:
     # Kernel id is unique!
@@ -891,8 +890,10 @@ def apply_filters(workload, dir, is_gui, debug):
         #     The better way may be parsing python slice string
         for d in workload.filter_dispatch_ids:
             if int(d) >= len(ret_df):  # subtract 2 bc of the two header rows
-                print("{} is an invalid dispatch id.".format(d))
-                sys.exit(1)
+                console_error(
+                    "analysis",
+                    "{} is an invalid dispatch id.".format(d)
+                )
         if ">" in workload.filter_dispatch_ids[0]:
             m = re.match(r"\> (\d+)", workload.filter_dispatch_ids[0])
             ret_df = ret_df[
