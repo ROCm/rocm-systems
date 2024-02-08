@@ -315,7 +315,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     param += [
         mspec.hostname,
         mspec.CPU,
-        mspec.sbios,
+        '"' + mspec.sbios + '"',
         mspec.distro,
         mspec.kernel_version,
         mspec.rocm_version,
