@@ -711,6 +711,9 @@
   <metric name="TA_FLAT_STORE_WAVEFRONTS" block=TA event=102 descr="Number of flat store vec32 packets processed by TA, same as flat_write_wavefronts in earlier IP"></metric>
 </gfx10>
 
+<gfx1010 base="gfx10">
+</gfx1010>
+
 <gfx1030 base="gfx10">
 </gfx1030>
 
