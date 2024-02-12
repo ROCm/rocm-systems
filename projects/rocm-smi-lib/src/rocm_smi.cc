@@ -1377,6 +1377,58 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   CATCH
 }
 
+rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
+                                        uint64_t clkvalue,
+                                        rsmi_clk_type_t clkType) {
+ TRY
+  rsmi_status_t ret;
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  LOG_TRACE(ss);
+
+  if (clkType != RSMI_CLK_TYPE_SYS && clkType != RSMI_CLK_TYPE_MEM) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  if (level != RSMI_FREQ_IND_MIN && level != RSMI_FREQ_IND_MAX) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::map<rsmi_clk_type_t, std::string> clk_char_map = {
+    {RSMI_CLK_TYPE_SYS, "s"},
+    {RSMI_CLK_TYPE_MEM, "m"},
+  };
+  DEVICE_MUTEX
+
+  // Set perf. level to manual so that we can then set the power profile
+  ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  // For clock frequency setting, enter a new value by writing a string that
+  // contains "s/m index clock" to the file. The index should be 0 if to set
+  // minimum clock. And 1 if to set maximum clock. E.g., "s 0 500" will update
+  // minimum sclk to be 500 MHz. "m 1 800" will update maximum mclk to 800Mhz.
+
+  std::string sysvalue = clk_char_map[clkType];
+  sysvalue += ' ' + std::to_string(level);
+  sysvalue += ' ' + std::to_string(clkvalue);
+  sysvalue += '\n';
+
+  ret = set_dev_range(dv_ind, sysvalue);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  ret = set_dev_range(dv_ind, "c");
+  if (ret != RSMI_STATUS_SUCCESS) {
+    return ret;
+  }
+
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
 rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
                                         uint64_t maxclkvalue,
                                         rsmi_clk_type_t clkType) {

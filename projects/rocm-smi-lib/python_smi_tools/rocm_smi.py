@@ -1056,6 +1056,51 @@ def setClockRange(deviceList, clkType, minvalue, maxvalue, autoRespond):
             if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
                 printLog(device, 'Setting %s range is not supported for this device.' % (clkType), None)
 
+def setClockExtremum(deviceList, level,  clkType, clkValue, autoRespond):
+    """ Set the range for the specified clktype in the PowerPlay table for a list of devices.
+
+    Parameters:
+    deviceList -- List of DRM devices (can be a single-item list)
+    level -- [min|max] Minimum value or Maximum value
+    clktype -- [sclk|mclk] Which clock type to apply the range to
+    clkValue -- clock value to apply to the level
+    autoRespond -- Response to automatically provide for all prompts
+    """
+    global RETCODE
+    if level not in {'min', 'max'}:
+        printLog(None, 'Invalid extremum identifier %s, use min or max' % (level), None)
+        logging.error('Unsupported clock extremum %s', level)
+        RETCODE = 1
+        return
+
+    if clkType not in {'sclk', 'mclk'}:
+        printLog(None, 'Invalid clock type identifier %s, use sclk or mclk ' % (clkType), None)
+        logging.error('Unsupported clock type %s', clkType)
+        RETCODE = 1
+        return
+
+    point = 0
+    if level == "max":
+        point = 1
+    try:
+        int(clkValue) 
+    except ValueError:
+        printErrLog(None, 'Unable to set %s' % (clkValue))
+        logging.error('%s is not an integer', clkValue)
+        RETCODE = 1
+        return
+    confirmOutOfSpecWarning(autoRespond)
+    printLogSpacer(' Set Valid %s Extremum ' % (clkType))
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_clk_extremum_set(device, rsmi_freq_ind_t(int(point)), int(clkValue), rsmi_clk_names_dict[clkType])
+        if rsmi_ret_ok(ret, device, silent=True):
+            printLog(device, 'Successfully set %s %s to %s(MHz)' % (level, clkType, clkValue), None)
+        else:
+            printErrLog(device, 'Unable to set %s %s to %s(MHz)' % (level, clkType, clkValue))
+            RETCODE = 1
+            if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+                printLog(device, 'Setting %s %s clock is not supported for this device.' % (level, clkType), None)
+
 
 def setVoltageCurve(deviceList, point, clk, volt, autoRespond):
     """ Set voltage curve for a point in the PowerPlay table for a list of devices.
@@ -3785,6 +3830,7 @@ if __name__ == '__main__':
     groupAction.add_argument('--setvc', help='Change SCLK Voltage Curve (MHz mV) for a specific point',
                              metavar=('POINT', 'SCLK', 'SVOLT'), nargs=3)
     groupAction.add_argument('--setsrange', help='Set min and max SCLK speed', metavar=('SCLKMIN', 'SCLKMAX'), nargs=2)
+    groupAction.add_argument('--setextremum', help='Set min/max of SCLK/MCLK speed', metavar=('min|max', "sclk|mclk", 'CLK'), nargs=3)
     groupAction.add_argument('--setmrange', help='Set min and max MCLK speed', metavar=('MCLKMIN', 'MCLKMAX'), nargs=2)
     groupAction.add_argument('--setfan', help='Set GPU Fan Speed (Level or %%)', metavar='LEVEL')
     groupAction.add_argument('--setperflevel', help='Set Performance Level', metavar='LEVEL')
@@ -3854,7 +3900,7 @@ if __name__ == '__main__':
             or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or args.setmemoverdrive \
             or args.setpoweroverdrive or args.resetpoweroverdrive or args.rasenable or args.rasdisable or \
             args.rasinject or args.gpureset or args.setperfdeterminism or args.setslevel or args.setmlevel or \
-            args.setvc or args.setsrange or args.setmrange or args.setclock or \
+            args.setvc or args.setsrange or args.setextremum or args.setmrange or args.setclock or \
             args.setcomputepartition or args.setmemorypartition or args.resetcomputepartition or args.resetmemorypartition:
         relaunchAsSudo()
 
@@ -4081,6 +4127,8 @@ if __name__ == '__main__':
         setProfile(deviceList, args.setprofile)
     if args.setvc:
         setVoltageCurve(deviceList, args.setvc[0], args.setvc[1], args.setvc[2], args.autorespond)
+    if args.setextremum:
+        setClockExtremum(deviceList, args.setextremum[0], args.setextremum[1], args.setextremum[2], args.autorespond)
     if args.setsrange:
         setClockRange(deviceList, 'sclk', args.setsrange[0], args.setsrange[1], args.autorespond)
     if args.setmrange:

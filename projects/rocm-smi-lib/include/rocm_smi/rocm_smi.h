@@ -2762,6 +2762,31 @@ rsmi_status_t rsmi_dev_clk_range_set(uint32_t dv_ind, uint64_t minclkvalue,
                                        rsmi_clk_type_t clkType);
 
 /**
+ *  @brief This function sets the clock min/max level
+ *
+ *  @details Given a device index @p dv_ind, a clock value @p minclkvalue,
+ *  a maximum clock value @p maxclkvalue and a clock type @p clkType this function
+ *  will set the sclk|mclk range
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in] level RSMI_FREQ_IND_MIN|RSMI_FREQ_IND_MAX
+ *
+ *  @param[in] clkvalue value to apply to the clock level. Frequency values
+ *  are in MHz.
+ *
+ *  @param[in] clkType RSMI_CLK_TYPE_SYS | RSMI_CLK_TYPE_MEM level type
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ */
+rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
+                                       uint64_t clkvalue,
+                                       rsmi_clk_type_t clkType);
+
+/**
  *  @brief This function sets the clock frequency information
  *
  *  @details Given a device index @p dv_ind, a frequency level @p level,
