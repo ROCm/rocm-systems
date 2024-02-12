@@ -351,7 +351,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     ]
 
     blocks = []
-    if mspec.GPU == "gfx90a" and (not skip_roof):
+    if mspec.arch == "gfx90a" and (not skip_roof):
         blocks.append("roofline")
 
     # ip block info
