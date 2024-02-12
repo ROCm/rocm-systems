@@ -768,7 +768,7 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
           interrupt_signal,
           new queue_info_session_t{
               queue_info.GetGPUAgent(), session_id_snapshot, queue_info.GetQueueID(), writer_id,
-              interrupt_signal, agentInfo.GetDeviceInfo().getGPUId(),
+              interrupt_signal, agentInfo.GetDeviceInfo().getNumaNode(),
               agentInfo.GetDeviceInfo().getXccCount(), queue_info.GetBlockSignal()});
       ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_add(1, std::memory_order_relaxed);
       // profile_id++;
