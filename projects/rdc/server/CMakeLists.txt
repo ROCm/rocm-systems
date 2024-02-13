@@ -80,6 +80,10 @@ link_directories(${RSMI_LIB_DIR})
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 
+# help find librdc_bootstrap.so at runtime
+set_target_properties(${SERVER_DAEMON_EXE}
+    PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib")
+
 target_link_libraries(${SERVER_DAEMON_EXE} pthread rt gRPC::grpc++
     cap dl rocm_smi64 rdc_bootstrap)
 

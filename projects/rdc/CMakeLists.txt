@@ -191,6 +191,9 @@ if(BUILD_STANDALONE)
 endif()
 message("-----------ROCM_DIR : " ${ROCM_DIR})
 
+# this is needed for INSTALL_RPATH "\$ORIGIN" property to work correctly
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE CACHE BOOL "Set all RPATH to be ORIGIN-based")
+
 ## Add address sanitizer
 if(${ADDRESS_SANITIZER})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g")

@@ -129,6 +129,8 @@ if(RDC_LIB_MODULES)
         EXPORT rdcTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
         COMPONENT ${CLIENT_COMPONENT})
+    set_target_properties(${RDC_LIB_MODULES}
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 endif()
 
 install(FILES ${PROJECT_SOURCE_DIR}/include/rdc/rdc.h
