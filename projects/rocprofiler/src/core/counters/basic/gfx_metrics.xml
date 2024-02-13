@@ -453,6 +453,8 @@
     <metric name="SQ_INSTS_SALU" block="SQ" event="60" descr="Number of SALU instructions issued. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_SMEM" block="SQ" event="61" descr="Number of SMEM instructions issued. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_FLAT" block="SQ" event="62" descr="Number of FLAT instructions issued. (per-simd, emulated)"></metric>
+    <metric name="SQ_INSTS_FLAT_FLATSEG" block="SQ" event="63" descr="Number of FLAT-FLAT instructions issued. (per-simd, emulated)"></metric>
+    <metric name="SQ_INSTS_FLAT_NO_LDS" block="SQ" event="64" descr="Number of FLAT instructions issued with no lds thread. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_LDS" block="SQ" event="65" descr="Number of LDS instructions issued (not including FLAT). (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_GDS" block="SQ" event="66" descr="Number of GDS instructions issued. (per-simd, emulated)"></metric>
     <metric name="SQ_INSTS_EXP_GDS" block="SQ" event="68" descr="Number of EXP and GDS instructions issued, excluding skipped export instructions. (per-simd, emulated)"></metric>
