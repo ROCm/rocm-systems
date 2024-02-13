@@ -13,7 +13,7 @@ find_package(rocprofiler-sdk REQUIRED)
 add_test(
     NAME rocprofv3-test-trace-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace --kernel-trace
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
         --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
         out $<TARGET_FILE:simple-transpose>)
 
@@ -78,12 +78,13 @@ set_tests_properties(
                ATTACHED_FILES_ON_FAIL
                "${VALIDATION_FILES}")
 
-# sys-trace test: tests --sys-trace command and validates generated files
+# sys-trace test: tests --sys-trace command with mangled kernel names and validates
+# generated files
 
 add_test(
     NAME rocprofv3-test-systrace-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --sys-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out
         $<TARGET_FILE:simple-transpose>)
 

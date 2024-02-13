@@ -2,6 +2,7 @@
 
 import sys
 import pytest
+import re
 
 
 def test_hsa_api_trace(hsa_input_data):
@@ -36,12 +37,13 @@ def test_hsa_api_trace(hsa_input_data):
 
 
 def test_kernel_trace(kernel_input_data):
+    mangled_kernel_name = "_Z15matrixTransposePfS_i.kd"
     for row in kernel_input_data:
         assert row["Kind"] == "KERNEL_DISPATCH"
         assert int(row["Agent_Id"]) > 0
         assert int(row["Queue_Id"]) > 0
         assert int(row["Kernel_Id"]) > 0
-        assert row["Kernel_Name"] == "matrixTranspose(float*, float*, int)"
+        assert row["Kernel_Name"] == mangled_kernel_name
         assert int(row["Correlation_Id"]) > 0
         assert int(row["Workgroup_Size_X"]) == 4
         assert int(row["Workgroup_Size_Y"]) == 4
