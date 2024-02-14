@@ -337,8 +337,8 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     param += [
         mspec.L1,
         mspec.L2,
-        mspec.cur_mclk,
-        mspec.cur_mclk,
+        mspec.max_sclk,
+        mspec.max_mclk,
         mspec.cur_sclk,
         mspec.cur_mclk,
         mspec.L2Banks,

@@ -993,7 +993,7 @@ def correct_sys_info(df, specs_correction):
         "max_waves_per_cu": "maxWavesPerCU",
         "max_waves_per_cu": "maxWorkgroupSize",
         "max_sclk": "sclk",
-        "mclk": "mclk",
+        "max_mclk": "mclk",
         "cur_sclk": "cur_sclk",
         "cur_mclk": "cur_mclk",
         "L2Banks": "L2Banks",

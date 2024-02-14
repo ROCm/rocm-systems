@@ -337,14 +337,10 @@ def get_machine_specs(devicenum):
 
     rocm_version = rocm_ver.strip()
 
-    freq = search(device, rocm_smi).split()
-    cur_sclk = search(r"([0-9]+)", freq[2])
-    if cur_sclk is None:
-        cur_sclk = ""
-
-    cur_mclk = search(r"([0-9]+)", freq[3])
-    if cur_mclk is None:
-        cur_mclk = 0
+    # these are just max's now, because the parsing was broken and this was inconsistent
+    # with how we use the clocks elsewhere (all max, all the time)
+    cur_sclk = gpu_info['max_sclk']
+    cur_mclk = gpu_info['max_mclk']
 
     # FIXME with device
     vbios = search(r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"], exit_on_error=True))
