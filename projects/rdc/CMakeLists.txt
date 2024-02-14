@@ -76,6 +76,9 @@ option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" OFF)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
 
+# Don't print 'Up-to-date' when installing
+set(CMAKE_INSTALL_MESSAGE LAZY)
+
 # this must go after some CMAKE_* variables
 project(${RDC}
     VERSION "${VERSION_STRING}"
@@ -94,7 +97,7 @@ set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
 set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE STRING "GRPC installation directory.")
-set(GRPC_DESIRED_VERSION 1.59.1 CACHE STRING "GRPC desired package version.")
+set(GRPC_DESIRED_VERSION 1.61.0 CACHE STRING "GRPC desired package version.")
 set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example install directory")
 
 set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE STRING "Default installation directory.")
@@ -188,6 +191,9 @@ if(BUILD_STANDALONE)
 endif()
 message("-----------ROCM_DIR : " ${ROCM_DIR})
 
+# this is needed for INSTALL_RPATH "\$ORIGIN" property to work correctly
+set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE CACHE BOOL "Set all RPATH to be ORIGIN-based")
+
 ## Add address sanitizer
 if(${ADDRESS_SANITIZER})
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address -g")
@@ -260,6 +266,9 @@ if(BUILD_STANDALONE)
         HINTS ${GRPC_ROOT}
         CONFIG REQUIRED)
 
+    # Don't print grpc install because it floods the terminal
+    set(OLD_CMAKE_INSTALL_MESSAGE ${CMAKE_INSTALL_MESSAGE})
+    set(CMAKE_INSTALL_MESSAGE NEVER)
     # Only allow installation when GRPC_ROOT is not default
     # The alternative is installing all libraries and binaries from
     # GRPC_ROOT_DEFAULT (/usr), which is incorrect behavior.
@@ -287,6 +296,9 @@ if(BUILD_STANDALONE)
             DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
             COMPONENT ${SERVER_COMPONENT})
     endif()
+    # Restore printing verbosity
+    set(CMAKE_INSTALL_MESSAGE ${OLD_CMAKE_INSTALL_MESSAGE})
+    unset(OLD_CMAKE_INSTALL_MESSAGE)
 
     add_subdirectory("server")
     add_subdirectory("client")
@@ -363,9 +375,15 @@ install(PROGRAMS ${RAS_SOURCES}
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/config
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
+# Don't sp3 grpc install because it floods the terminal
+set(OLD_CMAKE_INSTALL_MESSAGE ${CMAKE_INSTALL_MESSAGE})
+set(CMAKE_INSTALL_MESSAGE NEVER)
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/sp3
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
+# Restore printing verbosity
+set(CMAKE_INSTALL_MESSAGE ${OLD_CMAKE_INSTALL_MESSAGE})
+unset(OLD_CMAKE_INSTALL_MESSAGE)
 
 
 #Identify between SLES and Centos for setting symlink for rdc.service

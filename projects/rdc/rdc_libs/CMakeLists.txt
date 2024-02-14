@@ -129,16 +129,24 @@ if(RDC_LIB_MODULES)
         EXPORT rdcTargets
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
         COMPONENT ${CLIENT_COMPONENT})
+    set_target_properties(${RDC_LIB_MODULES}
+        PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 endif()
 
 install(FILES ${PROJECT_SOURCE_DIR}/include/rdc/rdc.h
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
 
+# Don't print kernel install because it floods the terminal
+set(OLD_CMAKE_INSTALL_MESSAGE ${CMAKE_INSTALL_MESSAGE})
+set(CMAKE_INSTALL_MESSAGE NEVER)
 # Install the kernel files
 install(DIRECTORY ${SRC_DIR}/rdc_modules/kernels/hsaco
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
     COMPONENT ${CLIENT_COMPONENT})
+# Restore printing verbosity
+set(CMAKE_INSTALL_MESSAGE ${OLD_CMAKE_INSTALL_MESSAGE})
+unset(OLD_CMAKE_INSTALL_MESSAGE)
 
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

@@ -224,25 +224,6 @@ typedef enum {
   RDC_FI_ECC_UMC_SEC,  //!< UMC Single Error Correction
   RDC_FI_ECC_UMC_DED,  //!< UMC Double Error Detection
 
-  /**
-   * @brief ROC-profiler related fields
-   */
-  RDC_FI_PROF_ELAPSED_CYCLES = 700,  //!< Number of elapsed cycles over all SMs
-  RDC_FI_PROF_ACTIVE_WAVES,          //!< Number of Active Waves
-  RDC_FI_PROF_ACTIVE_CYCLES,         //!< Number of Active Cycles
-  RDC_FI_PROF_CU_OCCUPANCY,          //!< Active Waves / maximum active Waves supported
-  RDC_FI_PROF_CU_UTILIZATION,        //!< Total active cycles / Total elapsed cycles
-  RDC_FI_PROF_FETCH_SIZE,            //!< Number of kilobytes fetched from video memory
-  RDC_FI_PROF_WRITE_SIZE,            //!< Number of kilobytes written to video memory
-  RDC_FI_PROF_FLOPS_16,              //!< Number of fp16 OPS / second
-  RDC_FI_PROF_FLOPS_32,              //!< Number of fp32 OPS / second
-  RDC_FI_PROF_FLOPS_64,              //!< Number of fp64 OPS / second
-  RDC_FI_PROF_GFLOPS_16,             //!< Number of fp16 GOPS / second
-  RDC_FI_PROF_GFLOPS_32,             //!< Number of fp32 GOPS / second
-  RDC_FI_PROF_GFLOPS_64,             //!< Number of fp64 GOPS / second
-  RDC_FI_PROF_MEMR_BW_KBPNS,         //!< HBM Read Bandwidth in kilobytes / nanosecond
-  RDC_FI_PROF_MEMW_BW_KBPNS,         //!< HBM Write Bandwidth in kilobytes / nanosecond
-
   /*
    * @brief Raw XGMI counter events
    */

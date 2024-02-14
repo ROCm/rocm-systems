@@ -75,6 +75,8 @@ set_property(TARGET ${RDC_LIB} PROPERTY
     SOVERSION "${VERSION_MAJOR}")
 set_property(TARGET ${RDC_LIB} PROPERTY
     VERSION "${SO_VERSION_STRING}")
+set_target_properties(${RDC_LIB}
+    PROPERTIES INSTALL_RPATH "\$ORIGIN")
 
 # If the library is a release, strip the target library
 if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
