@@ -35,7 +35,7 @@ import logging
 from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
-from utils.utils import error
+from utils.utils import error, get_hbm_stack_num
 
 @dataclass
 class MachineSpecs:
@@ -57,10 +57,12 @@ class MachineSpecs:
     wave_size: str
     workgroup_max_size: str
     max_sclk: str
+    max_mclk: str
     cur_sclk: str
     cur_mclk: str
     max_waves_per_cu: str
     L2Banks: str
+    totalL2Banks: str
     LDSBanks: str
     numSQC: str
     numPipes: str
@@ -86,6 +88,7 @@ class MachineSpecs:
             L1:                 {self.L1} KB
             L2:                 {self.L2} KB
             max_sclk:           {self.max_sclk} MHz
+            max_mclk:           {self.max_mclk} MHz
             cur_sclk:           {self.cur_sclk} MHz
             cur_mclk:           {self.cur_mclk} MHz
             CU:                 {self.CU}
@@ -95,6 +98,7 @@ class MachineSpecs:
             workgroup_max_size: {self.workgroup_max_size}
             max_waves_per_cu:   {self.max_waves_per_cu}
             L2Banks:            {self.L2Banks}
+            totalL2Banks:       {self.totalL2Banks}
             LDSBanks:           {self.LDSBanks}
             numSQC:             {self.numSQC}
             numPipes:           {self.numPipes}
@@ -114,6 +118,7 @@ def gpuinfo():
         "L1": None,
         "L2": None,
         "max_sclk": None,
+        "max_mclk": None,
         "num_CU": None,
         "num_SIMD": None,
         "numPipes": None,
@@ -127,6 +132,10 @@ def gpuinfo():
         "compute_partition": None,
         "memory_partition": None,
     }
+
+    # we get the max mclk from rocm-smi --showmclkrange
+    rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)
+    gpu_info['max_mclk'] = search(r'(\d+)Mhz\s*$', rocm_smi_mclk)
 
     # Fixme: find better way to differentiate cards, GPU vs APU, etc.
     rocminfo_full = run(["rocminfo"])
@@ -246,6 +255,23 @@ def search(pattern, string):
         return m.group(1)
     return None
 
+def total_l2_banks(archname, L2Banks, memory_partition):
+    # Fixme: support all supported partitioning mode
+    # Fixme: "name" is a bad name!
+    totalL2Banks = L2Banks
+    if (
+        archname.lower() == "mi300a_a0"
+        or archname.lower() == "mi300a_a1"
+    ):
+        totalL2Banks = L2Banks * get_hbm_stack_num(
+            archname, memory_partition)
+    elif (
+        archname.lower() == "mi300x_a0"
+        or archname.lower() == "mi300x_a1"
+    ):
+        totalL2Banks = L2Banks * get_hbm_stack_num(
+            archname, memory_partition)
+    return totalL2Banks
 
 def get_machine_specs(devicenum):
     cpuinfo = path("/proc/cpuinfo").read_text()
@@ -323,9 +349,6 @@ def get_machine_specs(devicenum):
     # FIXME with device
     vbios = search(r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"], exit_on_error=True))
 
-    # FIXME with spec
-    hbmBW = str(int(cur_mclk) / 1000 * 4096 / 8 * 2)
-
     compute_partition = search(
         r"Compute Partition:\s*(\w+)", run(["rocm-smi", "--showcomputepartition"])
     )
@@ -337,6 +360,18 @@ def get_machine_specs(devicenum):
     )
     if memory_partition == None:
         memory_partition = "NA"
+
+    totalL2Banks = total_l2_banks(
+        gpu_info['gpu_name'], int(gpu_info['L2Banks']), memory_partition)
+    hbmchannels = totalL2Banks
+    if (
+        gpu_info['gpu_name'].lower() == "mi300a_a0"
+        or gpu_info['gpu_name'].lower() == "mi300a_a1"
+    ) and memory_partition.lower() == "nps1":
+        # we have an extra 32 channels for the CCD
+        hbmchannels += 32
+    hbmBW = str(int(gpu_info['max_mclk']) / 1000 * 32 * hbmchannels)
+    totalL2Banks = str(totalL2Banks)
 
     return MachineSpecs(
         hostname,
@@ -357,10 +392,12 @@ def get_machine_specs(devicenum):
         gpu_info['wave_size'],
         gpu_info['grp_size'],
         gpu_info['max_sclk'],
+        gpu_info['max_mclk'],
         cur_sclk,
         cur_mclk,
         gpu_info['max_waves_per_cu'],
         gpu_info['L2Banks'],
+        totalL2Banks,
         gpu_info['LDSBanks'],
         gpu_info['numSQC'],
         gpu_info['numPipes'],

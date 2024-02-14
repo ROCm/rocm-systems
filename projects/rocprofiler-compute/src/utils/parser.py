@@ -30,7 +30,7 @@ import os
 import pandas as pd
 import numpy as np
 from utils import schema
-from utils.utils import error, get_hbm_stack_num
+from utils.utils import error
 from pathlib import Path
 import logging
 
@@ -409,24 +409,7 @@ def calc_builtin_var(var, sys_info):
     if isinstance(var, int):
         return var
     elif isinstance(var, str) and var.startswith("$totalL2Banks"):
-        # Fixme: support all supported partitioning mode
-        # Fixme: "name" is a bad name!
-        totalL2Banks = sys_info.L2Banks
-        if (
-            sys_info["name"].lower() == "mi300a_a0"
-            or sys_info["name"].lower() == "mi300a_a1"
-        ):
-            totalL2Banks = sys_info.L2Banks * get_hbm_stack_num(
-                sys_info["name"], sys_info["memory_partition"]
-            )
-        elif (
-            sys_info["name"].lower() == "mi300x_a0"
-            or sys_info["name"].lower() == "mi300x_a1"
-        ):
-            totalL2Banks = sys_info.L2Banks * get_hbm_stack_num(
-                sys_info["name"], sys_info["memory_partition"]
-            )
-        return totalL2Banks
+        return sys_info.totalL2Banks
     else:
         print("Don't support", var)
         sys.exit(1)
@@ -1014,6 +997,7 @@ def correct_sys_info(df, specs_correction):
         "cur_sclk": "cur_sclk",
         "cur_mclk": "cur_mclk",
         "L2Banks": "L2Banks",
+        "totalL2Banks": "totalL2Banks",
         "LDSBanks": "LDSBanks",
         "numSQC": "numSQC",
         "numPipes": "numPipes",
