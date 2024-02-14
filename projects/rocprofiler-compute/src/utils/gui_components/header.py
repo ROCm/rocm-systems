@@ -40,13 +40,22 @@ def list_unique(orig_list, is_numeric):
 
 
 def create_span(input):
-    elmt = {}
-    elmt["label"] = (html.Span(str(input), title=str(input)),)
-    elmt["value"] = str(input)
-    return elmt
+    return {
+        "label": html.Span(str(input), title=str(input)),
+        "value": str(input)
+    }
 
 
 def get_header(raw_pmc, input_filters, kernel_names):
+    kernel_names = list(
+        map(
+            str,
+            raw_pmc[
+                schema.pmc_perf_file_prefix
+            ]["Kernel_Name"],
+        )
+    )
+    kernel_names = [x.strip() for x in kernel_names]
     return html.Header(
         id="home",
         children=[
@@ -68,8 +77,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
-                                                "Top Stat",
-                                                href="#top_stat",
+                                                "Top Stats",
+                                                href="#top_stats",
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
@@ -125,8 +134,8 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
-                                                "Texture Addresser & Texture Data (TA/TD)",
-                                                href="#texture_addresser_and_texture_data_tatd",
+                                                "Address Processing Unit and Data Return Path (TA/TD)",
+                                                href="#address_processing_unit_and_data_return_path_tatd",
                                                 external_link=True,
                                             ),
                                             dbc.DropdownMenuItem(
@@ -270,21 +279,16 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                     map(
                                                         create_span,
                                                         list_unique(
-                                                            list(
-                                                                map(
-                                                                    str,
-                                                                    raw_pmc[
-                                                                        schema.pmc_perf_file_prefix
-                                                                    ]["Kernel_Name"],
-                                                                )
-                                                            ),
-                                                            False,
+                                                            orig_list=kernel_names,
+                                                            is_numeric=False,
                                                         ),  # list avail kernel names
                                                     )
                                                 ),
                                                 id="kernel-filt",
                                                 multi=True,
-                                                value=kernel_names,
+                                                value=input_filters[
+                                                    "kernel"
+                                                ],
                                                 optionHeight=150,
                                                 placeholder="ALL",
                                                 style={

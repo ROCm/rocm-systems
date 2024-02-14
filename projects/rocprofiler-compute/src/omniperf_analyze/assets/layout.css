@@ -5,22 +5,10 @@
 *   license: https://www.styleshout.com/template-license/
 *   03-18-2014
 =====================================================================
-
-   TOC:
-   a. General Styles
-   b. Header Styles
-   c. About Section
-   d. Resume Section
-   e. Portfolio Section
-   f. Call To Action Section
-   g. Testimonials Section
-   h. Contact Section
-   i. Footer
-
-===================================================================== */
+*/
 
 /* ------------------------------------------------------------------ */
-/* a. General Styles
+/* General Styles
 /* ------------------------------------------------------------------ */
 
 body { background: #0f0f0f; }
@@ -44,7 +32,7 @@ html {
 }
 
 /* ------------------------------------------------------------------ */
-/* b. Header Styles
+/* Header Styles
 /* ------------------------------------------------------------------ */
 
 header {
@@ -421,17 +409,27 @@ button.report:hover {
 }
 
 /* ------------------------------------------------------------------ */
-/* Top Stat Section
+/* Top Stats
 /* ------------------------------------------------------------------ */
-#top_stat {
+#top_stats {
    background: #2B2B2B;
    padding-top: 96px;
    padding-bottom: 66px;
    overflow: hidden;
 }
 
-#top_stat a, #top_stat a:visited { color: #fff; }
-#top_stat a:hover, #top_stat a:focus { color: #11ABB0; }
+#top_stats .dash-table-container {
+   max-height: 500px;
+   overflow-y: scroll;
+}
+
+#top_stats th {
+   position: sticky;
+   top: 0;
+}
+
+#top_stats a, #top_stats a:visited { color: #fff; }
+#top_stats a:hover, #top_stats a:focus { color: #11ABB0; }
 
 /* ------------------------------------------------------------------ */
 /* System Info Section
@@ -445,6 +443,29 @@ button.report:hover {
 
 #system_info a, #system_info a:visited { color: #fff; }
 #system_info a:hover, #system_info a:focus { color: #11ABB0; }
+
+/* ------------------------------------------------------------------ */
+/* Dispatch List Section
+/* ------------------------------------------------------------------ */
+#dispatch_list {
+   background: #2B2B2B;
+   padding-top: 96px;
+   padding-bottom: 66px;
+   overflow: hidden;
+}
+
+#dispatch_list .dash-table-container {
+   max-height: 500px;
+   overflow-y: scroll;
+}
+
+#dispatch_list th {
+   position: sticky;
+   top: 0;
+}
+
+#dispatch_list a, #dispatch_list a:visited { color: #fff; }
+#dispatch_list a:hover, #dispatch_list a:focus { color: #11ABB0; }
 
 /* ------------------------------------------------------------------ */
 /* System Speed-of-Light Section

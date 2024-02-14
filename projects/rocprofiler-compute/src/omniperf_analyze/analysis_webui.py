@@ -45,7 +45,7 @@ class webui_analysis(OmniAnalyze_Base):
         self.dest_dir = os.path.abspath(args.path[0][0])
         self.arch = None
         
-        self.__hidden_sections = ["Memory Chart", "Kernels", "Roofline"]
+        self.__hidden_sections = ["Memory Chart", "Roofline"]
         self.__hidden_columns = ["Tips", "coll_level"]
         # define different types of bar charts
         self.__barchart_elements = {
@@ -126,19 +126,19 @@ class webui_analysis(OmniAnalyze_Base):
                 filter_gpu_ids=base_data[base_run].filter_gpu_ids,
                 filter_dispatch_ids=base_data[base_run].filter_dispatch_ids,
                 time_unit=self.get_args().time_unit,
-                max_kernel_num=base_data[base_run].filter_top_n,
+                max_stat_num=base_data[base_run].filter_top_n,
             )
             # Only display basic metrics if no filters are applied
             if not (disp_filt or kernel_filter or gcd_filter):
                 temp = {}
-                keep = [1, 201, 101, 301]
+                keep = [1, 2, 101, 201, 301, 401]
                 for key in base_data[base_run].dfs:
                     if keep.count(key) != 0:
                         temp[key] = base_data[base_run].dfs[key]
 
                 base_data[base_run].dfs = temp
                 temp = {}
-                keep = [0, 100, 200, 300]
+                keep = [0, 100, 200, 300, 400]
                 for key in panel_configs:
                     if keep.count(key) != 0:
                         temp[key] = panel_configs[key]
@@ -159,7 +159,7 @@ class webui_analysis(OmniAnalyze_Base):
 
             # Append memory chart and roofline
             div_children.append(
-                get_memchart(panel_configs[300]["data source"], base_data[base_run])
+                get_memchart(panel_configs[400]["data source"], base_data[base_run])
             )
             has_roofline = os.path.isfile(os.path.join(self.dest_dir, "roofline.csv"))
             if has_roofline and hasattr(self.get_socs()[self.arch], "roofline_obj"):
@@ -273,7 +273,7 @@ class webui_analysis(OmniAnalyze_Base):
                 filter_gpu_ids=self._runs[self.dest_dir].filter_gpu_ids,
                 filter_dispatch_ids=self._runs[self.dest_dir].filter_dispatch_ids,
                 time_unit=args.time_unit,
-                max_kernel_num=args.max_kernel_num,
+                max_stat_num=args.max_stat_num,
             )
             # create 'mega dataframe'
             self._runs[self.dest_dir].raw_pmc = file_io.create_df_pmc(
@@ -299,7 +299,7 @@ class webui_analysis(OmniAnalyze_Base):
             "gpu": self._runs[self.dest_dir].filter_gpu_ids,
             "dispatch": self._runs[self.dest_dir].filter_dispatch_ids,
             "normalization": args.normal_unit,
-            "top_n": args.max_kernel_num,
+            "top_n": args.max_stat_num,
         }
         
         self.build_layout(
@@ -340,7 +340,7 @@ def determine_chart_type(
         # Smaller formatting if barchart yeilds several graphs
         if (
             len(d_figs) > 2
-            and not table_config["id"]
+            # and not table_config["id"]
             # in barchart_elements["l2_cache_per_chan"]
         ):
             temp_obj = []
