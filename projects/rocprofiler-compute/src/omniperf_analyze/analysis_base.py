@@ -51,11 +51,11 @@ class OmniAnalyze_Base():
         return self.__socs
     
     @demarcate
-    def generate_configs(self, arch, config_dir, list_kernels, filter_metrics, sys_info):
+    def generate_configs(self, arch, config_dir, list_stats, filter_metrics, sys_info):
         single_panel_config = file_io.is_single_panel_config(Path(config_dir), self.__supported_archs)
         
         ac = schema.ArchConfig()
-        if list_kernels:
+        if list_stats:
             ac.panel_configs = file_io.top_stats_build_in_config
         else:
             arch_panel_config = (
@@ -81,7 +81,7 @@ class OmniAnalyze_Base():
             arch = args.list_metrics
             if arch not in self._arch_configs.keys():
                 sys_info = file_io.load_sys_info(Path(self.__args.path[0][0], "sysinfo.csv"))
-                self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info.iloc[0])
+                self.generate_configs(arch, args.config_dir, args.list_stats, args.filter_metrics, sys_info.iloc[0])
 
             for key, value in self._arch_configs[args.list_metrics].metric_list.items():
                 prefix = ""
@@ -124,7 +124,7 @@ class OmniAnalyze_Base():
             sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_soc"]
             args = self.__args
-            self.generate_configs(arch, args.config_dir, args.list_kernels, args.filter_metrics, sys_info.iloc[0])
+            self.generate_configs(arch, args.config_dir, args.list_stats, args.filter_metrics, sys_info.iloc[0])
 
         self.load_options(normalization_filter)
         

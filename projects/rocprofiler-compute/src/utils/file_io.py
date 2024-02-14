@@ -43,8 +43,13 @@ import logging
 top_stats_build_in_config = {
     0: {
         "id": 0,
-        "title": "Top Stat",
+        "title": "Top Kernels",
         "data source": [{"raw_csv_table": {"id": 1, "source": "pmc_kernel_top.csv"}}],
+    },
+    1: {
+        "id": 1,
+        "title": "Dispatch List",
+        "data source": [{"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}],
     }
 }
 
@@ -82,7 +87,7 @@ def create_df_kernel_top_stats(
     filter_gpu_ids,
     filter_dispatch_ids,
     time_unit,
-    max_kernel_num,
+    max_stat_num,
     sortby="sum",
 ):
     """
@@ -142,14 +147,9 @@ def create_df_kernel_top_stats(
     #   Sort by total time as default.
     if sortby == "sum":
         grouped = grouped.sort_values(by=("Sum" + time_unit_str), ascending=False)
-
-        grouped = grouped.head(max_kernel_num)  # Display only the top n results
-
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
     elif sortby == "kernel":
         grouped = grouped.sort_values("Kernel_Name")
-
-        grouped = grouped.head(max_kernel_num)  # Display only the top n results
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
 
 

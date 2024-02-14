@@ -48,7 +48,7 @@ class cli_analysis(OmniAnalyze_Base):
                 filter_gpu_ids=self._runs[d[0]].filter_gpu_ids,
                 filter_dispatch_ids=self._runs[d[0]].filter_dispatch_ids,
                 time_unit=self.get_args().time_unit,
-                max_kernel_num=self.get_args().max_kernel_num
+                max_stat_num=self.get_args().max_stat_num
             )
             # create 'mega dataframe'
             self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
@@ -69,8 +69,8 @@ class cli_analysis(OmniAnalyze_Base):
         """Run CLI analysis.
         """
         super().run_analysis()
-        if self.get_args().list_kernels:
-            tty.show_kernels(
+        if self.get_args().list_stats:
+            tty.show_kernel_stats(
                 self.get_args(),
                 self._runs,
                 self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_soc"]],

@@ -200,6 +200,12 @@ def show_all(args, runs, archConfigs, output):
                                 index=False,
                             )
 
+                    # Only show top N kernels (as specified in --max-kernel-num) in "Top Stats" section
+                    if(
+                        type == "raw_csv_table"
+                        and (table_config["source"] == "pmc_kernel_top.csv" or table_config["source"] == "pmc_dispatch_info.csv")
+                    ):
+                        df = df.head(args.max_stat_num)
                     # NB:
                     # "columnwise: True" is a special attr of a table/df
                     # For raw_csv_table, such as system_info, we transpose the
@@ -226,30 +232,40 @@ def show_all(args, runs, archConfigs, output):
             print(ss, file=output)
 
 
-def show_kernels(args, runs, archConfigs, output):
+def show_kernel_stats(args, runs, archConfigs, output):
     """
-    Show the kernels from top stats.
+    Show the kernels and dispatches from "Top Stats" section.
     """
-    print("\n" + "-" * 80, file=output)
-    print("Detected Kernels", file=output)
+    # print("\n" + "-" * 80, file=output)
+    # print("Detected Kernels (sorted decending by duration)", file=output)
 
     df = pd.DataFrame()
     for panel_id, panel in archConfigs.panel_configs.items():
         for data_source in panel["data source"]:
             for type, table_config in data_source.items():
                 for run, data in runs.items():
+                    df = pd.DataFrame()
                     single_df = data.dfs[table_config["id"]]
                     # NB:
                     #   For pmc_kernel_top.csv, have to sort here if not
                     #   sorted when load_table_data.
-                    df = pd.concat([df, single_df["Kernel_Name"]], axis=1)
+                    if table_config["id"] == 1:
+                        print("\n" + "-" * 80, file=output)
+                        print("Detected Kernels (sorted decending by duration)", file=output)
+                        df = pd.concat([df, single_df["Kernel_Name"]], axis=1)
 
-    print(
-        tabulate(
-            df,
-            headers="keys",
-            tablefmt="fancy_grid",
-            floatfmt="." + str(args.decimal) + "f",
-        ),
-        file=output,
-    )
+                    if table_config["id"] == 2:
+                        print("\n" + "-" * 80, file=output)
+                        print("Dispatch list", file=output)
+                        df = single_df
+
+                    print(
+                        tabulate(
+                            df,
+                            headers="keys",
+                            tablefmt="fancy_grid",
+                            floatfmt="." + str(args.decimal) + "f",
+                        ),
+                        file=output,
+                    )
+

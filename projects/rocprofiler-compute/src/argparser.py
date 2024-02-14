@@ -391,9 +391,9 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         help="\t\tSpecify the raw data root dirs or desired results directory.",
     )
     analyze_group.add_argument(
-        "--list-kernels",
+        "--list-stats",
         action="store_true",
-        help="\t\tList all detected kernels. Sorted by duration (descending order).",
+        help="\t\tList all detected kernels and kernel dispatches.",
     )
     analyze_group.add_argument(
         "--list-metrics",
@@ -455,12 +455,12 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         help="\t\tRandomly generate a port to launch GUI application.\n\t\tRegistered Ports range inclusive (1024-49151).",
     )
     analyze_advanced_group.add_argument(
-        "--max-kernel-num",
-        dest="max_kernel_num",
+        "--max-stat-num",
+        dest="max_stat_num",
         metavar="",
         type=int,
         default=10,
-        help="\t\tSpecify the maximum number of kernels shown in \"Top Stats\" table (DEFAULT: 10)",
+        help="\t\tSpecify the maximum number of stats shown in \"Top Stats\" tables (DEFAULT: 10)",
     )
     analyze_advanced_group.add_argument(
         "-n",
