@@ -230,9 +230,10 @@ def run(cmd,exit_on_error=False):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if exit_on_error:
-        if cmd[0] == "rocm-smi" and p.returncode != 0:
-            logging.error("ERROR: No GPU detected. Unable to load rocm-smi")
-            sys.exit(1)
+        if cmd[0] == "rocm-smi":
+            if p.returncode != 2 and p.returncode != 0:
+                logging.error("ERROR: No GPU detected. Unable to load rocm-smi")
+                sys.exit(1)
         elif p.returncode != 0:
             logging.error("ERROR: command [%s] failed with non-zero exit code" % cmd)
             sys.exit(1)

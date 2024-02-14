@@ -159,7 +159,7 @@ class webui_analysis(OmniAnalyze_Base):
 
             # Append memory chart and roofline
             div_children.append(
-                get_memchart(panel_configs[400]["data source"], base_data[base_run])
+                get_memchart(panel_configs[300]["data source"], base_data[base_run])
             )
             has_roofline = os.path.isfile(os.path.join(self.dest_dir, "roofline.csv"))
             if has_roofline and hasattr(self.get_socs()[self.arch], "roofline_obj"):
