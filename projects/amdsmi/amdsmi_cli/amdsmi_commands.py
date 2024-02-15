@@ -152,10 +152,10 @@ class AMDSMICommands():
 
         # Store values based on format
         if self.logger.is_human_readable_format():
-            self.logger.store_output(args.gpu, 'AMDSMI_SPACING_REMOVAL', {'bdf':bdf, 'uuid':uuid})
+            self.logger.store_output(args.gpu, 'AMDSMI_SPACING_REMOVAL', {'gpu_bdf':bdf, 'gpu_uuid':uuid})
         else:
-            self.logger.store_output(args.gpu, 'bdf', bdf)
-            self.logger.store_output(args.gpu, 'uuid', uuid)
+            self.logger.store_output(args.gpu, 'gpu_bdf', bdf)
+            self.logger.store_output(args.gpu, 'gpu_uuid', uuid)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -323,16 +323,6 @@ class AMDSMICommands():
         if args.asic:
             try:
                 asic_info = amdsmi_interface.amdsmi_get_gpu_asic_info(args.gpu)
-                asic_info['vendor_id'] = hex(asic_info['vendor_id'])
-                asic_info['vendor_name'] = asic_info['vendor_name'].replace(',', '')
-                asic_info['device_id'] = hex(asic_info['device_id'])
-                asic_info['rev_id'] = hex(asic_info['rev_id'])
-                if asic_info['asic_serial'] != '':
-                    asic_info['asic_serial'] = hex(int(asic_info['asic_serial'], base=16))
-                else:
-                    asic_info['asic_serial'] = "N/A"
-                if asic_info['oam_id'] == 0xFFFF: # uint 16 max
-                    asic_info['oam_id'] = "N/A"
                 static_dict['asic'] = asic_info
             except amdsmi_exception.AmdSmiLibraryException as e:
                 static_dict['asic'] = "N/A"
@@ -560,21 +550,32 @@ class AMDSMICommands():
             static_dict['vram'] = vram_info
         if args.cache:
             try:
-                cache_info = amdsmi_interface.amdsmi_get_gpu_cache_info(args.gpu)
-                logging.debug(f"cache_info dictionary = {cache_info}")
-
+                cach_info_list = amdsmi_interface.amdsmi_get_gpu_cache_info(args.gpu)
+                logging.debug(f"cache_info dictionary = {cach_info_list}")
                 if self.logger.is_human_readable_format():
-                    for key, cache_values in cache_info.items():
-                        cache_values['cache_size'] = f"{cache_values['cache_size']} KB"
+                    cache_info_dict_format = {}
+                    for cache_dict in cach_info_list:
+                        cache_index = "cache_" + str(cache_dict["cache"])
+                        cache_info_dict_format[cache_index] = cache_dict
+
+                        # Remove cache index from new dictionary
+                        cache_info_dict_format[cache_index].pop("cache")
+
+                        # Add cache_size unit
+                        cache_info_dict_format[cache_index]["cache_size"] = f"{cache_info_dict_format[cache_index]['cache_size']} KB"
+
                         # take cache_properties out of list -> display as string, removing brackets
-                        cache_values['cache_properties'] = ", ".join(cache_values['cache_properties'])
-                logging.debug(f"After human_readable | cache_info = {cache_info}")
+                        cache_info_dict_format[cache_index]["cache_properties"] = ", ".join(cache_info_dict_format[cache_index]["cache_properties"])
+
+                    cach_info_list = cache_info_dict_format
+
+                logging.debug(f"After human_readable | cache_info = {cach_info_list}")
 
             except amdsmi_exception.AmdSmiLibraryException as e:
-                cache_info = "N/A"
+                cach_info_list = "N/A"
                 logging.debug("Failed to get cache info for gpu %s | %s", gpu_id, e.get_error_info())
 
-            static_dict['cache'] = cache_info
+            static_dict['cache_info'] = cach_info_list
         if 'ras' in current_platform_args:
             if args.ras:
                 ras_dict = {"eeprom_version": "N/A",
@@ -1961,7 +1962,7 @@ class AMDSMICommands():
             if (args.cpu_metrics_ver):
                 static_dict["metric_version"] = {}
                 try:
-                    version = amdsmi_interface.amdsmi_get_metrics_table_version(args.cpu)
+                    version = amdsmi_interface.amdsmi_get_hsmp_metrics_table_version(args.cpu)
                     static_dict["metric_version"]["version"] = version
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     static_dict["metric_version"]["version"] = "N/A"
@@ -1982,7 +1983,7 @@ class AMDSMICommands():
                     static_dict["metrics_table"]["cpu_model"] = "N/A"
                     logging.debug("Failed to get cpu model | %s", e.get_error_info())
                 try:
-                    metrics_table = amdsmi_interface.amdsmi_get_metrics_table(args.cpu)
+                    metrics_table = amdsmi_interface.amdsmi_get_hsmp_metrics_table(args.cpu)
                     static_dict["metrics_table"]["response"] = metrics_table
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     static_dict["metrics_table"]["response"] = "N/A"

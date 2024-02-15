@@ -69,8 +69,8 @@ try:
     from .amdsmi_interface import amdsmi_set_cpu_df_pstate_range
     from .amdsmi_interface import amdsmi_get_cpu_current_io_bandwidth
     from .amdsmi_interface import amdsmi_get_cpu_current_xgmi_bw
-    from .amdsmi_interface import amdsmi_get_metrics_table_version
-    from .amdsmi_interface import amdsmi_get_metrics_table
+    from .amdsmi_interface import amdsmi_get_hsmp_metrics_table_version
+    from .amdsmi_interface import amdsmi_get_hsmp_metrics_table
     from .amdsmi_interface import amdsmi_first_online_core_on_cpu_socket
     from .amdsmi_interface import amdsmi_get_cpu_family
     from .amdsmi_interface import amdsmi_get_cpu_model

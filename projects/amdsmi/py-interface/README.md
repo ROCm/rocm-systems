@@ -465,32 +465,33 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_cache_info
 
-Description: Returns dictionary of cache information for the given GPU.
+Description: Returns a list of dictionaries containing cache information for the given GPU.
 
 Input parameters:
 
 * `processor_handle` device which to query
 
-Output: Dictionary of Dictionaries containing cache information
-Schema: { cache_index:
-            {
-            cache_properties:
-                {
-                    "type": "array",
-                    "items": {
-                         "type": "string"
-                    }
-                },
-            cache_size: {"type" : "number"},
-            cache_level: {"type" : "number"},
-            max_num_cu_shared: {"type" : "number"},
-            num_cache_instance: {"type" : "number"}
-            }
-        }
+Output: List of Dictionaries containing cache information following the schema below:
+Schema:
+
+```JSON
+{
+    cache: {"type" : "number"},
+    cache_properties:  
+        {
+            "type" : "array",
+            "items" : {"type" : "string"}
+        },
+    cache_size: {"type" : "number"},
+    cache_level: {"type" : "number"},
+    max_num_cu_shared: {"type" : "number"},
+    num_cache_instance: {"type" : "number"}
+}
+```
 
 Field | Description
 ---|---
-`cache_index` | cache index is a string of format "cache_#" up to 10 caches will be available
+`cache` | cache index from 0-9
 `cache_properties` | list of up to 4 cache property type strings. Ex. data ("DATA_CACHE"), instruction ("INST_CACHE"), CPU ("CPU_CACHE"), or SIMD ("SIMD_CACHE").
 `cache_size` | size of cache in KB
 `cache_level` | level of cache
@@ -5958,13 +5959,13 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_get_metrics_table_version
+### amdsmi_get_hsmp_metrics_table_version
 
-Description: Get metrics table version.
+Description: Get HSMP metrics table version.
 
-Output: amdsmi metrics table version
+Output: amdsmi HSMP metrics table version
 
-Exceptions that can be thrown by `amdsmi_get_metrics_table_version` function:
+Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table_version` function:
 
 * `AmdSmiLibraryException`
 
@@ -5977,19 +5978,19 @@ try:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            met_ver = amdsmi_get_metrics_table_version(processor)
+            met_ver = amdsmi_get_hsmp_metrics_table_version(processor)
             print(met_ver)
 except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_get_metrics_table
+### amdsmi_get_hsmp_metrics_table
 
-Description: Get metrics table
+Description: Get HSMP metrics table
 
-Output: metric table data
+Output: HSMP metric table data
 
-Exceptions that can be thrown by `amdsmi_get_metrics_table` function:
+Exceptions that can be thrown by `amdsmi_get_hsmp_metrics_table` function:
 
 * `AmdSmiLibraryException`
 
@@ -6002,7 +6003,7 @@ try:
         print("No CPU sockets on machine")
     else:
         for processor in processor_handles:
-            mtbl = amdsmi_get_metrics_table(processor)
+            mtbl = amdsmi_get_hsmp_metrics_table(processor)
             print(mtbl['accumulation_counter'])
             print(mtbl['max_socket_temperature'])
             print(mtbl['max_vr_temperature'])

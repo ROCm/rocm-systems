@@ -349,6 +349,23 @@ void TestGpuMetricsRead::Run(void) {
           << static_cast<uint32_t>(smu.pcie_nak_rcvd_count_acc) << "\n";
           std::cout << "pcie_replay_rover_count_acc= " << std::dec
           << static_cast<uint64_t>(smu.pcie_replay_rover_count_acc) << "\n";
+
+          // Check for constant changes/refresh metrics
+          std::cout << "\n";
+          std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
+          constexpr uint16_t kMAX_ITER_TEST = 10;
+          amdsmi_gpu_metrics_t gpu_metrics_check;
+          for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+            amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+            std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
+          }
+
+          std::cout << "\n";
+          for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+            amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+            std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.system_clock_counter << "\n";
+          }
+          std::cout << "\n";
       }
     }
 

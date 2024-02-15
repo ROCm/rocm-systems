@@ -78,7 +78,7 @@ amd-smi will report the version and current platform detected when running the c
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.2.0.0 | ROCm version: 6.1.0 | Platform: Linux
+AMD System Management Interface | Version: 24.3.0.0 | ROCm version: 6.1.0 | Platform: Linux
 Baremetal
 
 options:

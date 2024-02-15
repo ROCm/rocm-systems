@@ -287,8 +287,8 @@ int main(int argc, char **argv) {
       double fraction_uq10 = fraction_q10;
       const char* err_str1;
 
-      amdsmi_hsmp_metric_table_t mtbl = {};
-      ret = amdsmi_get_metrics_table(plist[index], &mtbl);
+      amdsmi_hsmp_metrics_table_t mtbl = {};
+      ret = amdsmi_get_hsmp_metrics_table(plist[index], &mtbl);
 
       if (ret != AMDSMI_STATUS_SUCCESS) {
           cout<<"Failed to get Metrics Table for CPU["<<index<<"], Err["<<ret<<"]" << endl;

@@ -445,20 +445,21 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(
 
     info->num_cache_types = rsmi_info.num_cache_types;
     for (unsigned int i =0; i < rsmi_info.num_cache_types; i++) {
+        // convert from sysfs type to CRAT type(HSA Cache Affinity type)
+        info->cache[i].cache_properties = 0;
+        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_DATA)
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_DATA_CACHE;
+        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_INSTRUCTION)
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_INST_CACHE;
+        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_CPU)
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_CPU_CACHE;
+        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_HSACU)
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_SIMD_CACHE;
+
         info->cache[i].cache_size = rsmi_info.cache[i].cache_size_kb;
         info->cache[i].cache_level = rsmi_info.cache[i].cache_level;
         info->cache[i].max_num_cu_shared = rsmi_info.cache[i].max_num_cu_shared;
         info->cache[i].num_cache_instance = rsmi_info.cache[i].num_cache_instance;
-        // convert from sysfs type to CRAT type(HSA Cache Affinity type)
-        info->cache[i].properties = 0;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_DATA)
-            info->cache[i].properties |= CACHE_PROPERTIES_DATA_CACHE;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_INSTRUCTION)
-            info->cache[i].properties |= CACHE_PROPERTIES_INST_CACHE;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_CPU)
-            info->cache[i].properties |= CACHE_PROPERTIES_CPU_CACHE;
-        if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_HSACU)
-            info->cache[i].properties |= CACHE_PROPERTIES_SIMD_CACHE;
     }
 
     return AMDSMI_STATUS_SUCCESS;
@@ -1106,6 +1107,17 @@ amdsmi_status_t  amdsmi_get_gpu_ecc_status(amdsmi_processor_handle processor_han
     return rsmi_wrapper(rsmi_dev_ecc_status_get, processor_handle,
                     static_cast<rsmi_gpu_block_t>(block),
                     reinterpret_cast<rsmi_ras_err_state_t*>(state));
+}
+
+amdsmi_status_t
+amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle processor_handle,
+                amd_metrics_table_header_t *header_value)
+{
+    AMDSMI_CHECK_INIT();
+    // nullptr api supported
+
+    return rsmi_wrapper(rsmi_dev_metrics_header_info_get, processor_handle,
+                    reinterpret_cast<metrics_table_header_t*>(header_value));
 }
 
 amdsmi_status_t  amdsmi_get_gpu_metrics_info(
@@ -3004,7 +3016,7 @@ amdsmi_status_t amdsmi_get_cpu_current_xgmi_bw(amdsmi_processor_handle processor
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t amdsmi_get_metrics_table_version(amdsmi_processor_handle processor_handle,
+amdsmi_status_t amdsmi_get_hsmp_metrics_table_version(amdsmi_processor_handle processor_handle,
                 uint32_t *metrics_version)
 {
     amdsmi_status_t status;
@@ -3024,8 +3036,8 @@ amdsmi_status_t amdsmi_get_metrics_table_version(amdsmi_processor_handle process
     return AMDSMI_STATUS_SUCCESS;
 }
 
-amdsmi_status_t amdsmi_get_metrics_table(amdsmi_processor_handle processor_handle,
-                amdsmi_hsmp_metric_table_t *metrics_table)
+amdsmi_status_t amdsmi_get_hsmp_metrics_table(amdsmi_processor_handle processor_handle,
+                amdsmi_hsmp_metrics_table_t *metrics_table)
 {
     amdsmi_status_t status;
     struct hsmp_metric_table metrics_tbl;
@@ -3036,7 +3048,7 @@ amdsmi_status_t amdsmi_get_metrics_table(amdsmi_processor_handle processor_handl
     if (processor_handle == nullptr)
         return AMDSMI_STATUS_INVAL;
 
-    if(sizeof(amdsmi_hsmp_metric_table_t) != sizeof(struct hsmp_metric_table))
+    if(sizeof(amdsmi_hsmp_metrics_table_t) != sizeof(struct hsmp_metric_table))
         return AMDSMI_STATUS_UNEXPECTED_SIZE;
 
     amdsmi_status_t r = amdsmi_get_processor_info(processor_handle, SIZE, proc_id);
@@ -3049,7 +3061,7 @@ amdsmi_status_t amdsmi_get_metrics_table(amdsmi_processor_handle processor_handl
     if (status != AMDSMI_STATUS_SUCCESS)
         return amdsmi_errno_to_esmi_status(status);
 
-    std::memcpy(metrics_table, &metrics_tbl, sizeof(amdsmi_hsmp_metric_table_t));
+    std::memcpy(metrics_table, &metrics_tbl, sizeof(amdsmi_hsmp_metrics_table_t));
 
     return AMDSMI_STATUS_SUCCESS;
 }

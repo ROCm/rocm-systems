@@ -1349,7 +1349,7 @@ def amdsmi_get_cpu_current_xgmi_bw(
 
     return f"{xgmi_bw.value} Mbps"
 
-def amdsmi_get_metrics_table_version(
+def amdsmi_get_hsmp_metrics_table_version(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
 ):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -1360,7 +1360,7 @@ def amdsmi_get_metrics_table_version(
     metric_tbl_version = ctypes.c_uint32()
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_metrics_table_version(
+        amdsmi_wrapper.amdsmi_get_hsmp_metrics_table_version(
             processor_handle, ctypes.byref(metric_tbl_version))
     )
 
@@ -1393,7 +1393,7 @@ def check_msb_64(num):
     else:
         return num
 
-def amdsmi_get_metrics_table(
+def amdsmi_get_hsmp_metrics_table(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle
 ):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -1401,7 +1401,7 @@ def amdsmi_get_metrics_table(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    mtbl = amdsmi_wrapper.amdsmi_hsmp_metric_table_t()
+    mtbl = amdsmi_wrapper.amdsmi_hsmp_metrics_table_t()
 
     '''Encodings for the metric table defined for hsmp'''
     fraction_q10 = 1 / math.pow(2, 10)
@@ -1409,7 +1409,7 @@ def amdsmi_get_metrics_table(
     fraction_uq16 = 1 / math.pow(2, 16)
 
     _check_res(
-            amdsmi_wrapper.amdsmi_get_metrics_table(
+            amdsmi_wrapper.amdsmi_get_hsmp_metrics_table(
                    processor_handle, mtbl
             )
     )
@@ -1562,22 +1562,49 @@ def amdsmi_get_gpu_asic_info(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    asic_info = amdsmi_wrapper.amdsmi_asic_info_t()
+    asic_info_struct = amdsmi_wrapper.amdsmi_asic_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_asic_info(
-            processor_handle, ctypes.byref(asic_info))
+            processor_handle, ctypes.byref(asic_info_struct))
     )
 
-    return {
-        "market_name": asic_info.market_name.decode("utf-8"),
-        "vendor_id": asic_info.vendor_id,
-        "vendor_name": asic_info.vendor_name.decode("utf-8"),
-        "subvendor_id": asic_info.subvendor_id if asic_info.subvendor_id == '' else hex(asic_info.subvendor_id),
-        "device_id": asic_info.device_id,
-        "rev_id": asic_info.rev_id,
-        "asic_serial": asic_info.asic_serial.decode("utf-8"),
-        "oam_id": asic_info.oam_id
+    asic_info = {
+        "market_name": asic_info_struct.market_name.decode("utf-8"),
+        "vendor_id": asic_info_struct.vendor_id,
+        "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
+        "subvendor_id": asic_info_struct.subvendor_id,
+        "device_id": asic_info_struct.device_id,
+        "rev_id": asic_info_struct.rev_id,
+        "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
+        "oam_id": asic_info_struct.oam_id
     }
+
+    string_values = ["market_name", "vendor_name"]
+    for value in string_values:
+        if not asic_info[value]:
+            asic_info[value] = "N/A"
+
+    hex_values = ["vendor_id", "subvendor_id", "device_id", "rev_id"]
+    for value in hex_values:
+        if asic_info[value]:
+            asic_info[value] = hex(asic_info[value])
+        else:
+            asic_info[value] = "N/A"
+
+    # Ensure hex output for asic_serial
+    if asic_info["asic_serial"]:
+        asic_info["asic_serial"] = str.format("0x{:016X}", int(asic_info["asic_serial"], base=16))
+    else:
+        asic_info["asic_serial"] = "N/A"
+
+    # Check for max value as a sign for not applicable
+    if asic_info["oam_id"] == 0xFFFF: # uint 16 max
+        asic_info["oam_id"] = "N/A"
+
+    # Remove commas from vendor name for clean output
+    asic_info["vendor_name"] = asic_info["vendor_name"].replace(',', '')
+
+    return asic_info
 
 
 def amdsmi_get_power_cap_info(
@@ -1625,51 +1652,52 @@ def amdsmi_get_gpu_vram_info(
 
 def amdsmi_get_gpu_cache_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> Dict[str, Dict[str, Any]]:
+) -> List[Dict[str, Any]]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    cache_info = amdsmi_wrapper.amdsmi_gpu_cache_info_t()
+    cache_info_struct = amdsmi_wrapper.amdsmi_gpu_cache_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_cache_info(
-            processor_handle, ctypes.byref(cache_info))
+            processor_handle, ctypes.byref(cache_info_struct))
     )
 
-    cache_info_dict = {}
-    for cache_index in range(cache_info.num_cache_types):
+    cache_info_list = []
+    for cache_index in range(cache_info_struct.num_cache_types):
         # Put cache_properties at the start of the dictionary for readability
         cache_dict = {
-            "cache_properties": [],
-            "cache_size": cache_info.cache[cache_index].cache_size,
-            "cache_level": cache_info.cache[cache_index].cache_level,
-            "max_num_cu_shared": cache_info.cache[cache_index].max_num_cu_shared,
-            "num_cache_instance": cache_info.cache[cache_index].num_cache_instance
+            "cache": cache_index,
+            "cache_properties": [], # This will be a list of strings
+            "cache_size": cache_info_struct.cache[cache_index].cache_size,
+            "cache_level": cache_info_struct.cache[cache_index].cache_level,
+            "max_num_cu_shared": cache_info_struct.cache[cache_index].max_num_cu_shared,
+            "num_cache_instance": cache_info_struct.cache[cache_index].num_cache_instance
         }
 
         # Check against cache properties bitmask
-        cache_properties = cache_info.cache[cache_index].properties
-        data_cache = cache_properties & amdsmi_wrapper.CACHE_PROPERTIES_DATA_CACHE
-        inst_cache = cache_properties & amdsmi_wrapper.CACHE_PROPERTIES_INST_CACHE
-        cpu_cache = cache_properties & amdsmi_wrapper.CACHE_PROPERTIES_CPU_CACHE
-        simd_cache = cache_properties & amdsmi_wrapper.CACHE_PROPERTIES_SIMD_CACHE
+        cache_properties = cache_info_struct.cache[cache_index].cache_properties
+        data_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_DATA_CACHE
+        inst_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_INST_CACHE
+        cpu_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_CPU_CACHE
+        simd_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_SIMD_CACHE
 
         cache_properties_status = [data_cache, inst_cache, cpu_cache, simd_cache]
         cache_property_list = []
         for cache_property in cache_properties_status:
             if cache_property:
                 property_name = amdsmi_wrapper.amdsmi_cache_properties_type_t__enumvalues[cache_property]
-                property_name = property_name.replace("CACHE_PROPERTIES_", "")
+                property_name = property_name.replace("AMDSMI_CACHE_PROPERTIES_", "")
                 cache_property_list.append(property_name)
 
         cache_dict["cache_properties"] = cache_property_list
-        cache_info_dict[f"cache_{cache_index}"] = cache_dict
+        cache_info_list.append(cache_dict)
 
-    if not cache_info_dict:
+    if not cache_info_list:
         raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NO_DATA)
 
-    return cache_info_dict
+    return cache_info_list
 
 
 def amdsmi_get_gpu_vbios_info(

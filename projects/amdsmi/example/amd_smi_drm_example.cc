@@ -51,6 +51,7 @@
 #include <cstring>
 #include <iostream>
 #include <vector>
+#include <sstream>
 
 #include "amd_smi/amdsmi.h"
 
@@ -212,6 +213,13 @@ void getFWNameFromId(int id, char *name)
 	}
 }
 
+template <typename T>
+std::string print_unsigned_int(T value) {
+  std::stringstream ss;
+  ss << static_cast<uint64_t>(value | 0);
+
+  return ss.str();
+}
 
 int main() {
     amdsmi_status_t ret;
@@ -315,7 +323,7 @@ int main() {
                 printf("\tCache Level: %d, Cache Size: %d KB, Cache type: 0x%x\n",
                     cache_info.cache[i].cache_level,
                     cache_info.cache[i].cache_size,
-                    cache_info.cache[i].properties);
+                    cache_info.cache[i].cache_properties);
                 printf("\tMax number CU shared: %d, Number of instances: %d\n",
                     cache_info.cache[i].max_num_cu_shared,
                     cache_info.cache[i].num_cache_instance);
@@ -655,6 +663,177 @@ int main() {
                       << "\n\n";
             std::cout << "\t\t Max Power Cap: " << cap_info.max_power_cap
                       << "\n\n";
+
+            /// Get GPU Metrics info
+            std::cout << "\n\n";
+            amdsmi_gpu_metrics_t gpu_metrics;
+            ret = amdsmi_get_gpu_metrics_info(processor_handles[j], &gpu_metrics);
+            CHK_AMDSMI_RET(ret)
+            printf("    Output of amdsmi_get_gpu_metrics_info:\n");
+            printf("\tDevice[%d] BDF %04lx:%02x:%02x.%d\n\n", i,
+                   bdf.fields.domain_number,
+                   bdf.fields.bus_number,
+                   bdf.fields.device_number,
+                   bdf.fields.function_number);
+
+            std::cout << "\t**.common_header.format_revision : "
+                      << print_unsigned_int(gpu_metrics.common_header.format_revision) << "\n";
+            std::cout << "\t**.common_header.content_revision : "
+                      << print_unsigned_int(gpu_metrics.common_header.content_revision) << "\n";
+            std::cout << "\t**.temperature_edge : " << std::dec
+                      << gpu_metrics.temperature_edge << "\n";
+            std::cout << "\t**.temperature_hotspot : " << std::dec
+                      << gpu_metrics.temperature_hotspot << "\n";
+            std::cout << "\t**.temperature_mem : " << std::dec
+                      << gpu_metrics.temperature_mem << "\n";
+            std::cout << "\t**.temperature_vrgfx : " << std::dec
+                      << gpu_metrics.temperature_vrgfx << "\n";
+            std::cout << "\t**.temperature_vrsoc : " << std::dec
+                      << gpu_metrics.temperature_vrsoc << "\n";
+            std::cout << "\t**.temperature_vrmem : " << std::dec
+                      << gpu_metrics.temperature_vrmem << "\n";
+            std::cout << "\t**.average_gfx_activity : " << std::dec
+                      << gpu_metrics.average_gfx_activity << "\n";
+            std::cout << "\t**.average_umc_activity : " << std::dec
+                      << gpu_metrics.average_umc_activity << "\n";
+            std::cout << "\t**.average_mm_activity : " << std::dec
+                      << gpu_metrics.average_mm_activity << "\n";
+            std::cout << "\t**.average_socket_power : " << std::dec
+                      << gpu_metrics.average_socket_power << "\n";
+            std::cout << "\t**.energy_accumulator : " << std::dec
+                      << gpu_metrics.energy_accumulator << "\n";
+            std::cout << "\t**.system_clock_counter : " << std::dec
+                      << gpu_metrics.system_clock_counter << "\n";
+            std::cout << "\t**.average_gfxclk_frequency : " << std::dec
+                      << gpu_metrics.average_gfxclk_frequency << "\n";
+            std::cout << "\t**.average_socclk_frequency : " << std::dec
+                      << gpu_metrics.average_socclk_frequency << "\n";
+            std::cout << "\t**.average_uclk_frequency : " << std::dec
+                      << gpu_metrics.average_uclk_frequency << "\n";
+            std::cout << "\t**.average_vclk0_frequency : " << std::dec
+                      << gpu_metrics.average_vclk0_frequency<< "\n";
+            std::cout << "\t**.average_dclk0_frequency : " << std::dec
+                      << gpu_metrics.average_dclk0_frequency << "\n";
+            std::cout << "\t**.average_vclk1_frequency : " << std::dec
+                      << gpu_metrics.average_vclk1_frequency << "\n";
+            std::cout << "\t**.average_dclk1_frequency : " << std::dec
+                      << gpu_metrics.average_dclk1_frequency << "\n";
+            std::cout << "\t**.current_gfxclk : " << std::dec
+                      << gpu_metrics.current_gfxclk << "\n";
+            std::cout << "\t**.current_socclk : " << std::dec
+                      << gpu_metrics.current_socclk << "\n";
+            std::cout << "\t**.current_uclk : " << std::dec
+                      << gpu_metrics.current_uclk << "\n";
+            std::cout << "\t**.current_vclk0 : " << std::dec
+                      << gpu_metrics.current_vclk0 << "\n";
+            std::cout << "\t**.current_dclk0 : " << std::dec
+                      << gpu_metrics.current_dclk0 << "\n";
+            std::cout << "\t**.current_vclk1 : " << std::dec
+                      << gpu_metrics.current_vclk1 << "\n";
+            std::cout << "\t**.current_dclk1 : " << std::dec
+                      << gpu_metrics.current_dclk1 << "\n";
+            std::cout << "\t**.throttle_status : " << std::dec
+                      << gpu_metrics.throttle_status << "\n";
+            std::cout << "\t**.current_fan_speed : " << std::dec
+                      << gpu_metrics.current_fan_speed << "\n";
+            std::cout << "\t**.pcie_link_width : " << std::dec
+                      << gpu_metrics.pcie_link_width << "\n";
+            std::cout << "\t**.pcie_link_speed : " << std::dec
+                      << gpu_metrics.pcie_link_speed << "\n";
+            std::cout << "\t**.gfx_activity_acc : " << std::dec
+                      << gpu_metrics.gfx_activity_acc << "\n";
+            std::cout << "\t**.mem_activity_acc : " << std::dec
+                      << gpu_metrics.mem_activity_acc << "\n";
+            std::cout << "\t**.firmware_timestamp : " << std::dec
+                      << gpu_metrics.firmware_timestamp << "\n";
+            std::cout << "\t**.voltage_soc : " << std::dec
+                      << gpu_metrics.voltage_soc << "\n";
+            std::cout << "\t**.voltage_gfx : " << std::dec
+                      << gpu_metrics.voltage_gfx << "\n";
+            std::cout << "\t**.voltage_mem : " << std::dec
+                      << gpu_metrics.voltage_mem << "\n";
+            std::cout << "\t**.indep_throttle_status : " << std::dec
+                      << gpu_metrics.indep_throttle_status << "\n";
+            std::cout << "\t**.current_socket_power : " << std::dec
+                      << gpu_metrics.current_socket_power << "\n";
+            std::cout << "\t**.gfxclk_lock_status : " << std::dec
+                      << gpu_metrics.gfxclk_lock_status << "\n";
+            std::cout << "\t**.xgmi_link_width : " << std::dec
+                      << gpu_metrics.xgmi_link_width << "\n";
+            std::cout << "\t**.xgmi_link_speed : " << std::dec
+                      << gpu_metrics.xgmi_link_speed << "\n";
+            std::cout << "\t**.pcie_bandwidth_acc : " << std::dec
+                      << gpu_metrics.pcie_bandwidth_acc << "\n";
+            std::cout << "\t**.pcie_bandwidth_inst : " << std::dec
+                      << gpu_metrics.pcie_bandwidth_inst << "\n";
+            std::cout << "\t**.pcie_l0_to_recov_count_acc : " << std::dec
+                      << gpu_metrics.pcie_l0_to_recov_count_acc << "\n";
+            std::cout << "\t**.pcie_replay_count_acc : " << std::dec
+                      << gpu_metrics.pcie_replay_count_acc << "\n";
+            std::cout << "\t**.pcie_replay_rover_count_acc : " << std::dec
+                      << gpu_metrics.pcie_replay_rover_count_acc << "\n";
+
+            std::cout << "\t**.temperature_hbm[] : " << std::dec << "\n";
+            for (const auto& temp : gpu_metrics.temperature_hbm) {
+              std::cout << "\t  -> " << std::dec << temp << "\n";
+            }
+
+            std::cout << "\t**.vcn_activity[] : " << std::dec << "\n";
+            for (const auto& vcn : gpu_metrics.vcn_activity) {
+              std::cout << "\t  -> " << std::dec << vcn << "\n";
+            }
+
+            std::cout << "\t**.xgmi_read_data_acc[] : " << std::dec << "\n";
+            for (const auto& read_data : gpu_metrics.xgmi_read_data_acc) {
+              std::cout << "\t  -> " << std::dec << read_data << "\n";
+            }
+
+            std::cout << "\t**.xgmi_write_data_acc[] : " << std::dec << "\n";
+            for (const auto& write_data : gpu_metrics.xgmi_write_data_acc) {
+              std::cout << "\t  -> " << std::dec << write_data << "\n";
+            }
+
+            std::cout << "\t**.current_gfxclks[] : " << std::dec << "\n";
+            for (const auto& gfxclk : gpu_metrics.current_gfxclks) {
+              std::cout << "\t  -> " << std::dec << gfxclk << "\n";
+            }
+
+            std::cout << "\t**.current_socclks[] : " << std::dec << "\n";
+            for (const auto& socclk : gpu_metrics.current_socclks) {
+              std::cout << "\t  -> " << std::dec << socclk << "\n";
+            }
+
+            std::cout << "\t**.current_vclk0s[] : " << std::dec << "\n";
+            for (const auto& vclk : gpu_metrics.current_vclk0s) {
+              std::cout << "\t  -> " << std::dec << vclk << "\n";
+            }
+
+            std::cout << "\t**.current_dclk0s[] : " << std::dec << "\n";
+            for (const auto& dclk : gpu_metrics.current_dclk0s) {
+              std::cout << "\t  -> " << std::dec << dclk << "\n";
+            }
+
+            std::cout << "\n";
+            std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
+            constexpr uint16_t kMAX_ITER_TEST = 10;
+            amdsmi_gpu_metrics_t gpu_metrics_check;
+            for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+              amdsmi_get_gpu_metrics_info(processor_handles[j], &gpu_metrics_check);
+              std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
+            }
+
+            std::cout << "\n";
+            for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+              amdsmi_get_gpu_metrics_info(processor_handles[j], &gpu_metrics_check);
+              std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.system_clock_counter << "\n";
+            }
+            std::cout << "\n";
+
+            std::cout << "\n";
+            std::cout << "\t ** Note: Values MAX'ed out (UINTX MAX are unsupported for the version in question) ** " << "\n";
+            std::cout << "\n";
+            std::cout << "+=======+==================+============+=============="
+                      << "+=============+=============+=============+============+\n";
         }
     }
 

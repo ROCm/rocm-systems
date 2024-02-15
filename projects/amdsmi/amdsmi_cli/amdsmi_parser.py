@@ -994,8 +994,8 @@ core limit value"
 
 
     def _add_monitor_parser(self, subparsers, func):
-        if not(self.helpers.is_baremetal() and self.helpers.is_linux()):
-            # This subparser is only applicable to Baremetal Linux
+        if not(self.helpers.is_linux()):
+            # This subparser is only applicable to Linux
             return
 
         # Subparser help text
