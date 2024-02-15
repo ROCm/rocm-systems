@@ -1000,6 +1000,23 @@ int main() {
     for (const auto& dclk : gpu_metrics.current_dclk0s) {
       std::cout << "\t  -> " << std::dec << dclk << "\n";
     }
+
+    std::cout << "\n";
+    std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
+    constexpr uint16_t kMAX_ITER_TEST = 10;
+    rsmi_gpu_metrics_t gpu_metrics_check;
+    for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+        rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics_check);
+        std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
+    }
+
+    std::cout << "\n";
+    for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+        rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics_check);
+        std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.system_clock_counter << "\n";
+    }
+
+    std::cout << "\n\n";
     std::cout << " ** Note: Values MAX'ed out (UINTX MAX are unsupported for the version in question) ** " << "\n";
 
 

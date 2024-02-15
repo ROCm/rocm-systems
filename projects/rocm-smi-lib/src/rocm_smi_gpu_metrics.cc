@@ -2680,47 +2680,42 @@ rsmi_status_t Device::dev_read_gpu_metrics_header_data()
   LOG_TRACE(ostrstream);
 
   // Check if/when metrics table needs to be refreshed.
-  if ((!m_gpu_metrics_header.m_structure_size)    ||
-      (!m_gpu_metrics_header.m_format_revision)   ||
-      (!m_gpu_metrics_header.m_content_revision)) {
-    auto op_result = readDevInfo(DevInfoTypes::kDevGpuMetrics,
-                                 sizeof(AMDGpuMetricsHeader_v1_t),
-                                 &m_gpu_metrics_header);
-    if ((status_code = ErrnoToRsmiStatus(op_result)) !=
-        rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      ostrstream << __PRETTY_FUNCTION__
-                 << " | ======= end ======= "
-                 << " | Fail "
-                 << " | Device #: " << index()
-                 << " | Metric Version: " << stringfy_metrics_header(m_gpu_metrics_header)
-                 << " | Cause: readDevInfo(kDevGpuMetrics)"
-                 << " | Returning = "
-                 << getRSMIStatusString(status_code)
-                 << " Could not read Metrics Header: "
-                 << print_unsigned_int(m_gpu_metrics_header.m_structure_size)
-                 << " |";
-      LOG_ERROR(ostrstream);
-      return status_code;
-    }
-    if ((status_code = is_gpu_metrics_version_supported(m_gpu_metrics_header)) ==
-        rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
-      ostrstream << __PRETTY_FUNCTION__
-                 << " | ======= end ======= "
-                 << " | Fail "
-                 << " | Device #: " << index()
-                 << " | Metric Version: " << stringfy_metrics_header(m_gpu_metrics_header)
-                 << " | Cause: gpu metric file version is not supported: "
-                 << " | Returning = "
-                 << getRSMIStatusString(status_code)
-                 << " Could not read Metrics Header: "
-                 << print_unsigned_int(m_gpu_metrics_header.m_structure_size)
-                 << " |";
-      LOG_ERROR(ostrstream);
-      return status_code;
-    }
-
-    m_gpu_metrics_updated_timestamp = actual_timestamp_in_secs();
+  auto op_result = readDevInfo(DevInfoTypes::kDevGpuMetrics,
+                                sizeof(AMDGpuMetricsHeader_v1_t),
+                                &m_gpu_metrics_header);
+  if ((status_code = ErrnoToRsmiStatus(op_result)) !=
+      rsmi_status_t::RSMI_STATUS_SUCCESS) {
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= end ======= "
+                << " | Fail "
+                << " | Device #: " << index()
+                << " | Metric Version: " << stringfy_metrics_header(m_gpu_metrics_header)
+                << " | Cause: readDevInfo(kDevGpuMetrics)"
+                << " | Returning = "
+                << getRSMIStatusString(status_code)
+                << " Could not read Metrics Header: "
+                << print_unsigned_int(m_gpu_metrics_header.m_structure_size)
+                << " |";
+    LOG_ERROR(ostrstream);
+    return status_code;
   }
+  if ((status_code = is_gpu_metrics_version_supported(m_gpu_metrics_header)) ==
+      rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= end ======= "
+                << " | Fail "
+                << " | Device #: " << index()
+                << " | Metric Version: " << stringfy_metrics_header(m_gpu_metrics_header)
+                << " | Cause: gpu metric file version is not supported: "
+                << " | Returning = "
+                << getRSMIStatusString(status_code)
+                << " Could not read Metrics Header: "
+                << print_unsigned_int(m_gpu_metrics_header.m_structure_size)
+                << " |";
+    LOG_ERROR(ostrstream);
+    return status_code;
+  }
+  m_gpu_metrics_updated_timestamp = actual_timestamp_in_secs();
 
   ostrstream << __PRETTY_FUNCTION__
              << " | ======= end ======= "
@@ -2842,23 +2837,21 @@ rsmi_status_t Device::setup_gpu_metrics_reading()
   }
 
   //
-  // if/in case setup_gpu_metrics_reading() was called already use the same pointer
+  m_gpu_metrics_ptr.reset();
+  m_gpu_metrics_ptr = amdgpu_metrics_factory(gpu_metrics_flag_version);
   if (!m_gpu_metrics_ptr) {
-    m_gpu_metrics_ptr = amdgpu_metrics_factory(gpu_metrics_flag_version);
-    if (!m_gpu_metrics_ptr) {
-      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-      ostrstream << __PRETTY_FUNCTION__
-                  << " | ======= end ======= "
-                  << " | Fail "
-                  << " | Device #: " << index()
-                  << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
-                  << " | Cause: amdgpu_metrics_factory() couldn't get a valid metric object"
-                  << " | Returning = "
-                  << getRSMIStatusString(status_code)
-                  << " |";
-      LOG_ERROR(ostrstream);
-      return status_code;
-    }
+    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= end ======= "
+                << " | Fail "
+                << " | Device #: " << index()
+                << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+                << " | Cause: amdgpu_metrics_factory() couldn't get a valid metric object"
+                << " | Returning = "
+                << getRSMIStatusString(status_code)
+                << " |";
+    LOG_ERROR(ostrstream);
+    return status_code;
   }
 
   //
@@ -2938,23 +2931,21 @@ rsmi_status_t Device::dev_log_gpu_metrics(std::ostringstream& outstream_metrics)
   //  meaning, we didn't run any queries, and just want to
   //  print all the gpu metrics content, we need to setup
   //  the environment first.
-  if (!m_gpu_metrics_ptr) {
-    status_code = setup_gpu_metrics_reading();
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
-      // At this point we should have a valid gpu_metrics pointer.
-      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-      ostrstream << __PRETTY_FUNCTION__
-                  << " | ======= end ======= "
-                  << " | Fail "
-                  << " | Device #: " << index()
-                  << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
-                  << " | Cause: Couldn't get a valid metric object"
-                  << " | Returning = "
-                  << getRSMIStatusString(status_code)
-                  << " |";
-      LOG_ERROR(ostrstream);
-      return status_code;
-    }
+  status_code = setup_gpu_metrics_reading();
+  if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
+    // At this point we should have a valid gpu_metrics pointer.
+    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= end ======= "
+                << " | Fail "
+                << " | Device #: " << index()
+                << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+                << " | Cause: Couldn't get a valid metric object"
+                << " | Returning = "
+                << getRSMIStatusString(status_code)
+                << " |";
+    LOG_ERROR(ostrstream);
+    return status_code;
   }
 
   //  Header info
@@ -3100,22 +3091,20 @@ rsmi_status_t Device::run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t met
   ostrstream << __PRETTY_FUNCTION__ << " | ======= start =======";
   LOG_TRACE(ostrstream);
 
-  if (!m_gpu_metrics_ptr) {
-    status_code = setup_gpu_metrics_reading();
-    if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
-      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-      ostrstream << __PRETTY_FUNCTION__
-                  << " | ======= end ======= "
-                  << " | Fail "
-                  << " | Device #: " << index()
-                  << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
-                  << " | Cause: Couldn't get a valid metric object"
-                  << " | Returning = "
-                  << getRSMIStatusString(status_code)
-                  << " |";
-      LOG_ERROR(ostrstream);
-      return status_code;
-    }
+  status_code = setup_gpu_metrics_reading();
+  if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
+    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+    ostrstream << __PRETTY_FUNCTION__
+                << " | ======= end ======= "
+                << " | Fail "
+                << " | Device #: " << index()
+                << " | Metric Version: " << stringfy_metrics_header(dev_get_metrics_header())
+                << " | Cause: Couldn't get a valid metric object"
+                << " | Returning = "
+                << getRSMIStatusString(status_code)
+                << " |";
+    LOG_ERROR(ostrstream);
+    return status_code;
   }
 
   // Lookup the dynamic table

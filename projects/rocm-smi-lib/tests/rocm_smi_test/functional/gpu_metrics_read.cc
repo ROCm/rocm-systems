@@ -120,14 +120,6 @@ auto print_error_or_value(std::string title, std::string func_name, const T& met
   }
 };
 
-template <typename T>
-std::string print_unsigned_int(T value) {
-  std::stringstream ss;
-  ss << static_cast<uint64_t>(value | 0);
-
-  return ss.str();
-}
-
 void TestGpuMetricsRead::Run(void) {
   rsmi_status_t err;
 
@@ -148,8 +140,8 @@ void TestGpuMetricsRead::Run(void) {
         auto ret = rsmi_dev_metrics_header_info_get(i, &header_values);
         if (ret == rsmi_status_t::RSMI_STATUS_SUCCESS) {
             std::cout << "\t[Metrics Header]" << "\n";
-            std::cout << "\t  -> format_revision  : " << print_unsigned_int(header_values.format_revision) << "\n";
-            std::cout << "\t  -> content_revision : " << print_unsigned_int(header_values.content_revision) << "\n";
+            std::cout << "\t  -> format_revision  : " << amd::smi::print_unsigned_int(header_values.format_revision) << "\n";
+            std::cout << "\t  -> content_revision : " << amd::smi::print_unsigned_int(header_values.content_revision) << "\n";
             std::cout << "\t--------------------" << "\n";
         }
     }
@@ -256,6 +248,25 @@ void TestGpuMetricsRead::Run(void) {
           for (int i = 0; i < RSMI_MAX_NUM_CLKS; ++i) {
             std::cout << "\tcurrent_dclk0s[" << i << "]=" << std::dec << smu.current_dclk0s[i] << '\n';
           }
+
+
+          std::cout << "\n\n";
+          std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
+          constexpr uint16_t kMAX_ITER_TEST = 10;
+          rsmi_gpu_metrics_t gpu_metrics_check;
+          for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+              rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics_check);
+              std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
+          }
+
+          std::cout << "\n";
+          for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
+              rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics_check);
+              std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.system_clock_counter << "\n";
+          }
+
+          std::cout << "\n";
+          std::cout << " ** Note: Values MAX'ed out (UINTX MAX are unsupported for the version in question) ** " << "\n\n";
       }
     }
 
