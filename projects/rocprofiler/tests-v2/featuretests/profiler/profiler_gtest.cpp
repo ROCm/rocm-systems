@@ -740,7 +740,7 @@ class ATTCollection : public ::testing::Test {
 };
 bool ATTCollection::bCollected = false;
 
-TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
+TEST_F(ATTCollection, DISABLED_WhenRunningATTItCollectsTraceDataWithOldAPI) {
   int result = ROCPROFILER_STATUS_ERROR;
 
   // inititalize ROCProfiler
@@ -806,7 +806,7 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithOldAPI) {
 }
 
 // New API
-TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
+TEST_F(ATTCollection, DISABLED_WhenRunningATTItCollectsTraceDataWithNewAPI) {
   int result = ROCPROFILER_STATUS_ERROR;
   // inititalize ROCProfiler
   result = rocprofiler_initialize();

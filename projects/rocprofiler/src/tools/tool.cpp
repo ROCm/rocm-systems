@@ -313,7 +313,7 @@ att_parsed_input_t GetATTParams() {
   std::unordered_map<std::string, uint32_t> default_params = {
       {"SE_MASK", 0x111111},        // One every 4 SEs, by default
       {"SIMD_SELECT", 0x3},         // 0x3 works for both gfx9 and Navi
-      {"BUFFER_SIZE", 0x40000000},  // 2^30 == 1GB
+      {"BUFFER_SIZE", 0x10000000},  // 2^28 == 256MB
       {"ISA_CAPTURE_MODE", static_cast<uint32_t>(ROCPROFILER_CAPTURE_SYMBOLS_ONLY)}};
 
   std::ifstream trace_file(path);
