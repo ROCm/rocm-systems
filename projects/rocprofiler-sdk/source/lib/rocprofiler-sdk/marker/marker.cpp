@@ -63,7 +63,7 @@ get_default_retval()
 
 template <typename DataT, typename Tp>
 void
-set_data_retval(DataT& _data, Tp _val)
+set_data_retval(DataT& _data, [[maybe_unused]] Tp _val)
 {
     if constexpr(std::is_same<int32_t, Tp>::value)
         _data.int32_t_retval = _val;
