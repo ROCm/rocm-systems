@@ -40,6 +40,7 @@
 #include <hsa/hsa.h>
 #include <mutex>
 #include <sys/stat.h>
+#include <regex>
 
 #include "rocprofiler.h"
 #include "rocprofiler_plugin.h"
@@ -48,6 +49,23 @@
 
 #define ATT_FILENAME_MAXBYTES 90
 #define TEST_INVALID_KERNEL size_t(-1)
+
+static bool env_var_search(std::string& s) {
+  std::smatch m;
+  std::regex e("(.*)\\%\\q\\{([^}]+)\\}(.*)");
+  std::regex_match(s, m, e);
+
+  if (m.size() != 4) return false;
+
+  while (m.size() == 4) {
+    const char* envvar = getenv(m[2].str().c_str());
+    if (!envvar) envvar = "";
+    s = m[1].str() + envvar + m[3].str();
+    std::regex_match(s, m, e);
+  };
+
+  return true;
+}
 
 class att_plugin_t {
  public:
@@ -70,10 +88,28 @@ class att_plugin_t {
   static std::mutex writing_lock;
   bool is_valid_{true};
   rocprofiler::att_header_packet_t header{.raw = 0};
+  std::string output_dir = ".";
 
   bool CheckAddrMatches(uint64_t kernel_addr, uint64_t base_address, uint64_t size)
   {
     return (kernel_addr >= base_address) && (kernel_addr < base_address + size);
+  }
+
+  void InitOutputDir()
+  {
+    static bool bIsInit = false;
+    if (bIsInit) return;
+    bIsInit = true;
+
+    if (const char* env = getenv("OUTPUT_PATH")) output_dir = std::string(env);
+    env_var_search(output_dir);
+
+    if (!output_dir.size()) return;
+
+    try {
+        std::experimental::filesystem::create_directories(output_dir);
+    } catch (...) {}
+    output_dir += '/';
   }
 
   inline bool att_file_exists(const std::string& name) {
@@ -87,6 +123,7 @@ class att_plugin_t {
                      rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
 
     if (!att_tracer_record) return ROCPROFILER_STATUS_ERROR;
+    InitOutputDir();
 
     std::string kernel_name_mangled;
     // Found problem with rocprofiler API for invalid kernel_ids;
@@ -112,9 +149,6 @@ class att_plugin_t {
 
     if (name_demangled.size() > ATT_FILENAME_MAXBYTES)  // Limit filename size
       name_demangled = name_demangled.substr(0, ATT_FILENAME_MAXBYTES);
-
-    std::string output_dir = ".";
-    if (const char* env = getenv("OUTPUT_PATH")) output_dir = std::string(env);
 
     std::string outfilepath = output_dir + '/' + name_demangled;
     outfilepath.reserve(output_dir.size() + 128);  // Max filename size

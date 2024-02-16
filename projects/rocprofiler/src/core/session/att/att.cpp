@@ -205,7 +205,7 @@ bool AttTracer::AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* dat
       //  return true;
       rocprofiler_record_att_tracer_t record{};
       record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
-      record.gpu_id = rocprofiler_agent_id_t{(uint64_t)queue_info_session->gpu_index};
+      record.gpu_id = rocprofiler_agent_id_t{(uint64_t)queue_info_session->agent.handle};
       record.kernel_properties = pending.kernel_properties;
       record.thread_id = rocprofiler_thread_id_t{pending.thread_id};
       record.queue_idx = rocprofiler_queue_index_t{pending.queue_index};

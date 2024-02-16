@@ -482,12 +482,15 @@ void plugins_load(void* userdata) {
       else
         plugin_name = "libcli_plugin.so";
     }
-    env_var_replace("OUTPUT_PATH");
+
+    bool bIsATT = std::string_view(plugin_name) == "libatt_plugin.so";
+    if (!bIsATT)
+      env_var_replace("OUTPUT_PATH");
     env_var_replace("OUT_FILE_NAME");
 
     std::string out_path = getenv("OUTPUT_PATH") ? getenv("OUTPUT_PATH") : "";
 
-    if (out_path.size()) {
+    if (out_path.size() && !bIsATT) {
       try {
         std::experimental::filesystem::create_directories(out_path);
       } catch (...) {
