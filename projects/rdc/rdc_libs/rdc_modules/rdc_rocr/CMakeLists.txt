@@ -34,10 +34,13 @@ if(BUILD_ROCRTEST)
 
     message("RDC_ROCR_LIB_INC_LIST=${RDC_ROCR_LIB_INC_LIST}")
 
-    set(HSA_LIB "hsa-runtime64")
+    find_package(hsa-runtime64
+        NAMES hsa-runtime64
+        HINTS ${ROCM_DIR}/lib/cmake
+        CONFIGURE REQUIRED)
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_ROCR_LIB} PARENT_SCOPE)
     add_library(${RDC_ROCR_LIB} SHARED ${RDC_ROCR_LIB_SRC_LIST} ${RDC_ROCR_LIB_INC_LIST})
-    target_link_libraries(${RDC_ROCR_LIB} ${RDC_LIB} ${BOOTSTRAP_LIB} ${HSA_LIB} pthread dl)
+    target_link_libraries(${RDC_ROCR_LIB} ${RDC_LIB} ${BOOTSTRAP_LIB} hsa-runtime64::hsa-runtime64 pthread dl)
     target_include_directories(${RDC_ROCR_LIB} PRIVATE
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
