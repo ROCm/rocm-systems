@@ -79,7 +79,7 @@ def clean_output_dir(cleanup, output_dir):
     return
 
 
-def check_csv_files(output_dir,num_devices, num_kernels) :
+def check_csv_files(output_dir, num_devices, num_kernels):
     """Check profiling output csv files for expected number of entries (based on kernel invocations)
 
     Args:

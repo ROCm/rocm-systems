@@ -44,7 +44,7 @@ class webui_analysis(OmniAnalyze_Base):
         self.app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
         self.dest_dir = os.path.abspath(args.path[0][0])
         self.arch = None
-        
+
         self.__hidden_sections = ["Memory Chart", "Roofline"]
         self.__hidden_columns = ["Tips", "coll_level"]
         # define different types of bar charts
@@ -52,18 +52,13 @@ class webui_analysis(OmniAnalyze_Base):
             "instr_mix": [1001, 1002],
             "multi_bar": [1604, 1704],
             "sol": [1101, 1201, 1301, 1401, 1601, 1701],
-            #"l2_cache_per_chan": [1802, 1803]
+            # "l2_cache_per_chan": [1802, 1803]
         }
         # define any elements which will have full width
         self.__full_width_elements = {1801}
-        
 
     @demarcate
-    def build_layout(
-        self,
-        input_filters,
-        arch_configs
-    ):
+    def build_layout(self, input_filters, arch_configs):
         """
         Build gui layout
         """
@@ -78,7 +73,7 @@ class webui_analysis(OmniAnalyze_Base):
         kernel_top_df = base_data.dfs[1]
         for kernel_id in base_data.filter_kernel_ids:
             filt_kernel_names.append(kernel_top_df.loc[kernel_id, "Kernel_Name"])
-        
+
         self.app.layout.children = html.Div(
             children=[
                 dbc.Spinner(
@@ -107,10 +102,12 @@ class webui_analysis(OmniAnalyze_Base):
         ):
             logging.debug("[analysis] gui normalization is %s" % norm_filt)
 
-            base_data = self.initalize_runs() # Re-initalizes everything
+            base_data = self.initalize_runs()  # Re-initalizes everything
             panel_configs = copy.deepcopy(arch_configs.panel_configs)
             # Generate original raw df
-            base_data[base_run].raw_pmc = file_io.create_df_pmc(self.dest_dir, self.get_args().verbose)
+            base_data[base_run].raw_pmc = file_io.create_df_pmc(
+                self.dest_dir, self.get_args().verbose
+            )
             logging.debug("[analysis] gui dispatch filter is %s" % disp_filt)
             logging.debug("[analysis] gui kernel filter is %s" % kernel_filter)
             logging.debug("[analysis] gui gpu filter is %s" % gcd_filter)
@@ -145,8 +142,8 @@ class webui_analysis(OmniAnalyze_Base):
                 panel_configs = temp
             # All filtering will occur here
             parser.load_table_data(
-                workload=base_data[base_run], 
-                dir=self.dest_dir, 
+                workload=base_data[base_run],
+                dir=self.dest_dir,
                 is_gui=True,
                 debug=self.get_args().debug,
                 verbose=self.get_args().verbose,
@@ -166,21 +163,26 @@ class webui_analysis(OmniAnalyze_Base):
                 # update roofline for visualization in GUI
                 self.get_socs()[self.arch].analysis_setup(
                     roofline_parameters={
-                        'path_to_dir': self.dest_dir,
-                        'device_id': 0,
-                        'sort_type': 'kernels',
-                        'mem_level': 'ALL',
-                        'include_kernel_names': False,
-                        'is_standalone': False
+                        "path_to_dir": self.dest_dir,
+                        "device_id": 0,
+                        "sort_type": "kernels",
+                        "mem_level": "ALL",
+                        "include_kernel_names": False,
+                        "is_standalone": False,
                     }
                 )
                 roof_obj = self.get_socs()[self.arch].roofline_obj
                 div_children.append(
                     roof_obj.empirical_roofline(
-                        ret_df=parser.apply_filters(workload=base_data[base_run], dir=self.dest_dir, is_gui=True, debug=self.get_args().debug)
+                        ret_df=parser.apply_filters(
+                            workload=base_data[base_run],
+                            dir=self.dest_dir,
+                            is_gui=True,
+                            debug=self.get_args().debug,
+                        )
                     )
                 )
-            
+
             # Iterate over each section as defined in panel configs
             for panel_id, panel in panel_configs.items():
                 title = str(panel_id // 100) + ". " + panel["title"]
@@ -202,7 +204,7 @@ class webui_analysis(OmniAnalyze_Base):
                             # The sys info table need to add index back
                             if t_type == "raw_csv_table" and "Info" in original_df.keys():
                                 original_df.reset_index(inplace=True)
-                            
+
                             content = determine_chart_type(
                                 original_df=original_df,
                                 table_config=table_config,
@@ -210,7 +212,7 @@ class webui_analysis(OmniAnalyze_Base):
                                 barchart_elements=self.__barchart_elements,
                                 norm_filt=norm_filt,
                                 comparable_columns=comparable_columns,
-                                decimal=self.get_args().decimal
+                                decimal=self.get_args().decimal,
                             )
 
                             # Update content for this section
@@ -237,7 +239,9 @@ class webui_analysis(OmniAnalyze_Base):
                                     children=title,
                                     style={"color": "white"},
                                 ),
-                                html.Div(className="float-container", children=html_section),
+                                html.Div(
+                                    className="float-container", children=html_section
+                                ),
                             ],
                         )
                     )
@@ -254,17 +258,15 @@ class webui_analysis(OmniAnalyze_Base):
                         ],
                     )
                 )
-            
+
             return div_children
 
-
-    #-----------------------
+    # -----------------------
     # Required child methods
-    #-----------------------
+    # -----------------------
     @demarcate
     def pre_processing(self):
-        """Perform any pre-processing steps prior to analysis.
-        """
+        """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
         if len(self._runs) == 1:
             args = self.get_args()
@@ -282,16 +284,16 @@ class webui_analysis(OmniAnalyze_Base):
             # create the loaded kernel stats
             parser.load_kernel_top(self._runs[self.dest_dir], self.dest_dir)
             # set architecture
-            self.arch = self._runs[self.dest_dir].sys_info.iloc[0]['gpu_soc']
-            
-        else:
-            self.error("Multiple runs not yet supported in GUI. Retry without --gui flag.")
+            self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_soc"]
 
-    
+        else:
+            self.error(
+                "Multiple runs not yet supported in GUI. Retry without --gui flag."
+            )
+
     @demarcate
     def run_analysis(self):
-        """Run CLI analysis.
-        """
+        """Run CLI analysis."""
         super().run_analysis()
         args = self.get_args()
         input_filters = {
@@ -301,27 +303,29 @@ class webui_analysis(OmniAnalyze_Base):
             "normalization": args.normal_unit,
             "top_n": args.max_stat_num,
         }
-        
+
         self.build_layout(
             input_filters,
             self._arch_configs[self.arch],
         )
         if args.random_port:
-            self.app.run_server(debug=False, host="0.0.0.0", port=random.randint(1024, 49151))
+            self.app.run_server(
+                debug=False, host="0.0.0.0", port=random.randint(1024, 49151)
+            )
         else:
             self.app.run_server(debug=False, host="0.0.0.0", port=args.gui)
 
 
 @demarcate
 def determine_chart_type(
-        original_df,
-        table_config,
-        hidden_columns,
-        barchart_elements,
-        norm_filt,
-        comparable_columns,
-        decimal
-    ):
+    original_df,
+    table_config,
+    hidden_columns,
+    barchart_elements,
+    norm_filt,
+    comparable_columns,
+    decimal,
+):
     content = []
 
     display_columns = original_df.columns.values.tolist().copy()
@@ -333,13 +337,12 @@ def determine_chart_type(
 
     # Determine chart type:
     # a) Barchart
-    if table_config["id"] in [
-        x for i in barchart_elements.values() for x in i
-    ]:
+    if table_config["id"] in [x for i in barchart_elements.values() for x in i]:
         d_figs = build_bar_chart(display_df, table_config, barchart_elements, norm_filt)
         # Smaller formatting if barchart yeilds several graphs
         if (
-            len(d_figs) > 2
+            len(d_figs)
+            > 2
             # and not table_config["id"]
             # in barchart_elements["l2_cache_per_chan"]
         ):
@@ -348,24 +351,14 @@ def determine_chart_type(
                 temp_obj.append(
                     html.Div(
                         className="float-child",
-                        children=[
-                            dcc.Graph(
-                                figure=fig, style={"margin": "2%"}
-                            )
-                        ],
+                        children=[dcc.Graph(figure=fig, style={"margin": "2%"})],
                     )
                 )
-            content.append(
-                html.Div(
-                    className="float-container", children=temp_obj
-                )
-            )
+            content.append(html.Div(className="float-container", children=temp_obj))
         # Normal formatting if < 2 graphs
         else:
             for fig in d_figs:
-                content.append(
-                    dcc.Graph(figure=fig, style={"margin": "2%"})
-                )
+                content.append(dcc.Graph(figure=fig, style={"margin": "2%"}))
     # B) Tablechart
     else:
         d_figs = build_table_chart(

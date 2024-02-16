@@ -40,19 +40,14 @@ def list_unique(orig_list, is_numeric):
 
 
 def create_span(input):
-    return {
-        "label": html.Span(str(input), title=str(input)),
-        "value": str(input)
-    }
+    return {"label": html.Span(str(input), title=str(input)), "value": str(input)}
 
 
 def get_header(raw_pmc, input_filters, kernel_names):
     kernel_names = list(
         map(
             str,
-            raw_pmc[
-                schema.pmc_perf_file_prefix
-            ]["Kernel_Name"],
+            raw_pmc[schema.pmc_perf_file_prefix]["Kernel_Name"],
         )
     )
     kernel_names = [x.strip() for x in kernel_names]
@@ -286,9 +281,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                                 ),
                                                 id="kernel-filt",
                                                 multi=True,
-                                                value=input_filters[
-                                                    "kernel"
-                                                ],
+                                                value=input_filters["kernel"],
                                                 optionHeight=150,
                                                 placeholder="ALL",
                                                 style={
