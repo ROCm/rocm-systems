@@ -28,39 +28,44 @@ from omniperf_profile.profiler_base import OmniProfiler_Base
 from utils.utils import demarcate
 from utils.kernel_name_shortener import kernel_name_shortener
 
+
 class rocprof_v2_profiler(OmniProfiler_Base):
-    def __init__(self,profiling_args,profiler_mode,soc):
-        super().__init__(profiling_args,profiler_mode,soc)
-        self.ready_to_profile = (self.get_args().roof_only and not os.path.isfile(os.path.join(self.get_args().path, "pmc_perf.csv"))
-                            or not self.get_args().roof_only)
+    def __init__(self, profiling_args, profiler_mode, soc):
+        super().__init__(profiling_args, profiler_mode, soc)
+        self.ready_to_profile = (
+            self.get_args().roof_only
+            and not os.path.isfile(os.path.join(self.get_args().path, "pmc_perf.csv"))
+            or not self.get_args().roof_only
+        )
 
     def get_profiler_options(self, fname):
         fbase = os.path.splitext(os.path.basename(fname))[0]
         app_cmd = self.get_args().remaining
         args = [
             # v2 requires output directory argument
-            "-d", self.get_args().path + "/" + "out",
+            "-d",
+            self.get_args().path + "/" + "out",
             # v2 does not require csv extension
-            "-o", fbase,
+            "-o",
+            fbase,
             # v2 doen not require quotes on cmd
-            app_cmd
+            app_cmd,
         ]
         return args
-    #-----------------------
+
+    # -----------------------
     # Required child methods
-    #-----------------------
+    # -----------------------
     @demarcate
     def pre_processing(self):
-        """Perform any pre-processing steps prior to profiling.
-        """
+        """Perform any pre-processing steps prior to profiling."""
         super().pre_processing()
         if self.ready_to_profile:
             self.pmc_perf_split()
 
     @demarcate
     def run_profiling(self, version, prog):
-        """Run profiling.
-        """
+        """Run profiling."""
         if self.ready_to_profile:
             if self.get_args().roof_only:
                 logging.info("[roofline] Generating pmc_perf.csv")
@@ -70,13 +75,11 @@ class rocprof_v2_profiler(OmniProfiler_Base):
 
     @demarcate
     def post_processing(self):
-        """Perform any post-processing steps prior to profiling.
-        """
+        """Perform any post-processing steps prior to profiling."""
         super().post_processing()
 
         if self.ready_to_profile:
-            # Pass headers to join on 
+            # Pass headers to join on
             self.join_prof()
             # Demangle and overwrite original KernelNames
             kernel_name_shortener(self.get_args().path, self.get_args().kernel_verbose)
-

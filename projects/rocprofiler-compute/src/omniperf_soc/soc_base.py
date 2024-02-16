@@ -33,59 +33,74 @@ import numpy as np
 from utils.utils import demarcate
 from pathlib import Path
 
-class OmniSoC_Base():
-    def __init__(self,args):
+
+class OmniSoC_Base:
+    def __init__(self, args):
         self.__args = args
-        self.__name = None # SoC name
+        self.__name = None  # SoC name
         self.__perfmon_dir = None
-        self.__perfmon_config = {} # Per IP block max number of simulutaneous counters. GFX IP Blocks
-        self.__soc_params = {} # SoC specifications
-        self.__compatible_profilers = [] # Store profilers compatible with SoC
+        self.__perfmon_config = (
+            {}
+        )  # Per IP block max number of simulutaneous counters. GFX IP Blocks
+        self.__soc_params = {}  # SoC specifications
+        self.__compatible_profilers = []  # Store profilers compatible with SoC
         if self.__args.path == os.path.join(os.getcwd(), "workloads"):
-            self.__workload_dir = os.path.join(self.__args.path, self.__args.name, self.__args.target)
+            self.__workload_dir = os.path.join(
+                self.__args.path, self.__args.name, self.__args.target
+            )
         else:
             self.__workload_dir = self.__args.path
-    
+
     def __hash__(self):
         return hash(self.__name)
+
     def __eq__(self, other):
         if not isinstance(other, type(self)):
             return NotImplemented
         return self.__name == other.get_soc()
 
-    def set_perfmon_dir(self, path:str):
+    def set_perfmon_dir(self, path: str):
         self.__perfmon_dir = path
+
     def set_perfmon_config(self, config: dict):
         self.__perfmon_config = config
+
     def set_soc_param(self, param: dict):
         self.__soc_params = param
+
     def get_workload_perfmon_dir(self):
         return str(Path(self.__perfmon_dir).parent.absolute())
+
     def get_soc_param(self):
         return self.__soc_params
+
     def set_soc_name(self, soc: str):
         self.__name = soc
+
     def get_soc_name(self):
         return self.__name
+
     def get_args(self):
         return self.__args
+
     def set_compatible_profilers(self, profiler_names: list):
         self.__compatible_profilers = profiler_names
+
     def get_compatible_profilers(self):
         return self.__compatible_profilers
-    
+
     @demarcate
     def get_profiler_options(self):
-        """Fetch any SoC specific arguments required by the profiler
-        """
+        """Fetch any SoC specific arguments required by the profiler"""
         # assume no SoC specific options and return empty list by default
         return []
-    
+
     @demarcate
     def perfmon_filter(self, roofline_perfmon_only: bool):
-        """Filter default performance counter set based on user arguments
-        """
-        if roofline_perfmon_only and os.path.isfile(os.path.join(self.get_args().path, "pmc_perf.csv")):
+        """Filter default performance counter set based on user arguments"""
+        if roofline_perfmon_only and os.path.isfile(
+            os.path.join(self.get_args().path, "pmc_perf.csv")
+        ):
             return
         workload_perfmon_dir = self.__workload_dir + "/perfmon"
 
@@ -99,7 +114,9 @@ class OmniSoC_Base():
 
         if not roofline_perfmon_only:
             ref_pmc_files_list = glob.glob(self.__perfmon_dir + "/" + "pmc_*perf*.txt")
-            ref_pmc_files_list += glob.glob(self.__perfmon_dir + "/" + self.__name + "/pmc_*_perf*.txt")
+            ref_pmc_files_list += glob.glob(
+                self.__perfmon_dir + "/" + self.__name + "/pmc_*_perf*.txt"
+            )
 
             # Perfmon list filtering
             if self.__args.ipblocks != None:
@@ -124,38 +141,34 @@ class OmniSoC_Base():
             ref_pmc_files_list = glob.glob(self.__perfmon_dir + "/" + "pmc_roof_perf.txt")
             pmc_files_list = ref_pmc_files_list
 
-
         # Coalesce and writeback workload specific perfmon
-        pmc_list = perfmon_coalesce(pmc_files_list, self.__perfmon_config, self.__workload_dir)
+        pmc_list = perfmon_coalesce(
+            pmc_files_list, self.__perfmon_config, self.__workload_dir
+        )
         perfmon_emit(pmc_list, self.__perfmon_config, self.__workload_dir)
 
-    #----------------------------------------------------
+    # ----------------------------------------------------
     # Required methods to be implemented by child classes
-    #----------------------------------------------------
+    # ----------------------------------------------------
     @abstractmethod
     def profiling_setup(self):
-        """Perform any SoC-specific setup prior to profiling.
-        """
+        """Perform any SoC-specific setup prior to profiling."""
         logging.debug("[profiling] perform SoC profiling setup for %s" % self.__name)
-
 
     @abstractmethod
     def post_profiling(self):
-        """Perform any SoC-specific post profiling activities.
-        """
+        """Perform any SoC-specific post profiling activities."""
         logging.debug("[profiling] perform SoC post processing for %s" % self.__name)
 
     @abstractmethod
     def analysis_setup(self):
-        """Perform any SoC-specific setup prior to analysis.
-        """
+        """Perform any SoC-specific setup prior to analysis."""
         logging.debug("[analysis] perform SoC analysis setup for %s" % self.__name)
-        
+
 
 @demarcate
 def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
-    """Sort and bucket all related performance counters to minimize required application passes
-    """
+    """Sort and bucket all related performance counters to minimize required application passes"""
     workload_perfmon_dir = workload_dir + "/perfmon"
 
     # match pattern for pmc counters
@@ -216,9 +229,15 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
 
     return pmc_list
 
+
 @demarcate
 def update_pmc_bucket(
-    counters, save_file, perfmon_config, pmc_list=None, stext=None, workload_perfmon_dir=None
+    counters,
+    save_file,
+    perfmon_config,
+    pmc_list=None,
+    stext=None,
+    workload_perfmon_dir=None,
 ):
     # Verify inputs.
     # If save_file is True, we're being called internally, from perfmon_coalesce
@@ -303,6 +322,7 @@ def update_pmc_bucket(
             pmc_list["TCC2"][str(ch)].sort()
     return pmc_list
 
+
 @demarcate
 def perfmon_emit(pmc_list, perfmon_config, workload_dir=None):
     # Calculate the minimum number of iteration to save the pmc counters
@@ -363,13 +383,13 @@ def perfmon_emit(pmc_list, perfmon_config, workload_dir=None):
     for iter in range(niter):
         # Prefix
         line = "pmc: "
-        
+
         N = perfmon_config["TCC"]
         # TCC per-channel counters
         tcc_counters = []
         for ch in range(perfmon_config["TCC_channels"]):
             tcc_counters += pmc_list["TCC2"][str(ch)][tcc2_index * N : tcc2_index * N + N]
-        
+
         tcc2_index += 1
 
         # TCC2 aggregated counters

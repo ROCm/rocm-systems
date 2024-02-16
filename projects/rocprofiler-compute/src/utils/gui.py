@@ -34,7 +34,8 @@ pd.set_option(
     "mode.chained_assignment", None
 )  # ignore SettingWithCopyWarning pandas warning
 
-IS_DARK = True #TODO: Remove hardcoded in favor of class property
+IS_DARK = True  # TODO: Remove hardcoded in favor of class property
+
 
 ##################
 # HELPER FUNCTIONS
@@ -168,31 +169,31 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
             )
     # L2 Cache per channel
     # elif table_config["id"] in barchart_elements["l2_cache_per_chan"]:
-        # nested_bar = {}
-        # channels = []
-        # for colName, colData in display_df.items():
-        #     if colName == "Channel":
-        #         channels = list(colData.values)
-        #     else:
-        #         display_df[colName] = [
-        #             x.astype(float) if x != "" and x != None else float(0)
-        #             for x in display_df[colName]
-        #         ]
-        #         nested_bar[colName] = list(display_df[colName])
-        # for group, metric in nested_bar.items():
-        #     d_figs.append(
-        #         px.bar(
-        #             title=group[0 : group.rfind("(")],
-        #             x=channels,
-        #             y=metric,
-        #             labels={
-        #                 "x": "Channel",
-        #                 "y": group[group.rfind("(") + 1 : len(group) - 1].replace(
-        #                     "per", norm_filt
-        #                 ),
-        #             },
-        #         ).update_yaxes(rangemode="nonnegative")
-        #     )
+    # nested_bar = {}
+    # channels = []
+    # for colName, colData in display_df.items():
+    #     if colName == "Channel":
+    #         channels = list(colData.values)
+    #     else:
+    #         display_df[colName] = [
+    #             x.astype(float) if x != "" and x != None else float(0)
+    #             for x in display_df[colName]
+    #         ]
+    #         nested_bar[colName] = list(display_df[colName])
+    # for group, metric in nested_bar.items():
+    #     d_figs.append(
+    #         px.bar(
+    #             title=group[0 : group.rfind("(")],
+    #             x=channels,
+    #             y=metric,
+    #             labels={
+    #                 "x": "Channel",
+    #                 "y": group[group.rfind("(") + 1 : len(group) - 1].replace(
+    #                     "per", norm_filt
+    #                 ),
+    #             },
+    #         ).update_yaxes(rangemode="nonnegative")
+    #     )
 
     # Speed-of-light bar chart
     elif table_config["id"] in barchart_elements["sol"]:

@@ -37,14 +37,22 @@ SOC_PARAM = {
     "L2Banks": 16,
     "LDSBanks": 32,
     "Freq": 1725,
-    "mclk": 1000
+    "mclk": 1000,
 }
 
-class gfx906_soc (OmniSoC_Base):
-    def __init__(self,args):
+
+class gfx906_soc(OmniSoC_Base):
+    def __init__(self, args):
         super().__init__(args)
         self.set_soc_name("gfx906")
-        self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", self.get_soc_name()))
+        self.set_perfmon_dir(
+            os.path.join(
+                str(config.omniperf_home),
+                "omniperf_soc",
+                "profile_configs",
+                self.get_soc_name(),
+            )
+        )
         self.set_compatible_profilers(["rocprofv1", "rocscope"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -64,13 +72,12 @@ class gfx906_soc (OmniSoC_Base):
         )
         self.set_soc_param(SOC_PARAM)
 
-    #-----------------------
+    # -----------------------
     # Required child methods
-    #-----------------------
+    # -----------------------
     @demarcate
     def profiling_setup(self):
-        """Perform any SoC-specific setup prior to profiling.
-        """
+        """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         if self.get_args().roof_only:
             error("%s does not support roofline analysis" % self.get_soc_name())
@@ -79,13 +86,10 @@ class gfx906_soc (OmniSoC_Base):
 
     @demarcate
     def post_profiling(self):
-        """Perform any SoC-specific post profiling activities.
-        """
+        """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
 
     @demarcate
     def analysis_setup(self):
-        """Perform any SoC-specific setup prior to analysis.
-        """
+        """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup()
-

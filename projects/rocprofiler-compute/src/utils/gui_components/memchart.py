@@ -52,9 +52,9 @@ def insert_chart_data(mem_data, base_data):
     return G(
         className="data",
         children=[
-        # ----------------------------------------
-        # Instr Buff Block
-            #TODO: double check wave_occupancy
+            # ----------------------------------------
+            # Instr Buff Block
+            # TODO: double check wave_occupancy
             Text(
                 x="52",
                 y="313",
@@ -73,8 +73,8 @@ def insert_chart_data(mem_data, base_data):
                 fontWeight="bold",
                 children=memchart_values["Wave Life"],
             ),
-        # ----------------------------------------
-        # Instr Dispatch Block
+            # ----------------------------------------
+            # Instr Dispatch Block
             Text(
                 x="386",
                 y="46",
@@ -139,8 +139,8 @@ def insert_chart_data(mem_data, base_data):
                 fontSize="12px",
                 children=memchart_values["BR"],
             ),
-        # ----------------------------------------
-        # Exec Block
+            # ----------------------------------------
+            # Exec Block
             Text(
                 x="480",
                 y="99",
@@ -198,8 +198,8 @@ def insert_chart_data(mem_data, base_data):
                 fontSize="12px",
                 children=memchart_values["Workgroups"],
             ),
-        # ----------------------------------------
-        # LDS Block
+            # ----------------------------------------
+            # LDS Block
             Text(
                 x="723",
                 y="78",
@@ -224,8 +224,8 @@ def insert_chart_data(mem_data, base_data):
                 fontSize="12px",
                 children=memchart_values["LDS Latency"],
             ),
-        # ----------------------------------------
-        # Vector L1 Cache Block
+            # ----------------------------------------
+            # Vector L1 Cache Block
             Text(
                 x="708",
                 y="204",
@@ -306,8 +306,8 @@ def insert_chart_data(mem_data, base_data):
                 fontSize="12px",
                 children=memchart_values["VL1_L2 Atomic"],
             ),
-        # ----------------------------------------
-        # Scalar L1D Cache Block
+            # ----------------------------------------
+            # Scalar L1D Cache Block
             Text(
                 x="709",
                 y="384",
@@ -356,8 +356,8 @@ def insert_chart_data(mem_data, base_data):
                 fontSize="12px",
                 children=memchart_values["VL1D_L2 Atomic"],
             ),
-        # ----------------------------------------
-        # Instr L1  Cache Block
+            # ----------------------------------------
+            # Instr L1  Cache Block
             Text(
                 x="492",
                 y="498",
@@ -390,8 +390,8 @@ def insert_chart_data(mem_data, base_data):
                 fontSize="12px",
                 children=memchart_values["IL1_L2 Rd"],
             ),
-        # ----------------------------------------
-        # L2 Cache Block(inside)
+            # ----------------------------------------
+            # L2 Cache Block(inside)
             Text(
                 x="1145",
                 y="213",
@@ -440,8 +440,8 @@ def insert_chart_data(mem_data, base_data):
                 fontSize="12px",
                 children=memchart_values["L2 Wr Lat"],
             ),
-        # ----------------------------------------
-        # Fabric Block
+            # ----------------------------------------
+            # Fabric Block
             Text(
                 x="1317",
                 y="243",

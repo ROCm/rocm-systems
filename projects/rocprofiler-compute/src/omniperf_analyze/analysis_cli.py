@@ -27,15 +27,14 @@ from utils.utils import demarcate, error
 from utils import file_io, parser, tty
 from utils.kernel_name_shortener import kernel_name_shortener
 
-class cli_analysis(OmniAnalyze_Base):
 
-    #-----------------------
+class cli_analysis(OmniAnalyze_Base):
+    # -----------------------
     # Required child methods
-    #-----------------------
+    # -----------------------
     @demarcate
     def pre_processing(self):
-        """Perform any pre-processing steps prior to analysis.
-        """
+        """Perform any pre-processing steps prior to analysis."""
         super().pre_processing()
         if self.get_args().random_port:
             error("--gui flag is required to enable --random-port")
@@ -48,7 +47,7 @@ class cli_analysis(OmniAnalyze_Base):
                 filter_gpu_ids=self._runs[d[0]].filter_gpu_ids,
                 filter_dispatch_ids=self._runs[d[0]].filter_dispatch_ids,
                 time_unit=self.get_args().time_unit,
-                max_stat_num=self.get_args().max_stat_num
+                max_stat_num=self.get_args().max_stat_num,
             )
             # create 'mega dataframe'
             self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
@@ -56,30 +55,32 @@ class cli_analysis(OmniAnalyze_Base):
             )
             # create the loaded table
             parser.load_table_data(
-                workload=self._runs[d[0]], 
-                dir=d[0], 
+                workload=self._runs[d[0]],
+                dir=d[0],
                 is_gui=False,
-                debug=self.get_args().debug, 
-                verbose=self.get_args().verbose
+                debug=self.get_args().debug,
+                verbose=self.get_args().verbose,
             )
-
 
     @demarcate
     def run_analysis(self):
-        """Run CLI analysis.
-        """
+        """Run CLI analysis."""
         super().run_analysis()
         if self.get_args().list_stats:
             tty.show_kernel_stats(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_soc"]],
-                self._output
+                self._arch_configs[
+                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_soc"]
+                ],
+                self._output,
             )
         else:
             tty.show_all(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_soc"]],
-                self._output
+                self._arch_configs[
+                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_soc"]
+                ],
+                self._output,
             )

@@ -26,11 +26,13 @@ import argparse
 import shutil
 import os
 
+
 def print_avail_arch(avail_arch: list):
     ret_str = "\t\tList all available metrics for analysis on specified arch:"
     for arch in avail_arch:
         ret_str += "\n\t\t   {}".format(arch)
     return ret_str
+
 
 def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     # -----------------------------------------
@@ -42,8 +44,12 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     general_group = parser.add_argument_group("General Options")
     parser._positionals.title = "Modes"
     parser._optionals.title = "Help"
-    general_group.add_argument("-v", "--version", action="version", version=omniperf_version["ver_pretty"])
-    general_group.add_argument("-s", "--specs", action="store_true", help="Print system specs.")
+    general_group.add_argument(
+        "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
+    )
+    general_group.add_argument(
+        "-s", "--specs", action="store_true", help="Print system specs."
+    )
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -78,7 +84,9 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
 
-    general_group.add_argument("-v", "--version", action="version", version=omniperf_version["ver_pretty"])
+    general_group.add_argument(
+        "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
+    )
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
@@ -283,11 +291,15 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
 
-    general_group.add_argument("-v", "--version", action="version", version=omniperf_version["ver_pretty"])
+    general_group.add_argument(
+        "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
+    )
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
-    general_group.add_argument("-s", "--specs", action="store_true", help="Print system specs.")
+    general_group.add_argument(
+        "-s", "--specs", action="store_true", help="Print system specs."
+    )
 
     interaction_group.add_argument(
         "-i",
@@ -374,11 +386,15 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
 
-    general_group.add_argument("-v", "--version", action="version", version=omniperf_version["ver_pretty"])
+    general_group.add_argument(
+        "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
+    )
     general_group.add_argument(
         "-V", "--verbose", help="Increase output verbosity", action="count", default=0
     )
-    general_group.add_argument("-s", "--specs", action="store_true", help="Print system specs.")
+    general_group.add_argument(
+        "-s", "--specs", action="store_true", help="Print system specs."
+    )
 
     analyze_group.add_argument(
         "-p",
@@ -398,7 +414,7 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     analyze_group.add_argument(
         "--list-metrics",
         metavar="",
-        choices=supported_archs.keys(),#["gfx906", "gfx908", "gfx90a"],
+        choices=supported_archs.keys(),  # ["gfx906", "gfx908", "gfx90a"],
         help=print_avail_arch(supported_archs.keys()),
     )
     analyze_group.add_argument(
@@ -460,7 +476,7 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         metavar="",
         type=int,
         default=10,
-        help="\t\tSpecify the maximum number of stats shown in \"Top Stats\" tables (DEFAULT: 10)",
+        help='\t\tSpecify the maximum number of stats shown in "Top Stats" tables (DEFAULT: 10)',
     )
     analyze_advanced_group.add_argument(
         "-n",
@@ -508,7 +524,9 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         nargs="+",
         help="\t\tSpecify column indices to display.",
     )
-    analyze_advanced_group.add_argument("-g", dest="debug", action="store_true", help="\t\tDebug single metric.")
+    analyze_advanced_group.add_argument(
+        "-g", dest="debug", action="store_true", help="\t\tDebug single metric."
+    )
     analyze_advanced_group.add_argument(
         "--dependency", action="store_true", help="\t\tList the installation dependency."
     )
@@ -527,5 +545,5 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         "--specs-correction",
         type=str,
         metavar="",
-        help="\t\tSpecify the specs to correct."
+        help="\t\tSpecify the specs to correct.",
     )

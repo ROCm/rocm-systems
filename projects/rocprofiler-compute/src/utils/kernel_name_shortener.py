@@ -25,7 +25,7 @@
 import os
 import sys
 import logging
-import glob 
+import glob
 import re
 import subprocess
 import pandas as pd
@@ -33,6 +33,7 @@ import pandas as pd
 from utils.utils import error
 
 cache = dict()
+
 
 # Note: shortener is now dependent on a rocprof install with llvm
 def kernel_name_shortener(workload_dir, level):
@@ -134,6 +135,8 @@ def kernel_name_shortener(workload_dir, level):
                 modified_df = shorten_file(orig_df, level)
                 modified_df.to_csv(fpath, index=False)
             except pd.errors.EmptyDataError:
-                logging.debug("[profiling] Skipping shortening on empty csv: %s" % str(fpath))
+                logging.debug(
+                    "[profiling] Skipping shortening on empty csv: %s" % str(fpath)
+                )
 
         logging.info("[profiling] Kernel_Name shortening complete.")

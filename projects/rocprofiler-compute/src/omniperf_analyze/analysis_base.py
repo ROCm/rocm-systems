@@ -34,26 +34,31 @@ from utils import schema, file_io, parser
 import pandas as pd
 from tabulate import tabulate
 
-class OmniAnalyze_Base():
-    def __init__(self,args,supported_archs):
+
+class OmniAnalyze_Base:
+    def __init__(self, args, supported_archs):
         self.__args = args
-        self._runs = OrderedDict() 
-        self._arch_configs = {} 
+        self._runs = OrderedDict()
+        self._arch_configs = {}
         self.__supported_archs = supported_archs
-        self._output = None 
-        self.__socs = None # available OmniSoC objs
+        self._output = None
+        self.__socs = None  # available OmniSoC objs
 
     def get_args(self):
         return self.__args
+
     def set_soc(self, omni_socs):
         self.__socs = omni_socs
+
     def get_socs(self):
         return self.__socs
-    
+
     @demarcate
     def generate_configs(self, arch, config_dir, list_stats, filter_metrics, sys_info):
-        single_panel_config = file_io.is_single_panel_config(Path(config_dir), self.__supported_archs)
-        
+        single_panel_config = file_io.is_single_panel_config(
+            Path(config_dir), self.__supported_archs
+        )
+
         ac = schema.ArchConfig()
         if list_stats:
             ac.panel_configs = file_io.top_stats_build_in_config
@@ -66,22 +71,26 @@ class OmniAnalyze_Base():
         # TODO: filter_metrics should/might be one per arch
         # print(ac)
 
-        parser.build_dfs(
-            archConfigs=ac,
-            filter_metrics=filter_metrics,
-            sys_info=sys_info
-        )
+        parser.build_dfs(archConfigs=ac, filter_metrics=filter_metrics, sys_info=sys_info)
         self._arch_configs[arch] = ac
         return self._arch_configs
-    
+
     @demarcate
     def list_metrics(self):
         args = self.__args
         if args.list_metrics in self.__supported_archs.keys():
             arch = args.list_metrics
             if arch not in self._arch_configs.keys():
-                sys_info = file_io.load_sys_info(Path(self.__args.path[0][0], "sysinfo.csv"))
-                self.generate_configs(arch, args.config_dir, args.list_stats, args.filter_metrics, sys_info.iloc[0])
+                sys_info = file_io.load_sys_info(
+                    Path(self.__args.path[0][0], "sysinfo.csv")
+                )
+                self.generate_configs(
+                    arch,
+                    args.config_dir,
+                    args.list_stats,
+                    args.filter_metrics,
+                    sys_info.iloc[0],
+                )
 
             for key, value in self._arch_configs[args.list_metrics].metric_list.items():
                 prefix = ""
@@ -100,11 +109,13 @@ class OmniAnalyze_Base():
     def load_options(self, normalization_filter):
         if not normalization_filter:
             for k, v in self._arch_configs.items():
-                parser.build_metric_value_string(v.dfs, v.dfs_type, self.__args.normal_unit)
+                parser.build_metric_value_string(
+                    v.dfs, v.dfs_type, self.__args.normal_unit
+                )
         else:
             for k, v in self._arch_configs.items():
                 parser.build_metric_value_string(v.dfs, v.dfs_type, normalization_filter)
-        
+
         args = self.__args
         # Error checking for multiple runs and multiple gpu_kernel filters
         if args.gpu_kernel and (len(args.path) != len(args.gpu_kernel)):
@@ -112,27 +123,37 @@ class OmniAnalyze_Base():
                 for i in range(len(args.path) - 1):
                     args.gpu_kernel.extend(args.gpu_kernel)
             else:
-                error("Error: the number of --filter-kernels doesn't match the number of --dir.")
-    
+                error(
+                    "Error: the number of --filter-kernels doesn't match the number of --dir."
+                )
+
     @demarcate
     def initalize_runs(self, normalization_filter=None):
         if self.__args.list_metrics:
             self.list_metrics()
-        
+
         # load required configs
         for d in self.__args.path:
             sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
             arch = sys_info.iloc[0]["gpu_soc"]
             args = self.__args
-            self.generate_configs(arch, args.config_dir, args.list_stats, args.filter_metrics, sys_info.iloc[0])
+            self.generate_configs(
+                arch,
+                args.config_dir,
+                args.list_stats,
+                args.filter_metrics,
+                sys_info.iloc[0],
+            )
 
         self.load_options(normalization_filter)
-        
+
         for d in self.__args.path:
             w = schema.Workload()
             w.sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
             if self.__args.specs_correction:
-                w.sys_info = parser.correct_sys_info(w.sys_info, self.__args.specs_correction)
+                w.sys_info = parser.correct_sys_info(
+                    w.sys_info, self.__args.specs_correction
+                )
             w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             arch = w.sys_info.iloc[0]["gpu_soc"]
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
@@ -142,11 +163,9 @@ class OmniAnalyze_Base():
 
         return self._runs
 
-    
     @demarcate
     def sanitize(self):
-        """Perform sanitization of inputs
-        """
+        """Perform sanitization of inputs"""
         if not self.__args.path:
             error("The following arguments are required: -p/--path")
         # verify not accessing parent directories
@@ -160,23 +179,23 @@ class OmniAnalyze_Base():
                 error("Invalid directory {}\nPlease try again.".format(dir[0]))
             # validate profiling data
             is_workload_empty(dir[0])
-        
-    
-    #----------------------------------------------------
+
+    # ----------------------------------------------------
     # Required methods to be implemented by child classes
-    #----------------------------------------------------
+    # ----------------------------------------------------
     @abstractmethod
     def pre_processing(self):
-        """Perform initialization prior to analysis.
-        """
+        """Perform initialization prior to analysis."""
         logging.debug("[analysis] prepping to do some analysis")
         logging.info("[analysis] deriving Omniperf metrics...")
         # initalize output file
-        self._output = open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
-        
+        self._output = (
+            open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
+        )
+
         # initalize runs
         self._runs = self.initalize_runs()
-        
+
         # set filters
         if self.__args.gpu_kernel:
             for d, gk in zip(self.__args.path, self.__args.gpu_kernel):
@@ -196,6 +215,5 @@ class OmniAnalyze_Base():
 
     @abstractmethod
     def run_analysis(self):
-        """Run analysis.
-        """
+        """Run analysis."""
         logging.debug("[analysis] generating analysis")

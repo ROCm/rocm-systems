@@ -26,26 +26,30 @@ import logging
 from omniperf_profile.profiler_base import OmniProfiler_Base
 from utils.utils import demarcate
 
-class rocscope_profiler(OmniProfiler_Base):
-    def __init__(self,profiling_args,profiler_mode,soc):
-        super().__init__(profiling_args,profiler_mode,soc)
 
-    #-----------------------
+class rocscope_profiler(OmniProfiler_Base):
+    def __init__(self, profiling_args, profiler_mode, soc):
+        super().__init__(profiling_args, profiler_mode, soc)
+
+    # -----------------------
     # Required child methods
-    #-----------------------
+    # -----------------------
     @demarcate
     def pre_processing(self):
-        """Perform any pre-processing steps prior to profiling.
-        """
-        self.__profiler="rocscope"
+        """Perform any pre-processing steps prior to profiling."""
+        self.__profiler = "rocscope"
         logging.debug("[profiling] pre-processing using %s profiler" % self.__profiler)
+
     @demarcate
     def run_profiling(self, version, prog):
-        """Run profiling.
-        """
-        logging.debug("[profiling] performing profiling using %s profiler" % self.__profiler)
+        """Run profiling."""
+        logging.debug(
+            "[profiling] performing profiling using %s profiler" % self.__profiler
+        )
+
     @demarcate
     def post_processing(self):
-        """Perform any post-processing steps prior to profiling.
-        """
-        logging.debug("[profiling] performing post-processing using %s profiler" % self.__profiler)
+        """Perform any post-processing steps prior to profiling."""
+        logging.debug(
+            "[profiling] performing post-processing using %s profiler" % self.__profiler
+        )

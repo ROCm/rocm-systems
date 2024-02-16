@@ -39,18 +39,30 @@ SOC_PARAM = {
     "L2Banks": 16,
     "LDSBanks": 32,
     "Freq": 1950,
-    "mclk": 1300
+    "mclk": 1300,
 }
 
-class gfx940_soc (OmniSoC_Base):
-    def __init__(self,args):
+
+class gfx940_soc(OmniSoC_Base):
+    def __init__(self, args):
         super().__init__(args)
         self.set_soc_name("gfx940")
-        if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
+        if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
+            self.set_perfmon_dir(
+                os.path.join(
+                    str(config.omniperf_home),
+                    "omniperf_soc",
+                    "profile_configs",
+                    "roofline",
+                )
+            )
         else:
             # NB: We're using generalized Mi300 perfmon configs
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "gfx940")) 
+            self.set_perfmon_dir(
+                os.path.join(
+                    str(config.omniperf_home), "omniperf_soc", "profile_configs", "gfx940"
+                )
+            )
         self.set_compatible_profilers(["rocprofv2"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -65,28 +77,25 @@ class gfx940_soc (OmniSoC_Base):
                 "SPI": 2,
                 "GRBM": 2,
                 "GDS": 4,
-                "TCC_channels": 32
+                "TCC_channels": 32,
             }
         )
         self.set_soc_param(SOC_PARAM)
         self.roofline_obj = Roofline(args)
 
-    #-----------------------
+    # -----------------------
     # Required child methods
-    #-----------------------
+    # -----------------------
     @demarcate
     def profiling_setup(self):
-        """Perform any SoC-specific setup prior to profiling.
-        """
+        """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         # Performance counter filtering
         self.perfmon_filter(self.get_args().roof_only)
-        
 
     @demarcate
     def post_profiling(self):
-        """Perform any SoC-specific post profiling activities.
-        """
+        """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
 
         logging.info("[roofline] Roofline temporarily disabled in Mi300")
@@ -98,16 +107,11 @@ class gfx940_soc (OmniSoC_Base):
         # else:
         #     logging.info("[roofline] Skipping roofline")
 
-
     @demarcate
     def analysis_setup(self, roofline_parameters=None):
-        """Perform any SoC-specific setup prior to analysis.
-        """
+        """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup()
         logging.info("[roofline] Roofline temporarily disabled in Mi300")
         # configure roofline for analysis
         # if roofline_parameters:
         #     self.roofline_obj = Roofline(self.get_args(), roofline_parameters)
-
-
-

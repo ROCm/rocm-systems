@@ -37,6 +37,7 @@ from pathlib import Path as path
 from textwrap import dedent
 from utils.utils import error, get_hbm_stack_num
 
+
 @dataclass
 class MachineSpecs:
     hostname: str
@@ -135,7 +136,7 @@ def gpuinfo():
 
     # we get the max mclk from rocm-smi --showmclkrange
     rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)
-    gpu_info['max_mclk'] = search(r'(\d+)Mhz\s*$', rocm_smi_mclk)
+    gpu_info["max_mclk"] = search(r"(\d+)Mhz\s*$", rocm_smi_mclk)
 
     # Fixme: find better way to differentiate cards, GPU vs APU, etc.
     rocminfo_full = run(["rocminfo"])
@@ -151,81 +152,85 @@ def gpuinfo():
     if not gpu_arch in SUPPORTED_ARCHS.keys():
         return gpu_info
 
-    gpu_info['L1'], gpu_info['L1'] = "", ""
+    gpu_info["L1"], gpu_info["L1"] = "", ""
     for idx2, linetext in enumerate(rocminfo[idx1 + 1 :]):
         key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['L1'] = key
+            gpu_info["L1"] = key
             continue
 
         key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['L2'] = key
+            gpu_info["L2"] = key
             continue
 
         key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
         if key != None:
-            gpu_info['max_sclk'] = key
+            gpu_info["max_sclk"] = key
             continue
 
         key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['num_CU'] = key
+            gpu_info["num_CU"] = key
             continue
 
         key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['num_SIMD'] = key
+            gpu_info["num_SIMD"] = key
             continue
 
         key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['num_SE'] = key
+            gpu_info["num_SE"] = key
             continue
 
         key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['wave_size'] = key
+            gpu_info["wave_size"] = key
             continue
 
         key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['grp_size'] = key
+            gpu_info["grp_size"] = key
             continue
 
         key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
         if key != None:
-            gpu_info['max_waves_per_cu'] = key
+            gpu_info["max_waves_per_cu"] = key
             break
 
     try:
-        soc_module = importlib.import_module('omniperf_soc.soc_'+gpu_arch)
+        soc_module = importlib.import_module("omniperf_soc.soc_" + gpu_arch)
     except ModuleNotFoundError as e:
-        error("Arch %s marked as supported, but couldn't find class implementation %s." % (gpu_arch, e))
-    
+        error(
+            "Arch %s marked as supported, but couldn't find class implementation %s."
+            % (gpu_arch, e)
+        )
+
     # load arch specific info
     try:
         gpu_name = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-        gpu_info['L2Banks'] = str(soc_module.SOC_PARAM['L2Banks'])
-        gpu_info['numSQC'] = str(soc_module.SOC_PARAM['numSQC'])
-        gpu_info['LDSBanks'] = str(soc_module.SOC_PARAM['LDSBanks'])
-        gpu_info['numPipes'] = str(soc_module.SOC_PARAM['numPipes'])
+        gpu_info["L2Banks"] = str(soc_module.SOC_PARAM["L2Banks"])
+        gpu_info["numSQC"] = str(soc_module.SOC_PARAM["numSQC"])
+        gpu_info["LDSBanks"] = str(soc_module.SOC_PARAM["LDSBanks"])
+        gpu_info["numPipes"] = str(soc_module.SOC_PARAM["numPipes"])
     except KeyError as e:
-        error("Incomplete class definition for %s. Expected a field for %s in SOC_PARAM." % (gpu_arch, e))\
-    
+        error(
+            "Incomplete class definition for %s. Expected a field for %s in SOC_PARAM."
+            % (gpu_arch, e)
+        )
     # specify gpu name for gfx942 hardware
     if gpu_name == "MI300":
         gpu_name = list(SUPPORTED_ARCHS[gpu_arch].values())[0][0]
-    if (gpu_info['gpu_arch'] == "gfx942") and ("MI300A" in rocminfo_full):
+    if (gpu_info["gpu_arch"] == "gfx942") and ("MI300A" in rocminfo_full):
         gpu_name = "MI300A_A1"
     if (gpu_arch == "gfx942") and ("MI300A" not in rocminfo_full):
         gpu_name = "MI300X_A1"
-    
 
-    gpu_info['gpu_name'] = gpu_name
-    gpu_info['gpu_arch'] = gpu_arch
-    gpu_info['compute_partition'] = ""
-    gpu_info['memory_partition'] = ""
+    gpu_info["gpu_name"] = gpu_name
+    gpu_info["gpu_arch"] = gpu_arch
+    gpu_info["compute_partition"] = ""
+    gpu_info["memory_partition"] = ""
 
     # verify all fields are filled
     for key, value in gpu_info.items():
@@ -235,7 +240,7 @@ def gpuinfo():
     return gpu_info
 
 
-def run(cmd,exit_on_error=False):
+def run(cmd, exit_on_error=False):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
     if exit_on_error:
@@ -255,23 +260,17 @@ def search(pattern, string):
         return m.group(1)
     return None
 
+
 def total_l2_banks(archname, L2Banks, memory_partition):
     # Fixme: support all supported partitioning mode
     # Fixme: "name" is a bad name!
     totalL2Banks = L2Banks
-    if (
-        archname.lower() == "mi300a_a0"
-        or archname.lower() == "mi300a_a1"
-    ):
-        totalL2Banks = L2Banks * get_hbm_stack_num(
-            archname, memory_partition)
-    elif (
-        archname.lower() == "mi300x_a0"
-        or archname.lower() == "mi300x_a1"
-    ):
-        totalL2Banks = L2Banks * get_hbm_stack_num(
-            archname, memory_partition)
+    if archname.lower() == "mi300a_a0" or archname.lower() == "mi300a_a1":
+        totalL2Banks = L2Banks * get_hbm_stack_num(archname, memory_partition)
+    elif archname.lower() == "mi300x_a0" or archname.lower() == "mi300x_a1":
+        totalL2Banks = L2Banks * get_hbm_stack_num(archname, memory_partition)
     return totalL2Banks
+
 
 def get_machine_specs(devicenum):
     cpuinfo = path("/proc/cpuinfo").read_text()
@@ -339,8 +338,8 @@ def get_machine_specs(devicenum):
 
     # these are just max's now, because the parsing was broken and this was inconsistent
     # with how we use the clocks elsewhere (all max, all the time)
-    cur_sclk = gpu_info['max_sclk']
-    cur_mclk = gpu_info['max_mclk']
+    cur_sclk = gpu_info["max_sclk"]
+    cur_mclk = gpu_info["max_mclk"]
 
     # FIXME with device
     vbios = search(r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"], exit_on_error=True))
@@ -358,15 +357,16 @@ def get_machine_specs(devicenum):
         memory_partition = "NA"
 
     totalL2Banks = total_l2_banks(
-        gpu_info['gpu_name'], int(gpu_info['L2Banks']), memory_partition)
+        gpu_info["gpu_name"], int(gpu_info["L2Banks"]), memory_partition
+    )
     hbmchannels = totalL2Banks
     if (
-        gpu_info['gpu_name'].lower() == "mi300a_a0"
-        or gpu_info['gpu_name'].lower() == "mi300a_a1"
+        gpu_info["gpu_name"].lower() == "mi300a_a0"
+        or gpu_info["gpu_name"].lower() == "mi300a_a1"
     ) and memory_partition.lower() == "nps1":
         # we have an extra 32 channels for the CCD
         hbmchannels += 32
-    hbmBW = str(int(gpu_info['max_mclk']) / 1000 * 32 * hbmchannels)
+    hbmBW = str(int(gpu_info["max_mclk"]) / 1000 * 32 * hbmchannels)
     totalL2Banks = str(totalL2Banks)
 
     return MachineSpecs(
@@ -377,26 +377,26 @@ def get_machine_specs(devicenum):
         ram,
         distro,
         rocm_version,
-        gpu_info['gpu_name'],
-        gpu_info['gpu_arch'],
+        gpu_info["gpu_name"],
+        gpu_info["gpu_arch"],
         vbios,
-        gpu_info['L1'],
-        gpu_info['L2'],
-        gpu_info['num_CU'],
-        gpu_info['num_SIMD'],
-        gpu_info['num_SE'],
-        gpu_info['wave_size'],
-        gpu_info['grp_size'],
-        gpu_info['max_sclk'],
-        gpu_info['max_mclk'],
+        gpu_info["L1"],
+        gpu_info["L2"],
+        gpu_info["num_CU"],
+        gpu_info["num_SIMD"],
+        gpu_info["num_SE"],
+        gpu_info["wave_size"],
+        gpu_info["grp_size"],
+        gpu_info["max_sclk"],
+        gpu_info["max_mclk"],
         cur_sclk,
         cur_mclk,
-        gpu_info['max_waves_per_cu'],
-        gpu_info['L2Banks'],
+        gpu_info["max_waves_per_cu"],
+        gpu_info["L2Banks"],
         totalL2Banks,
-        gpu_info['LDSBanks'],
-        gpu_info['numSQC'],
-        gpu_info['numPipes'],
+        gpu_info["LDSBanks"],
+        gpu_info["numSQC"],
+        gpu_info["numPipes"],
         hbmBW,
         compute_partition,
         memory_partition,

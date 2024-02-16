@@ -50,10 +50,11 @@ top_stats_build_in_config = {
         "id": 1,
         "title": "Dispatch List",
         "data source": [{"raw_csv_table": {"id": 2, "source": "pmc_dispatch_info.csv"}}],
-    }
+    },
 }
 
 time_units = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
+
 
 def load_sys_info(f):
     """

@@ -28,31 +28,44 @@ import glob
 import sys
 import os
 import re
-from utils.utils import capture_subprocess_output, run_prof, gen_sysinfo, run_rocscope, error, demarcate
+from utils.utils import (
+    capture_subprocess_output,
+    run_prof,
+    gen_sysinfo,
+    run_rocscope,
+    error,
+    demarcate,
+)
 import config
 import pandas as pd
 
-class OmniProfiler_Base():
+
+class OmniProfiler_Base:
     def __init__(self, args, profiler_mode, soc):
         self.__args = args
         self.__profiler = profiler_mode
-        self._soc = soc # OmniSoC obj
-        self.__perfmon_dir = os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs")
+        self._soc = soc  # OmniSoC obj
+        self.__perfmon_dir = os.path.join(
+            str(config.omniperf_home), "omniperf_soc", "profile_configs"
+        )
 
     def get_args(self):
         return self.__args
+
     def get_profiler_options(self, fname):
-        """Fetch any version specific arguments required by profiler
-        """
+        """Fetch any version specific arguments required by profiler"""
         # assume no SoC specific options and return empty list by default
         return []
-    
+
     @demarcate
     def pmc_perf_split(self):
-        """Avoid default rocprof join utility by spliting each line into a separate input file
-        """
+        """Avoid default rocprof join utility by spliting each line into a separate input file"""
         workload_perfmon_dir = os.path.join(self.__args.path, "perfmon")
-        lines = open(os.path.join(workload_perfmon_dir, "pmc_perf.txt"), "r").read().splitlines()
+        lines = (
+            open(os.path.join(workload_perfmon_dir, "pmc_perf.txt"), "r")
+            .read()
+            .splitlines()
+        )
 
         # Iterate over each line in pmc_perf.txt
         mpattern = r"^pmc:(.*)"
@@ -83,8 +96,7 @@ class OmniProfiler_Base():
 
     @demarcate
     def join_prof(self, out=None):
-        """Manually join separated rocprof runs
-        """
+        """Manually join separated rocprof runs"""
         # Set default output directory if not specified
         if type(self.__args.path) == str:
             if out is None:
@@ -105,7 +117,11 @@ class OmniProfiler_Base():
             elif self.__args.join_type == "grid":
                 key = _df.groupby(["Kernel_Name", "Grid_Size"]).cumcount()
                 _df["key"] = (
-                    _df["Kernel_Name"] + " - " + _df["Grid_Size"].astype(str) + " - " + key.astype(str)
+                    _df["Kernel_Name"]
+                    + " - "
+                    + _df["Grid_Size"].astype(str)
+                    + " - "
+                    + key.astype(str)
                 )
             else:
                 print("ERROR: Unrecognized --join-type")
@@ -121,9 +137,15 @@ class OmniProfiler_Base():
         duplicate_cols = {
             "GPU_ID": [col for col in df.columns if col.startswith("GPU_ID")],
             "Grid_Size": [col for col in df.columns if col.startswith("Grid_Size")],
-            "Workgroup_Size": [col for col in df.columns if col.startswith("Workgroup_Size")],
-            "LDS_Per_Workgroup": [col for col in df.columns if col.startswith("LDS_Per_Workgroup")],
-            "Scratch_Per_Workitem": [col for col in df.columns if col.startswith("Scratch_Per_Workitem")],
+            "Workgroup_Size": [
+                col for col in df.columns if col.startswith("Workgroup_Size")
+            ],
+            "LDS_Per_Workgroup": [
+                col for col in df.columns if col.startswith("LDS_Per_Workgroup")
+            ],
+            "Scratch_Per_Workitem": [
+                col for col in df.columns if col.startswith("Scratch_Per_Workitem")
+            ],
             "SGPR": [col for col in df.columns if col.startswith("SGPR")],
         }
         # Check for vgpr counter in ROCm < 5.3
@@ -131,15 +153,17 @@ class OmniProfiler_Base():
             duplicate_cols["vgpr"] = [col for col in df.columns if col.startswith("vgpr")]
         # Check for vgpr counter in ROCm >= 5.3
         else:
-            duplicate_cols["Arch_VGPR"] = [col for col in df.columns if col.startswith("Arch_VGPR")]
-            duplicate_cols["Accum_VGPR"] = [col for col in df.columns if col.startswith("Accum_VGPR")]
+            duplicate_cols["Arch_VGPR"] = [
+                col for col in df.columns if col.startswith("Arch_VGPR")
+            ]
+            duplicate_cols["Accum_VGPR"] = [
+                col for col in df.columns if col.startswith("Accum_VGPR")
+            ]
         for key, cols in duplicate_cols.items():
             _df = df[cols]
             if not test_df_column_equality(_df):
-                msg = (
-                    "WARNING: Detected differing {} values while joining pmc_perf.csv".format(
-                        key
-                    )
+                msg = "WARNING: Detected differing {} values while joining pmc_perf.csv".format(
+                    key
                 )
                 logging.warning(msg + "\n")
             else:
@@ -157,7 +181,7 @@ class OmniProfiler_Base():
                 if not any(
                     k.startswith(check)
                     for check in [
-                       # rocprofv2 headers
+                        # rocprofv2 headers
                         "GPU_ID_",
                         "Grid_Size_",
                         "Workgroup_Size_",
@@ -236,31 +260,42 @@ class OmniProfiler_Base():
         else:
             return df
 
-    #----------------------------------------------------
+    # ----------------------------------------------------
     # Required methods to be implemented by child classes
-    #----------------------------------------------------
+    # ----------------------------------------------------
     @abstractmethod
     def pre_processing(self):
-        """Perform any pre-processing steps prior to profiling.
-        """
+        """Perform any pre-processing steps prior to profiling."""
         logging.debug("[profiling] pre-processing using %s profiler" % self.__profiler)
-        
+
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
-            error("%s is not enabled in %s. Available profilers include: %s" % (self._soc.get_soc_name(), self.__profiler, self._soc.get_compatible_profilers()))
+            error(
+                "%s is not enabled in %s. Available profilers include: %s"
+                % (
+                    self._soc.get_soc_name(),
+                    self.__profiler,
+                    self._soc.get_compatible_profilers(),
+                )
+            )
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
             error("Access denied. Cannot access parent directories in path (i.e. ../)")
-        
+
         # verify correct formatting for application binary
         self.__args.remaining = self.__args.remaining[1:]
         if self.__args.remaining:
             if not os.path.isfile(self.__args.remaining[0]):
-                error("Your command %s doesn't point to a executable. Please verify." % self.__args.remaining[0])
+                error(
+                    "Your command %s doesn't point to a executable. Please verify."
+                    % self.__args.remaining[0]
+                )
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
-            error("Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256")
-        
+            error(
+                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256"
+            )
+
         # verify name meets MongoDB length requirements and no illegal chars
         if len(self.__args.name) > 35:
             error("-n/--name exceeds 35 character limit. Try again.")
@@ -268,11 +303,12 @@ class OmniProfiler_Base():
             error("'-' and '.' are not permitted in -n/--name")
 
     @abstractmethod
-    def run_profiling(self, version:str, prog:str):
-        """Run profiling.
-        """
-        logging.debug("[profiling] performing profiling using %s profiler" % self.__profiler)
-        
+    def run_profiling(self, version: str, prog: str):
+        """Run profiling."""
+        logging.debug(
+            "[profiling] performing profiling using %s profiler" % self.__profiler
+        )
+
         # log basic info
         logging.info(str(prog) + " ver: " + str(version))
         logging.info("Path: " + str(os.path.abspath(self.__args.path)))
@@ -283,7 +319,7 @@ class OmniProfiler_Base():
         if self.__args.ipblocks == None:
             logging.info("IP Blocks: All")
         else:
-            logging.info("IP Blocks: "+ str(self.__args.ipblocks))
+            logging.info("IP Blocks: " + str(self.__args.ipblocks))
         if self.__args.kernel_verbose > 5:
             logging.info("KernelName verbose: DISABLED")
         else:
@@ -298,7 +334,10 @@ class OmniProfiler_Base():
                         "sed",
                         "-i",
                         "-r",
-                        "s%^(kernel:).*%" + "kernel: " + ",".join(self.__args.kernel) + "%g",
+                        "s%^(kernel:).*%"
+                        + "kernel: "
+                        + ",".join(self.__args.kernel)
+                        + "%g",
                         fname,
                     ]
                 )
@@ -315,7 +354,10 @@ class OmniProfiler_Base():
                         "sed",
                         "-i",
                         "-r",
-                        "s%^(range:).*%" + "range: " + " ".join(self.__args.dispatch) + "%g",
+                        "s%^(range:).*%"
+                        + "range: "
+                        + " ".join(self.__args.dispatch)
+                        + "%g",
                         fname,
                     ]
                 )
@@ -325,42 +367,44 @@ class OmniProfiler_Base():
                 else:
                     logging.debug(output)
             logging.info("\nCurrent input file: %s" % fname)
-            
+
             # Fetch any SoC/profiler specific profiling options
             options = self._soc.get_profiler_options()
             options += self.get_profiler_options(fname)
 
             if self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2":
                 run_prof(
-                    fname=fname, 
-                    # workload_dir=self.get_args().path, 
-                    # perfmon_dir=self.__perfmon_dir, 
+                    fname=fname,
+                    # workload_dir=self.get_args().path,
+                    # perfmon_dir=self.__perfmon_dir,
                     # cmd=self.__args.remaining,
                     # target=self.__args.target,
                     profiler_options=options,
                     target=self.__args.target,
-                    workload_dir=self.get_args().path
+                    workload_dir=self.get_args().path,
                 )
 
             elif self.__profiler == "rocscope":
                 run_rocscope(self.__args, fname)
             else:
-                #TODO: Finish logic
+                # TODO: Finish logic
                 error("profiler not supported")
 
     @abstractmethod
     def post_processing(self):
-        """Perform any post-processing steps prior to profiling.
-        """
-        logging.debug("[profiling] performing post-processing using %s profiler" % self.__profiler)
+        """Perform any post-processing steps prior to profiling."""
+        logging.debug(
+            "[profiling] performing post-processing using %s profiler" % self.__profiler
+        )
         gen_sysinfo(
-            workload_name=self.__args.name, 
-            workload_dir=self.get_args().path, 
-            ip_blocks=self.__args.ipblocks, 
-            app_cmd=self.__args.remaining, 
-            skip_roof=self.__args.no_roof, 
+            workload_name=self.__args.name,
+            workload_dir=self.get_args().path,
+            ip_blocks=self.__args.ipblocks,
+            app_cmd=self.__args.remaining,
+            skip_roof=self.__args.no_roof,
             roof_only=self.__args.roof_only,
         )
+
 
 def test_df_column_equality(df):
     return df.eq(df.iloc[:, 0], axis=0).all(1).all()

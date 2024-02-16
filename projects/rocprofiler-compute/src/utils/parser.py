@@ -174,6 +174,7 @@ def to_round(a, b):
     else:
         return round(a, b)
 
+
 def to_quantile(a, b):
     if a is None:
         return None
@@ -181,6 +182,7 @@ def to_quantile(a, b):
         return a.quantile(b)
     else:
         raise Exception("to_quantile: unsupported type.")
+
 
 def to_mod(a, b):
     if isinstance(a, pd.core.series.Series):
@@ -402,6 +404,7 @@ def gen_counter_list(formula):
 
     return visited, counters
 
+
 def calc_builtin_var(var, sys_info):
     """
     Calculate build-in variable based on sys_info:
@@ -413,6 +416,7 @@ def calc_builtin_var(var, sys_info):
     else:
         print("Don't support", var)
         sys.exit(1)
+
 
 def build_dfs(archConfigs, filter_metrics, sys_info):
     """
@@ -447,7 +451,6 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                     type == "metric_table"
                     and "metric" in data_config
                     and "placeholder_range" in data_config["metric"]
-                    
                 ):
                     # print(data_config["metric"])
                     new_metrics = {}
@@ -475,16 +478,14 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                     data_config["metric"] = new_metrics
                     # print(data_config)
                     # print(data_config["metric"])
-                             
+
     for panel_id, panel in archConfigs.panel_configs.items():
         for data_source in panel["data source"]:
             for type, data_config in data_source.items():
                 if type == "metric_table":
                     headers = ["Metric_ID"]
                     data_source_idx = str(data_config["id"] // 100)
-                    if (data_source_idx != 0 or
-                        data_source_idx in filter_metrics
-                    ):
+                    if data_source_idx != 0 or data_source_idx in filter_metrics:
                         metric_list[data_source_idx] = panel["title"]
                     if (
                         "cli_style" in data_config
@@ -506,9 +507,9 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                     headers.append("coll_level")
                     if "tips" in data_config["header"].keys():
                         headers.append(data_config["header"]["tips"])
-                    
+
                     df = pd.DataFrame(columns=headers)
-                
+
                     i = 0
                     for key, entries in data_config["metric"].items():
                         data_source_idx = (
@@ -532,7 +533,7 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
                         ):
                             values.append(metric_idx)
                             values.append(key)
-                            
+
                             metric_list[data_source_idx] = data_config["title"]
 
                             if (
@@ -687,9 +688,9 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
     ammolite__numWavesPerCU = sys_info.maxWavesPerCU  # todo: check do we still need it
     ammolite__numSQC = sys_info.numSQC
     ammolite__L2Banks = sys_info.L2Banks
-    ammolite__LDSBanks = (
-        soc_spec['LDSBanks']
-    )  # todo: eventually switch this over to sys_info. its a new spec so trying not to break compatibility
+    ammolite__LDSBanks = soc_spec[
+        "LDSBanks"
+    ]  # todo: eventually switch this over to sys_info. its a new spec so trying not to break compatibility
     ammolite__freq = sys_info.cur_sclk  # todo: check do we still need it
     ammolite__mclk = sys_info.cur_mclk
     ammolite__sclk = sys_info.sclk
@@ -910,7 +911,9 @@ def load_kernel_top(workload, dir):
             if file.exists():
                 tmp[id] = pd.read_csv(file)
             else:
-                logging.info("Warning: Issue loading top kernels. Check pmc_kernel_top.csv")
+                logging.info(
+                    "Warning: Issue loading top kernels. Check pmc_kernel_top.csv"
+                )
         elif "from_csv_columnwise" in df.columns:
             # NB:
             #   Another way might be doing transpose in tty like metric_table.
@@ -923,7 +926,9 @@ def load_kernel_top(workload, dir):
                 #   so tty could detect them and show them correctly in comparison.
                 tmp[id].columns = ["Info"]
             else:
-                logging.info("Warning: Issue loading top kernels. Check pmc_kernel_top.csv")
+                logging.info(
+                    "Warning: Issue loading top kernels. Check pmc_kernel_top.csv"
+                )
     workload.dfs.update(tmp)
 
 
@@ -956,6 +961,7 @@ def build_comparable_columns(time_unit):
         comparable_columns.append(h + "(" + time_unit + ")")
 
     return comparable_columns
+
 
 def correct_sys_info(df, specs_correction):
     """
@@ -1012,5 +1018,3 @@ def correct_sys_info(df, specs_correction):
         df[name_map[k]] = v
 
     return df
-
-
