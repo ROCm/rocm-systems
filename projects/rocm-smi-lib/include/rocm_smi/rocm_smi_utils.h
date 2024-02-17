@@ -162,7 +162,8 @@ std::string print_unsigned_hex_and_int(T i, std::string heading="") {
   }
   ss << "Hex (MSB): " << print_int_as_hex(i) << ", "
      << "Unsigned int: " << print_unsigned_int(i) << ", "
-     << "Byte Size: " << sizeof(T);
+     << "Byte Size: " << sizeof(T) << ", "
+     << "Bits: " << sizeof(T) * 8;  // 8 bits per 1 byte
   return ss.str();
 }
 

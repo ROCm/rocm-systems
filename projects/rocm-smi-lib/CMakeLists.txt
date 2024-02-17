@@ -14,6 +14,9 @@ endif()
 ## Include common cmake modules
 include(utils)
 
+# Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset:
+set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
+
 if (NOT DEFINED CPACK_RESOURCE_FILE_LICENSE)
     set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/License.txt")
 endif()

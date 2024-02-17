@@ -796,6 +796,20 @@ int main() {
     ret = rsmi_dev_target_graphics_version_get(i, &val_ui64);
     std::cout << "\t**Target Graphics Version: " << std::dec
     << static_cast<uint64_t>(val_ui64) << "\n";
+    ret = rsmi_dev_guid_get(i, &val_ui64);
+    std::cout << "\t**GUID: " << std::dec
+    << static_cast<uint64_t>(val_ui64) << "\n";
+    ret = rsmi_dev_node_id_get(i, &val_ui32);
+    std::cout << "\t**Node ID: " << std::dec
+    << static_cast<uint32_t>(val_ui32) << "\n";
+    char vbios_version[256];
+    ret = rsmi_dev_vbios_version_get(i, vbios_version, 256);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << "\t**VBIOS Version: " << vbios_version << "\n";
+    } else {
+      std::cout << "\t**VBIOS Version: "
+      << amd::smi::getRSMIStatusString(ret, false) << "\n";
+    }
 
     char current_compute_partition[256];
     current_compute_partition[0] = '\0';
@@ -988,18 +1002,10 @@ int main() {
     }
     std::cout << " ** Note: Values MAX'ed out (UINTX MAX are unsupported for the version in question) ** " << "\n";
 
+
     std::cout << "\n\n";
     print_test_header("GPU METRICS: Using direct APIs (newer)", i);
     metrics_table_header_t header_values;
-    GPUMetricTempHbm_t hbm_values;
-    GPUMetricVcnActivity_t vcn_values;
-    GPUMetricJpegActivity_t jpeg_values;
-    GPUMetricXgmiReadDataAcc_t xgmi_read_values;
-    GPUMetricXgmiWriteDataAcc_t xgmi_write_values;
-    GPUMetricCurrGfxClk_t curr_gfxclk_values;
-    GPUMetricCurrSocClk_t curr_socclk_values;
-    GPUMetricCurrVClk0_t curr_vclk0_values;
-    GPUMetricCurrDClk0_t curr_dclk0_values;
 
     ret = rsmi_dev_metrics_header_info_get(i, &header_values);
     std::cout << "\t[Metrics Header]" << "\n";
@@ -1008,150 +1014,10 @@ int main() {
     std::cout << "\t--------------------" << "\n";
 
     std::cout << "\n";
-    std::cout << "\t[Temperature]" << "\n";
-    ret = rsmi_dev_metrics_temp_edge_get(i, &val_ui16);
-    std::cout << "\t  -> temp_edge(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_temp_hotspot_get(i, &val_ui16);
-    std::cout << "\t  -> temp_hotspot(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_temp_mem_get(i, &val_ui16);
-    std::cout << "\t  -> temp_mem(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_temp_vrgfx_get(i, &val_ui16);
-    std::cout << "\t  -> temp_vrgfx(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_temp_vrsoc_get(i, &val_ui16);
-    std::cout << "\t  -> temp_vrsoc(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_temp_vrmem_get(i, &val_ui16);
-    std::cout << "\t  -> temp_vrmem(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_temp_hbm_get(i, &hbm_values);
-    std::cout << "\t  -> temp_hbm(): " << print_error_or_value(ret, hbm_values) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Power/Energy]" << "\n";
-    ret = rsmi_dev_metrics_curr_socket_power_get(i, &val_ui16);
-    std::cout << "\t  -> current_socket_power(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_energy_acc_get(i, &val_ui64);
-    std::cout << "\t  -> energy_accum(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_avg_socket_power_get(i, &val_ui16);
-    std::cout << "\t  -> average_socket_power(): " << print_error_or_value(ret, val_ui16) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Utilization]" << "\n";
-    ret = rsmi_dev_metrics_avg_gfx_activity_get(i, &val_ui16);
-    std::cout << "\t  -> average_gfx_activity(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_umc_activity_get(i, &val_ui16);
-    std::cout << "\t  -> average_umc_activity(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_mm_activity_get(i, &val_ui16);
-    std::cout << "\t  -> average_mm_activity(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_vcn_activity_get(i, &vcn_values);
-    std::cout << "\t  -> vcn_activity(): " << print_error_or_value(ret, vcn_values) << "\n";
-    ret = rsmi_dev_metrics_jpeg_activity_get(i, &jpeg_values);
-    std::cout << "\t  -> jpeg_activity(): " << print_error_or_value(ret, jpeg_values) << "\n";
-    ret = rsmi_dev_metrics_mem_activity_acc_get(i, &val_ui32);
-    std::cout << "\t  -> mem_activity_accum(): " << print_error_or_value(ret, val_ui32) << "\n";
-    ret = rsmi_dev_metrics_gfx_activity_acc_get(i, &val_ui32);
-    std::cout << "\t  -> gfx_activity_accum(): " << print_error_or_value(ret, val_ui32) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Average Clock]" << "\n";
-    ret = rsmi_dev_metrics_avg_gfx_clock_frequency_get(i, &val_ui16);
-    std::cout << "\t  -> average_gfx_clock_frequency(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_soc_clock_frequency_get(i, &val_ui16);
-    std::cout << "\t  -> average_soc_clock_frequency(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_uclock_frequency_get(i, &val_ui16);
-    std::cout << "\t  -> average_uclock_frequency(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_vclock0_frequency_get(i, &val_ui16);
-    std::cout << "\t  -> average_vclock0_frequency(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_dclock0_frequency_get(i, &val_ui16);
-    std::cout << "\t  -> average_dclock0_frequency(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_vclock1_frequency_get(i, &val_ui16);
-    std::cout << "\t  -> average_vclock1_frequency(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_avg_dclock1_frequency_get(i, &val_ui16);
-    std::cout << "\t  -> average_dclock1_frequency(): " << print_error_or_value(ret, val_ui16) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Current Clock]" << "\n";
-    ret = rsmi_dev_metrics_curr_vclk1_get(i, &val_ui16);
-    std::cout << "\t  -> current_vclock1(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_curr_dclk1_get(i, &val_ui16);
-    std::cout << "\t  -> current_dclock1(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_curr_uclk_get(i, &val_ui16);
-    std::cout << "\t  -> current_uclock(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_curr_dclk0_get(i, &curr_dclk0_values);
-    std::cout << "\t  -> current_dclk0(): " << print_error_or_value(ret, curr_dclk0_values) << "\n";
-    ret = rsmi_dev_metrics_curr_gfxclk_get(i, &curr_gfxclk_values);
-    std::cout << "\t  -> current_gfxclk(): " << print_error_or_value(ret, curr_gfxclk_values) << "\n";
-    ret = rsmi_dev_metrics_curr_socclk_get(i, &curr_socclk_values);
-    std::cout << "\t  -> current_soc_clock(): " << print_error_or_value(ret, curr_socclk_values) << "\n";
-    ret = rsmi_dev_metrics_curr_vclk0_get(i, &curr_vclk0_values);
-    std::cout << "\t  -> current_vclk0(): " << print_error_or_value(ret, curr_vclk0_values) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Throttle]" << "\n";
-    ret = rsmi_dev_metrics_indep_throttle_status_get(i, &val_ui64);
-    std::cout << "\t  -> indep_throttle_status(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_throttle_status_get(i, &val_ui32);
-    std::cout << "\t  -> throttle_status(): " << print_error_or_value(ret, val_ui32) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Gfx Clock Lock]" << "\n";
-    ret = rsmi_dev_metrics_gfxclk_lock_status_get(i, &val_ui32);
-    std::cout << "\t  -> gfxclk_lock_status(): " << print_error_or_value(ret, val_ui32) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Current Fan Speed]" << "\n";
-    ret = rsmi_dev_metrics_curr_fan_speed_get(i, &val_ui16);
-    std::cout << "\t  -> current_fan_speed(): " << print_error_or_value(ret, val_ui16) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Link/Bandwidth/Speed]" << "\n";
-    ret = rsmi_dev_metrics_pcie_link_width_get(i, &val_ui16);
-    std::cout << "\t  -> pcie_link_width(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_pcie_link_speed_get(i, &val_ui16);
-    std::cout << "\t  -> pcie_link_speed(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_pcie_bandwidth_acc_get(i, &val_ui64);
-    std::cout << "\t  -> pcie_bandwidth_accum(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_pcie_bandwidth_inst_get(i, &val_ui64);
-    std::cout << "\t  -> pcie_bandwidth_inst(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_pcie_l0_recov_count_acc_get(i, &val_ui64);
-    std::cout << "\t  -> pcie_l0_recov_count_accum(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_pcie_replay_count_acc_get(i, &val_ui64);
-    std::cout << "\t  -> pcie_replay_count_accum(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_pcie_replay_rover_count_acc_get(i, &val_ui64);
-    std::cout << "\t  -> pcie_replay_rollover_count_accum(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_xgmi_link_width_get(i, &val_ui16);
-    std::cout << "\t  -> xgmi_link_width(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_xgmi_link_speed_get(i, &val_ui16);
-    std::cout << "\t  -> xgmi_link_speed(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_xgmi_read_data_get(i, &xgmi_read_values);
-    std::cout << "\t  -> xgmi_read_data(): " << print_error_or_value(ret, xgmi_read_values) << "\n";
-    ret = rsmi_dev_metrics_xgmi_write_data_get(i, &xgmi_write_values);
-    std::cout << "\t  -> xgmi_write_data(): " << print_error_or_value(ret, xgmi_write_values) << "\n";
-    ret = rsmi_dev_metrics_pcie_nak_sent_count_acc_get(i, &val_ui32);
-    std::cout << "\t  -> pcie_nak_sent_count_accum(): " << print_error_or_value(ret, val_ui32) << "\n";
-    ret = rsmi_dev_metrics_pcie_nak_rcvd_count_acc_get(i, &val_ui32);
-    std::cout << "\t  -> pcie_nak_rcvd_count_accum(): " << print_error_or_value(ret, val_ui32) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Voltage]" << "\n";
-    ret = rsmi_dev_metrics_volt_soc_get(i, &val_ui16);
-    std::cout << "\t  -> voltage_soc(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_volt_gfx_get(i, &val_ui16);
-    std::cout << "\t  -> voltage_gfx(): " << print_error_or_value(ret, val_ui16) << "\n";
-    ret = rsmi_dev_metrics_volt_mem_get(i, &val_ui16);
-    std::cout << "\t  -> voltage_mem(): " << print_error_or_value(ret, val_ui16) << "\n";
-
-    std::cout << "\n";
-    std::cout << "\t[Timestamp]" << "\n";
-    ret = rsmi_dev_metrics_system_clock_counter_get(i, &val_ui64);
-    std::cout << "\t  -> system_clock_counter(): " << print_error_or_value(ret, val_ui64) << "\n";
-    ret = rsmi_dev_metrics_firmware_timestamp_get(i, &val_ui64);
-    std::cout << "\t  -> firmware_timestamp(): " << print_error_or_value(ret, val_ui64) << "\n";
-
-    std::cout << "\n";
     std::cout << "\t[XCD CounterVoltage]" << "\n";
     ret = rsmi_dev_metrics_xcd_counter_get(i, &val_ui16);
     std::cout << "\t  -> xcd_counter(): " << print_error_or_value(ret, val_ui16) << "\n";
     std::cout << "\n\n";
-
 
     ret = rsmi_dev_perf_level_get(i, &pfl);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)

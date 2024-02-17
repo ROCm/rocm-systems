@@ -507,7 +507,9 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t *proc,
       // Collect count of compute units
       cu_count += kfd_node_map[gpu_id]->cu_count();
     } else {
-      return err;
+      //Some GFX revisions do not provide cu_occupancy debugfs method 
+      proc->cu_occupancy = CU_OCCUPANCY_INVALID;
+      cu_count = 0;
     }
   }
 
@@ -982,12 +984,69 @@ int KFDNode::get_gfx_target_version(uint64_t *gfx_target_version) {
   *gfx_target_version = gfx_version;
   ss << __PRETTY_FUNCTION__
      << " | File: " << properties_path
-     << " | Successfully read node #" << std::to_string(this->node_indx_)
+     << " | Read node: " << std::to_string(this->node_indx_)
      << " for gfx_target_version"
-     << " | Data (gfx_target_version) *gfx_target_version = "
+     << " | Data (*gfx_target_version): "
      << std::to_string(*gfx_target_version)
-     << " | return = " << std::to_string(ret)
+     << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
      << " | ";
+  LOG_DEBUG(ss);
+  return ret;
+}
+
+// Public interface for device
+// /sys/class/kfd/kfd/topology/nodes/*/gpu_id
+int KFDNode::get_gpu_id(uint64_t *gpu_id) {
+  std::ostringstream ss;
+  std::string gpuid_path = "/sys/class/kfd/kfd/topology/nodes/"
+    + std::to_string(this->node_indx_) + "/gpu_id";
+  const uint64_t undefined_gpu_id = std::numeric_limits<uint64_t>::max();
+  std::string gpu_id_string = "";
+  *gpu_id = undefined_gpu_id;
+  int ret = ReadSysfsStr(gpuid_path, &gpu_id_string);
+  if (ret != 0 || gpu_id_string.empty()) {
+    ss << __PRETTY_FUNCTION__
+       << " | File: " << gpuid_path
+       << " | Data (*gpu_id): empty or nullptr"
+       << " | Issue: Could not read node #" << std::to_string(this->node_indx_)
+       << ". KFD node was an unsupported node or value read was empty."
+       << " | Return: "
+       << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
+       << " | ";
+    LOG_ERROR(ss);
+    return ret;
+  }
+  *gpu_id = std::stoull(gpu_id_string);
+  if (*gpu_id == 0) {  // CPU node - return not supported
+    *gpu_id = undefined_gpu_id;
+    ret = ENOENT;  // map to RSMI_STATUS_NOT_SUPPORTED
+  }
+  ss << __PRETTY_FUNCTION__
+     << " | File: " << gpuid_path
+     << " | Read node #: " << std::to_string(this->node_indx_)
+     << " | Data (*gpu_id): " << std::to_string(*gpu_id)
+     << " | Return: "
+     << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
+     << " | ";
+  LOG_DEBUG(ss);
+  return ret;
+}
+
+// Public interface for device
+// /sys/class/kfd/kfd/topology/nodes/<node_id>
+int KFDNode::get_node_id(uint32_t *node_id) {
+  std::ostringstream ss;
+  int ret = 0;
+  std::string nodeid_path = "/sys/class/kfd/kfd/topology/nodes/"
+    + std::to_string(this->node_indx_);
+  ss << __PRETTY_FUNCTION__
+     << " | File: " << nodeid_path
+     << " | Read node #: " << std::to_string(this->node_indx_)
+     << " | Data (*node_id): " << std::to_string(*node_id)
+     << " | Return: "
+     << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
+     << " | ";
+  *node_id = this->node_indx_;
   LOG_DEBUG(ss);
   return ret;
 }

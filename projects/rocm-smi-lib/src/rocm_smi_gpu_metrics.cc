@@ -2680,7 +2680,6 @@ rsmi_status_t Device::dev_read_gpu_metrics_header_data()
   LOG_TRACE(ostrstream);
 
   // Check if/when metrics table needs to be refreshed.
-  auto now_ts = actual_timestamp_in_secs();
   if ((!m_gpu_metrics_header.m_structure_size)    ||
       (!m_gpu_metrics_header.m_format_revision)   ||
       (!m_gpu_metrics_header.m_content_revision)) {
