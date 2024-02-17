@@ -35,6 +35,9 @@
 #include "rocprofiler_plugin.h"
 
 #include "plugin.h"
+#ifdef USE_GET_ROCM_PATH_API
+#include <rocm-core/rocm_getpath.h>
+#endif
 
 namespace fs = std::experimental::filesystem;
 
@@ -84,6 +87,23 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_
   _replace("\\$ENV\\{PPID\\}", getppid());
 
   // Create the plugin instance.
+  #ifdef USE_GET_ROCM_PATH_API
+  char *installPath = nullptr;
+  unsigned int installPathLen = 0;
+  PathErrors_t retVal = PathSuccess;
+  auto metadata_path = std::string{CTF_PLUGIN_METADATA_FILE_PATH};
+  // Get ROCM install path
+  retVal = getROCmInstallPath( &installPath, &installPathLen );
+  if(PathSuccess == retVal){
+      metadata_path = fs::path(installPath);
+  }else {
+      std::cout << "Failed to get ROCm Install Path: " << retVal << std::endl;
+  }
+  // free allocated memory
+  if(nullptr != installPath) {
+      free(installPath);
+  }
+  #else
   auto* this_plugin_handle = dlopen("libctf_plugin.so", RTLD_LAZY | RTLD_NOLOAD);
   auto* librocprofiler_handle = dlopen("librocprofiler64.so", RTLD_LAZY | RTLD_NOLOAD);
   auto metadata_path = std::string{CTF_PLUGIN_METADATA_FILE_PATH};
@@ -100,6 +120,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_
   if (!fs::exists(metadata_path)) {
     metadata_path = fs::path{CTF_PLUGIN_INSTALL_PREFIX} / CTF_PLUGIN_METADATA_FILE_PATH;
   }
+  #endif // USE_GET_ROCM_PATH_API
 
   try {
     the_plugin = new rocm_ctf::Plugin{256 * 1024, fs::path{output_dir} / output_file,

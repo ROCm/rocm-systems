@@ -45,6 +45,14 @@ target_compile_definitions(
     PRIVATE HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1
             CTF_PLUGIN_METADATA_FILE_PATH="${METADATA_STREAM_FILE_DIR}/metadata"
             CTF_PLUGIN_INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}")
+
+# Add definitions for getROCmInstallPath() API
+if(USE_GET_ROCM_PATH_API)
+    target_compile_definitions(
+        ctf_plugin
+        PRIVATE USE_GET_ROCM_PATH_API=1)
+endif()
+
 target_include_directories(
     ctf_plugin PRIVATE "${PROJECT_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/src/api"
                        "${CMAKE_CURRENT_BINARY_DIR}")
@@ -53,6 +61,13 @@ target_link_options(
     -Wl,--no-undefined)
 target_link_libraries(ctf_plugin PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
                                          stdc++fs dl)
+
+# Add link dependencies for getROCmInstallPath() API
+if(USE_GET_ROCM_PATH_API)
+    find_library(ROCM_CORE_LIB rocm-core HINTS ${ROCM_PATH}/lib)
+    target_link_libraries(ctf_plugin PRIVATE ${ROCM_CORE_LIB})
+endif()
+
 install(TARGETS ctf_plugin LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}"
                                    COMPONENT plugins)
 

@@ -168,6 +168,12 @@ if(NOT USE_PROF_API)
     set(USE_PROF_API 1)
 endif()
 
+# Enable use of getROCmInstallPath() API
+if(USE_GET_ROCM_PATH_API)
+    set(USE_GET_ROCM_PATH_API 1)
+    message(STATUS "Enabled Use of getROCmInstallPath() API" )
+endif()
+
 # Protocol header lookup
 set(PROF_API_HEADER_NAME prof_protocol.h)
 if(USE_PROF_API EQUAL 1)
