@@ -10,6 +10,8 @@ race:libamdhip64.so
 
 # data race arising from hsa runtime
 race:libhsa-runtime64.so
+# unlock of an unlocked mutex (or by a wrong thread)
+mutex:libhsa-runtime64.so
 
 # unlock of an unlocked mutex (or by a wrong thread)
 mutex:librocm_smi64.so

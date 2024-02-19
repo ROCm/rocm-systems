@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
@@ -74,7 +75,9 @@ public:
     static bool configure_dispatch(rocprofiler_context_id_t                         context_id,
                                    rocprofiler_buffer_id_t                          buffer,
                                    rocprofiler_profile_counting_dispatch_callback_t callback,
-                                   void*                                            callback_args)
+                                   void*                                            callback_args,
+                                   rocprofiler_profile_counting_record_callback_t   record_callback,
+                                   void* record_callback_args)
     {
         auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
         if(!ctx_p) return false;
@@ -90,11 +93,16 @@ public:
         auto& cb = *ctx.counter_collection->callbacks.emplace_back(
             std::make_shared<counter_callback_info>());
 
-        cb.user_cb          = callback;
-        cb.callback_args    = callback_args;
-        cb.context          = context_id;
-        cb.buffer           = buffer;
-        cb.internal_context = ctx_p;
+        cb.user_cb       = callback;
+        cb.callback_args = callback_args;
+        cb.context       = context_id;
+        if(buffer.handle != 0)
+        {
+            cb.buffer = buffer;
+        }
+        cb.internal_context     = ctx_p;
+        cb.record_callback      = record_callback;
+        cb.record_callback_args = record_callback_args;
 
         return true;
     }
@@ -317,7 +325,7 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
  */
 void
 completed_cb(const std::shared_ptr<counter_callback_info>& info,
-             const hsa::Queue&,
+             const hsa::Queue&                             queue,
              hsa::rocprofiler_packet,
              const hsa::Queue::queue_info_session_t& session,
              inst_pkt_t&                             pkts)
@@ -359,12 +367,13 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
         }
     });
 
-    if(!info->buffer) return;
+    common::container::small_vector<rocprofiler_record_counter_t, 128> out;
+    rocprofiler::buffer::instance*                                     buf = nullptr;
 
-    std::vector<rocprofiler_record_counter_t> out;
-    rocprofiler::buffer::instance*            buf = nullptr;
-
-    buf = CHECK_NOTNULL(buffer::get_buffer(info->buffer->handle));
+    if(info->buffer)
+    {
+        buf = CHECK_NOTNULL(buffer::get_buffer(info->buffer->handle));
+    }
 
     auto _corr_id_v =
         rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
@@ -388,8 +397,23 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
         for(auto& val : *ret)
         {
             val.corr_id = _corr_id_v;
-            buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS, 0, val);
+            if(buf)
+                buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS, 0, val);
+            else
+                out.push_back(val);
         }
+    }
+
+    if(!out.empty())
+    {
+        CHECK(info->record_callback);
+        info->record_callback(queue.get_id(),
+                              queue.get_agent().get_rocp_agent()->id,
+                              _corr_id_v,
+                              session.kernel_id,
+                              info->record_callback_args,
+                              out.size(),
+                              out.data());
     }
 }
 
@@ -451,7 +475,24 @@ configure_buffered_dispatch(rocprofiler_context_id_t                         con
                             rocprofiler_profile_counting_dispatch_callback_t callback,
                             void*                                            callback_args)
 {
-    return get_controller().configure_dispatch(context_id, buffer, callback, callback_args);
+    CHECK_NE(buffer.handle, 0);
+    return get_controller().configure_dispatch(
+        context_id, buffer, callback, callback_args, nullptr, nullptr);
+}
+
+bool
+configure_callback_dispatch(rocprofiler_context_id_t                         context_id,
+                            rocprofiler_profile_counting_dispatch_callback_t callback,
+                            void*                                            callback_data_args,
+                            rocprofiler_profile_counting_record_callback_t   record_callback,
+                            void*                                            record_callback_args)
+{
+    return get_controller().configure_dispatch(context_id,
+                                               {.handle = 0},
+                                               callback,
+                                               callback_data_args,
+                                               record_callback,
+                                               record_callback_args);
 }
 
 }  // namespace counters

@@ -222,6 +222,16 @@ null_buffered_callback(rocprofiler_context_id_t,
                        uint64_t)
 {}
 
+void
+null_record_callback(rocprofiler_queue_id_t,
+                     rocprofiler_agent_id_t,
+                     rocprofiler_correlation_id_t,
+                     uint64_t,
+                     void*,
+                     size_t,
+                     rocprofiler_record_counter_t*)
+{}
+
 }  // namespace
 
 TEST(core, check_packet_generation)
@@ -528,7 +538,7 @@ TEST(core, destroy_counter_profile)
     registration::finalize();
 }
 
-TEST(core, start_stop_ctx)
+TEST(core, start_stop_buffered_ctx)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
@@ -604,6 +614,75 @@ TEST(core, start_stop_ctx)
     registration::set_init_status(1);
 
     registration::finalize();
+}
+
+TEST(core, start_stop_callback_ctx)
+{
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_dispatch_profile_counting_service(get_client_ctx(),
+                                                                         null_dispatch_callback,
+                                                                         (void*) 0x12345,
+                                                                         null_record_callback,
+                                                                         (void*) 0x54321),
+        "Could not setup counting service");
+    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");
+
+    /**
+     * Check that the context was actually started
+     */
+    auto* ctx_p = context::get_mutable_registered_context(get_client_ctx());
+    ASSERT_TRUE(ctx_p);
+    auto& ctx = *ctx_p;
+
+    ASSERT_TRUE(ctx.counter_collection);
+    ASSERT_EQ(ctx.counter_collection->callbacks.size(), 1);
+    EXPECT_EQ(ctx.counter_collection->callbacks.at(0)->user_cb, null_dispatch_callback);
+    EXPECT_EQ(ctx.counter_collection->callbacks.at(0)->callback_args, (void*) 0x12345);
+    EXPECT_EQ(ctx.counter_collection->callbacks.at(0)->record_callback, null_record_callback);
+    EXPECT_EQ(ctx.counter_collection->callbacks.at(0)->record_callback_args, (void*) 0x54321);
+    EXPECT_EQ(ctx.counter_collection->callbacks.at(0)->context.handle, get_client_ctx().handle);
+
+    bool found = false;
+    ctx.counter_collection->enabled.rlock([&](const auto& data) { found = data; });
+    EXPECT_TRUE(found);
+
+    found = false;
+    hsa::get_queue_controller().iterate_callbacks([&](auto cid, const auto&) {
+        if(cid == ctx.counter_collection->callbacks.at(0)->queue_id)
+        {
+            found = true;
+        }
+    });
+    EXPECT_TRUE(found);
+
+    /**
+     * Check if context can be disabled correctly
+     */
+    ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
+
+    found = false;
+    hsa::get_queue_controller().iterate_callbacks([&](auto cid, const auto&) {
+        if(cid == ctx.counter_collection->callbacks.at(0)->queue_id)
+        {
+            found = true;
+        }
+    });
+    EXPECT_FALSE(found);
+    found = false;
+    ctx.counter_collection->enabled.rlock([&](const auto& data) { found = data; });
+    EXPECT_FALSE(found);
+
+    registration::set_init_status(1);
+    context::pop_client(1);
 }
 
 TEST(core, public_api_iterate_agents)

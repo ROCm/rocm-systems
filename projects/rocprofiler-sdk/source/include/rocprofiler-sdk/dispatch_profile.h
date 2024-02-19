@@ -94,6 +94,49 @@ rocprofiler_configure_buffered_dispatch_profile_counting_service(
     rocprofiler_buffer_id_t                          buffer_id,
     rocprofiler_profile_counting_dispatch_callback_t callback,
     void*                                            callback_data_args);
+
+/**
+ * @brief Counting record callback. This is a callback is invoked when the kernel
+ *        execution is complete and contains the counter profile data requested in
+ *        @ref rocprofiler_profile_counting_dispatch_callback_t. Only used with
+ *        @ref rocprofiler_configure_callback_dispatch_profile_counting_service.
+ *
+ * @param [in] queue_id           Queue the kernel dispatch packet is being enqueued onto
+ * @param [in] agent              Agent of this queue
+ * @param [in] correlation_id     Correlation ID for this dispatch
+ * @param [in] kernel_id          Kernel identifier
+ * @param [in] callback_data_args Callback supplied via buffered_dispatch_profile_counting_service
+ * @param [in] record_count       Number of counter records.
+ * @param [in] record_data        Counter record data.
+ */
+typedef void (*rocprofiler_profile_counting_record_callback_t)(
+    rocprofiler_queue_id_t        queue_id,
+    rocprofiler_agent_id_t        agent,
+    rocprofiler_correlation_id_t  correlation_id,
+    uint64_t                      kernel_id,
+    void*                         callback_data_args,
+    size_t                        record_count,
+    rocprofiler_record_counter_t* record_data);
+
+/**
+ * @brief Configure buffered dispatch profile Counting Service.
+ *        Collects the counters in dispatch packets and calls a callback
+ *        with the counters collected during that dispatch.
+ *
+ * @param [in] context_id context id
+ * @param [in] dispatch_callback callback to perform when dispatch is enqueued
+ * @param [in] dispatch_callback_args callback data for dispatch callback
+ * @param [in] record_callback  Record callback for completed profile data
+ * @param [in] record_callback_args Callback args for record callback
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_configure_callback_dispatch_profile_counting_service(
+    rocprofiler_context_id_t                         context_id,
+    rocprofiler_profile_counting_dispatch_callback_t dispatch_callback,
+    void*                                            dispatch_callback_args,
+    rocprofiler_profile_counting_record_callback_t   record_callback,
+    void*                                            record_callback_args);
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI

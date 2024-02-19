@@ -35,7 +35,7 @@ jobs:
 
     steps:
       - id: get_build_number
-        run: echo "LATEST_BUILD_NUMBER=581" >> $GITHUB_OUTPUT
+        run: echo "LATEST_BUILD_NUMBER=$(wget -qO- 'http://rocm-ci.amd.com/job/compute-rocm-dkms-component-staging-profiler/lastSuccessfulBuild/buildNumber')" >> $GITHUB_OUTPUT
 
   # run: echo "LATEST_BUILD_NUMBER=$(wget -qO- 'http://rocm-ci.amd.com/job/compute-rocm-dkms-component-staging-profiler/lastSuccessfulBuild/buildNumber')" >> $GITHUB_OUTPUT
   # Changed job name from mi200-ubuntu to vega20-ubuntu

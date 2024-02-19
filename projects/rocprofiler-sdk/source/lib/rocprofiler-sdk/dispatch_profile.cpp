@@ -53,4 +53,33 @@ rocprofiler_configure_buffered_dispatch_profile_counting_service(
                ? ROCPROFILER_STATUS_SUCCESS
                : ROCPROFILER_STATUS_ERROR;
 }
+
+/**
+ * @brief Configure buffered dispatch profile Counting Service.
+ *        Collects the counters in dispatch packets and calls a callback
+ *        with the counters collected during that dispatch.
+ *
+ * @param [in] context_id context id
+ * @param [in] dispatch_callback callback to perform when dispatch is enqueued
+ * @param [in] dispatch_callback_args callback data for dispatch callback
+ * @param [in] record_callback  Record callback for completed profile data
+ * @param [in] record_callback_args Callback args for record callback
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_configure_callback_dispatch_profile_counting_service(
+    rocprofiler_context_id_t                         context_id,
+    rocprofiler_profile_counting_dispatch_callback_t dispatch_callback,
+    void*                                            dispatch_callback_args,
+    rocprofiler_profile_counting_record_callback_t   record_callback,
+    void*                                            record_callback_args)
+{
+    return rocprofiler::counters::configure_callback_dispatch(context_id,
+                                                              dispatch_callback,
+                                                              dispatch_callback_args,
+                                                              record_callback,
+                                                              record_callback_args)
+               ? ROCPROFILER_STATUS_SUCCESS
+               : ROCPROFILER_STATUS_ERROR;
+}
 }

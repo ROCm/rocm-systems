@@ -54,6 +54,34 @@ set_tests_properties(
         FAIL_REGULAR_EXPRESSION
         "threw an exception")
 
+add_library(counter-collection-callback-client SHARED)
+target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
+target_link_libraries(
+    counter-collection-callback-client
+    PUBLIC rocprofiler::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-common-library)
+
+set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
+add_executable(counter-collection-callback)
+target_sources(counter-collection-callback PRIVATE main.cpp)
+target_link_libraries(counter-collection-callback
+                      PRIVATE counter-collection-callback-client Threads::Threads)
+
+add_test(NAME counter-collection-callback
+         COMMAND $<TARGET_FILE:counter-collection-callback>)
+
+set_tests_properties(
+    counter-collection-callback
+    PROPERTIES
+        TIMEOUT
+        600
+        LABELS
+        "samples"
+        ENVIRONMENT
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
+        FAIL_REGULAR_EXPRESSION
+        "threw an exception")
+
 add_library(counter-collection-functional-counter-client SHARED)
 target_sources(counter-collection-functional-counter-client
                PRIVATE print_functional_counters.cpp client.hpp)
