@@ -40,22 +40,35 @@
 
 extern "C" {
 /**
- * @brief Query Counter name.
+ * @brief Query Counter info such as name or description.
  *
- * @param [in] counter_id
- * @param [out] name if nullptr, size will be returned
- * @param [out] size
+ * @param [in] counter_id counter to get info for
+ * @param [in] version Version of struct in info, see @ref rocprofiler_counter_info_version_id_t for
+ * available types
+ * @param [out] info rocprofiler_counter_info_{version}_t struct to write info to.
  * @return ::rocprofiler_status_t
+ * @retval ROCPROFILER_STATUS_SUCCESS if counter found
+ * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter not found
+ * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Version is not supported
  */
-rocprofiler_status_t
-rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char** name, size_t* size)
+rocprofiler_status_t ROCPROFILER_API
+rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
+                               rocprofiler_counter_info_version_id_t version,
+                               void*                                 info)
 {
+    if(version != ROCPROFILER_COUNTER_INFO_VERSION_0)
+        return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
     const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getMetricIdMap());
+
+    auto& out_struct = *static_cast<rocprofiler_counter_info_v0_t*>(info);
 
     if(const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle))
     {
-        *name = metric_ptr->name().c_str();
-        *size = metric_ptr->name().size();
+        out_struct.name        = metric_ptr->name().c_str();
+        out_struct.description = metric_ptr->description().c_str();
+        out_struct.is_derived  = !metric_ptr->expression().empty();
+        out_struct.block       = metric_ptr->block().c_str();
+        out_struct.expression  = metric_ptr->expression().c_str();
         return ROCPROFILER_STATUS_SUCCESS;
     }
 

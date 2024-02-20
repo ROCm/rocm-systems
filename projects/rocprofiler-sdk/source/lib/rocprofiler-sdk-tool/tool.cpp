@@ -576,11 +576,15 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             rocprofiler_tool_kernel_properties_t kernel_properties =
                 GetKernelProperties(profiler_record->corr_id.internal);
-            rocprofiler_counter_id_t counter_id;
-            const char*              counter_name;
-            size_t                   size, pos;
+            rocprofiler_counter_id_t      counter_id;
+            size_t                        pos;
+            rocprofiler_counter_info_v0_t version;
+
             rocprofiler_query_record_counter_id(profiler_record->id, &counter_id);
-            rocprofiler_query_counter_name(counter_id, &counter_name, &size);
+
+            rocprofiler_query_counter_info(
+                counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version));
+
             rocprofiler_query_record_dimension_position(profiler_record->id, 0, &pos);
 
             auto counter_collection_ss = std::stringstream{};
@@ -599,7 +603,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 kernel_properties.scratch_size,
                 kernel_properties.arch_vgpr_count,
                 kernel_properties.sgpr_count,
-                fmt::format("{}[{}]", counter_name, pos),
+                fmt::format("{}[{}]", version.name, pos),
                 profiler_record->counter_value);
 
             get_counter_collection_file() << counter_collection_ss.str();
@@ -639,18 +643,16 @@ get_agent_profile(const rocprofiler_agent_t* agent)
                                      auto* vec = static_cast<counter_vec_t*>(user_data);
                                      for(size_t i = 0; i < num_counters; i++)
                                      {
-                                         const char* name = nullptr;
-                                         size_t      len  = 0;
+                                         rocprofiler_counter_info_v0_t version;
 
-                                         ROCPROFILER_CALL(rocprofiler_query_counter_name(
-                                                              counters[i], &name, &len),
-                                                          "Could not query name");
+                                         ROCPROFILER_CALL(rocprofiler_query_counter_info(
+                                                              counters[i],
+                                                              ROCPROFILER_COUNTER_INFO_VERSION_0,
+                                                              static_cast<void*>(&version)),
+                                                          "Could not query counter_id");
 
-                                         if(name && len > 0)
-                                         {
-                                             if(tool::get_config().counters.count(name) > 0)
-                                                 vec->emplace_back(counters[i]);
-                                         }
+                                         if(tool::get_config().counters.count(version.name) > 0)
+                                             vec->emplace_back(counters[i]);
                                      }
                                      return ROCPROFILER_STATUS_SUCCESS;
                                  },

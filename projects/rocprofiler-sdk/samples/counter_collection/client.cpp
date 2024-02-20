@@ -178,13 +178,14 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     // Look for the counters contained in counters_to_collect in gpu_counters
     for(auto& counter : gpu_counters)
     {
-        const char* name;
-        size_t      size;
-        ROCPROFILER_CALL(rocprofiler_query_counter_name(counter, &name, &size),
-                         "Could not query name");
-        if(counters_to_collect.count(std::string(name)) > 0)
+        rocprofiler_counter_info_v0_t version;
+        ROCPROFILER_CALL(
+            rocprofiler_query_counter_info(
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+            "Could not query info for counter");
+        if(counters_to_collect.count(std::string(version.name)) > 0)
         {
-            std::clog << "Counter: " << counter.handle << " " << name << "\n";
+            std::clog << "Counter: " << counter.handle << " " << version.name << "\n";
             collect_counters.push_back(counter);
         }
     }

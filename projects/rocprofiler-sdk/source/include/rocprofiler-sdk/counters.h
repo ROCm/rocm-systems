@@ -97,19 +97,21 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
                                        void*                                 user_data);
 
 /**
- * @brief Query Counter name. Name is a pointer controlled by rocprofiler and
- *        should not be free'd or modified.
+ * @brief Query Counter info such as name or description.
  *
- * @param [in] counter_id counter for which to get its name.
- * @param [out] name returns a pointer to the name of the counter
- * @param [out] size returns the size of the name returned
+ * @param [in] counter_id counter to get info for
+ * @param [in] version Version of struct in info, see @ref rocprofiler_counter_info_version_id_t for
+ * available types
+ * @param [out] info rocprofiler_counter_info_{version}_t struct to write info to.
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if counter found
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter not found
+ * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Version is not supported
  */
 rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_counter_name(rocprofiler_counter_id_t counter_id, const char** name, size_t* size)
-    ROCPROFILER_NONNULL(2, 3);
+rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
+                               rocprofiler_counter_info_version_id_t version,
+                               void*                                 info) ROCPROFILER_NONNULL(3);
 
 /**
  * @brief This call returns the number of instances specific counter contains.

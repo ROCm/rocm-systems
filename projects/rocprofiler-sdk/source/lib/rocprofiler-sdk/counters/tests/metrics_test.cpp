@@ -183,11 +183,16 @@ TEST(metrics, check_public_api_query)
     const auto* id_map = counters::getMetricIdMap();
     for(const auto& [id, metric] : *id_map)
     {
-        const char* name = nullptr;
-        size_t      size = 0;
-        ASSERT_EQ(rocprofiler_query_counter_name({.handle = id}, &name, &size),
-                  ROCPROFILER_STATUS_SUCCESS);
-        EXPECT_EQ(std::string(name), metric.name());
-        EXPECT_EQ(size, metric.name().size());
+        rocprofiler_counter_info_v0_t version;
+
+        ASSERT_EQ(
+            rocprofiler_query_counter_info(
+                {.handle = id}, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+            ROCPROFILER_STATUS_SUCCESS);
+        EXPECT_EQ(version.name, metric.name().c_str());
+        EXPECT_EQ(version.block, metric.block().c_str());
+        EXPECT_EQ(version.expression, metric.expression().c_str());
+        EXPECT_EQ(version.is_derived, !metric.expression().empty());
+        EXPECT_EQ(version.description, metric.description().c_str());
     }
 }

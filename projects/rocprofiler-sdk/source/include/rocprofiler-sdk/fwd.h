@@ -260,6 +260,26 @@ typedef enum
     ROCPROFILER_TABLE_LAST           = ROCPROFILER_MARKER_NAME_TABLE,
 } rocprofiler_intercept_table_t;
 
+/**
+ * @brief Enumeration for specifying the data type contained within the union.
+ */
+typedef enum
+{
+    ROCPROFILER_UNION_TYPE_NONE = 0,  ///< No union type
+    ROCPROFILER_UNION_TYPE_STRING,    ///< String Type set
+    ROCPROFILER_UNION_TYPE_INT,       ///< Integer Type Set
+    ROCPROFILER_UNION_TYPE_LAST,
+} rocprofiler_union_type_t;
+
+/**
+ * @brief Enumeration for specifying the counter info struct version you want.
+ */
+typedef enum
+{
+    ROCPROFILER_COUNTER_INFO_VERSION_NONE,
+    ROCPROFILER_COUNTER_INFO_VERSION_0,  ///< @see rocprofiler_counter_info_v0_t
+    ROCPROFILER_COUNTER_INFO_VERSION_LAST,
+} rocprofiler_counter_info_version_id_t;
 //--------------------------------------------------------------------------------------//
 //
 //                                      ALIASES
@@ -499,6 +519,18 @@ typedef struct
     double                            counter_value;  //<< counter value
     rocprofiler_correlation_id_t      corr_id;
 } rocprofiler_record_counter_t;
+
+/**
+ * @brief Counter info struct version 0
+ */
+typedef struct
+{
+    const char* name;         ///< Name of the counter
+    const char* description;  ///< Description of the counter
+    bool        is_derived;   ///< If this counter is a derrived counter
+    const char* block;        ///< Block of the counter (non-derrived only)
+    const char* expression;   ///< Counter expression (derrived counters only)
+} rocprofiler_counter_info_v0_t;
 
 /**
  * @brief ROCProfiler SPM Record.

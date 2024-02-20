@@ -229,11 +229,13 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
 
         for(auto& found_counter : counters_needed)
         {
-            const char* name;
-            size_t      name_size;
-            ROCPROFILER_CALL(rocprofiler_query_counter_name(found_counter, &name, &name_size),
-                             "Could not query name");
-            cap.expected_counter_names.emplace(found_counter.handle, std::string(name));
+            rocprofiler_counter_info_v0_t version;
+
+            ROCPROFILER_CALL(rocprofiler_query_counter_info(found_counter,
+                                                            ROCPROFILER_COUNTER_INFO_VERSION_0,
+                                                            static_cast<void*>(&version)),
+                             "Could not query counter_id");
+            cap.expected_counter_names.emplace(found_counter.handle, std::string(version.name));
             size_t expected = 0;
             ROCPROFILER_CALL(
                 rocprofiler_query_counter_instance_count(agent->id, found_counter, &expected),
