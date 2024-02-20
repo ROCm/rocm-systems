@@ -14,7 +14,7 @@ def test_valid_path():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/mixbench/mi100"],
+            ["omniperf", "analyze", "--path", "tests/workloads/vcopy/MI100"],
         ):
             omniperf.main()
     assert e.value.code == 0
@@ -22,7 +22,7 @@ def test_valid_path():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/mixbench/mi200"],
+            ["omniperf", "analyze", "--path", "tests/workloads/vcopy/MI200"],
         ):
             omniperf.main()
     assert e.value.code == 0
@@ -37,8 +37,8 @@ def test_list_kernels():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
-                "--list-kernels",
+                "tests/workloads/vcopy/MI100",
+                "--list-stats",
             ],
         ):
             omniperf.main()
@@ -51,8 +51,8 @@ def test_list_kernels():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
-                "--list-kernels",
+                "tests/workloads/vcopy/MI200",
+                "--list-stats",
             ],
         ):
             omniperf.main()
@@ -64,7 +64,7 @@ def test_list_metrics_gfx90a():
     with pytest.raises(SystemExit) as e:
         with patch("sys.argv", ["omniperf", "analyze", "--list-metrics", "gfx90a"]):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -73,7 +73,7 @@ def test_list_metrics_gfx90a():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--list-metrics",
                 "gfx90a",
             ],
@@ -88,7 +88,7 @@ def test_list_metrics_gfx90a():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--list-metrics",
                 "gfx90a",
             ],
@@ -102,7 +102,7 @@ def test_list_metrics_gfx906():
     with pytest.raises(SystemExit) as e:
         with patch("sys.argv", ["omniperf", "analyze", "--list-metrics", "gfx906"]):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -111,7 +111,7 @@ def test_list_metrics_gfx906():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--list-metrics",
                 "gfx906",
             ],
@@ -126,7 +126,7 @@ def test_list_metrics_gfx906():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--list-metrics",
                 "gfx906",
             ],
@@ -140,7 +140,7 @@ def test_list_metrics_gfx908():
     with pytest.raises(SystemExit) as e:
         with patch("sys.argv", ["omniperf", "analyze", "--list-metrics", "gfx908"]):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -149,7 +149,7 @@ def test_list_metrics_gfx908():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--list-metrics",
                 "gfx908",
             ],
@@ -164,7 +164,7 @@ def test_list_metrics_gfx908():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--list-metrics",
                 "gfx908",
             ],
@@ -182,7 +182,7 @@ def test_filter_metrics_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--metric",
                 "1",
             ],
@@ -197,7 +197,7 @@ def test_filter_metrics_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--metric",
                 "1",
             ],
@@ -215,7 +215,7 @@ def test_filter_metrics_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--metric",
                 "5",
             ],
@@ -230,7 +230,7 @@ def test_filter_metrics_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--metric",
                 "5",
             ],
@@ -248,7 +248,7 @@ def test_filter_metrics_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--metric",
                 "5.2.2",
             ],
@@ -263,7 +263,7 @@ def test_filter_metrics_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--metric",
                 "5.2.2",
             ],
@@ -281,7 +281,7 @@ def test_filter_metrics_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--metric",
                 "6.1",
             ],
@@ -296,7 +296,7 @@ def test_filter_metrics_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--metric",
                 "6.1",
             ],
@@ -314,7 +314,7 @@ def test_filter_metrics_5():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--metric",
                 "10",
             ],
@@ -329,7 +329,7 @@ def test_filter_metrics_5():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--metric",
                 "10",
             ],
@@ -347,7 +347,7 @@ def test_filter_metrics_6():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--metric",
                 "100",
             ],
@@ -362,7 +362,7 @@ def test_filter_metrics_6():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--metric",
                 "100",
             ],
@@ -380,7 +380,7 @@ def test_filter_kernel_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel",
                 "0",
             ],
@@ -395,7 +395,7 @@ def test_filter_kernel_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel",
                 "0",
             ],
@@ -413,7 +413,7 @@ def test_filter_kernel_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel",
                 "1",
             ],
@@ -428,7 +428,7 @@ def test_filter_kernel_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel",
                 "1",
             ],
@@ -446,7 +446,7 @@ def test_filter_kernel_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel",
                 "0",
                 "1",
@@ -462,7 +462,7 @@ def test_filter_kernel_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel",
                 "0",
                 "1",
@@ -481,7 +481,7 @@ def test_dispatch_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--dispatch",
                 "0",
             ],
@@ -496,7 +496,7 @@ def test_dispatch_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--dispatch",
                 "0",
             ],
@@ -514,7 +514,7 @@ def test_dispatch_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--dispatch",
                 "1",
             ],
@@ -529,7 +529,7 @@ def test_dispatch_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--dispatch",
                 "1",
             ],
@@ -547,7 +547,7 @@ def test_dispatch_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--dispatch",
                 "2",
             ],
@@ -562,7 +562,7 @@ def test_dispatch_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--dispatch",
                 "2",
             ],
@@ -580,14 +580,14 @@ def test_dispatch_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--dispatch",
                 "1",
                 "4",
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -596,14 +596,14 @@ def test_dispatch_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--dispatch",
                 "1",
                 "4",
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 @pytest.mark.dispatch
@@ -615,14 +615,14 @@ def test_dispatch_5():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--dispatch",
                 "5",
                 "6",
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -631,14 +631,14 @@ def test_dispatch_5():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--dispatch",
                 "5",
                 "6",
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 @pytest.mark.misc
@@ -650,9 +650,9 @@ def test_gpu_ids():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--gpu-id",
-                "0",
+                "2",
             ],
         ):
             omniperf.main()
@@ -665,9 +665,9 @@ def test_gpu_ids():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--gpu-id",
-                "0",
+                "2",
             ],
         ):
             omniperf.main()
@@ -683,7 +683,7 @@ def test_normal_unit_per_wave():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--normal-unit",
                 "per_wave",
             ],
@@ -698,7 +698,7 @@ def test_normal_unit_per_wave():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--normal-unit",
                 "per_wave",
             ],
@@ -716,7 +716,7 @@ def test_normal_unit_per_cycle():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--normal-unit",
                 "per_cycle",
             ],
@@ -731,7 +731,7 @@ def test_normal_unit_per_cycle():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--normal-unit",
                 "per_cycle",
             ],
@@ -749,7 +749,7 @@ def test_normal_unit_per_second():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--normal-unit",
                 "per_second",
             ],
@@ -764,7 +764,7 @@ def test_normal_unit_per_second():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--normal-unit",
                 "per_second",
             ],
@@ -782,7 +782,7 @@ def test_normal_unit_per_kernel():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--normal-unit",
                 "per_kernel",
             ],
@@ -797,7 +797,7 @@ def test_normal_unit_per_kernel():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--normal-unit",
                 "per_kernel",
             ],
@@ -806,8 +806,8 @@ def test_normal_unit_per_kernel():
     assert e.value.code == 0
 
 
-@pytest.mark.max_kernel
-def test_max_kernel_num_1():
+@pytest.mark.max_stat
+def test_max_stat_num_1():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -815,8 +815,8 @@ def test_max_kernel_num_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI100",
+                "--max-stat-num",
                 "0",
             ],
         ):
@@ -830,8 +830,8 @@ def test_max_kernel_num_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI200",
+                "--max-stat-num",
                 "0",
             ],
         ):
@@ -839,8 +839,8 @@ def test_max_kernel_num_1():
     assert e.value.code == 0
 
 
-@pytest.mark.max_kernel
-def test_max_kernel_num_2():
+@pytest.mark.max_stat
+def test_max_stat_num_2():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -848,8 +848,8 @@ def test_max_kernel_num_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI100",
+                "--max-stat-num",
                 "5",
             ],
         ):
@@ -863,8 +863,8 @@ def test_max_kernel_num_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI200",
+                "--max-stat-num",
                 "5",
             ],
         ):
@@ -872,8 +872,8 @@ def test_max_kernel_num_2():
     assert e.value.code == 0
 
 
-@pytest.mark.max_kernel
-def test_max_kernel_num_3():
+@pytest.mark.max_stat
+def test_max_stat_num_3():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -881,8 +881,8 @@ def test_max_kernel_num_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI100",
+                "--max-stat-num",
                 "10",
             ],
         ):
@@ -896,8 +896,8 @@ def test_max_kernel_num_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI200",
+                "--max-stat-num",
                 "10",
             ],
         ):
@@ -905,8 +905,8 @@ def test_max_kernel_num_3():
     assert e.value.code == 0
 
 
-@pytest.mark.max_kernel
-def test_max_kernel_num_4():
+@pytest.mark.max_stat
+def test_max_stat_num_4():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -914,8 +914,8 @@ def test_max_kernel_num_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI100",
+                "--max-stat-num",
                 "15",
             ],
         ):
@@ -929,8 +929,8 @@ def test_max_kernel_num_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
-                "--max-kernel-num",
+                "tests/workloads/vcopy/MI200",
+                "--max-stat-num",
                 "15",
             ],
         ):
@@ -947,7 +947,7 @@ def test_time_unit_s():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--time-unit",
                 "s",
             ],
@@ -962,7 +962,7 @@ def test_time_unit_s():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--time-unit",
                 "s",
             ],
@@ -980,7 +980,7 @@ def test_time_unit_ms():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--time-unit",
                 "ms",
             ],
@@ -995,7 +995,7 @@ def test_time_unit_ms():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--time-unit",
                 "ms",
             ],
@@ -1013,7 +1013,7 @@ def test_time_unit_us():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--time-unit",
                 "us",
             ],
@@ -1028,7 +1028,7 @@ def test_time_unit_us():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--time-unit",
                 "us",
             ],
@@ -1046,7 +1046,7 @@ def test_time_unit_ns():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--time-unit",
                 "ns",
             ],
@@ -1061,7 +1061,7 @@ def test_time_unit_ns():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--time-unit",
                 "ns",
             ],
@@ -1079,7 +1079,7 @@ def test_decimal_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--decimal",
                 "0",
             ],
@@ -1094,7 +1094,7 @@ def test_decimal_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--decimal",
                 "0",
             ],
@@ -1112,7 +1112,7 @@ def test_decimal_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--decimal",
                 "1",
             ],
@@ -1127,7 +1127,7 @@ def test_decimal_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--decimal",
                 "1",
             ],
@@ -1145,7 +1145,7 @@ def test_decimal_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--decimal",
                 "4",
             ],
@@ -1160,7 +1160,7 @@ def test_decimal_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--decimal",
                 "4",
             ],
@@ -1178,7 +1178,7 @@ def test_save_dfs():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--save-dfs",
                 "saved_dfs",
             ],
@@ -1193,7 +1193,7 @@ def test_save_dfs():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--save-dfs",
                 "saved_dfs",
             ],
@@ -1211,7 +1211,7 @@ def test_col_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--cols",
                 "0",
             ],
@@ -1226,7 +1226,7 @@ def test_col_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--cols",
                 "0",
             ],
@@ -1244,7 +1244,7 @@ def test_col_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--cols",
                 "2",
             ],
@@ -1259,7 +1259,7 @@ def test_col_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--cols",
                 "2",
             ],
@@ -1277,7 +1277,7 @@ def test_col_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--cols",
                 "0",
                 "2",
@@ -1293,7 +1293,7 @@ def test_col_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--cols",
                 "0",
                 "2",
@@ -1312,7 +1312,7 @@ def test_g():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "-g",
             ],
         ):
@@ -1326,7 +1326,7 @@ def test_g():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "-g",
             ],
         ):
@@ -1343,7 +1343,7 @@ def test_kernel_verbose_0():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel-verbose",
                 "0",
             ],
@@ -1358,7 +1358,7 @@ def test_kernel_verbose_0():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel-verbose",
                 "0",
             ],
@@ -1376,7 +1376,7 @@ def test_kernel_verbose_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel-verbose",
                 "1",
             ],
@@ -1391,7 +1391,7 @@ def test_kernel_verbose_1():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel-verbose",
                 "1",
             ],
@@ -1409,7 +1409,7 @@ def test_kernel_verbose_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel-verbose",
                 "2",
             ],
@@ -1424,7 +1424,7 @@ def test_kernel_verbose_2():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel-verbose",
                 "2",
             ],
@@ -1442,7 +1442,7 @@ def test_kernel_verbose_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel-verbose",
                 "3",
             ],
@@ -1457,7 +1457,7 @@ def test_kernel_verbose_3():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel-verbose",
                 "3",
             ],
@@ -1475,7 +1475,7 @@ def test_kernel_verbose_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel-verbose",
                 "4",
             ],
@@ -1490,7 +1490,7 @@ def test_kernel_verbose_4():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel-verbose",
                 "4",
             ],
@@ -1508,7 +1508,7 @@ def test_kernel_verbose_5():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel-verbose",
                 "5",
             ],
@@ -1523,7 +1523,7 @@ def test_kernel_verbose_5():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel-verbose",
                 "5",
             ],
@@ -1541,7 +1541,7 @@ def test_kernel_verbose_6():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--kernel-verbose",
                 "6",
             ],
@@ -1556,7 +1556,7 @@ def test_kernel_verbose_6():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--kernel-verbose",
                 "6",
             ],
@@ -1574,9 +1574,9 @@ def test_baseline():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
             ],
         ):
             omniperf.main()
@@ -1589,9 +1589,9 @@ def test_baseline():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi200",
+                "tests/workloads/vcopy/MI200",
                 "--path",
-                "tests/workloads/mixbench1/mi200",
+                "tests/workloads/vcopy/MI200",
             ],
         ):
             omniperf.main()
@@ -1604,9 +1604,9 @@ def test_baseline():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--path",
-                "tests/workloads/mixbench1/mi100",
+                "tests/workloads/vcopy/MI100",
             ],
         ):
             omniperf.main()
@@ -1614,7 +1614,7 @@ def test_baseline():
 
 
 @pytest.mark.misc
-def test_dependency_mi100():
+def test_dependency_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1622,7 +1622,7 @@ def test_dependency_mi100():
                 "omniperf",
                 "analyze",
                 "--path",
-                "tests/workloads/mixbench/mi100",
+                "tests/workloads/vcopy/MI100",
                 "--dependency",
             ],
         ):
