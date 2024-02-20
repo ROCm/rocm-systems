@@ -2,6 +2,7 @@ set(COMMON_SHARED_SRC vulkan_test.cc)
 
 set(TEST_SRC
     hipExternalMemoryGetMappedBuffer.cc
+    hipExternalMemoryGetMappedMipmappedArray.cc
     hipImportExternalMemory.cc
     hipDestroyExternalMemory.cc
     hipWaitExternalSemaphoresAsync.cc
