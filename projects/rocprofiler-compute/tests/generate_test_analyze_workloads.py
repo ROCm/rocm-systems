@@ -15,68 +15,51 @@ if __name__ == "__main__":
     workloads_path = args.path
     workloads = glob.glob(workloads_path + "/*")
 
-    with open("cmake/test_analyze_workloads.py", "a") as f:
-        with open("cmake/test_import_workloads.py", "a") as g:
-            with open("cmake/test_saved_analysis.py", "a") as h:
+    with open("test_analyze_workloads.py", "a") as f:
+        with open("test_saved_analysis.py", "a") as g:
                 for workload in workloads:
                     workload_name = workload[workload.rfind("/") + 1 :]
                     if (
-                        os.path.exists(workload + "/mi100")
-                        and len(os.listdir(workload + "/mi100")) > 0
+                        os.path.exists(workload + "/MI100")
+                        and len(os.listdir(workload + "/MI100")) > 0
                     ):
                         test = (
                             "\n\ndef test_analyze_"
                             + workload_name
-                            + "_mi100():\n    with patch('sys.argv',['omniperf', 'analyze', '--path', '"
+                            + "_MI100():\n    with patch('sys.argv',['omniperf', 'analyze', '--path', '"
                             + workload
-                            + "/mi100']): omniperf.main()"
+                            + "/MI100']): omniperf.main()"
                         )
                         f.write(test)
                         test = (
-                            "\n\ndef test_import_"
-                            + workload_name
-                            + "_mi100():\n    with patch('sys.argv',['omniperf', 'database', '--import', '-H', 'localhost', '-u', 'temp', '-p', 'temp123', '-t', 'asw', '-w', '"
-                            + workload
-                            + "/mi100']): omniperf.main()"
-                        )
-                        g.write(test)
-                        test = (
                             "\n\ndef test_saved_"
                             + workload_name
-                            + "_mi100():\n    compare('"
+                            + "_MI100():\n    compare('"
                             + workload
-                            + "/mi100/prev_analysis', '"
+                            + "/MI100/prev_analysis', '"
                             + workload
-                            + "/mi100/saved_analysis')"
+                            + "/MI100/saved_analysis')"
                         )
-                        h.write(test)
+                        g.write(test)
                     if (
-                        os.path.exists(workload + "/mi200")
-                        and len(os.listdir(workload + "/mi200")) > 0
+                        os.path.exists(workload + "/MI200")
+                        and len(os.listdir(workload + "/MI200")) > 0
                     ):
                         test = (
                             "\n\ndef test_"
                             + workload_name
-                            + "_mi200():\n    with patch('sys.argv',['omniperf', 'analyze', '--path', '"
+                            + "_MI200():\n    with patch('sys.argv',['omniperf', 'analyze', '--path', '"
                             + workload
-                            + "/mi200']): omniperf.main()"
+                            + "/MI200']): omniperf.main()"
                         )
                         f.write(test)
                         test = (
-                            "\n\ndef test_"
-                            + workload_name
-                            + "_mi100():\n    with patch('sys.argv',['omniperf', 'database', '--import', '-H', 'localhost', '-u', 'temp', '-p', 'temp123', '-t', 'asw', '-w', '"
-                            + workload
-                            + "/mi100']): omniperf.main()"
-                        )
-                        g.write(test)
-                        test = (
                             "\n\ndef test_saved_"
                             + workload_name
-                            + "_mi200():\n    compare('"
+                            + "_MI200():\n    compare('"
                             + workload
-                            + "/mi200/prev_analysis', '"
+                            + "/MI200/prev_analysis', '"
                             + workload
-                            + "/mi200/saved_analysis')"
+                            + "/MI200/saved_analysis')"
                         )
-                        h.write(test)
+                        g.write(test)
