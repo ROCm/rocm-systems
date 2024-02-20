@@ -1,0 +1,4 @@
+Dispatch_ID,Kernel_Name,GPU_ID,queue-id,queue-index,pid,tid,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,wave_size,sig,obj,SQ_INSTS_VMEM,SQ_INST_LEVEL_VMEM,SQ_ACCUM_PREV_HIRES,DispatchNs,Start_Timestamp,End_Timestamp,CompleteNs
+0,"vecCopy(double*, double*, double*, int, int) ",2,0,0,74504,74504,1048576,256,0,0,8,8,16,64,0x0,0x7fa1ecd66e80,32768,635062,81283128,4735233213481,4727932559552,4727932583552,4735240706241
+1,"vecCopy(double*, double*, double*, int, int) ",2,0,2,74504,74504,1048576,256,0,0,8,8,16,64,0x0,0x7fa1ecd66e80,32768,652266,83507104,4735240724325,4727932679392,4727932698432,4735241028470
+2,"vecCopy(double*, double*, double*, int, int) ",2,0,4,74504,74504,1048576,256,0,0,8,8,16,64,0x0,0x7fa1ecd66e80,32768,623869,79845160,4735241057815,4727932719072,4727932737792,4735241225142
