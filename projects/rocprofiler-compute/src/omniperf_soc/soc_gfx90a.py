@@ -29,42 +29,14 @@ from utils.utils import demarcate, mibench
 from roofline import Roofline
 import logging
 
-SOC_PARAM = {
-    "numSE": 8,
-    "numCU": 110,
-    "numSIMD": 440,
-    "numPipes": 4,
-    "numWavesPerCU": 32,
-    "numSQC": 56,
-    "L2Banks": 32,
-    "LDSBanks": 32,
-    "Freq": 1700,
-    "mclk": 1600,
-}
-
-
-class gfx90a_soc(OmniSoC_Base):
-    def __init__(self, args):
-        super().__init__(args)
-        self.set_soc_name("gfx90a")
-        if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
-            self.set_perfmon_dir(
-                os.path.join(
-                    str(config.omniperf_home),
-                    "omniperf_soc",
-                    "profile_configs",
-                    "roofline",
-                )
-            )
+class gfx90a_soc (OmniSoC_Base):
+    def __init__(self,args,mspec):
+        super().__init__(args,mspec)
+        self.set_arch("gfx90a")
+        if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
+            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
         else:
-            self.set_perfmon_dir(
-                os.path.join(
-                    str(config.omniperf_home),
-                    "omniperf_soc",
-                    "profile_configs",
-                    self.get_soc_name(),
-                )
-            )
+            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", self.get_arch())) 
         self.set_compatible_profilers(["rocprofv1", "rocscope"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -82,8 +54,13 @@ class gfx90a_soc(OmniSoC_Base):
                 "TCC_channels": 32,
             }
         )
-        self.set_soc_param(SOC_PARAM)
-        self.roofline_obj = Roofline(args)
+        self.roofline_obj = Roofline(args, self._mspec)
+
+        # Set arch specific specs
+        self._mspec.L2Banks = 32
+        self._mspec.LDSBanks = 32
+        self._mspec.numSQC = 56
+        self._mspec.numPipes = 4
 
     # -----------------------
     # Required child methods
@@ -104,7 +81,7 @@ class gfx90a_soc(OmniSoC_Base):
                 "[roofline] Checking for roofline.csv in " + str(self.get_args().path)
             )
             if not os.path.isfile(os.path.join(self.get_args().path, "roofline.csv")):
-                mibench(self.get_args())
+                mibench(self.get_args(), self._mspec)
             self.roofline_obj.post_processing()
         else:
             logging.info("[roofline] Skipping roofline")

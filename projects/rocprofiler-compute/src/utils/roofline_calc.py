@@ -474,7 +474,7 @@ def calc_ai(sort_type, ret_df):
 
 
 def constuct_roof(roofline_parameters, dtype):
-    benchmark_results = os.path.join(roofline_parameters["path_to_dir"], "roofline.csv")
+    benchmark_results = os.path.join(roofline_parameters["workload_dir"], "roofline.csv")
     # -----------------------------------------------------
     # Initialize roofline data dictionary from roofline.csv
     # -----------------------------------------------------

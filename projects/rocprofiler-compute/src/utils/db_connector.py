@@ -54,11 +54,7 @@ class DatabaseConnector:
         self.client: MongoClient = None
 
     @demarcate
-    def prep_import(self, profile_and_export=False):
-        if profile_and_export:
-            self.connection_info["workload"] = os.path.join(
-                self.connection_info["workload"], self.args.target
-            )
+    def prep_import(self):
 
         # Extract SoC and workload name from sysinfo.csv
         sys_info = os.path.join(self.connection_info["workload"], "sysinfo.csv")

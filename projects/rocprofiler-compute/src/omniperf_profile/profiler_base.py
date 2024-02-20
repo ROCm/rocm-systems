@@ -312,7 +312,7 @@ class OmniProfiler_Base:
         # log basic info
         logging.info(str(prog) + " ver: " + str(version))
         logging.info("Path: " + str(os.path.abspath(self.__args.path)))
-        logging.info("Target: " + str(self.__args.target))
+        logging.info("Target: " + str(self._soc._mspec.GPU))
         logging.info("Command: " + str(self.__args.remaining))
         logging.info("Kernel Selection: " + str(self.__args.kernel))
         logging.info("Dispatch Selection: " + str(self.__args.dispatch))
@@ -374,14 +374,10 @@ class OmniProfiler_Base:
 
             if self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2":
                 run_prof(
-                    fname=fname,
-                    # workload_dir=self.get_args().path,
-                    # perfmon_dir=self.__perfmon_dir,
-                    # cmd=self.__args.remaining,
-                    # target=self.__args.target,
+                    fname=fname, 
                     profiler_options=options,
-                    target=self.__args.target,
                     workload_dir=self.get_args().path,
+                    mspec=self._soc._mspec,
                 )
 
             elif self.__profiler == "rocscope":
@@ -403,6 +399,7 @@ class OmniProfiler_Base:
             app_cmd=self.__args.remaining,
             skip_roof=self.__args.no_roof,
             roof_only=self.__args.roof_only,
+            mspec=self._soc._mspec,
         )
 
 

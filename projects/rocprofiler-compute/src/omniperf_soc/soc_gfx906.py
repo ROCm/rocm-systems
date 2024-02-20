@@ -27,32 +27,11 @@ import config
 from omniperf_soc.soc_base import OmniSoC_Base
 from utils.utils import demarcate, error
 
-SOC_PARAM = {
-    "numSE": 4,
-    "numCU": 60,
-    "numSIMD": 240,
-    "numPipes": 4,
-    "numWavesPerCU": 40,
-    "numSQC": 15,
-    "L2Banks": 16,
-    "LDSBanks": 32,
-    "Freq": 1725,
-    "mclk": 1000,
-}
-
-
-class gfx906_soc(OmniSoC_Base):
-    def __init__(self, args):
-        super().__init__(args)
-        self.set_soc_name("gfx906")
-        self.set_perfmon_dir(
-            os.path.join(
-                str(config.omniperf_home),
-                "omniperf_soc",
-                "profile_configs",
-                self.get_soc_name(),
-            )
-        )
+class gfx906_soc (OmniSoC_Base):
+    def __init__(self,args,mspec):
+        super().__init__(args,mspec)
+        self.set_arch("gfx906")
+        self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", self.get_arch()))
         self.set_compatible_profilers(["rocprofv1", "rocscope"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -70,7 +49,12 @@ class gfx906_soc(OmniSoC_Base):
                 "TCC_channels": 16,
             }
         )
-        self.set_soc_param(SOC_PARAM)
+        
+        # Set arch specific specs
+        self._mspec.L2Banks = 16
+        self._mspec.LDSBanks = 32
+        self._mspec.numSQC = 15
+        self._mspec.numPipes = 4
 
     # -----------------------
     # Required child methods
@@ -80,7 +64,7 @@ class gfx906_soc(OmniSoC_Base):
         """Perform any SoC-specific setup prior to profiling."""
         super().profiling_setup()
         if self.get_args().roof_only:
-            error("%s does not support roofline analysis" % self.get_soc_name())
+            error("%s does not support roofline analysis" % self.get_arch())
         # Perfmon filtering
         self.perfmon_filter()
 

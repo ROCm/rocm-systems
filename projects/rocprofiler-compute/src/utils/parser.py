@@ -663,7 +663,7 @@ def build_metric_value_string(dfs, dfs_type, normal_unit):
         # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
-def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
+def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
     """
     Execute the expr string for each metric in the df.
     """
@@ -679,25 +679,18 @@ def eval_metric(dfs, dfs_type, sys_info, soc_spec, raw_pmc_df, debug):
         print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
         sys.exit(1)
 
-    # NB:
-    #  Following with Omniperf 0.2.0, we are using HW spec from sys_info instead.
-    #  The soc_spec is not in using right now, but can be used to do verification
-    #  against sys_info, forced theoretical evaluation, or supporting tool-chains
-    #  broken.
-    ammolite__numSE = sys_info.numSE
+    ammolite__numSE = sys_info.SE
     ammolite__numPipes = sys_info.numPipes
-    ammolite__numCU = sys_info.numCU
-    ammolite__numSIMD = sys_info.numSIMD
-    ammolite__numWavesPerCU = sys_info.maxWavesPerCU  # todo: check do we still need it
+    ammolite__numCU = sys_info.CU
+    ammolite__numSIMD = sys_info.SIMD
+    ammolite__numWavesPerCU = sys_info.max_waves_per_cu  # todo: check do we still need it
     ammolite__numSQC = sys_info.numSQC
     ammolite__L2Banks = sys_info.L2Banks
-    ammolite__LDSBanks = soc_spec[
-        "LDSBanks"
-    ]  # todo: eventually switch this over to sys_info. its a new spec so trying not to break compatibility
+    ammolite__LDSBanks = sys_info.LDSBanks
     ammolite__freq = sys_info.cur_sclk  # todo: check do we still need it
     ammolite__mclk = sys_info.cur_mclk
-    ammolite__sclk = sys_info.sclk
-    ammolite__maxWavesPerCU = sys_info.maxWavesPerCU
+    ammolite__sclk = sys_info.max_sclk
+    ammolite__maxWavesPerCU = sys_info.max_waves_per_cu
     ammolite__hbmBW = sys_info.hbmBW
     ammolite__totalL2Banks = calc_builtin_var("$totalL2Banks", sys_info)
 
@@ -947,7 +940,6 @@ def load_table_data(workload, dir, is_gui, debug, verbose, skipKernelTop=False):
         workload.dfs,
         workload.dfs_type,
         workload.sys_info.iloc[0],
-        workload.soc_spec,
         apply_filters(workload, dir, is_gui, debug),
         debug,
     )

@@ -31,46 +31,158 @@ import socket
 import subprocess
 import importlib
 import logging
+import pandas as pd
 
+from datetime import datetime
 from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
 from utils.utils import error, get_hbm_stack_num
 
+VERSION_LOC = [
+    "version",
+    "version-dev",
+    "version-hip-libraries",
+    "version-hiprt",
+    "version-hiprt-devel",
+    "version-hip-sdk",
+    "version-libs",
+    "version-utils",
+]
 
 @dataclass
 class MachineSpecs:
-    hostname: str
-    CPU: str
-    sbios: str
-    kernel_version: str
-    ram: str
-    distro: str
-    rocm_version: str
-    GPU: str
-    arch: str
-    vbios: str
-    L1: str
-    L2: str
-    CU: str
-    SIMD: str
-    SE: str
-    wave_size: str
-    workgroup_max_size: str
-    max_sclk: str
-    max_mclk: str
-    cur_sclk: str
-    cur_mclk: str
-    max_waves_per_cu: str
-    L2Banks: str
-    totalL2Banks: str
-    LDSBanks: str
-    numSQC: str
-    numPipes: str
-    hbmBW: str
-    compute_partition: str
-    memory_partition: str
+    def __init__(self, args, sysinfo=None):
+        if not sysinfo is None:
+            self.arch = sysinfo.iloc[0]["arch"]
+            return
+        # read timestamp info
+        now = datetime.now()
+        local_now = now.astimezone()
+        local_tz = local_now.tzinfo
+        local_tzname = local_tz.tzname(local_now)
+        self.timestamp = now.strftime("%c") + " (" + local_tzname + ")"
 
+        # read rocminfo
+        rocminfo_full = run(["rocminfo"])
+        self._rocminfo = rocminfo_full.split("\n")
+
+        ##########################################
+        ## A. Machine Specs
+        ##########################################
+        cpuinfo = path("/proc/cpuinfo").read_text()
+        meminfo = path("/proc/meminfo").read_text()
+        version = path("/proc/version").read_text()
+        os_release = path("/etc/os-release").read_text()
+        
+        self.hostname: str = socket.gethostname()
+        self.CPU: str = search(r"^model name\s*: (.*?)$", cpuinfo)
+        self.sbios: str = (
+            path("/sys/class/dmi/id/bios_vendor").read_text().strip()
+            + path("/sys/class/dmi/id/bios_version").read_text().strip()
+        )
+        self.kernel_version: str = search(r"version (\S*)", version)
+        self.ram: str = search(r"MemTotal:\s*(\S*)", meminfo)
+        self.distro: str = search(r'PRETTY_NAME="(.*?)"', os_release)
+        if self.distro is None:
+            self.distro = ""
+        self.rocm_version: str = get_rocm_ver().strip()
+        #FIXME: use device
+        self.vbios: str = search(
+            r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"], exit_on_error=True)
+        )
+        self.compute_partition: str = search(
+            r"Compute Partition:\s*(\w+)", run(["rocm-smi", "--showcomputepartition"])
+        )
+        if self.compute_partition is None:
+            self.compute_partition = "NA"
+        self.memory_partition: str = search(
+            r"Memory Partition:\s*(\w+)", run(["rocm-smi", "--showmemorypartition"])
+        )
+        if self.memory_partition is None:
+            self.memory_partition = "NA"
+        
+        ##########################################
+        ## B. SoC Specs
+        ##########################################
+        self.arch: str = self.detect_arch()[0]
+        self.L1: str = None
+        self.L2: str = None
+        self.CU: str = None
+        self.SIMD: str = None
+        self.SE: str = None
+        self.wave_size: str = None
+        self.workgroup_max_size: str = None
+        self.max_sclk: str = None
+        self.max_mclk: str = None
+        self.cur_sclk: str = None
+        self.cur_mclk: str = None
+        self.max_waves_per_cu: str = None
+        self.GPU: str = None
+        self.L2Banks: str = None
+        self.LDSBanks: str = None
+        self.numSQC: str = None
+        self.numPipes: str = None
+        self.totalL2Banks: str = None
+        self.hbmBW: str = None
+        # Load above SoC specs via module import
+        try:
+            soc_module = importlib.import_module('omniperf_soc.soc_'+ self.arch)
+        except ModuleNotFoundError as e:
+            error("Arch %s marked as supported, but couldn't find class implementation %s." % (self.arch, e))
+        soc_class = getattr(soc_module, self.arch+'_soc')
+        self._rocminfo = self._rocminfo[self.detect_arch()[1] + 1 :] # update rocminfo for target section
+        soc_obj = soc_class(args, self)
+        # Update arch specific specs
+        self.totalL2Banks: str = total_l2_banks(
+            self.GPU, int(self.L2Banks), self.memory_partition
+        )
+        self.hbmBW: str = str(int(self.max_mclk) / 1000 * 32 * self.get_hbm_channels())
+
+
+    def detect_arch(self):
+        from omniperf_base import SUPPORTED_ARCHS
+
+        for idx1, linetext in enumerate(self._rocminfo):
+            gpu_arch = search(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", linetext)
+            if gpu_arch in SUPPORTED_ARCHS.keys():
+                break
+            if str(gpu_arch) in SUPPORTED_ARCHS.keys():
+                gpu_arch = str(gpu_arch)
+                break
+        if not gpu_arch in SUPPORTED_ARCHS.keys():
+            error("[profiling] Cannot find a supported arch in rocminfo")
+        else:
+            return (gpu_arch, idx1)
+        
+    def get_hbm_channels(self):
+        hbmchannels = int(self.totalL2Banks)
+        if (
+            self.GPU.lower() == "mi300a_a0"
+            or self.GPU.lower() == "mi300a_a1"
+        ) and self.memory_partition.lower() == "nps1":
+            # we have an extra 32 channels for the CCD
+            hbmchannels += 32
+        return hbmchannels
+    
+    def get_class_members(self):
+        all_populated = True
+        data = {}
+        # dataclass uses an OrderedDict for member variables, ensuring order consistency
+        for attr_name in self.__dict__.keys():
+            if not attr_name.startswith("_"):
+                attr_value = getattr(self, attr_name)
+                if attr_value is None:
+                    #TODO: use proper logging function when that's merged
+                    logging.warning(f"WARNING: Incomplete class definition for {self.arch}. Expecting populated {attr_name} but detected None.")
+                    all_populated = False
+                data[attr_name] = attr_value
+
+        if not all_populated:
+            error("Missing specs fields for %s" % self.arch)
+        return pd.DataFrame(data, index=[0])
+    
+    
     def __str__(self):
         return dedent(
             f"""\
@@ -110,145 +222,27 @@ class MachineSpecs:
         )
 
 
-def gpuinfo():
-    from omniperf_base import SUPPORTED_ARCHS
-
-    gpu_info = {
-        "gpu_name": None,
-        "gpu_arch": None,
-        "L1": None,
-        "L2": None,
-        "max_sclk": None,
-        "max_mclk": None,
-        "num_CU": None,
-        "num_SIMD": None,
-        "numPipes": None,
-        "num_SE": None,
-        "wave_size": None,
-        "grp_size": None,
-        "max_waves_per_cu": None,
-        "L2Banks": None,
-        "LDSBanks": None,
-        "numSQC": None,
-        "compute_partition": None,
-        "memory_partition": None,
-    }
-
-    # Fixme: find better way to differentiate cards, GPU vs APU, etc.
-    rocminfo_full = run(["rocminfo"])
-    rocminfo = rocminfo_full.split("\n")
-
-    for idx1, linetext in enumerate(rocminfo):
-        gpu_arch = search(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", linetext)
-        if gpu_arch in SUPPORTED_ARCHS.keys():
-            break
-        if str(gpu_arch) in SUPPORTED_ARCHS.keys():
-            gpu_arch = str(gpu_arch)
-            break
-    if not gpu_arch in SUPPORTED_ARCHS.keys():
-        return gpu_info
-
-    gpu_info["L1"], gpu_info["L1"] = "", ""
-    for idx2, linetext in enumerate(rocminfo[idx1 + 1 :]):
-        key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["L1"] = key
-            continue
-
-        key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["L2"] = key
-            continue
-
-        key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
-        if key != None:
-            gpu_info["max_sclk"] = key
-            continue
-
-        key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["num_CU"] = key
-            continue
-
-        key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["num_SIMD"] = key
-            continue
-
-        key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["num_SE"] = key
-            continue
-
-        key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["wave_size"] = key
-            continue
-
-        key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["grp_size"] = key
-            continue
-
-        key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
-        if key != None:
-            gpu_info["max_waves_per_cu"] = key
-            break
-
-    try:
-        soc_module = importlib.import_module("omniperf_soc.soc_" + gpu_arch)
-    except ModuleNotFoundError as e:
-        error(
-            "Arch %s marked as supported, but couldn't find class implementation %s."
-            % (gpu_arch, e)
-        )
-
-    # load arch specific info
-    try:
-        gpu_name = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
-        gpu_info["L2Banks"] = str(soc_module.SOC_PARAM["L2Banks"])
-        gpu_info["numSQC"] = str(soc_module.SOC_PARAM["numSQC"])
-        gpu_info["LDSBanks"] = str(soc_module.SOC_PARAM["LDSBanks"])
-        gpu_info["numPipes"] = str(soc_module.SOC_PARAM["numPipes"])
-    except KeyError as e:
-        error(
-            "Incomplete class definition for %s. Expected a field for %s in SOC_PARAM."
-            % (gpu_arch, e)
-        )
-
-    # we get the max mclk from rocm-smi --showmclkrange
-    rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)
-    gpu_info["max_mclk"] = search(r"(\d+)Mhz\s*$", rocm_smi_mclk)
-    # check that we got the mclk from smi
-    if gpu_info["max_mclk"] is None:
-        if gpu_name == "MI100":
-            # hardcoded due to rocm-smi limitation
-            gpu_info["max_mclk"] = str(1200)
-        else:
-            error(
-                "Could not obtain maximum mclk from rocm-smi for GPU: {}".format(gpu_info)
+def get_rocm_ver():
+    rocm_found = False
+    for itr in VERSION_LOC:
+        _path = os.path.join(os.getenv("ROCM_PATH", "/opt/rocm"), ".info", itr)
+        if os.path.exists(_path):
+            rocm_ver = path(_path).read_text()
+            rocm_found = True
+        break
+    if not rocm_found:
+        # check if ROCM_VER is supplied externally
+        ROCM_VER_USER = os.getenv("ROCM_VER")
+        if ROCM_VER_USER is not None:
+            logging.info(
+                "Overriding missing ROCm version detection with ROCM_VER = %s"
+                % ROCM_VER_USER
             )
-
-    # specify gpu name for gfx942 hardware
-    if gpu_name == "MI300":
-        gpu_name = list(SUPPORTED_ARCHS[gpu_arch].values())[0][0]
-    if (gpu_info["gpu_arch"] == "gfx942") and ("MI300A" in rocminfo_full):
-        gpu_name = "MI300A_A1"
-    if (gpu_arch == "gfx942") and ("MI300A" not in rocminfo_full):
-        gpu_name = "MI300X_A1"
-
-    gpu_info["gpu_name"] = gpu_name
-    gpu_info["gpu_arch"] = gpu_arch
-    gpu_info["compute_partition"] = ""
-    gpu_info["memory_partition"] = ""
-
-    # verify all fields are filled
-    for key, value in gpu_info.items():
-        if value is None:
-            logging.info("Warning: %s is missing from gpu_info dictionary." % key)
-
-    return gpu_info
-
+            rocm_ver = ROCM_VER_USER
+        else:
+            _rocm_path = os.getenv("ROCM_PATH", "/opt/rocm")
+            error("Unable to detect a complete local ROCm installation.\nThe expected %s/.info/ versioning directory is missing. Please ensure you have valid ROCm installation." % _rocm_path)
+    return rocm_ver
 
 def run(cmd, exit_on_error=False):
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
@@ -275,143 +269,20 @@ def total_l2_banks(archname, L2Banks, memory_partition):
     # Fixme: support all supported partitioning mode
     # Fixme: "name" is a bad name!
     totalL2Banks = L2Banks
-    if archname.lower() == "mi300a_a0" or archname.lower() == "mi300a_a1":
-        totalL2Banks = L2Banks * get_hbm_stack_num(archname, memory_partition)
-    elif archname.lower() == "mi300x_a0" or archname.lower() == "mi300x_a1":
-        totalL2Banks = L2Banks * get_hbm_stack_num(archname, memory_partition)
-    return totalL2Banks
-
-
-def get_machine_specs(devicenum):
-    cpuinfo = path("/proc/cpuinfo").read_text()
-    meminfo = path("/proc/meminfo").read_text()
-    version = path("/proc/version").read_text()
-    os_release = path("/etc/os-release").read_text()
-
-    version_loc = [
-        "version",
-        "version-dev",
-        "version-hip-libraries",
-        "version-hiprt",
-        "version-hiprt-devel",
-        "version-hip-sdk",
-        "version-libs",
-        "version-utils",
-    ]
-
-    rocmFound = False
-    for itr in version_loc:
-        _path = os.path.join(os.getenv("ROCM_PATH", "/opt/rocm"), ".info", itr)
-        if os.path.exists(_path):
-            rocm_ver = path(_path).read_text()
-            rocmFound = True
-            break
-
-    if not rocmFound:
-        # check if ROCM_VER is supplied externally
-        ROCM_VER_USER = os.getenv("ROCM_VER")
-        if ROCM_VER_USER is not None:
-            print(
-                "Overriding missing ROCm version detection with ROCM_VER = %s"
-                % ROCM_VER_USER
-            )
-            rocm_ver = ROCM_VER_USER
-        else:
-            _rocm_path = os.getenv("ROCM_PATH", "/opt/rocm")
-            print("Error: Unable to detect a complete local ROCm installation.")
-            print(
-                "\nThe expected %s/.info/ versioning directory is missing. Please"
-                % _rocm_path
-            )
-            print("ensure you have valid ROCm installation.")
-            sys.exit(1)
-
-    gpu_info = gpuinfo()
-
-    rocm_smi = run(["rocm-smi"], exit_on_error=True)
-
-    device = rf"^\s*{devicenum}(.*)"
-
-    hostname = socket.gethostname()
-    sbios = (
-        path("/sys/class/dmi/id/bios_vendor").read_text().strip()
-        + path("/sys/class/dmi/id/bios_version").read_text().strip()
-    )
-    CPU = search(r"^model name\s*: (.*?)$", cpuinfo)
-    kernel_version = search(r"version (\S*)", version)
-    ram = search(r"MemTotal:\s*(\S*)", meminfo)
-    distro = search(r'PRETTY_NAME="(.*?)"', os_release)
-    if distro is None:
-        distro = ""
-
-    rocm_version = rocm_ver.strip()
-
-    # these are just max's now, because the parsing was broken and this was inconsistent
-    # with how we use the clocks elsewhere (all max, all the time)
-    cur_sclk = gpu_info["max_sclk"]
-    cur_mclk = gpu_info["max_mclk"]
-
-    # FIXME with device
-    vbios = search(r"VBIOS version: (.*?)$", run(["rocm-smi", "-v"], exit_on_error=True))
-
-    compute_partition = search(
-        r"Compute Partition:\s*(\w+)", run(["rocm-smi", "--showcomputepartition"])
-    )
-    if compute_partition == None:
-        compute_partition = "NA"
-
-    memory_partition = search(
-        r"Memory Partition:\s*(\w+)", run(["rocm-smi", "--showmemorypartition"])
-    )
-    if memory_partition == None:
-        memory_partition = "NA"
-
-    totalL2Banks = total_l2_banks(
-        gpu_info["gpu_name"], int(gpu_info["L2Banks"]), memory_partition
-    )
-    hbmchannels = totalL2Banks
     if (
-        gpu_info["gpu_name"].lower() == "mi300a_a0"
-        or gpu_info["gpu_name"].lower() == "mi300a_a1"
-    ) and memory_partition.lower() == "nps1":
-        # we have an extra 32 channels for the CCD
-        hbmchannels += 32
-    hbmBW = str(int(gpu_info["max_mclk"]) / 1000 * 32 * hbmchannels)
-    totalL2Banks = str(totalL2Banks)
-
-    return MachineSpecs(
-        hostname,
-        CPU,
-        sbios,
-        kernel_version,
-        ram,
-        distro,
-        rocm_version,
-        gpu_info["gpu_name"],
-        gpu_info["gpu_arch"],
-        vbios,
-        gpu_info["L1"],
-        gpu_info["L2"],
-        gpu_info["num_CU"],
-        gpu_info["num_SIMD"],
-        gpu_info["num_SE"],
-        gpu_info["wave_size"],
-        gpu_info["grp_size"],
-        gpu_info["max_sclk"],
-        gpu_info["max_mclk"],
-        cur_sclk,
-        cur_mclk,
-        gpu_info["max_waves_per_cu"],
-        gpu_info["L2Banks"],
-        totalL2Banks,
-        gpu_info["LDSBanks"],
-        gpu_info["numSQC"],
-        gpu_info["numPipes"],
-        hbmBW,
-        compute_partition,
-        memory_partition,
-    )
+        archname.lower() == "mi300a_a0"
+        or archname.lower() == "mi300a_a1"
+    ):
+        totalL2Banks = L2Banks * get_hbm_stack_num(
+            archname, memory_partition)
+    elif (
+        archname.lower() == "mi300x_a0"
+        or archname.lower() == "mi300x_a1"
+    ):
+        totalL2Banks = L2Banks * get_hbm_stack_num(
+            archname, memory_partition)
+    return str(totalL2Banks)
 
 
 if __name__ == "__main__":
-    print(get_machine_specs(0))
+    print(MachineSpecs())

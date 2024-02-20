@@ -29,33 +29,12 @@ from utils.utils import demarcate, mibench
 from roofline import Roofline
 import logging
 
-SOC_PARAM = {
-    "numSE": 8,
-    "numCU": 38,
-    "numSIMD": 4,
-    "numPipes": 4,
-    "numWavesPerCU": 32,
-    "numSQC": 56,
-    "L2Banks": 16,
-    "LDSBanks": 32,
-    "Freq": 1950,
-    "mclk": 1300,
-}
-
-
-class gfx941_soc(OmniSoC_Base):
-    def __init__(self, args):
-        super().__init__(args)
-        self.set_soc_name("gfx941")
-        if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
-            self.set_perfmon_dir(
-                os.path.join(
-                    str(config.omniperf_home),
-                    "omniperf_soc",
-                    "profile_configs",
-                    "roofline",
-                )
-            )
+class gfx941_soc (OmniSoC_Base):
+    def __init__(self,args, mspec):
+        super().__init__(args, mspec)
+        self.set_arch("gfx941")
+        if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
+            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
         else:
             # NB: We're using generalized Mi300 perfmon configs
             self.set_perfmon_dir(
@@ -80,8 +59,13 @@ class gfx941_soc(OmniSoC_Base):
                 "TCC_channels": 32,
             }
         )
-        self.set_soc_param(SOC_PARAM)
-        self.roofline_obj = Roofline(args)
+        self.roofline_obj = Roofline(args, self._mspec)
+
+        # Set arch specific specs
+        self._mspec.L2Banks = 16
+        self._mspec.LDSBanks = 32
+        self._mspec.numSQC = 56
+        self._mspec.numPipes = 4
 
     # -----------------------
     # Required child methods

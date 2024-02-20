@@ -33,53 +33,46 @@ import numpy as np
 from utils.utils import demarcate
 from pathlib import Path
 
+from omniperf_base import SUPPORTED_ARCHS
 
-class OmniSoC_Base:
-    def __init__(self, args):
+class OmniSoC_Base():
+    def __init__(self,args,mspec): # new info field will contain rocminfo or sysinfo to populate properties
         self.__args = args
-        self.__name = None  # SoC name
+        self.__arch = None
+        self._mspec = mspec
         self.__perfmon_dir = None
-        self.__perfmon_config = (
-            {}
-        )  # Per IP block max number of simulutaneous counters. GFX IP Blocks
-        self.__soc_params = {}  # SoC specifications
-        self.__compatible_profilers = []  # Store profilers compatible with SoC
-        if self.__args.path == os.path.join(os.getcwd(), "workloads"):
-            self.__workload_dir = os.path.join(
-                self.__args.path, self.__args.name, self.__args.target
-            )
-        else:
-            self.__workload_dir = self.__args.path
+        self.__perfmon_config = {} # Per IP block max number of simulutaneous counters. GFX IP Blocks
+        self.__soc_params = {} # SoC specifications
+        self.__compatible_profilers = [] # Store profilers compatible with SoC
+        self.populate_mspec()
+        # In some cases (i.e. --specs) path will not be given
+        if hasattr(self.__args, "path"):
+            if self.__args.path == os.path.join(os.getcwd(), "workloads"):
+                self.__workload_dir = os.path.join(self.__args.path, self.__args.name, self._mspec.GPU)
+            else:
+                self.__workload_dir = self.__args.path
 
     def __hash__(self):
-        return hash(self.__name)
-
+        return hash(self.__arch)
     def __eq__(self, other):
         if not isinstance(other, type(self)):
             return NotImplemented
-        return self.__name == other.get_soc()
+        return self.__arch == other.get_soc()
 
     def set_perfmon_dir(self, path: str):
         self.__perfmon_dir = path
 
     def set_perfmon_config(self, config: dict):
         self.__perfmon_config = config
-
-    def set_soc_param(self, param: dict):
-        self.__soc_params = param
-
     def get_workload_perfmon_dir(self):
         return str(Path(self.__perfmon_dir).parent.absolute())
 
     def get_soc_param(self):
         return self.__soc_params
-
-    def set_soc_name(self, soc: str):
-        self.__name = soc
-
-    def get_soc_name(self):
-        return self.__name
-
+    def set_arch(self, arch: str):
+        self.__arch = arch
+    def get_arch(self):
+        return self.__arch
     def get_args(self):
         return self.__args
 
@@ -94,6 +87,83 @@ class OmniSoC_Base:
         """Fetch any SoC specific arguments required by the profiler"""
         # assume no SoC specific options and return empty list by default
         return []
+
+    @demarcate
+    def populate_mspec(self):
+        from utils.specs import search, run
+
+        if not hasattr(self._mspec, "_rocminfo"):
+            return
+
+        # load stats from rocminfo
+        self._mspec.L1 = ""
+        self._mspec.L2 = ""
+        for idx2, linetext in enumerate(self._mspec._rocminfo):
+            key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.L1 = key
+                continue
+
+            key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.L2 = key
+                continue
+
+            key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
+            if key != None:
+                self._mspec.max_sclk = key
+                continue
+
+            key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.CU = key
+                continue
+
+            key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.SIMD = key
+                continue
+
+            key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.SE = key
+                continue
+
+            key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.wave_size = key
+                continue
+
+            key = search(r"^\s*Workgroup Max Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.workgroup_max_size = key
+                continue
+
+            key = search(r"^\s*Max Waves Per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
+            if key != None:
+                self._mspec.max_waves_per_cu = key
+                break
+        
+        # we get the max mclk from rocm-smi --showmclkrange
+        rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)
+        self._mspec.max_mclk = search(r'(\d+)Mhz\s*$', rocm_smi_mclk)
+
+        # these are just max's now, because the parsing was broken and this was inconsistent
+        # with how we use the clocks elsewhere (all max, all the time)
+        self._mspec.cur_sclk = self._mspec.max_sclk
+        self._mspec.cur_mclk = self._mspec.max_mclk
+
+        self._mspec.compute_partition = ""
+        self._mspec.memory_partition = ""
+
+        # specify gpu name for gfx942 hardware
+        self._mspec.GPU = list(SUPPORTED_ARCHS[self._mspec.arch].keys())[0].upper()
+        if self._mspec.GPU == "MI300":
+            self._mspec.GPU = list(SUPPORTED_ARCHS[self._mspec.arch].values())[0][0]
+        if (self._mspec.arch == "gfx942") and ("MI300A" in self._mspec._rocminfo):
+            self._mspec.GPU = "MI300A_A1"
+        if (self._mspec.arch == "gfx942") and ("MI300A" not in self._mspec._rocminfo):
+            self._mspec.GPU = "MI300X_A1"
 
     @demarcate
     def perfmon_filter(self, roofline_perfmon_only: bool):
@@ -114,9 +184,7 @@ class OmniSoC_Base:
 
         if not roofline_perfmon_only:
             ref_pmc_files_list = glob.glob(self.__perfmon_dir + "/" + "pmc_*perf*.txt")
-            ref_pmc_files_list += glob.glob(
-                self.__perfmon_dir + "/" + self.__name + "/pmc_*_perf*.txt"
-            )
+            ref_pmc_files_list += glob.glob(self.__perfmon_dir + "/" + self.__arch + "/pmc_*_perf*.txt")
 
             # Perfmon list filtering
             if self.__args.ipblocks != None:
@@ -152,19 +220,22 @@ class OmniSoC_Base:
     # ----------------------------------------------------
     @abstractmethod
     def profiling_setup(self):
-        """Perform any SoC-specific setup prior to profiling."""
-        logging.debug("[profiling] perform SoC profiling setup for %s" % self.__name)
+        """Perform any SoC-specific setup prior to profiling.
+        """
+        logging.debug("[profiling] perform SoC profiling setup for %s" % self.__arch)
 
     @abstractmethod
     def post_profiling(self):
-        """Perform any SoC-specific post profiling activities."""
-        logging.debug("[profiling] perform SoC post processing for %s" % self.__name)
+        """Perform any SoC-specific post profiling activities.
+        """
+        logging.debug("[profiling] perform SoC post processing for %s" % self.__arch)
 
     @abstractmethod
     def analysis_setup(self):
-        """Perform any SoC-specific setup prior to analysis."""
-        logging.debug("[analysis] perform SoC analysis setup for %s" % self.__name)
-
+        """Perform any SoC-specific setup prior to analysis.
+        """
+        logging.debug("[analysis] perform SoC analysis setup for %s" % self.__arch)
+        
 
 @demarcate
 def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):

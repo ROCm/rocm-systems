@@ -59,7 +59,6 @@ class ArchConfig:
 @dataclass
 class Workload:
     sys_info: pd.DataFrame = None
-    soc_spec: dict = None  # TODO: might move it to ArchConfig
     raw_pmc: pd.DataFrame = None
     dfs: Dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: Dict[int, str] = field(default_factory=dict)
