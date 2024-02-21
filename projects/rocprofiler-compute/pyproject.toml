@@ -49,7 +49,7 @@ markers = [
 	"filter_kernel",
 	"dispatch",
 	"normal_unit",
-	"max_kernel",
+	"max_stat",
 	"time_unit",
 	"decimal",
 	"col",
