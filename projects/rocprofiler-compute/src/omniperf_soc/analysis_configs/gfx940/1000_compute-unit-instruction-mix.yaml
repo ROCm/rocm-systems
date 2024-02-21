@@ -26,12 +26,16 @@ Panel Config:
             unit: (instr + $normUnit)
             tips: 
           VMEM:
-            avg: AVG(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
-            min: MIN(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
-            max: MAX(((SQ_INSTS_VMEM - SQ_INSTS_FLAT_LDS_ONLY) / $denom))
+            # TODO: need to fix this when the new FLAT/LDS counts
+            # are present in ROCm
+            avg: AVG(((SQ_INSTS_VMEM) / $denom))
+            min: MIN(((SQ_INSTS_VMEM) / $denom))
+            max: MAX(((SQ_INSTS_VMEM) / $denom))
             unit: (instr + $normUnit)
             tips: 
           LDS:
+            # TODO: need to fix this when the new FLAT/LDS counts
+            # are present in ROCm
             avg: AVG((SQ_INSTS_LDS / $denom))
             min: MIN((SQ_INSTS_LDS / $denom))
             max: MAX((SQ_INSTS_LDS / $denom))

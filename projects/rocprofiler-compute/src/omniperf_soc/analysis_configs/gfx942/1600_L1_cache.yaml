@@ -25,8 +25,8 @@ Panel Config:
             unit: Pct of Peak
             tips:
           Bandwidth:
-            value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp))))
-              / ((($max_sclk / 1000) * 64) * $cu_per_gpu))
+            value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp))))
+              / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
             unit: Pct of Peak
             tips:
           Utilization:
@@ -116,9 +116,9 @@ Panel Config:
             unit: (Req  + $normUnit)
             tips:
           Cache BW:
-            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
-            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / $denom))
+            avg: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
+            min: MIN(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
+            max: MAX(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / $denom))
             unit: (Bytes + $normUnit)
             tips:
           Cache Hit Rate:
@@ -161,12 +161,15 @@ Panel Config:
             unit: (Req + $normUnit)
             tips:
           L1-L2 BW:
-            avg: AVG(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
-            min: MIN(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
-            max: MAX(((64 * (((TCP_TCC_READ_REQ_sum + TCP_TCC_WRITE_REQ_sum) + TCP_TCC_ATOMIC_WITH_RET_REQ_sum)
-              + TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            avg: AVG(((128 * TCP_TCC_READ_REQ_sum + 64 *
+                      (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+                        TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            min: MIN(((128 * TCP_TCC_READ_REQ_sum + 64 *
+                      (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+                        TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
+            max: MAX(((128 * TCP_TCC_READ_REQ_sum + 64 *
+                      (TCP_TCC_WRITE_REQ_sum + TCP_TCC_ATOMIC_WITH_RET_REQ_sum +
+                        TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum)) / $denom))
             unit: (Bytes + $normUnit)
             tips:
           L1-L2 Read:

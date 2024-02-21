@@ -31,8 +31,9 @@ Panel Config:
             unit: pct
             tips:
           L2-Fabric Read BW:
-            value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / (End_Timestamp - Start_Timestamp)))
+            value: AVG((128 * TCC_BUBBLE_sum +
+                        64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) +
+                        32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp))
             unit: GB/s
             tips:
           L2-Fabric Write and Atomic BW:
@@ -53,12 +54,15 @@ Panel Config:
           tips: Tips
         metric:
           L2-Fabric Read BW:
-            avg: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
-            min: MIN((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
-            max: MAX((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / $denom))
+            avg: AVG(((128 * TCC_BUBBLE_sum +
+                        64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) +
+                        32 * TCC_EA0_RDREQ_32B_sum) / $denom))
+            min: MIN(((128 * TCC_BUBBLE_sum +
+                        64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) +
+                        32 * TCC_EA0_RDREQ_32B_sum) / $denom))
+            max: MAX(((128 * TCC_BUBBLE_sum +
+                        64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) +
+                        32 * TCC_EA0_RDREQ_32B_sum) / $denom))
             unit: (Bytes  + $normUnit)
             tips:
           HBM Read Traffic:
@@ -380,9 +384,15 @@ Panel Config:
             unit: (Req  + $normUnit)
             tips:
           Read (64B):
-            avg: AVG(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
-            min: MIN(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
-            max: MAX(((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            avg: AVG(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            min: MIN(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            max: MAX(((TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) / $denom))
+            unit: (Req  + $normUnit)
+            tips:
+          Read (128B):
+            avg: AVG(((TCC_BUBBLE_sum) / $denom))
+            min: MIN(((TCC_BUBBLE_sum) / $denom))
+            max: MAX(((TCC_BUBBLE_sum) / $denom))
             unit: (Req  + $normUnit)
             tips:
           HBM Read:

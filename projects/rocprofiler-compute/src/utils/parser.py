@@ -290,7 +290,7 @@ def build_eval_string(equation, coll_level):
     # build-in variable starts with '$', python can not handle it.
     # replace '$' with 'ammolite__'.
     # TODO: pre-check there is no "ammolite__" in all config files.
-    s = re.sub("\$", "ammolite__", s)
+    s = re.sub(r"\$", "ammolite__", s)
 
     # convert equation string to intermediate expression in df array format
     ast_node = ast.parse(s)
@@ -304,7 +304,7 @@ def build_eval_string(equation, coll_level):
     # the target is df['TCC_HIT[0]']
     s = re.sub(r"\'\]\[(\d+)\]", r"[\g<1>]']", s)
     # use .get() to catch any potential KeyErrors
-    s = re.sub("raw_pmc_df\['(.*?)']", r'raw_pmc_df.get("\1")', s)
+    s = re.sub(r"raw_pmc_df\['(.*?)']", r'raw_pmc_df.get("\1")', s)
     # apply coll_level
     s = re.sub(r"raw_pmc_df", "raw_pmc_df.get('" + coll_level + "')", s)
     # print("--- build_eval_string, return: ", s)

@@ -166,11 +166,11 @@ Panel Config:
               None))
             tips: 
           vL1D Cache BW:
-            value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp)))
+            value: AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp)))
             unit: GB/s
-            peak: ((($max_sclk / 1000) * 64) * $cu_per_gpu)
-            pop: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp))))
-              / ((($max_sclk / 1000) * 64) * $cu_per_gpu))
+            peak: ((($max_sclk / 1000) * 128) * $cu_per_gpu)
+            pop: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 128) / (End_Timestamp - Start_Timestamp))))
+              / ((($max_sclk / 1000) * 128) * $cu_per_gpu))
             tips: 
           L2 Cache Hit Rate:
             value: AVG((((100 * TCC_HIT_sum) / (TCC_HIT_sum + TCC_MISS_sum)) if ((TCC_HIT_sum
@@ -188,12 +188,14 @@ Panel Config:
               / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
             tips: 
           L2-Fabric Read BW:
-            value: AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / (End_Timestamp - Start_Timestamp)))
+            value: AVG((128 * TCC_BUBBLE_sum +
+                        64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 
+                        32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp))
             unit: GB/s
             peak: $hbm_bw
-            pop: ((100 * AVG((((TCC_EA0_RDREQ_32B_sum * 32) + ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_32B_sum)
-              * 64)) / (End_Timestamp - Start_Timestamp)))) / $hbm_bw)
+            pop: ((100 * (AVG((128 * TCC_BUBBLE_sum +
+                        64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 
+                        32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbmBW)
             tips: 
           L2-Fabric Write BW:
             value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
