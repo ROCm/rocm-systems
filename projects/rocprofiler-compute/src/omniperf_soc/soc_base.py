@@ -48,7 +48,7 @@ class OmniSoC_Base():
         # In some cases (i.e. --specs) path will not be given
         if hasattr(self.__args, "path"):
             if self.__args.path == os.path.join(os.getcwd(), "workloads"):
-                self.__workload_dir = os.path.join(self.__args.path, self.__args.name, self._mspec.GPU)
+                self.__workload_dir = os.path.join(self.__args.path, self.__args.name, self._mspec.gpu_model)
             else:
                 self.__workload_dir = self.__args.path
 
@@ -96,17 +96,17 @@ class OmniSoC_Base():
             return
 
         # load stats from rocminfo
-        self._mspec.L1 = ""
-        self._mspec.L2 = ""
+        self._mspec.gpu_l1 = ""
+        self._mspec.gpu_l2 = ""
         for idx2, linetext in enumerate(self._mspec._rocminfo):
             key = search(r"^\s*L1:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key != None:
-                self._mspec.L1 = key
+                self._mspec.gpu_l1 = key
                 continue
 
             key = search(r"^\s*L2:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key != None:
-                self._mspec.L2 = key
+                self._mspec.gpu_l2 = key
                 continue
 
             key = search(r"^\s*Max Clock Freq\. \(MHz\):\s+([0-9]+)", linetext)
@@ -116,17 +116,17 @@ class OmniSoC_Base():
 
             key = search(r"^\s*Compute Unit:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key != None:
-                self._mspec.CU = key
+                self._mspec.cu_per_gpu = key
                 continue
 
             key = search(r"^\s*SIMDs per CU:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key != None:
-                self._mspec.SIMD = key
+                self._mspec.simd_per_cu = key
                 continue
 
             key = search(r"^\s*Shader Engines:\s+ ([a-zA-Z0-9]+)\s*", linetext)
             if key != None:
-                self._mspec.SE = key
+                self._mspec.se_per_gpu = key
                 continue
 
             key = search(r"^\s*Wavefront Size:\s+ ([a-zA-Z0-9]+)\s*", linetext)
@@ -157,13 +157,13 @@ class OmniSoC_Base():
         self._mspec.memory_partition = ""
 
         # specify gpu name for gfx942 hardware
-        self._mspec.GPU = list(SUPPORTED_ARCHS[self._mspec.arch].keys())[0].upper()
-        if self._mspec.GPU == "MI300":
-            self._mspec.GPU = list(SUPPORTED_ARCHS[self._mspec.arch].values())[0][0]
-        if (self._mspec.arch == "gfx942") and ("MI300A" in self._mspec._rocminfo):
-            self._mspec.GPU = "MI300A_A1"
-        if (self._mspec.arch == "gfx942") and ("MI300A" not in self._mspec._rocminfo):
-            self._mspec.GPU = "MI300X_A1"
+        self._mspec.gpu_model = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].keys())[0].upper()
+        if self._mspec.gpu_model == "MI300":
+            self._mspec.gpu_model = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].values())[0][0]
+        if (self._mspec.gpu_arch == "gfx942") and ("MI300A" in self._mspec._rocminfo):
+            self._mspec.gpu_model = "MI300A_A1"
+        if (self._mspec.gpu_arch == "gfx942") and ("MI300A" not in self._mspec._rocminfo):
+            self._mspec.gpu_model = "MI300X_A1"
 
     @demarcate
     def perfmon_filter(self, roofline_perfmon_only: bool):

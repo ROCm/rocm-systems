@@ -135,7 +135,7 @@ class OmniAnalyze_Base:
         # load required configs
         for d in self.__args.path:
             sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
-            arch = sys_info.iloc[0]["arch"]
+            arch = sys_info.iloc[0]["gpu_arch"]
             args = self.__args
             self.generate_configs(
                 arch,
@@ -155,7 +155,7 @@ class OmniAnalyze_Base:
                     w.sys_info, self.__args.specs_correction
                 )
             w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
-            arch = w.sys_info.iloc[0]["arch"]
+            arch = w.sys_info.iloc[0]["gpu_arch"]
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
             w.dfs_type = self._arch_configs[arch].dfs_type
             self._runs[d[0]] = w

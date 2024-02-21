@@ -70,13 +70,13 @@ class cli_analysis(OmniAnalyze_Base):
             tty.show_kernel_stats(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["arch"]],
+                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]],
                 self._output
             )
         else:
             tty.show_all(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["arch"]],
+                self._arch_configs[self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]],
                 self._output
             )

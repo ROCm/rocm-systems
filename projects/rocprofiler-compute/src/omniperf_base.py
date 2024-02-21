@@ -159,10 +159,12 @@ class Omniperf:
     def load_soc_specs(self, sysinfo=None):
         """Load OmniSoC instance for Omniperf run
         """
-        if not sysinfo is None:
-            self.__mspec = MachineSpecs(self.__args, sysinfo)
+        self.__mspec = MachineSpecs(self.__args, sysinfo)
+        if self.__args.specs:
+            print(self.__mspec)
+            sys.exit(0)
 
-        arch = self.__mspec.arch
+        arch = self.__mspec.gpu_arch
 
         # NB: This checker is a bit redundent. We already check this in specs module
         if arch not in self.__supported_archs.keys():
@@ -188,10 +190,10 @@ class Omniperf:
         )
         self.__args = parser.parse_args()
 
-        if self.__args.specs:
-            print(MachineSpecs(self.__args))
-            sys.exit(0)
         if self.__args.mode == None:
+            if self.__args.specs:
+                print(MachineSpecs(self.__args))
+                sys.exit(0)
             parser.print_help(sys.stderr)
             error("Omniperf requires a valid mode.")
 
@@ -204,20 +206,20 @@ class Omniperf:
 
         # Update default path
         if self.__args.path == os.path.join(os.getcwd(), "workloads"):
-            self.__args.path = os.path.join(self.__args.path, self.__args.name, self.__mspec.GPU)
+            self.__args.path = os.path.join(self.__args.path, self.__args.name, self.__mspec.gpu_model)
 
         logging.info("Profiler choice = %s" % self.__profiler_mode)
 
         # instantiate desired profiler
         if self.__profiler_mode == "rocprofv1":
             from omniperf_profile.profiler_rocprof_v1 import rocprof_v1_profiler
-            profiler = rocprof_v1_profiler(self.__args, self.__profiler_mode, self.__soc[self.__mspec.arch])
+            profiler = rocprof_v1_profiler(self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch])
         elif self.__profiler_mode == "rocprofv2":
             from omniperf_profile.profiler_rocprof_v2 import rocprof_v2_profiler
-            profiler = rocprof_v2_profiler(self.__args, self.__profiler_mode, self.__soc[self.__mspec.arch])        
+            profiler = rocprof_v2_profiler(self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch])        
         elif self.__profiler_mode == "rocscope":
             from omniperf_profile.profiler_rocscope import rocscope_profiler
-            profiler = rocscope_profiler(self.__args, self.__profiler_mode, self.__soc[self.__mspec.arch])
+            profiler = rocscope_profiler(self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch])
         else:
             logging.error("Unsupported profiler")
             sys.exit(1)
@@ -225,11 +227,11 @@ class Omniperf:
         # -----------------------
         # run profiling workflow
         #-----------------------
-        self.__soc[self.__mspec.arch].profiling_setup()
+        self.__soc[self.__mspec.gpu_arch].profiling_setup()
         profiler.pre_processing()
         profiler.run_profiling(self.__version["ver"], config.prog)
         profiler.post_processing()
-        self.__soc[self.__mspec.arch].post_profiling()
+        self.__soc[self.__mspec.gpu_arch].post_profiling()
 
         return
 

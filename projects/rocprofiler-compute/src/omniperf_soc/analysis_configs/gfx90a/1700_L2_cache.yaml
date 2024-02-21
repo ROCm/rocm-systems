@@ -18,11 +18,11 @@ Panel Config:
           tips: Tips
         metric:
           Utilization:
-            value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($L2Banks) * GRBM_GUI_ACTIVE)))
+            value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($total_l2_chan) * GRBM_GUI_ACTIVE)))
             unit: pct
             tips:
           Bandwidth:
-            value: ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp)))) / ((($sclk / 1000) * 128) * TO_INT($L2Banks)))
+            value: ((100 * AVG(((TCC_REQ_sum * 128) / (End_Timestamp - Start_Timestamp)))) / ((($max_sclk / 1000) * 128) * TO_INT($total_l2_chan)))
             unit: pct
             tips: 
           Hit Rate:

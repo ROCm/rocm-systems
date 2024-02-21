@@ -74,7 +74,7 @@ Panel Config:
             tips:
           Num CUs:
             #alias: num_cu_
-            value: $numCU
+            value: $cu_per_gpu
             tips:
           VGPR:
             #alias: vgpr_
@@ -111,7 +111,7 @@ Panel Config:
           LDS Util:
             #alias: lds_util_
             value:
-              ROUND(AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $numCU))),
+              ROUND(AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $cu_per_gpu))),
               0)
             tips:
           LDS Latency:

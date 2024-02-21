@@ -312,7 +312,7 @@ class OmniProfiler_Base:
         # log basic info
         logging.info(str(prog) + " ver: " + str(version))
         logging.info("Path: " + str(os.path.abspath(self.__args.path)))
-        logging.info("Target: " + str(self._soc._mspec.GPU))
+        logging.info("Target: " + str(self._soc._mspec.gpu_model))
         logging.info("Command: " + str(self.__args.remaining))
         logging.info("Kernel Selection: " + str(self.__args.kernel))
         logging.info("Dispatch Selection: " + str(self.__args.dispatch))

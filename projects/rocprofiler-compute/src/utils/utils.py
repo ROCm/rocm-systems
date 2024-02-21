@@ -210,7 +210,7 @@ def run_prof(fname, profiler_options, workload_dir, mspec):
 
     # set required env var for mi300
     new_env = None
-    if  (mspec.GPU.lower() == "mi300x_a0" or mspec.GPU.lower() == "mi300x_a1" or mspec.GPU.lower() == "mi300a_a0" or mspec.GPU.lower() == "mi300a_a1") and (
+    if  (mspec.gpu_model.lower() == "mi300x_a0" or mspec.gpu_model.lower() == "mi300x_a1" or mspec.gpu_model.lower() == "mi300a_a0" or mspec.gpu_model.lower() == "mi300a_a1") and (
         os.path.basename(fname) == "pmc_perf_13.txt"
         or os.path.basename(fname) == "pmc_perf_14.txt"
         or os.path.basename(fname) == "pmc_perf_15.txt"
@@ -232,7 +232,7 @@ def run_prof(fname, profiler_options, workload_dir, mspec):
     if new_env:
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
-        hbm_stack_num = get_hbm_stack_num(mspec.GPU, mspec.memory_partition)
+        hbm_stack_num = get_hbm_stack_num(mspec.gpu_model, mspec.memory_partition)
         df = flatten_tcc_info_across_hbm_stacks(
             f, hbm_stack_num, int(mspec.L2Banks)
         )
@@ -308,7 +308,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
         blocks += t
     else:
         blocks += ip_blocks
-    if mspec.arch == "gfx90a" and (not skip_roof):
+    if mspec.gpu_arch == "gfx90a" and (not skip_roof):
         blocks.append("roofline")
     df['ip_blocks'] = "|".join(blocks)
 
@@ -396,7 +396,7 @@ def mibench(args, mspec):
             + "-"
             + distro_map[target_binary["distro"]]
             + "-"
-            + mspec.GPU.lower()
+            + mspec.gpu_model.lower()
             + "-rocm"
             + target_binary["rocm_ver"]
         )

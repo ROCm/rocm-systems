@@ -18,7 +18,7 @@ Panel Config:
           tips: Tips
         metric:
           Bandwidth:
-            value: AVG(((SQC_DCACHE_REQ * 100000) / (($sclk * $numSQC)
+            value: AVG(((SQC_DCACHE_REQ * 100000) / (($max_sclk * $sqc_per_gpu)
               * (End_Timestamp - Start_Timestamp))))
             unit: Pct of Peak
             tips:
@@ -29,7 +29,7 @@ Panel Config:
             tips:
           sL1D-L2 BW:
             value: AVG(((SQC_TC_DATA_READ_REQ + SQC_TC_DATA_WRITE_REQ + SQC_TC_DATA_ATOMIC_REQ) * 100000)
-                        / (2 * ($sclk * $numSQC) * (End_Timestamp - Start_Timestamp)))
+                        / (2 * ($max_sclk * $sqc_per_gpu) * (End_Timestamp - Start_Timestamp)))
             unit: Pct of Peak
             tips:
         comparable: false # for now

@@ -54,7 +54,7 @@ VERSION_LOC = [
 class MachineSpecs:
     def __init__(self, args, sysinfo=None):
         if not sysinfo is None:
-            self.arch = sysinfo.iloc[0]["arch"]
+            self.gpu_arch = sysinfo.iloc[0]["gpu_arch"]
             return
         # read timestamp info
         now = datetime.now()
@@ -76,16 +76,22 @@ class MachineSpecs:
         os_release = path("/etc/os-release").read_text()
         
         self.hostname: str = socket.gethostname()
-        self.CPU: str = search(r"^model name\s*: (.*?)$", cpuinfo)
+        self.cpu_model: str = search(r"^model name\s*: (.*?)$", cpuinfo)
         self.sbios: str = (
             path("/sys/class/dmi/id/bios_vendor").read_text().strip()
             + path("/sys/class/dmi/id/bios_version").read_text().strip()
         )
-        self.kernel_version: str = search(r"version (\S*)", version)
-        self.ram: str = search(r"MemTotal:\s*(\S*)", meminfo)
-        self.distro: str = search(r'PRETTY_NAME="(.*?)"', os_release)
-        if self.distro is None:
-            self.distro = ""
+        self.linux_kernel_version: str = search(r"version (\S*)", version)
+        self.amd_gpu_kernel_version: str = None
+        if self.amd_gpu_kernel_version is None: #TODO: Extract amdgpu kernel version
+            self.amd_gpu_kernel_version = ""
+        self.cpu_memory: str = search(r"MemTotal:\s*(\S*)", meminfo)
+        self.gpu_memory: str = None #TODO: Extract total gpu memory
+        if self.gpu_memory is None:
+            self.gpu_memory = ""
+        self.linux_distro: str = search(r'PRETTY_NAME="(.*?)"', os_release)
+        if self.linux_distro is None:
+            self.linux_distro = ""
         self.rocm_version: str = get_rocm_ver().strip()
         #FIXME: use device
         self.vbios: str = search(
@@ -105,12 +111,12 @@ class MachineSpecs:
         ##########################################
         ## B. SoC Specs
         ##########################################
-        self.arch: str = self.detect_arch()[0]
-        self.L1: str = None
-        self.L2: str = None
-        self.CU: str = None
-        self.SIMD: str = None
-        self.SE: str = None
+        self.gpu_arch: str = self.detect_arch()[0]
+        self.gpu_l1: str = None
+        self.gpu_l2: str = None
+        self.cu_per_gpu: str = None
+        self.simd_per_cu: str = None
+        self.se_per_gpu: str = None
         self.wave_size: str = None
         self.workgroup_max_size: str = None
         self.max_sclk: str = None
@@ -118,26 +124,26 @@ class MachineSpecs:
         self.cur_sclk: str = None
         self.cur_mclk: str = None
         self.max_waves_per_cu: str = None
-        self.GPU: str = None
-        self.L2Banks: str = None
-        self.LDSBanks: str = None
-        self.numSQC: str = None
-        self.numPipes: str = None
-        self.totalL2Banks: str = None
-        self.hbmBW: str = None
+        self.gpu_model: str = None
+        self.L2Banks: str = None #NB: This only used in flatten_tcc_info_across_hbm_stacks()
+        self.lds_banks_per_cu: str = None 
+        self.sqc_per_gpu: str = None
+        self.pipes_per_gpu: str = None
+        self.total_l2_chan: str = None
+        self.hbm_bw: str = None
         # Load above SoC specs via module import
         try:
-            soc_module = importlib.import_module('omniperf_soc.soc_'+ self.arch)
+            soc_module = importlib.import_module('omniperf_soc.soc_'+ self.gpu_arch)
         except ModuleNotFoundError as e:
-            error("Arch %s marked as supported, but couldn't find class implementation %s." % (self.arch, e))
-        soc_class = getattr(soc_module, self.arch+'_soc')
+            error("Arch %s marked as supported, but couldn't find class implementation %s." % (self.gpu_arch, e))
+        soc_class = getattr(soc_module, self.gpu_arch+'_soc')
         self._rocminfo = self._rocminfo[self.detect_arch()[1] + 1 :] # update rocminfo for target section
         soc_obj = soc_class(args, self)
         # Update arch specific specs
-        self.totalL2Banks: str = total_l2_banks(
-            self.GPU, int(self.L2Banks), self.memory_partition
+        self.total_l2_chan: str = total_l2_banks(
+            self.gpu_model, int(self.L2Banks), self.memory_partition
         )
-        self.hbmBW: str = str(int(self.max_mclk) / 1000 * 32 * self.get_hbm_channels())
+        self.hbm_bw: str = str(int(self.max_mclk) / 1000 * 32 * self.get_hbm_channels())
 
 
     def detect_arch(self):
@@ -156,10 +162,10 @@ class MachineSpecs:
             return (gpu_arch, idx1)
         
     def get_hbm_channels(self):
-        hbmchannels = int(self.totalL2Banks)
+        hbmchannels = int(self.total_l2_chan)
         if (
-            self.GPU.lower() == "mi300a_a0"
-            or self.GPU.lower() == "mi300a_a1"
+            self.gpu_model.lower() == "mi300a_a0"
+            or self.gpu_model.lower() == "mi300a_a1"
         ) and self.memory_partition.lower() == "nps1":
             # we have an extra 32 channels for the CCD
             hbmchannels += 32
@@ -174,12 +180,12 @@ class MachineSpecs:
                 attr_value = getattr(self, attr_name)
                 if attr_value is None:
                     #TODO: use proper logging function when that's merged
-                    logging.warning(f"WARNING: Incomplete class definition for {self.arch}. Expecting populated {attr_name} but detected None.")
+                    logging.warning(f"WARNING: Incomplete class definition for {self.gpu_arch}. Expecting populated {attr_name} but detected None.")
                     all_populated = False
                 data[attr_name] = attr_value
 
         if not all_populated:
-            error("Missing specs fields for %s" % self.arch)
+            error("Missing specs fields for %s" % self.gpu_arch)
         return pd.DataFrame(data, index=[0])
     
     
@@ -187,37 +193,38 @@ class MachineSpecs:
         return dedent(
             f"""\
         Host info:
-            hostname:       {self.hostname}
-            CPU:            {self.CPU}
-            sbios:          {self.sbios}
-            ram:            {self.ram}
-            distro:         {self.distro}
-            kernel_version: {self.kernel_version}
-            rocm_version:   {self.rocm_version}
+            Hostname:                   {self.hostname}
+            CPU Model:                  {self.cpu_model}
+            sbios:                      {self.sbios}
+            CPU Memory:                 {self.cpu_memory}
+            GPU Memory:                 {self.gpu_memory}
+            Linux Distro:               {self.linux_distro}
+            Linux Kernel Version:       {self.linux_kernel_version}
+            AMD GPU Kernel Version:     {self.amd_gpu_kernel_version}
+            ROCm Version:               {self.rocm_version}
         Device info:
-            GPU:                {self.GPU}
-            arch:               {self.arch}
-            vbios:              {self.vbios}
-            L1:                 {self.L1} KB
-            L2:                 {self.L2} KB
-            max_sclk:           {self.max_sclk} MHz
-            max_mclk:           {self.max_mclk} MHz
-            cur_sclk:           {self.cur_sclk} MHz
-            cur_mclk:           {self.cur_mclk} MHz
-            CU:                 {self.CU}
-            SIMD:               {self.SIMD}
-            SE:                 {self.SE}
-            wave_size:          {self.wave_size}
-            workgroup_max_size: {self.workgroup_max_size}
-            max_waves_per_cu:   {self.max_waves_per_cu}
-            L2Banks:            {self.L2Banks}
-            totalL2Banks:       {self.totalL2Banks}
-            LDSBanks:           {self.LDSBanks}
-            numSQC:             {self.numSQC}
-            numPipes:           {self.numPipes}
-            hbmBW:              {self.hbmBW} MB/s
-            compute_partition:  {self.compute_partition}
-            memory_partition:   {self.memory_partition}
+            GPU Model:                  {self.gpu_model}
+            GPU Arch:                   {self.gpu_arch}
+            vbios:                      {self.vbios}
+            GPU L1:                     {self.gpu_l1} KB
+            GPU L2:                     {self.gpu_l2} KB
+            Max SCLK:                   {self.max_sclk} MHz
+            Max MCLK:                   {self.max_mclk} MHz
+            Cur SCLK:                   {self.cur_sclk} MHz
+            Cur MCLK:                   {self.cur_mclk} MHz
+            CU per GPU:                 {self.cu_per_gpu}
+            SIMD per CU:                {self.simd_per_cu}
+            SE per GPU:                 {self.se_per_gpu}
+            Wave Size:                  {self.wave_size}
+            Workgroup Max Size:         {self.workgroup_max_size}
+            Max Waves per CU:           {self.max_waves_per_cu}
+            Total L2 Channels:          {self.total_l2_chan}
+            LDS Banks per CU:           {self.lds_banks_per_cu}
+            SQC per GPU:                {self.sqc_per_gpu}
+            Pipes per GPU:              {self.pipes_per_gpu}
+            HBM BW:                     {self.hbm_bw} MB/s
+            Compute Partition:          {self.compute_partition}
+            Memory Partition:           {self.memory_partition}
         """
         )
 

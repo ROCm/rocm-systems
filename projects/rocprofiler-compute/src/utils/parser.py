@@ -78,9 +78,9 @@ supported_denom = {
 # Build-in defined in mongodb variables:
 build_in_vars = {
     "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), \
-              0) / $maxWavesPerCU) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
-              / GRBM_GUI_ACTIVE)), 0), $maxWavesPerCU), 8)), $numCU))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $sclk)), 0)",
+              0) / $max_waves_per_cu) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
+              / GRBM_GUI_ACTIVE)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
+    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)",
 }
 
 supported_call = {
@@ -414,8 +414,8 @@ def calc_builtin_var(var, sys_info):
     """
     if isinstance(var, int):
         return var
-    elif isinstance(var, str) and var.startswith("$totalL2Banks"):
-        return sys_info.totalL2Banks
+    elif isinstance(var, str) and var.startswith("$total_l2_chan"):
+        return sys_info.total_l2_chan
     else:
         print("Don't support", var)
         sys.exit(1)
@@ -679,20 +679,18 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
         print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
         sys.exit(1)
 
-    ammolite__numSE = sys_info.SE
-    ammolite__numPipes = sys_info.numPipes
-    ammolite__numCU = sys_info.CU
-    ammolite__numSIMD = sys_info.SIMD
-    ammolite__numWavesPerCU = sys_info.max_waves_per_cu  # todo: check do we still need it
-    ammolite__numSQC = sys_info.numSQC
-    ammolite__L2Banks = sys_info.L2Banks
-    ammolite__LDSBanks = sys_info.LDSBanks
-    ammolite__freq = sys_info.cur_sclk  # todo: check do we still need it
-    ammolite__mclk = sys_info.cur_mclk
-    ammolite__sclk = sys_info.max_sclk
-    ammolite__maxWavesPerCU = sys_info.max_waves_per_cu
-    ammolite__hbmBW = sys_info.hbmBW
-    ammolite__totalL2Banks = calc_builtin_var("$totalL2Banks", sys_info)
+    ammolite__se_per_gpu = sys_info.se_per_gpu
+    ammolite__pipes_per_gpu = sys_info.pipes_per_gpu
+    ammolite__cu_per_gpu = sys_info.cu_per_gpu
+    ammolite__simd_per_cu = sys_info.simd_per_cu # not used
+    ammolite__sqc_per_gpu = sys_info.sqc_per_gpu
+    ammolite__lds_banks_per_cu = sys_info.lds_banks_per_cu
+    ammolite__cur_sclk = sys_info.cur_sclk  # not used
+    ammolite__mclk = sys_info.cur_mclk # not used
+    ammolite__max_sclk = sys_info.max_sclk
+    ammolite__max_waves_per_cu = sys_info.max_waves_per_cu
+    ammolite__hbm_bw = sys_info.hbm_bw
+    ammolite__total_l2_chan = calc_builtin_var("$total_l2_chan", sys_info)
 
     # TODO: fix all $normUnit in Unit column or title
 

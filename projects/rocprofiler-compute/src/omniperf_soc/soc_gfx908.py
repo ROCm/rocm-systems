@@ -52,12 +52,12 @@ class gfx908_soc (OmniSoC_Base):
 
         # Set arch specific specs
         self._mspec.L2Banks = 32
-        self._mspec.LDSBanks = 32
-        self._mspec.numSQC = 30
-        self._mspec.numPipes = 4
+        self._mspec.lds_banks_per_cu = 32
+        self._mspec.sqc_per_gpu = 30
+        self._mspec.pipes_per_gpu = 4
         # --showmclkrange is broken in Mi100, hardcode freq
-        self._info['max_mclk'] = 1200
-        self._info['cur_mclk'] = 1200
+        self._mspec.max_mclk = 1200
+        self._mspec.cur_mclk = 1200
 
     @demarcate
     def get_profiler_options(self):

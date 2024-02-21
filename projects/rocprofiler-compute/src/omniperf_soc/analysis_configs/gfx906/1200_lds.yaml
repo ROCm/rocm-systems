@@ -18,16 +18,16 @@ Panel Config:
           tips: Tips
         metric:
           Utilization:
-            value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $numCU)))
+            value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
             unit: Pct of Peak
             tips: 
           Access Rate:
-            value: AVG(((200 * SQ_ACTIVE_INST_LDS) / (GRBM_GUI_ACTIVE * $numCU)))
+            value: AVG(((200 * SQ_ACTIVE_INST_LDS) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
             unit: Pct of Peak
             tips: 
           Theoretical Bandwidth (% of Peak):
-            value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
-              / (End_Timestamp - Start_Timestamp)) / (($sclk * $numCU) * 0.00128)))
+            value: AVG((((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
+              / (End_Timestamp - Start_Timestamp)) / (($max_sclk * $cu_per_gpu) * 0.00128)))
             unit: Pct of Peak
             tips: 
           Bank Conflict Rate:
@@ -56,11 +56,11 @@ Panel Config:
             unit: (Instr  + $normUnit)
             tips: 
           Theoretical Bandwidth:
-            avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
+            avg: AVG(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / $denom))
-            min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
+            min: MIN(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / $denom))
-            max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($LDSBanks))
+            max: MAX(((((SQ_LDS_IDX_ACTIVE - SQ_LDS_BANK_CONFLICT) * 4) * TO_INT($lds_banks_per_cu))
               / $denom))
             unit: (Bytes  + $normUnit)
             tips: 

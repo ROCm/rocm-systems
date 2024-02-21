@@ -117,7 +117,7 @@ Panel Config:
               (((100 * TCC_HIT[::_1]) / (TCC_HIT[::_1] + TCC_MISS[::_1])) if ((TCC_HIT[::_1]
               + TCC_MISS[::_1]) != 0) else None)
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_box
 
     - metric_table:
@@ -130,7 +130,7 @@ Panel Config:
           "::_1":
             expr: (TO_INT(TCC_REQ[::_1]) / $denom)
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_box
 
     - metric_table:
@@ -147,7 +147,7 @@ Panel Config:
             write req: AVG((TO_INT(TCC_WRITE[::_1]) / $denom))
             atomic req: AVG((TO_INT(TCC_ATOMIC[::_1]) / $denom))
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
 
     - metric_table:
@@ -164,7 +164,7 @@ Panel Config:
             write req: AVG((TO_INT(TCC_EA0_WRREQ[::_1]) / $denom))
             atomic req: AVG((TO_INT(TCC_EA0_ATOMIC[::_1]) / $denom))
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
 
     # - metric_table:
@@ -187,7 +187,7 @@ Panel Config:
     #           AVG(((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if
     #           (TCC_EA0_ATOMIC[::_1] != 0) else 0))
     #       placeholder_range:
-    #         "::_1": $totalL2Banks
+    #         "::_1": $total_l2_chan
     #     cli_style: simple_multiple_bar
 
     - metric_table:
@@ -202,7 +202,7 @@ Panel Config:
               ((TCC_EA0_RDREQ_LEVEL[::_1] / TCC_EA0_RDREQ[::_1]) if (TCC_EA0_RDREQ[::_1]
               != 0) else None)
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_box
 
     - metric_table:
@@ -217,7 +217,7 @@ Panel Config:
               ((TCC_EA0_WRREQ_LEVEL[::_1] / TCC_EA0_WRREQ[::_1]) if (TCC_EA0_WRREQ[::_1]
               != 0) else None)
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_box
 
     - metric_table:
@@ -231,7 +231,7 @@ Panel Config:
             expr: ((TCC_EA0_ATOMIC_LEVEL[::_1] / TCC_EA0_ATOMIC[::_1]) if
               (TCC_EA0_ATOMIC[::_1] != 0) else 0)
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_box
 
     - metric_table:
@@ -248,7 +248,7 @@ Panel Config:
             ea read stall - gmi: None # Missing perfmon
             ea read stall - dram: None # Missing perfmon
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
 
     - metric_table:
@@ -267,7 +267,7 @@ Panel Config:
             ea write stall - dram: None # Missing perfmon
             ea write stall - starve: AVG((TO_INT(TCC_TOO_MANY_EA_WRREQS_STALL[::_1]) / $denom))
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
 
     - metric_table:
@@ -280,7 +280,7 @@ Panel Config:
           "::_1":
             expr: TCC_TAG_STALL[::_1]
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
         cli_style: simple_box
 
     - metric_table:
@@ -293,6 +293,6 @@ Panel Config:
           "::_1":
             expr: TCC_BUBBLE[::_1]
           placeholder_range:
-            "::_1": $totalL2Banks
+            "::_1": $total_l2_chan
           # tips: Number of 128-byte read requests sent to EA
         cli_style: simple_box

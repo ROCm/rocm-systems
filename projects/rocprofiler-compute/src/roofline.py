@@ -79,7 +79,7 @@ class Roofline:
     def roof_setup(self):
         # set default workload path if not specified
         if self.__run_parameters['workload_dir'] == os.path.join(os.getcwd(), 'workloads'):
-            self.__run_parameters['workload_dir'] = os.path.join(self.__run_parameters['workload_dir'], self.__args.name, self.__mspec.GPU)
+            self.__run_parameters['workload_dir'] = os.path.join(self.__run_parameters['workload_dir'], self.__args.name, self.__mspec.gpu_model)
         # create new directory for roofline if it doesn't exist
         if not os.path.isdir(self.__run_parameters['workload_dir']):
             os.makedirs(self.__run_parameters['workload_dir'])

@@ -26,7 +26,7 @@ Panel Config:
             tips: 
           Bandwidth:
             value: ((100 * AVG(((TCP_TOTAL_CACHE_ACCESSES_sum * 64) / (End_Timestamp - Start_Timestamp))))
-              / ((($sclk / 1000) * 64) * $numCU))
+              / ((($max_sclk / 1000) * 64) * $cu_per_gpu))
             unit: Pct of Peak
             tips: 
           Utilization:
