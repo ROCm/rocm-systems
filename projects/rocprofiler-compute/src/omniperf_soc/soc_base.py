@@ -90,7 +90,7 @@ class OmniSoC_Base():
 
     @demarcate
     def populate_mspec(self):
-        from utils.specs import search, run
+        from utils.specs import search, run, total_sqc
 
         if not hasattr(self._mspec, "_rocminfo"):
             return
@@ -143,6 +143,13 @@ class OmniSoC_Base():
             if key != None:
                 self._mspec.max_waves_per_cu = key
                 break
+        
+        self._mspec.sqc_per_gpu = str(
+            total_sqc(
+                self._mspec.gpu_arch, 
+                self._mspec.cu_per_gpu,
+                self._mspec.se_per_gpu
+            ))
         
         # we get the max mclk from rocm-smi --showmclkrange
         rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)

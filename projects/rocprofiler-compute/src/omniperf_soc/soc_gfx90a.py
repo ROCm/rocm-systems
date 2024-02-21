@@ -59,7 +59,6 @@ class gfx90a_soc (OmniSoC_Base):
         # Set arch specific specs
         self._mspec.L2Banks = 32
         self._mspec.lds_banks_per_cu = 32
-        self._mspec.sqc_per_gpu = 56
         self._mspec.pipes_per_gpu = 4
 
     # -----------------------

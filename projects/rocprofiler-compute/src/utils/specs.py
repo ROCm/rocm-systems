@@ -34,6 +34,7 @@ import logging
 import pandas as pd
 
 from datetime import datetime
+from math import ceil
 from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
@@ -289,6 +290,14 @@ def total_l2_banks(archname, L2Banks, memory_partition):
         totalL2Banks = L2Banks * get_hbm_stack_num(
             archname, memory_partition)
     return str(totalL2Banks)
+
+def total_sqc(archname, numCUs, numSEs):
+    cu_per_se = float(numCUs) / float(numSEs)
+    sq_per_se = cu_per_se / 2
+    if archname.lower() in ['mi50', 'mi100']:
+        sq_per_se = cu_per_se / 3
+    sq_per_se = ceil(sq_per_se)
+    return int(sq_per_se) * int(numSEs)
 
 
 if __name__ == "__main__":
