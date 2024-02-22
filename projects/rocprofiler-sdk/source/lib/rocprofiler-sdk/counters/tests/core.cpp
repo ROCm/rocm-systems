@@ -484,8 +484,10 @@ TEST(core, check_callbacks)
                                                        &check,
                                                        &opt_buff_id),
                              "Could not create buffer");
-            cb_info->buffer                       = opt_buff_id;
-            hsa::Queue::queue_info_session_t sess = {.queue = fq, .correlation_id = &corr_id};
+            cb_info->buffer = opt_buff_id;
+            // hsa::Queue::queue_info_session_t sess = {.queue = fq, .correlation_id = &corr_id};
+            hsa::Queue::queue_info_session_t sess = hsa::Queue::queue_info_session_t{.queue = fq};
+            sess.correlation_id                   = &corr_id;
 
             counters::inst_pkt_t pkts;
             pkts.emplace_back(
