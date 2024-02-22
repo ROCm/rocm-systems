@@ -344,8 +344,8 @@ typedef uint64_t rocprofiler_counter_dimension_id_t;
  */
 typedef union rocprofiler_user_data_t
 {
-    uint64_t value;
-    void*    ptr;
+    uint64_t value;  ///< usage example: set to process id, thread id, etc.
+    void*    ptr;    ///< usage example: set to address of data allocation
 } rocprofiler_user_data_t;
 
 //--------------------------------------------------------------------------------------//
@@ -504,10 +504,12 @@ rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
  */
 typedef struct
 {
-    const char* name;
-    size_t      instance_size;
-    rocprofiler_counter_dimension_id_t
-        id;  //<< Id for this dimension used by @ref rocprofiler_query_record_dimension_position
+    const char*                        name;
+    size_t                             instance_size;
+    rocprofiler_counter_dimension_id_t id;
+
+    /// @var id
+    /// @brief Id for this dimension used by @ref rocprofiler_query_record_dimension_position
 } rocprofiler_record_dimension_info_t;
 
 /**
@@ -515,9 +517,12 @@ typedef struct
  */
 typedef struct
 {
-    rocprofiler_counter_instance_id_t id;
-    double                            counter_value;  //<< counter value
-    rocprofiler_correlation_id_t      corr_id;
+    rocprofiler_counter_instance_id_t id;             ///< counter identifier
+    double                            counter_value;  ///< counter value
+    rocprofiler_correlation_id_t      correlation_id;
+
+    /// @var correlation_id
+    /// @brief Used to correlate the kernel data to an API call
 } rocprofiler_record_counter_t;
 
 /**

@@ -205,9 +205,9 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_record_t data)
 {
     SAVE_DATA_FIELD(context_id);
     SAVE_DATA_FIELD(thread_id);
-    SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(kind);
     SAVE_DATA_FIELD(operation);
+    SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(phase);
 }
 
@@ -217,8 +217,8 @@ save_buffer_tracing_api_record(ArchiveT& ar, Tp data)
 {
     SAVE_DATA_FIELD(size);
     SAVE_DATA_FIELD(kind);
-    SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(operation);
+    SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(start_timestamp);
     SAVE_DATA_FIELD(end_timestamp);
     SAVE_DATA_FIELD(thread_id);
@@ -237,7 +237,7 @@ save(ArchiveT& ar, rocprofiler_record_counter_t data)
 {
     SAVE_DATA_FIELD(id);
     SAVE_DATA_FIELD(counter_value);
-    SAVE_DATA_FIELD(corr_id);
+    SAVE_DATA_FIELD(correlation_id);
 }
 
 template <typename ArchiveT>
@@ -278,8 +278,8 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_copy_record_t data)
 {
     SAVE_DATA_FIELD(size);
     SAVE_DATA_FIELD(kind);
-    SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(operation);
+    SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(start_timestamp);
     SAVE_DATA_FIELD(end_timestamp);
     SAVE_DATA_FIELD(dst_agent_id);

@@ -62,34 +62,9 @@ get_clock_name(clockid_t _id)
         default: break;
     }
     return "CLOCK_UNKNOWN";
+#undef CLOCK_NAME_CASE_STATEMENT
 }
 }  // namespace
-
-clockid_t
-get_accurate_clock_id_impl()
-{
-    auto    clock = CLOCK_MONOTONIC;
-    utsname kernelInfo;
-    if(uname(&kernelInfo) == 0)
-    {
-        try
-        {
-            std::string ver = kernelInfo.release;
-            size_t      idx;
-            int         major = std::stoi(ver, &idx);
-            int         minor = std::stoi(ver.substr(idx + 1));
-            if(major > 4 || ((major == 4) && (minor >= 4)))
-            {
-                clock = CLOCK_MONOTONIC_RAW;
-            }
-        } catch(...)
-        {
-            // Kernel version string doesn't conform to the standard pattern.
-            // Keep using the "safe" (non-RAW) clock.
-        }
-    }
-    return clock;
-}
 
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id)

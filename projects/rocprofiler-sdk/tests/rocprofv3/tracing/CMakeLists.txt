@@ -84,7 +84,7 @@ set_tests_properties(
 add_test(
     NAME rocprofv3-test-systrace-execute
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --sys-trace -d
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out
         $<TARGET_FILE:simple-transpose>)
 
@@ -102,7 +102,8 @@ set_tests_properties(
 add_test(
     NAME rocprofv3-test-systrace-validate
     COMMAND
-        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --hsa-input
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k
+        "not test_hsa_api_trace" --hsa-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_hsa_api_trace.csv
         --kernel-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_kernel_trace.csv

@@ -89,7 +89,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y cmake clang-tidy-11 g++-11 g++-12 libgtest-dev python3-pip
+        apt-get install -y cmake clang-tidy-11 g++-11 g++-12 python3-pip
         update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-11 10
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
@@ -257,7 +257,8 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        apt-get install -y cmake libgtest-dev python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig
+        apt-get update
+        apt-get install -y cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig
         python3 -m pip install -r requirements.txt
         python3 -m pip install pytest pycobertura
 
@@ -356,7 +357,7 @@ jobs:
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 5
-      uses: thollander/actions-comment-pull-request@v2.4.3
+      uses: thollander/actions-comment-pull-request@v2.5.0
       with:
         comment_tag: codecov-report
         filePath: .codecov/report.md
@@ -471,7 +472,8 @@ jobs:
       shell: bash
       run: |
         git config --global --add safe.directory '*'
-        apt-get install -y cmake libgtest-dev python3-pip libasan8 libtsan2 software-properties-common
+        apt-get update
+        apt-get install -y cmake python3-pip libasan8 libtsan2 software-properties-common
         python3 -m pip install -r requirements.txt
         python3 -m pip install pytest
         add-apt-repository ppa:ubuntu-toolchain-r/test

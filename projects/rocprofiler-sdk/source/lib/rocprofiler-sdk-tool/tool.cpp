@@ -52,103 +52,153 @@
 #include <unordered_set>
 #include <vector>
 
-namespace common                     = ::rocprofiler::common;
-namespace tool                       = ::rocprofiler::tool;
-static const uint32_t lds_block_size = 128 * 4;
+namespace common = ::rocprofiler::common;
+namespace tool   = ::rocprofiler::tool;
 
 namespace
-{}  // namespace
+{
+constexpr uint32_t lds_block_size = 128 * 4;
 
-auto&
+auto destructors = new std::vector<std::function<void()>>{};
+
+template <typename Tp>
+Tp&
+get_dereference(Tp* ptr)
+{
+    return *CHECK_NOTNULL(ptr);
+}
+
+template <typename Tp>
+void
+add_destructor(Tp*& ptr)
+{
+    static auto _mutex = std::mutex{};
+    auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+    destructors->emplace_back([&ptr]() {
+        delete ptr;
+        ptr = nullptr;
+    });
+}
+
+#define ADD_DESTRUCTOR(PTR)                                                                        \
+    {                                                                                              \
+        static auto _once = std::once_flag{};                                                      \
+        std::call_once(_once, []() { add_destructor(PTR); });                                      \
+    }
+
+tool::output_file*&
 get_hsa_api_file()
 {
-    static auto _v = tool::output_file{"hsa_api_trace",
-                                       tool::csv::api_csv_encoder{},
-                                       {"Domain",
-                                        "Function",
-                                        "Process_Id",
-                                        "Thread_Id",
-                                        "Correlation_Id",
-                                        "Start_Timestamp",
-                                        "End_Timestamp"}};
+    static auto* _v = new tool::output_file{"hsa_api_trace",
+                                            tool::csv::api_csv_encoder{},
+                                            {"Domain",
+                                             "Function",
+                                             "Process_Id",
+                                             "Thread_Id",
+                                             "Correlation_Id",
+                                             "Start_Timestamp",
+                                             "End_Timestamp"}};
+    ADD_DESTRUCTOR(_v);
     return _v;
 }
 
-auto&
+tool::output_file*&
 get_hip_api_file()
 {
-    static auto _v = tool::output_file{"hip_api_trace",
-                                       tool::csv::api_csv_encoder{},
-                                       {"Domain",
-                                        "Function",
-                                        "Process_Id",
-                                        "Thread_Id",
-                                        "Correlation_Id",
-                                        "Start_Timestamp",
-                                        "End_Timestamp"}};
+    static auto* _v = new tool::output_file{"hip_api_trace",
+                                            tool::csv::api_csv_encoder{},
+                                            {"Domain",
+                                             "Function",
+                                             "Process_Id",
+                                             "Thread_Id",
+                                             "Correlation_Id",
+                                             "Start_Timestamp",
+                                             "End_Timestamp"}};
+    ADD_DESTRUCTOR(_v);
     return _v;
 }
 
-auto&
+tool::output_file*&
 get_kernel_trace_file()
 {
-    static auto _v = tool::output_file{"kernel_trace",
-                                       tool::csv::kernel_trace_csv_encoder{},
-                                       {"Kind",
-                                        "Agent_Id",
-                                        "Queue_Id",
-                                        "Kernel_Id",
-                                        "Kernel_Name",
-                                        "Correlation_Id",
-                                        "Start_Timestamp",
-                                        "End_Timestamp",
-                                        "Private_Segment_Size",
-                                        "Group_Segment_Size",
-                                        "Workgroup_Size_X",
-                                        "Workgroup_Size_Y",
-                                        "Workgroup_Size_Z",
-                                        "Grid_Size_X",
-                                        "Grid_Size_Y",
-                                        "Grid_Size_Z"}};
+    static auto* _v = new tool::output_file{"kernel_trace",
+                                            tool::csv::kernel_trace_csv_encoder{},
+                                            {"Kind",
+                                             "Agent_Id",
+                                             "Queue_Id",
+                                             "Kernel_Id",
+                                             "Kernel_Name",
+                                             "Correlation_Id",
+                                             "Start_Timestamp",
+                                             "End_Timestamp",
+                                             "Private_Segment_Size",
+                                             "Group_Segment_Size",
+                                             "Workgroup_Size_X",
+                                             "Workgroup_Size_Y",
+                                             "Workgroup_Size_Z",
+                                             "Grid_Size_X",
+                                             "Grid_Size_Y",
+                                             "Grid_Size_Z"}};
+    ADD_DESTRUCTOR(_v);
     return _v;
 }
 
-auto&
+tool::output_file*&
 get_counter_collection_file()
 {
-    static auto _v = tool::output_file{"counter_collection",
-                                       tool::csv::counter_collection_csv_encoder{},
-                                       {"Counter_Id",
-                                        "Agent_Id",
-                                        "Queue_Id",
-                                        "Process_Id",
-                                        "Thread_Id",
-                                        "Grid_Size",
-                                        "Kernel-Name",
-                                        "Workgroup_Size",
-                                        "LDS_Block_Size",
-                                        "Scratch_Size",
-                                        "VGPR_Count",
-                                        "SGPR_Count",
-                                        "Counter_Name",
-                                        "Counter_Value"}};
+    static auto* _v = new tool::output_file{"counter_collection",
+                                            tool::csv::counter_collection_csv_encoder{},
+                                            {"Counter_Id",
+                                             "Agent_Id",
+                                             "Queue_Id",
+                                             "Process_Id",
+                                             "Thread_Id",
+                                             "Grid_Size",
+                                             "Kernel-Name",
+                                             "Workgroup_Size",
+                                             "LDS_Block_Size",
+                                             "Scratch_Size",
+                                             "VGPR_Count",
+                                             "SGPR_Count",
+                                             "Counter_Name",
+                                             "Counter_Value"}};
+    ADD_DESTRUCTOR(_v);
     return _v;
 }
 
-auto&
+tool::output_file*&
 get_memory_copy_trace_file()
 {
-    static auto _v = tool::output_file{"memory_copy_trace",
-                                       tool::csv::memory_copy_csv_encoder{},
-                                       {"Kind",
-                                        "Direction",
-                                        "Source_Agent_Id",
-                                        "Destination_Agent_Id",
-                                        "Correlation_Id",
-                                        "Start_Timestamp",
-                                        "End_Timestamp"}};
+    static auto* _v = new tool::output_file{"memory_copy_trace",
+                                            tool::csv::memory_copy_csv_encoder{},
+                                            {"Kind",
+                                             "Direction",
+                                             "Source_Agent_Id",
+                                             "Destination_Agent_Id",
+                                             "Correlation_Id",
+                                             "Start_Timestamp",
+                                             "End_Timestamp"}};
+    ADD_DESTRUCTOR(_v);
     return _v;
 }
+
+tool::output_file*&
+get_marker_api_file()
+{
+    static auto* _v = new tool::output_file{"marker_api_trace",
+                                            tool::csv::marker_csv_encoder{},
+                                            {"Domain",
+                                             "Function",
+                                             "Process_Id",
+                                             "Thread_Id",
+                                             "Correlation_Id",
+                                             "Start_Timestamp",
+                                             "End_Timestamp"}};
+    ADD_DESTRUCTOR(_v);
+    return _v;
+}
+
+#undef ADD_DESTRUCTOR
 
 struct marker_entry
 {
@@ -158,21 +208,6 @@ struct marker_entry
     rocprofiler_user_data_t data    = {};
     std::string             message = {};
 };
-
-auto&
-get_marker_api_file()
-{
-    static auto _v = tool::output_file{"marker_api_trace",
-                                       tool::csv::marker_csv_encoder{},
-                                       {"Domain",
-                                        "Function",
-                                        "Process_Id",
-                                        "Thread_Id",
-                                        "Correlation_Id",
-                                        "Start_Timestamp",
-                                        "End_Timestamp"}};
-    return _v;
-}
 
 struct buffer_ids
 {
@@ -283,7 +318,7 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                                      record.correlation_id.internal,
                                                      user_data->value,
                                                      ts);
-            get_marker_api_file() << ss.str();
+            get_dereference(get_marker_api_file()) << ss.str();
         }
     }
 }
@@ -319,7 +354,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                                          record.correlation_id.internal,
                                                          ts,
                                                          ts);
-                get_marker_api_file() << ss.str();
+                get_dereference(get_marker_api_file()) << ss.str();
             }
         }
         else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA)
@@ -349,7 +384,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 auto ss = std::stringstream{};
                 tool::csv::marker_csv_encoder::write_row(
                     ss, kind_name, val.message, val.pid, val.tid, val.cid, val.data.value, ts);
-                get_marker_api_file() << ss.str();
+                get_dereference(get_marker_api_file()) << ss.str();
             }
         }
         else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA)
@@ -384,7 +419,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                                          _entry.cid,
                                                          _entry.data.value,
                                                          ts);
-                get_marker_api_file() << ss.str();
+                get_dereference(get_marker_api_file()) << ss.str();
 
                 global_range.wlock([](auto& map, auto _key) { return map.erase(_key); }, _id);
             }
@@ -408,7 +443,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
                                                          record.correlation_id.internal,
                                                          user_data->value,
                                                          ts);
-                get_marker_api_file() << ss.str();
+                get_dereference(get_marker_api_file()) << ss.str();
             }
         }
     }
@@ -504,7 +539,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     record->grid_size.y,
                     record->grid_size.z);
 
-                get_kernel_trace_file() << kernel_trace_ss.str();
+                get_dereference(get_kernel_trace_file()) << kernel_trace_ss.str();
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
@@ -525,7 +560,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     record->start_timestamp,
                     record->end_timestamp);
 
-                get_hsa_api_file() << hsa_trace_ss.str();
+                get_dereference(get_hsa_api_file()) << hsa_trace_ss.str();
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
             {
@@ -543,7 +578,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     record->start_timestamp,
                     record->end_timestamp);
 
-                get_memory_copy_trace_file() << memory_copy_trace_ss.str();
+                get_dereference(get_memory_copy_trace_file()) << memory_copy_trace_ss.str();
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
@@ -562,7 +597,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     record->start_timestamp,
                     record->end_timestamp);
 
-                get_hip_api_file() << hip_trace_ss.str();
+                get_dereference(get_hip_api_file()) << hip_trace_ss.str();
             }
             else
             {
@@ -575,7 +610,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
         {
             auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             rocprofiler_tool_kernel_properties_t kernel_properties =
-                GetKernelProperties(profiler_record->corr_id.internal);
+                GetKernelProperties(profiler_record->correlation_id.internal);
             rocprofiler_counter_id_t      counter_id;
             size_t                        pos;
             rocprofiler_counter_info_v0_t version;
@@ -606,7 +641,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 fmt::format("{}[{}]", version.name, pos),
                 profiler_record->counter_value);
 
-            get_counter_collection_file() << counter_collection_ss.str();
+            get_dereference(get_counter_collection_file()) << counter_collection_ss.str();
         }
     }
 }
@@ -925,26 +960,44 @@ tool_fini(void* tool_data)
     flush();
     rocprofiler_stop_context(get_client_ctx());
 
+    if(destructors)
+    {
+        for(const auto& itr : *destructors)
+            itr();
+        delete destructors;
+        destructors = nullptr;
+    }
+
     (void) (tool_data);
 }
+}  // namespace
 
 extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t /*version*/,
-                      const char* /*runtime_version*/,
+rocprofiler_configure(uint32_t                 version,
+                      const char*              runtime_version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
     common::init_logging("ROCPROF_LOG_LEVEL");
     FLAGS_colorlogtostderr = true;
 
-    // only activate if main tool
-    if(priority > 0) return nullptr;
-
     // set the client name
-    id->name = "rocprofiler-tool";
+    id->name = "rocprofv3";
 
     // store client info
     client_identifier = id;
+
+    // note that rocprofv3 is not the primary tool
+    LOG_IF(WARNING, priority > 0) << id->name << " has a priority of " << priority
+                                  << " (not primary tool)";
+
+    // compute major/minor/patch version info
+    uint32_t major = version / 10000;
+    uint32_t minor = (version % 10000) / 100;
+    uint32_t patch = version % 100;
+
+    LOG(INFO) << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
+              << " (" << runtime_version << ")";
 
     // create configure data
     static auto cfg = rocprofiler_tool_configure_result_t{

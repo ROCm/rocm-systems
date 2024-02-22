@@ -43,8 +43,6 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <glog/logging.h>
-
 #include <unistd.h>
 #include <atomic>
 #include <cassert>
@@ -432,7 +430,7 @@ dispatch_callback(rocprofiler_queue_id_t, /*queue_id*/
     // Counters we want to collect (here its SQ_WAVES_sum)
     auto* counters_env = getenv("ROCPROF_COUNTERS");
     if(std::string(counters_env) != "SQ_WAVES_sum")
-        LOG(FATAL) << "Counter not supported in the test tool";
+        throw std::runtime_error{"Counter not supported in the test tool"};
 
     std::set<std::string> counters_to_collect = {"SQ_WAVES_sum"};
     // GPU Counter IDs
@@ -728,9 +726,16 @@ auto buffers = std::array<rocprofiler_buffer_id_t*, 6>{&hsa_api_buffered_buffer,
 
 auto agents = std::vector<rocprofiler_agent_t>{};
 
+rocprofiler_timestamp_t init_time = 0;
+rocprofiler_timestamp_t fini_time = 0;
+rocprofiler_thread_id_t main_tid  = 0;
+
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
+    rocprofiler_get_timestamp(&init_time);
+    rocprofiler_get_thread_id(&main_tid);
+
     assert(tool_data != nullptr);
 
     rocprofiler_available_agents_cb_t iterate_cb =
@@ -998,6 +1003,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 }
 
 void
+write_json(call_stack_t* _call_stack);
+
+void
 tool_fini(void* tool_data)
 {
     static std::atomic_flag _once = ATOMIC_FLAG_INIT;
@@ -1005,6 +1013,8 @@ tool_fini(void* tool_data)
 
     stop();
     flush();
+
+    rocprofiler_get_timestamp(&fini_time);
 
     std::cerr << "[" << getpid() << "][" << __FUNCTION__
               << "] Finalizing... agents=" << agents.size()
@@ -1027,6 +1037,17 @@ tool_fini(void* tool_data)
         _call_stack->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
     }
 
+    write_json(_call_stack);
+
+    std::cerr << "[" << getpid() << "][" << __FUNCTION__ << "] Finalization complete.\n"
+              << std::flush;
+
+    delete _call_stack;
+}
+
+void
+write_json(call_stack_t* _call_stack)
+{
     auto ofname = std::string{"rocprofiler-tool-results.json"};
     if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
 
@@ -1067,6 +1088,14 @@ tool_fini(void* tool_data)
 
         json_ar.setNextName("rocprofiler-sdk-json-tool");
         json_ar.startNode();
+
+        json_ar.setNextName("metadata");
+        json_ar.startNode();
+        json_ar(cereal::make_nvp("pid", getpid()));
+        json_ar(cereal::make_nvp("main_tid", main_tid));
+        json_ar(cereal::make_nvp("init_time", init_time));
+        json_ar(cereal::make_nvp("fini_time", fini_time));
+        json_ar.finishNode();
 
         json_ar(cereal::make_nvp("agents", agents));
         if(_call_stack) json_ar(cereal::make_nvp("call_stack", *_call_stack));
@@ -1114,11 +1143,6 @@ tool_fini(void* tool_data)
     *ofs << std::flush;
 
     if(cleanup) cleanup(ofs);
-
-    std::cerr << "[" << getpid() << "][" << __FUNCTION__ << "] Finalization complete.\n"
-              << std::flush;
-
-    delete _call_stack;
 }
 
 void

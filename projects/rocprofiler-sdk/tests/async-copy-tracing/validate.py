@@ -8,7 +8,8 @@ import pytest
 def node_exists(name, data, min_len=1):
     assert name in data
     assert data[name] is not None
-    assert len(data[name]) >= min_len
+    if isinstance(data[name], (list, tuple, dict, set)):
+        assert len(data[name]) >= min_len
 
 
 def test_data_structure(input_data):
@@ -19,6 +20,12 @@ def test_data_structure(input_data):
 
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
+    node_exists("metadata", sdk_data)
+    node_exists("pid", sdk_data["metadata"])
+    node_exists("main_tid", sdk_data["metadata"])
+    node_exists("init_time", sdk_data["metadata"])
+    node_exists("fini_time", sdk_data["metadata"])
+
     node_exists("agents", sdk_data)
     node_exists("call_stack", sdk_data)
     node_exists("callback_records", sdk_data)
@@ -28,11 +35,15 @@ def test_data_structure(input_data):
     node_exists("code_objects", sdk_data["callback_records"])
     node_exists("kernel_symbols", sdk_data["callback_records"])
     node_exists("hsa_api_traces", sdk_data["callback_records"])
+    node_exists("hip_api_traces", sdk_data["callback_records"], 0)
+    node_exists("marker_api_traces", sdk_data["callback_records"])
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatches", sdk_data["buffer_records"])
     node_exists("memory_copies", sdk_data["buffer_records"], 4)
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
+    node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
+    node_exists("marker_api_traces", sdk_data["buffer_records"])
 
 
 def test_timestamps(input_data):
@@ -41,7 +52,7 @@ def test_timestamps(input_data):
 
     cb_start = {}
     cb_end = {}
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
             cid = itr["record"]["correlation_id"]["internal"]
             phase = itr["record"]["phase"]
@@ -56,18 +67,20 @@ def test_timestamps(input_data):
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["start_timestamp"] <= itr["end_timestamp"]
 
-    for itr in sdk_data["buffer_records"]["memory_copies"]:
-        assert itr["start_timestamp"] <= itr["end_timestamp"]
+    for titr in ["kernel_dispatches", "memory_copies"]:
+        for itr in sdk_data["buffer_records"][titr]:
+            assert itr["start_timestamp"] < itr["end_timestamp"]
+            assert itr["correlation_id"]["internal"] > 0
+            assert itr["correlation_id"]["external"] > 0
+            assert sdk_data["metadata"]["init_time"] < itr["start_timestamp"]
+            assert sdk_data["metadata"]["init_time"] < itr["end_timestamp"]
+            assert sdk_data["metadata"]["fini_time"] > itr["start_timestamp"]
+            assert sdk_data["metadata"]["fini_time"] > itr["end_timestamp"]
 
-    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
-        assert itr["start_timestamp"] < itr["end_timestamp"]
-        assert itr["correlation_id"]["internal"] > 0
-        assert itr["correlation_id"]["external"] > 0
-
-        api_start = cb_start[itr["correlation_id"]["internal"]]
-        api_end = cb_end[itr["correlation_id"]["internal"]]
-        assert api_start < itr["start_timestamp"]
-        assert api_end <= itr["end_timestamp"]
+            api_start = cb_start[itr["correlation_id"]["internal"]]
+            api_end = cb_end[itr["correlation_id"]["internal"]]
+            assert api_start < itr["start_timestamp"]
+            assert api_end <= itr["end_timestamp"]
 
 
 def test_internal_correlation_ids(input_data):
@@ -75,7 +88,7 @@ def test_internal_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     api_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
             api_corr_ids.append(itr["record"]["correlation_id"]["internal"])
 
@@ -101,7 +114,7 @@ def test_external_correlation_ids(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
     extern_corr_ids = []
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
             assert itr["record"]["correlation_id"]["external"] > 0
             assert (
@@ -110,7 +123,7 @@ def test_external_correlation_ids(input_data):
             extern_corr_ids.append(itr["record"]["correlation_id"]["external"])
 
     extern_corr_ids = list(set(sorted(extern_corr_ids)))
-    for titr in ["hsa_api_traces", "marker_api_traces"]:
+    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["correlation_id"]["external"] > 0
             assert itr["thread_id"] == itr["correlation_id"]["external"]

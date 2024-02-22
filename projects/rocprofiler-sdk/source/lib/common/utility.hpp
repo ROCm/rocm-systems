@@ -48,9 +48,6 @@ namespace rocprofiler
 {
 namespace common
 {
-clockid_t
-get_accurate_clock_id_impl();
-
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id);
 
@@ -60,20 +57,6 @@ get_tid()
     // system calls are expensive so store this in a thread-local
     static thread_local uint64_t _v = ::syscall(__NR_gettid);
     return _v;
-}
-
-inline clockid_t
-get_accurate_clock_id()
-{
-    static auto clk_id = get_accurate_clock_id_impl();
-    return clk_id;
-}
-
-inline uint64_t
-get_accurate_clock_period_ns()
-{
-    static auto clk_period = get_clock_period_ns_impl(get_accurate_clock_id());
-    return clk_period;
 }
 
 inline uint64_t
@@ -92,24 +75,17 @@ get_ticks(clockid_t clk_id_v) noexcept
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
 }
 
-// this equates to HSA-runtime library implementation of os::ReadAccurateClock()
+// CLOCK_MONOTONIC_RAW equates to HSA-runtime library implementation of os::ReadAccurateClock()
+// CLOCK_BOOTTIME equates to HSA-runtime library implementation of os::ReadSystemClock()
+template <int ClockT = CLOCK_BOOTTIME>
 inline uint64_t
 timestamp_ns()
 {
-    auto&& clk_period = get_accurate_clock_period_ns();
-    if(ROCPROFILER_LIKELY(clk_period == 1)) return get_ticks(get_accurate_clock_id());
-    return get_ticks(get_accurate_clock_id()) / clk_period;
-}
+    constexpr auto _clk        = ClockT;
+    static auto    _clk_period = get_clock_period_ns_impl(_clk);
 
-// this equates to HSA-runtime library implementation of os::ReadSystemClock()
-inline uint64_t
-system_timestamp_ns()
-{
-    constexpr auto boottime_clk        = CLOCK_BOOTTIME;
-    static auto    boottime_clk_period = get_clock_period_ns_impl(boottime_clk);
-
-    if(ROCPROFILER_LIKELY(boottime_clk_period == 1)) return get_ticks(boottime_clk);
-    return get_ticks(boottime_clk) / boottime_clk_period;
+    if(ROCPROFILER_LIKELY(_clk_period == 1)) return get_ticks(_clk);
+    return get_ticks(_clk) / _clk_period;
 }
 
 std::vector<std::string>

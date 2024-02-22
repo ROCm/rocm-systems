@@ -265,10 +265,10 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
     if(const auto* _corr_id = correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        if(const auto* extrenal =
+        if(const auto* external =
                rocprofiler::common::get_val(extern_corr_ids, info->internal_context))
         {
-            _corr_id_v.external = *extrenal;
+            _corr_id_v.external = *external;
         }
     }
 
@@ -380,10 +380,10 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
     if(const auto* _corr_id = session.correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        if(const auto* extrenal =
+        if(const auto* external =
                rocprofiler::common::get_val(session.extern_corr_ids, info->internal_context))
         {
-            _corr_id_v.external = *extrenal;
+            _corr_id_v.external = *external;
         }
     }
 
@@ -396,7 +396,7 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
 
         for(auto& val : *ret)
         {
-            val.corr_id = _corr_id_v;
+            val.correlation_id = _corr_id_v;
             if(buf)
                 buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS, 0, val);
             else

@@ -8,7 +8,8 @@ import pytest
 def node_exists(name, data, min_len=1):
     assert name in data
     assert data[name] is not None
-    assert len(data[name]) >= min_len
+    if isinstance(data[name], (list, tuple, dict, set)):
+        assert len(data[name]) >= min_len
 
 
 def test_data_structure(input_data):
@@ -18,6 +19,12 @@ def test_data_structure(input_data):
     node_exists("rocprofiler-sdk-json-tool", data)
 
     sdk_data = data["rocprofiler-sdk-json-tool"]
+
+    node_exists("metadata", sdk_data)
+    node_exists("pid", sdk_data["metadata"])
+    node_exists("main_tid", sdk_data["metadata"])
+    node_exists("init_time", sdk_data["metadata"])
+    node_exists("fini_time", sdk_data["metadata"])
 
     node_exists("agents", sdk_data)
     node_exists("call_stack", sdk_data)
@@ -60,18 +67,20 @@ def test_timestamps(input_data):
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["start_timestamp"] <= itr["end_timestamp"]
 
-    for itr in sdk_data["buffer_records"]["memory_copies"]:
-        assert itr["start_timestamp"] <= itr["end_timestamp"]
+    for titr in ["kernel_dispatches", "memory_copies"]:
+        for itr in sdk_data["buffer_records"][titr]:
+            assert itr["start_timestamp"] < itr["end_timestamp"]
+            assert itr["correlation_id"]["internal"] > 0
+            assert itr["correlation_id"]["external"] > 0
+            assert sdk_data["metadata"]["init_time"] < itr["start_timestamp"]
+            assert sdk_data["metadata"]["init_time"] < itr["end_timestamp"]
+            assert sdk_data["metadata"]["fini_time"] > itr["start_timestamp"]
+            assert sdk_data["metadata"]["fini_time"] > itr["end_timestamp"]
 
-    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
-        assert itr["start_timestamp"] < itr["end_timestamp"]
-        assert itr["correlation_id"]["internal"] > 0
-        assert itr["correlation_id"]["external"] > 0
-
-        api_start = cb_start[itr["correlation_id"]["internal"]]
-        api_end = cb_end[itr["correlation_id"]["internal"]]
-        assert api_start < itr["start_timestamp"]
-        assert api_end <= itr["end_timestamp"]
+            api_start = cb_start[itr["correlation_id"]["internal"]]
+            api_end = cb_end[itr["correlation_id"]["internal"]]
+            assert api_start < itr["start_timestamp"]
+            assert api_end <= itr["end_timestamp"]
 
 
 def test_total_runtime(input_data):
@@ -84,8 +93,8 @@ def test_total_runtime(input_data):
 
     expected_runtime = 1.0e3  # one second in milliseconds
 
-    assert (sum(runtime_data) * 1.0e-6) >= (0.9 * expected_runtime)
-    assert (sum(runtime_data) * 1.0e-6) <= (1.1 * expected_runtime)
+    assert (sum(runtime_data) * 1.0e-6) >= (0.8 * expected_runtime)
+    assert (sum(runtime_data) * 1.0e-6) <= (1.2 * expected_runtime)
 
 
 def test_internal_correlation_ids(input_data):

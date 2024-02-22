@@ -79,7 +79,7 @@ record_callback(rocprofiler_queue_id_t,
     for(size_t i = 0; i < record_count; ++i)
     {
         ss << "(Id: " << record_data[i].id << " Value [D]: " << record_data[i].counter_value
-           << " Corr_Id: " << record_data[i].corr_id.internal << "),";
+           << " Corr_Id: " << record_data[i].correlation_id.internal << "),";
     }
     auto* output_stream = static_cast<std::ostream*>(callback_data_args);
     if(!output_stream) throw std::runtime_error{"nullptr to output stream"};

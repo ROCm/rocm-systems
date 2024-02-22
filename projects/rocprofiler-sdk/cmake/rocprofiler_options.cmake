@@ -56,9 +56,6 @@ if(ROCPROFILER_BUILD_TESTS)
         "Enable building gtest (Google testing) library internally" ON ADVANCED)
 endif()
 
-rocprofiler_add_option(ROCPROFILER_DEBUG_TRACE "Enable debug tracing" OFF ADVANCED)
-rocprofiler_add_option(ROCPROFILER_LD_AQLPROFILE
-                       "Enable direct loading of AQL-profile HSA extension" OFF ADVANCED)
 rocprofiler_add_option(ROCPROFILER_ENABLE_CLANG_TIDY "Enable clang-tidy checks" OFF
                        ADVANCED)
 

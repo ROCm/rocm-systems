@@ -99,7 +99,7 @@ buffered_callback(rocprofiler_context_id_t,
             // Print the returned counter data.
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             ss << "(Id: " << record->id << " Value [D]: " << record->counter_value
-               << " Corr_Id: " << record->corr_id.internal << "),";
+               << " Corr_Id: " << record->correlation_id.internal << "),";
         }
     }
 
