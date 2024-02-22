@@ -18,7 +18,7 @@ Panel Config:
           tips: Tips
         metric:
           Utilization:
-            value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($total_l2_chan) * GRBM_GUI_ACTIVE)))
+            value: AVG(((TCC_BUSY_sum * 100) / (TO_INT($total_l2_chan) * $GRBM_GUI_ACTIVE_PER_XCD)))
             unit: pct
             tips:
           Bandwidth:

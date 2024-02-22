@@ -132,6 +132,7 @@ class MachineSpecs:
         self.pipes_per_gpu: str = None
         self.total_l2_chan: str = None
         self.hbm_bw: str = None
+        self.num_xcd: str = None
         # Load above SoC specs via module import
         try:
             soc_module = importlib.import_module('omniperf_soc.soc_'+ self.gpu_arch)
@@ -226,6 +227,7 @@ class MachineSpecs:
             HBM BW:                     {self.hbm_bw} MB/s
             Compute Partition:          {self.compute_partition}
             Memory Partition:           {self.memory_partition}
+            Num XCDs:                   {self.num_xcd}
         """
         )
 
@@ -298,6 +300,37 @@ def total_sqc(archname, numCUs, numSEs):
         sq_per_se = cu_per_se / 3
     sq_per_se = ceil(sq_per_se)
     return int(sq_per_se) * int(numSEs)
+
+def total_xcds(archname, compute_partition):
+    # check MI300 has a valid compute partition
+    mi300a_archs = ["mi300a_a0", "mi300a_a1"]
+    mi300x_archs = ["mi300x_a0", "mi300x_a1"]
+    if archname.lower() in mi300a_archs + mi300x_archs \
+        and compute_partition == "NA":
+            error("Invalid compute partition found for {}".format(archname))
+    if archname.lower() not in mi300a_archs + mi300x_archs:
+        return 1
+    # from the whitepaper
+    # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
+    if compute_partition.lower() == "spx":
+        if archname.lower() in mi300a_archs:
+            return 6
+        if archname.lower() in mi300x_archs:
+            return 8
+    if compute_partition.lower() == "tpx":
+        if archname.lower() in mi300a_archs:
+            return 2
+    if compute_partition.lower() == "dpx":
+        if archname.lower() in mi300x_archs:
+            return 4
+    if compute_partition.lower() == "qpx":
+        if archname.lower() in mi300x_archs:
+            return 2
+    if compute_partition.lower() == "cpx":
+        if archname.lower() in mi300x_archs:
+            return 2
+    error("Unknown compute partition / arch found for {} / {}".format(
+        compute_partition, archname))
 
 
 if __name__ == "__main__":

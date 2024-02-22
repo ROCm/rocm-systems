@@ -98,9 +98,9 @@ Panel Config:
             unit: ns
             tips: 
           Kernel Time (Cycles):
-            avg: AVG(GRBM_GUI_ACTIVE)
-            min: MIN(GRBM_GUI_ACTIVE)
-            max: MAX(GRBM_GUI_ACTIVE)
+            avg: AVG($GRBM_GUI_ACTIVE_PER_XCD)
+            min: MIN($GRBM_GUI_ACTIVE_PER_XCD)
+            max: MAX($GRBM_GUI_ACTIVE_PER_XCD)
             unit: Cycle
             tips: 
           Instructions per wavefront:
@@ -134,9 +134,9 @@ Panel Config:
             unit: (Cycles + $normUnit)
             tips: 
           Wavefront Occupancy:
-            avg: AVG((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE))
-            min: MIN((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE))
-            max: MAX((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE))
+            avg: AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+            min: MIN((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
+            max: MAX((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
             unit: Wavefronts
             coll_level: SQ_LEVEL_WAVES
             tips: 

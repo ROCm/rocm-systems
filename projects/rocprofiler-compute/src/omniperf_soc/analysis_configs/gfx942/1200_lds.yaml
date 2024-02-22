@@ -18,11 +18,11 @@ Panel Config:
           tips: Tips
         metric:
           Utilization:
-            value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+            value: AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
             tips:
           Access Rate:
-            value: AVG(((200 * SQ_ACTIVE_INST_LDS) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+            value: AVG(((200 * SQ_ACTIVE_INST_LDS) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: Pct of Peak
             tips:
           Theoretical Bandwidth (% of Peak):

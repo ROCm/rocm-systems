@@ -84,36 +84,36 @@ Panel Config:
             pop: ((100 * $numActiveCUs) / $cu_per_gpu)
             tips: 
           SALU Utilization:
-            value: AVG(((100 * SQ_ACTIVE_INST_SCA) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+            value: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
             peak: 100
-            pop: AVG(((100 * SQ_ACTIVE_INST_SCA) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+            pop: AVG(((100 * SQ_ACTIVE_INST_SCA) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             tips: 
           VALU Utilization:
-            value: AVG(((100 * SQ_ACTIVE_INST_VALU) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+            value: AVG(((100 * SQ_ACTIVE_INST_VALU) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             unit: pct
             peak: 100
-            pop: AVG(((100 * SQ_ACTIVE_INST_VALU) / (GRBM_GUI_ACTIVE * $cu_per_gpu)))
+            pop: AVG(((100 * SQ_ACTIVE_INST_VALU) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)))
             tips: 
           MFMA Utilization:
-            value: AVG(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / ((GRBM_GUI_ACTIVE * $cu_per_gpu)
+            value: AVG(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / (($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
               * 4)))
             unit: pct
             peak: 100
-            pop: AVG(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / ((GRBM_GUI_ACTIVE * $cu_per_gpu)
+            pop: AVG(((100 * SQ_VALU_MFMA_BUSY_CYCLES) / (($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
               * 4)))
             tips: 
           VMEM Utilization:
-            value: AVG((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / GRBM_GUI_ACTIVE) / $cu_per_gpu))
+            value: AVG((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             unit: pct
             peak: 100
-            pop: AVG((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / GRBM_GUI_ACTIVE) / $cu_per_gpu))
+            pop: AVG((((100 * (SQ_ACTIVE_INST_FLAT+SQ_ACTIVE_INST_VMEM)) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             tips: 
           Branch Utilization:
-            value: AVG((((100 * SQ_ACTIVE_INST_MISC) / GRBM_GUI_ACTIVE) / $cu_per_gpu))
+            value: AVG((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             unit: pct
             peak: 100
-            pop: AVG((((100 * SQ_ACTIVE_INST_MISC) / GRBM_GUI_ACTIVE) / $cu_per_gpu))
+            pop: AVG((((100 * SQ_ACTIVE_INST_MISC) / $GRBM_GUI_ACTIVE_PER_XCD) / $cu_per_gpu))
             tips: 
           VALU Active Threads:
             value: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
@@ -130,10 +130,10 @@ Panel Config:
             pop: ((100 * AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))) / 5)
             tips: 
           Wavefront Occupancy:
-            value: AVG((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE))
+            value: AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD))
             unit: Wavefronts
             peak: ($max_waves_per_cu * $cu_per_gpu)
-            pop: (100 * AVG(((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE) / ($max_waves_per_cu
+            pop: (100 * AVG(((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD) / ($max_waves_per_cu
               * $cu_per_gpu))))
             coll_level: SQ_LEVEL_WAVES
             tips: 

@@ -23,7 +23,7 @@ Panel Config:
           #TODO: double check wave_occupancy
           Wavefront Occupancy:
             #alias: wave_occ_
-            value: ROUND(AVG((SQ_ACCUM_PREV_HIRES / GRBM_GUI_ACTIVE) / $numActiveCUs), 0)
+            value: ROUND(AVG((SQ_ACCUM_PREV_HIRES / $GRBM_GUI_ACTIVE_PER_XCD) / $numActiveCUs), 0)
             coll_level: SQ_LEVEL_WAVES
             tips:
           Wave Life:
@@ -111,7 +111,7 @@ Panel Config:
           LDS Util:
             #alias: lds_util_
             value:
-              ROUND(AVG(((100 * SQ_LDS_IDX_ACTIVE) / (GRBM_GUI_ACTIVE * $cu_per_gpu))),
+              ROUND(AVG(((100 * SQ_LDS_IDX_ACTIVE) / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu))),
               0)
             tips:
           LDS Latency:

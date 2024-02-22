@@ -90,7 +90,7 @@ class OmniSoC_Base():
 
     @demarcate
     def populate_mspec(self):
-        from utils.specs import search, run, total_sqc
+        from utils.specs import search, run, total_sqc, total_xcds
 
         if not hasattr(self._mspec, "_rocminfo"):
             return
@@ -160,9 +160,6 @@ class OmniSoC_Base():
         self._mspec.cur_sclk = self._mspec.max_sclk
         self._mspec.cur_mclk = self._mspec.max_mclk
 
-        self._mspec.compute_partition = ""
-        self._mspec.memory_partition = ""
-
         # specify gpu name for gfx942 hardware
         self._mspec.gpu_model = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].keys())[0].upper()
         if self._mspec.gpu_model == "MI300":
@@ -171,6 +168,8 @@ class OmniSoC_Base():
             self._mspec.gpu_model = "MI300A_A1"
         if (self._mspec.gpu_arch == "gfx942") and ("MI300A" not in self._mspec._rocminfo):
             self._mspec.gpu_model = "MI300X_A1"
+
+        self._mspec.num_xcd = str(total_xcds(self._mspec.gpu_model, self._mspec.compute_partition))
 
     @demarcate
     def perfmon_filter(self, roofline_perfmon_only: bool):
