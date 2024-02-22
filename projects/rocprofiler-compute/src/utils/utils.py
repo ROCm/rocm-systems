@@ -39,13 +39,16 @@ import config
 
 rocprof_cmd = ""
 
+
 def demarcate(function):
     def wrap_function(*args, **kwargs):
         logging.trace("----- [entering function] -> %s()" % (function.__qualname__))
         result = function(*args, **kwargs)
         logging.trace("----- [exiting  function] -> %s()" % function.__qualname__)
         return result
+
     return wrap_function
+
 
 def error(message):
     logging.error("")
@@ -53,12 +56,13 @@ def error(message):
     logging.error("")
     sys.exit(1)
 
+
 def trace_logger(message, *args, **kwargs):
     logging.log(logging.TRACE, message, *args, **kwargs)
 
+
 def get_version(omniperf_home) -> dict:
-    """Return Omniperf versioning info
-    """
+    """Return Omniperf versioning info"""
     # symantic version info
     version = os.path.join(omniperf_home.parent, "VERSION")
     try:
@@ -96,9 +100,9 @@ def get_version(omniperf_home) -> dict:
     versionData = {"version": VER, "sha": SHA, "mode": MODE}
     return versionData
 
+
 def get_version_display(version, sha, mode):
-    """Pretty print versioning info
-    """
+    """Pretty print versioning info"""
     buf = io.StringIO()
     print("-" * 40, file=buf)
     print("Omniperf version: %s (%s)" % (version, mode), file=buf)
@@ -106,30 +110,36 @@ def get_version_display(version, sha, mode):
     print("-" * 40, file=buf)
     return buf.getvalue()
 
+
 def detect_rocprof():
-    """Detect loaded rocprof version. Resolve path and set cmd globally.
-    """
+    """Detect loaded rocprof version. Resolve path and set cmd globally."""
     global rocprof_cmd
     # detect rocprof
     if not "ROCPROF" in os.environ.keys():
         rocprof_cmd = "rocprof"
     else:
         rocprof_cmd = os.environ["ROCPROF"]
-    
+
     # resolve rocprof path
     rocprof_path = shutil.which(rocprof_cmd)
 
     if not rocprof_path:
         rocprof_cmd = "rocprof"
-        logging.warning("Warning: Unable to resolve path to %s binary. Reverting to default." % rocprof_cmd)
+        logging.warning(
+            "Warning: Unable to resolve path to %s binary. Reverting to default."
+            % rocprof_cmd
+        )
         rocprof_path = shutil.which(rocprof_cmd)
         if not rocprof_path:
-            error("Please verify installation or set ROCPROF environment variable with full path.")
+            error(
+                "Please verify installation or set ROCPROF environment variable with full path."
+            )
     else:
         # Resolve any sym links in file path
         rocprof_path = os.path.realpath(rocprof_path.rstrip("\n"))
         logging.info("ROC Profiler: " + str(rocprof_path))
-        return rocprof_cmd #TODO: Do we still need to return this? It's not being used in the function call
+        return rocprof_cmd  # TODO: Do we still need to return this? It's not being used in the function call
+
 
 def capture_subprocess_output(subprocess_args, new_env=None):
     # Start subprocess
@@ -180,7 +190,7 @@ def capture_subprocess_output(subprocess_args, new_env=None):
     return_code = process.wait()
     selector.close()
 
-    success = (return_code == 0)
+    success = return_code == 0
 
     # Store buffered output
     output = buf.getvalue()
@@ -188,22 +198,26 @@ def capture_subprocess_output(subprocess_args, new_env=None):
 
     return (success, output)
 
+
 def run_prof(fname, profiler_options, target, workload_dir):
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
     m_specs = specs.get_machine_specs(0)
-    
+
     logging.debug("pmc file: %s" % str(os.path.basename(fname)))
 
     # standard rocprof options
-    default_options = [
-        "-i", fname
-    ]
+    default_options = ["-i", fname]
     options = default_options + profiler_options
 
     # set required env var for mi300
     new_env = None
-    if  (target.lower() == "mi300x_a0" or target.lower() == "mi300x_a1" or target.lower() == "mi300a_a0" or target.lower() == "mi300a_a1") and (
+    if (
+        target.lower() == "mi300x_a0"
+        or target.lower() == "mi300x_a1"
+        or target.lower() == "mi300a_a0"
+        or target.lower() == "mi300a_a1"
+    ) and (
         os.path.basename(fname) == "pmc_perf_13.txt"
         or os.path.basename(fname) == "pmc_perf_14.txt"
         or os.path.basename(fname) == "pmc_perf_15.txt"
@@ -215,13 +229,9 @@ def run_prof(fname, profiler_options, target, workload_dir):
 
     # profile the app
     if new_env:
-         success, output = capture_subprocess_output(
-            [ rocprof_cmd ] + options, new_env
-        )
+        success, output = capture_subprocess_output([rocprof_cmd] + options, new_env)
     else:
-        success, output = capture_subprocess_output(
-            [ rocprof_cmd ] + options
-        )
+        success, output = capture_subprocess_output([rocprof_cmd] + options)
 
     if not success:
         error(output)
@@ -230,9 +240,7 @@ def run_prof(fname, profiler_options, target, workload_dir):
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
         hbm_stack_num = get_hbm_stack_num(target, m_specs.memory_partition)
-        df = flatten_tcc_info_across_hbm_stacks(
-            f, hbm_stack_num, int(m_specs.L2Banks)
-        )
+        df = flatten_tcc_info_across_hbm_stacks(f, hbm_stack_num, int(m_specs.L2Banks))
         df.to_csv(f, index=False)
 
     if os.path.exists(workload_dir + "/out"):
@@ -270,9 +278,10 @@ def run_prof(fname, profiler_options, target, workload_dir):
     df = pd.read_csv(workload_dir + "/" + fbase + ".csv")
     df.rename(columns=output_headers, inplace=True)
     df.to_csv(workload_dir + "/" + fbase + ".csv", index=False)
-    
+
     # write rocprof output to logging
     logging.info(output)
+
 
 def replace_timestamps(workload_dir):
     df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
@@ -286,8 +295,11 @@ def replace_timestamps(workload_dir):
                 df_pmc_perf["End_Timestamp"] = df_stamps["End_Timestamp"]
                 df_pmc_perf.to_csv(fname, index=False)
     else:
-        warning = "WARNING: Incomplete profiling data detected. Unable to update timestamps."
+        warning = (
+            "WARNING: Incomplete profiling data detected. Unable to update timestamps."
+        )
         logging.warning(warning + "\n")
+
 
 def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only):
     # Record system information
@@ -367,6 +379,7 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     sysinfo.write(",".join(param))
     sysinfo.close()
 
+
 def detect_roofline():
     mspec = specs.get_machine_specs(0)
     rocm_ver = mspec.rocm_version[:1]
@@ -389,8 +402,9 @@ def detect_roofline():
         # Must be a valid RHEL machine
         distro = "platform:el8"
     elif (
-        (type(sles_distro) == str and len(sles_distro) >= 3) and # confirm string and len
-        sles_distro[:2] == "15" and int(sles_distro[3]) >= 3 # SLES15 and SP >= 3
+        (type(sles_distro) == str and len(sles_distro) >= 3)
+        and sles_distro[:2] == "15"  # confirm string and len
+        and int(sles_distro[3]) >= 3  # SLES15 and SP >= 3
     ):
         # Must be a valid SLES machine
         # Use SP3 binary for all forward compatible service pack versions
@@ -399,11 +413,14 @@ def detect_roofline():
         # Must be a valid Ubuntu machine
         distro = ubuntu_distro
     else:
-        logging.error("ROOFLINE ERROR: Cannot find a valid binary for your operating system")
+        logging.error(
+            "ROOFLINE ERROR: Cannot find a valid binary for your operating system"
+        )
         sys.exit(1)
 
     target_binary = {"rocm_ver": rocm_ver, "distro": distro}
     return target_binary
+
 
 def run_rocscope(args, fname):
     # profile the app
@@ -417,23 +434,21 @@ def run_rocscope(args, fname):
                 args.path,
                 "-n",
                 args.name,
-                "-t",   
+                "-t",
                 fname,
                 "--",
             ]
             for i in args.remaining.split():
                 rs_cmd.append(i)
             logging.info(rs_cmd)
-            success, output = capture_subprocess_output(
-                rs_cmd
-            )
+            success, output = capture_subprocess_output(rs_cmd)
             if not success:
                 logging.error(result.stderr.decode("ascii"))
                 sys.exit(1)
 
+
 def mibench(args):
-    """Run roofline microbenchmark to generate peak BW and FLOP measurements.
-    """
+    """Run roofline microbenchmark to generate peak BW and FLOP measurements."""
     logging.info("[roofline] No roofline data found. Generating...")
     distro_map = {"platform:el8": "rhel8", "15.3": "sle15sp3", "20.04": "ubuntu20_04"}
 
@@ -454,7 +469,9 @@ def mibench(args):
 
     # Distro is valid but cant find rocm ver
     if not os.path.exists(path_to_binary):
-        logging.error("ROOFLINE ERROR: Unable to locate expected binary (%s)." % path_to_binary)
+        logging.error(
+            "ROOFLINE ERROR: Unable to locate expected binary (%s)." % path_to_binary
+        )
         sys.exit(1)
 
     subprocess.run(
@@ -465,8 +482,9 @@ def mibench(args):
             "-d",
             str(args.device),
         ],
-        check=True
+        check=True,
     )
+
 
 def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
     """
@@ -532,6 +550,7 @@ def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
 
     return df
 
+
 def get_hbm_stack_num(gpu_name, memory_partition):
     """
     Get total HBM stack numbers based on  memory partition for MI300.
@@ -564,15 +583,15 @@ def get_hbm_stack_num(gpu_name, memory_partition):
     else:
         # Fixme: add proper numbers for other archs
         return -1
-    
+
+
 def get_submodules(package_name):
-    """List all submodules for a target package
-    """
+    """List all submodules for a target package"""
     import importlib
     import pkgutil
 
     submodules = []
-    
+
     # walk all submodules in target package
     package = importlib.import_module(package_name)
     for _, name, _ in pkgutil.walk_packages(package.__path__):
@@ -583,15 +602,17 @@ def get_submodules(package_name):
 
     return submodules
 
+
 def is_workload_empty(path):
-    """Peek workload directory to verify valid profiling output
-    """
+    """Peek workload directory to verify valid profiling output"""
     pmc_perf_path = path + "/pmc_perf.csv"
     if os.path.isfile(pmc_perf_path):
         temp_df = pd.read_csv(pmc_perf_path)
         if temp_df.dropna().empty:
-            error("[profiling] Error. Found empty cells in %s.\nProfiling data could be corrupt." % pmc_perf_path)
+            error(
+                "[profiling] Error. Found empty cells in %s.\nProfiling data could be corrupt."
+                % pmc_perf_path
+            )
 
     else:
         error("[profiling] Error. Cannot find pmc_perf.csv in %s" % path)
-    

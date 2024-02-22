@@ -170,9 +170,11 @@ def show_all(args, runs, archConfigs, output):
                                     else:
                                         cur_df_copy = copy.deepcopy(cur_df)
                                         cur_df_copy[header] = [
-                                            round(float(x), args.decimal)
-                                            if x != ""
-                                            else x
+                                            (
+                                                round(float(x), args.decimal)
+                                                if x != ""
+                                                else x
+                                            )
                                             for x in base_df[header]
                                         ]
                                         df = pd.concat([df, cur_df_copy[header]], axis=1)
@@ -214,11 +216,13 @@ def show_all(args, runs, archConfigs, output):
                     # fash for now.
                     ss += (
                         tabulate(
-                            df.transpose()
-                            if type != "raw_csv_table"
-                            and "columnwise" in table_config
-                            and table_config["columnwise"] == True
-                            else df,
+                            (
+                                df.transpose()
+                                if type != "raw_csv_table"
+                                and "columnwise" in table_config
+                                and table_config["columnwise"] == True
+                                else df
+                            ),
                             headers="keys",
                             tablefmt="fancy_grid",
                             floatfmt="." + str(args.decimal) + "f",

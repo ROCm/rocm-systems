@@ -223,10 +223,12 @@ class Roofline:
                         "{} GB/s".format(
                             to_int(self.__ceiling_data[cache_level.lower()][2])
                         ),
-                        None
-                        if self.__run_parameters["is_standalone"]
-                        else "{} GB/s".format(
-                            to_int(self.__ceiling_data[cache_level.lower()][2])
+                        (
+                            None
+                            if self.__run_parameters["is_standalone"]
+                            else "{} GB/s".format(
+                                to_int(self.__ceiling_data[cache_level.lower()][2])
+                            )
                         ),
                     ],
                     textposition="top right",
@@ -243,9 +245,13 @@ class Roofline:
                     mode=plot_mode,
                     hovertemplate="<b>%{text}</b>",
                     text=[
-                        None
-                        if self.__run_parameters["is_standalone"]
-                        else "{} GFLOP/s".format(to_int(self.__ceiling_data["valu"][2])),
+                        (
+                            None
+                            if self.__run_parameters["is_standalone"]
+                            else "{} GFLOP/s".format(
+                                to_int(self.__ceiling_data["valu"][2])
+                            )
+                        ),
                         "{} GFLOP/s".format(to_int(self.__ceiling_data["valu"][2])),
                     ],
                     textposition="top left",
@@ -265,9 +271,11 @@ class Roofline:
                 mode=plot_mode,
                 hovertemplate="<b>%{text}</b>",
                 text=[
-                    None
-                    if self.__run_parameters["is_standalone"]
-                    else "{} GFLOP/s".format(to_int(self.__ceiling_data["mfma"][2])),
+                    (
+                        None
+                        if self.__run_parameters["is_standalone"]
+                        else "{} GFLOP/s".format(to_int(self.__ceiling_data["mfma"][2]))
+                    ),
                     "{} GFLOP/s".format(to_int(self.__ceiling_data["mfma"][2])),
                 ],
                 textposition=pos,
@@ -285,9 +293,9 @@ class Roofline:
                     name="ai_l1",
                     mode="markers",
                     marker={"color": "#00CC96"},
-                    marker_symbol=SYMBOLS
-                    if self.__run_parameters["include_kernel_names"]
-                    else None,
+                    marker_symbol=(
+                        SYMBOLS if self.__run_parameters["include_kernel_names"] else None
+                    ),
                 )
             )
             fig.add_trace(
@@ -297,9 +305,9 @@ class Roofline:
                     name="ai_l2",
                     mode="markers",
                     marker={"color": "#EF553B"},
-                    marker_symbol=SYMBOLS
-                    if self.__run_parameters["include_kernel_names"]
-                    else None,
+                    marker_symbol=(
+                        SYMBOLS if self.__run_parameters["include_kernel_names"] else None
+                    ),
                 )
             )
             fig.add_trace(
@@ -309,9 +317,9 @@ class Roofline:
                     name="ai_hbm",
                     mode="markers",
                     marker={"color": "#636EFA"},
-                    marker_symbol=SYMBOLS
-                    if self.__run_parameters["include_kernel_names"]
-                    else None,
+                    marker_symbol=(
+                        SYMBOLS if self.__run_parameters["include_kernel_names"] else None
+                    ),
                 )
             )
 

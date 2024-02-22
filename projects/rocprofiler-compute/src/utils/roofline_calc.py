@@ -195,21 +195,11 @@ def calc_ai(sort_type, ret_df):
     df = df.sort_values(by=["Kernel_Name"])
     df = df.reset_index(drop=True)
 
-    total_flops = (
-        valu_flops
-    ) = (
-        mfma_flops_bf16
-    ) = (
-        mfma_flops_f16
-    ) = (
-        mfma_iops_i8
-    ) = (
+    total_flops = valu_flops = mfma_flops_bf16 = mfma_flops_f16 = mfma_iops_i8 = (
         mfma_flops_f32
-    ) = (
-        mfma_flops_f64
-    ) = (
-        lds_data
-    ) = L1cache_data = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
+    ) = mfma_flops_f64 = lds_data = L1cache_data = L2cache_data = hbm_data = calls = (
+        totalDuration
+    ) = avgDuration = 0.0
 
     kernelName = ""
 
@@ -390,23 +380,11 @@ def calc_ai(sort_type, ret_df):
                     kernelName, idx, calls
                 )
             )
-            total_flops = (
-                valu_flops
-            ) = (
-                mfma_flops_bf16
-            ) = (
-                mfma_flops_f16
-            ) = (
-                mfma_iops_i8
-            ) = (
+            total_flops = valu_flops = mfma_flops_bf16 = mfma_flops_f16 = mfma_iops_i8 = (
                 mfma_flops_f32
-            ) = (
-                mfma_flops_f64
-            ) = (
-                lds_data
-            ) = (
-                L1cache_data
-            ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
+            ) = mfma_flops_f64 = lds_data = L1cache_data = L2cache_data = hbm_data = (
+                calls
+            ) = totalDuration = avgDuration = 0.0
 
         if sort_type == "dispatches":
             myList.append(
@@ -428,23 +406,11 @@ def calc_ai(sort_type, ret_df):
                     avgDuration,
                 )
             )
-            total_flops = (
-                valu_flops
-            ) = (
-                mfma_flops_bf16
-            ) = (
-                mfma_flops_f16
-            ) = (
-                mfma_iops_i8
-            ) = (
+            total_flops = valu_flops = mfma_flops_bf16 = mfma_flops_f16 = mfma_iops_i8 = (
                 mfma_flops_f32
-            ) = (
-                mfma_flops_f64
-            ) = (
-                lds_data
-            ) = (
-                L1cache_data
-            ) = L2cache_data = hbm_data = calls = totalDuration = avgDuration = 0.0
+            ) = mfma_flops_f64 = lds_data = L1cache_data = L2cache_data = hbm_data = (
+                calls
+            ) = totalDuration = avgDuration = 0.0
 
     myList.sort(key=lambda x: x.totalDuration, reverse=True)
 
@@ -456,24 +422,32 @@ def calc_ai(sort_type, ret_df):
     # Create list of top 5 intensities
     while i < TOP_N and i != len(myList):
         kernelNames.append(myList[i].KernelName)
-        intensities["ai_l1"].append(
-            myList[i].total_flops / myList[i].L1cache_data
-        ) if myList[i].L1cache_data else intensities["ai_l1"].append(0)
+        (
+            intensities["ai_l1"].append(myList[i].total_flops / myList[i].L1cache_data)
+            if myList[i].L1cache_data
+            else intensities["ai_l1"].append(0)
+        )
         # print("cur_ai_L1", myList[i].total_flops/myList[i].L1cache_data) if myList[i].L1cache_data else print("null")
         # print()
-        intensities["ai_l2"].append(
-            myList[i].total_flops / myList[i].L2cache_data
-        ) if myList[i].L2cache_data else intensities["ai_l2"].append(0)
+        (
+            intensities["ai_l2"].append(myList[i].total_flops / myList[i].L2cache_data)
+            if myList[i].L2cache_data
+            else intensities["ai_l2"].append(0)
+        )
         # print("cur_ai_L2", myList[i].total_flops/myList[i].L2cache_data) if myList[i].L2cache_data else print("null")
         # print()
-        intensities["ai_hbm"].append(
-            myList[i].total_flops / myList[i].hbm_data
-        ) if myList[i].hbm_data else intensities["ai_hbm"].append(0)
+        (
+            intensities["ai_hbm"].append(myList[i].total_flops / myList[i].hbm_data)
+            if myList[i].hbm_data
+            else intensities["ai_hbm"].append(0)
+        )
         # print("cur_ai_hbm", myList[i].total_flops/myList[i].hbm_data) if myList[i].hbm_data else print("null")
         # print()
-        curr_perf.append(myList[i].total_flops / myList[i].avgDuration) if myList[
-            i
-        ].avgDuration else curr_perf.append(0)
+        (
+            curr_perf.append(myList[i].total_flops / myList[i].avgDuration)
+            if myList[i].avgDuration
+            else curr_perf.append(0)
+        )
         # print("cur_perf", myList[i].total_flops/myList[i].avgDuration) if myList[i].avgDuration else print("null")
 
         i += 1
