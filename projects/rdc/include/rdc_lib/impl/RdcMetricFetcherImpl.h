@@ -67,7 +67,7 @@ struct MetricTask {
   std::function<void(RdcMetricFetcherImpl&, RdcFieldKey)> task;
 };
 
-class RdcMetricFetcherImpl : public RdcMetricFetcher {
+class RdcMetricFetcherImpl final : public RdcMetricFetcher {
  public:
   rdc_status_t fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
                                rdc_field_value* value) override;
@@ -75,7 +75,7 @@ class RdcMetricFetcherImpl : public RdcMetricFetcher {
       rdc_gpu_field_t* fields, uint32_t fields_count,
       std::vector<rdc_gpu_field_value_t>& results) override;  // NOLINT
   RdcMetricFetcherImpl();
-  ~RdcMetricFetcherImpl();
+  ~RdcMetricFetcherImpl() final;
 
   rdc_status_t acquire_smi_handle(RdcFieldKey fk) override;
   rdc_status_t delete_smi_handle(RdcFieldKey fk) override;

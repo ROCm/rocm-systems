@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
 #include "rdc_lib/impl/RdcRVSLib.h"
 #include "rdc_lib/impl/RdcRasLib.h"
+#include "rdc_lib/impl/RdcRocpLib.h"
 #include "rdc_lib/impl/RdcRocrLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 #include "rdc_lib/impl/RdcTelemetryModule.h"
@@ -41,7 +42,7 @@ namespace rdc {
 // pass shared_ptr instead of creating it
 template <typename T>
 rdc_status_t RdcModuleMgrImpl::insert_modules(std::shared_ptr<T> ptr) {
-  static_assert(std::is_base_of_v<RdcDiagnostic, T> || std::is_base_of_v<RdcTelemetryModule, T>);
+  static_assert(std::is_base_of_v<RdcDiagnostic, T> || std::is_base_of_v<RdcTelemetry, T>);
   RDC_LOG(RDC_DEBUG, "Inserting module: " << typeid(T).name());
   // same module can service multiple subsystems
   // e.g. Diagnostics and Telemetry
@@ -57,7 +58,7 @@ rdc_status_t RdcModuleMgrImpl::insert_modules(std::shared_ptr<T> ptr) {
 // base case
 template <typename T>
 rdc_status_t RdcModuleMgrImpl::insert_modules() {
-  static_assert(std::is_base_of_v<RdcDiagnostic, T> || std::is_base_of_v<RdcTelemetryModule, T>);
+  static_assert(std::is_base_of_v<RdcDiagnostic, T> || std::is_base_of_v<RdcTelemetry, T>);
   try {
     auto ptr = std::make_shared<T>();
     return insert_modules(ptr);
@@ -88,7 +89,7 @@ RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher) : fetcher
   }
 
   // all other modules get initialized by insert_modules
-  insert_modules<RdcRasLib, RdcRVSLib, RdcRocrLib>();
+  insert_modules<RdcRasLib, RdcRVSLib, RdcRocrLib, RdcRocpLib>();
 }
 
 RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {

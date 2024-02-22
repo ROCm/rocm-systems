@@ -83,9 +83,9 @@ If only the RDC libraries are needed (i.e. only "embedded mode" is required), th
 
 ## Building RDC library without ROCM Run time (optional)
 
-The user can choose to not build RDC diagnostic ROCM Run time. This will eliminate the need for ROCM Run time. To build in this way, -DBUILD_ROCRTEST=off should be passed on the the cmake command line:
+The user can choose to not build RDC diagnostic ROCM Run time. This will eliminate the need for ROCM Run time. To build in this way, -DBUILD_RUNTIME=off should be passed on the the cmake command line:
 
-    cmake -B build -DBUILD_ROCRTEST=off
+    cmake -B build -DBUILD_RUNTIME=off
 
 ## Update System Library Path
 

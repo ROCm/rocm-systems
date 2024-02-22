@@ -1,7 +1,7 @@
-# This module provides a rocmtools::rocmtools package
+# This module provides a rocprofiler::rocprofiler package
 # You can specify the ROCM directory by setting ROCM_DIR
 
-set(NAME rocmtools)
+set(NAME rocprofiler)
 
 if(NOT DEFINED ROCM_DIR)
     set(ROCM_DIR "/opt/rocm")

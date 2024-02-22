@@ -36,7 +36,7 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-class RdcEmbeddedHandler : public RdcHandler {
+class RdcEmbeddedHandler final : public RdcHandler {
  public:
   // Job API
   rdc_status_t rdc_job_start_stats(rdc_gpu_group_t groupId, const char job_id[64],
@@ -91,7 +91,7 @@ class RdcEmbeddedHandler : public RdcHandler {
   rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;
 
   explicit RdcEmbeddedHandler(rdc_operation_mode_t op_mode);
-  ~RdcEmbeddedHandler();
+  ~RdcEmbeddedHandler() final;
 
  private:
   rdc_status_t get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges);

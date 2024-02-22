@@ -36,6 +36,8 @@ THE SOFTWARE.
 
 amd::rdc::RdcRocpBase rocp;
 
+rdc_status_t rdc_module_init(uint64_t flags) { return RDC_ST_OK; }
+
 // get supported field ids
 // TODO: Query fields with rocprofiler
 rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint32_t* field_count) {
@@ -54,7 +56,7 @@ rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint
 }
 
 // Fetch
-rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fields_count,
+rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint32_t fields_count,
                                             rdc_field_value_f callback, void* user_data) {
   //
   // Bulk fetch fields
@@ -69,7 +71,8 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fi
   rdc_gpu_field_value_t values[BULK_FIELDS_MAX];
   uint32_t bulk_count = 0;
   rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
-  double value = 0;
+  double data;
+
   for (uint32_t i = 0; i < fields_count; i++) {
     if (bulk_count >= BULK_FIELDS_MAX) {
       status = callback(values, bulk_count, user_data);
@@ -80,14 +83,13 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fi
       bulk_count = 0;
     }
 
-    status = rocp.rocp_lookup(std::make_pair(fields[i].gpu_index, fields[i].field_id), &value);
-
+    status = rocp.rocp_lookup(std::make_pair(fields[i].gpu_index, fields[i].field_id), &data);
     // get value
     values[bulk_count].gpu_index = fields[i].gpu_index;
     values[bulk_count].field_value.type = DOUBLE;
     values[bulk_count].field_value.status = status;
     values[bulk_count].field_value.ts = curTime;
-    values[bulk_count].field_value.value.dbl = value;
+    values[bulk_count].field_value.value.dbl = data;
     values[bulk_count].field_value.field_id = fields[i].field_id;
     bulk_count++;
   }
@@ -106,8 +108,7 @@ rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t* fields, uint32_t fields
   rdc_status_t status = RDC_ST_OK;
   for (uint32_t i = 0; i < fields_count; i++) {
     RDC_LOG(RDC_DEBUG, "WATCH: " << fields[i].field_id);
-    const rdc_status_t temp_status =
-        rocp.create_session(std::make_pair(fields[i].gpu_index, fields[i].field_id));
+    const rdc_status_t temp_status = RDC_ST_OK;
     if (temp_status != RDC_ST_OK) {
       status = temp_status;
     }
@@ -119,8 +120,7 @@ rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields, uint32_t fiel
   rdc_status_t status = RDC_ST_OK;
   for (uint32_t i = 0; i < fields_count; i++) {
     RDC_LOG(RDC_DEBUG, "UNWATCH: " << fields[i].field_id);
-    const rdc_status_t temp_status =
-        rocp.destroy_session(std::make_pair(fields[i].gpu_index, fields[i].field_id));
+    const rdc_status_t temp_status = RDC_ST_OK;
     // return last non-ok status
     if (temp_status != RDC_ST_OK) {
       status = temp_status;

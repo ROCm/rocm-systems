@@ -247,6 +247,12 @@ typedef enum {
   RDC_FI_XGMI_6_WRITE_KB,  //!< XGMI_6 accumulated data write size (KB)
   RDC_FI_XGMI_7_WRITE_KB,  //!< XGMI_7 accumulated data write size (KB)
 
+  /**
+   * @brief ROC-profiler related fields
+   */
+  RDC_FI_PROF_GPU_UTIL = 800,  //!<
+  RDC_FI_PROF_TA_BUSY_AVR,     //!<
+
   /*
    * @brief Raw XGMI counter events
    */

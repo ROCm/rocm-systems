@@ -98,6 +98,13 @@ FLD_DESC_ENT(RDC_FI_XGMI_7_WRITE_KB,     "XGMI7 accumulated data write size (KB)
 
 
 
+// ROCProfiler fields
+// This doesn't map to rocprofiler counters directly
+// See counter_map in rdc/include/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.h
+// See metrics.xml in rocprofiler
+FLD_DESC_ENT(RDC_FI_PROF_GPU_UTIL,    "", "PROF_GPU_UTIL",    false)
+FLD_DESC_ENT(RDC_FI_PROF_TA_BUSY_AVR, "", "PROF_TA_BUSY_AVR", false)
+
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_REQ_TX,     "Outgoing requests to neighbor 0",             "XGMI_REQ_0",       false)
