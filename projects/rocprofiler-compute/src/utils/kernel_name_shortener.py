@@ -125,7 +125,7 @@ def kernel_name_shortener(workload_dir, level):
         if not os.path.isfile(cpp_filt):
             error("Could not resolve c++filt in expected directory: %s" % cpp_filt)
 
-        for fpath in glob.glob(workload_dir + "/*.csv"):
+        for fpath in glob.glob(workload_dir + "/[SQpmc]*.csv"):
             try:
                 orig_df = pd.read_csv(
                     fpath,
