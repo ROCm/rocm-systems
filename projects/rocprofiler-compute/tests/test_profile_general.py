@@ -258,11 +258,11 @@ def gpu_soc():
     gpu_id = list(filter(soc_regex.match, rocminfo))[0].split()[1]
 
     if gpu_id == "gfx906":
-        return "mi50"
+        return "MI50"
     elif gpu_id == "gfx908":
-        return "mi100"
+        return "MI100"
     elif gpu_id == "gfx90a":
-        return "mi200"
+        return "MI200"
     elif gpu_id == "gfx900":
         return "vega10"
     else:
@@ -273,7 +273,7 @@ def gpu_soc():
 
 soc = gpu_soc()
 
-Baseline_dir = os.path.realpath("tests/workloads/Baseline_vcopy_" + soc)
+Baseline_dir = os.path.realpath("tests/workloads/vcopy" + soc)
 
 
 def log_counter(file_dict, test_name):
