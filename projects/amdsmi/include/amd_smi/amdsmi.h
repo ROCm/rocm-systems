@@ -67,12 +67,12 @@ extern "C" {
  * Initialization flags may be OR'd together and passed to ::amdsmi_init().
  */
 typedef enum {
-  AMDSMI_INIT_ALL_PROCESSORS = 0x0,           // Default option
+  AMDSMI_INIT_ALL_PROCESSORS = 0xFFFFFFFF,  //!< Initialize all processors
   AMDSMI_INIT_AMD_CPUS = (1 << 0),
   AMDSMI_INIT_AMD_GPUS = (1 << 1),
   AMDSMI_INIT_NON_AMD_CPUS = (1 << 2),
   AMDSMI_INIT_NON_AMD_GPUS = (1 << 3),
-  AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS)
+  AMDSMI_INIT_AMD_APUS = (AMDSMI_INIT_AMD_CPUS | AMDSMI_INIT_AMD_GPUS) // Default option
 } amdsmi_init_flags_t;
 
 /* Maximum size definitions AMDSMI */
@@ -500,15 +500,15 @@ typedef enum {
 
 typedef struct {
   struct pcie_static_ {
-    uint16_t max_pcie_lanes;              //!< maximum number of PCIe lanes
+    uint16_t max_pcie_width;              //!< maximum number of PCIe lanes
     uint32_t max_pcie_speed;              //!< maximum PCIe speed
     uint32_t pcie_interface_version;      //!< PCIe interface version
     amdsmi_card_form_factor_t slot_type;  //!< card form factor
     uint64_t reserved[10];
   } pcie_static;
   struct pcie_metric_ {
+    uint16_t pcie_width;                  //!< current PCIe width
     uint32_t pcie_speed;                  //!< current PCIe speed in MT/s
-    uint16_t pcie_lanes;                  //!< current PCIe width
     uint32_t pcie_bandwidth;              //!< current PCIe bandwidth Mb/s
     uint64_t pcie_replay_count;           //!< total number of the replays issued on the PCIe link
     uint64_t pcie_l0_to_recovery_count;   //!< total number of times the PCIe link transitioned from L0 to the recovery state
@@ -541,17 +541,17 @@ typedef struct {
  * @brief cache properties
  */
 typedef enum {
-  AMDSMI_CACHE_PROPERTIES_ENABLED = 0x00000001,
-  AMDSMI_CACHE_PROPERTIES_DATA_CACHE = 0x00000002,
-  AMDSMI_CACHE_PROPERTIES_INST_CACHE = 0x00000004,
-  AMDSMI_CACHE_PROPERTIES_CPU_CACHE = 0x00000008,
-  AMDSMI_CACHE_PROPERTIES_SIMD_CACHE = 0x00000010,
-} amdsmi_cache_properties_type_t;
+  AMDSMI_CACHE_PROPERTY_ENABLED = 0x00000001,
+  AMDSMI_CACHE_PROPERTY_DATA_CACHE = 0x00000002,
+  AMDSMI_CACHE_PROPERTY_INST_CACHE = 0x00000004,
+  AMDSMI_CACHE_PROPERTY_CPU_CACHE = 0x00000008,
+  AMDSMI_CACHE_PROPERTY_SIMD_CACHE = 0x00000010,
+} amdsmi_cache_property_type_t;
 
 typedef struct {
   uint32_t num_cache_types;
   struct cache_ {
-    uint32_t cache_properties;  // amdsmi_cache_properties_type_t which is a bitmask
+    uint32_t cache_properties;  // amdsmi_cache_property_type_t which is a bitmask
     uint32_t cache_size; /* In KB */
     uint32_t cache_level;
     uint32_t max_num_cu_shared;  /* Indicates how many Compute Units share this cache instance */
@@ -1608,6 +1608,19 @@ typedef struct __attribute__((__packed__)){
     uint32_t gfxclk_frequency[8];
 } amdsmi_hsmp_metrics_table_t;
 
+/**
+ * @brief hsmp frequency limit source names
+ */
+static char* const amdsmi_hsmp_freqlimit_src_names[] = {
+        "cHTC-Active",
+        "PROCHOT",
+        "TDC limit",
+        "PPT Limit",
+        "OPN Max",
+        "Reliability Limit",
+        "APML Agent",
+        "HSMP Agent"
+};
 #endif
 
 /*****************************************************************************/

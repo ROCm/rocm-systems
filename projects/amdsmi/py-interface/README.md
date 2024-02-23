@@ -73,7 +73,7 @@ except AmdSmiException as e:
 
 ### amdsmi_init
 
-Description: Initialize amdsmi lib and connect to driver
+Description: Dynamically initialize amdsmi with amd_hsmp and amdgpu drivers
 
 Input parameters: `None`
 
@@ -87,7 +87,12 @@ Example:
 
 ```python
 try:
-    amdsmi_init()
+    init_flag = amdsmi_init()
+    # Print out integer bitmask of initialized drivers
+    # 1 is for amd_hsmp
+    # 2 is for amdgpu
+    # 3 is for amd_hsmp and amdgpu
+    print(init_flag)
     # continue with amdsmi
 except AmdSmiException as e:
     print("Init failed")
@@ -476,8 +481,7 @@ Schema:
 
 ```JSON
 {
-    cache: {"type" : "number"},
-    cache_properties:  
+    cache_properties:
         {
             "type" : "array",
             "items" : {"type" : "string"}
@@ -491,7 +495,6 @@ Schema:
 
 Field | Description
 ---|---
-`cache` | cache index from 0-9
 `cache_properties` | list of up to 4 cache property type strings. Ex. data ("DATA_CACHE"), instruction ("INST_CACHE"), CPU ("CPU_CACHE"), or SIMD ("SIMD_CACHE").
 `cache_size` | size of cache in KB
 `cache_level` | level of cache
@@ -515,13 +518,11 @@ try:
         for device in devices:
             cache_info = amdsmi_get_gpu_cache_info(device)
             for cache_index, cache_values in cache_info.items():
-                print(cache_index)
+                print(cache_values['cache_properties'])
                 print(cache_values['cache_size'])
                 print(cache_values['cache_level'])
-                print(cache_values['data_cache'])
-                print(cache_values['instruction_cache'])
-                print(cache_values['cpu_cache'])
-                print(cache_values['simd_cache'])
+                print(cache_values['max_num_cu_shared'])
+                print(cache_values['num_cache_instance'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -790,7 +791,7 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`pcie_lanes`| pcie lanes in use
+`pcie_width`| pcie lanes in use
 `pcie_speed`| current pcie speed
 `pcie_interface_version`| current pcie generation
 
@@ -810,7 +811,7 @@ try:
     else:
         for device in devices:
             pcie_link_status = amdsmi_get_pcie_info(device)
-            print(pcie_link_status["pcie_lanes"])
+            print(pcie_link_status["pcie_width"])
             print(pcie_link_status["pcie_speed"])
             print(pcie_link_status["pcie_interface_version"])
 except AmdSmiException as e:
@@ -988,8 +989,8 @@ Field | Description
 `model_number` | Board serial number
 `product_serial` | Product serial
 `fru_id` | FRU ID
-`manufacturer_name` | Manufacturer name
 `product_name` | Product name
+`manufacturer_name` | Manufacturer name
 
 Exceptions that can be thrown by `amdsmi_get_gpu_board_info` function:
 
@@ -1006,8 +1007,8 @@ try:
     print(board_info["model_number"])
     print(board_info["product_serial"])
     print(board_info["fru_id"])
-    print(board_info["manufacturer_name"])
     print(board_info["product_name"])
+    print(board_info["manufacturer_name"])
 except AmdSmiException as e:
     print(e)
 ```

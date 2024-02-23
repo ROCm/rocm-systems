@@ -116,6 +116,18 @@ class AMDSMIHelpers():
         return self._is_windows
 
 
+    def get_amdsmi_init_flag(self):
+        return AMDSMI_INIT_FLAG
+
+
+    def is_amdgpu_initialized(self):
+        return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_GPUS
+
+
+    def is_amd_hsmp_initialized(self):
+        return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_CPUS
+
+
     def get_cpu_choices(self):
         """Return dictionary of possible CPU choices and string of the output:
             Dictionary will be in format: cpus[ID]: Device Handle)
@@ -136,11 +148,11 @@ class AMDSMIHelpers():
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                               amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.info('Unable to get device choices, driver not initialized (amdhsmp not found in modules)')
+                logging.info('Unable to get device choices, driver not initialized (amd_hsmp not found in modules)')
             else:
                 raise e
         if len(cpu_handles) == 0:
-            logging.info('Unable to find any devices, check if driver is initialized (amdhsmp not found in modules)')
+            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp not found in modules)')
         else:
             # Handle spacing for the gpu_choices_str
             max_padding = int(math.log10(len(cpu_handles))) + 1
@@ -181,11 +193,11 @@ class AMDSMIHelpers():
         except amdsmi_interface.AmdSmiLibraryException as e:
             if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                               amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_DRIVER_NOT_LOADED):
-                logging.info('Unable to get device choices, driver not initialized (amdhsmp not found in modules)')
+                logging.info('Unable to get device choices, driver not initialized (amd_hsmp not found in modules)')
             else:
                 raise e
         if len(core_handles) == 0:
-            logging.info('Unable to find any devices, check if driver is initialized (amdhsmp not found in modules)')
+            logging.info('Unable to find any devices, check if driver is initialized (amd_hsmp not found in modules)')
         else:
             # Handle spacing for the gpu_choices_str
             max_padding = int(math.log10(len(core_handles))) + 1
@@ -463,6 +475,7 @@ class AMDSMIHelpers():
         else:
             return False, args.cpu
 
+
     def handle_cores(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
             of cores passed in via args.
@@ -566,6 +579,7 @@ class AMDSMIHelpers():
         raise amdsmi_exception.AmdSmiParameterException(input_device_handle,
                                                         amdsmi_interface.amdsmi_wrapper.amdsmi_processor_handle,
                                                         "Unable to find cpu ID from device_handle")
+
 
     def get_core_id_from_device_handle(self, input_device_handle):
         """Get the core index from the device_handle.

@@ -25,8 +25,8 @@ import json
 import re
 import time
 from typing import Dict
-import yaml
 from enum import Enum
+import yaml
 
 from amdsmi_helpers import AMDSMIHelpers
 import amdsmi_cli_exceptions
@@ -118,14 +118,43 @@ class AMDSMILogger():
                     table_values += value.rjust(12)
                 elif key in ('throttle_status', 'pcie_replay'):
                     table_values += value.rjust(13)
-                elif 'gpu_' in key: # handle topology tables
-                    table_values += value.rjust(13)
+                # Only for handling topology tables
+                elif 'gpu_' in key:
+                    table_values += value.ljust(13)
+                # Only for handling xgmi tables
+                elif key == "gpu#":
+                    table_values += value.ljust(7)
+                elif key == "bdf":
+                    table_values += value.ljust(13)
+                elif "bdf_" in key:
+                    table_values += value.ljust(13)
+                elif key == "bit_rate":
+                    table_values += value.ljust(9)
+                elif key == "max_bandwidth":
+                    table_values += value.ljust(14)
+                elif key == "link_type":
+                    table_values += value.ljust(10)
+                elif key == "RW":
+                    table_values += " " + value.ljust(52)
+                # Default spacing
                 else:
                     table_values += value.rjust(10)
             return table_values.rstrip()
 
         # First Capitalize all keys in the json object
         capitalized_json = self._capitalize_keys(json_object)
+
+        # Increase tabbing for device arguments by pulling them out of the main dictionary and assiging them to an empty string
+        tabbed_dictionary = {}
+        for key, value in capitalized_json.items():
+            if key not in ["GPU", "CPU", "CORE"]:
+                tabbed_dictionary[key] = value
+
+        for key, value in tabbed_dictionary.items():
+            del capitalized_json[key]
+
+        capitalized_json["AMDSMI_SPACING_REMOVAL"] = tabbed_dictionary
+
         json_string = json.dumps(capitalized_json, indent=4)
         yaml_data = yaml.safe_load(json_string)
         yaml_output = yaml.dump(yaml_data, sort_keys=False, allow_unicode=True)
@@ -242,6 +271,7 @@ class AMDSMILogger():
         """
         core_id = self.helpers.get_core_id_from_device_handle(device_handle)
         self._store_core_output_amdsmi(core_id=core_id, argument=argument, data=data)
+
 
     def _store_core_output_amdsmi(self, core_id, argument, data):
         if argument == 'timestamp': # Make sure timestamp is the first element in the output
@@ -388,7 +418,7 @@ class AMDSMILogger():
         if multiple_device_enabled:
             json_output = self.multiple_device_output
         else:
-            json_output = self.output
+            json_output = [self.output]
 
         if self.destination == 'stdout':
             if json_output:

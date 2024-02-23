@@ -448,13 +448,13 @@ amdsmi_status_t amdsmi_get_gpu_cache_info(
         // convert from sysfs type to CRAT type(HSA Cache Affinity type)
         info->cache[i].cache_properties = 0;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_DATA)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_DATA_CACHE;
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_DATA_CACHE;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_INSTRUCTION)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_INST_CACHE;
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_INST_CACHE;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_CPU)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_CPU_CACHE;
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_CPU_CACHE;
         if (rsmi_info.cache[i].flags & HSA_CACHE_TYPE_HSACU)
-            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTIES_SIMD_CACHE;
+            info->cache[i].cache_properties |= AMDSMI_CACHE_PROPERTY_SIMD_CACHE;
 
         info->cache[i].cache_size = rsmi_info.cache[i].cache_size_kb;
         info->cache[i].cache_level = rsmi_info.cache[i].cache_level;
@@ -1964,7 +1964,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
         printf("Failed to open file: %s \n", path_max_link_width.c_str());
         return AMDSMI_STATUS_API_FAILED;
     }
-    info->pcie_static.max_pcie_lanes = (uint16_t)pcie_width;
+    info->pcie_static.max_pcie_width = (uint16_t)pcie_width;
 
     std::string path_max_link_speed = "/sys/class/drm/" +
         gpu_device->get_gpu_path() + "/device/max_link_speed";
@@ -2028,7 +2028,7 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
     if (status != AMDSMI_STATUS_SUCCESS)
         return status;
 
-    info->pcie_metric.pcie_lanes = metric_info.pcie_link_width;
+    info->pcie_metric.pcie_width = metric_info.pcie_link_width;
     // gpu metrics is inconsistent with pcie_speed values, if 0-6 then it needs to be translated
     if (metric_info.pcie_link_speed <= 6) {
         status = smi_amdgpu_get_pcie_speed_from_pcie_type(metric_info.pcie_link_speed, &info->pcie_metric.pcie_speed); // mapping to MT/s
@@ -2915,6 +2915,7 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
 {
     amdsmi_status_t status;
     uint8_t sock_ind;
+    uint8_t p_mode;
 
     AMDSMI_CHECK_INIT();
 
@@ -2928,9 +2929,11 @@ amdsmi_status_t amdsmi_set_cpu_pcie_link_rate(amdsmi_processor_handle processor_
     sock_ind = (uint8_t)std::stoi(proc_id, NULL, 0);
 
     status = static_cast<amdsmi_status_t>(esmi_pcie_link_rate_set(sock_ind,
-                                                                        rate_ctrl, prev_mode));
+                                                                        rate_ctrl, &p_mode));
     if (status != AMDSMI_STATUS_SUCCESS)
         return amdsmi_errno_to_esmi_status(status);
+
+    *prev_mode = p_mode;
 
     return AMDSMI_STATUS_SUCCESS;
 }

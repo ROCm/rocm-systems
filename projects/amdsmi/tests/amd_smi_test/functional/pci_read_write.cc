@@ -163,8 +163,9 @@ void TestPciReadWrite::Run(void) {
                                                                     std::endl;
     }
     // Verify api support checking functionality is working
+    // NOTE:  We expect AMDSMI_STATUS_NOT_SUPPORTED, if rsmi_pcie_bandwidth_t* is NULL
     ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], nullptr);
-    ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(ret, AMDSMI_STATUS_NOT_SUPPORTED);
 
     // First set the bitmask to all supported bandwidths
     freq_bitmask = ~(~0u << bw.transfer_rate.num_supported);
@@ -183,7 +184,14 @@ void TestPciReadWrite::Run(void) {
                                                             " ..." << std::endl;
     }
     ret =  amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], freq_bitmask);
-    CHK_ERR_ASRT(ret)
+    if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+        CHK_ERR_ASRT(ret)
+    }
+    else {
+        auto status_string("");
+        amdsmi_status_code_to_string(ret, &status_string);
+        std::cout << "\t\t** amdsmi_set_gpu_pci_bandwidth(): " << status_string << "\n";
+    }
 
     ret = amdsmi_get_gpu_pci_bandwidth(processor_handles_[dv_ind], &bw);
     CHK_ERR_ASRT(ret)
@@ -194,7 +202,14 @@ void TestPciReadWrite::Run(void) {
       std::cout << "\tResetting mask to all bandwidths." << std::endl;
     }
     ret =  amdsmi_set_gpu_pci_bandwidth(processor_handles_[dv_ind], 0xFFFFFFFF);
-    CHK_ERR_ASRT(ret)
+    if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+        CHK_ERR_ASRT(ret)
+    }
+    else {
+        auto status_string("");
+        amdsmi_status_code_to_string(ret, &status_string);
+        std::cout << "\t\t** amdsmi_set_gpu_pci_bandwidth(): " << status_string << "\n";
+    }
 
     ret =  amdsmi_set_gpu_perf_level(processor_handles_[dv_ind], AMDSMI_DEV_PERF_LEVEL_AUTO);
     CHK_ERR_ASRT(ret)

@@ -828,8 +828,9 @@ def amdsmi_get_cpu_socket_current_active_freq_limit(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
+    amdsmi_wrapper.amdsmi_get_cpu_socket_current_active_freq_limit.argtypes = [amdsmi_wrapper.amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint16), ctypes.POINTER(ctypes.c_char_p * len(amdsmi_wrapper.amdsmi_hsmp_freqlimit_src_names))]
     freq = ctypes.c_uint16()
-    src_type = ctypes.pointer(ctypes.pointer(ctypes.c_char()))
+    src_type = (ctypes.c_char_p * len(amdsmi_wrapper.amdsmi_hsmp_freqlimit_src_names))()
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_cpu_socket_current_active_freq_limit(
@@ -837,9 +838,14 @@ def amdsmi_get_cpu_socket_current_active_freq_limit(
         )
     )
 
+    freq_src = []
+    for names in src_type:
+        if names is not None:
+            freq_src.append(names.decode('utf-8'))
+
     return {
             "freq": f"{freq.value} MHz",
-            "freq_src": f"{amdsmi_wrapper.string_cast(src_type.contents)}"
+            "freq_src": f"{freq_src}"
     }
 
 def amdsmi_get_cpu_socket_freq_range(
@@ -1285,6 +1291,8 @@ def amdsmi_set_cpu_pcie_link_rate(
             processor_handle, rate_ctrl, ctypes.byref(prev_mode))
     )
 
+    return f"{prev_mode.value}"
+
 def amdsmi_set_cpu_df_pstate_range(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
     max_pstate: int, min_pstate: int
@@ -1574,7 +1582,7 @@ def amdsmi_get_gpu_asic_info(
         "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
         "subvendor_id": asic_info_struct.subvendor_id,
         "device_id": asic_info_struct.device_id,
-        "rev_id": asic_info_struct.rev_id,
+        "rev_id": hex(asic_info_struct.rev_id),
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": asic_info_struct.oam_id
     }
@@ -1584,16 +1592,18 @@ def amdsmi_get_gpu_asic_info(
         if not asic_info[value]:
             asic_info[value] = "N/A"
 
-    hex_values = ["vendor_id", "subvendor_id", "device_id", "rev_id"]
+    hex_values = ["vendor_id", "subvendor_id", "device_id"]
     for value in hex_values:
         if asic_info[value]:
             asic_info[value] = hex(asic_info[value])
         else:
             asic_info[value] = "N/A"
 
-    # Ensure hex output for asic_serial
+    # Convert asic serial (hex string) to hex output format
     if asic_info["asic_serial"]:
-        asic_info["asic_serial"] = str.format("0x{:016X}", int(asic_info["asic_serial"], base=16))
+        asic_serial_string = asic_info["asic_serial"]
+        asic_serial_hex = int(asic_serial_string, base=16)
+        asic_info["asic_serial"] = str.format("0x{:016X}", asic_serial_hex)
     else:
         asic_info["asic_serial"] = "N/A"
 
@@ -1668,7 +1678,6 @@ def amdsmi_get_gpu_cache_info(
     for cache_index in range(cache_info_struct.num_cache_types):
         # Put cache_properties at the start of the dictionary for readability
         cache_dict = {
-            "cache": cache_index,
             "cache_properties": [], # This will be a list of strings
             "cache_size": cache_info_struct.cache[cache_index].cache_size,
             "cache_level": cache_info_struct.cache[cache_index].cache_level,
@@ -1678,17 +1687,17 @@ def amdsmi_get_gpu_cache_info(
 
         # Check against cache properties bitmask
         cache_properties = cache_info_struct.cache[cache_index].cache_properties
-        data_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_DATA_CACHE
-        inst_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_INST_CACHE
-        cpu_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_CPU_CACHE
-        simd_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTIES_SIMD_CACHE
+        data_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTY_DATA_CACHE
+        inst_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTY_INST_CACHE
+        cpu_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTY_CPU_CACHE
+        simd_cache = cache_properties & amdsmi_wrapper.AMDSMI_CACHE_PROPERTY_SIMD_CACHE
 
         cache_properties_status = [data_cache, inst_cache, cpu_cache, simd_cache]
         cache_property_list = []
         for cache_property in cache_properties_status:
             if cache_property:
-                property_name = amdsmi_wrapper.amdsmi_cache_properties_type_t__enumvalues[cache_property]
-                property_name = property_name.replace("AMDSMI_CACHE_PROPERTIES_", "")
+                property_name = amdsmi_wrapper.amdsmi_cache_property_type_t__enumvalues[cache_property]
+                property_name = property_name.replace("AMDSMI_CACHE_PROPERTY_", "")
                 cache_property_list.append(property_name)
 
         cache_dict["cache_properties"] = cache_property_list
@@ -1697,7 +1706,9 @@ def amdsmi_get_gpu_cache_info(
     if not cache_info_list:
         raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NO_DATA)
 
-    return cache_info_list
+    return {
+        "cache": cache_info_list
+    }
 
 
 def amdsmi_get_gpu_vbios_info(
@@ -1842,8 +1853,8 @@ def amdsmi_get_gpu_board_info(
         "model_number": board_info.model_number.decode("utf-8").strip(),
         "product_serial": board_info.product_serial.decode("utf-8").strip(),
         "fru_id": board_info.fru_id.decode("utf-8").strip(),
-        "manufacturer_name" : board_info.manufacturer_name.decode("utf-8").strip(),
-        "product_name": board_info.product_name.decode("utf-8").strip()
+        "product_name": board_info.product_name.decode("utf-8").strip(),
+        "manufacturer_name": board_info.manufacturer_name.decode("utf-8").strip()
     }
 
 
@@ -1993,8 +2004,6 @@ def amdsmi_get_gpu_driver_info(
     length = ctypes.c_int()
     length.value = _AMDSMI_MAX_DRIVER_VERSION_LENGTH
 
-    version = ctypes.create_string_buffer(_AMDSMI_MAX_DRIVER_VERSION_LENGTH)
-
     info = amdsmi_wrapper.amdsmi_driver_info_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_driver_info(
@@ -2004,7 +2013,8 @@ def amdsmi_get_gpu_driver_info(
 
     return {
         "driver_name": info.driver_name.decode("utf-8"),
-        "driver_version": info.driver_version.decode("utf-8")
+        "driver_version": info.driver_version.decode("utf-8"),
+        "driver_date": info.driver_date.decode("utf-8")
     }
 
 
@@ -2101,13 +2111,13 @@ def amdsmi_get_gpu_vram_usage(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    vram_info = amdsmi_wrapper.amdsmi_vram_usage_t()
+    vram_usage = amdsmi_wrapper.amdsmi_vram_usage_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_vram_usage(
-            processor_handle, ctypes.byref(vram_info))
+            processor_handle, ctypes.byref(vram_usage))
     )
 
-    return {"vram_total": vram_info.vram_total, "vram_used": vram_info.vram_used}
+    return {"vram_total": vram_usage.vram_total, "vram_used": vram_usage.vram_used}
 
 
 def amdsmi_get_pcie_info(
@@ -2125,13 +2135,24 @@ def amdsmi_get_pcie_info(
         )
     )
 
-    return {"pcie_speed": pcie_info.pcie_metric.pcie_speed,
-            "pcie_lanes": pcie_info.pcie_metric.pcie_lanes,
-            "pcie_interface_version": pcie_info.pcie_static.pcie_interface_version,
+    return {
+        "pcie_static": {
+            "max_pcie_width": pcie_info.pcie_static.max_pcie_width,
             "max_pcie_speed": pcie_info.pcie_static.max_pcie_speed,
-            "max_pcie_lanes": pcie_info.pcie_static.max_pcie_lanes,
             "pcie_interface_version": pcie_info.pcie_static.pcie_interface_version,
-            "pcie_slot_type": pcie_info.pcie_static.slot_type}
+            "slot_type": pcie_info.pcie_static.slot_type,
+            },
+        "pcie_metric": {
+            "pcie_width": pcie_info.pcie_metric.pcie_width,
+            "pcie_speed": pcie_info.pcie_metric.pcie_speed,
+            "pcie_bandwidth": pcie_info.pcie_metric.pcie_bandwidth,
+            "pcie_replay_count": pcie_info.pcie_metric.pcie_replay_count,
+            "pcie_l0_to_recovery_count": pcie_info.pcie_metric.pcie_l0_to_recovery_count,
+            "pcie_replay_roll_over_count": pcie_info.pcie_metric.pcie_replay_roll_over_count,
+            "pcie_nak_sent_count": pcie_info.pcie_metric.pcie_nak_sent_count,
+            "pcie_nak_received_count": pcie_info.pcie_metric.pcie_nak_received_count,
+        }
+    }
 
 
 def amdsmi_get_processor_handle_from_bdf(bdf):

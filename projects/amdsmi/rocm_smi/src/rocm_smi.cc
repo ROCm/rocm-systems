@@ -2642,7 +2642,10 @@ rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask) {
 
   int32_t ret_i;
   ret_i = dev->writeDevInfo(amd::smi::kDevPCIEClk, freq_enable_str);
-
+  //
+  // NOTE:  kDevPCIEClk sysfs file maybe not exist for all cases.
+  //        If it doesn't exist (pp_dpm_pcie), it shouldn't be an error
+  //        and will get translated to RSMI_STATUS_NOT_SUPPORTED.
   return amd::smi::ErrnoToRsmiStatus(ret_i);
 
   CATCH

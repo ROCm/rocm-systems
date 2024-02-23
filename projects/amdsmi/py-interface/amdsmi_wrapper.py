@@ -196,14 +196,14 @@ _libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')
 
 # values for enumeration 'amdsmi_init_flags_t'
 amdsmi_init_flags_t__enumvalues = {
-    0: 'AMDSMI_INIT_ALL_PROCESSORS',
+    4294967295: 'AMDSMI_INIT_ALL_PROCESSORS',
     1: 'AMDSMI_INIT_AMD_CPUS',
     2: 'AMDSMI_INIT_AMD_GPUS',
     4: 'AMDSMI_INIT_NON_AMD_CPUS',
     8: 'AMDSMI_INIT_NON_AMD_GPUS',
     3: 'AMDSMI_INIT_AMD_APUS',
 }
-AMDSMI_INIT_ALL_PROCESSORS = 0
+AMDSMI_INIT_ALL_PROCESSORS = 4294967295
 AMDSMI_INIT_AMD_CPUS = 1
 AMDSMI_INIT_AMD_GPUS = 2
 AMDSMI_INIT_NON_AMD_CPUS = 4
@@ -751,9 +751,9 @@ class struct_pcie_metric_(Structure):
 
 struct_pcie_metric_._pack_ = 1 # source:False
 struct_pcie_metric_._fields_ = [
-    ('pcie_speed', ctypes.c_uint32),
-    ('pcie_lanes', ctypes.c_uint16),
+    ('pcie_width', ctypes.c_uint16),
     ('PADDING_0', ctypes.c_ubyte * 2),
+    ('pcie_speed', ctypes.c_uint32),
     ('pcie_bandwidth', ctypes.c_uint32),
     ('PADDING_1', ctypes.c_ubyte * 4),
     ('pcie_replay_count', ctypes.c_uint64),
@@ -769,7 +769,7 @@ class struct_pcie_static_(Structure):
 
 struct_pcie_static_._pack_ = 1 # source:False
 struct_pcie_static_._fields_ = [
-    ('max_pcie_lanes', ctypes.c_uint16),
+    ('max_pcie_width', ctypes.c_uint16),
     ('PADDING_0', ctypes.c_ubyte * 2),
     ('max_pcie_speed', ctypes.c_uint32),
     ('pcie_interface_version', ctypes.c_uint32),
@@ -813,20 +813,20 @@ struct_amdsmi_vbios_info_t._fields_ = [
 
 amdsmi_vbios_info_t = struct_amdsmi_vbios_info_t
 
-# values for enumeration 'amdsmi_cache_properties_type_t'
-amdsmi_cache_properties_type_t__enumvalues = {
-    1: 'AMDSMI_CACHE_PROPERTIES_ENABLED',
-    2: 'AMDSMI_CACHE_PROPERTIES_DATA_CACHE',
-    4: 'AMDSMI_CACHE_PROPERTIES_INST_CACHE',
-    8: 'AMDSMI_CACHE_PROPERTIES_CPU_CACHE',
-    16: 'AMDSMI_CACHE_PROPERTIES_SIMD_CACHE',
+# values for enumeration 'amdsmi_cache_property_type_t'
+amdsmi_cache_property_type_t__enumvalues = {
+    1: 'AMDSMI_CACHE_PROPERTY_ENABLED',
+    2: 'AMDSMI_CACHE_PROPERTY_DATA_CACHE',
+    4: 'AMDSMI_CACHE_PROPERTY_INST_CACHE',
+    8: 'AMDSMI_CACHE_PROPERTY_CPU_CACHE',
+    16: 'AMDSMI_CACHE_PROPERTY_SIMD_CACHE',
 }
-AMDSMI_CACHE_PROPERTIES_ENABLED = 1
-AMDSMI_CACHE_PROPERTIES_DATA_CACHE = 2
-AMDSMI_CACHE_PROPERTIES_INST_CACHE = 4
-AMDSMI_CACHE_PROPERTIES_CPU_CACHE = 8
-AMDSMI_CACHE_PROPERTIES_SIMD_CACHE = 16
-amdsmi_cache_properties_type_t = ctypes.c_uint32 # enum
+AMDSMI_CACHE_PROPERTY_ENABLED = 1
+AMDSMI_CACHE_PROPERTY_DATA_CACHE = 2
+AMDSMI_CACHE_PROPERTY_INST_CACHE = 4
+AMDSMI_CACHE_PROPERTY_CPU_CACHE = 8
+AMDSMI_CACHE_PROPERTY_SIMD_CACHE = 16
+amdsmi_cache_property_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_gpu_cache_info_t(Structure):
     pass
 
@@ -1846,6 +1846,7 @@ struct_amdsmi_hsmp_metrics_table_t._fields_ = [
 ]
 
 amdsmi_hsmp_metrics_table_t = struct_amdsmi_hsmp_metrics_table_t
+amdsmi_hsmp_freqlimit_src_names = ['cHTC-Active', 'PROCHOT', 'TDC limit', 'PPT Limit', 'OPN Max', 'Reliability Limit', 'APML Agent', 'HSMP Agent'] # Variable ctypes.POINTER(ctypes.c_char) * 8
 uint64_t = ctypes.c_uint64
 amdsmi_init = _libraries['libamd_smi.so'].amdsmi_init
 amdsmi_init.restype = amdsmi_status_t
@@ -2308,14 +2309,14 @@ amdsmi_get_esmi_err_msg.restype = amdsmi_status_t
 amdsmi_get_esmi_err_msg.argtypes = [amdsmi_status_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 __all__ = \
     ['AGG_BW0', 'AMDSMI_ARG_PTR_NULL', 'AMDSMI_AVERAGE_POWER',
-    'AMDSMI_CACHE_PROPERTIES_CPU_CACHE',
-    'AMDSMI_CACHE_PROPERTIES_DATA_CACHE',
-    'AMDSMI_CACHE_PROPERTIES_ENABLED',
-    'AMDSMI_CACHE_PROPERTIES_INST_CACHE',
-    'AMDSMI_CACHE_PROPERTIES_SIMD_CACHE',
-    'AMDSMI_CARD_FORM_FACTOR_OAM', 'AMDSMI_CARD_FORM_FACTOR_PCIE',
-    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CNTR_CMD_START',
-    'AMDSMI_CNTR_CMD_STOP', 'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
+    'AMDSMI_CACHE_PROPERTY_CPU_CACHE',
+    'AMDSMI_CACHE_PROPERTY_DATA_CACHE',
+    'AMDSMI_CACHE_PROPERTY_ENABLED',
+    'AMDSMI_CACHE_PROPERTY_INST_CACHE',
+    'AMDSMI_CACHE_PROPERTY_SIMD_CACHE', 'AMDSMI_CARD_FORM_FACTOR_OAM',
+    'AMDSMI_CARD_FORM_FACTOR_PCIE', 'AMDSMI_CARD_FORM_FACTOR_UNKNOWN',
+    'AMDSMI_CNTR_CMD_START', 'AMDSMI_CNTR_CMD_STOP',
+    'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
     'AMDSMI_COARSE_GRAIN_MEM_ACTIVITY', 'AMDSMI_CURRENT_POWER',
     'AMDSMI_DEV_PERF_LEVEL_AUTO', 'AMDSMI_DEV_PERF_LEVEL_DETERMINISM',
     'AMDSMI_DEV_PERF_LEVEL_FIRST', 'AMDSMI_DEV_PERF_LEVEL_HIGH',
@@ -2477,7 +2478,7 @@ __all__ = \
     'VRAM_TYPE_GDDR6', 'VRAM_TYPE_HBM', 'VRAM_TYPE_UNKNOWN',
     'VRAM_TYPE__MAX', 'WR_BW0', 'amd_metrics_table_header_t',
     'amdsmi_asic_info_t', 'amdsmi_bdf_t', 'amdsmi_bit_field_t',
-    'amdsmi_board_info_t', 'amdsmi_cache_properties_type_t',
+    'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
     'amdsmi_card_form_factor_t', 'amdsmi_clk_info_t',
     'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
     'amdsmi_container_types_t', 'amdsmi_counter_command_t',
@@ -2569,10 +2570,10 @@ __all__ = \
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
     'amdsmi_gpu_read_counter', 'amdsmi_gpu_xgmi_error_status',
-    'amdsmi_hsmp_metrics_table_t', 'amdsmi_init',
-    'amdsmi_init_flags_t', 'amdsmi_init_gpu_event_notification',
-    'amdsmi_io_bw_encoding_t', 'amdsmi_io_link_type_t',
-    'amdsmi_is_P2P_accessible',
+    'amdsmi_hsmp_freqlimit_src_names', 'amdsmi_hsmp_metrics_table_t',
+    'amdsmi_init', 'amdsmi_init_flags_t',
+    'amdsmi_init_gpu_event_notification', 'amdsmi_io_bw_encoding_t',
+    'amdsmi_io_link_type_t', 'amdsmi_is_P2P_accessible',
     'amdsmi_is_gpu_power_management_enabled',
     'amdsmi_link_id_bw_type_t', 'amdsmi_link_metrics_t',
     'amdsmi_link_type_t', 'amdsmi_memory_page_status_t',

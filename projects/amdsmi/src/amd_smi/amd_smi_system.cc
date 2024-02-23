@@ -261,7 +261,7 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
         processors_.clear();
         sockets_.clear();
         esmi_exit();
-        init_flag_ = AMDSMI_INIT_ALL_PROCESSORS;
+        init_flag_ &= ~AMDSMI_INIT_AMD_CPUS;
     }
 #endif
     if (init_flag_ & AMDSMI_INIT_AMD_GPUS) {
@@ -270,7 +270,7 @@ amdsmi_status_t AMDSmiSystem::cleanup() {
         }
         processors_.clear();
         sockets_.clear();
-        init_flag_ = AMDSMI_INIT_ALL_PROCESSORS;
+        init_flag_ &= ~AMDSMI_INIT_AMD_GPUS;
         rsmi_status_t ret = rsmi_shut_down();
         if (ret != RSMI_STATUS_SUCCESS) {
             return amd::smi::rsmi_to_amdsmi_status(ret);
