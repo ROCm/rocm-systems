@@ -18,6 +18,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+set(ROCM_DEP_ROCMCORE
+    OFF
+    CACHE BOOL "DEB and RPM packages depend on rocm-core package")
+mark_as_advanced(ROCM_DEP_ROCMCORE)
+
 rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_TESTS
                                 "Enable building the tests" OFF)
 rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_SAMPLES
@@ -31,6 +36,9 @@ rocprofiler_register_add_option(
     ${ROCPROFILER_REGISTER_BUILD_CI} ADVANCED)
 rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_GLOG "Build GLOG" ON)
 rocprofiler_register_add_option(ROCPROFILER_REGISTER_BUILD_FMT "Build FMT" ON)
+rocprofiler_register_add_option(
+    ROCPROFILER_REGISTER_DEP_ROCMCORE "DEB and RPM package depend on rocm-core package"
+    ${ROCM_DEP_ROCMCORE})
 
 # In the future, we will do this even with clang-tidy enabled
 if(ROCPROFILER_REGISTER_BUILD_CI AND NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
@@ -44,6 +52,13 @@ if(ROCPROFILER_REGISTER_BUILD_CI AND NOT ROCPROFILER_REGISTER_ENABLE_CLANG_TIDY)
             BOOL
             "Any compiler warnings are errors (forced due ROCPROFILER_REGISTER_BUILD_CI=ON)"
             FORCE)
+endif()
+
+if(NOT ROCM_DEP_ROCMCORE EQUAL ROCPROFILER_REGISTER_DEP_ROCMCORE)
+    message(
+        AUTHOR_WARNING
+            "Conflicting option values: ROCM_DEP_ROCMCORE = ${ROCM_DEP_ROCMCORE} and ROCPROFILER_REGISTER_DEP_ROCMCORE = ${ROCPROFILER_REGISTER_DEP_ROCMCORE}"
+        )
 endif()
 
 set(ROCPROFILER_REGISTER_BUILD_TYPES "Release" "RelWithDebInfo" "Debug" "MinSizeRel"
