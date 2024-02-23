@@ -249,8 +249,6 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         }
     }
 
-    if(_corr_id) _corr_id->ref_count.fetch_sub(1);
-
     auto* orig_amd_signal = convert_hsa_handle<amd_signal_t>(_data->orig_signal);
 
     // Original intercepted signal completion
@@ -276,6 +274,8 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         delete _data;
         get_active_signals()->fetch_sub(1);
     }
+
+    if(_corr_id) _corr_id->sub_ref_count();
 
     return (signal_value > 0);
 }
@@ -487,7 +487,7 @@ async_copy_impl(Args... args)
         for(const auto* ctx : _data->contexts)
             extern_corr_ids.emplace(ctx,
                                     ctx->correlation_tracer.external_correlator.get(_data->tid));
-        _data->correlation_id->ref_count.fetch_add(1);
+        _data->correlation_id->add_ref_count();
     }
 
     _data->orig_signal = _completion_signal;
@@ -505,27 +505,46 @@ auto get_async_copy_impl(RetT (*)(Args...))
 
 template <size_t TableIdx, size_t OpIdx>
 void
-async_copy_save(hsa_amd_ext_table_t* _orig)
+async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance)
 {
     static_assert(
         std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
         "unexpected type");
 
-    auto  _meta                          = hsa_api_meta<TableIdx, OpIdx>{};
-    auto& _table                         = _meta.get_table(_orig);
-    auto& _func                          = _meta.get_table_func(_table);
-    get_next_dispatch<TableIdx, OpIdx>() = _func;
+    auto _meta = hsa_api_meta<TableIdx, OpIdx>{};
+
+    // original table and function
+    auto& _orig_table = _meta.get_table(_orig);
+    auto& _orig_func  = _meta.get_table_func(_orig_table);
+
+    // table with copy function
+    auto& _copy_func = get_next_dispatch<TableIdx, OpIdx>();
+
+    LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
+        << _meta.name << " has non-null function pointer " << _copy_func
+        << " despite this being the first instance of the library being copies";
+
+    if(!_copy_func)
+    {
+        LOG(INFO) << "copying table entry for " << _meta.name;
+        _copy_func = _orig_func;
+    }
+    else
+    {
+        LOG(INFO) << "skipping copying table entry for " << _meta.name << " from table instance "
+                  << _tbl_instance;
+    }
 }
 
 template <size_t TableIdx, size_t... OpIdx>
 void
-async_copy_save(hsa_amd_ext_table_t* _orig, std::index_sequence<OpIdx...>)
+async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance, std::index_sequence<OpIdx...>)
 {
     static_assert(
         std::is_same<hsa_amd_ext_table_t, typename hsa_table_lookup<TableIdx>::type>::value,
         "unexpected type");
 
-    (async_copy_save<TableIdx, OpIdx>(_orig), ...);
+    (async_copy_save<TableIdx, OpIdx>(_orig, _tbl_instance), ...);
 }
 
 template <size_t TableIdx, size_t OpIdx>
@@ -594,12 +613,12 @@ get_names()
 }  // namespace async_copy
 
 void
-async_copy_init(hsa_api_table_t* _orig)
+async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
 {
     if(_orig && _orig->amd_ext_)
     {
         async_copy::async_copy_save<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
-            _orig->amd_ext_, async_copy::async_copy_index_seq_t{});
+            _orig->amd_ext_, _tbl_instance, async_copy::async_copy_index_seq_t{});
 
         auto ctxs = context::get_registered_contexts(async_copy::context_filter);
         if(!ctxs.empty())

@@ -28,7 +28,6 @@
 #include "lib/common/container/record_header_buffer.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/demangle.hpp"
-#include "lib/rocprofiler-sdk/allocator.hpp"
 
 #include <array>
 #include <atomic>
@@ -56,14 +55,13 @@ struct instance
     rocprofiler_buffer_policy_t     policy        = ROCPROFILER_BUFFER_POLICY_NONE;
 
     template <typename Tp>
-    void emplace(uint32_t, uint32_t, Tp&);
+    bool emplace(uint32_t, uint32_t, Tp&);
 
     buffer_t& get_internal_buffer();
     buffer_t& get_internal_buffer(size_t);
 };
 
-using unique_buffer_vec_t =
-    common::container::stable_vector<allocator::unique_static_ptr_t<instance>, 4>;
+using unique_buffer_vec_t = common::container::stable_vector<std::unique_ptr<instance>, 4>;
 
 bool
 is_valid_buffer_id(rocprofiler_buffer_id_t id);
@@ -114,14 +112,15 @@ rocprofiler::buffer::flush(uint64_t buffer_idx, bool wait)
 }
 
 template <typename Tp>
-inline void
+inline bool
 rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& value)
 {
     // get the index of the current buffer
     auto get_idx = [this]() { return buffer_idx.load(std::memory_order_acquire) % buffers.size(); };
 
-    auto idx = get_idx();
-    if(!buffers.at(idx).emplace(category, kind, value))
+    auto idx     = get_idx();
+    auto success = buffers.at(idx).emplace(category, kind, value);
+    if(!success)
     {
         if(buffers.at(idx).capacity() < sizeof(value))
         {
@@ -135,10 +134,9 @@ rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& val
         if(policy == ROCPROFILER_BUFFER_POLICY_LOSSLESS)
         {
             // blocks until buffer is flushed
-            bool success = false;
             while(!success)
             {
-                buffer::flush(buffer_id, true);
+                buffer::flush(buffer_id, false);
                 idx     = get_idx();
                 success = buffers.at(idx).emplace(category, kind, value);
             }
@@ -154,4 +152,6 @@ rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& val
         // flush without syncing
         buffer::flush(buffer_id, false);
     }
+
+    return success;
 }

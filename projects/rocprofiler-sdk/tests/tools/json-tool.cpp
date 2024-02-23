@@ -33,9 +33,11 @@
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
+#include "common/perfetto.hpp"
 #include "common/serialization.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -44,6 +46,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <unistd.h>
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -61,6 +64,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
@@ -68,6 +72,101 @@ namespace client
 {
 namespace
 {
+template <typename Tp>
+size_t
+get_hash_id(Tp&& _val)
+{
+    if constexpr(!std::is_pointer<Tp>::value)
+        return std::hash<Tp>{}(std::forward<Tp>(_val));
+    else if constexpr(std::is_same<Tp, const char*>::value)
+        return get_hash_id(std::string_view{_val});
+    else
+        return get_hash_id(*_val);
+}
+
+std::string
+demangle(std::string_view _mangled_name, int& _status)
+{
+    constexpr size_t buffer_len = 4096;
+    // return the mangled since there is no buffer
+    if(_mangled_name.empty())
+    {
+        _status = -2;
+        return std::string{};
+    }
+
+    auto _demangled_name = std::string{_mangled_name};
+
+    // PARAMETERS to __cxa_demangle
+    //  mangled_name:
+    //      A NULL-terminated character string containing the name to be demangled.
+    //  buffer:
+    //      A region of memory, allocated with malloc, of *length bytes, into which the
+    //      demangled name is stored. If output_buffer is not long enough, it is expanded
+    //      using realloc. output_buffer may instead be NULL; in that case, the demangled
+    //      name is placed in a region of memory allocated with malloc.
+    //  _buflen:
+    //      If length is non-NULL, the length of the buffer containing the demangled name
+    //      is placed in *length.
+    //  status:
+    //      *status is set to one of the following values
+    size_t _demang_len = 0;
+    char*  _demang = abi::__cxa_demangle(_demangled_name.c_str(), nullptr, &_demang_len, &_status);
+    switch(_status)
+    {
+        //  0 : The demangling operation succeeded.
+        // -1 : A memory allocation failure occurred.
+        // -2 : mangled_name is not a valid name under the C++ ABI mangling rules.
+        // -3 : One of the arguments is invalid.
+        case 0:
+        {
+            if(_demang) _demangled_name = std::string{_demang};
+            break;
+        }
+        case -1:
+        {
+            char _msg[buffer_len];
+            ::memset(_msg, '\0', buffer_len * sizeof(char));
+            ::snprintf(_msg,
+                       buffer_len,
+                       "memory allocation failure occurred demangling %s",
+                       _demangled_name.c_str());
+            ::perror(_msg);
+            break;
+        }
+        case -2: break;
+        case -3:
+        {
+            char _msg[buffer_len];
+            ::memset(_msg, '\0', buffer_len * sizeof(char));
+            ::snprintf(_msg,
+                       buffer_len,
+                       "Invalid argument in: (\"%s\", nullptr, nullptr, %p)",
+                       _demangled_name.c_str(),
+                       (void*) &_status);
+            ::perror(_msg);
+            break;
+        }
+        default: break;
+    };
+
+    // if it "demangled" but the length is zero, set the status to -2
+    if(_demang_len == 0 && _status == 0) _status = -2;
+
+    // free allocated buffer
+    ::free(_demang);
+    return _demangled_name;
+}
+
+std::string
+demangle(std::string_view symbol)
+{
+    int  _status       = 0;
+    auto demangled_str = demangle(symbol, _status);
+    if(_status == 0) return demangled_str;
+    return std::string{symbol};
+}
+
 struct source_location
 {
     std::string function = {};
@@ -262,11 +361,19 @@ template <typename ArchiveT>
 void
 serialize_args(ArchiveT& ar, const callback_arg_array_t& data)
 {
-    ar.setNextName("args");
-    ar.startNode();
-    for(const auto& itr : data)
-        ar(cereal::make_nvp(itr.first, itr.second));
-    ar.finishNode();
+    if constexpr(std::is_same<ArchiveT, cereal::BinaryOutputArchive>::value ||
+                 std::is_same<ArchiveT, cereal::PortableBinaryOutputArchive>::value)
+    {
+        ar(cereal::make_nvp("args", data));
+    }
+    else
+    {
+        ar.setNextName("args");
+        ar.startNode();
+        for(const auto& itr : data)
+            ar(cereal::make_nvp(itr.first, itr.second));
+        ar.finishNode();
+    }
 }
 
 int
@@ -352,6 +459,7 @@ struct marker_api_callback_record_t
     uint64_t                                       timestamp = 0;
     rocprofiler_callback_tracing_record_t          record    = {};
     rocprofiler_callback_tracing_marker_api_data_t payload   = {};
+    callback_arg_array_t                           args      = {};
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
@@ -359,6 +467,7 @@ struct marker_api_callback_record_t
         ar(cereal::make_nvp("timestamp", timestamp));
         ar(cereal::make_nvp("record", record));
         ar(cereal::make_nvp("payload", payload));
+        serialize_args(ar, args);
     }
 };
 
@@ -387,6 +496,7 @@ counter_collection_buffered(rocprofiler_context_id_t, /*context*/
     else if(headers == nullptr)
         throw std::runtime_error{"rocprofiler invoked a buffer callback with a null pointer to the "
                                  "array of headers. this should never happen"};
+
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
@@ -487,9 +597,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                       rocprofiler_user_data_t* /*user_data*/,
                       void* /*callback_data*/)
 {
-    static auto _mutex = std::mutex{};
-    auto        _lk    = std::unique_lock<std::mutex>{_mutex};
-    auto        ts     = rocprofiler_timestamp_t{};
+    auto ts = rocprofiler_timestamp_t{};
     ROCPROFILER_CALL(rocprofiler_get_timestamp(&ts), "get timestamp");
 
     static thread_local auto _once = std::once_flag{};
@@ -505,12 +613,18 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             auto data_v =
                 *static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
+
+            static auto _mutex = std::mutex{};
+            auto        _lk    = std::unique_lock<std::mutex>{_mutex};
             code_object_records.emplace_back(code_object_callback_record_t{ts, record, data_v});
         }
         else if(record.operation ==
                 ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
         {
             auto data_v = *static_cast<kernel_symbol_data_t*>(record.payload);
+
+            static auto _mutex = std::mutex{};
+            auto        _lk    = std::unique_lock<std::mutex>{_mutex};
             kernel_symbol_records.emplace_back(kernel_symbol_callback_record_t{ts, record, data_v});
         }
     }
@@ -521,7 +635,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         auto* data = static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
-        rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+
+        static auto _mutex = std::mutex{};
+        auto        _lk    = std::unique_lock<std::mutex>{_mutex};
         hsa_api_cb_records.emplace_back(
             hsa_api_callback_record_t{ts, record, *data, std::move(args)});
     }
@@ -530,7 +648,11 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         auto* data = static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
-        rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+
+        static auto _mutex = std::mutex{};
+        auto        _lk    = std::unique_lock<std::mutex>{_mutex};
         hip_api_cb_records.emplace_back(
             hip_api_callback_record_t{ts, record, *data, std::move(args)});
     }
@@ -539,7 +661,14 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API)
     {
         auto* data = static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
-        marker_api_cb_records.emplace_back(marker_api_callback_record_t{ts, record, *data});
+        auto  args = callback_arg_array_t{};
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+
+        static auto _mutex = std::mutex{};
+        auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+        marker_api_cb_records.emplace_back(
+            marker_api_callback_record_t{ts, record, *data, std::move(args)});
     }
     else
     {
@@ -552,6 +681,8 @@ auto marker_api_bf_records   = std::deque<rocprofiler_buffer_tracing_marker_api_
 auto hip_api_bf_records      = std::deque<rocprofiler_buffer_tracing_hip_api_record_t>{};
 auto kernel_dispatch_records = std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>{};
 auto memory_copy_records     = std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>{};
+auto corr_id_retire_records =
+    std::deque<rocprofiler_buffer_tracing_correlation_id_retirement_record_t>{};
 
 void
 tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
@@ -634,6 +765,14 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 memory_copy_records.emplace_back(*record);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_correlation_id_retirement_record_t*>(
+                        header->payload);
+
+                corr_id_retire_records.emplace_back(*record);
+            }
             else
             {
                 throw std::runtime_error{
@@ -697,6 +836,7 @@ rocprofiler_context_id_t marker_api_buffered_ctx = {};
 rocprofiler_context_id_t kernel_dispatch_ctx     = {};
 rocprofiler_context_id_t memory_copy_ctx         = {};
 rocprofiler_context_id_t counter_collection_ctx  = {};
+rocprofiler_context_id_t corr_id_retire_ctx      = {};
 // buffers
 rocprofiler_buffer_id_t hsa_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t hip_api_buffered_buffer    = {};
@@ -704,6 +844,7 @@ rocprofiler_buffer_id_t marker_api_buffered_buffer = {};
 rocprofiler_buffer_id_t kernel_dispatch_buffer     = {};
 rocprofiler_buffer_id_t memory_copy_buffer         = {};
 rocprofiler_buffer_id_t counter_collection_buffer  = {};
+rocprofiler_buffer_id_t corr_id_retire_buffer      = {};
 
 auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"HSA_API_CALLBACK", &hsa_api_callback_ctx},
@@ -715,14 +856,19 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"MARKER_API_BUFFERED", &marker_api_buffered_ctx},
     {"KERNEL_DISPATCH", &kernel_dispatch_ctx},
     {"MEMORY_COPY", &memory_copy_ctx},
-    {"COUNTER_COLLECTION", &counter_collection_ctx}};
+    {"COUNTER_COLLECTION", &counter_collection_ctx},
+    {"CORRELATION_ID_RETIREMENT", &corr_id_retire_ctx},
+};
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 6>{&hsa_api_buffered_buffer,
-                                                       &hip_api_buffered_buffer,
-                                                       &marker_api_buffered_buffer,
-                                                       &kernel_dispatch_buffer,
-                                                       &memory_copy_buffer,
-                                                       &counter_collection_buffer};
+auto buffers = std::array<rocprofiler_buffer_id_t*, 7>{
+    &hsa_api_buffered_buffer,
+    &hip_api_buffered_buffer,
+    &marker_api_buffered_buffer,
+    &kernel_dispatch_buffer,
+    &memory_copy_buffer,
+    &counter_collection_buffer,
+    &corr_id_retire_buffer,
+};
 
 auto agents = std::vector<rocprofiler_agent_t>{};
 
@@ -866,6 +1012,24 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &memory_copy_buffer),
                      "buffer creation");
 
+    ROCPROFILER_CALL(rocprofiler_create_buffer(corr_id_retire_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &corr_id_retire_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(counter_collection_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               counter_collection_buffered,
+                                               nullptr,
+                                               &counter_collection_buffer),
+                     "buffer creation");
+
     for(auto itr : {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
                     ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
                     ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
@@ -908,20 +1072,6 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                      marker_api_buffered_buffer),
         "buffer tracing service configure");
 
-    ROCPROFILER_CALL(rocprofiler_create_buffer(counter_collection_ctx,
-                                               4096,
-                                               2048,
-                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
-                                               counter_collection_buffered,
-                                               nullptr,
-                                               &counter_collection_buffer),
-                     "buffer creation");
-
-    ROCPROFILER_CALL(
-        rocprofiler_configure_buffered_dispatch_profile_counting_service(
-            counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
-        "setup buffered service");
-
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(kernel_dispatch_ctx,
                                                      ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
@@ -938,12 +1088,27 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                      memory_copy_buffer),
         "buffer tracing service for memory copy configure");
 
-    auto client_thread = rocprofiler_callback_thread_t{};
-    ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),
-                     "creating callback thread");
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                         corr_id_retire_ctx,
+                         ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
+                         nullptr,
+                         0,
+                         corr_id_retire_buffer),
+                     "buffer tracing service for memory copy configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffered_dispatch_profile_counting_service(
+            counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
+        "setup buffered service");
 
     for(auto* itr : buffers)
     {
+        if(itr->handle == 0) continue;
+
+        auto client_thread = rocprofiler_callback_thread_t{};
+        ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),
+                         "creating callback thread");
+
         ROCPROFILER_CALL(rocprofiler_assign_callback_thread(*itr, client_thread),
                          "assignment of thread for buffer");
     }
@@ -996,6 +1161,37 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         }
     }
 
+    auto* context_settings_excl_env = getenv("ROCPROFILER_TOOL_CONTEXTS_EXCLUDE");
+    if(context_settings_excl_env != nullptr && !std::string_view{context_settings_excl_env}.empty())
+    {
+        auto context_settings = std::string{context_settings_excl_env};
+
+        // ignore case
+        for(auto& itr : context_settings)
+            itr = toupper(itr);
+
+        // if context is not in string, set the pointer to null in the contexts array
+        auto options = std::stringstream{};
+        for(auto& itr : contexts)
+        {
+            options << "\n\t- " << itr.first;
+            auto pos = context_settings.find(itr.first);
+            if(pos != std::string::npos) itr.second = nullptr;
+        }
+
+        // detect if there are any invalid entries
+        if(context_settings.find_first_not_of(" ,;:\t\n\r") != std::string::npos)
+        {
+            auto filename = std::string_view{__FILE__};
+            auto msg      = std::stringstream{};
+            msg << "[rocprofiler-sdk-json-tool][" << filename.substr(filename.find_last_of('/') + 1)
+                << ":" << __LINE__
+                << "] invalid specification of ROCPROFILER_TOOL_CONTEXTS_EXCLUDE ('"
+                << context_settings_excl_env << "'). Valid choices are: " << options.str();
+            throw std::runtime_error{msg.str()};
+        }
+    }
+
     start();
 
     // no errors
@@ -1004,6 +1200,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
 void
 write_json(call_stack_t* _call_stack);
+
+void
+write_perfetto();
 
 void
 tool_fini(void* tool_data)
@@ -1028,6 +1227,7 @@ tool_fini(void* tool_data)
               << ", hsa_api_bf_records=" << hsa_api_bf_records.size()
               << ", hip_api_bf_records=" << hip_api_bf_records.size()
               << ", marker_api_bf_records=" << marker_api_bf_records.size()
+              << ", corr_id_retire_records=" << corr_id_retire_records.size()
               << ", counter_collection_records" << counter_collection_bf_records.size() << "...\n"
               << std::flush;
 
@@ -1038,6 +1238,7 @@ tool_fini(void* tool_data)
     }
 
     write_json(_call_stack);
+    write_perfetto();
 
     std::cerr << "[" << getpid() << "][" << __FUNCTION__ << "] Finalization complete.\n"
               << std::flush;
@@ -1128,6 +1329,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_bf_records));
             json_ar(cereal::make_nvp("hip_api_traces", hip_api_bf_records));
             json_ar(cereal::make_nvp("marker_api_traces", marker_api_bf_records));
+            json_ar(cereal::make_nvp("retired_correlation_ids", corr_id_retire_records));
             json_ar(cereal::make_nvp("counter_collection", counter_collection_bf_records));
         } catch(std::exception& e)
         {
@@ -1143,6 +1345,335 @@ write_json(call_stack_t* _call_stack)
     *ofs << std::flush;
 
     if(cleanup) cleanup(ofs);
+}
+
+void
+write_perfetto()
+{
+    auto args            = ::perfetto::TracingInitArgs{};
+    auto track_event_cfg = ::perfetto::protos::gen::TrackEventConfig{};
+    auto cfg             = ::perfetto::TraceConfig{};
+
+    // environment settings
+    auto shmem_size_hint = size_t{64};
+    auto buffer_size_kb  = size_t{1024000};
+
+    auto* buffer_config = cfg.add_buffers();
+    buffer_config->set_size_kb(buffer_size_kb);
+    buffer_config->set_fill_policy(
+        ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD);
+
+    auto* ds_cfg = cfg.add_data_sources()->mutable_config();
+    ds_cfg->set_name("track_event");  // this MUST be track_event
+    ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
+
+    args.shmem_size_hint_kb = shmem_size_hint;
+    args.backends |= ::perfetto::kInProcessBackend;
+
+    ::perfetto::Tracing::Initialize(args);
+    ::perfetto::TrackEvent::Register();
+
+    auto tracing_session = ::perfetto::Tracing::NewTrace();
+
+    tracing_session->Setup(cfg);
+    tracing_session->StartBlocking();
+
+    auto tids            = std::set<rocprofiler_thread_id_t>{};
+    auto agent_ids       = std::set<uint64_t>{};
+    auto agent_queue_ids = std::map<uint64_t, std::set<uint64_t>>{};
+
+    auto _get_agent = [](uint64_t id_handle) -> const rocprofiler_agent_t* {
+        for(const auto& itr : agents)
+        {
+            if(id_handle == itr.id.handle) return &itr;
+        }
+        return nullptr;
+    };
+
+    {
+        for(auto itr : hsa_api_bf_records)
+            tids.emplace(itr.thread_id);
+        for(auto itr : hip_api_bf_records)
+            tids.emplace(itr.thread_id);
+        for(auto itr : marker_api_bf_records)
+            tids.emplace(itr.thread_id);
+
+        for(auto itr : memory_copy_records)
+        {
+            agent_ids.emplace(itr.dst_agent_id.handle);
+            agent_ids.emplace(itr.src_agent_id.handle);
+        }
+
+        for(auto itr : kernel_dispatch_records)
+            agent_queue_ids[itr.agent_id.handle].emplace(itr.queue_id.handle);
+    }
+
+    auto thread_tracks = std::unordered_map<rocprofiler_thread_id_t, ::perfetto::Track>{};
+
+    uint64_t nthrn = 0;
+    for(auto itr : tids)
+    {
+        if(itr == main_tid)
+            thread_tracks.emplace(main_tid, ::perfetto::ThreadTrack::Current());
+        else
+        {
+            auto _track  = ::perfetto::Track{itr};
+            auto _desc   = _track.Serialize();
+            auto _namess = std::stringstream{};
+            _namess << "Thread " << ++nthrn << " (" << itr << ")";
+            _desc.set_name(_namess.str());
+            perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+            thread_tracks.emplace(itr, _track);
+        }
+    }
+
+    auto agent_tracks = std::unordered_map<uint64_t, ::perfetto::Track>{};
+
+    for(auto itr : agent_ids)
+    {
+        const auto* _agent = _get_agent(itr);
+        if(!_agent) throw std::runtime_error{"agent lookup error"};
+
+        auto _namess = std::stringstream{};
+
+        if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+            _namess << "CPU COPY [" << itr << "] ";
+        else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            _namess << "GPU COPY [" << itr << "] ";
+
+        if(!std::string_view{_agent->model_name}.empty())
+            _namess << _agent->model_name;
+        else
+            _namess << _agent->product_name;
+
+        auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
+        auto _desc  = _track.Serialize();
+        _desc.set_name(_namess.str());
+
+        perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+        agent_tracks.emplace(itr, _track);
+    }
+
+    auto agent_queue_tracks =
+        std::unordered_map<uint64_t, std::unordered_map<uint64_t, ::perfetto::Track>>{};
+
+    for(const auto& aitr : agent_queue_ids)
+    {
+        uint32_t nqueue = 0;
+        for(auto qitr : aitr.second)
+        {
+            const auto* _agent = _get_agent(aitr.first);
+            if(!_agent) throw std::runtime_error{"agent lookup error"};
+
+            auto _namess = std::stringstream{};
+
+            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                _namess << "CPU COMPUTE [" << aitr.first << "] ";
+            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                _namess << "GPU COMPUTE [" << aitr.first << "] ";
+
+            _namess << " Queue [" << nqueue++ << "]";
+
+            auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
+            auto _desc  = _track.Serialize();
+            _desc.set_name(_namess.str());
+
+            perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+            agent_queue_tracks[aitr.first].emplace(qitr, _track);
+        }
+    }
+
+    {
+        auto buffer_name_info = get_buffer_tracing_names();
+        auto callbk_name_info = get_callback_tracing_names();
+
+        for(auto itr : hsa_api_bf_records)
+        {
+            auto& name  = buffer_name_info.operation_names.at(itr.kind).at(itr.operation);
+            auto& track = thread_tracks.at(itr.thread_id);
+
+            auto _args = callback_arg_array_t{};
+            auto ritr  = std::find_if(
+                hsa_api_cb_records.begin(), hsa_api_cb_records.end(), [&itr](const auto& citr) {
+                    return (citr.record.correlation_id.internal == itr.correlation_id.internal);
+                });
+            if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
+
+            TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::hsa_api>::value,
+                              ::perfetto::StaticString(name.c_str()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "tid",
+                              itr.thread_id,
+                              "kind",
+                              itr.kind,
+                              "operation",
+                              itr.operation,
+                              "cid",
+                              itr.correlation_id.internal,
+                              [&](::perfetto::EventContext ctx) {
+                                  for(const auto& aitr : _args)
+                                      add_perfetto_annotation(ctx, aitr.first, aitr.second);
+                              });
+            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::hsa_api>::value,
+                            track,
+                            itr.end_timestamp,
+                            "end_ns",
+                            itr.end_timestamp);
+        }
+
+        for(auto itr : hip_api_bf_records)
+        {
+            auto& name  = buffer_name_info.operation_names.at(itr.kind).at(itr.operation);
+            auto& track = thread_tracks.at(itr.thread_id);
+
+            auto _args = callback_arg_array_t{};
+            auto ritr  = std::find_if(
+                hip_api_cb_records.begin(), hip_api_cb_records.end(), [&itr](const auto& citr) {
+                    return (citr.record.correlation_id.internal == itr.correlation_id.internal);
+                });
+            if(ritr != hip_api_cb_records.end()) _args = ritr->args;
+
+            TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::hip_api>::value,
+                              ::perfetto::StaticString(name.c_str()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "tid",
+                              itr.thread_id,
+                              "kind",
+                              itr.kind,
+                              "operation",
+                              itr.operation,
+                              "cid",
+                              itr.correlation_id.internal,
+                              [&](::perfetto::EventContext ctx) {
+                                  for(const auto& aitr : _args)
+                                      add_perfetto_annotation(ctx, aitr.first, aitr.second);
+                              });
+            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::hip_api>::value,
+                            track,
+                            itr.end_timestamp,
+                            "end_ns",
+                            itr.end_timestamp);
+        }
+
+        for(auto itr : memory_copy_records)
+        {
+            auto& name  = buffer_name_info.operation_names.at(itr.kind).at(itr.operation);
+            auto& track = agent_tracks.at(itr.dst_agent_id.handle);
+
+            TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::memory_copy>::value,
+                              ::perfetto::StaticString(name.c_str()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "kind",
+                              itr.kind,
+                              "operation",
+                              itr.operation,
+                              "src_agent",
+                              itr.src_agent_id.handle,
+                              "dst_agent",
+                              itr.dst_agent_id.handle);
+            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::memory_copy>::value,
+                            track,
+                            itr.end_timestamp,
+                            "end_ns",
+                            itr.end_timestamp);
+        }
+
+        auto demangled = std::unordered_map<std::string_view, std::string>{};
+        for(auto itr : kernel_dispatch_records)
+        {
+            const kernel_symbol_callback_record_t* sym = nullptr;
+            for(const auto& kitr : kernel_symbol_records)
+            {
+                if(kitr.payload.kernel_id == itr.kernel_id)
+                {
+                    sym = &kitr;
+                    break;
+                }
+            }
+
+            auto  name  = std::string_view{sym->payload.kernel_name};
+            auto& track = agent_queue_tracks.at(itr.agent_id.handle).at(itr.queue_id.handle);
+
+            if(demangled.find(name) == demangled.end())
+            {
+                demangled.emplace(name, demangle(name));
+            }
+
+            TRACE_EVENT_BEGIN(
+                rocprofiler::trait::name<rocprofiler::category::kernel_dispatch>::value,
+                ::perfetto::StaticString(demangled.at(name).c_str()),
+                track,
+                itr.start_timestamp,
+                ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                "begin_ns",
+                itr.start_timestamp,
+                "kind",
+                itr.kind,
+                "agent",
+                itr.agent_id.handle,
+                "cid",
+                itr.correlation_id.internal,
+                "queue",
+                itr.queue_id.handle,
+                "kid",
+                itr.kernel_id,
+                "private_segment_size",
+                itr.private_segment_size,
+                "group_segment_size",
+                itr.group_segment_size,
+                "workgroup_size",
+                itr.workgroup_size.x * itr.workgroup_size.y * itr.workgroup_size.z,
+                "grid_size",
+                itr.grid_size.x * itr.grid_size.y * itr.grid_size.z);
+
+            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::kernel_dispatch>::value,
+                            track,
+                            itr.end_timestamp,
+                            "end_ns",
+                            itr.end_timestamp);
+        }
+    }
+
+    ::perfetto::TrackEvent::Flush();
+    tracing_session->FlushBlocking();
+    tracing_session->StopBlocking();
+
+    using char_vec_t = std::vector<char>;
+
+    auto trace_data = char_vec_t{tracing_session->ReadTraceBlocking()};
+
+    if(!trace_data.empty())
+    {
+        auto ofname = std::string{"rocprofiler-tool-results.pftrace"};
+        if(auto* eofname = getenv("ROCPROFILER_TOOL_OUTPUT_FILE")) ofname = eofname;
+
+        auto jpos = ofname.find(".json");
+        if(jpos != std::string::npos) ofname = ofname.substr(0, jpos) + std::string{".pftrace"};
+
+        std::clog << "Writing perfetto trace file: " << ofname << std::endl;
+        auto ofs = std::ofstream{ofname};
+        // Write the trace into a file.
+        ofs.write(trace_data.data(), trace_data.size());
+    }
+    else
+    {
+        throw std::runtime_error{"no trace data"};
+    }
 }
 
 void
@@ -1179,11 +1710,9 @@ flush()
 {
     for(auto* itr : buffers)
     {
-        if(!itr) continue;
-        auto status = rocprofiler_flush_buffer(*itr);
-        if(status != ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
+        if(itr && itr->handle > 0)
         {
-            ROCPROFILER_CALL(status, "buffer flush");
+            ROCPROFILER_CALL(rocprofiler_flush_buffer(*itr), "buffer flush");
         }
     }
 }
@@ -1265,3 +1794,5 @@ rocprofiler_configure(uint32_t                 version,
     // return pointer to configure data
     return &cfg;
 }
+
+PERFETTO_TRACK_EVENT_STATIC_STORAGE();

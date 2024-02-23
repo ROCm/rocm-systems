@@ -2,6 +2,10 @@
 # common utilities for tests
 #
 
+include(FetchContent)
+
+set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/external)
+
 # build flags
 add_library(rocprofiler-tests-build-flags INTERFACE)
 add_library(rocprofiler::tests-build-flags ALIAS rocprofiler-tests-build-flags)
@@ -35,10 +39,6 @@ if(NOT TARGET rocprofiler::cereal)
             INTERFACE $<BUILD_INTERFACE:${ROCPROFILER_SOURCE_DIR}/external/cereal/include>
             )
     else()
-        include(FetchContent)
-
-        set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/external)
-
         fetchcontent_declare(
             cereal
             GIT_REPOSITORY https://github.com/jrmadsen/cereal.git
@@ -59,6 +59,32 @@ if(NOT TARGET rocprofiler::cereal)
             INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/cereal/include>)
     endif()
 endif()
+
+# perfetto
+fetchcontent_declare(
+    perfetto
+    GIT_REPOSITORY https://android.googlesource.com/platform/external/perfetto
+    GIT_TAG v42.0
+    SOURCE_DIR ${PROJECT_BINARY_DIR}/external/perfetto BINARY_DIR
+    ${PROJECT_BINARY_DIR}/external/build/perfetto-build SUBBUILD_DIR
+    ${PROJECT_BINARY_DIR}/external/build/perfetto-subdir)
+
+fetchcontent_getproperties(perfetto)
+
+if(NOT perfetto_POPULATED)
+    fetchcontent_populate(perfetto)
+endif()
+
+add_library(rocprofiler-tests-perfetto STATIC)
+add_library(rocprofiler::tests-perfetto ALIAS rocprofiler-tests-perfetto)
+target_sources(
+    rocprofiler-tests-perfetto
+    PRIVATE ${PROJECT_BINARY_DIR}/external/perfetto/sdk/perfetto.h
+            ${PROJECT_BINARY_DIR}/external/perfetto/sdk/perfetto.cc)
+target_include_directories(
+    rocprofiler-tests-perfetto SYSTEM
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/perfetto/sdk>)
+set_target_properties(rocprofiler-tests-perfetto PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
 # common utilities
 cmake_path(GET CMAKE_CURRENT_SOURCE_DIR PARENT_PATH COMMON_LIBRARY_INCLUDE_DIR)

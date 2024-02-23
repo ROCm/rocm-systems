@@ -103,7 +103,7 @@ iterate_args(uint32_t                                           id,
 
 template <typename TableT>
 void
-copy_table(TableT* _orig);
+copy_table(TableT* _orig, uint64_t _tbl_instance);
 
 template <typename TableT>
 void

@@ -165,6 +165,25 @@ typedef struct
 } rocprofiler_buffer_tracing_scratch_memory_record_t;
 
 /**
+ * @brief ROCProfiler Buffer Correlation ID Retirement Tracer Record.
+ */
+typedef struct
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_timestamp_t           timestamp;
+    uint64_t                          internal_correlation_id;
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT
+    /// @var timestamp
+    /// @brief Timestamp (in nanosec) of when rocprofiler detected the correlation ID could be
+    /// retired
+    /// @var internal_correlation_id
+    /// @brief Only internal correlation ID is provided
+} rocprofiler_buffer_tracing_correlation_id_retirement_record_t;
+
+/**
  * @brief Callback function for mapping @ref rocprofiler_buffer_tracing_kind_t ids to
  * string names. @see rocprofiler_iterate_buffer_trace_kind_names.
  */

@@ -30,7 +30,9 @@
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include <cereal/archives/binary.hpp>
 #include <cereal/archives/json.hpp>
+#include <cereal/archives/portable_binary.hpp>
 #include <cereal/cereal.hpp>
 #include <cereal/types/array.hpp>
 #include <cereal/types/atomic.hpp>
@@ -284,6 +286,16 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_copy_record_t data)
     SAVE_DATA_FIELD(end_timestamp);
     SAVE_DATA_FIELD(dst_agent_id);
     SAVE_DATA_FIELD(src_agent_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_correlation_id_retirement_record_t data)
+{
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(kind);
+    SAVE_DATA_FIELD(timestamp);
+    SAVE_DATA_FIELD(internal_correlation_id);
 }
 
 template <typename ArchiveT>

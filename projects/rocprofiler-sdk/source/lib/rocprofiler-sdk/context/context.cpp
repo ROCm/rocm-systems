@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
@@ -118,10 +119,10 @@ get_correlation_id_map()
     return _v;
 }
 
-auto*&
+auto&
 get_latest_correlation_id_impl()
 {
-    static thread_local correlation_id* _v = nullptr;
+    static thread_local auto _v = common::container::small_vector<correlation_id*, 16>{};
     return _v;
 }
 
@@ -133,6 +134,53 @@ get_unique_internal_id()
 }
 }  // namespace
 
+uint32_t
+correlation_id::add_ref_count()
+{
+    return m_ref_count.fetch_add(1);
+}
+
+uint32_t
+correlation_id::sub_ref_count()
+{
+    auto _ret = m_ref_count.fetch_sub(1);
+
+    LOG_IF(FATAL, _ret == 0) << "correlation id underflow";
+
+    if(_ret == 1)
+    {
+        auto ctxs = get_active_contexts([](const context* ctx) {
+            return (ctx->buffered_tracer &&
+                    (ctx->buffered_tracer->domains(
+                        ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)));
+        });
+
+        auto record = rocprofiler_buffer_tracing_correlation_id_retirement_record_t{
+            .size      = sizeof(rocprofiler_buffer_tracing_correlation_id_retirement_record_t),
+            .kind      = ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
+            .timestamp = common::timestamp_ns(),
+            .internal_correlation_id = internal};
+
+        if(!ctxs.empty())
+        {
+            for(const auto* itr : ctxs)
+            {
+                auto* _buffer = buffer::get_buffer(itr->buffered_tracer->buffer_data.at(
+                    ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT));
+
+                auto success = CHECK_NOTNULL(_buffer)->emplace(
+                    ROCPROFILER_BUFFER_CATEGORY_TRACING,
+                    ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
+                    record);
+
+                LOG_IF(FATAL, !success) << "failed to emplace correlation id retirement";
+            }
+        }
+    }
+
+    return _ret;
+}
+
 correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
@@ -142,7 +190,7 @@ correlation_tracing_service::construct(uint32_t _init_ref_count)
     auto& ret = corr_id_map->wlock([](auto& data) -> auto& { return data.emplace_back(); });
     ret       = std::make_unique<correlation_id>(_init_ref_count, common::get_tid(), _internal_id);
 
-    get_latest_correlation_id_impl() = ret.get();
+    get_latest_correlation_id_impl().emplace_back(ret.get());
 
     return ret.get();
 }
@@ -150,13 +198,33 @@ correlation_tracing_service::construct(uint32_t _init_ref_count)
 correlation_id*
 get_latest_correlation_id()
 {
-    return get_latest_correlation_id_impl();
+    return (get_latest_correlation_id_impl().empty()) ? nullptr
+                                                      : get_latest_correlation_id_impl().back();
 }
 
-void
-pop_latest_correlation_id(const correlation_id* val)
+const correlation_id*
+pop_latest_correlation_id(correlation_id* val)
 {
-    if(get_latest_correlation_id_impl() == val) get_latest_correlation_id_impl() = nullptr;
+    if(!val)
+    {
+        LOG(ERROR) << "passed nullptr to correlation id";
+        return nullptr;
+    }
+
+    if(get_latest_correlation_id_impl().empty())
+    {
+        LOG(ERROR) << "empty thread-local correlation id stack";
+        return nullptr;
+    }
+
+    LOG_IF(ERROR, get_latest_correlation_id_impl().back() != val)
+        << "pop_latest_correlation_id is happening out of order for " << val->internal
+        << ". top of stack is " << get_latest_correlation_id_impl().back()->internal;
+
+    get_latest_correlation_id_impl().pop_back();
+
+    return (get_latest_correlation_id_impl().empty()) ? nullptr
+                                                      : get_latest_correlation_id_impl().back();
 }
 
 context_array_t&

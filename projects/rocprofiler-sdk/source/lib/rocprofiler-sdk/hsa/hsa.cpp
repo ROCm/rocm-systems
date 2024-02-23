@@ -35,6 +35,8 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
+#include <rocprofiler-sdk/hsa/core_api_id.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
 
 #include <glog/logging.h>
 
@@ -364,7 +366,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
     }
 
     // decrement the reference count before invoking
-    corr_id->ref_count.fetch_sub(1);
+    corr_id->sub_ref_count();
 
     auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
 
@@ -416,7 +418,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
     }
 
     // decrement the reference count after usage in the callback/buffers
-    corr_id->ref_count.fetch_sub(1);
+    corr_id->sub_ref_count();
 
     context::pop_latest_correlation_id(corr_id);
 
@@ -510,6 +512,7 @@ iterate_args(const uint32_t                                     id,
                             user_data);
             if(ret != 0) break;
         }
+        return;
     }
     if constexpr(sizeof...(IdxTail) > 0)
         iterate_args<TableIdx>(id, data, func, user_data, std::index_sequence<IdxTail...>{});
@@ -542,7 +545,7 @@ should_wrap_functor(const context::context_array_t&     _contexts,
 
 template <size_t TableIdx, typename Tp, size_t OpIdx>
 void
-copy_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
+copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpIdx>)
 {
     using table_type = typename hsa_table_lookup<TableIdx>::type;
 
@@ -550,24 +553,34 @@ copy_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
     {
         auto _info = hsa_api_info<TableIdx, OpIdx>{};
 
-        LOG(INFO) << "copying table entry for " << _info.name;
-
         // make sure we don't access a field that doesn't exist in input table
         if(_info.offset() >= _orig->version.minor_id) return;
 
         // 1. get the sub-table containing the function pointer in original table
         // 2. get reference to function pointer in sub-table in original table
-        auto& _table = _info.get_table(_orig);
-        auto& _func  = _info.get_table_func(_table);
+        auto& _orig_table = _info.get_table(_orig);
+        auto& _orig_func  = _info.get_table_func(_orig_table);
         // 3. get the sub-table containing the function pointer in saved table
         // 4. get reference to function pointer in sub-table in saved table
         // 5. save the original function in the saved table
-        auto& _saved = _info.get_table(hsa_table_lookup<TableIdx>{}());
-        auto& _ofunc = _info.get_table_func(_saved);
-        _ofunc       = _func;
-    }
+        auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}());
+        auto& _copy_func  = _info.get_table_func(_copy_table);
 
-    (void) _orig;
+        LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
+            << _info.name << " has non-null function pointer " << _copy_func
+            << " despite this being the first instance of the library being copies";
+
+        if(!_copy_func)
+        {
+            LOG(INFO) << "copying table entry for " << _info.name;
+            _copy_func = _orig_func;
+        }
+        else
+        {
+            LOG(INFO) << "skipping copying table entry for " << _info.name
+                      << " from table instance " << _tbl_instance;
+        }
+    }
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx>
@@ -602,17 +615,15 @@ update_table(const context::context_array_t& _contexts,
         auto& _func  = _info.get_table_func(_table);
         _func        = _info.get_functor(_func);
     }
-
-    (void) _orig;
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
 void
-copy_table(Tp* _orig, std::index_sequence<OpIdx, OpIdxTail...>)
+copy_table(Tp* _orig, uint64_t _tbl_instance, std::index_sequence<OpIdx, OpIdxTail...>)
 {
-    copy_table<TableIdx>(_orig, std::integral_constant<size_t, OpIdx>{});
+    copy_table<TableIdx>(_orig, _tbl_instance, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0)
-        copy_table<TableIdx>(_orig, std::index_sequence<OpIdxTail...>{});
+        copy_table<TableIdx>(_orig, _tbl_instance, std::index_sequence<OpIdxTail...>{});
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
@@ -681,11 +692,12 @@ iterate_args(uint32_t                                           id,
 
 template <typename TableT>
 void
-copy_table(TableT* _orig)
+copy_table(TableT* _orig, uint64_t _tbl_instance)
 {
     constexpr auto TableIdx = hsa_table_id_lookup<TableT>::value;
     if(_orig)
-        copy_table<TableIdx>(_orig, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
+        copy_table<TableIdx>(
+            _orig, _tbl_instance, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
 }
 
 template <typename TableT>
@@ -704,8 +716,8 @@ update_table(TableT* _orig)
 using iterate_args_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
 using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
 
-#define INSTANTIATE_MARKER_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                       \
-    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                   \
+#define INSTANTIATE_HSA_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                          \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
     template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
     template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
     template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
@@ -714,11 +726,11 @@ using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
     template void                     iterate_args<TABLE_IDX>(                                     \
         uint32_t, const iterate_args_data_t&, iterate_args_cb_t, void*);
 
-INSTANTIATE_MARKER_TABLE_FUNC(hsa_core_table_t, ROCPROFILER_HSA_TABLE_ID_Core)
-INSTANTIATE_MARKER_TABLE_FUNC(hsa_amd_ext_table_t, ROCPROFILER_HSA_TABLE_ID_AmdExt)
-INSTANTIATE_MARKER_TABLE_FUNC(hsa_img_ext_table_t, ROCPROFILER_HSA_TABLE_ID_ImageExt)
-INSTANTIATE_MARKER_TABLE_FUNC(hsa_fini_ext_table_t, ROCPROFILER_HSA_TABLE_ID_FinalizeExt)
+INSTANTIATE_HSA_TABLE_FUNC(hsa_core_table_t, ROCPROFILER_HSA_TABLE_ID_Core)
+INSTANTIATE_HSA_TABLE_FUNC(hsa_amd_ext_table_t, ROCPROFILER_HSA_TABLE_ID_AmdExt)
+INSTANTIATE_HSA_TABLE_FUNC(hsa_img_ext_table_t, ROCPROFILER_HSA_TABLE_ID_ImageExt)
+INSTANTIATE_HSA_TABLE_FUNC(hsa_fini_ext_table_t, ROCPROFILER_HSA_TABLE_ID_FinalizeExt)
 
-#undef INSTANTIATE_MARKER_TABLE_FUNC
+#undef INSTANTIATE_HSA_TABLE_FUNC
 }  // namespace hsa
 }  // namespace rocprofiler

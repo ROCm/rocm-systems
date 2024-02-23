@@ -22,9 +22,6 @@
 
 #include "lib/rocprofiler-sdk/buffer.hpp"
 
-#include <glog/logging.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
@@ -33,6 +30,11 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <glog/logging.h>
 
 #include <atomic>
 #include <exception>
@@ -121,7 +123,7 @@ allocate_buffer()
 
     // create an entry in the registered
     auto& _cfg_v = CHECK_NOTNULL(get_buffers())->back();
-    _cfg_v       = allocator::make_unique_static<buffer::instance>();
+    _cfg_v       = std::make_unique<buffer::instance>();
     auto* _cfg   = _cfg_v.get();
 
     if(!_cfg) return std::nullopt;
@@ -149,6 +151,8 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     if(!is_valid_buffer_id(buffer_id)) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto* buff = get_buffer(buffer_id);
+
+    if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
 
     auto* task_group =
         internal_threading::get_task_group(rocprofiler_callback_thread_t{buff->task_group_id});
@@ -211,11 +215,10 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
         buff_v->syncer.clear();
     };
 
-    task_group->exec(_task);
+    task_group->exec(std::move(_task));
     if(wait)
     {
-        while(task_group->size() > 0)
-            task_group->join();
+        task_group->join();
     }
 
     return ROCPROFILER_STATUS_SUCCESS;
@@ -283,6 +286,8 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
     auto* buffers = CHECK_NOTNULL(rocprofiler::buffer::get_buffers());
     auto& buff    = buffers->at(buffer_id.handle - offset);
 
+    if(!buff) return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
+
     // buffer is currently being flushed or destroyed
     if(buff->syncer.test_and_set()) return ROCPROFILER_STATUS_ERROR_BUFFER_BUSY;
 
@@ -290,6 +295,7 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id)
         itr.reset();
 
     buff->syncer.clear();
+    buff.reset();
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

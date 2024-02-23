@@ -652,7 +652,7 @@ rocprofiler_set_api_table(const char* name,
         // any internal modifications to the HipDispatchTable need to be done before we make the
         // copy or else those modifications will be lost when HIP API tracing is enabled
         // because the HIP API tracing invokes the function pointers from the copy below
-        rocprofiler::hip::copy_table(hip_runtime_api_table);
+        rocprofiler::hip::copy_table(hip_runtime_api_table, lib_instance);
 
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_runtime_api_table);
@@ -675,7 +675,7 @@ rocprofiler_set_api_table(const char* name,
         // any internal modifications to the HipCompilerDispatchTable need to be done before we make
         // the copy or else those modifications will be lost when HIP API tracing is enabled because
         // the HIP API tracing invokes the function pointers from the copy below
-        rocprofiler::hip::copy_table(hip_compiler_api_table);
+        rocprofiler::hip::copy_table(hip_compiler_api_table, lib_instance);
 
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_compiler_api_table);
@@ -703,15 +703,15 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         rocprofiler::hsa::code_object_init(hsa_api_table);
-        rocprofiler::hsa::async_copy_init(hsa_api_table);
+        rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
 
         // any internal modifications to the HsaApiTable need to be done before we make the
         // copy or else those modifications will be lost when HSA API tracing is enabled
         // because the HSA API tracing invokes the function pointers from the copy below
-        rocprofiler::hsa::copy_table(hsa_api_table->core_);
-        rocprofiler::hsa::copy_table(hsa_api_table->amd_ext_);
-        rocprofiler::hsa::copy_table(hsa_api_table->image_ext_);
-        rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_);
+        rocprofiler::hsa::copy_table(hsa_api_table->core_, lib_instance);
+        rocprofiler::hsa::copy_table(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::hsa::copy_table(hsa_api_table->image_ext_, lib_instance);
+        rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_, lib_instance);
 
         // install rocprofiler API wrappers
         rocprofiler::hsa::update_table(hsa_api_table->core_);
@@ -736,9 +736,9 @@ rocprofiler_set_api_table(const char* name,
         // any internal modifications to the roctxApiTable_t need to be done before we make
         // the copy or else those modifications will be lost when ROCTx tracing is enabled because
         // the ROCTx tracing invokes the function pointers from the copy below
-        rocprofiler::marker::copy_table(roctx_core);
-        rocprofiler::marker::copy_table(roctx_ctrl);
-        rocprofiler::marker::copy_table(roctx_name);
+        rocprofiler::marker::copy_table(roctx_core, lib_instance);
+        rocprofiler::marker::copy_table(roctx_ctrl, lib_instance);
+        rocprofiler::marker::copy_table(roctx_name, lib_instance);
 
         // install rocprofiler API wrappers
         rocprofiler::marker::update_table(roctx_core);

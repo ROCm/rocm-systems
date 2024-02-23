@@ -59,9 +59,9 @@ struct correlation_id
     //     thus, after two HSA buffer flushes, we will have received all the PC samples for
     //     the
     correlation_id(uint32_t _cnt, rocprofiler_thread_id_t _tid, uint64_t _internal) noexcept
-    : ref_count{_cnt}
-    , thread_idx{_tid}
+    : thread_idx{_tid}
     , internal{_internal}
+    , m_ref_count{_cnt}
     {}
 
     correlation_id()                              = default;
@@ -72,9 +72,15 @@ struct correlation_id
     correlation_id& operator=(const correlation_id&) = delete;
     correlation_id& operator=(correlation_id&&) noexcept = delete;
 
-    std::atomic<uint32_t>   ref_count  = {};
     rocprofiler_thread_id_t thread_idx = 0;
     uint64_t                internal   = 0;
+
+    uint32_t get_ref_count() const { return m_ref_count.load(); }
+    uint32_t add_ref_count();
+    uint32_t sub_ref_count();
+
+private:
+    std::atomic<uint32_t> m_ref_count = {};
 };
 
 correlation_id*
@@ -84,8 +90,8 @@ get_correlation_id(rocprofiler_thread_id_t tid, uint64_t internal_id);
 correlation_id*
 get_latest_correlation_id();
 
-void
-pop_latest_correlation_id(const correlation_id*);
+const correlation_id*
+pop_latest_correlation_id(correlation_id*);
 
 /// permits tools opportunity to modify the correlation id based on the domain, op, and
 /// the rocprofiler generated correlation id

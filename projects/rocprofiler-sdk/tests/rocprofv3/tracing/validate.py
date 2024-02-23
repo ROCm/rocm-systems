@@ -23,7 +23,8 @@ def test_hsa_api_trace(hsa_input_data):
     correlation_ids = sorted(list(set(correlation_ids)))
 
     hsa_api_calls_offset = 2  # roctxRangePush is first
-    num_marker_api_calls = 6  # six marker API calls
+    num_marker_api_calls = 6  # seven marker API calls, only six entries in
+    # marker csv data because roctxRangePush + roctxRangePop is one entry
 
     # all correlation ids are unique
     assert len(correlation_ids) == len(hsa_input_data)

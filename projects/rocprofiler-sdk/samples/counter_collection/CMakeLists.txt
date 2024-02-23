@@ -46,7 +46,7 @@ set_tests_properties(
     counter-collection-buffer
     PROPERTIES
         TIMEOUT
-        600
+        120
         LABELS
         "samples"
         ENVIRONMENT
@@ -74,7 +74,7 @@ set_tests_properties(
     counter-collection-callback
     PROPERTIES
         TIMEOUT
-        600
+        120
         LABELS
         "samples"
         ENVIRONMENT
@@ -103,7 +103,7 @@ set_tests_properties(
     counter-collection-print-functional-counters
     PROPERTIES
         TIMEOUT
-        300
+        120
         LABELS
         "samples"
         ENVIRONMENT

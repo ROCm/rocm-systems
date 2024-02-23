@@ -181,10 +181,10 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     if(_corr_id)
     {
-        LOG_IF(FATAL, _corr_id->ref_count.load() == 0)
+        LOG_IF(FATAL, _corr_id->get_ref_count() == 0)
             << "reference counter for correlation id " << _corr_id->internal << " from thread "
             << _corr_id->thread_idx << " has no reference count";
-        _corr_id->ref_count.fetch_sub(1);
+        _corr_id->sub_ref_count();
     }
 
     queue_info_session.queue.async_complete();
@@ -257,24 +257,17 @@ WriteInterceptor(const void* packets,
     auto* corr_id = context::get_latest_correlation_id();
 
     // use thread-local value to reuse allocation
-    static thread_local auto extern_corr_ids_tl =
-        Queue::queue_info_session_t::external_corr_id_map_t{};
+    auto extern_corr_ids = Queue::queue_info_session_t::external_corr_id_map_t{};
 
     // increase the reference count to denote that this correlation id is being used in a kernel
     if(corr_id)
     {
-        extern_corr_ids_tl.clear();  // clear it so that it only contains the current contexts
-        extern_corr_ids_tl.reserve(ctxs.size());  // reserve for performance
+        extern_corr_ids.clear();  // clear it so that it only contains the current contexts
+        extern_corr_ids.reserve(ctxs.size());  // reserve for performance
         for(const auto* ctx : ctxs)
-            extern_corr_ids_tl.emplace(ctx,
-                                       ctx->correlation_tracer.external_correlator.get(thr_id));
-        corr_id->ref_count.fetch_add(1);
+            extern_corr_ids.emplace(ctx, ctx->correlation_tracer.external_correlator.get(thr_id));
     }
 
-    // move to local variable
-    auto extern_corr_ids = std::move(extern_corr_ids_tl);
-
-    // hsa_ext_amd_aql_pm4_packet_t
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
     auto        transformed_packets = std::vector<rocprofiler_packet>{};
 
@@ -374,6 +367,8 @@ WriteInterceptor(const void* packets,
 
         LOG_IF(FATAL, packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
             << "get_kernel_id below might need to be updated";
+
+        if(corr_id) corr_id->add_ref_count();
 
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.

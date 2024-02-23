@@ -15,7 +15,7 @@ target_sources(rocprofiler-sdk-json-tool PRIVATE json-tool.cpp)
 target_link_libraries(
     rocprofiler-sdk-json-tool
     PRIVATE rocprofiler::rocprofiler rocprofiler::cereal rocprofiler::tests-build-flags
-            rocprofiler::tests-common-library)
+            rocprofiler::tests-common-library rocprofiler::tests-perfetto)
 set_target_properties(
     rocprofiler-sdk-json-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
