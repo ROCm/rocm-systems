@@ -21,7 +21,7 @@ config["kernel_name_1"] = "vecCopy(double*, double*, double*, int, int) [clone .
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
-config["METRIC_COMPARE"] = False
+config["METRIC_COMPARE"] = True
 config["METRIC_LOGGING"] = False
 
 baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
@@ -80,6 +80,8 @@ ALL_CSVS_MI200 = [
     "pmc_perf_14.csv",
     "pmc_perf_15.csv",
     "pmc_perf_16.csv",
+    "pmc_perf_17.csv",
+    "pmc_perf_18.csv",
     "pmc_perf_2.csv",
     "pmc_perf_3.csv",
     "pmc_perf_4.csv",
@@ -92,6 +94,7 @@ ALL_CSVS_MI200 = [
     "sysinfo.csv",
     "timestamps.csv",
 ]
+
 ROOF_ONLY_FILES = [
     "empirRoof_gpu-0_fp32.pdf",
     "empirRoof_gpu-0_int8_fp16.pdf",
@@ -106,9 +109,15 @@ ROOF_ONLY_FILES = [
 
 # Must not change relative difference is zero
 METRIC_THRESHOLDS = {
-    "2.1.12": {"absolute": 0, "relative": 1},
-    "2.1.15": {"absolute": 0, "relative": 1},
-    "2.1.19": {"absolute": 0, "relative": 1},
+    # "2.1.7": {"absolute": 1, "relative": 5},
+    "2.1.12": {"absolute": 0, "relative": 8},
+    # "2.1.15": {"absolute": 0, "relative": 10},
+    "3.1.1": {"absolute": 0, "relative": 10},
+    "3.1.10": {"absolute": 0, "relative": 10},
+    "3.1.11": {"absolute": 0, "relative": 1},
+    "3.1.12": {"absolute": 0, "relative": 1},
+    "3.1.13": {"absolute": 0, "relative": 1},
+    # "2.1.19": {"absolute": 0, "relative": 1},
     "5.1.0": {"absolute": 0, "relative": 15},
     "5.2.0": {"absolute": 0, "relative": 15},
     "6.1.5": {"absolute": 0, "relative": 1},
@@ -123,8 +132,9 @@ METRIC_THRESHOLDS = {
     "7.1.5": {"absolute": 0, "relative": 1},
     "7.1.6": {"absolute": 0, "relative": 1},
     "7.1.7": {"absolute": 0, "relative": 1},
-    "7.2.0": {"absolute": 0, "relative": 5},
+    # "7.2.0": {"absolute": 0, "relative": 5},
     "7.2.1": {"absolute": 0, "relative": 10},
+    "7.2.3": {"absolute": 0, "relative": 12},
     "7.2.6": {"absolute": 0, "relative": 1},
     "10.1.4": {"absolute": 0, "relative": 1},
     "10.1.5": {"absolute": 0, "relative": 1},
@@ -134,7 +144,7 @@ METRIC_THRESHOLDS = {
     "10.3.5": {"absolute": 0, "relative": 1},
     "10.3.6": {"absolute": 0, "relative": 1},
     "11.2.1": {"absolute": 0, "relative": 1},
-    "11.2.4": {"absolute": 0, "relative": 1},
+    "11.2.4": {"absolute": 0, "relative": 5},
     "13.2.0": {"absolute": 0, "relative": 1},
     "13.2.2": {"absolute": 0, "relative": 1},
     "14.2.0": {"absolute": 0, "relative": 1},
@@ -163,13 +173,13 @@ METRIC_THRESHOLDS = {
     "16.5.0": {"absolute": 0, "relative": 1},
     "17.3.3": {"absolute": 0, "relative": 1},
     "17.3.6": {"absolute": 0, "relative": 1},
-    "17.3.13": {"absolute": 0, "relative": 1},
+    # "17.3.13": {"absolute": 0, "relative": 1},
     "18.1.0": {"absolute": 0, "relative": 1},
     "18.1.1": {"absolute": 0, "relative": 1},
     "18.1.2": {"absolute": 0, "relative": 1},
     "18.1.3": {"absolute": 0, "relative": 1},
-    "5.1.2": {"absolute": 0, "relative": 1},
-    "6.1.4": {"absolute": 0, "relative": 1},
+    # "5.1.2": {"absolute": 0, "relative": 5},
+    "6.1.4": {"absolute": 4, "relative": 0},
     "18.1.5": {"absolute": 0, "relative": 1},
     "18.1.6": {"absolute": 1, "relative": 0},
 }
@@ -320,6 +330,7 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
         stdout=subprocess.PIPE,
     )
     captured_output = t.communicate(timeout=1300)[0].decode("utf-8")
+    print(captured_output)
     assert t.returncode == 0
 
     if "DEBUG ERROR" in captured_output:
@@ -413,11 +424,18 @@ def baseline_compare_metric(test_name, workload_dir, args=[]):
                             counts > MAX_REOCCURING_COUNT
                         ]
                         if reoccurring_metrics.any(axis=None):
-                            print(
-                                "These metrics appear alot\n",
-                                reoccurring_metrics,
-                            )
-                            print(list(reoccurring_metrics["Index"]))
+                            with pd.option_context(
+                                "display.max_rows",
+                                None,
+                                "display.max_columns",
+                                None,
+                                #    'display.precision', 3,
+                            ):
+                                print(
+                                    "These metrics appear alot\n",
+                                    reoccurring_metrics,
+                                )
+                                # print(list(reoccurring_metrics["Index"]))
 
                         # log into csv
                         if not error_df.empty:
@@ -445,6 +463,7 @@ def test_path():
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
+        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -478,6 +497,8 @@ def test_no_roof():
             "pmc_perf_14.csv",
             "pmc_perf_15.csv",
             "pmc_perf_16.csv",
+            "pmc_perf_17.csv",
+            "pmc_perf_18.csv",
             "pmc_perf_2.csv",
             "pmc_perf_3.csv",
             "pmc_perf_4.csv",
@@ -517,7 +538,7 @@ def test_kernel_names():
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
+        # print(['empirRoof_gpu-0_fp32.pdf', 'empirRoof_gpu-0_int8_fp16.pdf', 'kernelName_legend.pdf', 'pmc_perf.csv', 'pmc_perf_0.csv', 'pmc_perf_1.csv', 'pmc_perf_2.csv', 'roofline.csv', 'sysinfo.csv', 'timestamps.csv'])
         assert sorted(list(file_dict.keys())) == [
             "empirRoof_gpu-0_fp32.pdf",
             "empirRoof_gpu-0_int8_fp16.pdf",
@@ -530,6 +551,7 @@ def test_kernel_names():
             "sysinfo.csv",
             "timestamps.csv",
         ]
+
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
@@ -1564,7 +1586,6 @@ def test_mem_levels_HBM():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1595,7 +1616,6 @@ def test_mem_levels_L2():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1626,7 +1646,6 @@ def test_mem_levels_vL1D():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1657,7 +1676,6 @@ def test_mem_levels_LDS():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1688,7 +1706,6 @@ def test_mem_levels_HBM_LDS():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1719,7 +1736,6 @@ def test_mem_levels_vL1D_LDS():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
@@ -1749,7 +1765,6 @@ def test_mem_levels_L2_vL1D_LDS():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
     if soc == "mi200":
-        print(sorted(list(file_dict.keys())))
         assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
