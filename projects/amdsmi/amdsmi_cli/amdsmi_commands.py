@@ -800,7 +800,9 @@ class AMDSMICommands():
         cpu_attributes = ["smu", "interface_ver"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
-                cpu_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    cpu_args_enabled = True
+                    break
 
         # Check if a GPU argument has been set
         gpu_args_enabled = False
@@ -809,7 +811,9 @@ class AMDSMICommands():
                           "dfc_ucode", "fb_info", "num_vf"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
-                gpu_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    gpu_args_enabled = True
+                    break
 
         # Handle CPU and GPU intialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
@@ -2251,7 +2255,9 @@ class AMDSMICommands():
                           "guard", "guest_data", "fb_usage", "xgmi"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
-                gpu_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    gpu_args_enabled = True
+                    break
 
         # Check if a CPU argument has been set
         cpu_args_enabled = False
@@ -2262,14 +2268,18 @@ class AMDSMICommands():
                           "cpu_dimm_pow_consumption", "cpu_dimm_thermal_sensor"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
-                cpu_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    cpu_args_enabled = True
+                    break
 
         # Check if a Core argument has been set
         core_args_enabled = False
         core_attributes = ["core_boost_limit", "core_curr_active_freq_core_limit", "core_energy"]
         for attr in core_attributes:
             if hasattr(args, attr):
-                core_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    core_args_enabled = True
+                    break
 
         # Handle CPU and GPU driver intialization cases
         if self.helpers.is_amd_hsmp_initialized() and self.helpers.is_amdgpu_initialized():
@@ -3281,7 +3291,8 @@ class AMDSMICommands():
         Return:
             Nothing
         """
-        # Mutually exculsive args
+        # These are the only args checked at this point, the other args will be passed
+        #   in through the applicable function set_gpu, set_cpu, or set_core function
         if gpu:
             args.gpu = gpu
         if cpu:
@@ -3295,7 +3306,9 @@ class AMDSMICommands():
                           "memory_partition", "power_cap"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
-                gpu_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    gpu_args_enabled = True
+                    break
 
         # Check if a CPU argument has been set
         cpu_args_enabled = False
@@ -3304,14 +3317,18 @@ class AMDSMICommands():
                           "cpu_enable_apb", "cpu_disable_apb", "soc_boost_limit"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
-                cpu_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    cpu_args_enabled = True
+                    break
 
         # Check if a Core argument has been set
         core_args_enabled = False
         core_attributes = ["core_boost_limit"]
         for attr in core_attributes:
             if hasattr(args, attr):
-                core_args_enabled |= bool(getattr(args, attr))
+                if getattr(args, attr) is not None:
+                    core_args_enabled = True
+                    break
 
         # Only allow one device's arguments to be set at a time
         if gpu_args_enabled == cpu_args_enabled == core_args_enabled == False:
