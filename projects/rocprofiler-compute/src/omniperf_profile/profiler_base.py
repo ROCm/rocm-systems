@@ -270,14 +270,7 @@ class OmniProfiler_Base:
 
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
-            error(
-                "%s is not enabled in %s. Available profilers include: %s"
-                % (
-                    self._soc.get_soc_name(),
-                    self.__profiler,
-                    self._soc.get_compatible_profilers(),
-                )
-            )
+            error("%s is not enabled in %s. Available profilers include: %s" % (self._soc.get_arch(), self.__profiler, self._soc.get_compatible_profilers()))
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
             error("Access denied. Cannot access parent directories in path (i.e. ../)")
