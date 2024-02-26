@@ -273,7 +273,7 @@ def gpu_soc():
 
 soc = gpu_soc()
 
-Baseline_dir = os.path.realpath("tests/workloads/vcopy" + soc)
+Baseline_dir = os.path.realpath("tests/workloads/vcopy/" + soc)
 
 
 def log_counter(file_dict, test_name):
