@@ -95,6 +95,7 @@ typedef struct
     std::string            kernel_name;
     rocprofiler_agent_t    gpu_agent;
     uint64_t               thread_id;
+    uint64_t               dispatch_index;
 
 } rocprofiler_tool_kernel_properties_t;
 

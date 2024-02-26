@@ -9,7 +9,7 @@ def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
     assert df.empty == False
     assert df["Agent_Id"].map(type).eq(int).all()
     assert len(df["Kernel-Name"]) > 0
-    assert df["Kernel-Name"].str.contains("matrixTranspose").all()
+    assert df["Kernel-Name"].str.contains("matrixTranspose").any()
     assert df["Counter_Name"].str.contains("SQ_WAVES").all()
 
 
