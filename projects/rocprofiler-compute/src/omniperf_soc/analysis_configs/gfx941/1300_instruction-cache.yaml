@@ -91,14 +91,14 @@ Panel Config:
         title: Instruction Cache - L2 Interface
         header:
           metric: Metric
-          mean: Mean
+          avg: Avg
           min: Min
           max: Max
           unit: Unit
           tips: Tips
         metric:
           L1I-L2 Bandwidth:
-            mean: AVG(((SQC_TC_INST_REQ * 64) / $denom))
+            avg: AVG(((SQC_TC_INST_REQ * 64) / $denom))
             min: MIN(((SQC_TC_INST_REQ * 64) / $denom))
             max: MAX(((SQC_TC_INST_REQ * 64) / $denom))
             unit: (Bytes + $normUnit)
