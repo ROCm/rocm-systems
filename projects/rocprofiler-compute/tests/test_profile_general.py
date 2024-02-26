@@ -117,6 +117,7 @@ METRIC_THRESHOLDS = {
     "3.1.13": {"absolute": 0, "relative": 1},
     "5.1.0": {"absolute": 0, "relative": 15},
     "5.2.0": {"absolute": 0, "relative": 15},
+    "6.1.4": {"absolute": 4, "relative": 0},
     "6.1.5": {"absolute": 0, "relative": 1},
     "6.1.0": {"absolute": 0, "relative": 15},
     "6.1.3": {"absolute": 0, "relative": 11},
@@ -172,7 +173,6 @@ METRIC_THRESHOLDS = {
     "18.1.1": {"absolute": 0, "relative": 1},
     "18.1.2": {"absolute": 0, "relative": 1},
     "18.1.3": {"absolute": 0, "relative": 1},
-    "6.1.4": {"absolute": 4, "relative": 0},
     "18.1.5": {"absolute": 0, "relative": 1},
     "18.1.6": {"absolute": 1, "relative": 0},
 }
