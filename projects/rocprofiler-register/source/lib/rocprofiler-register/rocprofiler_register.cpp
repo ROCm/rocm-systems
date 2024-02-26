@@ -273,6 +273,18 @@ rocp_load_rocprofiler_lib(std::string _rocp_reg_lib)
 
     if(rocprofiler_set_api_table) rocprofiler_lib_config_fn = &rocprofiler_set_api_table;
 
+    // return if found via LD_PRELOAD
+    if(rocprofiler_lib_config_fn)
+        return std::make_tuple(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
+
+    // look to see if entrypoint function is already a symbol
+    *(void**) (&rocprofiler_lib_config_fn) =
+        dlsym(RTLD_DEFAULT, rocprofiler_lib_register_entrypoint);
+
+    // return if found via RTLD_DEFAULT
+    if(rocprofiler_lib_config_fn)
+        return std::make_tuple(rocprofiler_lib_handle, rocprofiler_lib_config_fn);
+
     if(_rocp_reg_lib.empty()) _rocp_reg_lib = rocprofiler_lib_name;
 
     auto _rocp_reg_lib_path       = fs::path{ _rocp_reg_lib };
