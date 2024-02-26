@@ -134,10 +134,6 @@ def gpuinfo():
         "memory_partition": None,
     }
 
-    # we get the max mclk from rocm-smi --showmclkrange
-    rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)
-    gpu_info["max_mclk"] = search(r"(\d+)Mhz\s*$", rocm_smi_mclk)
-
     # Fixme: find better way to differentiate cards, GPU vs APU, etc.
     rocminfo_full = run(["rocminfo"])
     rocminfo = rocminfo_full.split("\n")
@@ -219,6 +215,20 @@ def gpuinfo():
             "Incomplete class definition for %s. Expected a field for %s in SOC_PARAM."
             % (gpu_arch, e)
         )
+
+    # we get the max mclk from rocm-smi --showmclkrange
+    rocm_smi_mclk = run(["rocm-smi", "--showmclkrange"], exit_on_error=True)
+    gpu_info["max_mclk"] = search(r"(\d+)Mhz\s*$", rocm_smi_mclk)
+    # check that we got the mclk from smi
+    if gpu_info["max_mclk"] is None:
+        if gpu_name == "MI100":
+            # hardcoded due to rocm-smi limitation
+            gpu_info["max_mclk"] = str(1200)
+        else:
+            error(
+                "Could not obtain maximum mclk from rocm-smi for GPU: {}".format(gpu_info)
+            )
+
     # specify gpu name for gfx942 hardware
     if gpu_name == "MI300":
         gpu_name = list(SUPPORTED_ARCHS[gpu_arch].values())[0][0]
