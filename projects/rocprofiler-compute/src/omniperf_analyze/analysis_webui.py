@@ -284,7 +284,7 @@ class webui_analysis(OmniAnalyze_Base):
             # create the loaded kernel stats
             parser.load_kernel_top(self._runs[self.dest_dir], self.dest_dir)
             # set architecture
-            self.arch = self._runs[self.dest_dir].sys_info.iloc[0]['GPU']
+            self.arch = self._runs[self.dest_dir].sys_info.iloc[0]['gpu_arch']
             
         else:
             error("Multiple runs not yet supported in GUI. Retry without --gui flag.")

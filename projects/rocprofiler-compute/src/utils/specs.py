@@ -126,7 +126,7 @@ class MachineSpecs:
         self.cur_mclk: str = None
         self.max_waves_per_cu: str = None
         self.gpu_model: str = None
-        self.L2Banks: str = None #NB: This only used in flatten_tcc_info_across_hbm_stacks()
+        self._l2_banks: str = None #NB: This only used in flatten_tcc_info_across_hbm_stacks()
         self.lds_banks_per_cu: str = None 
         self.sqc_per_gpu: str = None
         self.pipes_per_gpu: str = None
@@ -143,7 +143,7 @@ class MachineSpecs:
         soc_obj = soc_class(args, self)
         # Update arch specific specs
         self.total_l2_chan: str = total_l2_banks(
-            self.gpu_model, int(self.L2Banks), self.memory_partition
+            self.gpu_model, int(self._l2_banks), self.memory_partition
         )
         self.hbm_bw: str = str(int(self.max_mclk) / 1000 * 32 * self.get_hbm_channels())
 

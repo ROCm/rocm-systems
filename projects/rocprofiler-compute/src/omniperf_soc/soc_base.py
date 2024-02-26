@@ -164,9 +164,9 @@ class OmniSoC_Base():
         self._mspec.gpu_model = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].keys())[0].upper()
         if self._mspec.gpu_model == "MI300":
             self._mspec.gpu_model = list(SUPPORTED_ARCHS[self._mspec.gpu_arch].values())[0][0]
-        if (self._mspec.gpu_arch == "gfx942") and ("MI300A" in self._mspec._rocminfo):
+        if (self._mspec.gpu_arch == "gfx942") and ("MI300A" in '\n'.join(self._mspec._rocminfo)):
             self._mspec.gpu_model = "MI300A_A1"
-        if (self._mspec.gpu_arch == "gfx942") and ("MI300A" not in self._mspec._rocminfo):
+        if (self._mspec.gpu_arch == "gfx942") and ("MI300A" not in '\n'.join(self._mspec._rocminfo)):
             self._mspec.gpu_model = "MI300X_A1"
 
         self._mspec.num_xcd = str(total_xcds(self._mspec.gpu_model, self._mspec.compute_partition))

@@ -53,7 +53,7 @@ class Roofline:
         self.__ceiling_data = None
         self.__figure = go.Figure()
         # Set roofline run parameters from args
-        if hasattr(self.__args, 'path'):
+        if hasattr(self.__args, 'path') and not run_parameters:
             self.__run_parameters['workload_dir'] = self.__args.path
         if hasattr(self.__args, 'roof_only') and self.__args.roof_only == True:
             self.__run_parameters['is_standalone'] = True

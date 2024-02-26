@@ -51,7 +51,7 @@ class gfx908_soc (OmniSoC_Base):
         )
 
         # Set arch specific specs
-        self._mspec.L2Banks = 32
+        self._mspec._l2_banks = 32
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 4
         # --showmclkrange is broken in Mi100, hardcode freq

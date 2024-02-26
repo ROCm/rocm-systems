@@ -57,7 +57,7 @@ class gfx90a_soc (OmniSoC_Base):
         self.roofline_obj = Roofline(args, self._mspec)
 
         # Set arch specific specs
-        self._mspec.L2Banks = 32
+        self._mspec._l2_banks = 32
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 4
 
@@ -91,4 +91,7 @@ class gfx90a_soc (OmniSoC_Base):
         super().analysis_setup()
         # configure roofline for analysis
         if roofline_parameters:
-            self.roofline_obj = Roofline(self.get_args(), roofline_parameters)
+            self.roofline_obj = Roofline(self.get_args(), self._mspec, roofline_parameters)
+
+
+

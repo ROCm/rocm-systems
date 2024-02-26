@@ -195,7 +195,7 @@ Panel Config:
             peak: $hbm_bw
             pop: ((100 * (AVG((128 * TCC_BUBBLE_sum +
                         64 * (TCC_EA0_RDREQ_sum - TCC_BUBBLE_sum - TCC_EA0_RDREQ_32B_sum) + 
-                        32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbmBW)
+                        32 * TCC_EA0_RDREQ_32B_sum) / (End_Timestamp - Start_Timestamp)))) / $hbm_bw)
             tips: 
           L2-Fabric Write BW:
             value: AVG((((TCC_EA0_WRREQ_64B_sum * 64) + ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_64B_sum)
