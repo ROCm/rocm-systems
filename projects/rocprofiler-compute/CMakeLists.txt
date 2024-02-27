@@ -173,8 +173,9 @@ enable_testing()
 option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
-    set(COV_OPTION "--cov=src" "--junitxml=tests/test-results.xml" "--cov-append"
-                   "--cov-report=term-missing" "--cov-report=xml:tests/coverage.xml")
+    set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing"
+                   "--cov-report=xml:tests/coverage.xml")
+    # "--cov-report=term-missing" "--cov-report=xml:tests/coverage.xml")
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
@@ -184,52 +185,52 @@ message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
 add_test(
     NAME test_profile_kernel_execution
-    COMMAND pytest -m kernel_execution ${COV_OPTION}
-            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
+    COMMAND pytest -m kernel_execution --junitxml=tests/test_profile_kernel_execution.xml
+            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_ipblocks
-    COMMAND pytest -m ipblocks ${COV_OPTION}
+    COMMAND pytest -m ipblocks --junitxml=tests/test_profile_ipblocks.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_property(TEST test_profile_ipblocks PROPERTY COST 11)
 
 add_test(
     NAME test_profile_dispatch
-    COMMAND pytest -m dispatch ${COV_OPTION}
+    COMMAND pytest -m dispatch --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_property(TEST test_profile_ipblocks PROPERTY COST 5)
 
 add_test(
     NAME test_profile_verbosity
-    COMMAND pytest -m verbosity ${COV_OPTION}
+    COMMAND pytest -m verbosity --junitxml=tests/test_profile_verbosity.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_property(TEST test_profile_ipblocks PROPERTY COST 10)
 
 add_test(
     NAME test_profile_mem
-    COMMAND pytest -m mem ${COV_OPTION}
+    COMMAND pytest -m mem --junitxml=tests/test_profile_mem.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_join
-    COMMAND pytest -m join ${COV_OPTION}
+    COMMAND pytest -m join --junitxml=tests/test_profile_join.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_sort
-    COMMAND pytest -m sort ${COV_OPTION}
+    COMMAND pytest -m sort --junitxml=tests/test_profile_sort.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_misc
-    COMMAND pytest -m misc ${COV_OPTION}
+    COMMAND pytest -m misc --junitxml=tests/test_profile_misc.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
