@@ -70,16 +70,16 @@ pmc_kernel_top_table_id = 1
 #       }
 supported_denom = {
     "per_wave": "SQ_WAVES",
-    "per_cycle": "GRBM_GUI_ACTIVE",
+    "per_cycle": "$GRBM_GUI_ACTIVE_PER_XCD",
     "per_second": "((End_Timestamp - Start_Timestamp) / 1000000000)",
     "per_kernel": "1",
 }
 
 # Build-in defined in mongodb variables:
 build_in_vars = {
-    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), \
+    "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD)), \
               0) / $max_waves_per_cu) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
-              / GRBM_GUI_ACTIVE)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
+              / $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
     "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)",
     "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
     "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
@@ -391,9 +391,9 @@ def gen_counter_list(formula):
             .replace("$denom", "SQ_WAVES")
             .replace(
                 "$numActiveCUs",
-                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / GRBM_GUI_ACTIVE)), \
+                "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD})), \
               0) / $maxWavesPerCU) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
-              / GRBM_GUI_ACTIVE)), 0), $maxWavesPerCU), 8)), $numCU))",
+              / $GRBM_GUI_ACTIVE_PER_XCD)), 0), $maxWavesPerCU), 8)), $numCU))",
             )
             .replace("$", "")
         )
