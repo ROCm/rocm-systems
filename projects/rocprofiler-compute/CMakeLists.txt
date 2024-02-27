@@ -359,10 +359,9 @@ install(
     TYPE BIN
     PATTERN "rooflines*" EXCLUDE)
 # src/utils/rooflines
+file(GLOB rooflinebins src/utils/rooflines/roofline-*)
 install(
-    PROGRAMS src/utils/rooflines/roofline-rhel8-mi200-rocm5
-             src/utils/rooflines/roofline-sle15sp3-mi200-rocm5
-             src/utils/rooflines/roofline-ubuntu20_04-mi200-rocm5
+    PROGRAMS ${rooflinebins}
     DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
 # src/omniperf_soc
 install(
