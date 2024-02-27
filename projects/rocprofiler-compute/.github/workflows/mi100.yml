@@ -60,6 +60,7 @@ jobs:
           srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
       - name: Summarize tests
         if: always()
+        uses: pmeier/pytest-results-action@main
         with:
           path: tests/test-results.xml
           summary: true
