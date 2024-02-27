@@ -51,7 +51,7 @@ jobs:
           mkdir build
           cd build
           ml cmake
-          cmake -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=24 ..
+          cmake -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=16 ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: Run [profile] mode
@@ -63,18 +63,17 @@ jobs:
         run: |
           cd build
           srun -N 1 -J omniperf -p ci -t 00:10:00 ctest --verbose -R test_analyze_workloads
+      - name: Run [analyze commands] mode
+        if: '!cancelled()'
+        run: |
+          cd build
+          srun -N 1 -J omniperf -p ci -t 00:10:00 ctest --verbose -R test_analyze_commands
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/linux@v2
         if: always()
         with:
           files: |
             tests/**/test_*.xml
-##       - name: Run [analyze workloads] mode
-##         run: |
-##           cd build
-##           srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
-#          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest --verbose -R test_profile_kernel_execution
-
 ## ##       - name: Pytest coverage comment
 ## ##         if: '!cancelled()'
 ## ##         uses: MishaKav/pytest-coverage-comment@v1.1.48
