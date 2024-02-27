@@ -46,12 +46,13 @@ jobs:
           echo "PATH=$PATH"
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
           echo "ROCM_PATH=$ROCM_PATH"
+	  ulimit -u
       - name: Configure
         run: |
           mkdir build
           cd build
           ml cmake
-          cmake -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=16 ..
+          cmake -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=8 ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
       - name: Run [profile] mode
