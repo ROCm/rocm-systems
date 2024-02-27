@@ -69,7 +69,7 @@ jobs:
         if: always()
         with:
           files: |
-            test-results/**/test_*.xml
+            tests/**/test_*.xml
 ##       - name: Run [analyze workloads] mode
 ##         run: |
 ##           cd build
