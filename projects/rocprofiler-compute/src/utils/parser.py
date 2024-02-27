@@ -77,13 +77,13 @@ supported_denom = {
 
 # Build-in defined in mongodb variables:
 build_in_vars = {
+    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
+    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
+    "GRBM_SPI_BUSY_PER_XCD" : "(GRBM_SPI_BUSY / $num_xcd)",
     "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD)), \
               0) / $max_waves_per_cu) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
               / $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)",
-    "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
-    "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD" : "(GRBM_SPI_BUSY / $num_xcd)"
+    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)"
 }
 
 supported_call = {
@@ -700,7 +700,11 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
 
     # build and eval all derived build-in global variables
     ammolite__build_in = {}
+
+    # first pass, we do all per-xcd values, as these are used in subsequent builtins
     for key, value in build_in_vars.items():
+        if "PER_XCD" not in key:
+            continue
         # NB: assume all built-in vars from pmc_perf.csv for now
         s = build_eval_string(value, schema.pmc_perf_file_prefix)
         try:
@@ -710,12 +714,25 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
         except AttributeError as ae:
             if ae == "'NoneType' object has no attribute 'get'":
                 ammolite__build_in[key] = None
-
-    ammolite__numActiveCUs = ammolite__build_in["numActiveCUs"]
-    ammolite__kernelBusyCycles = ammolite__build_in["kernelBusyCycles"]
     ammolite__GRBM_GUI_ACTIVE_PER_XCD = ammolite__build_in["GRBM_GUI_ACTIVE_PER_XCD"]
     ammolite__GRBM_COUNT_PER_XCD = ammolite__build_in["GRBM_COUNT_PER_XCD"]
     ammolite__GRBM_SPI_BUSY_PER_XCD = ammolite__build_in["GRBM_SPI_BUSY_PER_XCD"]
+
+    for key, value in build_in_vars.items():
+        # next pass, we evaluate the builtins the depend on the per-XCD values
+        if "PER_XCD" in key:
+            continue
+        # NB: assume all built-in vars from pmc_perf.csv for now
+        s = build_eval_string(value, schema.pmc_perf_file_prefix)
+        try:
+            ammolite__build_in[key] = eval(compile(s, "<string>", "eval"))
+        except TypeError:
+            ammolite__build_in[key] = None
+        except AttributeError as ae:
+            if ae == "'NoneType' object has no attribute 'get'":
+                ammolite__build_in[key] = None
+    ammolite__numActiveCUs = ammolite__build_in["numActiveCUs"]
+    ammolite__kernelBusyCycles = ammolite__build_in["kernelBusyCycles"]
 
     # Hmmm... apply + lambda should just work
     # df['Value'] = df['Value'].apply(lambda s: eval(compile(str(s), '<string>', 'eval')))
