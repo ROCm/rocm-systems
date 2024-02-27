@@ -57,6 +57,8 @@ typedef struct {
   uint64_t correlation_id;
 } pending_signal_t;
 
+typedef std::unique_ptr<pending_signal_t> pending_signal_ptr_t;
+
 namespace profiler {
 
 uint64_t GetCounterID(std::string& counter_name);
@@ -76,8 +78,8 @@ class Profiler {
                          rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
                          uint64_t queue_index, uint64_t correlation_id);
 
-  const std::vector<pending_signal_t*>& GetPendingSignals(uint32_t writer_id);
-  bool CheckPendingSignalsIsEmpty();
+  std::vector<pending_signal_ptr_t> MovePendingSignals(uint32_t writer_id);
+  void WaitForPendingAndDestroy();
 
   void AddCounterName(rocprofiler_counter_id_t handler, std::string counter_name);
   void AddCounterName(std::string& counter_name);
@@ -102,7 +104,9 @@ class Profiler {
   rocprofiler_session_id_t session_id_;
 
   std::mutex sessions_pending_signals_lock_;
-  std::map<uint32_t, std::vector<pending_signal_t*>>* sessions_pending_signals_;
+  std::map<uint32_t, std::vector<pending_signal_ptr_t>> sessions_pending_signals_{};
+  std::condition_variable has_session_pending_cv;
+  std::atomic<bool> bIsSessionDestroying{false};
 };
 
 }  // namespace profiler

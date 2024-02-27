@@ -95,7 +95,7 @@ public:
     uint64_t agent_handle
   );
 
-  const std::vector<att_pending_signal_t>& GetPendingSignals(uint32_t writer_id);
+  std::vector<att_pending_signal_t> MovePendingSignals(uint32_t writer_id);
 
   bool ATTWriteInterceptor(
     const void* packets,
@@ -150,6 +150,8 @@ public:
   bool HasActiveTracerATT(uint64_t agent_handle) const {
     return pending_stop_packets.find(agent_handle) != pending_stop_packets.end();
   }
+
+  void WaitForPendingAndDestroy();
 
 protected:
   using packet_t = hsa_ext_amd_aql_pm4_packet_t;
@@ -208,6 +210,8 @@ private:
 
   std::mutex sessions_pending_signals_lock_;
   std::map<uint32_t, std::vector<att_pending_signal_t>> sessions_pending_signals_;
+  std::condition_variable has_session_pending_cv;
+  std::atomic<bool> bIsSessionDestroying{false};
 
   rocprofiler_record_id_t capture_id;
   std::unordered_set<uint32_t> active_capture_event_ids;

@@ -46,6 +46,8 @@ void AttTracer::AddPendingSignals(
     uint32_t thread_id, uint64_t queue_index
 ) {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
+  if (bIsSessionDestroying.load())
+    return;
 
   auto pending = sessions_pending_signals_.find(writer_id);
   if (pending == sessions_pending_signals_.end())
@@ -64,11 +66,18 @@ void AttTracer::AddPendingSignals(
   });
 }
 
-const std::vector<att_pending_signal_t>& AttTracer::GetPendingSignals(uint32_t writer_id) {
+std::vector<att_pending_signal_t> AttTracer::MovePendingSignals(uint32_t writer_id)
+{
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
-  assert(sessions_pending_signals_.find(writer_id) != sessions_pending_signals_.end() &&
-         "writer_id is not found in the pending_signals");
-  return sessions_pending_signals_.at(writer_id);
+  auto it = sessions_pending_signals_.find(writer_id);
+  if (it == sessions_pending_signals_.end())
+    rocprofiler::fatal("writer_id is not found in the pending_signals");
+
+  auto move_pending = std::move(it->second);
+  sessions_pending_signals_.erase(writer_id);
+  if (bIsSessionDestroying.load() && sessions_pending_signals_.size() == 0)
+    has_session_pending_cv.notify_all();
+  return move_pending;
 }
 
 #define DEFAULT_ATT_BUFFER_SIZE 0x40000000
@@ -174,7 +183,8 @@ void AttTracer::signalAsyncHandlerATT(const hsa_signal_t& signal, void* data) {
     rocprofiler::fatal("Error: hsa_amd_signal_async_handler for ATT failed");
 }
 
-bool AttTracer::AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data) {
+bool AttTracer::AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* data)
+{
   auto queue_info_session = static_cast<queue::queue_info_session_t*>(data);
   rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =
       rocprofiler::ROCProfiler_Singleton::GetInstance();
@@ -191,68 +201,55 @@ bool AttTracer::AsyncSignalHandlerATT(hsa_signal_value_t /* signal */, void* dat
   rocprofiler::att::AttTracer* att_tracer = session->GetAttTracer();
 
   if (!session->GetAttTracer()) return true;
+  auto pending_signals = att_tracer->MovePendingSignals(queue_info_session->writer_id);
 
-  std::vector<att_pending_signal_t>& pending_signals =
-      const_cast<std::vector<att_pending_signal_t>&>(
-          att_tracer->GetPendingSignals(queue_info_session->writer_id));
+  for (auto& pending : pending_signals)
+  {
+    rocprofiler_record_att_tracer_t record{};
+    record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
+    record.gpu_id = rocprofiler_agent_id_t{(uint64_t)queue_info_session->agent.handle};
+    record.kernel_properties = pending.kernel_properties;
+    record.thread_id = rocprofiler_thread_id_t{pending.thread_id};
+    record.queue_idx = rocprofiler_queue_index_t{pending.queue_index};
+    record.queue_id = rocprofiler_queue_id_t{queue_info_session->queue_id};
+    record.writer_id = queue_info_session->writer_id;
 
-  if (!pending_signals.empty()) {
-    for (auto it = pending_signals.begin(); it != pending_signals.end();
-         it = pending_signals.erase(it)) {
+    if (pending.profile)
+      AddAttRecord(&record, queue_info_session->agent, pending);
 
-      auto& pending = *it;
-      //if (hsasupport_singleton.GetCoreApiTable().hsa_signal_load_relaxed_fn(pending.new_signal))
-      //  return true;
-      rocprofiler_record_att_tracer_t record{};
-      record.kernel_id = rocprofiler_kernel_id_t{pending.kernel_descriptor};
-      record.gpu_id = rocprofiler_agent_id_t{(uint64_t)queue_info_session->agent.handle};
-      record.kernel_properties = pending.kernel_properties;
-      record.thread_id = rocprofiler_thread_id_t{pending.thread_id};
-      record.queue_idx = rocprofiler_queue_index_t{pending.queue_index};
-      record.queue_id = rocprofiler_queue_id_t{queue_info_session->queue_id};
-      record.writer_id = queue_info_session->writer_id;
+    // July/01/2023 -> Changed this to queue_info_session->writer_id
+    // so we can correlate to dispatches. kernel_id already has the descriptor.
+    record.header = {ROCPROFILER_ATT_TRACER_RECORD,
+                      rocprofiler_record_id_t{pending.kernel_descriptor}};
 
-      if (/*pending.counters_count > 0 && */ pending.profile) {
-        AddAttRecord(&record, queue_info_session->agent, pending);
-      }
+    record.intercept_list = codeobj_record::get_capture(record.header.id);
+    std::atomic_thread_fence(std::memory_order_release);
 
-      // July/01/2023 -> Changed this to queue_info_session->writer_id
-      // so we can correlate to dispatches. kernel_id already has the descriptor.
-      record.header = {ROCPROFILER_ATT_TRACER_RECORD,
-                       rocprofiler_record_id_t{pending.kernel_descriptor}};
+    if (pending.session_id.handle == 0)
+      pending.session_id = rocprofiler_singleton.GetCurrentSessionId();
 
-      record.intercept_list = codeobj_record::get_capture(record.header.id);
-      std::atomic_thread_fence(std::memory_order_release);
-
-      if (pending.session_id.handle == 0) {
-        pending.session_id = rocprofiler_singleton.GetCurrentSessionId();
-      }
-
-      if (session->FindBuffer(pending.buffer_id)) {
-        Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
-        buffer->AddRecord(record);
-        buffer->Flush();
-      }
-      codeobj_record::free_capture(record.header.id);
-
-      hsa_status_t status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
-          (pending.profile->output_buffer.ptr));
-      if (status != HSA_STATUS_SUCCESS)
-        rocprofiler::warning("Error: Couldn't free output buffer memory");
-
-      status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
-          (pending.profile->command_buffer.ptr));
-      if (status != HSA_STATUS_SUCCESS)
-        rocprofiler::warning("Error: Couldn't free command buffer memory");
-
-      if (pending.profile->parameters)
-        delete[] pending.profile->parameters;
-      delete pending.profile;
+    if (session->FindBuffer(pending.buffer_id)) {
+      Memory::GenericBuffer* buffer = session->GetBuffer(pending.buffer_id);
+      buffer->AddRecord(record);
+      buffer->Flush();
     }
+    codeobj_record::free_capture(record.header.id);
+
+    hsa_status_t status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+        (pending.profile->output_buffer.ptr));
+    if (status != HSA_STATUS_SUCCESS)
+      rocprofiler::warning("Error: Couldn't free output buffer memory");
+
+    status = hsasupport_singleton.GetAmdExtTable().hsa_amd_memory_pool_free_fn(
+        (pending.profile->command_buffer.ptr));
+    if (status != HSA_STATUS_SUCCESS)
+      rocprofiler::warning("Error: Couldn't free command buffer memory");
+
+    if (pending.profile->parameters)
+      delete[] pending.profile->parameters;
+    delete pending.profile;
   }
   delete queue_info_session;
-
-  std::atomic_thread_fence(std::memory_order_seq_cst);
   return false;
 }
 
@@ -318,6 +315,18 @@ hsa_status_t AttTracer::attTraceDataCallback(
   // either copy here or in ::AddAttRecord
 
   return status;
+}
+
+void AttTracer::WaitForPendingAndDestroy()
+{
+  bIsSessionDestroying.store(true);
+  std::unique_lock<std::mutex> lk(sessions_pending_signals_lock_);
+  if (sessions_pending_signals_.size() == 0)
+    return;
+
+  has_session_pending_cv.wait_for(lk, std::chrono::seconds(2), [this] () {
+    return this->sessions_pending_signals_.size() == 0;
+  });
 }
 
 std::unordered_map<uint64_t, ATTRecordSignal> AttTracer::pending_stop_packets;

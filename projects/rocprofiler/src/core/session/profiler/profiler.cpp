@@ -50,17 +50,9 @@ uint64_t GetCounterID(std::string& counter_name) {
 
 Profiler::Profiler(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t filter_id,
                    rocprofiler_session_id_t session_id)
-    : buffer_id_(buffer_id), filter_id_(filter_id), session_id_(session_id) {
-  sessions_pending_signals_ = new std::map<uint32_t, std::vector<pending_signal_t*>>();
-}
-Profiler::~Profiler() {
-  for (auto& [thread_id, pending_signals] : *sessions_pending_signals_) {
-    for (auto& pending_signal : pending_signals) {
-      delete pending_signal;
-    }
-  }
-  delete sessions_pending_signals_;
-}
+    : buffer_id_(buffer_id), filter_id_(filter_id), session_id_(session_id) {}
+
+Profiler::~Profiler() {}
 
 void Profiler::AddCounterName(rocprofiler_counter_id_t counter_id, std::string counter_name) {
   std::lock_guard<std::mutex> lock(counter_names_lock_);
@@ -130,26 +122,49 @@ void Profiler::AddPendingSignals(
     rocprofiler_buffer_id_t buffer_id, rocprofiler::profiling_context_t* context,
     uint64_t session_data_count, hsa_ven_amd_aqlprofile_profile_t* profile,
     rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id, uint64_t queue_index,
-    uint64_t correlation_id) {
+    uint64_t correlation_id)
+{
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
-  if (sessions_pending_signals_->find(writer_id) == sessions_pending_signals_->end())
-    sessions_pending_signals_->emplace(writer_id, std::vector<pending_signal_t*>());
-  sessions_pending_signals_->at(writer_id).emplace_back(
-      new pending_signal_t{kernel_object, original_completion_signal, new_completion_signal,
-                           session_id_, buffer_id, context, session_data_count, profile,
-                           kernel_properties, thread_id, queue_index, correlation_id});
+  if (bIsSessionDestroying.load())
+    return;
+
+  if (sessions_pending_signals_.find(writer_id) == sessions_pending_signals_.end())
+    sessions_pending_signals_.emplace(writer_id, std::vector<pending_signal_ptr_t>{});
+
+  sessions_pending_signals_.at(writer_id).emplace_back(
+    new pending_signal_t{
+      kernel_object, original_completion_signal, new_completion_signal,
+      session_id_, buffer_id, context, session_data_count, profile,
+      kernel_properties, thread_id, queue_index, correlation_id
+    }
+  );
 }
 
-const std::vector<pending_signal_t*>& Profiler::GetPendingSignals(uint32_t writer_id) {
+std::vector<pending_signal_ptr_t> Profiler::MovePendingSignals(uint32_t writer_id)
+{
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
-  assert(sessions_pending_signals_->find(writer_id) != sessions_pending_signals_->end() &&
-         "writer_id is not found in the pending_signals");
-  return sessions_pending_signals_->at(writer_id);
+  auto it = sessions_pending_signals_.find(writer_id);
+  if (it == sessions_pending_signals_.end())
+    rocprofiler::fatal("writer_id is not found in the pending_signals");
+
+  auto move_pending = std::move(it->second);
+  sessions_pending_signals_.erase(writer_id);
+  if (bIsSessionDestroying.load() && sessions_pending_signals_.size() == 0)
+    has_session_pending_cv.notify_all();
+
+  return move_pending;
 }
 
-bool Profiler::CheckPendingSignalsIsEmpty() {
-  std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
-  return sessions_pending_signals_->empty();
+void Profiler::WaitForPendingAndDestroy()
+{
+  bIsSessionDestroying.store(true);
+  std::unique_lock<std::mutex> lk(sessions_pending_signals_lock_);
+  if (sessions_pending_signals_.size() == 0)
+    return;
+
+  has_session_pending_cv.wait_for(lk, std::chrono::seconds(2), [this] () {
+    return this->sessions_pending_signals_.size() == 0;
+  });
 }
 
 }  // namespace profiler

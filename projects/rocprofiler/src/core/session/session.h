@@ -106,25 +106,19 @@ class Session {
   std::mutex filters_lock_;
   std::vector<Filter*> filters_;
 
-  std::atomic<bool> profiler_started_{false};
-  std::atomic<bool> tracer_started_{false};
-  std::atomic<bool> att_tracer_started_{false};
-  att::AttTracer* att_tracer_;
-  std::atomic<bool> spm_started_{false};
+  att::AttTracer* att_tracer_ = nullptr;
+  bool spm_started_{false};
 
-  profiler::Profiler* profiler_;
-  tracer::Tracer* tracer_;
-  spm::SpmCounters* spmcounter_;
+  profiler::Profiler* profiler_ = nullptr;
+  tracer::Tracer* tracer_ = nullptr;
+  spm::SpmCounters* spmcounter_ = nullptr;
 
-  std::atomic<bool> pc_sampler_started_{false};
-  pc_sampler::PCSampler* pc_sampler_;
-
-  std::atomic<bool> counters_sampler_started_{false};
-  CountersSampler* counters_sampler_;
+  pc_sampler::PCSampler* pc_sampler_ = nullptr;
+  CountersSampler* counters_sampler_ = nullptr;
 
   std::atomic<uint64_t> buffers_counter_{1};
   std::mutex buffers_lock_;
-  std::map<uint64_t, Memory::GenericBuffer*>* buffers_;
+  std::map<uint64_t, Memory::GenericBuffer*>* buffers_ = nullptr;
   std::atomic<uint64_t> records_counter_{1};
 
 

@@ -35,6 +35,7 @@
 #include <string>
 #include <vector>
 #include <condition_variable>
+#include <shared_mutex>
 #include "src/core/session/profiler/profiler.h"
 
 namespace rocprofiler {
@@ -87,7 +88,11 @@ class Queue {
   hsa_signal_t GetReadySignal();
   hsa_signal_t GetBlockSignal();
 
+  static void ResetSessionID(rocprofiler_session_id_t id = rocprofiler_session_id_t{0});
+  static void CheckNeededProfileConfigs();
  private:
+  static std::shared_mutex session_id_mutex;
+  static rocprofiler_session_id_t session_id;
 
   hsa_agent_t cpu_agent_;
   hsa_agent_t gpu_agent_;
@@ -112,8 +117,6 @@ struct queue_info_session_t {
 };
 
 void AddRecordCounters(rocprofiler_record_profiler_t* record, const pending_signal_t& pending);
-
-void ResetSessionID(rocprofiler_session_id_t id = rocprofiler_session_id_t{0});
 
 void CheckPacketReqiurements();
 

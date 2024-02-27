@@ -384,25 +384,27 @@ void SignalAsyncReadyHandler(const hsa_signal_t& signal, void* data) {
           signal, HSA_SIGNAL_CONDITION_EQ, 0, AsyncSignalReadyHandler, data);
   if (status != HSA_STATUS_SUCCESS) fatal("hsa_amd_signal_async_handler failed");
 }
-bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
+bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
+{
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
+  if (!queue_info_session) return true;
+
   rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =
-      rocprofiler::ROCProfiler_Singleton::GetInstance();
+                                          rocprofiler::ROCProfiler_Singleton::GetInstance();
   rocprofiler::HSASupport_Singleton& hsasupport_singleton =
-      rocprofiler::HSASupport_Singleton::GetInstance();
-  if (!queue_info_session || !rocprofiler_singleton.GetSession(queue_info_session->session_id) ||
-      !rocprofiler_singleton.GetSession(queue_info_session->session_id)->GetProfiler())
-    return true;
+                                          rocprofiler::HSASupport_Singleton::GetInstance();
+
   rocprofiler::Session* session = rocprofiler_singleton.GetSession(queue_info_session->session_id);
+  if (!session) return true;
+
   std::lock_guard<std::mutex> lock(session->GetSessionLock());
   rocprofiler::profiler::Profiler* profiler = session->GetProfiler();
-  std::vector<pending_signal_t*> pending_signals = const_cast<std::vector<pending_signal_t*>&>(
-      profiler->GetPendingSignals(queue_info_session->writer_id));
+  if (!profiler) return true;
 
-  if (!pending_signals.empty()) {
-    for (auto it = pending_signals.begin(); it != pending_signals.end();
-         it = pending_signals.erase(it)) {
-      auto& pending = *it;
+  auto pending_signals = profiler->MovePendingSignals(queue_info_session->writer_id);
+
+  for (auto& pending : pending_signals)
+  {
       if (hsasupport_singleton.GetCoreApiTable().hsa_signal_load_relaxed_fn(pending->new_signal))
        return true;
       hsa_amd_profiling_dispatch_time_t time;
@@ -458,7 +460,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
             rocprofiler::metrics::GetMetricsData(pending->context->results_map,
                                                  pending->context->metrics_list,
                                                  time.end - time.start);
-          AddRecordCounters(&record, pending);
+          AddRecordCounters(&record, pending.get());
         } else {
           if (session->FindBuffer(pending->buffer_id)) {
             Memory::GenericBuffer* buffer = session->GetBuffer(pending->buffer_id);
@@ -503,14 +505,11 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data) {
 
       }
 
-    
-
       if (pending->new_signal.handle)
        hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(pending->new_signal);
       if (queue_info_session->interrupt_signal.handle)
         hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(
             queue_info_session->interrupt_signal);
-    }
   }
   delete queue_info_session;
   ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_sub(1, std::memory_order_relaxed);
@@ -529,7 +528,8 @@ void CreateSignal(uint32_t attribute, hsa_signal_t* signal) {
   HSASupport_Singleton::GetInstance().CreateSignal(attribute, signal);
 }
 
-rocprofiler_session_id_t session_id = rocprofiler_session_id_t{0};
+rocprofiler_session_id_t Queue::session_id = rocprofiler_session_id_t{0};
+std::shared_mutex Queue::session_id_mutex;
 // Counter Names declaration
 std::vector<std::string> session_data;
 
@@ -546,9 +546,13 @@ uint32_t replay_mode_count = 0;
 
 rocprofiler::Session* session = nullptr;
 
-void ResetSessionID(rocprofiler_session_id_t id) { session_id = id; }
+void Queue::ResetSessionID(rocprofiler_session_id_t id)
+{
+  std::unique_lock<std::shared_mutex> session_id_lock(session_id_mutex);
+  session_id = id;
+}
 
-void CheckNeededProfileConfigs() {
+void Queue::CheckNeededProfileConfigs() {
   rocprofiler_session_id_t internal_session_id;
   // Getting Session ID
   rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =
@@ -609,7 +613,9 @@ std::atomic<uint32_t> WRITER_ID{0};
  * interceptor by invoking the writer function.
  */
 void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t user_pkt_index,
-                             void* data, hsa_amd_queue_intercept_packet_writer writer) {
+                             void* data, hsa_amd_queue_intercept_packet_writer writer)
+{
+  std::shared_lock<std::shared_mutex> session_id_lock(session_id_mutex);
   const Packet::packet_t* packets_arr = reinterpret_cast<const Packet::packet_t*>(packets);
   std::vector<Packet::packet_t> transformed_packets;
 
@@ -668,7 +674,6 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       */
       Packet::CreateBarrierPacket(&transformed_packets, &block_signal, &block_signal);
       }
-
 
       uint32_t writer_id = WRITER_ID.fetch_add(1, std::memory_order_release);
 
