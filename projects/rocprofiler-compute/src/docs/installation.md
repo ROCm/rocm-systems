@@ -27,9 +27,9 @@ Determine what you need to install based on how you would like to interact with 
 
 Omniperf client-side requires the following basic software dependencies prior to usage:
 
-* Python (>=3.7)
+* Python (>=3.8)
 * CMake (>= 3.19)
-* ROCm (>= 5.2.0)
+* ROCm (>= 5.7.1)
 
 In addition, Omniperf leverages a number of Python packages that are
 documented in the top-level `requirements.txt` file.  These must be
