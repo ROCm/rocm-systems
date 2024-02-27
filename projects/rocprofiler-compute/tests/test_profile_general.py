@@ -521,7 +521,7 @@ def test_kernel_names():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1506,7 +1506,7 @@ def test_sort_dispatches():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1537,7 +1537,7 @@ def test_sort_kernels():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1567,7 +1567,7 @@ def test_mem_levels_HBM():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1598,7 +1598,7 @@ def test_mem_levels_L2():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1629,7 +1629,7 @@ def test_mem_levels_vL1D():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1660,7 +1660,7 @@ def test_mem_levels_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1691,7 +1691,7 @@ def test_mem_levels_HBM_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1722,7 +1722,7 @@ def test_mem_levels_vL1D_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1753,7 +1753,7 @@ def test_mem_levels_L2_vL1D_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "mi100":
+    if soc == "MI100":
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
