@@ -58,6 +58,15 @@ jobs:
         run: |
           cd build
           srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
+      - name: Summarize tests
+        if: always()
+        with:
+          path: tests/test-results.xml
+          summary: true
+##       - name: Run [analyze workloads] mode
+##         run: |
+##           cd build
+##           srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
 #          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest --verbose -R test_profile_kernel_execution
 ##       - name: Run [analyze] mode
 ##         if: '!cancelled()'
