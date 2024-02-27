@@ -179,6 +179,12 @@ if(${ENABLE_COVERAGE})
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
 
+# CPU threads available for testing
+set(PYTEST_NUMPROCS
+    "1"
+    CACHE STRING "Number of parallel threads to use with CPU-oriented tests")
+message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS}")
+
 # ---------------------------
 # profile mode tests
 # ---------------------------
@@ -339,7 +345,8 @@ set_tests_properties(
 
 add_test(
     NAME test_analyze_workloads
-    COMMAND pytest ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
+    COMMAND pytest -n ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_workloads.xml
+            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # ---------------------------
