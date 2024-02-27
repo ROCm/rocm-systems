@@ -58,7 +58,7 @@ message(STATUS "Installation path: ${CMAKE_INSTALL_PREFIX}")
 # Python 3 is required
 message(STATUS "Detecting Python interpreter...")
 find_package(
-    Python3 3.7
+    Python3 3.8
     COMPONENTS Interpreter
     REQUIRED)
 
