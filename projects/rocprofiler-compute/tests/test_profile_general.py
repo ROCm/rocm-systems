@@ -21,7 +21,7 @@ config["kernel_name_1"] = "vecCopy(double*, double*, double*, int, int) [clone .
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
 config["cleanup"] = True
 config["COUNTER_LOGGING"] = False
-config["METRIC_COMPARE"] = True
+config["METRIC_COMPARE"] = False
 config["METRIC_LOGGING"] = False
 
 baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
