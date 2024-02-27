@@ -234,7 +234,7 @@ def run_prof(fname, profiler_options, workload_dir, mspec):
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
         hbm_stack_num = get_hbm_stack_num(mspec.gpu_model, mspec.memory_partition)
         df = flatten_tcc_info_across_hbm_stacks(
-            f, hbm_stack_num, int(mspec._ls_banks)
+            f, hbm_stack_num, int(mspec._l2_banks)
         )
         df.to_csv(f, index=False)
 
