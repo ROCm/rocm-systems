@@ -64,6 +64,12 @@ jobs:
         with:
           path: tests/test-results.xml
           summary: true
+      - name: Publish Test Results
+        uses: EnricoMi/publish-unit-test-result-action/linux@v2
+        if: always()
+        with:
+          files: |
+            test-results/**/test_*.xml
 ##       - name: Run [analyze workloads] mode
 ##         run: |
 ##           cd build
