@@ -17,7 +17,7 @@ jobs:
   profile:
     strategy:
       matrix:
-        version: [5.5.1, 5.7.1]
+        version: [5.7.1]
       fail-fast: false
     runs-on: [mi100, rhel9]
 
