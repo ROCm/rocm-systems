@@ -126,12 +126,24 @@ rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
 std::string removeString(const std::string origStr,
                         const std::string &removeMe);
 template <typename T>
-  std::string print_int_as_hex(T i, bool showHexNotation = true) {
+  std::string print_int_as_hex(T i, bool showHexNotation = true,
+  int overloadBitSize = 0) {
   std::stringstream ss;
   if (showHexNotation) {
-    ss << "0x" << std::setfill('0') << std::setw(sizeof(T) * 2) << std::hex;
+    if (overloadBitSize == 0) {
+      ss << "0x" << std::hex << std::setw(sizeof(T) * 2) << std::setfill('0');
+    } else {
+      // 8 bits per 1 byte
+      int byteSize = (overloadBitSize / 8) * 2;
+      ss << "0x" << std::hex << std::setw(byteSize) << std::setfill('0');
+    }
   } else {
-    ss << std::setfill('0') << std::setw(sizeof(T) * 2) << std::hex;
+    if (overloadBitSize == 0) {
+      ss << std::hex << std::setw(sizeof(T) * 2) << std::setfill('0');
+    } else {
+      int byteSize = (overloadBitSize / 8) * 2;
+      ss << std::hex << std::setw(byteSize) << std::setfill('0');
+    }
   }
 
   if (std::is_same<std::uint8_t, T>::value) {

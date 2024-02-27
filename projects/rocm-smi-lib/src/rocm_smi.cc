@@ -754,16 +754,25 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
 
   kfd_node->get_property_value("domain", &domain);
 
-  // Replace the 16 bit domain originally set like this:
-  // BDFID = ((<DOMAIN> & 0xffff) << 32) | ((<BUS> & 0xff) << 8) |
-  //                        ((device& 0x1f) <<3 ) | (function & 0x7)
-  // with this:
-  // BDFID = ((<DOMAIN> & 0xffffffff) << 32) | ((<BUS> & 0xff) << 8) |
-  //                        ((device& 0x1f) <<3 ) | (function & 0x7)
-
+  // Add domain to full pci_id:
+  // BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) |
+  // ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
+  // bits [63:32] = domain
+  // bits [31:28] = partition id in multi partition system
+  // bits [27:16] = reserved
+  // bits [15: 0] = pci bus/device/function
   assert((domain & 0xFFFFFFFF00000000) == 0);
-  (*bdfid) &= 0xFFFF;  // Clear out the old 16 bit domain
-  *bdfid |= (domain & 0xFFFFFFFF) << 32;
+  (*bdfid) &= 0xFFFFFFFF;  // keep bottom 32 bits of pci_id
+  *bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
+  uint64_t pci_id = *bdfid;
+  uint32_t node = UINT32_MAX;
+  rsmi_dev_node_id_get(dv_ind, &node);
+  ss << __PRETTY_FUNCTION__ << " | kfd node = "
+  << std::to_string(node) << "\n"
+  << " returning pci_id = "
+  << std::to_string(pci_id) << " ("
+  << amd::smi::print_int_as_hex(pci_id) << ")";
+  LOG_INFO(ss);
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting RSMI_STATUS_SUCCESS";
