@@ -41,8 +41,8 @@ class OmniAnalyze_Base:
         self._runs = OrderedDict()
         self._arch_configs = {}
         self.__supported_archs = supported_archs
-        self._output = None
-        self.__socs = None  # available OmniSoC objs
+        self._output = None 
+        self.__socs:dict = None # available OmniSoC objs
 
     def get_args(self):
         return self.__args
@@ -150,12 +150,11 @@ class OmniAnalyze_Base:
         for d in self.__args.path:
             w = schema.Workload()
             w.sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
-            if self.__args.specs_correction:
-                w.sys_info = parser.correct_sys_info(
-                    w.sys_info, self.__args.specs_correction
-                )
-            w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             arch = w.sys_info.iloc[0]["gpu_arch"]
+            mspec = self.get_socs()[arch]._mspec
+            if self.__args.specs_correction:
+                w.sys_info = parser.correct_sys_info(mspec, self.__args.specs_correction)
+            w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
             w.dfs_type = self._arch_configs[arch].dfs_type
             self._runs[d[0]] = w

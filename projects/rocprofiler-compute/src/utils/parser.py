@@ -912,9 +912,12 @@ def load_kernel_top(workload, dir):
             if file.exists():
                 tmp[id] = pd.read_csv(file)
             else:
-                logging.info(
-                    "Warning: Issue loading top kernels. Check pmc_kernel_top.csv"
-                )
+                logging.info("Warning: Issue loading top kernels. Check pmc_kernel_top.csv")
+        # NB: Special case for sysinfo. Probably room for improvement in this whole function design
+        elif "from_csv_columnwise" in df.columns and id == 101:
+            tmp[id] = workload.sys_info.transpose()
+            # All transposed columns should be marked with a general header
+            tmp[id].columns = ["Info"]
         elif "from_csv_columnwise" in df.columns:
             # NB:
             #   Another way might be doing transpose in tty like metric_table.
@@ -962,60 +965,18 @@ def build_comparable_columns(time_unit):
 
     return comparable_columns
 
-
-def correct_sys_info(df, specs_correction):
+def correct_sys_info(mspec, specs_correction:dict):
     """
     Correct system spec items manually
     """
-
-    # NB: to keep the backwards compatibility, we don't touch the current
-    #   naming convention. Ideally, the header of sysinfo should use/include
-    #   the members of MachineSpecs directly.
-
-    # Sync up with the header defined in omniperf gen_sysinfo() !!
-    # header = "workload_name,"
-    # header += "command,"
-    # header += "host_name,host_cpu,host_distro,host_kernel,host_rocmver,date,"
-    # header += "gpu_soc,numSE,numCU,numSIMD,waveSize,maxWavesPerCU,maxWorkgroupSize,"
-    # header += "L1,L2,sclk,mclk,cur_sclk,cur_mclk,L2Banks,LDSBanks,name,numSQC,numPipes,hbmBW,compute_partition,memory_partition,"
-    # header += "ip_blocks\n"
-
-    name_map = {
-        "host_name": "hostname",
-        "CPU": "host_cpu",
-        "kernel_version": "host_kernel",
-        "host_distro": "distro",
-        # "ram": "",
-        "distro": "host_distro",
-        "rocm_version": "host_rocmver",
-        "GPU": "name",
-        "arch": "gpu_soc",
-        "L1": "L1",
-        "L2": "L2",
-        "CU": "numCU",
-        "SIMD": "numSIMD",
-        "SE": "numSE",
-        "wave_size": "waveSize",
-        "max_waves_per_cu": "maxWavesPerCU",
-        "max_waves_per_cu": "maxWorkgroupSize",
-        "max_sclk": "sclk",
-        "max_mclk": "mclk",
-        "cur_sclk": "cur_sclk",
-        "cur_mclk": "cur_mclk",
-        "L2Banks": "L2Banks",
-        "totalL2Banks": "totalL2Banks",
-        "LDSBanks": "LDSBanks",
-        "numSQC": "numSQC",
-        "numPipes": "numPipes",
-        "hbmBW": "hbmBW",
-        "compute_partition": "compute_partition",
-        "memory_partition": "memory_partition",
-        "num_xcd": "num_xcd"
-    }
-
     # todo: more err checking for string specs_correction
-    pairs = dict(re.findall(r"(\w+):\s*(\d+)", specs_correction))
-    for k, v in pairs.items():
-        df[name_map[k]] = v
 
-    return df
+    pairs = dict(re.findall(r"(\w+):\s*(\d+)", specs_correction))
+
+    for k, v in pairs.items():
+        if not hasattr(mspec, str(k)):
+            error(f"Invalid specs correction '{k}'. Please use --specs option to peak valid specs")
+        setattr(mspec, str(k), v)
+    return mspec.get_class_members()
+
+

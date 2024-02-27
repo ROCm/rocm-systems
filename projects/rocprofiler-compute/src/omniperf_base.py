@@ -156,7 +156,7 @@ class Omniperf:
         return
 
     @demarcate
-    def load_soc_specs(self, sysinfo=None):
+    def load_soc_specs(self, sysinfo:dict=None):
         """Load OmniSoC instance for Omniperf run
         """
         self.__mspec = MachineSpecs(self.__args, sysinfo)
@@ -278,6 +278,7 @@ class Omniperf:
         # Load required SoC(s) from input
         for d in analyzer.get_args().path:
             sys_info = pd.read_csv(Path(d[0], "sysinfo.csv"))
+            sys_info = sys_info.to_dict('list')
             self.load_soc_specs(sys_info)
 
         analyzer.set_soc(self.__soc)
