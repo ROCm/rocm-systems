@@ -72,9 +72,9 @@ Panel Config:
             unit: pct
             tips:
           Remote Read Traffic:
-            avg: AVG((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-            min: MIN((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
-            max: MAX((100 * ((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+            avg: AVG((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum),0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+            min: MIN((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum),0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
+            max: MAX((100 * (MAX((TCC_EA0_RDREQ_sum - TCC_EA0_RDREQ_DRAM_sum),0) / TCC_EA0_RDREQ_sum) if (TCC_EA0_RDREQ_sum != 0) else None))
             unit: pct
             tips:
           Uncached Read Traffic:
@@ -102,9 +102,9 @@ Panel Config:
             unit: pct
             tips:
           Remote Write and Atomic Traffic:
-            avg: AVG((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
-            min: MIN((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
-            max: MAX((100 * ((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+            avg: AVG((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+            min: MIN((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
+            max: MAX((100 * (MAX((TCC_EA0_WRREQ_sum - TCC_EA0_WRREQ_DRAM_sum),0) / TCC_EA0_WRREQ_sum) if (TCC_EA0_WRREQ_sum != 0) else None))
             unit: pct
             tips:
           Atomic Traffic:

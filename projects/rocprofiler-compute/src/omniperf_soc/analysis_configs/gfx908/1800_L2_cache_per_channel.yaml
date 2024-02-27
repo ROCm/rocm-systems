@@ -10,7 +10,7 @@ Panel Config:
   data source:
     - metric_table:
         id: 1801
-        title: Aggregate Stats (All 32 channels)
+        title: Aggregate Stats (All channels)
         header:
           metric: Metric
           avg: Avg
@@ -171,7 +171,7 @@ Panel Config:
 
     - metric_table:
         id: 1802
-        title: L2 Cache Hit Rate (%)
+        title: L2 Cache Hit Rate (pct)
         header:
           metric: Metric
           expr: Expression
@@ -186,7 +186,7 @@ Panel Config:
      
     - metric_table:
         id: 1803
-        title: L2 Requests (Requests)
+        title: L2 Requests (per normUnit)
         header:
           metric: Metric
           expr: Expression
@@ -199,12 +199,12 @@ Panel Config:
 
     - metric_table:
         id: 1804
-        title: L2 Access (Requests)
+        title: L2 Requests (per normUnit)
         header:
           metric: Metric
-          read req: L2 Read Req
-          write req: L2 Write Req
-          atomic req: L2 Atomic Req
+          read req: L2 Read
+          write req: L2 Write
+          atomic req: L2 Atomic
         metric:
           "::_1":
             read req: AVG((TO_INT(TCC_READ[::_1]) / $denom))
@@ -216,12 +216,12 @@ Panel Config:
 
     - metric_table:
         id: 1805
-        title: L2 - Fabric Access (Requests)
+        title: L2-Fabric Requests (per normUnit)
         header:
           metric: Metric
-          read req: L2 - Fabric Read Req
-          write req: L2 - Fabric Write and Atomic Req
-          atomic req: L2 - Fabric Atomic Req
+          read req: L2-Fabric Read
+          write req: L2-Fabric Write and Atomic
+          atomic req: L2-Fabric Atomic
         metric:
           "::_1":
             read req: AVG((TO_INT(TCC_EA_RDREQ[::_1]) / $denom))
@@ -256,7 +256,7 @@ Panel Config:
 
     - metric_table:
         id: 1806
-        title: L2 - Fabric Read Latency (Cycles)
+        title: L2-Fabric Read Latency (Cycles)
         header:
           metric: Metric
           expr: Expression
@@ -271,7 +271,7 @@ Panel Config:
 
     - metric_table:
         id: 1807
-        title: L2 - Fabric Write Latency (Cycles)
+        title: L2-Fabric Write and Atomic Latency (Cycles)
         header:
           metric: Metric
           expr: Expression
@@ -286,7 +286,7 @@ Panel Config:
 
     - metric_table:
         id: 1808
-        title: L2 - Fabric Atomic Latency (Cycles)
+        title: L2-Fabric Atomic Latency (Cycles per normUnit)
         header:
           metric: Metric
           expr: Expression
@@ -300,7 +300,7 @@ Panel Config:
 
     - metric_table:
         id: 1809
-        title: L2 - Fabric Read Stall (Cycles per normUnit)
+        title: L2-Fabric Read Stall (Cycles per normUnit)
         header:
           metric: Metric
           ea read stall - pcie: L2 - Fabric Read Stall (PCIe)
@@ -317,7 +317,7 @@ Panel Config:
 
     - metric_table:
         id: 1810
-        title: L2 - Fabric Write Stall (Cycles per normUnit)
+        title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
         header:
           metric: Metric
           ea write stall - pcie: L2 - Fabric Write Stall (PCIe)

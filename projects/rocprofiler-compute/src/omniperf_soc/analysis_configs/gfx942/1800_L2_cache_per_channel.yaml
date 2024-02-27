@@ -6,11 +6,11 @@ Metric Description:
 # Define the panel properties and properties of each metric in the panel.
 Panel Config:
   id: 1800
-  title: L2 Cache (per Channel)
+  title: L2 Cache (per Metric)
   data source:
     - metric_table:
         id: 1801
-        title: Aggregate Stats (All 32 channels)
+        title: Aggregate Stats (All channels)
         header:
           metric: Metric
           avg: Avg
@@ -107,7 +107,7 @@ Panel Config:
 
     - metric_table:
         id: 1802
-        title: L2 Cache Hit Rate (%)
+        title: L2 Cache Hit Rate (pct)
         header:
           metric: Metric
           expr: Expression
@@ -122,7 +122,7 @@ Panel Config:
 
     - metric_table:
         id: 1803
-        title: Requests (Requests)
+        title: L2 Requests (per normUnit)
         header:
           metric: Metric
           expr: Expression
@@ -135,12 +135,12 @@ Panel Config:
 
     - metric_table:
         id: 1804
-        title: L1-L2 Access (Requests)
+        title: L2 Requests (per normUnit)
         header:
           metric: Metric
-          read req: L1-L2 Read
-          write req: L1-L2 Write
-          atomic req: L1-L2 Atomic
+          read req: L2 Read
+          write req: L2 Write
+          atomic req: L2 Atomic
         metric:
           "::_1":
             read req: AVG((TO_INT(TCC_READ[::_1]) / $denom))
@@ -152,12 +152,12 @@ Panel Config:
 
     - metric_table:
         id: 1805
-        title: L2-EA Access (Requests)
+        title: L2-Fabric Requests (per normUnit)
         header:
           metric: Metric
-          read req: L2-EA Read
-          write req: L2-EA Write
-          atomic req: L2-EA Atomic
+          read req: L2-Fabric Read
+          write req: L2-Fabric Write and Atomic
+          atomic req: L2-Fabric Atomic
         metric:
           "::_1":
             read req: AVG((TO_INT(TCC_EA0_RDREQ[::_1]) / $denom))
@@ -169,12 +169,12 @@ Panel Config:
 
     # - metric_table:
     #     id: 1806
-    #     title: L2-EA Latency (Cycles)
+    #     title: L2-Fabric Latency (Cycles)
     #     header:
     #       metric: Metric
-    #       read lat: L2-EA Read
-    #       write lat: L2-EA Write
-    #       atomic lat: L2-EA Atomic
+    #       read lat: L2-Fabric Read
+    #       write lat: L2-Fabric Write
+    #       atomic lat: L2-Fabric Atomic
     #     metric:
     #       "::_1":
     #         read lat:
@@ -192,7 +192,7 @@ Panel Config:
 
     - metric_table:
         id: 1806
-        title: L2-EA Read Latency (Cycles)
+        title: L2-Fabric Read Latency (Cycles)
         header:
           metric: Metric
           expr: Expression
@@ -207,7 +207,7 @@ Panel Config:
 
     - metric_table:
         id: 1807
-        title: L2-EA Write Latency (Cycles)
+        title: L2-Fabric Write and Atomic Latency (Cycles)
         header:
           metric: Metric
           expr: Expression
@@ -222,7 +222,7 @@ Panel Config:
 
     - metric_table:
         id: 1808
-        title: L2-EA Atomic Latency (Cycles)
+        title: L2-Fabric Atomic Latency (Cycles per normUnit)
         header:
           metric: Metric
           expr: Expression
@@ -236,12 +236,12 @@ Panel Config:
 
     - metric_table:
         id: 1809
-        title: L2-EA Read Stall (Cycles per normUnit)
+        title: L2-Fabric Read Stall (Cycles per normUnit)
         header:
           metric: Metric
-          ea read stall - io: L2-EA Read Stall - IO
-          ea read stall - gmi: L2-EA Read Stall - GMI
-          ea read stall - dram: L2-EA Read Stall - DRAM
+          ea read stall - io: L2-Fabric Read Stall - IO
+          ea read stall - gmi: L2-Fabric Read Stall - GMI
+          ea read stall - dram: L2-Fabric Read Stall - DRAM
         metric:
           "::_1":
             ea read stall - io: None # Missing perfmon
@@ -253,45 +253,45 @@ Panel Config:
 
     - metric_table:
         id: 1810
-        title: L2-EA Write Stall (Cycles per normUnit)
+        title: L2-Fabric Write and Atomic Stall (Cycles per normUnit)
         header:
           metric: Metric
-          ea write stall - io: L2-EA Write Stall - IO
-          ea write stall - gmi: L2-EA Write Stall - GMI
-          ea write stall - dram: L2-EA Write Stall - DRAM
-          ea write stall - starve: L2-EA Write Stall - Starve
+          ea write stall - io: L2-Fabric Write Stall - IO
+          ea write stall - gmi: L2-Fabric Write Stall - GMI
+          ea write stall - dram: L2-Fabric Write Stall - DRAM
+          ea write stall - starve: L2-Fabric Write Stall - Starve
         metric:
           "::_1":
             ea write stall - io: None # Missing perfmon
             ea write stall - gmi: None # Missing perfmon
             ea write stall - dram: None # Missing perfmon
-            ea write stall - starve: TCC_TOO_MANY_EA_WRREQS_STALL
+            ea write stall - starve: None # Missing perfmon
           placeholder_range:
             "::_1": $total_l2_chan
         cli_style: simple_multiple_bar
 
-    - metric_table:
-        id: 1811
-        title: L2 Tag Stall (cycles)
-        header:
-          metric: Metric
-          expr: Expression
-        metric:
-          "::_1":
-            expr: TCC_TAG_STALL[::_1]
-          placeholder_range:
-            "::_1": $total_l2_chan
-        cli_style: simple_box
+    # - metric_table:
+    #     id: 1811
+    #     title: L2 Tag Stall (cycles)
+    #     header:
+    #       metric: Metric
+    #       expr: Expression
+    #     metric:
+    #       "::_1":
+    #         expr: TCC_TAG_STALL[::_1]
+    #       placeholder_range:
+    #         "::_1": $total_l2_chan
+    #     cli_style: simple_box
 
     - metric_table:
         id: 1812
-        title: L2 Bubble (128B request)
+        title: L2-Fabric (128B read requests per normUnit)
         header:
           metric: Metric
           expr: Expression
         metric:
           "::_1":
-            expr: TCC_BUBBLE[::_1]
+            expr: (TO_INT(TCC_BUBBLE[::_1]) / $denom)
           placeholder_range:
             "::_1": $total_l2_chan
           # tips: Number of 128-byte read requests sent to EA
