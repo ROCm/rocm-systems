@@ -69,6 +69,7 @@ endif()
 # populate version string
 configure_file(pyproject.toml.in ${PY_BUILD_DIR}/pyproject.toml @ONLY)
 configure_file(setup.cfg.in ${PY_BUILD_DIR}/setup.cfg @ONLY)
+configure_file(_version.py.in ${PY_PACKAGE_DIR}/_version.py @ONLY)
 
 add_custom_target(
     python_wrapper
@@ -102,6 +103,7 @@ add_custom_target(
     python_package ALL
     DEPENDS ${PY_BUILD_DIR}/pyproject.toml
             ${PY_BUILD_DIR}/setup.cfg
+            ${PY_PACKAGE_DIR}/_version.py
             ${PY_PACKAGE_DIR}/__init__.py
             ${PY_PACKAGE_DIR}/amdsmi_exception.py
             ${PY_PACKAGE_DIR}/amdsmi_interface.py
@@ -114,6 +116,7 @@ install(
     FILES
         ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/pyproject.toml
         ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/setup.cfg
+        ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/_version.py
     DESTINATION ${PY_WRAPPER_INSTALL_DIR}
     COMPONENT dev)
 
