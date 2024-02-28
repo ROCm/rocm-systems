@@ -80,6 +80,7 @@ jobs:
         if: always()
         with:
           path: src/coverage.xml
+          minimum_coverage: 45
 
 ## ##       - name: Pytest coverage comment
 ## ##         if: '!cancelled()'
