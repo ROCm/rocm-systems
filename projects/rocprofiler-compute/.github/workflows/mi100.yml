@@ -86,10 +86,10 @@ jobs:
         if: always()
         with:
           path: tests/coverage.xml
-## ##       - name: Pytest coverage comment
-## ##         if: '!cancelled()'
-## ##         uses: MishaKav/pytest-coverage-comment@v1.1.48
-## ##         with:
-## ##           pytest-xml-coverage-path: 'tests/coverage.xml'
-## ##           junitxml-path: 'tests/test-results.xml'
-## ##           coverage-path-prefix: src/
+      - name: Pytest coverage comment
+        if: '!cancelled()'
+        uses: MishaKav/pytest-coverage-comment@v1.1.48
+        with:
+          pytest-xml-coverage-path: 'tests/coverage.xml'
+#          junitxml-path: 'tests/test-results.xml'
+          coverage-path-prefix: src/
