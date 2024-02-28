@@ -23,7 +23,6 @@ jobs:
 
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
-#       PYTHONPATH: ${{ github.workspace }}/python-libs
     name: ROCm v${{ matrix.version }}
     steps:
       - name: Checkout
@@ -55,10 +54,10 @@ jobs:
           cmake -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=8 ..
       - name: Create HIP binary (vcopy)
         run: hipcc -o tests/vcopy ./sample/vcopy.cpp
-##       - name: Run [profile] mode
-##         run: |
-##           cd build
-##           srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
+      - name: Run [profile] mode
+        run: |
+          cd build
+          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
       - name: Run [analyze workloads] mode
         if: '!cancelled()'
         run: |
@@ -75,28 +74,15 @@ jobs:
         with:
           files: |
             tests/**/test_*.xml
-##       - name: Alternate coverage report
-##         uses: irongut/CodeCoverageSummary@v1.3.0
-##         if: always()
-##         with:
-##           filename: tests/coverage.xml
-## 	  format: markdown
-## 	  
-###       - name: Code coverage summary
-###         uses: 5monkeys/cobertura-action@master
-###         if: always()
-###         with:
-###           path: tests/coverage.xml
-###           minimum_coverage: 45
-###       - name: Alternate coverage report
-###         uses: insightsengineering/coverage-action@v2
-###         if: always()
-###         with:
-###           path: tests/coverage.xml
-###       - name: Pytest coverage comment
-###         if: '!cancelled()'
-###         uses: MishaKav/pytest-coverage-comment@v1.1.48
-###         with:
-###           pytest-xml-coverage-path: 'tests/coverage.xml'
-### #          junitxml-path: 'tests/test-results.xml'
-###           coverage-path-prefix: src/
+      - name: Summarize code coverage
+        if: always()
+        run: coverage report
+      - name: Upload code coverage
+        uses: zgosalvez/github-actions-report-lcov@v3
+        if: always()
+        with:
+          coverage-files: tests/coverage.info
+          minimum-coverage: 35
+          artifact-name: code-coverage-report
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          update-comment: true

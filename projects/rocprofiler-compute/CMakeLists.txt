@@ -174,7 +174,7 @@ option(ENABLE_COVERAGE "Enable code coverage" OFF)
 set(COV_OPTION "")
 if(${ENABLE_COVERAGE})
     set(COV_OPTION "--cov=src" "--cov-append" "--cov-report=term-missing"
-                   "--cov-report=xml:tests/coverage.xml")
+                   "--cov-report=lcov:tests/coverage.info")
     # "--cov-report=term-missing" "--cov-report=xml:tests/coverage.xml")
 endif()
 message(STATUS "Code coverage: ${ENABLE_COVERAGE}")
