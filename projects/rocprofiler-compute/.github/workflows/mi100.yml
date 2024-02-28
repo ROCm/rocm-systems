@@ -83,6 +83,7 @@ jobs:
           minimum_coverage: 45
       - name: Alternate coverage report
         uses: insightsengineering/coverage-action@v2
+        if: always()
         with:
           path: tests/coverage.xml
 ## ##       - name: Pytest coverage comment
