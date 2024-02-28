@@ -222,7 +222,7 @@ Panel Config:
 
     - metric_table:
         id: 1808
-        title: L2-Fabric Atomic Latency (Cycles per normUnit)
+        title: L2-Fabric Atomic Latency (Cycles)
         header:
           metric: Channel
           expr: Expression
