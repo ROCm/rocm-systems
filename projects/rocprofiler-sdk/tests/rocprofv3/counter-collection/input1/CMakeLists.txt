@@ -20,8 +20,8 @@ add_test(
     NAME rocprofv3-test-counter-collection-pmc1-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1 -o
-        pmc1 $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1
+        -o pmc1 $<TARGET_FILE:vector-ops>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")

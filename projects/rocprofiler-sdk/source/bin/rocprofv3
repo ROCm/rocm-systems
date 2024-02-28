@@ -19,7 +19,12 @@ usage() {
   if [ -z "${EC}" ]; then EC=1; fi
   echo -e "${RESET}ROCProfilerV3 Run Script Usage:"
   echo -e "${GREEN}-h   | --help ${RESET}                For showing this message"
-  #   echo -e "${GREEN}-i   | --input ${RESET}               For adding counters file path (every line in the text file represents a counter)"
+  echo -e "${GREEN}-i   | --input ${RESET}               For counter collection "
+  echo -e "\t#${GREY} Input file .txt format, automatically rerun application for every profiling features line"
+  echo -e "\t# Perf counters group 1"
+  echo -e "\tpmc : Wavefronts VALUInsts SALUInsts SFetchInsts FlatVMemInsts LDSInsts"
+  echo -e "\t# Perf counters group 2"
+  echo -e "\tpmc : WriteSize L2CacheHit ${RESET}"
   echo -e "${GREEN}--hsa-trace ${RESET}                  For Collecting HSA API Traces"
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel Dispatch Traces"
   echo -e "${GREEN}--memory-copy-trace ${RESET}          For Collecting Memory Copy Traces"
