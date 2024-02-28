@@ -31,6 +31,7 @@ import socket
 import subprocess
 import importlib
 import logging
+import config
 import pandas as pd
 
 from datetime import datetime
@@ -38,7 +39,7 @@ from math import ceil
 from dataclasses import dataclass
 from pathlib import Path as path
 from textwrap import dedent
-from utils.utils import error, get_hbm_stack_num
+from utils.utils import error, get_hbm_stack_num, get_version
 
 VERSION_LOC = [
     "version",
@@ -55,9 +56,19 @@ VERSION_LOC = [
 class MachineSpecs:
     def __init__(self, args, sysinfo:dict=None):
         if not sysinfo is None:
+            sysinfo_ver = str(sysinfo['specs_version'][0])
+            version = get_version(config.omniperf_home)['version']
+            if sysinfo_ver != version[:version.find(".")]:
+                logging.warning("WARNING: Detected mismatch in sysinfo versioning. You may need to reprofile to update data.")
             for key, value in sysinfo.items():
                 setattr(self, key, value[0])
             return
+        # set specs version
+        vData = get_version(config.omniperf_home)
+        version = vData["version"]
+        # NB: Just taking major as specs version. May want to make this more specific in the future
+        self.specs_version = version[:version.find(".")] # version will alway follow 'major.minor.patch' format
+
         # read timestamp info
         now = datetime.now()
         local_now = now.astimezone()
@@ -195,6 +206,7 @@ class MachineSpecs:
     def __str__(self):
         return dedent(
             f"""\
+        Specs version: v{self.specs_version}
         Host info:
             Hostname:                   {self.hostname}
             CPU Model:                  {self.cpu_model}
