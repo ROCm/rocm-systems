@@ -81,7 +81,10 @@ jobs:
         with:
           path: tests/coverage.xml
           minimum_coverage: 45
-
+      - name: Alternate coverage report
+             uses: insightsengineering/coverage-action@v2
+             with:
+               path: tests/coverage.xml
 ## ##       - name: Pytest coverage comment
 ## ##         if: '!cancelled()'
 ## ##         uses: MishaKav/pytest-coverage-comment@v1.1.48
