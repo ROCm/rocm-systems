@@ -75,6 +75,12 @@ jobs:
         with:
           files: |
             tests/**/test_*.xml
+      - name: Code coverage summary
+        uses: 5monkeys/cobertura-action@master
+        if: always()
+        with:
+          path: src/coverage.xml
+
 ## ##       - name: Pytest coverage comment
 ## ##         if: '!cancelled()'
 ## ##         uses: MishaKav/pytest-coverage-comment@v1.1.48
