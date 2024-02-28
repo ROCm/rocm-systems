@@ -3,6 +3,8 @@ from pathlib import Path
 from unittest.mock import patch
 import pytest
 from importlib.machinery import SourceFileLoader
+import shutil
+import pandas as pd
 
 omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 
@@ -1171,6 +1173,8 @@ def test_decimal_3():
 
 @pytest.mark.misc
 def test_save_dfs():
+    output_path = "tests/workloads/vcopy/saved_analysis"
+
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -1180,7 +1184,7 @@ def test_save_dfs():
                 "--path",
                 "tests/workloads/vcopy/MI100",
                 "--save-dfs",
-                "saved_dfs",
+                output_path,
             ],
         ):
             omniperf.main()
@@ -1195,11 +1199,49 @@ def test_save_dfs():
                 "--path",
                 "tests/workloads/vcopy/MI200",
                 "--save-dfs",
-                "saved_dfs",
+                output_path,
             ],
         ):
             omniperf.main()
     assert e.value.code == 0
+
+    files_in_workload = os.listdir(output_path)
+    single_row_tables = [
+        "0.1_Top_Kernels.csv",
+        "13.3_Instruction_Cache_-_L2_Interface.csv",
+        "18.1_Aggregate_Stats_(All_32_channels).csv",
+    ]
+    for file_name in files_in_workload:
+        df = pd.read_csv(output_path + "/" + file_name)
+        if file_name in single_row_tables:
+            assert len(df.index) == 1
+        else:
+            assert len(df.index) >= 3
+
+    shutil.rmtree(output_path)
+
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            [
+                "omniperf",
+                "analyze",
+                "--path",
+                "tests/workloads/vcopy/MI100",
+                "--save-dfs",
+                output_path,
+            ],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+    files_in_workload = os.listdir(output_path)
+    for file_name in files_in_workload:
+        df = pd.read_csv(output_path + "/" + file_name)
+        if file_name in single_row_tables:
+            assert len(df.index) == 1
+        else:
+            assert len(df.index) >= 3
 
 
 @pytest.mark.col
@@ -1628,37 +1670,3 @@ def test_dependency_MI100():
         ):
             omniperf.main()
     assert e.value.code == 0
-
-
-@pytest.mark.misc
-def test_save_dfs():
-    output_path = "tests/workloads/vcopy/saved_analysis"
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            [
-                "omniperf",
-                "analyze",
-                "--path",
-                "tests/workloads/vcopy/MI100",
-                "--save-dfs",
-                output_path,
-            ],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-    files_in_workload = os.listdir(output_path)
-    for file_name in files_in_workload:
-        import pandas as pd
-
-        df = pd.read_csv(output_path + "/" + file_name)
-        print(file_name)
-        single_row_tables = [
-            "0.1_Top_Kernels.csv",
-            "13.3_Instruction_Cache_-_L2_Interface.csv",
-            "18.1_Aggregate_Stats_(All_32_channels).csv",
-        ]
-        if file_name in single_row_tables:
-            assert len(df.index) == 1
-        else:
-            assert len(df.index) >= 3
