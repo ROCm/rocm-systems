@@ -855,7 +855,7 @@ def apply_filters(workload, dir, is_gui, debug):
     # We pick up kernel names from kerne ids first.
     # Then filter valid entries with kernel names.
     if workload.filter_kernel_ids:
-        if type(workload.filter_kernel_ids) == int:
+        if all(type(kid) == int for kid in workload.filter_kernel_ids):
             # Verify valid kernel filter
             kernels_df = pd.read_csv(os.path.join(dir, "pmc_kernel_top.csv"))
             for kernel_id in workload.filter_kernel_ids:
@@ -880,12 +880,14 @@ def apply_filters(workload, dir, is_gui, debug):
                 ret_df = ret_df.loc[
                     ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(kernels)
                 ]
-        elif type(workload.filter_kernel_ids) == str:
+        elif all(type(kid) == str for kid in workload.filter_kernel_ids):
             ret_df = ret_df.loc[
                 ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(
                     workload.filter_kernel_ids
                 )
             ]
+        else:
+            error("Mixing kernel indices and string filters is not currently supported")
 
     if workload.filter_dispatch_ids:
         # NB: support ignoring the 1st n dispatched execution by '> n'
