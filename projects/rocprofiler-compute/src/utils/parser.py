@@ -33,6 +33,7 @@ from utils import schema
 from utils.utils import error
 from pathlib import Path
 import logging
+import warnings
 
 # ------------------------------------------------------------------------------
 # Internal global definitions
@@ -142,7 +143,9 @@ def to_median(a):
     if a is None:
         return None
     elif isinstance(a, pd.core.series.Series):
-        return a.median()
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", message="Mean of empty slice")
+            return a.median()
     else:
         raise Exception("to_median: unsupported type.")
 
