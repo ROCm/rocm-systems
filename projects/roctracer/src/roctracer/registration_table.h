@@ -54,9 +54,15 @@ struct False {
 // Generic callbacks table
 template <typename T, uint32_t N, typename IsStopped = detail::False> class RegistrationTable {
  public:
+  struct table_element_t {
+    std::atomic<bool> enabled{false};
+    mutable std::shared_mutex mutex;
+    T data;
+  };
+
   template <typename... Args> void Register(uint32_t operation_id, Args... args) {
     assert(operation_id < N && "operation_id is out of range");
-    auto& entry = table_[operation_id];
+    table_element_t& entry = table_.at(operation_id);
     std::unique_lock lock(entry.mutex);
     if (!entry.enabled.exchange(true, std::memory_order_relaxed))
       registered_count_.fetch_add(1, std::memory_order_relaxed);
@@ -65,7 +71,7 @@ template <typename T, uint32_t N, typename IsStopped = detail::False> class Regi
 
   void Unregister(uint32_t operation_id) {
     assert(operation_id < N && "id is out of range");
-    auto& entry = table_[operation_id];
+    table_element_t& entry = table_.at(operation_id);
     std::unique_lock lock(entry.mutex);
     if (entry.enabled.exchange(false, std::memory_order_relaxed))
       registered_count_.fetch_sub(1, std::memory_order_relaxed);
@@ -73,7 +79,7 @@ template <typename T, uint32_t N, typename IsStopped = detail::False> class Regi
 
   std::optional<T> Get(uint32_t operation_id) const {
     assert(operation_id < N && "id is out of range");
-    auto& entry = table_[operation_id];
+    const table_element_t& entry = table_.at(operation_id);
     if (!entry.enabled.load(std::memory_order_relaxed) || IsStopped{}()) return std::nullopt;
     std::shared_lock lock(entry.mutex);
     return entry.enabled.load(std::memory_order_relaxed) ? std::make_optional(entry.data)
@@ -84,11 +90,7 @@ template <typename T, uint32_t N, typename IsStopped = detail::False> class Regi
 
  private:
   std::atomic<size_t> registered_count_{0};
-  struct {
-    std::atomic<bool> enabled{false};
-    mutable std::shared_mutex mutex;
-    T data;
-  } table_[N]{};
+  std::array<table_element_t, N> table_{};
 };
 
 #if IGNORE_GCC_ARRAY_BOUNDS_ERROR
