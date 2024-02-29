@@ -33,7 +33,7 @@
 #include <unordered_map>
 #include <memory>
 #include <optional>
-
+#include <shared_mutex>
 #include "rocprofiler.h"
 #include "src/core/hardware/hsa_info.h"
 
@@ -152,8 +152,8 @@ class HSASupport_Singleton {
   HSAAgentInfo& GetHSAAgentInfo(uint64_t agent_handle);
   HSAAgentInfo& GetHSAAgentInfo(Agent::DeviceInfo device_info);
   Agent::DeviceInfo& GetDeviceInfo(HSAAgentInfo* agent_info);
-  std::mutex kernel_names_map_lock;
-  std::map<std::string, std::vector<uint64_t>>* kernel_names;
+  std::shared_mutex kernel_names_map_lock;
+  std::unordered_map<uint64_t, std::string>* kernel_names;
   std::mutex ksymbol_map_lock;
   std::map<uint64_t, std::string>* ksymbols;
   std::mutex signals_timestamps_map_lock;

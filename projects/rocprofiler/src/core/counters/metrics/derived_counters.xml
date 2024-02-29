@@ -353,8 +353,8 @@
 
   <metric name="KERNEL_DURATION" expr=1 descr="The duration of the kernel dispatch"></metric>
   <metric name="WriteUnitStalled" expr=100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
-  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Total number of TCP stalls TA data interface."></metric>
-  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=max(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Maximum number of TCP stalls TA data interface."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,10) descr="Total number of TCP stalls TA data interface."></metric>
+  <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=max(TCP_TCP_TA_DATA_STALL_CYCLES,10) descr="Maximum number of TCP stalls TA data interface."></metric>
 
   <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*XCC_NUM/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4*XCC_NUM/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
@@ -393,43 +393,43 @@
   <metric name="TD_STORE_WAVEFRONT_sum"                                 expr=sum(TD_STORE_WAVEFRONT,16) descr="Count the wavefronts with opcode = store. Sum over TD instances."></metric>
   <metric name="TD_COALESCABLE_WAVEFRONT_sum"                           expr=sum(TD_COALESCABLE_WAVEFRONT,16) descr="Count wavefronts that TA finds coalescable. Sum over TD instances."></metric>
   <metric name="TD_SPI_STALL_sum"                                       expr=sum(TD_SPI_STALL,16) descr="TD is stalled SPI vinit, sum of TCP instances"></metric>
-  <metric name="TCP_GATE_EN1_sum"                                       expr=sum(TCP_GATE_EN1,16) descr="TCP interface clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
-  <metric name="TCP_GATE_EN2_sum"                                       expr=sum(TCP_GATE_EN2,16) descr="TCP core clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
-  <metric name="TCP_TD_TCP_STALL_CYCLES_sum"                            expr=sum(TCP_TD_TCP_STALL_CYCLES,16) descr="TD stalls TCP. Sum over TCP instances."></metric>
-  <metric name="TCP_TCR_TCP_STALL_CYCLES_sum"                           expr=sum(TCP_TCR_TCP_STALL_CYCLES,16) descr="TCR stalls TCP_TCR_req interface. Sum over TCP instances."></metric>
-  <metric name="TCP_READ_TAGCONFLICT_STALL_CYCLES_sum"                  expr=sum(TCP_READ_TAGCONFLICT_STALL_CYCLES,16) descr="Tagram conflict stall on a read. Sum over TCP instances."></metric>
-  <metric name="TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"                 expr=sum(TCP_WRITE_TAGCONFLICT_STALL_CYCLES,16) descr="Tagram conflict stall on a write. Sum over TCP instances."></metric>
-  <metric name="TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum"                expr=sum(TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES,16) descr="Tagram conflict stall on an atomic. Sum over TCP instances."></metric>
-  <metric name="TCP_VOLATILE_sum"                                       expr=sum(TCP_VOLATILE,16) descr="Total number of L1 volatile pixels/buffers from TA. Sum over TCP instances."></metric>
-  <metric name="TCP_TOTAL_ACCESSES_sum"                                 expr=sum(TCP_TOTAL_ACCESSES,16) descr="Total number of pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_READ+TCP_PERF_SEL_TOTAL_NONREAD. Sum over TCP instances."></metric>
-  <metric name="TCP_TOTAL_READ_sum"                                     expr=sum(TCP_TOTAL_READ,16) descr="Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ. Sum over TCP instances."></metric>
-  <metric name="TCP_TOTAL_WRITE_sum"                                    expr=sum(TCP_TOTAL_WRITE,16) descr="Total number of local write pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_MISS_LRU_WRITE+ TCP_PERF_SEL_TOTAL_MISS_EVICT_WRITE. Sum over TCP instances."></metric>
-  <metric name="TCP_TOTAL_ATOMIC_WITH_RET_sum"                          expr=sum(TCP_TOTAL_ATOMIC_WITH_RET,16) descr="Total number of atomic with return pixels/buffers from TA. Sum over TCP instances."></metric>
-  <metric name="TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"                       expr=sum(TCP_TOTAL_ATOMIC_WITHOUT_RET,16) descr="Total number of atomic without return pixels/buffers from TA Sum over TCP instances."></metric>
-  <metric name="TCP_TOTAL_WRITEBACK_INVALIDATES_sum"                    expr=sum(TCP_TOTAL_WRITEBACK_INVALIDATES,16) descr="Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+ TCP_PERF_SEL_TOTAL_WBINVL1_VOL+ TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL. Not Windowed. Sum over TCP instances."></metric>
-  <metric name="TCP_UTCL1_REQUEST_sum"                                  expr=sum(TCP_UTCL1_REQUEST,16) descr="Total CLIENT_UTCL1 NORMAL requests Sum over TCP instances."></metric>
-  <metric name="TCP_UTCL1_TRANSLATION_MISS_sum"                         expr=sum(TCP_UTCL1_TRANSLATION_MISS,16) descr="Total utcl1 translation misses Sum over TCP instances."></metric>
-  <metric name="TCP_UTCL1_TRANSLATION_HIT_sum"                          expr=sum(TCP_UTCL1_TRANSLATION_HIT,16) descr="Total utcl1 translation hits Sum over TCP instances."></metric>
-  <metric name="TCP_UTCL1_PERMISSION_MISS_sum"                          expr=sum(TCP_UTCL1_PERMISSION_MISS,16) descr="Total utcl1 permission misses Sum over TCP instances."></metric>
-  <metric name="TCP_TOTAL_CACHE_ACCESSES_sum"                           expr=sum(TCP_TOTAL_CACHE_ACCESSES,16) descr="Count of total cache line (tag) accesses (includes hits and misses). Sum over TCP instances."></metric>
-  <metric name="TCP_TA_TCP_STATE_READ_sum"                              expr=sum(TCP_TA_TCP_STATE_READ,16) descr="Number of state reads Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_READ_REQ_sum"                                   expr=sum(TCP_TCC_READ_REQ,16) descr="Total read requests from TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_WRITE_REQ_sum"                                  expr=sum(TCP_TCC_WRITE_REQ,16) descr="Total write requests from TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_ATOMIC_WITH_RET_REQ_sum"                        expr=sum(TCP_TCC_ATOMIC_WITH_RET_REQ,16) descr="Total atomic with return requests from TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"                     expr=sum(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,16) descr="Total atomic without return requests from TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_NC_READ_REQ_sum"                                expr=sum(TCP_TCC_NC_READ_REQ,16) descr="Total read requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_NC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_NC_WRITE_REQ,16) descr="Total write requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_NC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_NC_ATOMIC_REQ,16) descr="Total atomic requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_UC_READ_REQ_sum"                                expr=sum(TCP_TCC_UC_READ_REQ,16) descr="Total read requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_UC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_UC_WRITE_REQ,16) descr="Total write requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_UC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_UC_ATOMIC_REQ,16) descr="Total atomic requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_CC_READ_REQ_sum"                                expr=sum(TCP_TCC_CC_READ_REQ,16) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_CC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_CC_WRITE_REQ,16) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_CC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_CC_ATOMIC_REQ,16) descr="Total atomic requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_RW_READ_REQ_sum"                                expr=sum(TCP_TCC_RW_READ_REQ,16) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_RW_WRITE_REQ_sum"                               expr=sum(TCP_TCC_RW_WRITE_REQ,16) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
-  <metric name="TCP_TCC_RW_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_RW_ATOMIC_REQ,16) descr="Total atomic requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
-  <metric name="TCP_PENDING_STALL_CYCLES_sum"                           expr=sum(TCP_PENDING_STALL_CYCLES,16) descr="Stall due to data pending from L2. Sum over TCP instances."></metric>
+  <metric name="TCP_GATE_EN1_sum"                                       expr=sum(TCP_GATE_EN1,10) descr="TCP interface clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_GATE_EN2_sum"                                       expr=sum(TCP_GATE_EN2,10) descr="TCP core clocks are turned on. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_TD_TCP_STALL_CYCLES_sum"                            expr=sum(TCP_TD_TCP_STALL_CYCLES,10) descr="TD stalls TCP. Sum over TCP instances."></metric>
+  <metric name="TCP_TCR_TCP_STALL_CYCLES_sum"                           expr=sum(TCP_TCR_TCP_STALL_CYCLES,10) descr="TCR stalls TCP_TCR_req interface. Sum over TCP instances."></metric>
+  <metric name="TCP_READ_TAGCONFLICT_STALL_CYCLES_sum"                  expr=sum(TCP_READ_TAGCONFLICT_STALL_CYCLES,10) descr="Tagram conflict stall on a read. Sum over TCP instances."></metric>
+  <metric name="TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum"                 expr=sum(TCP_WRITE_TAGCONFLICT_STALL_CYCLES,10) descr="Tagram conflict stall on a write. Sum over TCP instances."></metric>
+  <metric name="TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES_sum"                expr=sum(TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES,10) descr="Tagram conflict stall on an atomic. Sum over TCP instances."></metric>
+  <metric name="TCP_VOLATILE_sum"                                       expr=sum(TCP_VOLATILE,10) descr="Total number of L1 volatile pixels/buffers from TA. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ACCESSES_sum"                                 expr=sum(TCP_TOTAL_ACCESSES,10) descr="Total number of pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_READ+TCP_PERF_SEL_TOTAL_NONREAD. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_READ_sum"                                     expr=sum(TCP_TOTAL_READ,10) descr="Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_WRITE_sum"                                    expr=sum(TCP_TOTAL_WRITE,10) descr="Total number of local write pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_MISS_LRU_WRITE+ TCP_PERF_SEL_TOTAL_MISS_EVICT_WRITE. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITH_RET_sum"                          expr=sum(TCP_TOTAL_ATOMIC_WITH_RET,10) descr="Total number of atomic with return pixels/buffers from TA. Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_ATOMIC_WITHOUT_RET_sum"                       expr=sum(TCP_TOTAL_ATOMIC_WITHOUT_RET,10) descr="Total number of atomic without return pixels/buffers from TA Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_WRITEBACK_INVALIDATES_sum"                    expr=sum(TCP_TOTAL_WRITEBACK_INVALIDATES,10) descr="Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+ TCP_PERF_SEL_TOTAL_WBINVL1_VOL+ TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL. Not Windowed. Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_REQUEST_sum"                                  expr=sum(TCP_UTCL1_REQUEST,10) descr="Total CLIENT_UTCL1 NORMAL requests Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_MISS_sum"                         expr=sum(TCP_UTCL1_TRANSLATION_MISS,10) descr="Total utcl1 translation misses Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_TRANSLATION_HIT_sum"                          expr=sum(TCP_UTCL1_TRANSLATION_HIT,10) descr="Total utcl1 translation hits Sum over TCP instances."></metric>
+  <metric name="TCP_UTCL1_PERMISSION_MISS_sum"                          expr=sum(TCP_UTCL1_PERMISSION_MISS,10) descr="Total utcl1 permission misses Sum over TCP instances."></metric>
+  <metric name="TCP_TOTAL_CACHE_ACCESSES_sum"                           expr=sum(TCP_TOTAL_CACHE_ACCESSES,10) descr="Count of total cache line (tag) accesses (includes hits and misses). Sum over TCP instances."></metric>
+  <metric name="TCP_TA_TCP_STATE_READ_sum"                              expr=sum(TCP_TA_TCP_STATE_READ,10) descr="Number of state reads Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_READ_REQ_sum"                                   expr=sum(TCP_TCC_READ_REQ,10) descr="Total read requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_WRITE_REQ_sum"                                  expr=sum(TCP_TCC_WRITE_REQ,10) descr="Total write requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITH_RET_REQ_sum"                        expr=sum(TCP_TCC_ATOMIC_WITH_RET_REQ,10) descr="Total atomic with return requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum"                     expr=sum(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,10) descr="Total atomic without return requests from TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_READ_REQ_sum"                                expr=sum(TCP_TCC_NC_READ_REQ,10) descr="Total read requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_NC_WRITE_REQ,10) descr="Total write requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_NC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_NC_ATOMIC_REQ,10) descr="Total atomic requests with NC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_READ_REQ_sum"                                expr=sum(TCP_TCC_UC_READ_REQ,10) descr="Total read requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_UC_WRITE_REQ,10) descr="Total write requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_UC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_UC_ATOMIC_REQ,10) descr="Total atomic requests with UC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_READ_REQ_sum"                                expr=sum(TCP_TCC_CC_READ_REQ,10) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_WRITE_REQ_sum"                               expr=sum(TCP_TCC_CC_WRITE_REQ,10) descr="Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_CC_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_CC_ATOMIC_REQ,10) descr="Total atomic requests with CC mtype from this TCP to all TCCs Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_READ_REQ_sum"                                expr=sum(TCP_TCC_RW_READ_REQ,10) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_WRITE_REQ_sum"                               expr=sum(TCP_TCC_RW_WRITE_REQ,10) descr="Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_TCC_RW_ATOMIC_REQ_sum"                              expr=sum(TCP_TCC_RW_ATOMIC_REQ,10) descr="Total atomic requests with RW mtype from this TCP to all TCCs. Sum over TCP instances."></metric>
+  <metric name="TCP_PENDING_STALL_CYCLES_sum"                           expr=sum(TCP_PENDING_STALL_CYCLES,10) descr="Stall due to data pending from L2. Sum over TCP instances."></metric>
   <metric name="TCP_TCR_TCP_STALL_CYCLES_PERCENT"                       expr=100*TCP_TCR_TCP_STALL_CYCLES_sum/TCP_GATE_EN1_sum descr="Percentage of time TCP is stalled by TCR."></metric>
   <metric name="TCA_CYCLE_sum"                                          expr=sum(TCA_CYCLE,16)  descr="Number of cycles. Sum over all TCA instances "></metric>
   <metric name="TCA_BUSY_sum"                                           expr=sum(TCA_BUSY,16)   descr="Number of cycles we have a request pending. Sum over all TCA instances."></metric>

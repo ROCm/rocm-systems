@@ -30,7 +30,7 @@
 #include <optional>
 #include <string>
 #include <vector>
-
+#include "src/core/hsa/packets/packets_generator.h"
 #include "rocprofiler.h"
 #include "src/core/counters/basic/basic_counter.h"
 #include "src/core/counters/metrics/eval_metrics.h"
@@ -48,9 +48,8 @@ typedef struct {
   hsa_signal_t new_signal;
   rocprofiler_session_id_t session_id;
   rocprofiler_buffer_id_t buffer_id;
-  rocprofiler::profiling_context_t* context;
   uint64_t counters_count;
-  hsa_ven_amd_aqlprofile_profile_t* profile;
+  std::unique_ptr<::Packet::AQLPacketProfile> profile;
   rocprofiler_kernel_properties_t kernel_properties;
   uint32_t thread_id;
   uint64_t queue_index;
@@ -73,8 +72,8 @@ class Profiler {
                          const hsa_signal_t& original_completion_signal,
                          const hsa_signal_t& new_completion_signal,
                          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
-                         rocprofiler::profiling_context_t* context, uint64_t session_data_count,
-                         hsa_ven_amd_aqlprofile_profile_t* profile,
+                         uint64_t session_data_count,
+                         std::unique_ptr<Packet::AQLPacketProfile>&& profile,
                          rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id,
                          uint64_t queue_index, uint64_t correlation_id);
 

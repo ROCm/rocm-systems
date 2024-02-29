@@ -216,7 +216,7 @@ void Session::Terminate()
     GetProfiler()->WaitForPendingAndDestroy();
   if (GetAttTracer())
     GetAttTracer()->WaitForPendingAndDestroy();
-
+  Packet::AQLPacketProfile::WaitForProfileDeletion();
 
   std::lock_guard<std::mutex> lock(session_lock_);
   if (FindFilterWithKind(ROCPROFILER_SPM_COLLECTION)) {

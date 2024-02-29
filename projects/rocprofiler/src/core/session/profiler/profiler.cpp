@@ -119,8 +119,8 @@ bool Profiler::HasActivePass() {
 void Profiler::AddPendingSignals(
     uint32_t writer_id, uint64_t kernel_object, const hsa_signal_t& original_completion_signal,
     const hsa_signal_t& new_completion_signal, rocprofiler_session_id_t session_id,
-    rocprofiler_buffer_id_t buffer_id, rocprofiler::profiling_context_t* context,
-    uint64_t session_data_count, hsa_ven_amd_aqlprofile_profile_t* profile,
+    rocprofiler_buffer_id_t buffer_id,
+    uint64_t session_data_count, std::unique_ptr<Packet::AQLPacketProfile>&& profile,
     rocprofiler_kernel_properties_t kernel_properties, uint32_t thread_id, uint64_t queue_index,
     uint64_t correlation_id)
 {
@@ -134,7 +134,7 @@ void Profiler::AddPendingSignals(
   sessions_pending_signals_.at(writer_id).emplace_back(
     new pending_signal_t{
       kernel_object, original_completion_signal, new_completion_signal,
-      session_id_, buffer_id, context, session_data_count, profile,
+      session_id_, buffer_id, session_data_count, std::move(profile),
       kernel_properties, thread_id, queue_index, correlation_id
     }
   );

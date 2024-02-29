@@ -844,8 +844,8 @@ void HSASupport_Singleton::InitKsymbols() {
       ksymbols_flag.exchange(false, std::memory_order_release);
     }
     {
-      std::lock_guard<std::mutex> lock(kernel_names_map_lock);
-      kernel_names = new std::map<std::string, std::vector<uint64_t>>();
+      std::unique_lock<std::shared_mutex> lock(kernel_names_map_lock);
+      kernel_names = new std::unordered_map<uint64_t, std::string>();
       kernel_names_flag.exchange(false, std::memory_order_release);
     }
   }
@@ -858,7 +858,7 @@ void HSASupport_Singleton::FinitKsymbols() {
     ksymbols_flag.exchange(true, std::memory_order_release);
   }
   if (!kernel_names_flag.load(std::memory_order_relaxed)) {
-    std::lock_guard<std::mutex> lock(kernel_names_map_lock);
+    std::unique_lock<std::shared_mutex> lock(kernel_names_map_lock);
     kernel_names->clear();
     delete kernel_names;
     kernel_names_flag.exchange(true, std::memory_order_release);

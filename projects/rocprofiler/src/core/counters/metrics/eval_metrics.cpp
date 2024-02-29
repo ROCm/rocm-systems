@@ -27,40 +27,43 @@ struct block_status_t {
   uint32_t group_index;
 };
 
+struct aqlprofile_event_t : public hsa_ven_amd_aqlprofile_event_t
+{
+  bool operator==(const aqlprofile_event_t& other) const {
+    return this->block_name == other.block_name &&
+           this->block_index == other.block_index &&
+           this->counter_id ==other.counter_id;
+  }
+};
+
+template <>
+struct std::hash<aqlprofile_event_t>
+{
+  std::size_t operator()(const aqlprofile_event_t& k) const {
+    return (int(k.block_name)<<20) ^ (int(k.counter_id)<<10) ^ int(k.block_index);
+  }
+};
+
 typedef struct {
-  std::vector<results_t*>* results;
+  std::unordered_map<aqlprofile_event_t, results_t*> results;
   size_t index;
 } callback_data_t;
 
-static inline bool IsEventMatch(const hsa_ven_amd_aqlprofile_event_t& event1,
-                                const hsa_ven_amd_aqlprofile_event_t& event2) {
-  return (event1.block_name == event2.block_name) && (event1.block_index == event2.block_index) &&
-      (event1.counter_id == event2.counter_id);
-}
-
 hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
                          hsa_ven_amd_aqlprofile_info_data_t* info_data, void* data) {
-  hsa_status_t status = HSA_STATUS_SUCCESS;
+  if (info_type != HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) return HSA_STATUS_SUCCESS;
   callback_data_t* passed_data = reinterpret_cast<callback_data_t*>(data);
 
-  try {
-    for (auto data_it = passed_data->results->begin(); data_it != passed_data->results->end();
-         ++data_it) {
-      if (info_type != HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) continue;
-      if (!IsEventMatch(info_data->pmc_data.event, (*data_it)->event)) continue;
+  auto it = passed_data->results.find(aqlprofile_event_t{info_data->pmc_data.event});
+  if (it == passed_data->results.end())
+    return HSA_STATUS_ERROR;
 
-      // stores event result from each event separately
-      (*data_it)->xcc_vals.push_back(info_data->pmc_data.result);
-      // stores accumulated event result from all xccs
-      (*data_it)->val_double += info_data->pmc_data.result;
-    }
-  } catch (std::exception& e) {
-    std::cout << "caught an exception in eval_metrics.cpp:pmcCallback(): " << e.what() << std::endl;
-  }
-
+  auto* res = it->second;
+  res->xcc_vals.push_back(info_data->pmc_data.result);
+  res->val_double += info_data->pmc_data.result;
   passed_data->index += 1;
 
-  return status;
+  return HSA_STATUS_SUCCESS;
 }
 
 
@@ -187,10 +190,13 @@ bool metrics::ExtractMetricEvents(
 bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
                              std::vector<results_t*>& results_list) {
   size_t gpu_xcc_count = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
-  callback_data_t callback_data{&results_list, 0};
+
+  callback_data_t callback_data{};
+  for (auto* res : results_list)
+    callback_data.results[aqlprofile_event_t{res->event}] = res;
   hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);
 
-  for (auto& data : *(callback_data.results))
+  for (auto& data : results_list)
   {
     size_t xcc_count = (data->event.block_name != HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC) ? gpu_xcc_count : 1;
     std::vector<double> xcc_results = std::move(data->xcc_vals);

@@ -89,7 +89,7 @@ class Queue {
   hsa_signal_t GetBlockSignal();
 
   static void ResetSessionID(rocprofiler_session_id_t id = rocprofiler_session_id_t{0});
-  static void CheckNeededProfileConfigs();
+  static bool CheckNeededProfileConfigs();
  private:
   static std::shared_mutex session_id_mutex;
   static rocprofiler_session_id_t session_id;

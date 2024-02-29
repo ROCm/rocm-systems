@@ -32,6 +32,7 @@
 #include <string>
 #include <vector>
 #include <mutex>
+#include <shared_mutex>
 
 #include "src/core/counters/metrics/eval_metrics.h"
 
@@ -39,10 +40,43 @@ namespace Packet {
 
 typedef hsa_ext_amd_aql_pm4_packet_t packet_t;
 
-std::vector<std::pair<rocprofiler::profiling_context_t*, hsa_ven_amd_aqlprofile_profile_t*>>
-InitializeAqlPackets(hsa_agent_t cpu_agent, hsa_agent_t gpu_agent,
-                     std::vector<std::string>& counter_names, rocprofiler_session_id_t session_id,
-                     bool is_spm = false);
+
+class AQLPacketProfile
+{
+public:
+  AQLPacketProfile(decltype(hsa_amd_memory_pool_free) _free_fn)
+  {
+    profile = std::make_unique<hsa_ven_amd_aqlprofile_profile_t>();
+    context = std::make_unique<rocprofiler::profiling_context_t>();
+    this->free_fn = _free_fn;
+    valid_profiles.fetch_add(1);
+  };
+
+  ~AQLPacketProfile();
+
+  std::unique_ptr<hsa_ven_amd_aqlprofile_profile_t> profile;
+  std::unique_ptr<rocprofiler::profiling_context_t> context;
+
+  static std::unique_ptr<AQLPacketProfile> MoveFromCache(hsa_agent_t gpu_agent);
+  static void MoveToCache(hsa_agent_t gpu_agent, std::unique_ptr<AQLPacketProfile>&& packet);
+
+  static void WaitForProfileDeletion();
+
+  static std::atomic<int> valid_profiles;
+  static std::condition_variable_any delete_cv;
+  static std::shared_mutex deleter_mutex;
+  static bool IsDeletingBegin;
+  decltype(hsa_amd_memory_pool_free)* free_fn;
+};
+
+std::unique_ptr<AQLPacketProfile> InitializeAqlPackets(
+  hsa_agent_t cpu_agent,
+  hsa_agent_t gpu_agent,
+  std::vector<std::string>& counter_names,
+  rocprofiler_session_id_t session_id,
+  bool is_spm = false
+);
+
 uint8_t* AllocateSysMemory(hsa_agent_t gpu_agent, size_t size, hsa_amd_memory_pool_t* cpu_pool);
 void GetCommandBufferMap(std::map<size_t, uint8_t*>);
 void GetOutputBufferMap(std::map<size_t, uint8_t*>);
