@@ -265,11 +265,6 @@ def show_kernel_stats(args, runs, archConfigs, output):
                         df = single_df
 
                     print(
-                        tabulate(
-                            df,
-                            headers="keys",
-                            tablefmt="fancy_grid",
-                            floatfmt="." + str(args.decimal) + "f",
-                        ),
+                        get_table_string(df, transpose=False, decimal=args.decimal),
                         file=output,
                     )
