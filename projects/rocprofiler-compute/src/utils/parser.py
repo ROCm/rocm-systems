@@ -849,10 +849,10 @@ def apply_filters(workload, dir, is_gui, debug):
             # Verify valid kernel filter
             kernels_df = pd.read_csv(os.path.join(dir, "pmc_kernel_top.csv"))
             for kernel_id in workload.filter_kernel_ids:
-                if kernel_id > len(kernels_df["Kernel_Name"]):
+                if kernel_id >= len(kernels_df["Kernel_Name"]):
                     error(
                         "{} is an invalid kernel id. Please enter an id between 0-{}".format(
-                            kernel_id, len(kernels_df["Kernel_Name"])
+                            kernel_id, len(kernels_df["Kernel_Name"]) - 1
                         )
                     )
             kernels = []

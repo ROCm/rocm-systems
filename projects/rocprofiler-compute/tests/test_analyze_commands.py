@@ -421,7 +421,7 @@ def test_filter_kernel_2():
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -436,7 +436,7 @@ def test_filter_kernel_2():
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 @pytest.mark.filter_kernel
@@ -455,7 +455,7 @@ def test_filter_kernel_3():
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -471,7 +471,7 @@ def test_filter_kernel_3():
             ],
         ):
             omniperf.main()
-    assert e.value.code == 0
+    assert e.value.code == 1
 
 
 @pytest.mark.dispatch
