@@ -82,5 +82,6 @@ class gfx908_soc (OmniSoC_Base):
 
     @demarcate
     def analysis_setup(self):
-        """Perform any SoC-specific setup prior to analysis."""
+        """Perform any SoC-specific setup prior to analysis.
+        """
         super().analysis_setup()
