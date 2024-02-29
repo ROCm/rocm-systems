@@ -28,7 +28,7 @@ import sys
 import os
 from pathlib import Path
 import shutil
-from utils.specs import MachineSpecs
+from utils.specs import generate_machine_specs
 from utils.utils import demarcate, trace_logger, get_version, get_version_display, detect_rocprof, error, get_submodules
 from argparser import omniarg_parser
 import config
@@ -160,7 +160,7 @@ class Omniperf:
     def load_soc_specs(self, sysinfo:dict=None):
         """Load OmniSoC instance for Omniperf run
         """
-        self.__mspec = MachineSpecs(self.__args, sysinfo)
+        self.__mspec = generate_machine_specs(self.__args, sysinfo)
         if self.__args.specs:
             print(self.__mspec)
             sys.exit(0)
@@ -193,7 +193,7 @@ class Omniperf:
 
         if self.__args.mode == None:
             if self.__args.specs:
-                print(MachineSpecs(self.__args))
+                print(generate_machine_specs(self.__args))
                 sys.exit(0)
             parser.print_help(sys.stderr)
             error("Omniperf requires a valid mode.")
@@ -280,6 +280,7 @@ class Omniperf:
         for d in analyzer.get_args().path:
             sys_info = pd.read_csv(Path(d[0], "sysinfo.csv"))
             sys_info = sys_info.to_dict('list')
+            sys_info = {key: value[0] for key, value in sys_info.items()}
             self.load_soc_specs(sys_info)
 
         analyzer.set_soc(self.__soc)

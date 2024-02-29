@@ -92,7 +92,7 @@ class OmniSoC_Base():
     def populate_mspec(self):
         from utils.specs import search, run, total_sqc, total_xcds
 
-        if not hasattr(self._mspec, "_rocminfo"):
+        if not hasattr(self._mspec, "_rocminfo") or self._mspec._rocminfo is None:
             return
 
         # load stats from rocminfo

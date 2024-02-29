@@ -299,8 +299,8 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
     df = mspec.get_class_members()
     
     # Append workload information to machine specs
-    df.insert(0, 'command', app_cmd)
-    df.insert(0,'workload_name', workload_name)
+    df['command'] = app_cmd
+    df['workload_name'] = workload_name
     
     blocks = []
     if ip_blocks == None:
