@@ -186,7 +186,8 @@ class MachineSpecs:
         'name': 'Timestamp'})
     version: str = field(default=None, metadata={
         'doc': 'The version of the machine specification file format.',
-        'name': 'MachineSpecs Version'})
+        'name': 'MachineSpecs Version',
+        'intable': False})
     timestamp: str = field(default=None, metadata={
         'doc': 'The time (in local system time) when data was collected',
         'name': 'Timestamp'})
@@ -346,6 +347,7 @@ class MachineSpecs:
         return pd.DataFrame(data, index=[0])
     
     def __repr__(self):
+        topstr = "Machine Specifications: describing the state of the machine that Omniperf data was collected on.\n"
         data = []
         for field in fields(self):
             name = field.name
@@ -353,6 +355,13 @@ class MachineSpecs:
                 _data = {}
                 value = getattr(self, name)
                 if field.metadata:
+                    # check out of table before any re-naming for pretty-printing
+                    if 'intable' in field.metadata and not field.metadata['intable']:
+                        if name == 'version':
+                            topstr += f'Output version: {value}\n'
+                        else:
+                            error(f"Unknown out of table printing field: {name}")
+                        continue
                     if 'name' in field.metadata:
                         name = field.metadata['name']
                     if 'unit' in field.metadata:
@@ -371,8 +380,7 @@ class MachineSpecs:
         df = df[columns]
         df = df.fillna('')
         return (
-            "Machine Specifications: describing the state of the machine that Omniperf data was collected on." +
-            "\n" +
+            topstr +
             get_table_string(df, transpose=False, decimal=2))
 
 
