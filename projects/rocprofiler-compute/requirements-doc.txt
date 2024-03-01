@@ -1,1 +1,5 @@
-sphinx myst-parser recommonmark pygments sphinx-rtd-theme
+sphinx
+myst-parser
+recommonmark
+pygments
+sphinx-rtd-theme
