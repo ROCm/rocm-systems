@@ -360,9 +360,7 @@ install(
     PATTERN "rooflines*" EXCLUDE)
 # src/utils/rooflines
 file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(
-    PROGRAMS ${rooflinebins}
-    DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
+install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
 # src/omniperf_soc
 install(
     DIRECTORY src/omniperf_soc

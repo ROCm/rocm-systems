@@ -400,7 +400,7 @@ class OmniProfiler_Base:
             skip_roof=self.__args.no_roof,
             roof_only=self.__args.roof_only,
             mspec=self._soc._mspec,
-            soc=self._soc
+            soc=self._soc,
         )
 
 
