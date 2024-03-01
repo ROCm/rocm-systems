@@ -279,11 +279,11 @@ class MachineSpecs:
         'unit': 'MHz'})
     cur_sclk: str = field(default=None, metadata={'doc': 
         '[RESERVED] The current engine (compute unit) clock rate of the accelerators/GPUs in the system. Unused.',
-        'name': 'Max SCLK',
+        'name': 'Cur SCLK',
         'unit': 'MHz'})
     cur_mclk: str = field(default=None, metadata={'doc': 
         '[RESERVED] The current memory clock rate of the accelerators/GPUs in the system. Unused.',
-        'name': 'Max MCLK',
+        'name': 'Cur MCLK',
         'unit': 'MHz'})
     _l2_banks: str = None # NB: This only used in flatten_tcc_info_across_hbm_stacks()
     total_l2_chan: str = field(default=None, metadata={
