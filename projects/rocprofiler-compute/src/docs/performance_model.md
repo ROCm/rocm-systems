@@ -1,7 +1,9 @@
 # AMD Instinct(tm) MI Series Accelerator Performance Model
 
 ```eval_rst
-.. sectionauthor:: Nicholas Curtis <nicholas.curtis@amd.com>
+.. toctree::
+   :glob:
+   :maxdepth: 5
 ```
 
 Omniperf makes available an extensive list of metrics to better understand achieved application performance on AMD Instinct(tm) MI accelerators including Graphics Core Next (GCN) GPUs such as the AMD Instinct MI50, CDNA(tm) accelerators such as the MI100, and CDNA(tm) 2 accelerators such as MI250X/250/210.
