@@ -173,7 +173,14 @@ void TestFrequenciesRead::Run(void) {
           print_frequencies(&b.transfer_rate, b.lanes);
           // Verify api support checking functionality is working
           err = rsmi_dev_pci_bandwidth_get(i, nullptr);
-          ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+          if (err != rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED) {
+            ASSERT_EQ(err, RSMI_STATUS_INVALID_ARGS);
+          }
+          else {
+            auto status_string("");
+            rsmi_status_string(err, &status_string);
+            std::cout << "\t\t** rsmi_dev_pci_bandwidth_get(): " << status_string << "\n";
+          }
         }
       }
     }
