@@ -12,8 +12,8 @@ import multiprocessing
 
 # this constant is used to define CTEST_PROJECT_NAME
 # and default value for CTEST_SUBMIT_URL
-_PROJECT_NAME = "rocprofiler-sdk-internal"
-_BASE_URL = "rocprofiler0.amd.com:30915"
+_PROJECT_NAME = "rocprofiler-v2-internal"
+_BASE_URL = "10.194.116.31/cdash"
 _GCOVR_GENERATE_CMD = None
 
 

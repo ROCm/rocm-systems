@@ -39,6 +39,8 @@
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
 
+#include <hsa/hsa_api_trace.h>
+
 #include <cassert>
 #include <chrono>
 #include <cstddef>
@@ -55,8 +57,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-#include "common/defines.hpp"
-#include "common/filesystem.hpp"
 
 namespace client
 {

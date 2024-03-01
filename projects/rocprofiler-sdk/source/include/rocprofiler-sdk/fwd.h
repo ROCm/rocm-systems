@@ -531,11 +531,11 @@ typedef struct
  */
 typedef struct
 {
+    int         is_derived;   ///< If this counter is a derived counter
     const char* name;         ///< Name of the counter
     const char* description;  ///< Description of the counter
-    bool        is_derived;   ///< If this counter is a derrived counter
-    const char* block;        ///< Block of the counter (non-derrived only)
-    const char* expression;   ///< Counter expression (derrived counters only)
+    const char* block;        ///< Block of the counter (non-derived only)
+    const char* expression;   ///< Counter expression (derived counters only)
 } rocprofiler_counter_info_v0_t;
 
 /**

@@ -93,7 +93,10 @@ template <typename DataArgsT, typename... Args>
 auto
 roctx_api_impl<TableIdx, OpIdx>::set_data_args(DataArgsT& _data_args, Args... args)
 {
-    _data_args = DataArgsT{args...};
+    if constexpr(sizeof...(Args) == 0)
+        _data_args.no_args.empty = '\0';
+    else
+        _data_args = DataArgsT{args...};
 }
 
 template <size_t TableIdx, size_t OpIdx>

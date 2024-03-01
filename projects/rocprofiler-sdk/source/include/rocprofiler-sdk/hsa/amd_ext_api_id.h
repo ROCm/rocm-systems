@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/hsa/api_trace_version.h>
 #include <rocprofiler-sdk/version.h>
 
 /**

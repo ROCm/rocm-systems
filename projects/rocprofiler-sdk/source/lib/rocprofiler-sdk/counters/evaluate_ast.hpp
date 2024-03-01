@@ -185,7 +185,7 @@ private:
 using EvaluateASTMap = std::unordered_map<std::string, EvaluateAST>;
 
 /**
- * Construct the ASTs for all counters appearing in basic/derrived counter
+ * Construct the ASTs for all counters appearing in basic/derived counter
  * definition files.
  */
 const std::unordered_map<std::string, EvaluateASTMap>&
@@ -193,7 +193,7 @@ get_ast_map();
 
 /**
  * Get the required basic/hardware counters needed to evaluate a
- * specific metric (may be multiple HW counters if a derrived metric).
+ * specific metric (may be multiple HW counters if a derived metric).
  */
 std::optional<std::set<Metric>>
 get_required_hardware_counters(const std::unordered_map<std::string, EvaluateASTMap>& asts,

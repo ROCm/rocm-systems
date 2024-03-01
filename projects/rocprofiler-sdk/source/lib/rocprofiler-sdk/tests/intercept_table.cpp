@@ -35,6 +35,7 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime_api.h>
 #include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
 
 #include <dlfcn.h>
 #include <pthread.h>

@@ -40,6 +40,7 @@ endif()
 
 target_sources(rocprofiler-expr-parser PRIVATE ${expr_parser_sources})
 target_include_directories(rocprofiler-expr-parser PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_compile_definitions(rocprofiler-expr-parser PRIVATE YY_NO_INPUT)
 target_link_libraries(rocprofiler-expr-parser
                       PRIVATE rocprofiler::rocprofiler-common-library)
 target_sources(rocprofiler-object-library

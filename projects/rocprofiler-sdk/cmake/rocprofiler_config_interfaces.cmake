@@ -138,6 +138,8 @@ target_link_libraries(rocprofiler-hsa-runtime INTERFACE hsa-runtime64::hsa-runti
 rocprofiler_config_nolink_target(rocprofiler-hsa-runtime-nolink
                                  hsa-runtime64::hsa-runtime64)
 
+rocprofiler_parse_hsa_api_table_versions(rocprofiler-hsa-runtime-nolink)
+
 # ----------------------------------------------------------------------------------------#
 #
 # amd comgr

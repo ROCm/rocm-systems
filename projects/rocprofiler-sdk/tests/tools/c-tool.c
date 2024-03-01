@@ -20,26 +20,45 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
-
-// without AMD_INTERNAL_BUILD defined, including the hsa/hsa.h looks for headers in inc/ folder
-// so we always want it defined but we set ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD to 1 to tell
-// us that after this include, we should undefine it
-#ifndef AMD_INTERNAL_BUILD
-#    define AMD_INTERNAL_BUILD
-#    ifndef ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD
-#        define ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD 1
-#    endif
+// undefine NDEBUG so asserts are implemented
+#ifdef NDEBUG
+#    undef NDEBUG
 #endif
 
-#include <hsa/hsa.h>
+/**
+ * @file samples/c_tool/client.cpp
+ *
+ * @brief Example rocprofiler client (tool) written in C
+ */
 
-#include <rocprofiler-sdk/hsa/api_trace_version.h>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
-#include <rocprofiler-sdk/hsa/api_args.h>
-#include <rocprofiler-sdk/hsa/api_id.h>
-#include <rocprofiler-sdk/hsa/table_id.h>
+rocprofiler_tool_configure_result_t*
+rocprofiler_configure(uint32_t                 version,
+                      const char*              runtime_version,
+                      uint32_t                 priority,
+                      rocprofiler_client_id_t* id)
+{
+    // only activate if main tool
+    if(priority > 0) return NULL;
 
-#if defined(ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD) && ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD > 0
-#    undef AMD_INTERNAL_BUILD
-#endif
+    // set the client name
+    id->name = "Test C tool";
+
+    // compute major/minor/patch version info
+    uint32_t major = version / 10000;
+    uint32_t minor = (version % 10000) / 100;
+    uint32_t patch = version % 100;
+
+    // generate info string
+    printf("%s is using rocprofiler-sdk v%i.%i.%i (%s)\n",
+           id->name,
+           major,
+           minor,
+           patch,
+           runtime_version);
+
+    // return pointer to configure data
+    return NULL;
+}

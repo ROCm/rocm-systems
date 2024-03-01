@@ -22,13 +22,24 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/hsa/api_trace_version.h>
 #include <rocprofiler-sdk/version.h>
 
 #include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ext_finalize.h>
 #include <hsa/hsa_ext_image.h>
+
+ROCPROFILER_EXTERN_C_INIT
+
+// Empty struct has a size of 0 in C but size of 1 in C++.
+// This struct is added to the union members which represent
+// functions with no arguments to ensure ABI compatibility
+typedef struct rocprofiler_hsa_api_no_args
+{
+    char empty;
+} rocprofiler_hsa_api_no_args;
 
 typedef union rocprofiler_hsa_api_retval_u
 {
@@ -38,18 +49,38 @@ typedef union rocprofiler_hsa_api_retval_u
     hsa_status_t       hsa_status_t_retval;
 } rocprofiler_hsa_api_retval_t;
 
+// the following hsa_* typedefs are only in hsa/hsa_api_trace.h but we cannot include that file here
+// because it is not C-compatible
 typedef hsa_status_t (*hsa_ext_program_iterate_modules_cb_t)(hsa_ext_program_t program,
                                                              hsa_ext_module_t  module,
                                                              void*             data);
+
+typedef void (*hsa_amd_queue_intercept_packet_writer)(const void* pkts, uint64_t pkt_count);
+
+typedef void (*hsa_amd_queue_intercept_handler)(const void* pkts,
+                                                uint64_t    pkt_count,
+                                                uint64_t    user_pkt_index,
+                                                void*       data,
+                                                hsa_amd_queue_intercept_packet_writer writer);
+
+typedef void (*hsa_amd_runtime_queue_notifier)(const hsa_queue_t* queue,
+                                               hsa_agent_t        agent,
+                                               void*              data);
 
 typedef union rocprofiler_hsa_api_args_u
 {
     // block: CoreApi API
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hsa_api_no_args struct to fix this
+        rocprofiler_hsa_api_no_args no_args;
     } hsa_init;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hsa_api_no_args struct to fix this
+        rocprofiler_hsa_api_no_args no_args;
     } hsa_shut_down;
     struct
     {
@@ -1360,3 +1391,5 @@ typedef union rocprofiler_hsa_api_args_u
 #    endif
 #endif
 } rocprofiler_hsa_api_args_t;
+
+ROCPROFILER_EXTERN_C_FINI

@@ -945,4 +945,57 @@ function(COMPUTE_POW2_CEIL _OUTPUT _VALUE)
 
 endfunction()
 
+# ----------------------------------------------------------------------------
+# Parses headers in hsa/hsa_api_trace*.h for API table version numbers
+#
+function(rocprofiler_parse_hsa_api_table_versions _TARGET)
+    get_target_property(HSA_API_TRACE_HEADER_PATH ${_TARGET}
+                        INTERFACE_SYSTEM_INCLUDE_DIRECTORIES)
+
+    if(HSA_API_TRACE_HEADER AND NOT EXISTS "${HSA_API_TRACE_HEADER}")
+        unset(HSA_API_TRACE_HEADER CACHE)
+    endif()
+
+    find_file(
+        HSA_API_TRACE_HEADER
+        NAMES hsa_api_trace_version.h hsa_api_trace.h
+        HINTS ${HSA_API_TRACE_HEADER_PATH}
+        PATHS ${HSA_API_TRACE_HEADER_PATH}
+        PATH_SUFFIXES hsa
+        NO_DEFAULT_PATH)
+
+    if(EXISTS "${HSA_API_TRACE_HEADER}")
+        file(READ "${HSA_API_TRACE_HEADER}" HSA_API_TRACE_HEADER_CONTENTS)
+        string(REPLACE "\n" ";" HSA_API_TRACE_HEADER_CONTENTS
+                       "${HSA_API_TRACE_HEADER_CONTENTS}")
+
+        foreach(_LINE ${HSA_API_TRACE_HEADER_CONTENTS})
+            if("${_LINE}" MATCHES ".*define HSA_.*_(MAJOR|STEP)_VERSION .*")
+                # message(STATUS "LINE: ${_LINE}")
+                string(
+                    REGEX
+                    REPLACE
+                        "#[ ]*define HSA_([A-Z_]*)API_TABLE_(MAJOR|STEP)_VERSION [ ]*(0x[0-9A-Fa-f]+)"
+                        "HSA_\\1API_TABLE_\\2_VERSION"
+                        _VAR
+                        "${_LINE}")
+                string(
+                    REGEX
+                    REPLACE
+                        "#[ ]*define HSA_([A-Z_]*)API_TABLE_(MAJOR|STEP)_VERSION [ ]*(0x[0-9A-Fa-f]+)"
+                        "\\3"
+                        _VAL
+                        "${_LINE}")
+
+                # used with cmakedefine in source/include/rocprofiler-sdk/version.h.in
+                if(_VAR AND _VAL)
+                    set(ROCPROFILER_${_VAR}
+                        "${_VAL}"
+                        PARENT_SCOPE)
+                endif()
+            endif()
+        endforeach()
+    endif()
+endfunction()
+
 cmake_policy(POP)

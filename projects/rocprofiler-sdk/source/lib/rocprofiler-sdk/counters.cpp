@@ -64,9 +64,9 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
     if(const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle))
     {
+        out_struct.is_derived  = (metric_ptr->expression().empty()) ? 0 : 1;
         out_struct.name        = metric_ptr->name().c_str();
         out_struct.description = metric_ptr->description().c_str();
-        out_struct.is_derived  = !metric_ptr->expression().empty();
         out_struct.block       = metric_ptr->block().c_str();
         out_struct.expression  = metric_ptr->expression().c_str();
         return ROCPROFILER_STATUS_SUCCESS;

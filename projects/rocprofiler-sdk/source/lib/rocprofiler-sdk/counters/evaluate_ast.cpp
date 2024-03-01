@@ -121,7 +121,7 @@ get_ast_map()
         const auto& metric_map = *CHECK_NOTNULL(counters::getMetricMap());
         for(const auto& [gfx, metrics] : metric_map)
         {
-            // TODO: Remove global XML from derrived counters...
+            // TODO: Remove global XML from derived counters...
             if(gfx == "global") continue;
 
             std::unordered_map<std::string, Metric> by_name;

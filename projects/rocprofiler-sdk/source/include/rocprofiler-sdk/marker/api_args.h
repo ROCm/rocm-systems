@@ -22,10 +22,23 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/version.h>
+
 #include <rocprofiler-sdk-roctx/api_trace.h>
 #include <rocprofiler-sdk-roctx/types.h>
 
 #include <stdint.h>
+
+ROCPROFILER_EXTERN_C_INIT
+
+// Empty struct has a size of 0 in C but size of 1 in C++.
+// This struct is added to the union members which represent
+// functions with no arguments to ensure ABI compatibility
+typedef struct rocprofiler_marker_api_no_args
+{
+    char empty;
+} rocprofiler_marker_api_no_args;
 
 typedef union rocprofiler_marker_api_retval_u
 {
@@ -46,6 +59,9 @@ typedef union rocprofiler_marker_api_args_u
     } roctxRangePushA;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_marker_api_no_args struct to fix this
+        rocprofiler_marker_api_no_args no_args;
     } roctxRangePop;
     struct
     {
@@ -87,3 +103,5 @@ typedef union rocprofiler_marker_api_args_u
         const struct ihipStream_t* stream;
     } roctxNameHipStream;
 } rocprofiler_marker_api_args_t;
+
+ROCPROFILER_EXTERN_C_FINI

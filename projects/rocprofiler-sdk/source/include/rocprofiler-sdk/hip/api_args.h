@@ -23,12 +23,25 @@
 #pragma once
 
 #include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/version.h>
 
 #include <hip/hip_runtime.h>
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_version.h>
 // must be included after
 #include <hip/hip_deprecated.h>
+
+#include <hip/amd_detail/amd_hip_gl_interop.h>
+
+ROCPROFILER_EXTERN_C_INIT
+
+// Empty struct has a size of 0 in C but size of 1 in C++.
+// This struct is added to the union members which represent
+// functions with no arguments to ensure ABI compatibility
+typedef struct rocprofiler_hip_api_no_args
+{
+    char empty;
+} rocprofiler_hip_api_no_args;
 
 typedef union rocprofiler_hip_api_retval_u
 {
@@ -277,6 +290,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipCtxSetSharedMemConfig;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
     } hipCtxSynchronize;
     struct
     {
@@ -419,6 +435,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipDevicePrimaryCtxSetFlags;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
     } hipDeviceReset;
     struct
     {
@@ -446,6 +465,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipDeviceSetSharedMemConfig;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
     } hipDeviceSynchronize;
     struct
     {
@@ -668,6 +690,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipGetErrorString;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
     } hipGetLastError;
     struct
     {
@@ -2045,6 +2070,9 @@ typedef union rocprofiler_hip_api_args_u
     } hipOccupancyMaxPotentialBlockSize;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
     } hipPeekAtLastError;
     struct
     {
@@ -2065,9 +2093,15 @@ typedef union rocprofiler_hip_api_args_u
     } hipPointerSetAttribute;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
     } hipProfilerStart;
     struct
     {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
     } hipProfilerStop;
     struct
     {
@@ -2736,3 +2770,5 @@ typedef union rocprofiler_hip_api_args_u
     //     hipCtx_t                      ctx;
     // } hipDrvGraphAddMemsetNode;
 } rocprofiler_hip_api_args_t;
+
+ROCPROFILER_EXTERN_C_FINI

@@ -37,7 +37,7 @@ namespace rocprofiler
 {
 namespace counters
 {
-// Base metrics (w/o instance information) defined in gfx_metrics/derrived.xml
+// Base metrics (w/o instance information) defined in gfx_metrics/derived.xml
 class Metric
 {
 public:
