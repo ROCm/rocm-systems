@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#define _GNU_SOURCE 1
+
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
@@ -167,16 +169,37 @@ find_clients()
     auto data            = client_library_vec_t{};
     auto priority_offset = get_client_offset();
 
-    if(get_forced_configure())
+    auto is_unique_configure_func = [&data](auto* _cfg_func) {
+        for(const auto& itr : data)
+        {
+            if(itr && itr->configure_func && itr->configure_func == _cfg_func) return false;
+        }
+        return true;
+    };
+
+    auto emplace_client = [&data, priority_offset](
+                              std::string_view _name,
+                              void*            _dlhandle,
+                              auto*            _cfg_func) -> std::optional<client_library>& {
+        uint32_t _prio = priority_offset + data.size();
+        return data.emplace_back(client_library{std::string{_name},
+                                                _dlhandle,
+                                                _cfg_func,
+                                                nullptr,
+                                                rocprofiler_client_id_t{nullptr, _prio},
+                                                rocprofiler_client_id_t{nullptr, _prio}});
+    };
+
+    auto rocprofiler_configure_dlsym = [](auto _handle) {
+        decltype(::rocprofiler_configure)* _sym = nullptr;
+        *(void**) (&_sym)                       = dlsym(_handle, "rocprofiler_configure");
+        return _sym;
+    };
+
+    if(get_forced_configure() && is_unique_configure_func(get_forced_configure()))
     {
         LOG(ERROR) << "adding forced configure";
-        uint32_t _prio = priority_offset + data.size();
-        data.emplace_back(client_library{"(forced)",
-                                         nullptr,
-                                         get_forced_configure(),
-                                         nullptr,
-                                         rocprofiler_client_id_t{nullptr, _prio},
-                                         rocprofiler_client_id_t{nullptr, _prio}});
+        emplace_client("(forced)", nullptr, get_forced_configure());
     }
 
     auto get_env_libs = []() {
@@ -208,78 +231,25 @@ find_clients()
 
     auto env = get_env_libs();
 
-    if(!rocprofiler_configure && !get_forced_configure() && env.empty())
-    {
-        LOG(ERROR) << "no rocprofiler_configure function(s) found";
-        return data;
-    }
-
-    if(rocprofiler_configure != &rocprofiler_configure)
-        throw std::runtime_error("rocprofiler_configure != &rocprofiler_configure");
-
-    if(rocprofiler_configure && rocprofiler_configure != get_forced_configure())
-    {
-        uint32_t _prio = priority_offset + data.size();
-        data.emplace_back(client_library{"unknown",
-                                         nullptr,
-                                         rocprofiler_configure,
-                                         nullptr,
-                                         rocprofiler_client_id_t{nullptr, _prio},
-                                         rocprofiler_client_id_t{nullptr, _prio}});
-    }
-
-    for(const auto& itr : get_link_map())
-    {
-        LOG(INFO) << "searching " << itr << " for rocprofiler_configure";
-
-        void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
-        LOG_IF(ERROR, handle == nullptr) << "error dlopening " << itr;
-
-        decltype(::rocprofiler_configure)* _sym = nullptr;
-        *(void**) (&_sym)                       = dlsym(handle, "rocprofiler_configure");
-
-        // symbol not found
-        if(!_sym)
-        {
-            LOG(INFO) << "|_" << itr << " did not contain rocprofiler_configure symbol";
-            continue;
-        }
-
-        // skip the configure function that was forced
-        if(_sym == get_forced_configure())
-        {
-            data.front()->name                    = itr;
-            data.front()->dlhandle                = handle;
-            data.front()->internal_client_id.name = "(forced)";
-            continue;
-        }
-
-        if(_sym == &rocprofiler_configure && data.size() == 1)
-        {
-            data.front()->name                    = itr;
-            data.front()->dlhandle                = handle;
-            data.front()->internal_client_id.name = "default";
-        }
-        else
-        {
-            uint32_t _prio = priority_offset + data.size();
-            auto&    entry =
-                data.emplace_back(client_library{itr,
-                                                 handle,
-                                                 _sym,
-                                                 nullptr,
-                                                 rocprofiler_client_id_t{nullptr, _prio},
-                                                 rocprofiler_client_id_t{nullptr, _prio}});
-            entry->internal_client_id.name = entry->name.c_str();
-        }
-    }
-
     if(!env.empty())
     {
         for(const auto& itr : env)
         {
-            void* handle = dlopen(itr.c_str(), RTLD_GLOBAL | RTLD_LAZY);
-            LOG_IF(ERROR, handle == nullptr) << "error dlopening " << itr;
+            LOG(INFO) << "searching " << itr << " for rocprofiler_configure";
+
+            void* handle = dlopen(itr.c_str(), RTLD_NOLOAD | RTLD_LAZY);
+
+            if(!handle)
+            {
+                LOG(INFO) << itr << " is not already loaded, doing a global lazy dlopen...";
+                handle = dlopen(itr.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+            }
+
+            if(!handle)
+            {
+                LOG(ERROR) << "error dlopening " << itr;
+                continue;
+            }
 
             for(const auto& ditr : data)
             {
@@ -292,16 +262,66 @@ find_clients()
 
             if(handle)
             {
-                decltype(::rocprofiler_configure)* _sym = nullptr;
-                *(void**) (&_sym)                       = dlsym(handle, "rocprofiler_configure");
+                auto _sym = rocprofiler_configure_dlsym(handle);
+                // FATAL bc they explicitly said this was a tool library
+                LOG_IF(FATAL, !_sym) << "rocprofiler tool library " << itr
+                                     << " did not contain rocprofiler_configure symbol";
+                if(is_unique_configure_func(_sym)) emplace_client(itr, handle, _sym);
+            }
+        }
+    }
 
-                uint32_t _prio = priority_offset + data.size();
-                data.emplace_back(client_library{itr,
-                                                 handle,
-                                                 _sym,
-                                                 nullptr,
-                                                 rocprofiler_client_id_t{nullptr, _prio},
-                                                 rocprofiler_client_id_t{nullptr, _prio}});
+    if(rocprofiler_configure && is_unique_configure_func(rocprofiler_configure))
+        emplace_client("unknown", nullptr, rocprofiler_configure);
+
+    auto _default_configure = rocprofiler_configure_dlsym(RTLD_DEFAULT);
+    auto _next_configure    = rocprofiler_configure_dlsym(RTLD_NEXT);
+
+    if(_default_configure && is_unique_configure_func(_default_configure))
+        emplace_client("(RTLD_DEFAULT)", nullptr, _default_configure);
+
+    if(_next_configure && is_unique_configure_func(_next_configure))
+        emplace_client("(RTLD_NEXT)", nullptr, _next_configure);
+
+    // if there are two "rocprofiler_configures", we need to trigger a search of all the shared
+    // libraries
+    if(_next_configure)
+    {
+        for(const auto& itr : get_link_map())
+        {
+            LOG(INFO) << "searching " << itr << " for rocprofiler_configure";
+
+            void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
+            LOG_IF(ERROR, handle == nullptr) << "error dlopening " << itr;
+
+            auto* _sym = rocprofiler_configure_dlsym(handle);
+
+            // symbol not found
+            if(!_sym)
+            {
+                LOG(INFO) << "|_" << itr << " did not contain rocprofiler_configure symbol";
+                continue;
+            }
+
+            // skip the configure function that was forced
+            if(_sym == get_forced_configure())
+            {
+                data.front()->name                    = itr;
+                data.front()->dlhandle                = handle;
+                data.front()->internal_client_id.name = "(forced)";
+                continue;
+            }
+
+            if(_sym == &rocprofiler_configure && data.size() == 1)
+            {
+                data.front()->name                    = itr;
+                data.front()->dlhandle                = handle;
+                data.front()->internal_client_id.name = "default";
+            }
+            else if(is_unique_configure_func(_sym))
+            {
+                auto& entry                    = emplace_client(itr, handle, _sym);
+                entry->internal_client_id.name = entry->name.c_str();
             }
         }
     }
@@ -635,17 +655,16 @@ rocprofiler_set_api_table(const char* name,
     std::call_once(_once, rocprofiler::registration::initialize);
 
     // pass to roctx init
-    LOG_IF(ERROR, num_tables == 0) << " rocprofiler expected " << name
+    LOG_IF(ERROR, num_tables == 0) << "rocprofiler expected " << name
                                    << " library to pass at least one table, not " << num_tables;
-    LOG_IF(ERROR, tables == nullptr) << " rocprofiler expected pointer to array of tables from "
+    LOG_IF(ERROR, tables == nullptr) << "rocprofiler expected pointer to array of tables from "
                                      << name << " library, not a nullptr";
 
     if(std::string_view{name} == "hip")
     {
         // pass to hip init
-        LOG_IF(ERROR, num_tables > 1)
-            << " rocprofiler expected HIP library to pass 1 API table for " << name << ", not "
-            << num_tables;
+        LOG_IF(ERROR, num_tables > 1) << "rocprofiler expected HIP library to pass 1 API table for "
+                                      << name << ", not " << num_tables;
 
         auto* hip_runtime_api_table = static_cast<HipDispatchTable*>(*tables);
 
@@ -666,9 +685,8 @@ rocprofiler_set_api_table(const char* name,
     else if(std::string_view{name} == "hip_compiler")
     {
         // pass to hip init
-        LOG_IF(ERROR, num_tables > 1)
-            << " rocprofiler expected HIP library to pass 1 API table for " << name << ", not "
-            << num_tables;
+        LOG_IF(ERROR, num_tables > 1) << "rocprofiler expected HIP library to pass 1 API table for "
+                                      << name << ", not " << num_tables;
 
         auto* hip_compiler_api_table = static_cast<HipCompilerDispatchTable*>(*tables);
 
@@ -695,7 +713,7 @@ rocprofiler_set_api_table(const char* name,
 
         // pass to hsa init
         LOG_IF(ERROR, num_tables > 1)
-            << " rocprofiler expected HSA library to pass 1 API table, not " << num_tables;
+            << "rocprofiler expected HSA library to pass 1 API table, not " << num_tables;
 
         auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
 
@@ -727,9 +745,9 @@ rocprofiler_set_api_table(const char* name,
     {
         // pass to roctx init
         LOG_IF(FATAL, num_tables < 3)
-            << " rocprofiler expected ROCTX library to pass 3 API tables, not " << num_tables;
+            << "rocprofiler expected ROCTX library to pass 3 API tables, not " << num_tables;
         LOG_IF(ERROR, num_tables > 3)
-            << " rocprofiler expected ROCTX library to pass 3 API tables, not " << num_tables;
+            << "rocprofiler expected ROCTX library to pass 3 API tables, not " << num_tables;
 
         auto* roctx_core = static_cast<roctxCoreApiTable_t*>(tables[0]);
         auto* roctx_ctrl = static_cast<roctxControlApiTable_t*>(tables[1]);
