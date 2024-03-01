@@ -41,31 +41,37 @@ class Roofline:
     def __init__(self, args, mspec, run_parameters=None):
         self.__args = args
         self.__mspec = mspec
-        self.__run_parameters = run_parameters if run_parameters else {
-            'workload_dir': None, # in some cases (i.e. --specs) path will not be given
-            'device_id': 0,
-            'sort_type': 'kernels',
-            'mem_level': 'ALL',
-            'include_kernel_names': False,
-            'is_standalone': False
-        }
+        self.__run_parameters = (
+            run_parameters
+            if run_parameters
+            else {
+                "workload_dir": None,  # in some cases (i.e. --specs) path will not be given
+                "device_id": 0,
+                "sort_type": "kernels",
+                "mem_level": "ALL",
+                "include_kernel_names": False,
+                "is_standalone": False,
+            }
+        )
         self.__ai_data = None
         self.__ceiling_data = None
         self.__figure = go.Figure()
         # Set roofline run parameters from args
-        if hasattr(self.__args, 'path') and not run_parameters:
-            self.__run_parameters['workload_dir'] = self.__args.path
-        if hasattr(self.__args, 'roof_only') and self.__args.roof_only == True:
-            self.__run_parameters['is_standalone'] = True
-        if hasattr(self.__args, 'kernel_names') and self.__args.kernel_names == True:
-            self.__run_parameters['include_kernel_names'] = True
-        if hasattr(self.__args, 'mem_level') and self.__args.mem_level != "ALL":
-            self.__run_parameters['mem_level'] = self.__args.mem_level
-        if hasattr(self.__args, 'sort') and self.__args.sort != "ALL":
-            self.__run_parameters['sort_type'] = self.__args.sort
+        if hasattr(self.__args, "path") and not run_parameters:
+            self.__run_parameters["workload_dir"] = self.__args.path
+        if hasattr(self.__args, "roof_only") and self.__args.roof_only == True:
+            self.__run_parameters["is_standalone"] = True
+        if hasattr(self.__args, "kernel_names") and self.__args.kernel_names == True:
+            self.__run_parameters["include_kernel_names"] = True
+        if hasattr(self.__args, "mem_level") and self.__args.mem_level != "ALL":
+            self.__run_parameters["mem_level"] = self.__args.mem_level
+        if hasattr(self.__args, "sort") and self.__args.sort != "ALL":
+            self.__run_parameters["sort_type"] = self.__args.sort
 
-        if (not isinstance(self.__run_parameters['workload_dir'], list)
-            and self.__run_parameters['workload_dir'] != None):
+        if (
+            not isinstance(self.__run_parameters["workload_dir"], list)
+            and self.__run_parameters["workload_dir"] != None
+        ):
             self.roof_setup()
 
         self.validate_parameters()
@@ -78,11 +84,17 @@ class Roofline:
 
     def roof_setup(self):
         # set default workload path if not specified
-        if self.__run_parameters['workload_dir'] == os.path.join(os.getcwd(), 'workloads'):
-            self.__run_parameters['workload_dir'] = os.path.join(self.__run_parameters['workload_dir'], self.__args.name, self.__mspec.gpu_model)
+        if self.__run_parameters["workload_dir"] == os.path.join(
+            os.getcwd(), "workloads"
+        ):
+            self.__run_parameters["workload_dir"] = os.path.join(
+                self.__run_parameters["workload_dir"],
+                self.__args.name,
+                self.__mspec.gpu_model,
+            )
         # create new directory for roofline if it doesn't exist
-        if not os.path.isdir(self.__run_parameters['workload_dir']):
-            os.makedirs(self.__run_parameters['workload_dir'])
+        if not os.path.isdir(self.__run_parameters["workload_dir"]):
+            os.makedirs(self.__run_parameters["workload_dir"])
 
     @demarcate
     def empirical_roofline(
@@ -91,9 +103,9 @@ class Roofline:
     ):
         """Generate a set of empirical roofline plots given a directory containing required profiling and benchmarking data"""
         # Create arithmetic intensity data that will populate the roofline model
-        logging.debug("[roofline] Path: %s" % self.__run_parameters['workload_dir'])
-        self.__ai_data = calc_ai(self.__run_parameters['sort_type'], ret_df)
-        
+        logging.debug("[roofline] Path: %s" % self.__run_parameters["workload_dir"])
+        self.__ai_data = calc_ai(self.__run_parameters["sort_type"], ret_df)
+
         logging.debug("[roofline] AI at each mem level:")
         for i in self.__ai_data:
             logging.debug("%s -> %s" % (i, self.__ai_data[i]))
@@ -131,21 +143,33 @@ class Roofline:
         if self.__run_parameters["is_standalone"]:
             dev_id = str(self.__run_parameters["device_id"])
 
-            fp32_fig.write_image(self.__run_parameters['workload_dir'] + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
+            fp32_fig.write_image(
+                self.__run_parameters["workload_dir"]
+                + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id)
+            )
             ml_combo_fig.write_image(
-                self.__run_parameters['workload_dir'] + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
+                self.__run_parameters["workload_dir"]
+                + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
             )
             # only save a legend if kernel_names option is toggled
-            if self.__run_parameters['include_kernel_names']:
-                self.__figure.write_image(self.__run_parameters['workload_dir'] + "/kernelName_legend.pdf")
+            if self.__run_parameters["include_kernel_names"]:
+                self.__figure.write_image(
+                    self.__run_parameters["workload_dir"] + "/kernelName_legend.pdf"
+                )
             time.sleep(1)
             # Re-save to remove loading MathJax pop up
-            fp32_fig.write_image(self.__run_parameters['workload_dir'] + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id))
-            ml_combo_fig.write_image(
-                self.__run_parameters['workload_dir'] + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
+            fp32_fig.write_image(
+                self.__run_parameters["workload_dir"]
+                + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id)
             )
-            if self.__run_parameters['include_kernel_names']:
-                self.__figure.write_image(self.__run_parameters['workload_dir'] + "/kernelName_legend.pdf")
+            ml_combo_fig.write_image(
+                self.__run_parameters["workload_dir"]
+                + "/empirRoof_gpu-{}_int8_fp16.pdf".format(dev_id)
+            )
+            if self.__run_parameters["include_kernel_names"]:
+                self.__figure.write_image(
+                    self.__run_parameters["workload_dir"] + "/kernelName_legend.pdf"
+                )
             logging.info("[roofline] Empirical Roofline PDFs saved!")
         else:
             return html.Section(
@@ -332,7 +356,7 @@ class Roofline:
             self.__run_parameters["mem_level"].remove("vL1D")
             self.__run_parameters["mem_level"].append("L1")
 
-        app_path = os.path.join(self.__run_parameters['workload_dir'], "pmc_perf.csv")
+        app_path = os.path.join(self.__run_parameters["workload_dir"], "pmc_perf.csv")
         roofline_exists = os.path.isfile(app_path)
         if not roofline_exists:
             logging.error("[roofline] Error: {} does not exist".format(app_path))
@@ -353,13 +377,13 @@ class Roofline:
             if not os.path.isfile(sysinfo_path):
                 logging.info("[roofline] sysinfo.csv not found. Generating...")
                 gen_sysinfo(
-                    workload_name=self.__args.name, 
-                    workload_dir=self.__workload_dir, 
-                    ip_blocks=self.__args.ipblocks, 
-                    app_cmd=self.__args.remaining, 
-                    skip_roof=self.__args.no_roof, 
+                    workload_name=self.__args.name,
+                    workload_dir=self.__workload_dir,
+                    ip_blocks=self.__args.ipblocks,
+                    app_cmd=self.__args.remaining,
+                    skip_roof=self.__args.no_roof,
                     roof_only=self.__args.roof_only,
-                    mspec=self.__mspec
+                    mspec=self.__mspec,
                 )
 
     @abstractmethod

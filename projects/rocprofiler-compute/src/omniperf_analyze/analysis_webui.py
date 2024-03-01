@@ -163,12 +163,12 @@ class webui_analysis(OmniAnalyze_Base):
                 # update roofline for visualization in GUI
                 self.get_socs()[self.arch].analysis_setup(
                     roofline_parameters={
-                        'workload_dir': self.dest_dir,
-                        'device_id': 0,
-                        'sort_type': 'kernels',
-                        'mem_level': 'ALL',
-                        'include_kernel_names': False,
-                        'is_standalone': False
+                        "workload_dir": self.dest_dir,
+                        "device_id": 0,
+                        "sort_type": "kernels",
+                        "mem_level": "ALL",
+                        "include_kernel_names": False,
+                        "is_standalone": False,
                     }
                 )
                 roof_obj = self.get_socs()[self.arch].roofline_obj
@@ -284,10 +284,12 @@ class webui_analysis(OmniAnalyze_Base):
             # create the loaded kernel stats
             parser.load_kernel_top(self._runs[self.dest_dir], self.dest_dir)
             # set architecture
-            self.arch = self._runs[self.dest_dir].sys_info.iloc[0]['gpu_arch']
-            
+            self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]
+
         else:
-            error("Multiple runs not yet supported in GUI. Retry without --gui flag.")
+            self.error(
+                "Multiple runs not yet supported in GUI. Retry without --gui flag."
+            )
 
     @demarcate
     def run_analysis(self):

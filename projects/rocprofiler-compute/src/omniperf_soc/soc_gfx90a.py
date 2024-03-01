@@ -29,14 +29,29 @@ from utils.utils import demarcate, mibench
 from roofline import Roofline
 import logging
 
-class gfx90a_soc (OmniSoC_Base):
-    def __init__(self,args,mspec):
-        super().__init__(args,mspec)
+
+class gfx90a_soc(OmniSoC_Base):
+    def __init__(self, args, mspec):
+        super().__init__(args, mspec)
         self.set_arch("gfx90a")
-        if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
+        if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
+            self.set_perfmon_dir(
+                os.path.join(
+                    str(config.omniperf_home),
+                    "omniperf_soc",
+                    "profile_configs",
+                    "roofline",
+                )
+            )
         else:
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", self.get_arch())) 
+            self.set_perfmon_dir(
+                os.path.join(
+                    str(config.omniperf_home),
+                    "omniperf_soc",
+                    "profile_configs",
+                    self.get_arch(),
+                )
+            )
         self.set_compatible_profilers(["rocprofv1", "rocscope"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -91,7 +106,6 @@ class gfx90a_soc (OmniSoC_Base):
         super().analysis_setup()
         # configure roofline for analysis
         if roofline_parameters:
-            self.roofline_obj = Roofline(self.get_args(), self._mspec, roofline_parameters)
-
-
-
+            self.roofline_obj = Roofline(
+                self.get_args(), self._mspec, roofline_parameters
+            )

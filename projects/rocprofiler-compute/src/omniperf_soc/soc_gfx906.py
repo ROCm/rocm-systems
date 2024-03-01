@@ -27,11 +27,19 @@ import config
 from omniperf_soc.soc_base import OmniSoC_Base
 from utils.utils import demarcate, error
 
-class gfx906_soc (OmniSoC_Base):
-    def __init__(self,args,mspec):
-        super().__init__(args,mspec)
+
+class gfx906_soc(OmniSoC_Base):
+    def __init__(self, args, mspec):
+        super().__init__(args, mspec)
         self.set_arch("gfx906")
-        self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", self.get_arch()))
+        self.set_perfmon_dir(
+            os.path.join(
+                str(config.omniperf_home),
+                "omniperf_soc",
+                "profile_configs",
+                self.get_arch(),
+            )
+        )
         self.set_compatible_profilers(["rocprofv1", "rocscope"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
@@ -49,7 +57,7 @@ class gfx906_soc (OmniSoC_Base):
                 "TCC_channels": 16,
             }
         )
-        
+
         # Set arch specific specs
         self._mspec._l2_banks = 16
         self._mspec.lds_banks_per_cu = 32

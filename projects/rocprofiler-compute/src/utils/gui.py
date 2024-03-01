@@ -227,9 +227,9 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                 ).update_xaxes(range=[0, 1638])
             )  # append second GB/s chart
         else:
-            key = 'Avg'
-            if table_config['id'] in [1101]:
-                key = 'Pct of Peak'
+            key = "Avg"
+            if table_config["id"] in [1101]:
+                key = "Pct of Peak"
             d_figs.append(
                 px.bar(
                     display_df,

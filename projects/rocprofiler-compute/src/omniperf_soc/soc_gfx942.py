@@ -29,12 +29,20 @@ from utils.utils import demarcate, mibench
 from roofline import Roofline
 import logging
 
-class gfx942_soc (OmniSoC_Base):
-    def __init__(self,args,mspec):
-        super().__init__(args,mspec)
+
+class gfx942_soc(OmniSoC_Base):
+    def __init__(self, args, mspec):
+        super().__init__(args, mspec)
         self.set_arch("gfx942")
-        if hasattr(self.get_args(), 'roof_only') and self.get_args().roof_only:
-            self.set_perfmon_dir(os.path.join(str(config.omniperf_home), "omniperf_soc", "profile_configs", "roofline"))
+        if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
+            self.set_perfmon_dir(
+                os.path.join(
+                    str(config.omniperf_home),
+                    "omniperf_soc",
+                    "profile_configs",
+                    "roofline",
+                )
+            )
         else:
             # NB: We're using generalized Mi300 perfmon configs
             self.set_perfmon_dir(

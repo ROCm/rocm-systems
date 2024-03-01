@@ -270,7 +270,14 @@ class OmniProfiler_Base:
 
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
-            error("%s is not enabled in %s. Available profilers include: %s" % (self._soc.get_arch(), self.__profiler, self._soc.get_compatible_profilers()))
+            error(
+                "%s is not enabled in %s. Available profilers include: %s"
+                % (
+                    self._soc.get_arch(),
+                    self.__profiler,
+                    self._soc.get_compatible_profilers(),
+                )
+            )
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
             error("Access denied. Cannot access parent directories in path (i.e. ../)")
@@ -367,7 +374,7 @@ class OmniProfiler_Base:
 
             if self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2":
                 run_prof(
-                    fname=fname, 
+                    fname=fname,
                     profiler_options=options,
                     workload_dir=self.get_args().path,
                     mspec=self._soc._mspec,

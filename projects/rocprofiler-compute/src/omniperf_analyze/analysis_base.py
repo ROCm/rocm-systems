@@ -41,8 +41,8 @@ class OmniAnalyze_Base:
         self._runs = OrderedDict()
         self._arch_configs = {}
         self.__supported_archs = supported_archs
-        self._output = None 
-        self.__socs:dict = None # available OmniSoC objs
+        self._output = None
+        self.__socs: dict = None  # available OmniSoC objs
 
     def get_args(self):
         return self.__args

@@ -79,11 +79,11 @@ supported_denom = {
 build_in_vars = {
     "GRBM_GUI_ACTIVE_PER_XCD": "(GRBM_GUI_ACTIVE / $num_xcd)",
     "GRBM_COUNT_PER_XCD": "(GRBM_COUNT / $num_xcd)",
-    "GRBM_SPI_BUSY_PER_XCD" : "(GRBM_SPI_BUSY / $num_xcd)",
+    "GRBM_SPI_BUSY_PER_XCD": "(GRBM_SPI_BUSY / $num_xcd)",
     "numActiveCUs": "TO_INT(MIN((((ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) / $GRBM_GUI_ACTIVE_PER_XCD)), \
               0) / $max_waves_per_cu) * 8) + MIN(MOD(ROUND(AVG(((4 * SQ_BUSY_CU_CYCLES) \
               / $GRBM_GUI_ACTIVE_PER_XCD)), 0), $max_waves_per_cu), 8)), $cu_per_gpu))",
-    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)"
+    "kernelBusyCycles": "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)",
 }
 
 supported_call = {
@@ -685,11 +685,11 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
     ammolite__se_per_gpu = sys_info.se_per_gpu
     ammolite__pipes_per_gpu = sys_info.pipes_per_gpu
     ammolite__cu_per_gpu = sys_info.cu_per_gpu
-    ammolite__simd_per_cu = sys_info.simd_per_cu # not used
+    ammolite__simd_per_cu = sys_info.simd_per_cu  # not used
     ammolite__sqc_per_gpu = sys_info.sqc_per_gpu
     ammolite__lds_banks_per_cu = sys_info.lds_banks_per_cu
     ammolite__cur_sclk = sys_info.cur_sclk  # not used
-    ammolite__mclk = sys_info.cur_mclk # not used
+    ammolite__mclk = sys_info.cur_mclk  # not used
     ammolite__max_sclk = sys_info.max_sclk
     ammolite__max_waves_per_cu = sys_info.max_waves_per_cu
     ammolite__hbm_bw = sys_info.hbm_bw
@@ -924,7 +924,9 @@ def load_kernel_top(workload, dir):
             if file.exists():
                 tmp[id] = pd.read_csv(file)
             else:
-                logging.info("Warning: Issue loading top kernels. Check pmc_kernel_top.csv")
+                logging.info(
+                    "Warning: Issue loading top kernels. Check pmc_kernel_top.csv"
+                )
         # NB: Special case for sysinfo. Probably room for improvement in this whole function design
         elif "from_csv_columnwise" in df.columns and id == 101:
             tmp[id] = workload.sys_info.transpose()
@@ -977,7 +979,8 @@ def build_comparable_columns(time_unit):
 
     return comparable_columns
 
-def correct_sys_info(mspec, specs_correction:dict):
+
+def correct_sys_info(mspec, specs_correction: dict):
     """
     Correct system spec items manually
     """
@@ -987,8 +990,8 @@ def correct_sys_info(mspec, specs_correction:dict):
 
     for k, v in pairs.items():
         if not hasattr(mspec, str(k)):
-            error(f"Invalid specs correction '{k}'. Please use --specs option to peak valid specs")
+            error(
+                f"Invalid specs correction '{k}'. Please use --specs option to peak valid specs"
+            )
         setattr(mspec, str(k), v)
     return mspec.get_class_members()
-
-

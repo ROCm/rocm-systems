@@ -198,10 +198,11 @@ def capture_subprocess_output(subprocess_args, new_env=None):
 
     return (success, output)
 
+
 def run_prof(fname, profiler_options, workload_dir, mspec):
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
-    
+
     logging.debug("pmc file: %s" % str(os.path.basename(fname)))
 
     # standard rocprof options
@@ -210,7 +211,12 @@ def run_prof(fname, profiler_options, workload_dir, mspec):
 
     # set required env var for mi300
     new_env = None
-    if  (mspec.gpu_model.lower() == "mi300x_a0" or mspec.gpu_model.lower() == "mi300x_a1" or mspec.gpu_model.lower() == "mi300a_a0" or mspec.gpu_model.lower() == "mi300a_a1") and (
+    if (
+        mspec.gpu_model.lower() == "mi300x_a0"
+        or mspec.gpu_model.lower() == "mi300x_a1"
+        or mspec.gpu_model.lower() == "mi300a_a0"
+        or mspec.gpu_model.lower() == "mi300a_a1"
+    ) and (
         os.path.basename(fname) == "pmc_perf_13.txt"
         or os.path.basename(fname) == "pmc_perf_14.txt"
         or os.path.basename(fname) == "pmc_perf_15.txt"
@@ -233,9 +239,7 @@ def run_prof(fname, profiler_options, workload_dir, mspec):
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
         hbm_stack_num = get_hbm_stack_num(mspec.gpu_model, mspec.memory_partition)
-        df = flatten_tcc_info_across_hbm_stacks(
-            f, hbm_stack_num, int(mspec._l2_banks)
-        )
+        df = flatten_tcc_info_across_hbm_stacks(f, hbm_stack_num, int(mspec._l2_banks))
         df.to_csv(f, index=False)
 
     if os.path.exists(workload_dir + "/out"):
@@ -295,13 +299,16 @@ def replace_timestamps(workload_dir):
         )
         logging.warning(warning + "\n")
 
-def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only, mspec):
+
+def gen_sysinfo(
+    workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only, mspec
+):
     df = mspec.get_class_members()
-    
+
     # Append workload information to machine specs
-    df['command'] = app_cmd
-    df['workload_name'] = workload_name
-    
+    df["command"] = app_cmd
+    df["workload_name"] = workload_name
+
     blocks = []
     if ip_blocks == None:
         t = ["SQ", "LDS", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"]
@@ -310,10 +317,11 @@ def gen_sysinfo(workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof
         blocks += ip_blocks
     if mspec.gpu_arch == "gfx90a" and (not skip_roof):
         blocks.append("roofline")
-    df['ip_blocks'] = "|".join(blocks)
+    df["ip_blocks"] = "|".join(blocks)
 
     # Save csv
     df.to_csv(workload_dir + "/" + "sysinfo.csv", index=False)
+
 
 def detect_roofline(mspec):
     rocm_ver = mspec.rocm_version[:1]
@@ -380,9 +388,9 @@ def run_rocscope(args, fname):
                 logging.error(result.stderr.decode("ascii"))
                 sys.exit(1)
 
+
 def mibench(args, mspec):
-    """Run roofline microbenchmark to generate peak BW and FLOP measurements.
-    """
+    """Run roofline microbenchmark to generate peak BW and FLOP measurements."""
     logging.info("[roofline] No roofline data found. Generating...")
     distro_map = {"platform:el8": "rhel8", "15.3": "sle15sp3", "20.04": "ubuntu20_04"}
 
