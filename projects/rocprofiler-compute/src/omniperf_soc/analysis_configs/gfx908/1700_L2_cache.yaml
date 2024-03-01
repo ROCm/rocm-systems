@@ -52,7 +52,7 @@ Panel Config:
           unit: Unit
           tips: Tips
         metric:
-          L2-Fabric Read BW:
+          Read BW:
             avg: AVG((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
               * 64)) / $denom))
             min: MIN((((TCC_EA_RDREQ_32B_sum * 32) + ((TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum)
@@ -79,7 +79,7 @@ Panel Config:
             max: MAX((100 * (TCC_EA_RD_UNCACHED_32B_sum / TCC_EA_RDREQ_sum) if (TCC_EA_RDREQ_sum != 0) else None))
             unit: pct
             tips:
-          L2-Fabric Write and Atomic BW:
+          Write and Atomic BW:
             avg: AVG((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
               * 32)) / $denom))
             min: MIN((((TCC_EA_WRREQ_64B_sum * 64) + ((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum)
@@ -121,7 +121,7 @@ Panel Config:
               0) else None))
             unit: Cycles
             tips:
-          Write Latency:
+          Write and Atomic Latency:
             avg: AVG(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum !=
               0) else None))
             min: MIN(((TCC_EA_WRREQ_LEVEL_sum / TCC_EA_WRREQ_sum) if (TCC_EA_WRREQ_sum !=
