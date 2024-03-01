@@ -123,20 +123,27 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     auto info_data_cb = [](rocprofiler_callback_tracing_kind_t,
                            uint32_t,
                            uint32_t          arg_num,
+                           const void* const arg_value_addr,
+                           int32_t           indirection_count,
+                           const char*       arg_type,
                            const char*       arg_name,
                            const char*       arg_value_str,
-                           const void* const arg_value_addr,
+                           int32_t           dereference_count,
                            void*             cb_data) -> int {
         auto& dss = *static_cast<std::stringstream*>(cb_data);
         dss << ((arg_num == 0) ? "(" : ", ");
         dss << arg_num << ": " << arg_name << "=" << arg_value_str;
         (void) arg_value_addr;
+        (void) arg_type;
+        (void) indirection_count;
+        (void) dereference_count;
         return 0;
     };
 
-    auto info_data = std::stringstream{};
+    int32_t max_deref = (record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER) ? 1 : 2;
+    auto    info_data = std::stringstream{};
     ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operation_args(
-                         record, info_data_cb, static_cast<void*>(&info_data)),
+                         record, info_data_cb, max_deref, static_cast<void*>(&info_data)),
                      "Failure iterating trace operation args");
 
     auto info_data_str = info_data.str();

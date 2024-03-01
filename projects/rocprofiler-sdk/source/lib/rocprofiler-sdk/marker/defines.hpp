@@ -99,7 +99,7 @@
                                                                                                    \
         static std::vector<void*> as_arg_addr(callback_data_type) { return std::vector<void*>{}; } \
                                                                                                    \
-        static std::vector<std::pair<std::string, std::string>> as_arg_list(callback_data_type)    \
+        static std::vector<common::stringified_argument> as_arg_list(callback_data_type, int32_t)  \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -188,9 +188,10 @@
                 GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
         }                                                                                          \
                                                                                                    \
-        static auto as_arg_list(callback_data_type trace_data)                                     \
+        static auto as_arg_list(callback_data_type trace_data, int32_t max_deref)                  \
         {                                                                                          \
             return utils::stringize(                                                               \
+                max_deref,                                                                         \
                 GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
         }                                                                                          \
     };                                                                                             \

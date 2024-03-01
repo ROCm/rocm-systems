@@ -25,15 +25,16 @@
 #include <rocprofiler-sdk/version.h>
 
 #include "lib/common/mpl.hpp"
+#include "lib/common/stringize_arg.hpp"
 
-#include "fmt/core.h"
-#include "fmt/ranges.h"
-
+#include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ext_finalize.h>
 #include <hsa/hsa_ext_image.h>
 
+#include <cstdint>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -56,36 +57,11 @@ template <typename Tp>
 auto
 stringize_impl(const Tp& _v)
 {
-    using nonpointer_type = typename std::remove_pointer_t<Tp>;
+    using value_type = std::decay_t<Tp>;
 
-    if constexpr(common::mpl::is_pair<Tp>::value)
-    {
-        return std::make_pair(stringize_impl(_v.first), stringize_impl(_v.second));
-    }
-    else if constexpr(std::is_constructible<std::string_view, Tp>::value)
-    {
-        auto _ss = std::stringstream{};
-        _ss << _v;
-        return _ss.str();
-    }
-    else if constexpr(fmt::is_formattable<Tp>::value && !std::is_pointer<Tp>::value)
+    if constexpr(fmt::is_formattable<value_type>::value && !std::is_pointer<value_type>::value)
     {
         return fmt::format("{}", _v);
-    }
-    else if constexpr(std::is_pointer<Tp>::value && !std::is_pointer<nonpointer_type>::value &&
-                      common::mpl::is_type_complete_v<nonpointer_type> &&
-                      !std::is_void<nonpointer_type>::value)
-    {
-        if(_v)
-        {
-            return stringize_impl(*_v);
-        }
-        else
-        {
-            auto _ss = std::stringstream{};
-            _ss << _v;
-            return _ss.str();
-        }
     }
     else
     {
@@ -97,9 +73,10 @@ stringize_impl(const Tp& _v)
 
 template <typename... Args>
 auto
-stringize(Args... args)
+stringize(int32_t max_deref, Args... args)
 {
-    return std::vector<std::pair<std::string, std::string>>{stringize_impl(args)...};
+    return std::vector<common::stringified_argument>{common::stringize_arg(
+        max_deref, args, [](const auto& _v) { return stringize_impl(_v); })...};
 }
 
 template <typename Tp>

@@ -926,24 +926,10 @@ code_object_init(HsaApiTable* table)
 uint64_t
 get_kernel_id(uint64_t kernel_object)
 {
-    // return get_code_objects().rlock([kernel_object](const code_object_array_t& _data) -> uint64_t
-    // {
-    //     for(const auto& itr : _data)
-    //     {
-    //         for(const auto& ditr : itr->symbols)
-    //         {
-    //             if(kernel_object == ditr->rocp_data.kernel_object) return
-    //             ditr->rocp_data.kernel_id;
-    //         }
-    //     }
-    //     return 0;
-    // });
-
     return get_kernel_object_map().rlock(
         [](const kernel_object_map_t& object_map, uint64_t _kern_obj) -> uint64_t {
             auto itr = object_map.find(_kern_obj);
             return (itr == object_map.end()) ? 0 : itr->second;
-            // return object_map.at(_kern_obj);
         },
         kernel_object);
 }

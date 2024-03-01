@@ -90,23 +90,29 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     auto info_data_cb = [](rocprofiler_callback_tracing_kind_t,
                            uint32_t,
                            uint32_t          arg_num,
+                           const void* const arg_value_addr,
+                           int32_t           arg_indir_cnt,
+                           const char*       arg_type,
                            const char*       arg_name,
                            const char*       arg_value_str,
-                           const void* const arg_value_addr,
+                           int32_t           arg_deref_cnt,
                            void*             data) -> int {
         auto& info = *static_cast<info_data*>(data);
         info.arg_ss << ((arg_num == 0) ? "(" : ", ");
         info.arg_ss << arg_num << ": " << arg_name << "=" << arg_value_str;
+        EXPECT_NE(arg_type, nullptr);
         EXPECT_NE(arg_name, nullptr);
         EXPECT_NE(arg_value_str, nullptr);
         EXPECT_NE(arg_value_addr, nullptr);
         EXPECT_EQ(arg_num, info.num_args);
+        EXPECT_GE(arg_indir_cnt, 0);
+        EXPECT_LE(arg_deref_cnt, arg_indir_cnt);
         info.num_args++;
         return 0;
     };
 
     ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operation_args(
-                         record, info_data_cb, static_cast<void*>(&info_data_v)),
+                         record, info_data_cb, record.phase, static_cast<void*>(&info_data_v)),
                      "Failure iterating trace operation args");
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API &&
        !(record.operation == ROCPROFILER_HSA_CORE_API_ID_hsa_init ||

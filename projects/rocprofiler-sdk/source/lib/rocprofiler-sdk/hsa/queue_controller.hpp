@@ -73,7 +73,7 @@ public:
 
     // Called to add a queue that was created by the user program
     void add_queue(hsa_queue_t*, std::unique_ptr<Queue>);
-    void destory_queue(hsa_queue_t*);
+    void destroy_queue(hsa_queue_t*);
 
     // Add callback to queues associated with the agent. Returns a client
     // id that can be used by callers to remove the callback. If no agent

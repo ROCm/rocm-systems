@@ -13,6 +13,7 @@ set(common_headers
     mpl.hpp
     scope_destructor.hpp
     static_object.hpp
+    stringize_arg.hpp
     synchronized.hpp
     utility.hpp
     xml.hpp)

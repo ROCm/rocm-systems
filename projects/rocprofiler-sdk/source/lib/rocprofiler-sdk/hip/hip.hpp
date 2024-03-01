@@ -99,6 +99,7 @@ void
 iterate_args(uint32_t                                           id,
              const rocprofiler_callback_tracing_hip_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   callback,
+             int32_t                                            max_deref,
              void*                                              user_data);
 
 template <typename TableT>

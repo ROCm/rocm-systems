@@ -76,7 +76,7 @@ create_queue(hsa_agent_t        agent,
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
 {
-    get_queue_controller().destory_queue(hsa_queue);
+    get_queue_controller().destroy_queue(hsa_queue);
     return HSA_STATUS_SUCCESS;
 }
 
@@ -106,7 +106,7 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 }
 
 void
-QueueController::destory_queue(hsa_queue_t* id)
+QueueController::destroy_queue(hsa_queue_t* id)
 {
     const auto*                  queue = get_queue_controller().get_queue(*id);
     std::unique_lock<std::mutex> cvlock(queue->cv_mutex);
@@ -243,8 +243,8 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
 
     if(enable_intercepter)
     {
-        core_table.hsa_queue_create_fn  = create_queue;
-        core_table.hsa_queue_destroy_fn = destroy_queue;
+        core_table.hsa_queue_create_fn  = hsa::create_queue;
+        core_table.hsa_queue_destroy_fn = hsa::destroy_queue;
     }
 }
 

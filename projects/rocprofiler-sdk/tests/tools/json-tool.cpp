@@ -376,18 +376,34 @@ serialize_args(ArchiveT& ar, const callback_arg_array_t& data)
     }
 }
 
+template <typename... Args>
+void
+consume_args(Args&&...)
+{}
+
 int
-save_args(rocprofiler_callback_tracing_kind_t,
-          uint32_t,
-          uint32_t,
-          const char* arg_name,
-          const char* arg_value_str,
-          const void* const,
-          void* data)
+save_args(rocprofiler_callback_tracing_kind_t domain_idx,
+          uint32_t                            op_idx,
+          uint32_t                            arg_num,
+          const void* const                   arg_value_addr,
+          int32_t                             arg_indirection_count,
+          const char*                         arg_type,
+          const char*                         arg_name,
+          const char*                         arg_value_str,
+          int32_t                             arg_dereference_count,
+          void*                               data)
 {
     auto* argvec = static_cast<callback_arg_array_t*>(data);
     argvec->emplace_back(arg_name, arg_value_str);
     return 0;
+
+    consume_args(domain_idx,
+                 op_idx,
+                 arg_num,
+                 arg_value_addr,
+                 arg_indirection_count,
+                 arg_type,
+                 arg_dereference_count);
 }
 
 struct code_object_callback_record_t
@@ -635,8 +651,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         auto* data = static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(
+                record, save_args, record.phase, &args);
 
         static auto _mutex = std::mutex{};
         auto        _lk    = std::unique_lock<std::mutex>{_mutex};
@@ -648,8 +665,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         auto* data = static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(
+                record, save_args, record.phase, &args);
 
         static auto _mutex = std::mutex{};
         auto        _lk    = std::unique_lock<std::mutex>{_mutex};
@@ -662,8 +680,9 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         auto* data = static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
         auto  args = callback_arg_array_t{};
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
-            rocprofiler_iterate_callback_tracing_kind_operation_args(record, save_args, &args);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(
+                record, save_args, record.phase, &args);
 
         static auto _mutex = std::mutex{};
         auto        _lk    = std::unique_lock<std::mutex>{_mutex};

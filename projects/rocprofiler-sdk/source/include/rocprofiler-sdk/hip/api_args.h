@@ -1298,7 +1298,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipIpcOpenMemHandle;
     struct
     {
-        hipFunction_t f;
+        hipFunction_t func;
     } hipKernelNameRef;
     struct
     {
@@ -1311,7 +1311,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipLaunchByPtr;
     struct
     {
-        const void*  f;
+        const void*  func;
         dim3         gridDim;
         dim3         blockDimX;
         void**       kernelParams;
@@ -1960,7 +1960,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipModuleGetTexRef;
     struct
     {
-        hipFunction_t f;
+        hipFunction_t func;
         unsigned int  gridDimX;
         unsigned int  gridDimY;
         unsigned int  gridDimZ;
@@ -1979,7 +1979,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipModuleLaunchCooperativeKernelMultiDevice;
     struct
     {
-        hipFunction_t f;
+        hipFunction_t func;
         unsigned int  gridDimX;
         unsigned int  gridDimY;
         unsigned int  gridDimZ;
@@ -2012,14 +2012,14 @@ typedef union rocprofiler_hip_api_args_u
     struct
     {
         int*          numBlocks;
-        hipFunction_t f;
+        hipFunction_t func;
         int           blockSize;
         size_t        dynSharedMemPerBlk;
     } hipModuleOccupancyMaxActiveBlocksPerMultiprocessor;
     struct
     {
         int*          numBlocks;
-        hipFunction_t f;
+        hipFunction_t func;
         int           blockSize;
         size_t        dynSharedMemPerBlk;
         unsigned int  flags;
@@ -2028,7 +2028,7 @@ typedef union rocprofiler_hip_api_args_u
     {
         int*          gridSize;
         int*          blockSize;
-        hipFunction_t f;
+        hipFunction_t func;
         size_t        dynSharedMemPerBlk;
         int           blockSizeLimit;
     } hipModuleOccupancyMaxPotentialBlockSize;
@@ -2036,7 +2036,7 @@ typedef union rocprofiler_hip_api_args_u
     {
         int*          gridSize;
         int*          blockSize;
-        hipFunction_t f;
+        hipFunction_t func;
         size_t        dynSharedMemPerBlk;
         int           blockSizeLimit;
         unsigned int  flags;
@@ -2048,14 +2048,14 @@ typedef union rocprofiler_hip_api_args_u
     struct
     {
         int*        numBlocks;
-        const void* f;
+        const void* func;
         int         blockSize;
         size_t      dynSharedMemPerBlk;
     } hipOccupancyMaxActiveBlocksPerMultiprocessor;
     struct
     {
         int*         numBlocks;
-        const void*  f;
+        const void*  func;
         int          blockSize;
         size_t       dynSharedMemPerBlk;
         unsigned int flags;
@@ -2064,7 +2064,7 @@ typedef union rocprofiler_hip_api_args_u
     {
         int*        gridSize;
         int*        blockSize;
-        const void* f;
+        const void* func;
         size_t      dynSharedMemPerBlk;
         int         blockSizeLimit;
     } hipOccupancyMaxPotentialBlockSize;
@@ -2453,7 +2453,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipCreateChannelDesc;
     struct
     {
-        hipFunction_t f;
+        hipFunction_t func;
         uint32_t      globalWorkSizeX;
         uint32_t      globalWorkSizeY;
         uint32_t      globalWorkSizeZ;
@@ -2461,7 +2461,7 @@ typedef union rocprofiler_hip_api_args_u
         uint32_t      localWorkSizeY;
         uint32_t      localWorkSizeZ;
         size_t        sharedMemBytes;
-        hipStream_t   hStream;
+        hipStream_t   stream;
         void**        kernelParams;
         void**        extra;
         hipEvent_t    startEvent;
@@ -2470,7 +2470,7 @@ typedef union rocprofiler_hip_api_args_u
     } hipExtModuleLaunchKernel;
     struct
     {
-        hipFunction_t f;
+        hipFunction_t func;
         uint32_t      globalWorkSizeX;
         uint32_t      globalWorkSizeY;
         uint32_t      globalWorkSizeZ;
@@ -2478,7 +2478,7 @@ typedef union rocprofiler_hip_api_args_u
         uint32_t      localWorkSizeY;
         uint32_t      localWorkSizeZ;
         size_t        sharedMemBytes;
-        hipStream_t   hStream;
+        hipStream_t   stream;
         void**        kernelParams;
         void**        extra;
         hipEvent_t    startEvent;
@@ -2699,12 +2699,12 @@ typedef union rocprofiler_hip_api_args_u
     } hipEventRecord_spt;
     struct
     {
-        const void* f;
+        const void* func;
         dim3        gridDim;
         dim3        blockDim;
         void**      kernelParams;
         uint32_t    sharedMemBytes;
-        hipStream_t hStream;
+        hipStream_t stream;
     } hipLaunchCooperativeKernel_spt;
     struct
     {

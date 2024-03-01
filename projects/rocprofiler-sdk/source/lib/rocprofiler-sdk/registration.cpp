@@ -726,8 +726,10 @@ rocprofiler_set_api_table(const char* name,
     else if(std::string_view{name} == "roctx")
     {
         // pass to roctx init
-        LOG_IF(ERROR, num_tables >= 3)
-            << " rocprofiler expected ROCTX library to pass 1 API table, not " << num_tables;
+        LOG_IF(FATAL, num_tables < 3)
+            << " rocprofiler expected ROCTX library to pass 3 API tables, not " << num_tables;
+        LOG_IF(ERROR, num_tables > 3)
+            << " rocprofiler expected ROCTX library to pass 3 API tables, not " << num_tables;
 
         auto* roctx_core = static_cast<roctxCoreApiTable_t*>(tables[0]);
         auto* roctx_ctrl = static_cast<roctxControlApiTable_t*>(tables[1]);

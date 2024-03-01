@@ -193,18 +193,26 @@ typedef int (*rocprofiler_callback_tracing_kind_operation_cb_t)(
  * @param [in] kind domain
  * @param [in] operation associated domain operation
  * @param [in] arg_number the argument number, starting at zero
+ * @param [in] arg_value_addr the address of the argument stored by rocprofiler.
+ * @param [in] arg_indirection_count the total number of indirection levels for the argument, e.g.
+ * int == 0, int* == 1, int** == 2
+ * @param [in] arg_type the typeid name of the argument
  * @param [in] arg_name the name of the argument in the prototype (or rocprofiler union)
  * @param [in] arg_value_str conversion of the argument to a string, e.g. operator<< overload
- * @param [in] arg_value_addr the address of the argument stored by rocprofiler.
+ * @param [in] arg_dereference_count the number of times the argument was dereferenced when it was
+ * converted to a string
  * @param [in] data user data
  */
 typedef int (*rocprofiler_callback_tracing_operation_args_cb_t)(
     rocprofiler_callback_tracing_kind_t kind,
     uint32_t                            operation,
     uint32_t                            arg_number,
+    const void* const                   arg_value_addr,
+    int32_t                             arg_indirection_count,
+    const char*                         arg_type,
     const char*                         arg_name,
     const char*                         arg_value_str,
-    const void* const                   arg_value_addr,
+    int32_t                             arg_dereference_count,
     void*                               data);
 
 /**
@@ -322,14 +330,63 @@ rocprofiler_iterate_callback_tracing_kind_operations(
  * particularly useful when tools want to annotate traces with the function arguments. See
  * @example samples/api_callback_tracing/client.cpp for a usage example.
  *
+ * It is recommended to use this function when the record phase is ::ROCPROFILER_CALLBACK_PHASE_EXIT
+ * or ::ROCPROFILER_CALLBACK_PHASE_NONE. When the phase is ::ROCPROFILER_CALLBACK_PHASE_ENTER, the
+ * function may have output parameters which have not set. In the case of an output parameter with
+ * one level of indirection, e.g. `int* output_len`, this is considered safe since the output
+ * parameter is either null or, in the worst case scenario, pointing to an uninitialized value which
+ * will result in garbage values to be stringified. However, if the output parameter has more than
+ * one level of indirection, e.g. `const char** output_name`, this can result in a segmentation
+ * fault because the dereferenced output parameter may be uninitialized and point to an invalid
+ address. E.g.:
+ *
+ * @code{.cpp}
+ * struct dim3
+ * {
+ *     int x;
+ *     int y;
+ *     int z;
+ * };
+ *
+ * static dim3 default_dims = {.x = 1, .y = 1, .z = 1};
+ *
+ * void set_dim_x(int val, dim3* output_dims) { output_dims->x = val; }
+ *
+ * void get_default_dims(dim3** output_dims) { *output_dims = default_dims; }
+ *
+ * int main()
+ * {
+ *     dim3  my_dims;       // uninitialized value. x, y, and z may be set to random values
+ *     dim3* current_dims;  // uninitialized pointer. May be set to invalid address
+ *
+ *     set_dim_x(3, &my_dims);  // if rocprofiler-sdk wrapped this function and tried to stringify
+ *                              // in the enter phase, dereferencing my_dims is not problematic
+ *                              // since there is an actual dim3 allocation
+ *
+ *     get_default_dims(&current_dims);  // if rocprofiler-sdk wrapped this function,
+ *                                       // and tried to stringify in the enter phase,
+ *                                       // current_dims may point to an address outside
+ *                                       // of the address space of this process and
+ *                                       // cause a segfault
+ * }
+ * @endcode
+ *
+ *
  * @param[in] record Record provided by service callback
  * @param[in] callback The callback function which will be invoked for each argument
+ * @param[in] max_dereference_count In the callback enter phase, certain arguments may be output
+ * parameters which have not been set. When the output parameter has multiple levels of indirection,
+ * it may be invalid to dereference the output parameter more than once and doing so may result in a
+ * segmentation fault. Thus, it is recommended to set this parameter to a maximum value of 1 when
+ * the phase is ::ROCPROFILER_CALLBACK_PHASE_ENTER to ensure that output parameters which point to
+ * uninitialized pointers do not cause segmentation faults.
  * @param[in] user_data Data to be passed to each invocation of the callback
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_iterate_callback_tracing_kind_operation_args(
     rocprofiler_callback_tracing_record_t            record,
     rocprofiler_callback_tracing_operation_args_cb_t callback,
+    int32_t                                          max_dereference_count,
     void*                                            user_data) ROCPROFILER_NONNULL(2);
 
 /** @} */

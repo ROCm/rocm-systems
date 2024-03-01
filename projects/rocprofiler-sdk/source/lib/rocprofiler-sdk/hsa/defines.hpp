@@ -136,8 +136,9 @@
             return std::vector<void*>{};                                                           \
         }                                                                                          \
                                                                                                    \
-        static std::vector<std::pair<std::string, std::string>> as_arg_list(                       \
-            rocprofiler_callback_tracing_hsa_api_data_t)                                           \
+        static std::vector<common::stringified_argument> as_arg_list(                              \
+            rocprofiler_callback_tracing_hsa_api_data_t,                                           \
+            int32_t)                                                                               \
         {                                                                                          \
             return {};                                                                             \
         }                                                                                          \
@@ -217,9 +218,11 @@
                 GET_ADDR_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__)};          \
         }                                                                                          \
                                                                                                    \
-        static auto as_arg_list(rocprofiler_callback_tracing_hsa_api_data_t trace_data)            \
+        static auto as_arg_list(rocprofiler_callback_tracing_hsa_api_data_t trace_data,            \
+                                int32_t                                     max_deref)             \
         {                                                                                          \
             return utils::stringize(                                                               \
+                max_deref,                                                                         \
                 GET_NAMED_MEMBER_FIELDS(get_api_data_args(trace_data.args), __VA_ARGS__));         \
         }                                                                                          \
     };                                                                                             \

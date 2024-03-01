@@ -496,29 +496,34 @@ void
 iterate_args(const uint32_t                                     id,
              const rocprofiler_callback_tracing_hsa_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   func,
+             int32_t                                            max_deref,
              void*                                              user_data,
              std::index_sequence<OpIdx, IdxTail...>)
 {
     if(OpIdx == id)
     {
         using info_type = hsa_api_info<TableIdx, OpIdx>;
-        auto&& arg_list = info_type::as_arg_list(data);
+        auto&& arg_list = info_type::as_arg_list(data, max_deref);
         auto&& arg_addr = info_type::as_arg_addr(data);
         for(size_t i = 0; i < std::min(arg_list.size(), arg_addr.size()); ++i)
         {
-            auto ret = func(info_type::callback_domain_idx,  // kind
-                            id,                              // operation
-                            i,                               // arg_number
-                            arg_list.at(i).first.c_str(),    // arg_name
-                            arg_list.at(i).second.c_str(),   // arg_value_str
-                            arg_addr.at(i),                  // arg_value_addr
+            auto ret = func(info_type::callback_domain_idx,    // kind
+                            id,                                // operation
+                            i,                                 // arg_number
+                            arg_addr.at(i),                    // arg_value_addr
+                            arg_list.at(i).indirection_level,  // indirection
+                            arg_list.at(i).type,               // arg_type
+                            arg_list.at(i).name.c_str(),       // arg_name
+                            arg_list.at(i).value.c_str(),      // arg_value_str
+                            arg_list.at(i).dereference_count,  // num deref in str
                             user_data);
             if(ret != 0) break;
         }
         return;
     }
     if constexpr(sizeof...(IdxTail) > 0)
-        iterate_args<TableIdx>(id, data, func, user_data, std::index_sequence<IdxTail...>{});
+        iterate_args<TableIdx>(
+            id, data, func, max_deref, user_data, std::index_sequence<IdxTail...>{});
 }
 
 bool
@@ -683,12 +688,14 @@ void
 iterate_args(uint32_t                                           id,
              const rocprofiler_callback_tracing_hsa_api_data_t& data,
              rocprofiler_callback_tracing_operation_args_cb_t   callback,
+             int32_t                                            max_deref,
              void*                                              user_data)
 {
     if(callback)
         iterate_args<TableIdx>(id,
                                data,
                                callback,
+                               max_deref,
                                user_data,
                                std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
 }
@@ -727,7 +734,7 @@ using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
     template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
     template std::vector<const char*> get_names<TABLE_IDX>();                                      \
     template void                     iterate_args<TABLE_IDX>(                                     \
-        uint32_t, const iterate_args_data_t&, iterate_args_cb_t, void*);
+        uint32_t, const iterate_args_data_t&, iterate_args_cb_t, int32_t, void*);
 
 INSTANTIATE_HSA_TABLE_FUNC(hsa_core_table_t, ROCPROFILER_HSA_TABLE_ID_Core)
 INSTANTIATE_HSA_TABLE_FUNC(hsa_amd_ext_table_t, ROCPROFILER_HSA_TABLE_ID_AmdExt)

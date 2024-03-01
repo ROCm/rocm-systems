@@ -37,6 +37,7 @@
 #include <glog/logging.h>
 
 #include <atomic>
+#include <cstdint>
 #include <vector>
 
 #define RETURN_STATUS_ON_FAIL(...)                                                                 \
@@ -325,8 +326,20 @@ rocprofiler_status_t
 rocprofiler_iterate_callback_tracing_kind_operation_args(
     rocprofiler_callback_tracing_record_t            record,
     rocprofiler_callback_tracing_operation_args_cb_t callback,
+    int32_t                                          max_deref,
     void*                                            user_data)
 {
+    if(max_deref > 1 && record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+    {
+        const char* name = "(unknown)";
+        rocprofiler_query_callback_tracing_kind_operation_name(
+            record.kind, record.operation, &name, nullptr);
+        LOG(WARNING) << __FUNCTION__
+                     << " invoked with a max dereference count > 1 when the record.phase == "
+                     << "ROCPROFILER_CALLBACK_PHASE_ENTER for '" << name
+                     << "' record. This may result in a segmentation fault";
+    }
+
     switch(record.kind)
     {
         case ROCPROFILER_CALLBACK_TRACING_NONE:
@@ -340,6 +353,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
@@ -349,6 +363,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
@@ -358,6 +373,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
@@ -367,6 +383,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_hsa_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
@@ -376,6 +393,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
@@ -385,6 +403,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
@@ -394,16 +413,27 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
         case ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API:
+        {
+            rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Compiler>(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
         case ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API:
         {
             rocprofiler::hip::iterate_args<ROCPROFILER_HIP_TABLE_ID_Runtime>(
                 record.operation,
                 *static_cast<rocprofiler_callback_tracing_hip_api_data_t*>(record.payload),
                 callback,
+                max_deref,
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }

@@ -126,6 +126,27 @@ constexpr bool is_type_complete_v = false;  // NOLINT(misc-definitions-in-header
 
 template <typename T>  // NOLINTNEXTLINE(misc-definitions-in-headers)
 constexpr bool is_type_complete_v<T, std::void_t<decltype(sizeof(T))>> = true;
+
+template <typename Tp, size_t N>
+struct indirection_level_impl_n
+{
+    using value_type = std::conditional_t<std::is_function<Tp>::value, Tp, std::decay_t<Tp>>;
+    static_assert(!std::is_pointer<value_type>::value, "missing overload");
+    static constexpr size_t value = N;
+};
+
+template <typename Tp, size_t N>
+struct indirection_level_impl_n<Tp*, N> : indirection_level_impl_n<Tp, N + 1>
+{};
+
+template <typename Tp, size_t N>
+struct indirection_level_impl_n<Tp* const, N> : indirection_level_impl_n<Tp, N + 1>
+{};
+
+template <typename Tp>
+struct indirection_level
+: indirection_level_impl_n<std::remove_cv_t<std::remove_reference_t<std::decay_t<Tp>>>, 0>
+{};
 }  // namespace mpl
 }  // namespace common
 }  // namespace rocprofiler
