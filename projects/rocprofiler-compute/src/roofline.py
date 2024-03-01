@@ -376,6 +376,8 @@ class Roofline:
             sysinfo_path = os.path.join(self.__args.path, "sysinfo.csv")
             if not os.path.isfile(sysinfo_path):
                 logging.info("[roofline] sysinfo.csv not found. Generating...")
+                class Dummy_SoC:
+                    roofline_obj = True
                 gen_sysinfo(
                     workload_name=self.__args.name,
                     workload_dir=self.__workload_dir,
@@ -384,6 +386,7 @@ class Roofline:
                     skip_roof=self.__args.no_roof,
                     roof_only=self.__args.roof_only,
                     mspec=self.__mspec,
+                    soc=Dummy_SoC
                 )
 
     @abstractmethod

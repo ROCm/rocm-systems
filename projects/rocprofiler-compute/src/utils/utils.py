@@ -301,7 +301,7 @@ def replace_timestamps(workload_dir):
 
 
 def gen_sysinfo(
-    workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only, mspec
+    workload_name, workload_dir, ip_blocks, app_cmd, skip_roof, roof_only, mspec, soc
 ):
     df = mspec.get_class_members()
 
@@ -315,7 +315,7 @@ def gen_sysinfo(
         blocks += t
     else:
         blocks += ip_blocks
-    if mspec.gpu_arch == "gfx90a" and (not skip_roof):
+    if hasattr(soc, "roofline_obj") and (not skip_roof):
         blocks.append("roofline")
     df["ip_blocks"] = "|".join(blocks)
 
