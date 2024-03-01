@@ -276,7 +276,7 @@ void DisassemblyInstance::inst_callback(const char* instruction, void* user_data
 // return file offset, if found
 std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va)
 {
-  /*CHECK_VA2FO(buffer.size(), "buffer is not large enough");
+  CHECK_VA2FO(buffer.size(), "buffer is not large enough");
 
   uint8_t *e_ident = (uint8_t*)buffer.data();
   CHECK_VA2FO(e_ident, "e_ident is nullptr");
@@ -297,13 +297,11 @@ std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va)
     e_ident[EI_ABIVERSION] == 3, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V5
 
   Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
-  CHECK_VA2FO(buffer.size() > ehdr->e_phoff + sizeof(Elf64_Ehdr), "buffer is not large enough");
   CHECK_VA2FO(ehdr, "ehdr is nullptr");
   CHECK_VA2FO(ehdr->e_type == ET_DYN, "unexpected e_type");
-  CHECK_VA2FO(ehdr->e_machine == ELF::EM_AMDGPU, "unexpected e_machine"); */
+  CHECK_VA2FO(ehdr->e_machine == ELF::EM_AMDGPU, "unexpected e_machine");
 
   CHECK_VA2FO(buffer.size() > sizeof(Elf64_Ehdr), "buffer is not large enough");
-  Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
   CHECK_VA2FO(ehdr->e_phoff != 0, "unexpected e_phoff");
 
   CHECK_VA2FO(buffer.size() > ehdr->e_phoff + sizeof(Elf64_Phdr), "buffer is not large enough");
@@ -331,7 +329,7 @@ std::optional<uint64_t> DisassemblyInstance::va2fo(uint64_t va)
 
 std::vector<std::pair<uint64_t, uint64_t>> DisassemblyInstance::getSegments()
 {
-  /*CHECK_VA2FO(buffer.size(), "buffer is not large enough");
+  CHECK_VA2FO(buffer.size(), "buffer is not large enough");
 
   uint8_t *e_ident = (uint8_t*)buffer.data();
   CHECK_VA2FO(e_ident, "e_ident is nullptr");
@@ -352,13 +350,11 @@ std::vector<std::pair<uint64_t, uint64_t>> DisassemblyInstance::getSegments()
     e_ident[EI_ABIVERSION] == 3, "unexpected ei_abiversion"); // ELFABIVERSION_AMDGPU_HSA_V5
 
   Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
-  CHECK_VA2FO(buffer.size() > ehdr->e_phoff + sizeof(Elf64_Ehdr), "buffer is not large enough");
   CHECK_VA2FO(ehdr, "ehdr is nullptr");
   CHECK_VA2FO(ehdr->e_type == ET_DYN, "unexpected e_type");
-  CHECK_VA2FO(ehdr->e_machine == ELF::EM_AMDGPU, "unexpected e_machine"); */
+  CHECK_VA2FO(ehdr->e_machine == ELF::EM_AMDGPU, "unexpected e_machine");
 
   CHECK_VA2FO(buffer.size() > sizeof(Elf64_Ehdr), "buffer is not large enough");
-  Elf64_Ehdr *ehdr = (Elf64_Ehdr*)buffer.data();
   CHECK_VA2FO(ehdr->e_phoff != 0, "unexpected e_phoff");
 
   CHECK_VA2FO(buffer.size() > ehdr->e_phoff + sizeof(Elf64_Phdr), "buffer is not large enough");

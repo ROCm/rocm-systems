@@ -347,10 +347,12 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
             line = firstinst.cycles
             lineincrement = watchlist.getincrement(line)
         except KeyError as e:
-            print('Auto error invalid addr', hex(e.args[0]))
-            return None
+            print('Warning: Waves from addr', hex(e.args[0]), 'have no codeobj info.')
+            for i in range(len(insts)):
+                insts[i].asmline = 0
+            return [i for k, i in enumerate(insts) if i.type != PCINFO], [], [], [], 1, 0, [k for k, i in enumerate(insts) if i.type == PCINFO]
         except Exception as e:
-            print('Auto error', e)
+            print('Unknown error', e)
             return None
     else:
         line = 0

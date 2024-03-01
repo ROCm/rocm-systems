@@ -501,9 +501,9 @@ hsa_status_t CodeObjectCallback(hsa_executable_t executable,
   ReportActivity(ACTIVITY_DOMAIN_HSA_EVT, HSA_EVT_ID_CODEOBJ, &data);
 
   if (data.codeobj.unload)
-    codeobj_capture_instance::Unload(data.codeobj.load_base);
+    codeobj_capture_instance::Unload(data.codeobj.load_delta);
   else
-    codeobj_capture_instance::Load(data.codeobj.load_base, data.codeobj.load_size,
+    codeobj_capture_instance::Load(data.codeobj.load_delta, data.codeobj.load_size,
             uri_str, data.codeobj.memory_base, data.codeobj.memory_size);
 
   hsa_executable_iterate_agent_symbols(executable, data.codeobj.agent,

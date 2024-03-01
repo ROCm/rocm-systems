@@ -298,53 +298,34 @@ class perfetto_plugin_t {
 
     TRACE_EVENT_END("KERNELS", queue_track, profiler_record.timestamps.end.value);
 
-    auto get_counter_track_fn = [&](std::string counter_name) {
-      std ::string counter_track_id = hostname_ + std::to_string(GetPid()) + counter_name;
-      std::pair<int, std::string> gpu_counter_track_id = std::make_pair(device_id, counter_name);
-      std::unordered_map<std::string, perfetto::CounterTrack>::iterator counters_track_it;
-      {
-        counters_track_it = counter_tracks_.find(gpu_counter_track_id.second);
-        if (counters_track_it == counter_tracks_.end()) {
-          /* Create a new perfetto::Track */
-          counters_track_it =
-              counter_tracks_
-                  .emplace(gpu_counter_track_id.second,
-                           perfetto::CounterTrack(counter_track_id.c_str(), gpu_track))
-                  .first;
+    auto get_counter_track_fn = [&](size_t i, rocprofiler_counter_id_t counter_handler)
+    {
+      auto& ctrack = counter_tracks_[device_id];
 
-          auto counter_track_desc = counters_track_it->second.Serialize();
-          std::string counter_track_str = "Counter " + gpu_counter_track_id.second;
-          counter_track_desc.set_name(counter_track_str);
-          perfetto::TrackEvent::SetTrackDescriptor(counters_track_it->second, counter_track_desc);
-        }
-      }
-      return counters_track_it->second;
+      if (i<ctrack.size()) return;
+
+      const char* name_c = nullptr;
+      CHECK_ROCPROFILER(rocprofiler_query_counter_info(session_id, ROCPROFILER_COUNTER_NAME, counter_handler, &name_c));
+
+      ctrack.push_back(perfetto::CounterTrack(name_c, gpu_track));
+      auto counter_track_desc = ctrack.back().Serialize();
+      counter_track_desc.set_name("Counter " + std::string(name_c));
+      perfetto::TrackEvent::SetTrackDescriptor(ctrack.back(), counter_track_desc);
     };
 
     // For Counters
     if (!profiler_record.counters) return 0;
 
-    for (uint64_t i = 0; i < profiler_record.counters_count.value; i++) {
+    for (uint64_t i = 0; i < profiler_record.counters_count.value; i++)
+    {
       if (profiler_record.counters[i].counter_handler.handle == 0) continue;
 
-      size_t name_length = 0;
-      CHECK_ROCPROFILER(rocprofiler_query_counter_info_size(
-          session_id, ROCPROFILER_COUNTER_NAME, profiler_record.counters[i].counter_handler,
-          &name_length));
-
-      if (name_length <= 1)
-        continue;
-
-      const char* name_c = nullptr;
-      CHECK_ROCPROFILER(rocprofiler_query_counter_info(
-          session_id, ROCPROFILER_COUNTER_NAME, profiler_record.counters[i].counter_handler,
-          &name_c));
-
-      perfetto::CounterTrack counters_track = get_counter_track_fn(std::string(name_c));
+      get_counter_track_fn(i, profiler_record.counters[i].counter_handler);
+      auto& counters_track = counter_tracks_.at(device_id).at(i);
       TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.begin.value,
                     profiler_record.counters[i].value.value);
       // Added an extra zero event for maintaining start-end of the counter
-      TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.end.value, 0.001);
+      TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.end.value, 0);
     }
 
     return 0;
@@ -634,7 +615,7 @@ class perfetto_plugin_t {
   // Activity Tracks
   std::unordered_map<uint64_t, perfetto::Track> queue_tracks_;
 
-  std::unordered_map<std::string, perfetto::CounterTrack> counter_tracks_;
+  std::unordered_map<uint64_t, std::vector<perfetto::CounterTrack>> counter_tracks_;
 
   std::atomic<uint64_t> track_counter_{GetPid()};
   std::vector<uint64_t> track_ids_used_;
