@@ -33,25 +33,32 @@ jobs:
         run: pip3 install -r requirements-doc.txt
       - name: Setup Pages
         uses: actions/configure-pages@v4
-      - name: Build html
+      - name: Build 1.x docs
         run: |
-          cd src/docs
+          cd src/docs-1.x
+          make html	
+      - name: Build 2.x docs
+        run: |
+          cd src/docs-2.x
           make html
-          mv _build/html _build/2.x
+          mv _build/html ../_build/2.x
+      - name: Relocate 2.x docs
+        run: |
+          mv src/docs-2.x/_build/html src/docs-1.x/_build/html/2.x
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./src/docs/_build
+          path: ./src/docs-1.x/_build/html
 
-  # Deployment job
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+##   # Deployment job
+##   deploy:
+##     environment:
+##       name: github-pages
+##       url: ${{ steps.deployment.outputs.page_url }}
+##     runs-on: ubuntu-latest
+##     needs: build
+##     steps:
+##       - name: Deploy to GitHub Pages
+##         id: deployment
+##         uses: actions/deploy-pages@v4
 
