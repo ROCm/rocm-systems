@@ -2,4 +2,6 @@ sphinx
 myst-parser
 recommonmark
 pygments
+sphinxmark
 sphinx-rtd-theme
+pillow==9.5.0
