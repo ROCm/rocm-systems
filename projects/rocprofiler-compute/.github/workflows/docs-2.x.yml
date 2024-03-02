@@ -42,15 +42,15 @@ jobs:
         with:
           path: ./src/docs/_build/html
 
-##   # Deployment job
-##   deploy:
-##     environment:
-##       name: github-pages
-##       url: ${{ steps.deployment.outputs.page_url }}/2.x
-##     runs-on: ubuntu-latest
-##     needs: build
-##     steps:
-##       - name: Deploy to GitHub Pages
-##         id: deployment
-##         uses: actions/deploy-pages@v1
+  # Deployment job
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}/2.x
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v1
 
