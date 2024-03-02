@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
       - name: Additional python packages
         run: pip3 install -r requirements-doc.txt
       - name: Setup Pages
