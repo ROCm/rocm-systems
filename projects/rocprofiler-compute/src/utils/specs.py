@@ -69,11 +69,13 @@ def detect_arch(_rocminfo):
     else:
         return (gpu_arch, idx1)
 
-# Custom decorator to mimic the behavior of kw_only found in Python 3.10  
+
+# Custom decorator to mimic the behavior of kw_only found in Python 3.10
 def kw_only(cls):
     def __init__(self, *args, **kwargs):
         for name, value in kwargs.items():
             setattr(self, name, value)
+
     cls.__init__ = __init__
     return cls
 
