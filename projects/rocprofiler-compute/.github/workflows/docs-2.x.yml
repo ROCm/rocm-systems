@@ -32,7 +32,7 @@ jobs:
       - name: Additional python packages
         run: pip3 install -r requirements-doc.txt
       - name: Setup Pages
-        uses: actions/configure-pages@v2
+        uses: actions/configure-pages@v4
       - name: Build html
         run: |
           cd src/docs
