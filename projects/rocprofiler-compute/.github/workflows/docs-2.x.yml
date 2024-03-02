@@ -37,7 +37,7 @@ jobs:
         run: |
           cd src/docs
           make html
-          mv ./src/docs/_build ./src/docs/2.x
+          mv _build 2.x
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
