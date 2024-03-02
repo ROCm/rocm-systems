@@ -50,9 +50,11 @@ install("sphinx_rtd_theme")
 extensions = [
     "sphinx.ext.githubpages",
     "myst_parser",
+    "sphinxmark",
 ]
 
 show_authors = True
+
 
 myst_heading_anchors = 4
 # enable replacement of (tm) & friends
@@ -69,6 +71,17 @@ source_suffix = {
     ".txt": "markdown",
     ".md": "markdown",
 }
+
+sphinxmark_enable = True
+sphinxmark_image = 'text'
+sphinxmark_text = 'Tech Preview'
+sphinxmark_text_size = 80
+sphinxmark_div = 'document'
+sphinxmark_fixed = False
+sphinxmark_text_rotation = 30
+sphinxmark_text_color = (128,128,128)
+sphinxmark_text_spacing = 800
+sphinxmark_text_opacity = 30
 
 from recommonmark.parser import CommonMarkParser
 
