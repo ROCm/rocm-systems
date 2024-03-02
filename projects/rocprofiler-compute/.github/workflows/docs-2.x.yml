@@ -41,7 +41,6 @@ jobs:
         run: |
           cd src/docs-2.x
           make html
-          mv _build/html ../_build/2.x
       - name: Relocate 2.x docs
         run: |
           mv src/docs-2.x/_build/html src/docs-1.x/_build/html/2.x
