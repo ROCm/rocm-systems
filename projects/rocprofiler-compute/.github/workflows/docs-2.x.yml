@@ -4,7 +4,8 @@ on:
   push:
     branches: ["docpub"]
     paths:
-      - 'src/docs'
+      - 'src/docs-2.x'
+      - 'src/docs-1.x'
       - '.github/workflows/docs-2.x.yml'
       - 'VERSION'
 
