@@ -881,8 +881,9 @@ def apply_filters(workload, dir, is_gui, debug):
                     ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(kernels)
                 ]
         elif all(type(kid) == str for kid in workload.filter_kernel_ids):
+            df_cleaned = ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].apply(lambda x: x.strip() if isinstance(x, str) else x)
             ret_df = ret_df.loc[
-                ret_df[schema.pmc_perf_file_prefix]["Kernel_Name"].isin(
+                df_cleaned.isin(
                     workload.filter_kernel_ids
                 )
             ]

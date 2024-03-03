@@ -82,11 +82,16 @@ def kw_only(cls):
 
 def generate_machine_specs(args, sysinfo: dict = None):
     if not sysinfo is None:
-        sysinfo_ver = str(sysinfo["version"])
+        try:
+            sysinfo_ver = str(sysinfo["version"])
+        except KeyError:
+            error(
+                "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
+            )
         version = get_version(config.omniperf_home)["version"]
         if sysinfo_ver != version[: version.find(".")]:
-            logging.warning(
-                "WARNING: Detected mismatch in sysinfo versioning. You may need to reprofile to update data."
+            error(
+                "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
             )
         return MachineSpecs(**sysinfo)
     # read timestamp info

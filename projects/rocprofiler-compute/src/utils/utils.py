@@ -390,7 +390,7 @@ def run_rocscope(args, fname):
 
 
 def mibench(args, mspec):
-    """Run roofline microbenchmark to generate peak BW and FLOP measurements."""
+    """Run roofline microbenchmark to generate peek BW and FLOP measurements."""
     logging.info("[roofline] No roofline data found. Generating...")
     distro_map = {"platform:el8": "rhel8", "15.3": "sle15sp3", "20.04": "ubuntu20_04"}
 
