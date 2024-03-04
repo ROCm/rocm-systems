@@ -19,10 +19,11 @@ Omniperf is a kernel level profiling tool for Machine Learning/HPC workloads run
 ## Features
 
 The Omniperf tool performs profiling based on all available hardware counters for the target accelerator. It provides high level performance analysis features including System Speed-of-Light, Hardware block level Speed-of-Light, Memory Chart Analysis, Roofline Analysis, Baseline Comparisons, and more...
-  
-Both command line analysis and GUI analysis are supported. 
+
+Both command line analysis and GUI analysis are supported.
 
 Detailed Feature List:
+
 - MI100 support
 - MI200 support
 - Standalone GUI Analyzer
@@ -36,7 +37,7 @@ Detailed Feature List:
 - System Speed-of-Light Panel
 - Kernel Statistic Panel
 - Memory Chart Analysis Panel
-- Roofline Analysis Panel (*Supported on MI200 only, Ubuntu 20.04, SLES 15 SP3 or RHEL8*)
+- Roofline Analysis Panel (_Supported on MI200 only, Ubuntu 20.04, SLES 15 SP3 or RHEL8_)
 - Command Processor (CP) Panel
 - Workgroup Manager (SPI) Panel
 - Wavefront Launch Panel
@@ -52,10 +53,9 @@ Detailed Feature List:
 
 ## Compatible SoCs
 
-| Platform | Status         |
-| :------- | :------------- |
-| Vega 20 (MI50/60)  | No  |
-| MI100    | Supported      |
-| MI200    | Supported      |
-| MI300    | In development |
-
+| Platform          | Status         |
+| :---------------- | :------------- |
+| Vega 20 (MI50/60) | No support     |
+| MI100             | Supported      |
+| MI200             | Supported      |
+| MI300             | In development |

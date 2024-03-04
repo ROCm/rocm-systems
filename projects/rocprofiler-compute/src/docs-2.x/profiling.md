@@ -69,16 +69,16 @@ General Options:
 
 Profile Options:
   -n , --name                      			Assign a name to workload.
-  -p , --path                      			Specify path to save workload.
+  -p , --path                       			Specify path to save workload.
 
   -k  [ ...], --kernel  [ ...]     			Kernel filtering.
   -d  [ ...], --dispatch  [ ...]   			Dispatch ID filtering.
-  -b  [ ...], --ipblocks  [ ...]   			IP block filtering:
+  -b  [ ...], --block  [ ...]   			  Hardware block filtering:
                                    			   SQ
                                    			   SQC
                                    			   TA
                                    			   TD
-                                   			   TCP
+                                   			   TCP 
                                    			   TCC
                                    			   SPI
                                    			   CPC
@@ -100,7 +100,7 @@ Standalone Roofline Options:
                                    			   L2
                                    			   vL1D
                                    			   LDS
-  --device                         			GPU device ID. (DEFAULT: ALL)
+  --device                         			Target GPU device ID. (DEFAULT: ALL)
   --kernel-names                   			Include kernel names in roofline plot.
 
 ```

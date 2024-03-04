@@ -139,14 +139,14 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     )
     profile_group.add_argument(
         "-b",
-        "--ipblocks",
+        "--block",
         type=str,
         dest="ipblocks",
         metavar="",
         nargs="+",
         required=False,
         choices=["SQ", "SQC", "TA", "TD", "TCP", "TCC", "SPI", "CPC", "CPF"],
-        help="\t\t\tIP block filtering:\n\t\t\t   SQ\n\t\t\t   SQC\n\t\t\t   TA\n\t\t\t   TD\n\t\t\t   TCP\n\t\t\t   TCC\n\t\t\t   SPI\n\t\t\t   CPC\n\t\t\t   CPF",
+        help="\t\t\tHardware block filtering:\n\t\t\t   SQ\n\t\t\t   SQC\n\t\t\t   TA\n\t\t\t   TD\n\t\t\t   TCP\n\t\t\t   TCC\n\t\t\t   SPI\n\t\t\t   CPC\n\t\t\t   CPF",
     )
 
     result = shutil.which("rocscope")
@@ -253,7 +253,7 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         required=False,
         default=-1,
         type=int,
-        help="\t\t\tGPU device ID. (DEFAULT: ALL)",
+        help="\t\t\tTarget GPU device ID. (DEFAULT: ALL)",
     )
     roofline_group.add_argument(
         "--kernel-names",
@@ -441,11 +441,11 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     )
     analyze_group.add_argument(
         "-b",
-        "--metric",
+        "--block",
         dest="filter_metrics",
         metavar="",
         nargs="+",
-        help="\t\tSpecify IP block/metric id(s) from --list-metrics for filtering.",
+        help="\t\tSpecify hardware block/metric id(s) from --list-metrics for filtering.",
     )
     analyze_group.add_argument(
         "--gpu-id",

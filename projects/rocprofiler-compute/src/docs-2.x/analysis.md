@@ -164,7 +164,7 @@ SoC = {'MI200'}
 		2.1.25 -> L2-Fabric Write Latency
 ...
  ```
- 2. Choose your own customized subset of metrics with `-b` (a.k.a. `--metric`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
+ 2. Choose your own customized subset of metrics with `-b` (a.k.a. `--block`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/MI200/ -b 2
 --------
