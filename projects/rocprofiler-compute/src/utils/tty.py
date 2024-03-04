@@ -168,7 +168,13 @@ def show_all(args, runs, archConfigs, output):
                                                 violation_idx = t_df_pretty.index[
                                                     t_df_pretty.abs() > args.report_diff
                                                 ]
-                                                console_warning("Dataframe diff exceeds %s threshold requirement\nSee metric %s" % (str(args.report_diff) + "%", violation_idx.to_numpy()))
+                                                console_warning(
+                                                    "Dataframe diff exceeds %s threshold requirement\nSee metric %s"
+                                                    % (
+                                                        str(args.report_diff) + "%",
+                                                        violation_idx.to_numpy(),
+                                                    )
+                                                )
                                                 console_warning(df)
 
                                     else:

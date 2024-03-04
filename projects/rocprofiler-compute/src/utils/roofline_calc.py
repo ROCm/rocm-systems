@@ -112,11 +112,8 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
     if dtype != "FP16" and dtype != "I8":
         peakOps = float(benchmark_data[dtype + "Flops"][roofline_parameters["device_id"]])
     for i in range(0, len(cacheHierarchy)):
-        # Plot BW line  
-        console_debug(
-            "roofline"
-            "Current cache level is %s" % cacheHierarchy[i]
-        )
+        # Plot BW line
+        console_debug("roofline" "Current cache level is %s" % cacheHierarchy[i])
         curr_bw = cacheHierarchy[i] + "Bw"
         peakBw = float(benchmark_data[curr_bw][roofline_parameters["device_id"]])
 
@@ -146,10 +143,7 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
         y2_mfma = peakMFMA
 
         # These are the points to use:
-        console_debug(
-            "roofline",
-            "coordinate points:"
-        )
+        console_debug("roofline", "coordinate points:")
         console_debug("x = [{}, {}]".format(x1, x2_mfma))
         console_debug("y = [{}, {}]".format(y1, y2_mfma))
 
@@ -180,7 +174,9 @@ def calc_ceilings(roofline_parameters, dtype, benchmark_data):
         if x2_mfma < x0_mfma:
             x0_mfma = x2_mfma
 
-        console_debug("MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA))
+        console_debug(
+            "MFMA ROOF [{}, {}], [{},{}]".format(x0_mfma, XMAX, peakMFMA, peakMFMA)
+        )
         graphPoints["mfma"].append([x0_mfma, XMAX])
         graphPoints["mfma"].append([peakMFMA, peakMFMA])
         graphPoints["mfma"].append(peakMFMA)
@@ -259,7 +255,7 @@ def calc_ai(sort_type, ret_df):
         except KeyError:
             console_debug(
                 "roofline",
-                "{}: Skipped total_flops at index {}".format(kernelName[:35], idx)
+                "{}: Skipped total_flops at index {}".format(kernelName[:35], idx),
             )
             pass
         try:
@@ -289,7 +285,8 @@ def calc_ai(sort_type, ret_df):
         except KeyError:
             console_debug(
                 "roofline",
-                "{}: Skipped valu_flops at index {}".format(kernelName[:35], idx))
+                "{}: Skipped valu_flops at index {}".format(kernelName[:35], idx),
+            )
             pass
 
         try:
@@ -301,7 +298,7 @@ def calc_ai(sort_type, ret_df):
         except KeyError:
             console_debug(
                 "roofline",
-                "{}: Skipped mfma ops at index {}".format(kernelName[:35], idx)
+                "{}: Skipped mfma ops at index {}".format(kernelName[:35], idx),
             )
             pass
 
@@ -314,7 +311,7 @@ def calc_ai(sort_type, ret_df):
         except KeyError:
             console_debug(
                 "roofline",
-                "{}: Skipped lds_data at index {}".format(kernelName[:35], idx)
+                "{}: Skipped lds_data at index {}".format(kernelName[:35], idx),
             )
             pass
 
@@ -323,7 +320,7 @@ def calc_ai(sort_type, ret_df):
         except KeyError:
             console_debug(
                 "roofline",
-                "{}: Skipped L1cache_data at index {}".format(kernelName[:35], idx)
+                "{}: Skipped L1cache_data at index {}".format(kernelName[:35], idx),
             )
             pass
 
@@ -337,7 +334,7 @@ def calc_ai(sort_type, ret_df):
         except KeyError:
             console_debug(
                 "roofline",
-                "{}: Skipped L2cache_data at index {}".format(kernelName[:35], idx)
+                "{}: Skipped L2cache_data at index {}".format(kernelName[:35], idx),
             )
             pass
         try:
@@ -350,7 +347,7 @@ def calc_ai(sort_type, ret_df):
         except KeyError:
             console_debug(
                 "roofline",
-                "{}: Skipped hbm_data at index {}".format(kernelName[:35], idx)
+                "{}: Skipped hbm_data at index {}".format(kernelName[:35], idx),
             )
             pass
 

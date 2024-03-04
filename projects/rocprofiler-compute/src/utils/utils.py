@@ -47,6 +47,7 @@ def demarcate(function):
 
     return wrap_function
 
+
 def console_error(*argv):
     if len(argv) > 1:
         logging.error(f"[{argv[0]}]: {argv[1]}")
@@ -54,11 +55,13 @@ def console_error(*argv):
         logging.error(f"{argv[0]}")
     sys.exit(1)
 
+
 def console_log(*argv):
     if len(argv) > 1:
         logging.info(f"[{argv[0]}]: {argv[1]}")
     else:
         logging.info(f"{argv[0]}")
+
 
 def console_debug(*argv):
     if len(argv) > 1:
@@ -66,8 +69,10 @@ def console_debug(*argv):
     else:
         logging.debug(f"{argv[0]}")
 
-def console_warning(msg:str):
+
+def console_warning(msg: str):
     logging.warning(msg)
+
 
 def trace_logger(message, *args, **kwargs):
     logging.log(logging.TRACE, message, *args, **kwargs)
@@ -137,17 +142,20 @@ def detect_rocprof():
 
     if not rocprof_path:
         rocprof_cmd = "rocprof"
-        console_warning("Unable to resolve path to %s binary. Reverting to default." % rocprof_cmd)
+        console_warning(
+            "Unable to resolve path to %s binary. Reverting to default." % rocprof_cmd
+        )
         rocprof_path = shutil.which(rocprof_cmd)
         if not rocprof_path:
-            console_error("Please verify installation or set ROCPROF environment variable with full path.")
+            console_error(
+                "Please verify installation or set ROCPROF environment variable with full path."
+            )
     else:
         # Resolve any sym links in file path
         rocprof_path = os.path.realpath(rocprof_path.rstrip("\n"))
-        console_log(
-            "ROC Profiler: " + str(rocprof_path)
-        )
-        return rocprof_cmd #TODO: Do we still need to return this? It's not being used in the function call
+        console_log("ROC Profiler: " + str(rocprof_path))
+        return rocprof_cmd  # TODO: Do we still need to return this? It's not being used in the function call
+
 
 def capture_subprocess_output(subprocess_args, new_env=None):
     # Start subprocess
@@ -302,7 +310,9 @@ def replace_timestamps(workload_dir):
                 df_pmc_perf["End_Timestamp"] = df_stamps["End_Timestamp"]
                 df_pmc_perf.to_csv(fname, index=False)
     else:
-        console_warning("Incomplete profiling data detected. Unable to update timestamps.\n")
+        console_warning(
+            "Incomplete profiling data detected. Unable to update timestamps.\n"
+        )
 
 
 def gen_sysinfo(
@@ -344,8 +354,8 @@ def detect_roofline(mspec):
             logging._SysExcInfoType("Detected user-supplied binary")
             return {"rocm_ver": "override", "distro": "override", "path": rooflineBinary}
         else:
-            msg = ("[roofline] user-supplied path to binary not accessible")
-            msg += ("--> ROOFLINE_BIN = %s\n" % target_binary)
+            msg = "[roofline] user-supplied path to binary not accessible"
+            msg += "--> ROOFLINE_BIN = %s\n" % target_binary
             console_error(msg)
     elif rhel_distro == "platform:el8" or rhel_distro == "platform:el9":
         # Must be a valid RHEL machine
@@ -362,10 +372,7 @@ def detect_roofline(mspec):
         # Must be a valid Ubuntu machine
         distro = ubuntu_distro
     else:
-        console_error(
-            "roofline",
-            "Cannot find a valid binary for your operating system"
-        )
+        console_error("roofline", "Cannot find a valid binary for your operating system")
 
     target_binary = {"rocm_ver": rocm_ver, "distro": distro}
     return target_binary
@@ -390,9 +397,7 @@ def run_rocscope(args, fname):
             for i in args.remaining.split():
                 rs_cmd.append(i)
             console_log(rs_cmd)
-            success, output = capture_subprocess_output(
-                rs_cmd
-            )
+            success, output = capture_subprocess_output(rs_cmd)
             if not success:
                 console_error(result.stderr.decode("ascii"))
 
@@ -421,8 +426,7 @@ def mibench(args, mspec):
     # Distro is valid but cant find rocm ver
     if not os.path.exists(path_to_binary):
         console_error(
-            "roofline",
-            "Unable to locate expected binary (%s)." % path_to_binary
+            "roofline", "Unable to locate expected binary (%s)." % path_to_binary
         )
 
     subprocess.run(
@@ -560,14 +564,13 @@ def is_workload_empty(path):
         if temp_df.dropna().empty:
             console_error(
                 "profiling"
-                "Found empty cells in %s.\nProfiling data could be corrupt." % pmc_perf_path
+                "Found empty cells in %s.\nProfiling data could be corrupt."
+                % pmc_perf_path
             )
 
     else:
-        console_error(
-            "profiling",
-            "Cannot find pmc_perf.csv in %s" % path
-        )
+        console_error("profiling", "Cannot find pmc_perf.csv in %s" % path)
+
 
 def print_status(msg):
     print("\n")
@@ -577,4 +580,3 @@ def print_status(msg):
     print("\n")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("\n")
-    

@@ -27,7 +27,18 @@ import glob
 import sys
 import os
 import re
-from utils.utils import capture_subprocess_output, run_prof, gen_sysinfo, run_rocscope, demarcate, console_log, console_debug, console_error, console_warning, print_status
+from utils.utils import (
+    capture_subprocess_output,
+    run_prof,
+    gen_sysinfo,
+    run_rocscope,
+    demarcate,
+    console_log,
+    console_debug,
+    console_error,
+    console_warning,
+    print_status,
+)
 import config
 import pandas as pd
 
@@ -97,7 +108,9 @@ class OmniProfiler_Base:
         elif type(self.__args.path) == list:
             files = self.__args.path
         else:
-            console_error("Invalid workload directory. Cannot resolve %s" % self.__args.path)
+            console_error(
+                "Invalid workload directory. Cannot resolve %s" % self.__args.path
+            )
 
         df = None
         for i, file in enumerate(files):
@@ -115,7 +128,9 @@ class OmniProfiler_Base:
                     + key.astype(str)
                 )
             else:
-                console_error("%s is an unrecognized option for --join-type" % self.__args.join_type)
+                console_error(
+                    "%s is an unrecognized option for --join-type" % self.__args.join_type
+                )
 
             if df is None:
                 df = _df
@@ -152,20 +167,15 @@ class OmniProfiler_Base:
         for key, cols in duplicate_cols.items():
             _df = df[cols]
             if not test_df_column_equality(_df):
-                msg = (
-                    "Detected differing {} values while joining pmc_perf.csv".format(
-                        key
-                    )
+                msg = "Detected differing {} values while joining pmc_perf.csv".format(
+                    key
                 )
                 console_warning(msg + "\n")
             else:
                 msg = "Successfully joined {} in pmc_perf.csv".format(key)
                 console_debug(msg + "\n")
             if test_df_column_equality(_df) and self.__args.verbose:
-                console_log(
-                    "profile",
-                    msg
-                )
+                console_log("profile", msg)
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
@@ -260,29 +270,39 @@ class OmniProfiler_Base:
     # ----------------------------------------------------
     @abstractmethod
     def pre_processing(self):
-        """Perform any pre-processing steps prior to profiling.
-        """
-        console_debug(
-            "profiling",
-            "pre-processing using %s profiler" % self.__profiler
-        )
-        
+        """Perform any pre-processing steps prior to profiling."""
+        console_debug("profiling", "pre-processing using %s profiler" % self.__profiler)
+
         # verify soc compatibility
         if self.__profiler not in self._soc.get_compatible_profilers():
-            console_error("%s is not enabled in %s. Available profilers include: %s" % (self._soc.get_arch(), self.__profiler, self._soc.get_compatible_profilers()))
+            console_error(
+                "%s is not enabled in %s. Available profilers include: %s"
+                % (
+                    self._soc.get_arch(),
+                    self.__profiler,
+                    self._soc.get_compatible_profilers(),
+                )
+            )
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
-            console_error("Access denied. Cannot access parent directories in path (i.e. ../)")
-        
+            console_error(
+                "Access denied. Cannot access parent directories in path (i.e. ../)"
+            )
+
         # verify correct formatting for application binary
         self.__args.remaining = self.__args.remaining[1:]
         if self.__args.remaining:
             if not os.path.isfile(self.__args.remaining[0]):
-                console_error("Your command %s doesn't point to a executable. Please verify." % self.__args.remaining[0])
+                console_error(
+                    "Your command %s doesn't point to a executable. Please verify."
+                    % self.__args.remaining[0]
+                )
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
-            console_error("Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256")
-        
+            console_error(
+                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256"
+            )
+
         # verify name meets MongoDB length requirements and no illegal chars
         if len(self.__args.name) > 35:
             console_error("-n/--name exceeds 35 character limit. Try again.")
@@ -290,14 +310,12 @@ class OmniProfiler_Base:
             console_error("'-' and '.' are not permitted in -n/--name")
 
     @abstractmethod
-    def run_profiling(self, version:str, prog:str):
-        """Run profiling.
-        """
+    def run_profiling(self, version: str, prog: str):
+        """Run profiling."""
         console_debug(
-            "profiling",
-            "performing profiling using %s profiler" % self.__profiler
+            "profiling", "performing profiling using %s profiler" % self.__profiler
         )
-        
+
         # log basic info
         console_log(str(prog) + " ver: " + str(version))
         console_log("Path: " + str(os.path.abspath(self.__args.path)))
@@ -308,7 +326,7 @@ class OmniProfiler_Base:
         if self.__args.ipblocks == None:
             console_log("IP Blocks: All")
         else:
-            console_log("IP Blocks: "+ str(self.__args.ipblocks))
+            console_log("IP Blocks: " + str(self.__args.ipblocks))
         if self.__args.kernel_verbose > 5:
             console_log("KernelName verbose: DISABLED")
         else:
@@ -359,11 +377,8 @@ class OmniProfiler_Base:
                     console_error(output)
                 else:
                     console_debug(output)
-            console_log(
-                "profile",
-                "Current input file: %s" % fname
-            )
-            
+            console_log("profile", "Current input file: %s" % fname)
+
             # Fetch any SoC/profiler specific profiling options
             options = self._soc.get_profiler_options()
             options += self.get_profiler_options(fname)
@@ -379,16 +394,14 @@ class OmniProfiler_Base:
             elif self.__profiler == "rocscope":
                 run_rocscope(self.__args, fname)
             else:
-                #TODO: Finish logic
+                # TODO: Finish logic
                 console_error("Profiler not supported")
 
     @abstractmethod
     def post_processing(self):
-        """Perform any post-processing steps prior to profiling.
-        """
+        """Perform any post-processing steps prior to profiling."""
         console_debug(
-            "profiling",
-            "performing post-processing using %s profiler" % self.__profiler
+            "profiling", "performing post-processing using %s profiler" % self.__profiler
         )
 
         gen_sysinfo(

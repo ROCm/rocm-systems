@@ -28,7 +28,13 @@ import sys
 import copy
 from collections import OrderedDict
 from pathlib import Path
-from utils.utils import demarcate, is_workload_empty, console_log, console_debug, console_error
+from utils.utils import (
+    demarcate,
+    is_workload_empty,
+    console_log,
+    console_debug,
+    console_error,
+)
 from utils import schema, file_io, parser
 import pandas as pd
 from tabulate import tabulate
@@ -126,7 +132,7 @@ class OmniAnalyze_Base:
                     "analysis"
                     "The number of -k/--kernel doesn't match the number of --dir."
                 )
-    
+
     @demarcate
     def initalize_runs(self, normalization_filter=None):
         if self.__args.list_metrics:
@@ -168,7 +174,9 @@ class OmniAnalyze_Base:
             console_error("The following arguments are required: -p/--path")
         # verify not accessing parent directories
         if ".." in str(self.__args.path):
-            console_error("Access denied. Cannot access parent directories in path (i.e. ../)")
+            console_error(
+                "Access denied. Cannot access parent directories in path (i.e. ../)"
+            )
         # ensure absolute path
         for dir in self.__args.path:
             full_path = os.path.abspath(dir[0])
@@ -183,16 +191,9 @@ class OmniAnalyze_Base:
     # ----------------------------------------------------
     @abstractmethod
     def pre_processing(self):
-        """Perform initialization prior to analysis.
-        """
-        console_debug(
-            "analysis",
-            "prepping to do some analysis"
-        )
-        console_log(
-            "analysis",
-            "deriving Omniperf metrics..."
-        )
+        """Perform initialization prior to analysis."""
+        console_debug("analysis", "prepping to do some analysis")
+        console_log("analysis", "deriving Omniperf metrics...")
         # initalize output file
         self._output = (
             open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
@@ -220,9 +221,5 @@ class OmniAnalyze_Base:
 
     @abstractmethod
     def run_analysis(self):
-        """Run analysis.
-        """
-        console_debug(
-            "analysis",
-            "generating analysis"
-        )
+        """Run analysis."""
+        console_debug("analysis", "generating analysis")

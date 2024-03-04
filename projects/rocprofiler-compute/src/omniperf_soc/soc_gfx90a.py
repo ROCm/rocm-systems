@@ -89,20 +89,16 @@ class gfx90a_soc(OmniSoC_Base):
     def post_profiling(self):
         """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
-        
+
         if not self.get_args().no_roof:
             console_log(
-                "roofline",
-                "Checking for roofline.csv in " + str(self.get_args().path)
+                "roofline", "Checking for roofline.csv in " + str(self.get_args().path)
             )
             if not os.path.isfile(os.path.join(self.get_args().path, "roofline.csv")):
                 mibench(self.get_args(), self._mspec)
             self.roofline_obj.post_processing()
         else:
-            console_log(
-                "roofline",
-                "Skipping roofline"
-            )
+            console_log("roofline", "Skipping roofline")
 
     @demarcate
     def analysis_setup(self, roofline_parameters=None):

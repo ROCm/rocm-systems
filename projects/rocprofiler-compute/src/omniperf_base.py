@@ -28,7 +28,15 @@ import os
 from pathlib import Path
 import shutil
 from utils.specs import MachineSpecs, generate_machine_specs
-from utils.utils import demarcate, get_version, get_version_display, detect_rocprof, get_submodules, console_log, console_error
+from utils.utils import (
+    demarcate,
+    get_version,
+    get_version_display,
+    detect_rocprof,
+    get_submodules,
+    console_log,
+    console_error,
+)
 from utils.logger import setup_logging
 from argparser import omniarg_parser
 import config
@@ -72,9 +80,9 @@ class Omniperf:
             self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
-        
+
         console_log("Execution mode = %s" % self.__mode)
-   
+
     def print_graphic(self):
         """Log program name as ascii art to terminal."""
         ascii_art = r"""
@@ -97,7 +105,7 @@ class Omniperf:
             vData["version"], vData["sha"], vData["mode"]
         )
         return
-    
+
     def detect_profiler(self):
         if (
             self.__args.lucky == True
@@ -115,10 +123,12 @@ class Omniperf:
             elif str(rocprof_cmd).endswith("rocprofv2"):
                 self.__profiler_mode = "rocprofv2"
             else:
-                console_error("Incompatible profiler: %s. Supported profilers include: %s" % (rocprof_cmd, get_submodules('omniperf_profile')))
+                console_error(
+                    "Incompatible profiler: %s. Supported profilers include: %s"
+                    % (rocprof_cmd, get_submodules("omniperf_profile"))
+                )
         return
 
-    
     def detect_analyze(self):
         if self.__args.gui:
             self.__analyze_mode = "web_ui"
@@ -178,9 +188,7 @@ class Omniperf:
                 self.__args.path, self.__args.name, self.__mspec.gpu_model
             )
 
-        console_log( 
-            "Profiler choice = %s" % self.__profiler_mode
-        )
+        console_log("Profiler choice = %s" % self.__profiler_mode)
 
         # instantiate desired profiler
         if self.__profiler_mode == "rocprofv1":
@@ -237,9 +245,7 @@ class Omniperf:
     def run_analysis(self):
         self.print_graphic()
 
-        console_log(
-            "Analysis mode = %s" % self.__analyze_mode
-        )
+        console_log("Analysis mode = %s" % self.__analyze_mode)
 
         if self.__analyze_mode == "cli":
             from omniperf_analyze.analysis_cli import cli_analysis

@@ -68,16 +68,12 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         if self.ready_to_profile:
             if self.get_args().roof_only:
                 console_log(
-                    "roofline",
-                    "Generating pmc_perf.csv (roofline counters only)."
+                    "roofline", "Generating pmc_perf.csv (roofline counters only)."
                 )
             # Log profiling options and setup filtering
             super().run_profiling(version, prog)
         else:
-            console_log(
-                "roofline",
-                "Detected existing pmc_perf.csv"
-            )
+            console_log("roofline", "Detected existing pmc_perf.csv")
 
     @demarcate
     def post_processing(self):

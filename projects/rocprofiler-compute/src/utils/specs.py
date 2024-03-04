@@ -37,7 +37,13 @@ from datetime import datetime
 from math import ceil
 from dataclasses import dataclass, field, fields
 from pathlib import Path as path
-from utils.utils import get_hbm_stack_num, get_version, console_error, console_warning, console_log
+from utils.utils import (
+    get_hbm_stack_num,
+    get_version,
+    console_error,
+    console_warning,
+    console_log,
+)
 from utils.tty import get_table_string
 
 VERSION_LOC = [
@@ -573,13 +579,16 @@ def get_rocm_ver():
         if ROCM_VER_USER is not None:
             console_log(
                 "profiling",
-                "Overriding missing ROCm version detection with ROCM_VER = %s" % ROCM_VER_USER
+                "Overriding missing ROCm version detection with ROCM_VER = %s"
+                % ROCM_VER_USER,
             )
             rocm_ver = ROCM_VER_USER
         else:
             _rocm_path = os.getenv("ROCM_PATH", "/opt/rocm")
             console_warning("Unable to detect a complete local ROCm installation.")
-            console_warning("The expected %s/.info/ versioning directory is missing." % _rocm_path)
+            console_warning(
+                "The expected %s/.info/ versioning directory is missing." % _rocm_path
+            )
             console_error("Ensure you have valid ROCm installation.")
     return rocm_ver
 

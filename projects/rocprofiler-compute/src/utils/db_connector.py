@@ -23,7 +23,14 @@
 ##############################################################################el
 
 from abc import ABC, abstractmethod
-from utils.utils import is_workload_empty, demarcate, console_error, console_log, console_warning, console_debug
+from utils.utils import (
+    is_workload_empty,
+    demarcate,
+    console_error,
+    console_log,
+    console_warning,
+    console_debug,
+)
 from pymongo import MongoClient
 from tqdm import tqdm
 
@@ -62,7 +69,9 @@ class DatabaseConnector:
             soc = sys_info["name"][0]
             name = sys_info["workload_name"][0]
         else:
-            console_error("[database] Unable to parse SoC and/or workload name from sysinfo.csv")
+            console_error(
+                "[database] Unable to parse SoC and/or workload name from sysinfo.csv"
+            )
 
         self.connection_info["db"] = (
             "omniperf_" + str(self.args.team) + "_" + str(name) + "_" + str(soc)
@@ -77,7 +86,7 @@ class DatabaseConnector:
             if file.endswith(".csv"):
                 console_log(
                     "database",
-                    "Uploading: %s" % self.connection_info["workload"] + "/" + file
+                    "Uploading: %s" % self.connection_info["workload"] + "/" + file,
                 )
                 try:
                     fileName = file[0 : file.find(".")]
@@ -97,19 +106,13 @@ class DatabaseConnector:
                 except pd.errors.EmptyDataError:
                     console_warning("[database] Skipping empty file: %s" % file)
 
-        console_log(
-            "database",
-            "%s collections successfully added." % i
-        )
+        console_log("database", "%s collections successfully added." % i)
         mydb = self.client["workload_names"]
         mycol = mydb["names"]
         value = {"name": self.connection_info["db"]}
         newValue = {"name": self.connection_info["db"]}
         mycol.replace_one(value, newValue, upsert=True)
-        console_log(
-            "database",
-            "Workload name uploaded."
-        )
+        console_log("database", "Workload name uploaded.")
 
     @demarcate
     def db_remove(self):
@@ -120,60 +123,68 @@ class DatabaseConnector:
         self.client.drop_database(db_to_remove)
         db = self.client["workload_names"]
         col = db["names"]
-        col.delete_many({"name": self.connection_info['workload']})
+        col.delete_many({"name": self.connection_info["workload"]})
 
         console_log(
-            "database",
-            "Successfully removed %s" % self.connection_info['workload']
+            "database", "Successfully removed %s" % self.connection_info["workload"]
         )
-
 
     @abstractmethod
     def pre_processing(self):
-        """Perform any pre-processing steps prior to database conncetion.
-        """
-        console_debug(
-            "database",
-            "pre-processing database connection"
-        )
+        """Perform any pre-processing steps prior to database conncetion."""
+        console_debug("database", "pre-processing database connection")
         if not self.args.remove and not self.args.upload:
-            console_error("Either -i/--import or -r/--remove is required in database mode")
-        self.interaction_type = 'import' if self.args.upload else 'remove'
+            console_error(
+                "Either -i/--import or -r/--remove is required in database mode"
+            )
+        self.interaction_type = "import" if self.args.upload else "remove"
 
         # Detect interaction type
-        if self.interaction_type == 'remove':
-            console_debug(
-                "database",
-                "validating arguments for --remove workflow"
-            )
+        if self.interaction_type == "remove":
+            console_debug("database", "validating arguments for --remove workflow")
             is_full_workload_name = self.args.workload.count("_") >= 3
             if not is_full_workload_name:
-                console_error("-w/--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. omniperf_asw_vcopy_mi200)")
-            if self.connection_info['host'] == None or self.connection_info['username'] == None:
-                console_error("-H/--host and -u/--username are required when interaction type is set to %s" % self.interaction_type)
-            if self.connection_info['workload'] == "admin" or self.connection_info['workload'] == "local":
-                console_error("Cannot remove %s. Try again." % self.connection_info['workload'])
+                console_error(
+                    "-w/--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. omniperf_asw_vcopy_mi200)"
+                )
+            if (
+                self.connection_info["host"] == None
+                or self.connection_info["username"] == None
+            ):
+                console_error(
+                    "-H/--host and -u/--username are required when interaction type is set to %s"
+                    % self.interaction_type
+                )
+            if (
+                self.connection_info["workload"] == "admin"
+                or self.connection_info["workload"] == "local"
+            ):
+                console_error(
+                    "Cannot remove %s. Try again." % self.connection_info["workload"]
+                )
         else:
-            console_debug(
-                "database",
-                "validating arguments for --import workflow"
-            )
+            console_debug("database", "validating arguments for --import workflow")
             if (
                 self.connection_info["host"] == None
                 or self.connection_info["team"] == None
                 or self.connection_info["username"] == None
                 or self.connection_info["workload"] == None
             ):
-                console_error("-H/--host, -w/--workload, -u/--username, and -t/--team are all required when interaction type is set to %s" % self.interaction_type)
+                console_error(
+                    "-H/--host, -w/--workload, -u/--username, and -t/--team are all required when interaction type is set to %s"
+                    % self.interaction_type
+                )
 
             if os.path.isdir(os.path.abspath(self.connection_info["workload"])):
                 is_workload_empty(self.connection_info["workload"])
             else:
-                console_error("--workload is invalid. Please pass path to a valid directory.")
+                console_error(
+                    "--workload is invalid. Please pass path to a valid directory."
+                )
 
             if len(self.args.team) > 13:
                 console_error("--team exceeds 13 character limit. Try again.")
-            
+
             # format path properly
             self.connection_info["workload"] = os.path.abspath(
                 self.connection_info["workload"]
@@ -184,15 +195,9 @@ class DatabaseConnector:
             try:
                 self.connection_info["password"] = getpass.getpass()
             except Exception as e:
-                console_error(
-                    "database",
-                    "PASSWORD ERROR %s" % e
-                )
+                console_error("database", "PASSWORD ERROR %s" % e)
             else:
-                console_log(
-                    "database",
-                    "Password recieved"
-                )
+                console_log("database", "Password recieved")
         else:
             password = self.connection_info["password"]
 
@@ -214,10 +219,4 @@ class DatabaseConnector:
         try:
             self.client.server_info()
         except:
-            console_error(
-                "database",
-                "Unable to connect to the DB server."
-            )
-        
-
-        
+            console_error("database", "Unable to connect to the DB server.")

@@ -23,7 +23,7 @@
 ##############################################################################el
 
 import os
-import glob 
+import glob
 import re
 import subprocess
 import pandas as pd
@@ -121,7 +121,9 @@ def kernel_name_shortener(workload_dir, level):
     if level < 5:
         cpp_filt = os.path.join("/usr", "bin", "c++filt")
         if not os.path.isfile(cpp_filt):
-            console_error("Could not resolve c++filt in expected directory: %s" % cpp_filt)
+            console_error(
+                "Could not resolve c++filt in expected directory: %s" % cpp_filt
+            )
 
         for fpath in glob.glob(workload_dir + "/[SQpmc]*.csv"):
             try:
@@ -134,11 +136,7 @@ def kernel_name_shortener(workload_dir, level):
                 modified_df.to_csv(fpath, index=False)
             except pd.errors.EmptyDataError:
                 console_debug(
-                    "profiling",
-                    "Skipping shortening on empty csv: %s" % str(fpath)
+                    "profiling", "Skipping shortening on empty csv: %s" % str(fpath)
                 )
 
-        console_log(
-            "profiling",
-            "Kernel_Name shortening complete."
-        )
+        console_log("profiling", "Kernel_Name shortening complete.")

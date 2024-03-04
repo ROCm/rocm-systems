@@ -33,12 +33,13 @@ RESET_SEQ = "\033[0m"
 COLOR_SEQ = "\033[1;%dm"
 
 COLORS = {
-    'WARNING': YELLOW,
-    'INFO': GREEN,
-    'DEBUG': BLUE,
-    'CRITICAL': YELLOW,
-    'ERROR': RED
+    "WARNING": YELLOW,
+    "INFO": GREEN,
+    "DEBUG": BLUE,
+    "CRITICAL": YELLOW,
+    "ERROR": RED,
 }
+
 
 # Define the formatter
 class ColoredFormatter(logging.Formatter):
@@ -48,6 +49,7 @@ class ColoredFormatter(logging.Formatter):
             levelname_color = COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
             record.levelname = levelname_color
         return logging.Formatter.format(self, record)
+
 
 # Setup logger
 def setup_logging(verbose):
@@ -62,20 +64,20 @@ def setup_logging(verbose):
     loglevel = levels[min(verbose, len(levels) - 1)]  # cap to last level index
     # optional: override of default loglevel via env variable
     if "OMNIPERF_LOGLEVEL" in os.environ.keys():
-        loglevel = os.environ['OMNIPERF_LOGLEVEL']
-        if loglevel in {"DEBUG","debug"}:
+        loglevel = os.environ["OMNIPERF_LOGLEVEL"]
+        if loglevel in {"DEBUG", "debug"}:
             loglevel = logging.DEBUG
-        elif loglevel in {"TRACE","trace"}:
+        elif loglevel in {"TRACE", "trace"}:
             loglevel = logging.TRACE
-        elif loglevel in {"INFO","info"}:
+        elif loglevel in {"INFO", "info"}:
             loglevel = logging.INFO
-        elif loglevel in {"ERROR","error"}:
+        elif loglevel in {"ERROR", "error"}:
             loglevel = logging.ERROR
         else:
             print("Ignoring unsupported OMNIPERF_LOGLEVEL setting (%s)" % loglevel)
             sys.exit(1)
 
-    formatter = ColoredFormatter('%(levelname)s - %(message)s')
+    formatter = ColoredFormatter("%(levelname)s - %(message)s")
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
     logging.basicConfig(level=loglevel, handlers=[handler])

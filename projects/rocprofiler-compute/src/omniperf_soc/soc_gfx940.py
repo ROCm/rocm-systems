@@ -88,10 +88,7 @@ class gfx940_soc(OmniSoC_Base):
         """Perform any SoC-specific post profiling activities."""
         super().post_profiling()
 
-        console_log(
-            "roofline",
-            "Roofline temporarily disabled in Mi300"
-        )
+        console_log("roofline", "Roofline temporarily disabled in Mi300")
         # if not self.get_args().no_roof:
         #     logging.info("[roofline] Checking for roofline.csv in " + str(self.get_args().path))
         #     if not os.path.isfile(os.path.join(self.get_args().path, "roofline.csv")):
@@ -104,10 +101,7 @@ class gfx940_soc(OmniSoC_Base):
     def analysis_setup(self, roofline_parameters=None):
         """Perform any SoC-specific setup prior to analysis."""
         super().analysis_setup()
-        console_log(
-            "roofline",
-            "Roofline temporarily disabled in Mi300"
-        )
+        console_log("roofline", "Roofline temporarily disabled in Mi300")
         # configure roofline for analysis
         # if roofline_parameters:
         #     self.roofline_obj = Roofline(self.get_args(), roofline_parameters)
