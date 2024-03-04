@@ -52,7 +52,7 @@ class gfx90a_soc(OmniSoC_Base):
                     self.get_arch(),
                 )
             )
-        self.set_compatible_profilers(["rocprofv1", "rocscope"])
+        self.set_compatible_profilers(["rocprofv1", "rocscope", "rocprofv2"])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(
             {
