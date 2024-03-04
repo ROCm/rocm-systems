@@ -321,3 +321,10 @@ Example for file plugin output:
 - ATT: Network mode, since it was redundant with file mode.
 - ATT: Generated isa.s file, since the functionality was moved from collection to parsing time.
 
+### Fixed
+
+- Multiple fixes and optimizations for ATT (Advanced Thread Tracer).
+- Fixed format of presenting MI300 counters for individual XCCs.
+- Fixed ROCprofiler to match versioning changes in HIP Runtime.
+- Fixed plugins race condition.
+- Updated metrics to MI300.
