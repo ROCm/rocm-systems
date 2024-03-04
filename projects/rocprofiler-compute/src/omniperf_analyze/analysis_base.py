@@ -122,18 +122,11 @@ class OmniAnalyze_Base:
                 for i in range(len(args.path) - 1):
                     args.gpu_kernel.extend(args.gpu_kernel)
             else:
-<<<<<<< HEAD
-                error(
-                    "Error: the number of --filter-kernels doesn't match the number of --dir."
-                )
-
-=======
                 console_error(
                     "analysis"
                     "The number of -k/--kernel doesn't match the number of --dir."
                 )
     
->>>>>>> All logging should use call new functions
     @demarcate
     def initalize_runs(self, normalization_filter=None):
         if self.__args.list_metrics:
@@ -190,11 +183,6 @@ class OmniAnalyze_Base:
     # ----------------------------------------------------
     @abstractmethod
     def pre_processing(self):
-<<<<<<< HEAD
-        """Perform initialization prior to analysis."""
-        logging.debug("[analysis] prepping to do some analysis")
-        logging.info("[analysis] deriving Omniperf metrics...")
-=======
         """Perform initialization prior to analysis.
         """
         console_debug(
@@ -205,7 +193,6 @@ class OmniAnalyze_Base:
             "analysis",
             "deriving Omniperf metrics..."
         )
->>>>>>> All logging should use call new functions
         # initalize output file
         self._output = (
             open(self.__args.output_file, "w+") if self.__args.output_file else sys.stdout
@@ -233,14 +220,9 @@ class OmniAnalyze_Base:
 
     @abstractmethod
     def run_analysis(self):
-<<<<<<< HEAD
-        """Run analysis."""
-        logging.debug("[analysis] generating analysis")
-=======
         """Run analysis.
         """
         console_debug(
             "analysis",
             "generating analysis"
         )
->>>>>>> All logging should use call new functions
