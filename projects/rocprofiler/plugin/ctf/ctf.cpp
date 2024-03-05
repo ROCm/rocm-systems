@@ -95,7 +95,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_initialize(const uint32_t rocprofiler_
   // Get ROCM install path
   retVal = getROCmInstallPath( &installPath, &installPathLen );
   if(PathSuccess == retVal){
-      metadata_path = fs::path(installPath);
+      metadata_path = fs::path(installPath) / fs::path{CTF_PLUGIN_METADATA_FILE_PATH};
   }else {
       std::cout << "Failed to get ROCm Install Path: " << retVal << std::endl;
   }
