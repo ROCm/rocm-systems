@@ -1,3 +1,12 @@
+Version 1.1.0-PR1 (13 Oct 2023)
+
+  * standardize headers to use 'avg' instead of 'mean'
+  * add color code thresholds to standalone gui to match grafana
+  * modify kernel name shortener to use cpp_filt (#168)
+  * enable stochastic kernel dispatch selection (#183)
+  * patch grafana plugin module to address a known issue in the latest version (#186)
+  * enhanced communication between analyze mode kernel flags (#187)
+
 Version 1.0.10 (22 Aug 2023)
 
   * critical patch for detection of llvm in rocm installs on SLURM systems

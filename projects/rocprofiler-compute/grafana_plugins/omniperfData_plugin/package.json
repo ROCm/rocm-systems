@@ -31,7 +31,7 @@
 		"mocha": "^7.1.2",
 		"moment": "^2.24.0",
 		"mongodb": "^3.5.7",
-		"statman-stopwatch": "^2.11.1"
+		"statman-stopwatch": "^2.18.0"
 	},
 	"_comments": "Dependencies are not included as part of Omniperf. It's the user's responsibility to accept any licensing implications before building the project."
 }
