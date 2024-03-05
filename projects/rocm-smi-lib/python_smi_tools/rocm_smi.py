@@ -1935,7 +1935,7 @@ def showAllConcise(deviceList):
         if vram_used is None:
             mem_use_pct='Unsupported'
         if vram_used != None and vram_total != None and float(vram_total) != 0:
-            mem_use_pct = float(100 * (float(vram_used) / float(vram_total)))
+            mem_use_pct = round(float(100 * (float(vram_used) / float(vram_total))))
             mem_use_pct = '{:<.0f}%'.format(mem_use_pct)  # left aligned
                                                           # values with no precision
 
@@ -3526,6 +3526,9 @@ def doesDeviceExist(device):
 def initializeRsmi():
     """ initializes rocmsmi if the amdgpu driver is initialized
     """
+    global rocmsmi
+    # Initialize rsmiBindings
+    rocmsmi = initRsmiBindings(silent=PRINT_JSON)
     # Check if amdgpu is initialized before initializing rsmi
     if driverInitialized() is True:
         ret_init = rocmsmi.rsmi_init(0)
@@ -3907,8 +3910,6 @@ if __name__ == '__main__':
     if args.json or args.csv:
         PRINT_JSON = True
 
-    # Initialize rsmiBindings
-    rocmsmi = initRsmiBindings(silent=PRINT_JSON)
     # Initialize the rocm SMI library
     initializeRsmi()
 
