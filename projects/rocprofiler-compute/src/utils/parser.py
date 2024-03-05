@@ -675,12 +675,11 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
     roof_only_run = sys_info.ip_blocks == "roofline"
     rocscope_run = sys_info.ip_blocks == "rocscope"
     if (
-        not rocscope_run
-        and not roof_only_run
+        (not rocscope_run and not roof_only_run)
+        and hasattr(raw_pmc_df["pmc_perf"], "GRBM_GUI_ACTIVE")
         and (raw_pmc_df["pmc_perf"]["GRBM_GUI_ACTIVE"] == 0).any()
     ):
-        print("WARNING: Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
-        sys.exit(1)
+        error("Dectected GRBM_GUI_ACTIVE == 0\nHaulting execution.")
 
     ammolite__se_per_gpu = sys_info.se_per_gpu
     ammolite__pipes_per_gpu = sys_info.pipes_per_gpu
