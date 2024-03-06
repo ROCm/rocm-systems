@@ -25,13 +25,19 @@
 ##############################################################################el
 
 import sys
+import locale
+import logging
+from utils.utils import error
 from omniperf_base import Omniperf
 
 def main():
+    try:
+        locale.setlocale(locale.LC_ALL, 'en_US.UTF-8')
+    except locale.Error as e:
+        logging.warning("Please ensure that the 'en_US.UTF-8' locale is available on your system.")
+        error(f"Error setting locale: {e}")
 
     omniperf = Omniperf()
-    omniperf.parse_args() #TODO: We already do this in the __init__ for Omniperf(). Change that?
-
     mode = omniperf.get_mode()
 
     # major omniperf execution modes

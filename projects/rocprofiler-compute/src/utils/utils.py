@@ -32,8 +32,6 @@ import subprocess
 import shutil
 import pandas as pd
 import glob
-from utils import specs
-from datetime import datetime
 from pathlib import Path as path
 import config
 
@@ -324,6 +322,8 @@ def gen_sysinfo(
 
 
 def detect_roofline(mspec):
+    from utils import specs
+
     rocm_ver = mspec.rocm_version[:1]
 
     os_release = path("/etc/os-release").read_text()
