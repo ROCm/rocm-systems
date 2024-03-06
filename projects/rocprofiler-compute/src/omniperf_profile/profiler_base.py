@@ -23,7 +23,9 @@
 ##############################################################################el
 
 from abc import ABC, abstractmethod
+from tqdm import tqdm
 import glob
+import logging
 import sys
 import os
 import re
@@ -334,10 +336,17 @@ class OmniProfiler_Base:
 
         print_status("Collecting Performance Counters")
 
+        # show status bar in error-only mode
+        disable_tqdm = True
+        if logging.getLogger().getEffectiveLevel() >= logging.ERROR:
+            disable_tqdm = False
+
         # Run profiling on each input file
         input_files = glob.glob(self.get_args().path + "/perfmon/*.txt")
         input_files.sort()
-        for fname in input_files:
+
+        # Run profiling on each input file
+        for fname in tqdm(input_files,disable=disable_tqdm):
             # Kernel filtering (in-place replacement)
             if not self.__args.kernel == None:
                 success, output = capture_subprocess_output(
@@ -382,7 +391,6 @@ class OmniProfiler_Base:
             # Fetch any SoC/profiler specific profiling options
             options = self._soc.get_profiler_options()
             options += self.get_profiler_options(fname)
-
             if self.__profiler == "rocprofv1" or self.__profiler == "rocprofv2":
                 run_prof(
                     fname=fname,
