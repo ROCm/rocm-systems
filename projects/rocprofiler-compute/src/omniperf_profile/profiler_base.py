@@ -325,8 +325,10 @@ class OmniProfiler_Base:
         else:
             logging.info("KernelName verbose: " + str(self.__args.kernel_verbose))
 
+        input_files = glob.glob(self.get_args().path + "/perfmon/*.txt")
+        input_files.sort()
         # Run profiling on each input file
-        for fname in glob.glob(self.get_args().path + "/perfmon/*.txt"):
+        for fname in input_files:
             # Kernel filtering (in-place replacement)
             if not self.__args.kernel == None:
                 success, output = capture_subprocess_output(
