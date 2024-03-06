@@ -61,16 +61,17 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         "profile",
         help="Profile the target application",
         usage="""
-            \nomniperf profile --name <workload_name> [profile options] [roofline options] -- <profile_cmd>
 
-            \n\n-------------------------------------------------------------------------------
-            \nExamples:
-            \n\tomniperf profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
-            \n\tomniperf profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy -n 1048576 -b 256
-            \n\tomniperf profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
-            \n\tomniperf profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
-            \n\tomniperf profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
-            \n-------------------------------------------------------------------------------\n
+omniperf profile --name <workload_name> [profile options] [roofline options] -- <profile_cmd>
+
+---------------------------------------------------------------------------------
+Examples:
+\tomniperf profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
+\tomniperf profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy -n 1048576 -b 256
+\tomniperf profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
+\tomniperf profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
+\tomniperf profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
+---------------------------------------------------------------------------------
         """,
         prog="tool",
         allow_abbrev=False,
