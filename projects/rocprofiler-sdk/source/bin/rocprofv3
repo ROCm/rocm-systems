@@ -39,6 +39,7 @@ usage() {
   echo -e "\t#${GREY} usage e.g:(with custom dir):  rocprofv3 --hsa-trace -d <out_dir> <executable>${RESET}"
   echo -e "${GREEN}-M   | --mangled-kernels ${RESET}     Do not demangle the kernel names"
   echo -e "${GREEN}-T   | --truncate-kernels ${RESET}    Truncate the demangled kernel names"
+  echo -e "${GREEN}-L   | --list-metrics ${RESET}    List metrics"
   echo -e ""
   exit ${EC}
 }
@@ -75,6 +76,7 @@ while true; do
   elif [[ "$1" == "-o" || "$1" == "--output-file-name" ]]; then
     if [ "$2" ]; then
       export ROCPROF_OUTPUT_FILE_NAME=$2
+      export ROCPROF_OUTPUT_LIST_METRICS_FILE=1
     else
       usage 1
     fi
@@ -84,6 +86,7 @@ while true; do
     if [ "$2" ]; then
       ROCPROF_OUTPUT_PATH_INTERNAL=$2
       export ROCPROF_OUTPUT_PATH=$ROCPROF_OUTPUT_PATH_INTERNAL
+      export ROCPROF_OUTPUT_LIST_METRICS_FILE=1
     else
       usage 1
     fi
@@ -92,6 +95,12 @@ while true; do
   elif [ "$1" == "--hsa-trace" ]; then
     export ROCPROF_HSA_API_TRACE=1
     shift
+  elif [[ "$1" == "-L" || "$1" == "--list-metrics" ]]; then
+    export ROCPROF_LIST_METRICS=1
+    ROCP_TOOL_LIBRARIES="${ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so" \
+    LD_LIBRARY_PATH=${ROCM_DIR}/lib:${LD_LIBRARY_PATH} \
+    LD_PRELOAD="${ROCPROF_PRELOAD}:${ROCM_DIR}/lib/librocprofiler-sdk.so" \
+    exec ${ROCM_DIR}/lib/rocprofiler-sdk/rocprofv3-trigger-list-metrics
   elif [ "$1" == "--kernel-trace" ]; then
     export ROCPROF_KERNEL_TRACE=1
     shift

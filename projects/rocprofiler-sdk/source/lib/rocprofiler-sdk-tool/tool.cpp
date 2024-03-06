@@ -200,6 +200,28 @@ get_marker_api_file()
     return _v;
 }
 
+tool::output_file*&
+get_list_basic_metrics_file()
+{
+    static auto* _v =
+        new tool::output_file{"basic_metrics",
+                              tool::csv::list_basic_metrics_csv_encoder{},
+                              {"Agent-id", "Name", "Description", "Block", "Dimensions"}};
+    ADD_DESTRUCTOR(_v);
+    return _v;
+}
+
+tool::output_file*&
+get_list_derived_metrics_file()
+{
+    static auto* _v =
+        new tool::output_file{"derived_metrics",
+                              tool::csv::list_derived_metrics_csv_encoder{},
+                              {"Agent-id", "Name", "Description", "Expression", "Dimensions"}};
+    ADD_DESTRUCTOR(_v);
+    return _v;
+}
+
 #undef ADD_DESTRUCTOR
 
 struct marker_entry
@@ -694,15 +716,25 @@ rocprofiler_status_t
 dimensions_info_callback(rocprofiler_counter_id_t                   id,
                          const rocprofiler_record_dimension_info_t* dim_info,
                          long unsigned int                          num_dims,
-                         void*)
+                         void*                                      user_data)
 {
-    counter_dimension_data.wlock(
-        [&id, &dim_info, &num_dims](counter_dimension_info_map_t& counter_dimension_data_v) {
-            std::vector<rocprofiler_record_dimension_info_t> dimensions;
-            for(size_t dim = 0; dim < num_dims; dim++)
-                dimensions.emplace_back(dim_info[dim]);
-            counter_dimension_data_v.emplace(std::make_pair(id.handle, dimensions));
-        });
+    if(user_data != nullptr)
+    {
+        auto* dimensions_info =
+            static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
+        for(size_t j = 0; j < num_dims; j++)
+            dimensions_info->push_back(dim_info[j]);
+    }
+    else
+    {
+        counter_dimension_data.wlock(
+            [&id, &dim_info, &num_dims](counter_dimension_info_map_t& counter_dimension_data_v) {
+                std::vector<rocprofiler_record_dimension_info_t> dimensions;
+                for(size_t dim = 0; dim < num_dims; dim++)
+                    dimensions.emplace_back(dim_info[dim]);
+                counter_dimension_data_v.emplace(std::make_pair(id.handle, dimensions));
+            });
+    }
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -769,6 +801,111 @@ get_agent_profile(const rocprofiler_agent_t* agent)
         });
 
     return profile;
+}
+
+rocprofiler_status_t
+list_metrics_iterate_agents(const rocprofiler_agent_t** agents, size_t num_agents, void*)
+{
+    for(size_t idx = 0; idx < num_agents; idx++)
+    {
+        auto     counters_v = counter_vec_t{};
+        uint32_t node_id    = agents[idx]->node_id;
+        ROCPROFILER_CALL(
+            rocprofiler_iterate_agent_supported_counters(
+                agents[idx]->id,
+                [](rocprofiler_agent_id_t,
+                   rocprofiler_counter_id_t* counters,
+                   size_t                    num_counters,
+                   void*                     user_data) {
+                    auto* agent_node_id = static_cast<uint32_t*>(user_data);
+                    for(size_t i = 0; i < num_counters; i++)
+                    {
+                        rocprofiler_counter_info_v0_t counter_info;
+                        auto dimensions = std::vector<rocprofiler_record_dimension_info_t>{};
+                        ROCPROFILER_CALL(
+                            rocprofiler_iterate_counter_dimensions(counters[i],
+                                                                   dimensions_info_callback,
+                                                                   static_cast<void*>(&dimensions)),
+                            "iterate_dimension_info");
+
+                        ROCPROFILER_CALL(
+                            rocprofiler_query_counter_info(counters[i],
+                                                           ROCPROFILER_COUNTER_INFO_VERSION_0,
+                                                           static_cast<void*>(&counter_info)),
+                            "Could not query counter_id");
+
+                        auto dimensions_info = std::stringstream{};
+                        for(size_t j = 0; j != dimensions.size(); j++)
+                        {
+                            dimensions_info << dimensions[j].name
+                                            << "[0:" << dimensions[j].instance_size - 1 << "]";
+                            if(j != dimensions.size() - 1) dimensions_info << "\t";
+                        }
+                        if(!counter_info.is_derived && tool::get_config().list_metrics &&
+                           !std::string(counter_info.block).empty())
+                        {
+                            auto counter_info_ss = std::stringstream{};
+                            if(tool::get_config().list_metrics_output_file)
+                            {
+                                tool::csv::list_basic_metrics_csv_encoder::write_row(
+                                    counter_info_ss,
+                                    *agent_node_id,
+                                    counter_info.name,
+                                    counter_info.description,
+                                    counter_info.block,
+                                    dimensions_info.str());
+                                get_dereference(get_list_basic_metrics_file())
+                                    << counter_info_ss.str();
+                            }
+                            else
+                            {
+                                counter_info_ss << "gpu-agent" << *agent_node_id << ":"
+                                                << "\t" << counter_info.name << "\n";
+                                counter_info_ss << "Description:"
+                                                << "\t" << counter_info.description << "\n";
+                                counter_info_ss << "Block:"
+                                                << "\t" << counter_info.block << "\n";
+                                counter_info_ss << "Dimensions:"
+                                                << "\t" << dimensions_info.str() << "\n";
+                                counter_info_ss << "\n";
+                                std::cout << counter_info_ss.str();
+                            }
+                        }
+                        else if(counter_info.is_derived && tool::get_config().list_metrics)
+                        {
+                            auto counter_info_ss = std::stringstream{};
+                            if(tool::get_config().list_metrics_output_file)
+                            {
+                                tool::csv::list_derived_metrics_csv_encoder::write_row(
+                                    counter_info_ss,
+                                    *agent_node_id,
+                                    counter_info.name,
+                                    counter_info.description,
+                                    counter_info.expression,
+                                    dimensions_info.str());
+                                get_dereference(get_list_derived_metrics_file())
+                                    << counter_info_ss.str();
+                            }
+                            else
+                            {
+                                counter_info_ss << "gpu-agent" << *agent_node_id << ":"
+                                                << "\t" << counter_info.name << "\n"
+                                                << "Description: " << counter_info.description
+                                                << "\n";
+                                counter_info_ss << "Expression: " << counter_info.expression
+                                                << "\n";
+                                counter_info_ss << "Dimensions: " << dimensions_info.str() << "\n";
+                                counter_info_ss << "\n";
+                                std::cout << counter_info_ss.str();
+                            }
+                        }
+                    }
+                    return ROCPROFILER_STATUS_SUCCESS;
+                },
+                reinterpret_cast<void*>(&node_id)),
+            "Iterate rocprofiler counters");
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 void
@@ -1005,6 +1142,19 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 }
 
 void
+api_registration_callback(rocprofiler_intercept_table_t,
+                          uint64_t,
+                          uint64_t,
+                          void**,
+                          uint64_t,
+                          void*)
+{
+    ROCPROFILER_CALL(rocprofiler_query_available_agents(
+                         list_metrics_iterate_agents, sizeof(rocprofiler_agent_t), nullptr),
+                     "Iterate rocporfiler agents")
+}
+
+void
 tool_fini(void* tool_data)
 {
     client_identifier = nullptr;
@@ -1048,6 +1198,14 @@ rocprofiler_configure(uint32_t                 version,
     uint32_t major = version / 10000;
     uint32_t minor = (version % 10000) / 100;
     uint32_t patch = version % 100;
+
+    if(tool::get_config().list_metrics)
+    {
+        ROCPROFILER_CALL(rocprofiler_at_intercept_table_registration(
+                             api_registration_callback, ROCPROFILER_HSA_TABLE, nullptr),
+                         "api registration");
+        return nullptr;
+    }
 
     LOG(INFO) << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";

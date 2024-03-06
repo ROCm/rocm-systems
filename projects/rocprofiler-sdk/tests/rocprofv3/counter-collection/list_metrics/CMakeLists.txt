@@ -1,0 +1,81 @@
+#
+# rocprofv3 tool test
+#
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
+project(
+    rocprofiler-tests-counter-collection
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+
+foreach(FILENAME validate.py conftest.py)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
+                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
+endforeach()
+
+# basic-metrics
+add_test(NAME rocprofv3-test-list-metrics-execute
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+                 ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2 -o metrics --list-metrics)
+
+# list-metrics-stdout
+add_test(NAME rocprofv3-test-list-metrics-std-out-execute
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --list-metrics)
+
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
+    set(LOG_LEVEL "warning") # info produces memory leak
+else()
+    set(LOG_LEVEL "info")
+endif()
+
+set(cc-env-list-metrics
+    "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
+    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
+
+set_tests_properties(
+    rocprofv3-test-list-metrics-execute
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
+               FAIL_REGULAR_EXPRESSION "threw an exception")
+
+set_tests_properties(
+    rocprofv3-test-list-metrics-std-out-execute
+    PROPERTIES
+        TIMEOUT
+        45
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${cc-env-list-metrics}"
+        PASS_REGULAR_EXPRESSION
+        "gpu-agent[0-9]*:[a-zA-Z_]*\\n;Description:(.*)\\n*;Expression:(.)*\\n*;Block:[a-zA-Z]*\\n*;Dimensions:([A-Z_]*\\[[0-9]*:[0-9]*\\])*\\n*;"
+    )
+set(VALIDATION_FILES ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_basic_metrics.csv
+                     ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_derived_metrics.csv)
+
+add_test(
+    NAME rocprofv3-test-list-metrics-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
+        --derived-metrics-input
+        ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_derived_metrics.csv
+        --basic-metrics-input
+        ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_basic_metrics.csv)
+
+set_tests_properties(
+    rocprofv3-test-list-metrics-validate
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               rocprofv3-test-list-metrics-execute
+               FAIL_REGULAR_EXPRESSION
+               "threw an exception"
+               ATTACHED_FILES_ON_FAIL
+               "${VALIDATION_FILES}")
