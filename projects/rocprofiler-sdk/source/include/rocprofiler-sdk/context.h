@@ -52,7 +52,7 @@ rocprofiler_create_context(rocprofiler_context_id_t* context_id) ROCPROFILER_NON
 /**
  * @brief Start context.
  *
- * @param [in] context_id
+ * @param [in] context_id Identifier for context to be activated
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
@@ -61,18 +61,21 @@ rocprofiler_start_context(rocprofiler_context_id_t context_id);
 /**
  * @brief Stop context.
  *
- * @param [in] context_id
+ * @param [in] context_id Identifier for context to be deactivated
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_stop_context(rocprofiler_context_id_t context_id);
 
 /**
- * @brief Query whether context is active.
+ * @brief Query whether context is currently active.
  *
- * @param [in] context_id
+ * @param [in] context_id Context identifier for the query
  * @param [out] status If context is active, this will be a nonzero value
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS The input context id identified a registered context
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND The input context id did not identify a
+ * registered context
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
@@ -81,7 +84,7 @@ rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
 /**
  * @brief Query whether the context is valid
  *
- * @param [in] context_id
+ * @param [in] context_id Context identifier for the query
  * @param [out] status If context is invalid, this will be a nonzero value
  * @return ::rocprofiler_status_t
  */

@@ -78,13 +78,16 @@ rocprofiler_stop_context(rocprofiler_context_id_t context_id)
 rocprofiler_status_t
 rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
 {
+    // make sure that status is zero (if not active) regardless of initial value
     *status = 0;
 
-    if(context_id.handle == rocprofiler_context_none.handle)
+    // return context not found if not registered
+    if(context_id.handle == rocprofiler_context_none.handle ||
+       !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    auto ctxs = rocprofiler::context::context_array_t{};
-    for(const auto* itr : rocprofiler::context::get_active_contexts(ctxs))
+    // set status to 1 if found in active context array
+    for(const auto* itr : rocprofiler::context::get_active_contexts())
     {
         if(itr && itr->context_idx == context_id.handle)
         {
@@ -92,7 +95,9 @@ rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
             return ROCPROFILER_STATUS_SUCCESS;
         }
     }
-    return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    // context was not found in active array so status value is still zero
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
