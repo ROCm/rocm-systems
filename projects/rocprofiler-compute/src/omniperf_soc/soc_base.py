@@ -204,8 +204,10 @@ class OmniSoC_Base:
         # Initialize directories
         if not os.path.isdir(self.__workload_dir):
             os.makedirs(self.__workload_dir)
-        else:
+        elif not os.path.islink(self.__workload_dir):
             shutil.rmtree(self.__workload_dir)
+        else:
+            os.unlink(self.__workload_dir)
 
         os.makedirs(workload_perfmon_dir)
 
