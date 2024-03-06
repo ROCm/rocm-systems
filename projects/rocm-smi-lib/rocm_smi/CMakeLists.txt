@@ -55,10 +55,10 @@ set(${ROCM_SMI}_VERSION_BUILD "0")
 set(${ROCM_SMI}_VERSION_HASH "${PKG_VERSION_HASH}")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
-# Configure rsmiBindings.py.in with SO major version:
+# Configure rsmiBindingsInit.py.in with SO major version:
 configure_file(
-  "${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py.in"
-  "${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py")
+  "${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindingsInit.py.in"
+  "${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindingsInit.py")
 
 # Create a configure file to get version info from within library
 configure_file(
@@ -138,6 +138,9 @@ install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/${ROCM_SMI_TARGET}Config.h
        COMPONENT dev)
 install(FILES ${COMMON_SRC_ROOT}/include/rocm_smi/kfd_ioctl.h
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocm_smi
+        COMPONENT dev)
+install(PROGRAMS ${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindingsInit.py
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${ROCM_SMI}
         COMPONENT dev)
 install(PROGRAMS ${COMMON_SRC_ROOT}/python_smi_tools/rsmiBindings.py
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${ROCM_SMI}

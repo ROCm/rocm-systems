@@ -3,12 +3,14 @@
 # any tracked files which get ignored after the change.
 
 # VisualStudioCode
+.venv/
 .vscode/
+_build
 
 # below files are generated via CMake
 include/rocm_smi/rocm_smi64Config.h
 oam/include/oam/oamConfig.h
-python_smi_tools/rsmiBindings.py
+python_smi_tools/rsmiBindingsInit.py
 
 # Build directory
 build/
@@ -28,3 +30,6 @@ README.html
 !.clang-format
 !.clang-tidy
 !.clangd
+
+# avoid duplicating contributing.md due to conf.py
+docs/CHANGELOG.md

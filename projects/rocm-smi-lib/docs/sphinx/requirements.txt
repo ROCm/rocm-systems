@@ -41,7 +41,7 @@ docutils==0.16
     #   myst-parser
     #   pydata-sphinx-theme
     #   sphinx
-doxysphinx==3.3.4
+doxysphinx==3.3.7
     # via rocm-docs-core
 fastjsonschema==2.18.0
     # via rocm-docs-core
@@ -116,7 +116,7 @@ requests==2.28.2
     # via
     #   pygithub
     #   sphinx
-rocm-docs-core[api_reference]>=0.30.3
+rocm-docs-core[api_reference]>=0.31.0
     # via -r requirements.in
 smmap==5.0.0
     # via gitdb
