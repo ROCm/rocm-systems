@@ -36,6 +36,7 @@
 #include "common/perfetto.hpp"
 #include "common/serialization.hpp"
 
+#include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -903,16 +904,21 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     assert(tool_data != nullptr);
 
-    rocprofiler_available_agents_cb_t iterate_cb =
-        [](const rocprofiler_agent_t** agents_arr, size_t num_agents, void* user_data) {
-            auto* agents_v = static_cast<std::vector<rocprofiler_agent_t>*>(user_data);
-            for(size_t i = 0; i < num_agents; ++i)
-                agents_v->emplace_back(*agents_arr[i]);
-            return ROCPROFILER_STATUS_SUCCESS;
-        };
+    rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
+                                                            const void**                agents_arr,
+                                                            size_t                      num_agents,
+                                                            void*                       user_data) {
+        if(agents_ver != ROCPROFILER_AGENT_INFO_VERSION_0)
+            throw std::runtime_error{"unexpected rocprofiler agent version"};
+        auto* agents_v = static_cast<std::vector<rocprofiler_agent_v0_t>*>(user_data);
+        for(size_t i = 0; i < num_agents; ++i)
+            agents_v->emplace_back(*static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]));
+        return ROCPROFILER_STATUS_SUCCESS;
+    };
 
     ROCPROFILER_CALL(
-        rocprofiler_query_available_agents(iterate_cb,
+        rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                           iterate_cb,
                                            sizeof(rocprofiler_agent_t),
                                            const_cast<void*>(static_cast<const void*>(&agents))),
         "query available agents");

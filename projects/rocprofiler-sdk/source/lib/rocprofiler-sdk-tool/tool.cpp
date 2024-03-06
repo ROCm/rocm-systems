@@ -804,15 +804,19 @@ get_agent_profile(const rocprofiler_agent_t* agent)
 }
 
 rocprofiler_status_t
-list_metrics_iterate_agents(const rocprofiler_agent_t** agents, size_t num_agents, void*)
+list_metrics_iterate_agents(rocprofiler_agent_version_t,
+                            const void** agents,
+                            size_t       num_agents,
+                            void*)
 {
     for(size_t idx = 0; idx < num_agents; idx++)
     {
-        auto     counters_v = counter_vec_t{};
-        uint32_t node_id    = agents[idx]->node_id;
+        const auto* agent      = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
+        auto        counters_v = counter_vec_t{};
+        uint32_t    node_id    = agent->node_id;
         ROCPROFILER_CALL(
             rocprofiler_iterate_agent_supported_counters(
-                agents[idx]->id,
+                agent->id,
                 [](rocprofiler_agent_id_t,
                    rocprofiler_counter_id_t* counters,
                    size_t                    num_counters,
@@ -1149,8 +1153,10 @@ api_registration_callback(rocprofiler_intercept_table_t,
                           uint64_t,
                           void*)
 {
-    ROCPROFILER_CALL(rocprofiler_query_available_agents(
-                         list_metrics_iterate_agents, sizeof(rocprofiler_agent_t), nullptr),
+    ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                                        list_metrics_iterate_agents,
+                                                        sizeof(rocprofiler_agent_t),
+                                                        nullptr),
                      "Iterate rocporfiler agents")
 }
 

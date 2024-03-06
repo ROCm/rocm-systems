@@ -36,6 +36,7 @@
 #include <iostream>
 #include <random>
 #include <sstream>
+#include <type_traits>
 #include <typeinfo>
 
 TEST(rocprofiler_lib, agent_abi)
@@ -132,22 +133,31 @@ TEST(rocprofiler_lib, agent)
                     "#####\n\"; cat ${i}; echo \"\"; done'");
     EXPECT_EQ(sys_ret_virt, 0);
 
-    auto                              agents = std::vector<const rocprofiler_agent_t*>{};
-    rocprofiler_available_agents_cb_t iterate_cb =
-        [](const rocprofiler_agent_t** agents_arr, size_t num_agents, void* user_data) {
-            auto* agents_v = static_cast<std::vector<const rocprofiler_agent_t*>*>(user_data);
-            // EXPECT_EQ(num_agents, hsa_agents_v.size());
-            for(size_t i = 0; i < num_agents; ++i)
-            {
-                const auto* agent = agents_arr[i];
-                agents_v->emplace_back(agent);
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        };
+    static_assert(std::is_same<rocprofiler_agent_t, rocprofiler_agent_v0_t>::value,
+                  "update test to support new agent struct version");
+
+    auto                                    agents     = std::vector<const rocprofiler_agent_t*>{};
+    rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
+                                                            const void**                agents_arr,
+                                                            size_t                      num_agents,
+                                                            void*                       user_data) {
+        EXPECT_EQ(agents_ver, ROCPROFILER_AGENT_INFO_VERSION_0);
+        if(agents_ver != ROCPROFILER_AGENT_INFO_VERSION_0) return ROCPROFILER_STATUS_ERROR;
+
+        auto* agents_v = static_cast<std::vector<const rocprofiler_agent_t*>*>(user_data);
+        // EXPECT_EQ(num_agents, hsa_agents_v.size());
+        for(size_t i = 0; i < num_agents; ++i)
+        {
+            const auto* agent = static_cast<const rocprofiler_agent_t*>(agents_arr[i]);
+            agents_v->emplace_back(agent);
+        }
+        return ROCPROFILER_STATUS_SUCCESS;
+    };
 
     std::cout << "# querying available agents...\n" << std::flush;
     auto status =
-        rocprofiler_query_available_agents(iterate_cb,
+        rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                           iterate_cb,
                                            sizeof(rocprofiler_agent_t),
                                            const_cast<void*>(static_cast<const void*>(&agents)));
 

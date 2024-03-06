@@ -877,18 +877,35 @@ get_agent_available_properties()
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_query_available_agents(rocprofiler_available_agents_cb_t callback,
-                                   size_t                            agent_size,
-                                   void*                             user_data)
+rocprofiler_query_available_agents(rocprofiler_agent_version_t             version,
+                                   rocprofiler_query_available_agents_cb_t callback,
+                                   size_t                                  agent_size,
+                                   void*                                   user_data)
 {
-    if(agent_size > sizeof(rocprofiler_agent_t))
+    // only support version 0 for now
+    if(version != ROCPROFILER_AGENT_INFO_VERSION_0)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    // this will need to be updated for new versions
+    if(version == ROCPROFILER_AGENT_INFO_VERSION_0)
     {
-        LOG(ERROR) << "rocprofiler_agent_t used by caller is ABI-incompatible with "
-                      "rocprofiler_agent_t in rocprofiler";
-        return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+        if(agent_size > sizeof(rocprofiler_agent_v0_t))
+        {
+            LOG(ERROR) << "size of rocprofiler agent struct used by caller is ABI-incompatible "
+                          "with rocprofiler_agent_v0_t in rocprofiler";
+            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
+        }
+    }
+    else
+    {
+        LOG(FATAL) << "rocprofiler-sdk does not support given agent info version";
     }
 
-    auto&& pointers = rocprofiler::agent::get_agents();
-    return callback(pointers.data(), pointers.size(), user_data);
+    auto&& pointers   = rocprofiler::agent::get_agents();
+    auto   v_pointers = std::vector<const void*>{};
+    v_pointers.reserve(pointers.size());
+    for(const auto& itr : pointers)
+        v_pointers.emplace_back(itr);
+    return callback(version, v_pointers.data(), pointers.size(), user_data);
 }
 }

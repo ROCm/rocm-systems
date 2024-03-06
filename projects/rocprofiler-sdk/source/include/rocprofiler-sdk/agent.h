@@ -39,6 +39,17 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
+ * @brief Enumeration ID for version of the rocprofiler_agent_v*_t struct in rocprofiler_i
+ *
+ */
+typedef enum rocprofiler_agent_version_t
+{
+    ROCPROFILER_AGENT_INFO_VERSION_NONE = 0,
+    ROCPROFILER_AGENT_INFO_VERSION_0    = 1,
+    ROCPROFILER_AGENT_INFO_VERSION_LAST,
+} rocprofiler_agent_version_t;
+
+/**
  * @brief Cache information for an agent.
  */
 typedef struct rocprofiler_agent_cache_t
@@ -89,7 +100,7 @@ typedef struct rocprofiler_agent_mem_bank_t
 /**
  * @brief Agent.
  */
-typedef struct rocprofiler_agent_t
+typedef struct rocprofiler_agent_v0_t
 {
     uint64_t size;  ///< set to sizeof(rocprofiler_agent_t) by rocprofiler. This can be used for
                     ///< versioning and compatibility handling
@@ -179,33 +190,44 @@ typedef struct rocprofiler_agent_t
     uint32_t node_id;    ///< Node sequence number. This will be equivalent to the HSA-runtime
                          ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
     uint32_t reserved0;  ///< reserved padding
-} rocprofiler_agent_t;
+} rocprofiler_agent_v0_t;
+
+typedef rocprofiler_agent_v0_t rocprofiler_agent_t;
 
 /**
- * @brief Callback function type for querying the available agents
+ * @brief Callback function type for querying the available agents.
  *
+ * If callback is invoked, returns the ::rocprofiler_status_t value returned from callback
+ *
+ * @param [in] version Enum specifying the version of agent info
  * @param [in] agents Array of pointers to agents
  * @param [in] num_agents Number of agents in array
  * @param [in] user_data Data pointer passback
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI size of the agent struct in application is
+ * larger than the agent struct for rocprofiler-sdk
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Invalid ::rocprofiler_agent_version_t value
  */
-typedef rocprofiler_status_t (*rocprofiler_available_agents_cb_t)(
-    const rocprofiler_agent_t** agents,
+typedef rocprofiler_status_t (*rocprofiler_query_available_agents_cb_t)(
+    rocprofiler_agent_version_t version,
+    const void**                agents,
     size_t                      num_agents,
     void*                       user_data);
 
 /**
  * @brief Receive synchronous callback with an array of available agents at moment of invocation
  *
+ * @param [in] version Enum value specifying the struct type of the agent info
  * @param [in] callback Callback function accepting list of agents
  * @param [in] agent_size Should be set to sizeof(rocprofiler_agent_t)
  * @param [in] user_data Data pointer provided to callback
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_query_available_agents(rocprofiler_available_agents_cb_t callback,
-                                   size_t                            agent_size,
-                                   void* user_data) ROCPROFILER_NONNULL(1);
+rocprofiler_status_t
+rocprofiler_query_available_agents(rocprofiler_agent_version_t             version,
+                                   rocprofiler_query_available_agents_cb_t callback,
+                                   size_t                                  agent_size,
+                                   void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2);
 
 /** @} */
 
