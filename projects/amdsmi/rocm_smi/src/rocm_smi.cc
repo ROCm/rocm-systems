@@ -766,6 +766,20 @@ rsmi_dev_ecc_count_get(uint32_t dv_ind, rsmi_gpu_block_t block,
   assert(junk == "ce:");
   fs2 >> ec->correctable_err;
 
+  ec->deferred_err = 0;
+  if (val_vec.size() > 2) {
+    std::istringstream fs3(val_vec[2]);
+    fs3 >> junk;
+    if (junk == "de:") {
+      fs3 >> ec->deferred_err;
+    } else {
+      ss << __PRETTY_FUNCTION__
+       << "Trying to get the de count, but got " << junk
+       << " ignore the defer count";
+    LOG_ERROR(ss);
+    }
+  }
+
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="
      << ", reporting " << amd::smi::getRSMIStatusString(ret);;
   LOG_TRACE(ss);

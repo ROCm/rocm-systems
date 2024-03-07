@@ -1733,6 +1733,7 @@ amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor_handle, amdsmi_
                     // Increase the total ecc counts
                     ec->correctable_count += block_ec.correctable_count;
                     ec->uncorrectable_count += block_ec.uncorrectable_count;
+                    ec->deferred_count += block_ec.deferred_count;
                 }
             }
         }

@@ -1429,9 +1429,10 @@ typedef struct {
  * @brief This structure holds error counts.
  */
 typedef struct {
-    uint64_t correctable_count;            //!< Accumulated correctable errors
-    uint64_t uncorrectable_count;          //!< Accumulated uncorrectable errors
-    uint64_t reserved[2];
+  uint64_t correctable_count;   //!< Accumulated correctable errors
+  uint64_t uncorrectable_count;  //!< Accumulated uncorrectable errors
+  uint64_t deferred_count;  //!< Accumulated deferred errors
+  uint64_t reserved[5];
 } amdsmi_error_count_t;
 
 /**
@@ -4662,8 +4663,8 @@ amdsmi_get_gpu_process_info(amdsmi_processor_handle processor_handle, amdsmi_pro
  */
 
 /**
- *  @brief          Returns the total number of ECC errors (correctable and
- *                  uncorrectable) in the given GPU. It is not supported on
+ *  @brief          Returns the total number of ECC errors (correctable,
+ *                  uncorrectable and deferred) in the given GPU. It is not supported on
  *                  virtual machine guest
  *
  *  @platform{gpu_bm_linux}  @platform{host}

@@ -161,12 +161,13 @@ class AMDSMICommands():
         except amdsmi_exception.AmdSmiLibraryException as e:
             uuid = e.get_error_info()
 
-        # Store values based on format
-        if self.logger.is_human_readable_format():
-            self.logger.store_output(args.gpu, 'AMDSMI_SPACING_REMOVAL', {'gpu_bdf':bdf, 'gpu_uuid':uuid})
-        else:
+        # CSV format is intentionally aligned with Host
+        if self.logger.is_csv_format():
             self.logger.store_output(args.gpu, 'gpu_bdf', bdf)
             self.logger.store_output(args.gpu, 'gpu_uuid', uuid)
+        else:
+            self.logger.store_output(args.gpu, 'bdf', bdf)
+            self.logger.store_output(args.gpu, 'uuid', uuid)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -800,7 +801,7 @@ class AMDSMICommands():
         cpu_attributes = ["smu", "interface_ver"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
-                if getattr(args, attr) is not None:
+                if getattr(args, attr):
                     cpu_args_enabled = True
                     break
 
@@ -811,7 +812,7 @@ class AMDSMICommands():
                           "dfc_ucode", "fb_info", "num_vf"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
-                if getattr(args, attr) is not None:
+                if getattr(args, attr):
                     gpu_args_enabled = True
                     break
 
@@ -2255,7 +2256,7 @@ class AMDSMICommands():
                           "guard", "guest_data", "fb_usage", "xgmi"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
-                if getattr(args, attr) is not None:
+                if getattr(args, attr):
                     gpu_args_enabled = True
                     break
 
@@ -2268,7 +2269,7 @@ class AMDSMICommands():
                           "cpu_dimm_pow_consumption", "cpu_dimm_thermal_sensor"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
-                if getattr(args, attr) is not None:
+                if getattr(args, attr):
                     cpu_args_enabled = True
                     break
 
@@ -2277,7 +2278,7 @@ class AMDSMICommands():
         core_attributes = ["core_boost_limit", "core_curr_active_freq_core_limit", "core_energy"]
         for attr in core_attributes:
             if hasattr(args, attr):
-                if getattr(args, attr) is not None:
+                if getattr(args, attr):
                     core_args_enabled = True
                     break
 
@@ -3314,12 +3315,17 @@ class AMDSMICommands():
         cpu_args_enabled = False
         cpu_attributes = ["cpu_pwr_limit", "cpu_xgmi_link_width", "cpu_lclk_dpm_level", "cpu_pwr_eff_mode",
                           "cpu_gmi3_link_width", "cpu_pcie_link_rate", "cpu_df_pstate_range",
-                          "cpu_enable_apb", "cpu_disable_apb", "soc_boost_limit"]
+                          "cpu_disable_apb", "soc_boost_limit"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
                     cpu_args_enabled = True
                     break
+
+        # Check if CPU set argument with store_true has been passed
+        if hasattr(args, "cpu_enable_apb"):
+            if getattr(args, attr):
+                cpu_args_enabled = True
 
         # Check if a Core argument has been set
         core_args_enabled = False

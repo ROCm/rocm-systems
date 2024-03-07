@@ -1194,8 +1194,10 @@ typedef enum {
  * @brief This structure holds error counts.
  */
 typedef struct {
-    uint64_t correctable_err;            //!< Accumulated correctable errors
-    uint64_t uncorrectable_err;          //!< Accumulated uncorrectable errors
+  uint64_t correctable_err;   //!< Accumulated correctable errors
+  uint64_t uncorrectable_err;  //!< Accumulated uncorrectable errors
+  uint64_t deferred_err;  //!< Accumulated deferred errors
+  uint64_t reserved[5];
 } rsmi_error_count_t;
 
 /**
