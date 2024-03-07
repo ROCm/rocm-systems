@@ -56,11 +56,15 @@ def console_error(*argv):
     sys.exit(1)
 
 
-def console_log(*argv):
+def console_log(*argv,indent_level=0):
+    indent = ''
+    if indent_level >= 1:
+        indent = ' ' * 3 * indent_level + '|-> '  # spaces per indent level
+
     if len(argv) > 1:
-        logging.info(f"[{argv[0]}] {argv[1]}")
+        logging.info(indent + f"[{argv[0]}] {argv[1]}")
     else:
-        logging.info(f"{argv[0]}")
+        logging.info(indent + f"{argv[0]}")
 
 
 def console_debug(*argv):
