@@ -77,7 +77,11 @@ def setup_logging(verbose):
             print("Ignoring unsupported OMNIPERF_LOGLEVEL setting (%s)" % loglevel)
             sys.exit(1)
 
-    formatter = ColoredFormatter("%(levelname)s - %(message)s")
+    if False:
+        formatter = ColoredFormatter("%(levelname)s %(message)s")
+    else:
+        formatter = ColoredFormatter("%(message)s")
     handler = logging.StreamHandler(sys.stdout)
     handler.setFormatter(formatter)
     logging.basicConfig(level=loglevel, handlers=[handler])
+    return loglevel
