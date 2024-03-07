@@ -575,12 +575,10 @@ def is_workload_empty(path):
     else:
         console_error("profiling", "Cannot find pmc_perf.csv in %s" % path)
 
-
 def print_status(msg):
-    print("\n")
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    print("\n")
+    msg_length = len(msg)
+    print("")
+    print("~" * (msg_length + 1))
     print(msg)
-    print("\n")
-    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    print("\n")
+    print("~" * (msg_length + 1))
+    print("")
