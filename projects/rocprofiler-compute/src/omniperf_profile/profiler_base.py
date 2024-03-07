@@ -397,6 +397,7 @@ class OmniProfiler_Base:
                     profiler_options=options,
                     workload_dir=self.get_args().path,
                     mspec=self._soc._mspec,
+                    loglevel=self.get_args().loglevel,
                 )
 
             elif self.__profiler == "rocscope":
