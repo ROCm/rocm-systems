@@ -1,6 +1,9 @@
 #include <rocm-core/rocm_version.h>
 #include <iostream>
 #include <sstream>
+#include <cstdint>
+
+using std::uint32_t;
 
 
 int main() {
