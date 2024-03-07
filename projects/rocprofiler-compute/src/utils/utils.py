@@ -50,9 +50,9 @@ def demarcate(function):
 
 def console_error(*argv):
     if len(argv) > 1:
-        logging.error(f"[{argv[0]}] {argv[1]}")
+        logging.error("ERROR: " + f"[{argv[0]}] {argv[1]}")
     else:
-        logging.error(f"{argv[0]}")
+        logging.error("ERROR: " + f"{argv[0]}")
     sys.exit(1)
 
 
