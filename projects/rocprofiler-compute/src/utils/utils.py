@@ -222,7 +222,7 @@ def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
     return (success, output)
 
 
-def run_prof(fname, profiler_options, workload_dir, mspec):
+def run_prof(fname, profiler_options, workload_dir, mspec, loglevel):
 
     fbase = os.path.splitext(os.path.basename(fname))[0]
 
@@ -251,12 +251,15 @@ def run_prof(fname, profiler_options, workload_dir, mspec):
 
     # profile the app
     if new_env:
-        success, output = capture_subprocess_output([rocprof_cmd] + options, new_env)
+        success, output = capture_subprocess_output([rocprof_cmd] + options, new_env=new_env, profileMode=True)
     else:
-        success, output = capture_subprocess_output([rocprof_cmd] + options)
+        success, output = capture_subprocess_output([rocprof_cmd] + options, profileMode=True)
 
     if not success:
-        console_error(output)
+        if loglevel > logging.INFO:
+            for line in output.splitlines():
+                console_error(output)
+        console_error("Profiling execution failed.")
 
     if new_env:
         # flatten tcc for applicable mi300 input
