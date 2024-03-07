@@ -50,6 +50,16 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     general_group.add_argument(
         "-s", "--specs", action="store_true", help="Print system specs."
     )
+    general_group.add_argument(
+        "-q", "--quiet", action="store_true", help="Run in quiet mode."
+    )
+    general_group.add_argument(
+        "-V",
+        "--verbose",
+        help="Increase output verbosity (use multiple times for higher levels)",
+        action="count",
+        default=0,
+    )
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -87,6 +97,9 @@ Examples:
 
     general_group.add_argument(
         "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
+    )
+    general_group.add_argument(
+        "-q", "--quiet", action="store_true", help="Run in quiet mode."
     )
     general_group.add_argument(
         "-V",

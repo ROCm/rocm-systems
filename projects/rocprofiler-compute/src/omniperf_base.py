@@ -72,7 +72,7 @@ class Omniperf:
 
         self.set_version()
         self.parse_args()
-        self.__loglevel = setup_logging(self.__args.verbose)
+        self.__loglevel = setup_logging(self.__args.verbose,self.__args.quiet)
         setattr(self.__args, "loglevel", self.__loglevel)
         self.__mode = self.__args.mode
 
