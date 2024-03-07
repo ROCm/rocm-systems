@@ -23,13 +23,13 @@ jobs:
             echo "sha=$GITHUB_SHA" >> $GITHUB_OUTPUT
           fi      
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
         with:
           ref: ${{ steps.sha-mode.sha }}
       - name: Cancel Previous Runs
-        uses: styfle/cancel-workflow-action@0.11.0
+        uses: styfle/cancel-workflow-action@0.12.1
       - name: Install Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5
         with:
           python-version: '3.8'
       - name: Python dependency installs
@@ -44,7 +44,7 @@ jobs:
           cd build
           make package_source
       - name: Archive tarball
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: tarball-testing
           path: build/omniperf-*.tar.gz
@@ -57,7 +57,7 @@ jobs:
       INSTALL_DIR: /tmp/foo2
     steps:
       - name: Cancel previous runs
-        uses: styfle/cancel-workflow-action@0.11.0
+        uses: styfle/cancel-workflow-action@0.11.1
       - name: Access tarball
         uses: actions/download-artifact@v3
         with:
