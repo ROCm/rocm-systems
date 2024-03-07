@@ -59,7 +59,7 @@ jobs:
       - name: Cancel previous runs
         uses: styfle/cancel-workflow-action@0.12.1
       - name: Access tarball
-        uses: actions/download-artifact@v3
+        uses: actions/download-artifact@v4
         with:
           name: tarball-testing
       - name: Expand
