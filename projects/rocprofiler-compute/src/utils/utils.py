@@ -48,12 +48,13 @@ def demarcate(function):
     return wrap_function
 
 
-def console_error(*argv):
+def console_error(*argv,exit=True):
     if len(argv) > 1:
         logging.error("ERROR: " + f"[{argv[0]}] {argv[1]}")
     else:
         logging.error("ERROR: " + f"{argv[0]}")
-    sys.exit(1)
+    if exit:
+        sys.exit(1)
 
 
 def console_log(*argv,indent_level=0):
@@ -258,7 +259,7 @@ def run_prof(fname, profiler_options, workload_dir, mspec, loglevel):
     if not success:
         if loglevel > logging.INFO:
             for line in output.splitlines():
-                console_error(output)
+                console_error(output,exit=False)
         console_error("Profiling execution failed.")
 
     if new_env:
