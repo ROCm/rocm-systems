@@ -625,9 +625,9 @@ def test_kernel_summaries():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SQ():
-    options = baseline_opts + ["--ipblocks", "SQ"]
+@pytest.mark.blocks
+def test_blocks_SQ():
+    options = baseline_opts + ["--blocks", "SQ"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -688,9 +688,9 @@ def test_ipblocks_SQ():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SQC():
-    options = baseline_opts + ["--ipblocks", "SQC"]
+@pytest.mark.blocks
+def test_blocks_SQC():
+    options = baseline_opts + ["--blocks", "SQC"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -718,9 +718,9 @@ def test_ipblocks_SQC():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_TA():
-    options = baseline_opts + ["--ipblocks", "TA"]
+@pytest.mark.blocks
+def test_blocks_TA():
+    options = baseline_opts + ["--blocks", "TA"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -752,9 +752,9 @@ def test_ipblocks_TA():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_TD():
-    options = baseline_opts + ["--ipblocks", "TD"]
+@pytest.mark.blocks
+def test_blocks_TD():
+    options = baseline_opts + ["--blocks", "TD"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -790,9 +790,9 @@ def test_ipblocks_TD():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_TCP():
-    options = baseline_opts + ["--ipblocks", "TCP"]
+@pytest.mark.blocks
+def test_blocks_TCP():
+    options = baseline_opts + ["--blocks", "TCP"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -826,9 +826,9 @@ def test_ipblocks_TCP():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_TCC():
-    options = baseline_opts + ["--ipblocks", "TCC"]
+@pytest.mark.blocks
+def test_blocks_TCC():
+    options = baseline_opts + ["--blocks", "TCC"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -863,9 +863,9 @@ def test_ipblocks_TCC():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SPI():
-    options = baseline_opts + ["--ipblocks", "SPI"]
+@pytest.mark.blocks
+def test_blocks_SPI():
+    options = baseline_opts + ["--blocks", "SPI"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -898,9 +898,9 @@ def test_ipblocks_SPI():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_CPC():
-    options = baseline_opts + ["--ipblocks", "CPC"]
+@pytest.mark.blocks
+def test_blocks_CPC():
+    options = baseline_opts + ["--blocks", "CPC"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -925,9 +925,9 @@ def test_ipblocks_CPC():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_CPF():
-    options = baseline_opts + ["--ipblocks", "CPF"]
+@pytest.mark.blocks
+def test_blocks_CPF():
+    options = baseline_opts + ["--blocks", "CPF"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -954,9 +954,9 @@ def test_ipblocks_CPF():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SQ_CPC():
-    options = baseline_opts + ["--ipblocks", "SQ", "CPC"]
+@pytest.mark.blocks
+def test_blocks_SQ_CPC():
+    options = baseline_opts + ["--blocks", "SQ", "CPC"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -1017,9 +1017,9 @@ def test_ipblocks_SQ_CPC():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SQ_TA():
-    options = baseline_opts + ["--ipblocks", "SQ", "TA"]
+@pytest.mark.blocks
+def test_blocks_SQ_TA():
+    options = baseline_opts + ["--blocks", "SQ", "TA"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -1075,9 +1075,9 @@ def test_ipblocks_SQ_TA():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SQ_SPI():
-    options = baseline_opts + ["--ipblocks", "SQ", "SPI"]
+@pytest.mark.blocks
+def test_blocks_SQ_SPI():
+    options = baseline_opts + ["--blocks", "SQ", "SPI"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -1136,9 +1136,9 @@ def test_ipblocks_SQ_SPI():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SQ_SQC_TCP_CPC():
-    options = baseline_opts + ["--ipblocks", "SQ", "SQC", "TCP", "CPC"]
+@pytest.mark.blocks
+def test_blocks_SQ_SQC_TCP_CPC():
+    options = baseline_opts + ["--blocks", "SQ", "SQC", "TCP", "CPC"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
@@ -1195,9 +1195,9 @@ def test_ipblocks_SQ_SQC_TCP_CPC():
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
-@pytest.mark.ipblocks
-def test_ipblocks_SQ_SPI_TA_TCC_CPF():
-    options = baseline_opts + ["--ipblocks", "SQ", "SPI", "TA", "TCC", "CPF"]
+@pytest.mark.blocks
+def test_blocks_SQ_SPI_TA_TCC_CPF():
+    options = baseline_opts + ["--blocks", "SQ", "SPI", "TA", "TCC", "CPF"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 

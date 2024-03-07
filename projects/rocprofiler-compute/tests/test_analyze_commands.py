@@ -175,8 +175,8 @@ def test_list_metrics_gfx908():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_metrics
-def test_filter_metrics_1():
+@pytest.mark.filter_block
+def test_filter_block_1():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -185,7 +185,7 @@ def test_filter_metrics_1():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI100",
-                "--metric",
+                "--block",
                 "1",
             ],
         ):
@@ -200,7 +200,7 @@ def test_filter_metrics_1():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI200",
-                "--metric",
+                "--block",
                 "1",
             ],
         ):
@@ -208,8 +208,8 @@ def test_filter_metrics_1():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_metrics
-def test_filter_metrics_2():
+@pytest.mark.filter_block
+def test_filter_block_2():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -218,7 +218,7 @@ def test_filter_metrics_2():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI100",
-                "--metric",
+                "--block",
                 "5",
             ],
         ):
@@ -233,7 +233,7 @@ def test_filter_metrics_2():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI200",
-                "--metric",
+                "--block",
                 "5",
             ],
         ):
@@ -241,8 +241,8 @@ def test_filter_metrics_2():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_metrics
-def test_filter_metrics_3():
+@pytest.mark.filter_block
+def test_filter_block_3():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -251,7 +251,7 @@ def test_filter_metrics_3():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI100",
-                "--metric",
+                "--block",
                 "5.2.2",
             ],
         ):
@@ -266,7 +266,7 @@ def test_filter_metrics_3():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI200",
-                "--metric",
+                "--block",
                 "5.2.2",
             ],
         ):
@@ -274,8 +274,8 @@ def test_filter_metrics_3():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_metrics
-def test_filter_metrics_4():
+@pytest.mark.filter_block
+def test_filter_block_4():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -284,7 +284,7 @@ def test_filter_metrics_4():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI100",
-                "--metric",
+                "--block",
                 "6.1",
             ],
         ):
@@ -299,7 +299,7 @@ def test_filter_metrics_4():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI200",
-                "--metric",
+                "--block",
                 "6.1",
             ],
         ):
@@ -307,8 +307,8 @@ def test_filter_metrics_4():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_metrics
-def test_filter_metrics_5():
+@pytest.mark.filter_block
+def test_filter_block_5():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -317,7 +317,7 @@ def test_filter_metrics_5():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI100",
-                "--metric",
+                "--block",
                 "10",
             ],
         ):
@@ -332,7 +332,7 @@ def test_filter_metrics_5():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI200",
-                "--metric",
+                "--block",
                 "10",
             ],
         ):
@@ -340,8 +340,8 @@ def test_filter_metrics_5():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_metrics
-def test_filter_metrics_6():
+@pytest.mark.filter_block
+def test_filter_block_6():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -350,7 +350,7 @@ def test_filter_metrics_6():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI100",
-                "--metric",
+                "--block",
                 "100",
             ],
         ):
@@ -365,7 +365,7 @@ def test_filter_metrics_6():
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI200",
-                "--metric",
+                "--block",
                 "100",
             ],
         ):
@@ -1209,7 +1209,7 @@ def test_save_dfs():
     single_row_tables = [
         "0.1_Top_Kernels.csv",
         "13.3_Instruction_Cache_-_L2_Interface.csv",
-        "18.1_Aggregate_Stats_(All_32_channels).csv",
+        "18.1_Aggregate_Stats_(All_channels).csv",
     ]
     for file_name in files_in_workload:
         df = pd.read_csv(output_path + "/" + file_name)
