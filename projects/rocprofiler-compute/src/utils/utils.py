@@ -161,7 +161,7 @@ def detect_rocprof():
         return rocprof_cmd  # TODO: Do we still need to return this? It's not being used in the function call
 
 
-def capture_subprocess_output(subprocess_args, new_env=None):
+def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
     # Start subprocess
     # bufsize = 1 means output is line buffered
     # universal_newlines = True is required for line buffering
@@ -192,7 +192,10 @@ def capture_subprocess_output(subprocess_args, new_env=None):
         # line to read when this function is called
         line = stream.readline()
         buf.write(line)
-        sys.stdout.write(line)
+        if profileMode:
+            console_log(rocprof_cmd,line.strip(),indent_level=1)
+        else:
+            console_log(line.strip())
 
     # Register callback for an "available for read" event from subprocess' stdout stream
     selector = selectors.DefaultSelector()
