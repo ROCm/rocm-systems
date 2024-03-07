@@ -257,9 +257,9 @@ Analyze
   $ omniperf analyze -p workloads/vcopy/MI200/
   ```
 
-- List top kernels
+- List top kernels and dispatches
   ```shell
-  $ omniperf analyze -p workloads/vcopy/MI200/  --list-kernels
+  $ omniperf analyze -p workloads/vcopy/MI200/  --list-stats
   ```
 
 - List metrics
@@ -278,42 +278,47 @@ Analyze
 
 - Filter kernels
 
-  First, list the top kernels in your application using `--list-kernels`.
+  First, list the top kernels in your application using `--list-stats`.
   ```shell-session
-  $ omniperf analyze -p workloads/vcopy/MI200/ --list-kernels
+  $ omniperf analyze -p workloads/vcopy/MI200/ --list-stats
   
-  --------
-  Analyze
-  --------
-
+  Analysis mode = cli
+  [analysis] deriving Omniperf metrics...
 
   --------------------------------------------------------------------------------
-  Detected Kernels
-  ╒════╤══════════════════════════════════════════════════════════╕
-  │    │ KernelName                                               │
-  ╞════╪══════════════════════════════════════════════════════════╡
-  │  0 │ vecCopy(double*, double*, double*, int, int) [clone .kd] │
-  ╘════╧══════════════════════════════════════════════════════════╛
+  Detected Kernels (sorted decending by duration)
+  ╒════╤══════════════════════════════════════════════╕
+  │    │ Kernel_Name                                  │
+  ╞════╪══════════════════════════════════════════════╡
+  │  0 │ vecCopy(double*, double*, double*, int, int) │
+  ╘════╧══════════════════════════════════════════════╛
+
+  --------------------------------------------------------------------------------
+  Dispatch list
+  ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
+  │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
+  ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
+  │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
+  ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
 
   ```
 
   Second, select the index of the kernel you would like to filter (i.e. __vecCopy(double*, double*, double*, int, int) [clone .kd]__ at index __0__). Then, use this index to apply the filter via `-k/--kernels`.
 
   ```shell-session
-  $ omniperf -p workloads/vcopy/mi200/ -k 0
+  $ omniperf analyze -p workloads/vcopy/MI200/ -k 0
   
-  --------
-  Analyze
-  --------
-
+  Analysis mode = cli
+  [analysis] deriving Omniperf metrics...
 
   --------------------------------------------------------------------------------
-  0. Top Stat
+  0. Top Stats
+  0.1 Top Kernels
   ╒════╤══════════════════════════════════════════╤═════════╤═══════════╤════════════╤══════════════╤════════╤═════╕
-  │    │ KernelName                               │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
+  │    │ Kernel_Name                              │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
   ╞════╪══════════════════════════════════════════╪═════════╪═══════════╪════════════╪══════════════╪════════╪═════╡
-  │  0 │ vecCopy(double*, double*, double*, int,  │       1 │  20800.00 │   20800.00 │     20800.00 │ 100.00 │ *   │
-  │    │ int) [clone .kd]                         │         │           │            │              │        │     │
+  │  0 │ vecCopy(double*, double*, double*, int,  │    1.00 │  18560.00 │   18560.00 │     18560.00 │ 100.00 │ *   │
+  │    │ int)                                     │         │           │            │              │        │     │
   ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
   ... ...
   ```
