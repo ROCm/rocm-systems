@@ -52,17 +52,22 @@ class ColoredFormatter(logging.Formatter):
 
 
 # Setup logger
-def setup_logging(verbose):
+def setup_logging(verbosity, quietmode):
     # register a trace level logger
     logging.TRACE = logging.DEBUG - 5
     logging.addLevelName(logging.TRACE, "TRACE")
     setattr(logging, "TRACE", logging.TRACE)
     setattr(logging, "trace", trace_logger)
 
-    # default: set loglevel based on selected verbosity
+    # set loglevel based on selected verbosity and quietmode
     levels = [logging.INFO, logging.DEBUG, logging.TRACE]
-    loglevel = levels[min(verbose, len(levels) - 1)]  # cap to last level index
-    # optional: override of default loglevel via env variable
+
+    if quietmode:
+        loglevel = logging.ERROR
+    else:
+        loglevel = levels[min(verbosity, len(levels) - 1)]  # cap to last level index
+
+    # optional: override of default loglevel via env variable which takes precedence
     if "OMNIPERF_LOGLEVEL" in os.environ.keys():
         loglevel = os.environ["OMNIPERF_LOGLEVEL"]
         if loglevel in {"DEBUG", "debug"}:
