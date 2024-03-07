@@ -37,7 +37,7 @@ pythonpath = [
 
 markers = [
 	"kernel_execution",
-	"ipblocks",
+	"blocks",
 	"misc",
 	"mem",
 	"sort",
