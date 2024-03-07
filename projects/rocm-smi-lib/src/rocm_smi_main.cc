@@ -57,10 +57,8 @@
 #include <set>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <climits>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -78,85 +76,6 @@ static const char *kPathPowerRoot = "/sys/kernel/debug/dri";
 static const char *kDeviceNamePrefix = "card";
 
 static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
-
-static const std::string amdSMI = "amd::smi::";
-const std::map<amd::smi::DevInfoTypes, std::string>
-amd::smi::RocmSMI::devInfoTypesStrings = {
-  {amd::smi::kDevPerfLevel, amdSMI + "kDevPerfLevel"},
-  {amd::smi::kDevOverDriveLevel, amdSMI + "kDevOverDriveLevel"},
-  {amd::smi::kDevMemOverDriveLevel, amdSMI + "kDevMemOverDriveLevel"},
-  {amd::smi::kDevDevID, amdSMI + "kDevDevID"},
-  {amd::smi::kDevXGMIPhysicalID, amdSMI + "kDevXGMIPhysicalID"},
-  {amd::smi::kDevDevRevID, amdSMI + "kDevDevRevID"},
-  {amd::smi::kDevDevProdName, amdSMI + "kDevDevProdName"},
-  {amd::smi::kDevDevProdNum, amdSMI + "kDevDevProdNum"},
-  {amd::smi::kDevVendorID, amdSMI + "kDevVendorID"},
-  {amd::smi::kDevSubSysDevID, amdSMI + "kDevSubSysDevID"},
-  {amd::smi::kDevSubSysVendorID, amdSMI + "kDevSubSysVendorID"},
-  {amd::smi::kDevGPUMClk, amdSMI + "kDevGPUMClk"},
-  {amd::smi::kDevGPUSClk, amdSMI + "kDevGPUSClk"},
-  {amd::smi::kDevDCEFClk, amdSMI + "kDevDCEFClk"},
-  {amd::smi::kDevFClk, amdSMI + "kDevFClk"},
-  {amd::smi::kDevSOCClk, amdSMI + "kDevSOCClk"},
-  {amd::smi::kDevPCIEClk, amdSMI + "kDevPCIEClk"},
-  {amd::smi::kDevPowerProfileMode, amdSMI + "kDevPowerProfileMode"},
-  {amd::smi::kDevUsage, amdSMI + "kDevUsage"},
-  {amd::smi::kDevPowerODVoltage, amdSMI + "kDevPowerODVoltage"},
-  {amd::smi::kDevVBiosVer, amdSMI + "kDevVBiosVer"},
-  {amd::smi::kDevPCIEThruPut, amdSMI + "kDevPCIEThruPut"},
-  {amd::smi::kDevErrCntSDMA, amdSMI + "kDevErrCntSDMA"},
-  {amd::smi::kDevErrCntUMC, amdSMI + "kDevErrCntUMC"},
-  {amd::smi::kDevErrCntGFX, amdSMI + "kDevErrCntGFX"},
-  {amd::smi::kDevErrCntMMHUB, amdSMI + "kDevErrCntMMHUB"},
-  {amd::smi::kDevErrCntPCIEBIF, amdSMI + "kDevErrCntPCIEBIF"},
-  {amd::smi::kDevErrCntHDP, amdSMI + "kDevErrCntHDP"},
-  {amd::smi::kDevErrCntXGMIWAFL, amdSMI + "kDevErrCntXGMIWAFL"},
-  {amd::smi::kDevErrCntFeatures, amdSMI + "kDevErrCntFeatures"},
-  {amd::smi::kDevMemTotGTT, amdSMI + "kDevMemTotGTT"},
-  {amd::smi::kDevMemTotVisVRAM, amdSMI + "kDevMemTotVisVRAM"},
-  {amd::smi::kDevMemTotVRAM, amdSMI + "kDevMemTotVRAM"},
-  {amd::smi::kDevMemUsedGTT, amdSMI + "kDevMemUsedGTT"},
-  {amd::smi::kDevMemUsedVisVRAM, amdSMI + "kDevMemUsedVisVRAM"},
-  {amd::smi::kDevMemUsedVRAM, amdSMI + "kDevMemUsedVRAM"},
-  {amd::smi::kDevVramVendor, amdSMI + "kDevVramVendor"},
-  {amd::smi::kDevPCIEReplayCount, amdSMI + "kDevPCIEReplayCount"},
-  {amd::smi::kDevUniqueId, amdSMI + "kDevUniqueId"},
-  {amd::smi::kDevDFCountersAvailable, amdSMI + "kDevDFCountersAvailable"},
-  {amd::smi::kDevMemBusyPercent, amdSMI + "kDevMemBusyPercent"},
-  {amd::smi::kDevXGMIError, amdSMI + "kDevXGMIError"},
-  {amd::smi::kDevFwVersionAsd, amdSMI + "kDevFwVersionAsd"},
-  {amd::smi::kDevFwVersionCe, amdSMI + "kDevFwVersionCe"},
-  {amd::smi::kDevFwVersionDmcu, amdSMI + "kDevFwVersionDmcu"},
-  {amd::smi::kDevFwVersionMc, amdSMI + "kDevFwVersionMc"},
-  {amd::smi::kDevFwVersionMe, amdSMI + "kDevFwVersionMe"},
-  {amd::smi::kDevFwVersionMec, amdSMI + "kDevFwVersionMec"},
-  {amd::smi::kDevFwVersionMec2, amdSMI + "kDevFwVersionMec2"},
-  {amd::smi::kDevFwVersionMes, amdSMI + "kDevFwVersionMes"},
-  {amd::smi::kDevFwVersionMesKiq, amdSMI + "kDevFwVersionMesKiq"},
-  {amd::smi::kDevFwVersionPfp, amdSMI + "kDevFwVersionPfp"},
-  {amd::smi::kDevFwVersionRlc, amdSMI + "kDevFwVersionRlc"},
-  {amd::smi::kDevFwVersionRlcSrlc, amdSMI + "kDevFwVersionRlcSrlc"},
-  {amd::smi::kDevFwVersionRlcSrlg, amdSMI + "kDevFwVersionRlcSrlg"},
-  {amd::smi::kDevFwVersionRlcSrls, amdSMI + "kDevFwVersionRlcSrls"},
-  {amd::smi::kDevFwVersionSdma, amdSMI + "kDevFwVersionSdma"},
-  {amd::smi::kDevFwVersionSdma2, amdSMI + "kDevFwVersionSdma2"},
-  {amd::smi::kDevFwVersionSmc, amdSMI + "kDevFwVersionSmc"},
-  {amd::smi::kDevFwVersionSos, amdSMI + "kDevFwVersionSos"},
-  {amd::smi::kDevFwVersionTaRas, amdSMI + "kDevFwVersionTaRas"},
-  {amd::smi::kDevFwVersionTaXgmi, amdSMI + "kDevFwVersionTaXgmi"},
-  {amd::smi::kDevFwVersionUvd, amdSMI + "kDevFwVersionUvd"},
-  {amd::smi::kDevFwVersionVce, amdSMI + "kDevFwVersionVce"},
-  {amd::smi::kDevFwVersionVcn, amdSMI + "kDevFwVersionVcn"},
-  {amd::smi::kDevSerialNumber, amdSMI + "kDevSerialNumber"},
-  {amd::smi::kDevMemPageBad, amdSMI + "kDevMemPageBad"},
-  {amd::smi::kDevNumaNode, amdSMI + "kDevNumaNode"},
-  {amd::smi::kDevGpuMetrics, amdSMI + "kDevGpuMetrics"},
-  {amd::smi::kDevGpuReset, amdSMI + "kDevGpuReset"},
-  {amd::smi::kDevAvailableComputePartition, amdSMI +
-      "kDevAvailableComputePartition"},
-  {amd::smi::kDevComputePartition, amdSMI + "kDevComputePartition"},
-  {amd::smi::kDevMemoryPartition, amdSMI + "kDevMemoryPartition"}
-};
 
 namespace amd {
 namespace smi {
@@ -647,7 +566,7 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
   for (auto it=env_vars_.enum_overrides.begin();
        it != env_vars_.enum_overrides.end(); ++it) {
     DevInfoTypes type = static_cast<DevInfoTypes>(*it);
-    ss << (std::to_string(*it) + " (" + devInfoTypesStrings.at(type) + ")");
+    ss << (std::to_string(*it) + " (" + Device::devInfoTypesStrings.at(type) + ")");
     auto temp_it = it;
     if(++temp_it != env_vars_.enum_overrides.end()) {
       ss << ", ";

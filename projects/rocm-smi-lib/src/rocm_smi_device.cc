@@ -322,7 +322,7 @@ static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
     {RSMI_DEV_PERF_LEVEL_UNKNOWN, kDevPerfLevelUnknownStr},
 };
 
-static  std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
+static const std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
     // rsmi_memory_type_t
     {kDevMemTotGTT, RSMI_MEM_TYPE_GTT},
     {kDevMemTotVisVRAM, RSMI_MEM_TYPE_VIS_VRAM},
@@ -375,6 +375,83 @@ static  std::map<DevInfoTypes, uint8_t> kDevInfoVarTypeToRSMIVariant = {
 
     // rsmi_event_group_t
     {kDevDFCountersAvailable, RSMI_EVNT_GRP_XGMI}
+};
+
+const std::map<DevInfoTypes, const char*>
+Device::devInfoTypesStrings = {
+  {kDevPerfLevel, "kDevPerfLevel"},
+  {kDevOverDriveLevel, "kDevOverDriveLevel"},
+  {kDevMemOverDriveLevel, "kDevMemOverDriveLevel"},
+  {kDevDevID, "kDevDevID"},
+  {kDevXGMIPhysicalID, "kDevXGMIPhysicalID"},
+  {kDevDevRevID, "kDevDevRevID"},
+  {kDevDevProdName, "kDevDevProdName"},
+  {kDevDevProdNum, "kDevDevProdNum"},
+  {kDevVendorID, "kDevVendorID"},
+  {kDevSubSysDevID, "kDevSubSysDevID"},
+  {kDevSubSysVendorID, "kDevSubSysVendorID"},
+  {kDevGPUMClk, "kDevGPUMClk"},
+  {kDevGPUSClk, "kDevGPUSClk"},
+  {kDevDCEFClk, "kDevDCEFClk"},
+  {kDevFClk, "kDevFClk"},
+  {kDevSOCClk, "kDevSOCClk"},
+  {kDevPCIEClk, "kDevPCIEClk"},
+  {kDevPowerProfileMode, "kDevPowerProfileMode"},
+  {kDevUsage, "kDevUsage"},
+  {kDevPowerODVoltage, "kDevPowerODVoltage"},
+  {kDevVBiosVer, "kDevVBiosVer"},
+  {kDevPCIEThruPut, "kDevPCIEThruPut"},
+  {kDevErrCntSDMA, "kDevErrCntSDMA"},
+  {kDevErrCntUMC, "kDevErrCntUMC"},
+  {kDevErrCntGFX, "kDevErrCntGFX"},
+  {kDevErrCntMMHUB, "kDevErrCntMMHUB"},
+  {kDevErrCntPCIEBIF, "kDevErrCntPCIEBIF"},
+  {kDevErrCntHDP, "kDevErrCntHDP"},
+  {kDevErrCntXGMIWAFL, "kDevErrCntXGMIWAFL"},
+  {kDevErrCntFeatures, "kDevErrCntFeatures"},
+  {kDevMemTotGTT, "kDevMemTotGTT"},
+  {kDevMemTotVisVRAM, "kDevMemTotVisVRAM"},
+  {kDevMemTotVRAM, "kDevMemTotVRAM"},
+  {kDevMemUsedGTT, "kDevMemUsedGTT"},
+  {kDevMemUsedVisVRAM, "kDevMemUsedVisVRAM"},
+  {kDevMemUsedVRAM, "kDevMemUsedVRAM"},
+  {kDevVramVendor, "kDevVramVendor"},
+  {kDevPCIEReplayCount, "kDevPCIEReplayCount"},
+  {kDevUniqueId, "kDevUniqueId"},
+  {kDevDFCountersAvailable, "kDevDFCountersAvailable"},
+  {kDevMemBusyPercent, "kDevMemBusyPercent"},
+  {kDevXGMIError, "kDevXGMIError"},
+  {kDevFwVersionAsd, "kDevFwVersionAsd"},
+  {kDevFwVersionCe, "kDevFwVersionCe"},
+  {kDevFwVersionDmcu, "kDevFwVersionDmcu"},
+  {kDevFwVersionMc, "kDevFwVersionMc"},
+  {kDevFwVersionMe, "kDevFwVersionMe"},
+  {kDevFwVersionMec, "kDevFwVersionMec"},
+  {kDevFwVersionMec2, "kDevFwVersionMec2"},
+  {kDevFwVersionMes, "kDevFwVersionMes"},
+  {kDevFwVersionMesKiq, "kDevFwVersionMesKiq"},
+  {kDevFwVersionPfp, "kDevFwVersionPfp"},
+  {kDevFwVersionRlc, "kDevFwVersionRlc"},
+  {kDevFwVersionRlcSrlc, "kDevFwVersionRlcSrlc"},
+  {kDevFwVersionRlcSrlg, "kDevFwVersionRlcSrlg"},
+  {kDevFwVersionRlcSrls, "kDevFwVersionRlcSrls"},
+  {kDevFwVersionSdma, "kDevFwVersionSdma"},
+  {kDevFwVersionSdma2, "kDevFwVersionSdma2"},
+  {kDevFwVersionSmc, "kDevFwVersionSmc"},
+  {kDevFwVersionSos, "kDevFwVersionSos"},
+  {kDevFwVersionTaRas, "kDevFwVersionTaRas"},
+  {kDevFwVersionTaXgmi, "kDevFwVersionTaXgmi"},
+  {kDevFwVersionUvd, "kDevFwVersionUvd"},
+  {kDevFwVersionVce, "kDevFwVersionVce"},
+  {kDevFwVersionVcn, "kDevFwVersionVcn"},
+  {kDevSerialNumber, "kDevSerialNumber"},
+  {kDevMemPageBad, "kDevMemPageBad"},
+  {kDevNumaNode, "kDevNumaNode"},
+  {kDevGpuMetrics, "kDevGpuMetrics"},
+  {kDevGpuReset, "kDevGpuReset"},
+  {kDevAvailableComputePartition, "kDevAvailableComputePartition"},
+  {kDevComputePartition, "kDevComputePartition"},
+  {kDevMemoryPartition, "kDevMemoryPartition"},
 };
 
 static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
@@ -603,7 +680,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   if (ret != 0) {
     ss << __PRETTY_FUNCTION__ << " | Issue: File did not exist - SYSFS file ("
        << sysfs_path
-       << ") for DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
+       << ") for DevInfoInfoType (" << devInfoTypesStrings.at(type)
        << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -612,7 +689,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
     ss << __PRETTY_FUNCTION__
        << " | Issue: File is not a regular file - SYSFS file ("
        << sysfs_path << ") for "
-       << "DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type) << "),"
+       << "DevInfoInfoType (" << devInfoTypesStrings.at(type) << "),"
        << " returning ENOENT (" << std::strerror(ENOENT) << ")";
     LOG_ERROR(ss);
     return ENOENT;
@@ -623,7 +700,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   if (!fs->is_open()) {
     ss << __PRETTY_FUNCTION__
        << " | Issue: Could not open - SYSFS file (" << sysfs_path << ") for "
-       << "DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type) << "), "
+       << "DevInfoInfoType (" << devInfoTypesStrings.at(type) << "), "
        << ", returning " << std::to_string(errno) << " ("
        << std::strerror(errno) << ")";
     LOG_ERROR(ss);
@@ -632,7 +709,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
 
   ss << __PRETTY_FUNCTION__ << " | Successfully opened SYSFS file ("
      << sysfs_path
-     << ") for DevInfoInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
+     << ") for DevInfoInfoType (" << devInfoTypesStrings.at(type)
      << ")";
   LOG_INFO(ss);
   return 0;
@@ -649,7 +726,7 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   ret = openDebugFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read debugInfoStr for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type)<< "), returning "
+     << devInfoTypesStrings.at(type)<< "), returning "
      << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -663,7 +740,7 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   fs.close();
 
   ss << "Successfully read debugInfoStr for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type)<< "), retString= " << *retStr;
+     << devInfoTypesStrings.at(type)<< "), retString= " << *retStr;
   LOG_INFO(ss);
 
   return 0;
@@ -679,7 +756,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read device info string for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type) << "), returning "
+     << devInfoTypesStrings.at(type) << "), returning "
      << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -688,8 +765,8 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   fs >> *retStr;
   fs.close();
   ss << __PRETTY_FUNCTION__
-     << "Successfully read device info string for DevInfoType (" +
-            RocmSMI::devInfoTypesStrings.at(type) + "): " + *retStr
+     << "Successfully read device info string for DevInfoType (" <<
+            devInfoTypesStrings.at(type) << "): " + *retStr
      << " | "
      << (fs.is_open() ? " File stream is opened" : " File stream is closed")
      << " | " << (fs.bad() ? "[ERROR] Bad read operation" :
@@ -724,7 +801,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
     fs.close();
     ss << __PRETTY_FUNCTION__ << " | Issue: Could not open fileStream; "
        << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
+       << ") for DevInfoType (" << devInfoTypesStrings.at(type)
        << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -735,7 +812,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
     fs.flush();
     fs.close();
     ss << "Successfully wrote device info string (" << valStr
-       << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
+       << ") for DevInfoType (" << devInfoTypesStrings.at(type)
        << "), returning RSMI_STATUS_SUCCESS";
     LOG_INFO(ss);
     ret = RSMI_STATUS_SUCCESS;
@@ -749,7 +826,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
     fs.close();
     ss << __PRETTY_FUNCTION__ << " | Issue: Could not write to file; "
        << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << RocmSMI::devInfoTypesStrings.at(type)
+       << ") for DevInfoType (" << devInfoTypesStrings.at(type)
        << "), returning " << getRSMIStatusString(ErrnoToRsmiStatus(ret));
     ss << " | "
        << (fs.is_open() ? "[ERROR] File stream open" :
@@ -836,14 +913,14 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read DevInfoLine for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")";
+       << devInfoTypesStrings.at(type) << ")";
     LOG_ERROR(ss);
     return ret;
   }
 
   std::getline(fs, *line);
   ss << "Successfully read DevInfoLine for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type) << "), returning *line = "
+     << devInfoTypesStrings.at(type) << "), returning *line = "
      << *line;
   LOG_INFO(ss);
 
@@ -862,7 +939,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   ptr = fopen(sysfs_path.c_str(), "rb");
   if (!ptr) {
     ss << "Could not read DevInfoBinary for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")"
+       << devInfoTypesStrings.at(type) << ")"
        << " - SYSFS (" << sysfs_path << ")"
        << ", returning " << std::to_string(errno) << " ("
        << std::strerror(errno) << ")";
@@ -874,7 +951,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   fclose(ptr);
   if ((num*b_size) != b_size) {
     ss << "Could not read DevInfoBinary for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ") - SYSFS ("
+       << devInfoTypesStrings.at(type) << ") - SYSFS ("
        << sysfs_path << "), binary size error; "
        << "[buff: "
        << p_binary_data
@@ -888,7 +965,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
     return ENOENT;
   }
   ss << "Successfully read DevInfoBinary for DevInfoType ("
-     << RocmSMI::devInfoTypesStrings.at(type) << ") - SYSFS ("
+     << devInfoTypesStrings.at(type) << ") - SYSFS ("
      << sysfs_path << "), returning binaryData = " << p_binary_data
      << "; byte_size = " << std::dec << static_cast<int>(b_size);
 
@@ -920,7 +997,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
 
   if (retVec->empty()) {
     ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")"
+       << devInfoTypesStrings.at(type) << ")"
        << ", but contained no string lines";
     LOG_ERROR(ss);
     return ENXIO;
@@ -938,12 +1015,12 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
 
   if (!allLines.empty()) {
     ss << "Successfully read devInfoMultiLineStr for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ") "
+       << devInfoTypesStrings.at(type) << ") "
        << ", returning lines read = " << allLines;
     LOG_INFO(ss);
   } else {
     ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << RocmSMI::devInfoTypesStrings.at(type) << ")"
+       << devInfoTypesStrings.at(type) << ")"
        << ", but lines were empty";
     LOG_INFO(ss);
     return ENXIO;
