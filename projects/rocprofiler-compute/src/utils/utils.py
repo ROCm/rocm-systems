@@ -301,10 +301,6 @@ def run_prof(fname, profiler_options, workload_dir, mspec):
     df.rename(columns=output_headers, inplace=True)
     df.to_csv(workload_dir + "/" + fbase + ".csv", index=False)
 
-    # write rocprof output to logging
-    console_log(output)
-
-
 def replace_timestamps(workload_dir):
     df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
     if "Start_Timestamp" in df_stamps.columns and "End_Timestamp" in df_stamps.columns:
