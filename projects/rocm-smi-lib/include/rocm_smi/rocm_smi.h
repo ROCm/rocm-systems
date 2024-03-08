@@ -815,7 +815,7 @@ typedef rsmi_pcie_bandwidth_t rsmi_pcie_bandwidth;
  */
 typedef struct {
   /* Utilization */
-  uint16_t average_gfx_activity;
+  uint16_t average_gfx_activity;  //!< Average graphics activity
   uint16_t average_umc_activity;  //!< memory controller
   uint16_t average_mm_activity;   //!< UVD or VCN
 } rsmi_activity_metric_counter_t;
@@ -1616,7 +1616,7 @@ rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] revision a pointer to uint32_t to which the XGMI physical id
+ *  @param[inout] id a pointer to uint32_t to which the XGMI physical id
  *  will be written
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
@@ -1634,7 +1634,7 @@ rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id);
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] gpu_id a pointer to uint64_t to which the KFD gpu id will be
+ *  @param[inout] guid a pointer to uint64_t to which the KFD gpu id will be
  *  written. If the @p guid parameter is nullptr, this function will return
  *  ::RSMI_STATUS_INVALID_ARGS. If the GPU ID is not supported with
  *  the device index queried, gpu_id will return MAX UINT64 value an
@@ -4541,6 +4541,7 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value);
 rsmi_status_t
 rsmi_dev_metrics_log_get(uint32_t dv_ind);
 
+/** @} */  // end of DevMetricsHeaderInfoGet
 
 #ifdef __cplusplus
 }

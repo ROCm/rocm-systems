@@ -5,9 +5,27 @@ defaults:
   maxdepth: 6
 root: index
 subtrees:
-- caption: API
+- caption: Tutorials
   entries:
-    - file: doxygen/html/index
+  - file: c++_tutorials
+    title: C++ Tutorials
+  - file: python_tutorials
+    title: Python Tutorials
+- caption: How to Guide
+  entries:
+  - file: c++_usage
+    title: C++ How to Guide
+  - file: python_usage
+    title: Python How to Guide
+- caption: Reference
+  entries:
+  - file: doxygen/html/index
+    title: C++ Reference
+  - file: python_api
+    title: Python Reference
 - caption: About
   entries:
   - file: license
+    title: License
+  - file: CHANGELOG
+    title: Changelog
