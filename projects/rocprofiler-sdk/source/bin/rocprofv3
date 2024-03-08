@@ -143,7 +143,7 @@ while true; do
     shift
   elif [[ "$1" == "-L" || "$1" == "--list-metrics" ]]; then
     export ROCPROF_LIST_METRICS=1
-    LD_PRELOAD="${ROCPROF_PRELOAD}" exec ${ROCM_DIR}/lib/rocprofiler-sdk/rocprofv3-trigger-list-metrics
+    shift
   elif [ "$1" == "--kernel-trace" ]; then
     export ROCPROF_KERNEL_TRACE=1
     shift
@@ -217,6 +217,8 @@ if [ -n "${PMC_LINES:-}" ]; then
       echo -e "\nThe output path for the following counters: $ROCPROF_OUTPUT_PATH"
     fi
   done
+elif [ -n "$ROCPROF_LIST_METRICS" ]; then
+    LD_PRELOAD="${ROCPROF_PRELOAD}" exec ${ROCM_DIR}/lib/rocprofiler-sdk/rocprofv3-trigger-list-metrics
 else
   # for non counter collection. e.g: tracing
   LD_PRELOAD="${ROCPROF_PRELOAD}" exec "${@}"
