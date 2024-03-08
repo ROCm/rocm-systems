@@ -338,7 +338,7 @@ class OmniProfiler_Base:
 
         # show status bar in error-only mode
         disable_tqdm = True
-        if logging.getLogger().getEffectiveLevel() >= logging.ERROR:
+        if self.__args.loglevel >= logging.ERROR:
             disable_tqdm = False
 
         # Run profiling on each input file
