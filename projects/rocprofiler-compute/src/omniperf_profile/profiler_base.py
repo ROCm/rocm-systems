@@ -319,7 +319,8 @@ class OmniProfiler_Base:
         )
 
         # log basic info
-        console_log(str(prog) + " ver: " + str(version))
+        console_log(str(prog).title() + " version: " + str(version))
+        console_log("Profiler choice: %s" % self.__profiler)
         console_log("Path: " + str(os.path.abspath(self.__args.path)))
         console_log("Target: " + str(self._soc._mspec.gpu_model))
         console_log("Command: " + str(self.__args.remaining))
