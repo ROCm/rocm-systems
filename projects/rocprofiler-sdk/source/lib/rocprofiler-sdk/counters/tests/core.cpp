@@ -414,6 +414,10 @@ TEST(core, check_callbacks)
     context::push_client(1);
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
+    context::context ctx;
+    ctx.counter_collection = std::make_unique<rocprofiler::context::counter_collection_service>();
+    ctx.counter_collection->enabled.wlock([](auto& data) { data = true; });
+
     auto agents = hsa::get_queue_controller().get_supported_agents();
     ASSERT_GT(agents.size(), 0);
     hsa::get_queue_controller().disable_serialization();
@@ -471,9 +475,10 @@ TEST(core, check_callbacks)
             expected.agent_id       = fq.get_agent().get_rocp_agent()->id;
 
             hsa::Queue::queue_info_session_t::external_corr_id_map_t extern_ids = {};
+
             auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
             auto ret_pkt   = counters::queue_cb(
-                cb_info, fq, pkt, expected.kernel_id, &user_data, extern_ids, &corr_id);
+                &ctx, cb_info, fq, pkt, expected.kernel_id, &user_data, extern_ids, &corr_id);
 
             ASSERT_TRUE(ret_pkt) << fmt::format("Expected a packet to be generated for - {}",
                                                 metric.name());
@@ -515,7 +520,7 @@ TEST(core, check_callbacks)
             counters::inst_pkt_t pkts;
             pkts.emplace_back(
                 std::make_pair(std::move(ret_pkt), static_cast<counters::ClientID>(0)));
-            completed_cb(cb_info, fq, pkt, sess, pkts);
+            completed_cb(&ctx, cb_info, fq, pkt, sess, pkts);
             rocprofiler_flush_buffer(opt_buff_id);
             rocprofiler_destroy_buffer(opt_buff_id);
         }
@@ -622,14 +627,6 @@ TEST(core, start_stop_buffered_ctx)
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
     found = false;
-    hsa::get_queue_controller().iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
-    EXPECT_FALSE(found);
-    found = false;
     ctx.counter_collection->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_FALSE(found);
 
@@ -694,14 +691,6 @@ TEST(core, start_stop_callback_ctx)
      */
     ROCPROFILER_CALL(rocprofiler_stop_context(get_client_ctx()), "stop context");
 
-    found = false;
-    hsa::get_queue_controller().iterate_callbacks([&](auto cid, const auto&) {
-        if(cid == ctx.counter_collection->callbacks.at(0)->queue_id)
-        {
-            found = true;
-        }
-    });
-    EXPECT_FALSE(found);
     found = false;
     ctx.counter_collection->enabled.rlock([&](const auto& data) { found = data; });
     EXPECT_FALSE(found);

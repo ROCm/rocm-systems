@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
 #include <glog/logging.h>
 #include <hsa/hsa.h>
@@ -171,6 +172,12 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     // Delete signals and packets, signal we have completed.
     if(queue_info_session.interrupt_signal.handle != 0u)
     {
+#if !defined(NDEBUG)
+        hsa::get_queue_controller()._debug_signals.wlock(
+            [&](auto& signals) { signals.erase(queue_info_session.interrupt_signal.handle); });
+#endif
+        hsa::get_core_table()->hsa_signal_store_screlease_fn(queue_info_session.interrupt_signal,
+                                                             -1);
         hsa::get_core_table()->hsa_signal_destroy_fn(queue_info_session.interrupt_signal);
     }
     if(queue_info_session.kernel_pkt.ext_amd_aql_pm4.completion_signal.handle != 0u)
@@ -234,6 +241,7 @@ WriteInterceptor(const void* packets,
                                     std::vector<rocprofiler_packet>& _packets) {
         hsa_barrier_and_packet_t barrier{};
         barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+        barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
         if(dependency_signal != nullptr) barrier.dep_signal[0] = *dependency_signal;
         if(completion_signal != nullptr) barrier.completion_signal = *completion_signal;
         _packets.emplace_back(barrier);
@@ -285,6 +293,7 @@ WriteInterceptor(const void* packets,
             continue;
         }
 
+        queue.async_started();
         // Copy kernel pkt, copy is to allow for signal to be modified
         rocprofiler_packet kernel_pkt = packets_arr[i];
         uint64_t           kernel_id  = get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
@@ -322,9 +331,7 @@ WriteInterceptor(const void* packets,
         // Barrier packet is last packet inserted into queue
         if(inserted_before)
         {
-            CreateBarrierPacket(&transformed_packets.back().ext_amd_aql_pm4.completion_signal,
-                                nullptr,
-                                transformed_packets);
+            CreateBarrierPacket(nullptr, nullptr, transformed_packets);
         }
 
         transformed_packets.emplace_back(kernel_pkt);
@@ -334,7 +341,10 @@ WriteInterceptor(const void* packets,
         if(original_packet.completion_signal.handle != 0u)
         {
             hsa_barrier_and_packet_t barrier{};
-            barrier.header            = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+            barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+            // barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
+            // barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
+            // barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
             barrier.completion_signal = original_packet.completion_signal;
             transformed_packets.emplace_back(barrier);
         }
@@ -356,10 +366,11 @@ WriteInterceptor(const void* packets,
         if(injected_end_pkt)
         {
             transformed_packets.back().ext_amd_aql_pm4.completion_signal = interrupt_signal;
-            CreateBarrierPacket(&interrupt_signal, nullptr, transformed_packets);
+            CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
         }
         else
         {
+            get_core_table()->hsa_signal_store_screlease_fn(interrupt_signal, 0);
             hsa_barrier_and_packet_t barrier{};
             barrier.header            = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
             barrier.completion_signal = interrupt_signal;
@@ -373,7 +384,6 @@ WriteInterceptor(const void* packets,
 
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.
-        queue.async_started();
         queue.signal_async_handler(
             interrupt_signal,
             new Queue::queue_info_session_t{.queue            = queue,
@@ -400,8 +410,12 @@ Queue::~Queue() { sync(); }
 void
 Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const
 {
+#if !defined(NDEBUG)
+    hsa::get_queue_controller()._debug_signals.wlock(
+        [&](auto& signals) { signals[signal.handle] = signal; });
+#endif
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-        signal, HSA_SIGNAL_CONDITION_EQ, 0, AsyncSignalHandler, static_cast<void*>(data));
+        signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, static_cast<void*>(data));
     LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_async_handler failed";
 }
@@ -451,6 +465,7 @@ Queue::Queue(const AgentCache&  agent,
 
     create_signal(0, &ready_signal);
     create_signal(0, &block_signal);
+    _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
     *queue = _intercept_queue;
 }
 

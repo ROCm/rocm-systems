@@ -72,7 +72,6 @@ public:
 
     // Do not allow this data structure to be copied, std::move only.
     Synchronized(const Synchronized&) = delete;
-    Synchronized& operator=(const Synchronized&) = delete;
 
     template <typename FuncT, typename... Args>
     decltype(auto) rlock(FuncT&& lambda, Args&&... args) const;

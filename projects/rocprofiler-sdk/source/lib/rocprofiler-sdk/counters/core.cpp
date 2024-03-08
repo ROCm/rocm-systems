@@ -253,7 +253,8 @@ counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& 
  * We return an AQLPacket containing the start/stop/read packets for injection.
  */
 std::unique_ptr<rocprofiler::hsa::AQLPacket>
-queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
+queue_cb(const context::context*                                         ctx,
+         const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue&                                               queue,
          const hsa::rocprofiler_packet&                                  pkt,
          uint64_t                                                        kernel_id,
@@ -261,7 +262,43 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
          const context::correlation_id*                                  correlation_id)
 {
-    if(!info || !info->user_cb) return nullptr;
+    CHECK(info && ctx);
+
+    // Maybe adds serialization packets to the AQLPacket (if serializer is enabled)
+    // and maybe adds barrier packets if the state is transitioning from serialized <->
+    // unserialized
+    auto maybe_add_serialization = [&](auto& gen_pkt) {
+        hsa::get_queue_controller().serializer().rlock([&](const auto& serializer) {
+            for(auto& s_pkt : serializer.kernel_dispatch(queue))
+            {
+                gen_pkt->before_krn_pkt.push_back(s_pkt.ext_amd_aql_pm4);
+            }
+        });
+    };
+
+    // Packet generated when no instrumentation is performed. May contain serialization
+    // packets/barrier packets (and can be empty).
+    auto no_instrumentation = [&]() {
+        auto ret_pkt = std::make_unique<rocprofiler::hsa::AQLPacket>(nullptr);
+        // If we have a counter collection context but it is not enabled, we still might need
+        // to add barrier packets to transition from serialized -> unserialized execution. This
+        // transition is coordinated by the serializer.
+        maybe_add_serialization(ret_pkt);
+        info->packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), nullptr); });
+        return ret_pkt;
+    };
+
+    if(!ctx || !ctx->counter_collection) return nullptr;
+
+    bool is_enabled = false;
+
+    ctx->counter_collection->enabled.rlock(
+        [&](const auto& collect_ctx) { is_enabled = collect_ctx; });
+
+    if(!is_enabled || !info->user_cb)
+    {
+        return no_instrumentation();
+    }
 
     auto _corr_id_v =
         rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
@@ -294,7 +331,10 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
 
     info->user_cb(dispatch_data, &req_profile, user_data, info->callback_args);
 
-    if(req_profile.handle == 0) return nullptr;
+    if(req_profile.handle == 0)
+    {
+        return no_instrumentation();
+    }
 
     auto prof_config = get_controller().get_profile_cfg(req_profile);
     CHECK(prof_config);
@@ -303,27 +343,13 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
     auto status = info->get_packet(ret_pkt, queue.get_agent(), prof_config);
     CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(status);
 
-    if(ret_pkt->empty) return ret_pkt;
-
-    auto&& CreateBarrierPacket =
-        [](hsa_signal_t*                                                     dependency_signal,
-           hsa_signal_t*                                                     completion_signal,
-           common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3>& _packets) {
-            hsa::rocprofiler_packet barrier{};
-            barrier.barrier_and.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-            if(dependency_signal != nullptr) barrier.barrier_and.dep_signal[0] = *dependency_signal;
-            if(completion_signal != nullptr)
-                barrier.barrier_and.completion_signal = *completion_signal;
-            _packets.emplace_back(barrier.ext_amd_aql_pm4);
-        };
-
-    hsa_signal_t ready_signal = queue.ready_signal;
-    hsa_signal_t block_signal = queue.block_signal;
-    CreateBarrierPacket(nullptr, &ready_signal, ret_pkt->before_krn_pkt);
-    CreateBarrierPacket(&block_signal, &block_signal, ret_pkt->before_krn_pkt);
+    maybe_add_serialization(ret_pkt);
+    if(ret_pkt->empty)
+    {
+        return ret_pkt;
+    }
 
     ret_pkt->before_krn_pkt.push_back(ret_pkt->start);
-    ret_pkt->before_krn_pkt.end()->completion_signal.handle = 0;
     ret_pkt->after_krn_pkt.push_back(ret_pkt->stop);
     ret_pkt->after_krn_pkt.push_back(ret_pkt->read);
     for(auto& aql_pkt : ret_pkt->after_krn_pkt)
@@ -338,13 +364,14 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
  * Callback called by HSA interceptor when the kernel has completed processing.
  */
 void
-completed_cb(const std::shared_ptr<counter_callback_info>& info,
+completed_cb(const context::context*                       ctx,
+             const std::shared_ptr<counter_callback_info>& info,
              const hsa::Queue&                             queue,
              hsa::rocprofiler_packet,
              const hsa::Queue::queue_info_session_t& session,
              inst_pkt_t&                             pkts)
 {
-    if(!info || pkts.empty()) return;
+    CHECK(info && ctx);
 
     std::shared_ptr<profile_config> prof_config;
     // Get the Profile Config
@@ -365,10 +392,11 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
 
     if(!pkt) return;
 
-    if(!pkt->empty)
-    {
-        hsa::profiler_serializer_kernel_completion_signal(session.queue.block_signal);
-    }
+    hsa::get_queue_controller().serializer().wlock(
+        [&](auto& serializer) { serializer.kernel_completion_signal(session.queue); });
+
+    // We have no profile config, nothing to output.
+    if(!prof_config) return;
 
     auto decoded_pkt = EvaluateAST::read_pkt(prof_config->pkt_generator.get(), *pkt);
     EvaluateAST::read_special_counters(
@@ -452,13 +480,21 @@ start_context(const context::context* ctx)
 
     auto& controller = hsa::get_queue_controller();
 
-    // Only one thread should be attempting to enable/disable this context
+    bool already_enabled = true;
+    controller.enable_serialization();
     ctx->counter_collection->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
+        already_enabled = false;
+        enabled         = true;
+    });
+
+    if(!already_enabled)
+    {
         for(auto& cb : ctx->counter_collection->callbacks)
         {
             // Insert our callbacks into HSA Interceptor. This
             // turns on counter instrumentation.
+            if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
             cb->queue_id = controller.add_callback(
                 std::nullopt,
                 [=](const hsa::Queue&                                               q,
@@ -467,17 +503,22 @@ start_context(const context::context* ctx)
                     rocprofiler_user_data_t*                                        user_data,
                     const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
                     const context::correlation_id* correlation_id) {
-                    return queue_cb(
-                        cb, q, kern_pkt, kernel_id, user_data, extern_corr_ids, correlation_id);
+                    return queue_cb(ctx,
+                                    cb,
+                                    q,
+                                    kern_pkt,
+                                    kernel_id,
+                                    user_data,
+                                    extern_corr_ids,
+                                    correlation_id);
                 },
                 // Completion CB
                 [=](const hsa::Queue&                       q,
                     hsa::rocprofiler_packet                 kern_pkt,
                     const hsa::Queue::queue_info_session_t& session,
-                    inst_pkt_t& aql) { completed_cb(cb, q, kern_pkt, session, aql); });
+                    inst_pkt_t& aql) { completed_cb(ctx, cb, q, kern_pkt, session, aql); });
         }
-        enabled = true;
-    });
+    }
 }
 
 void
@@ -489,14 +530,9 @@ stop_context(const context::context* ctx)
 
     ctx->counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
-        for(auto& cb : ctx->counter_collection->callbacks)
-        {
-            // Remove our callbacks from HSA's queue controller
-            controller.remove_callback(cb->queue_id);
-            cb->queue_id = -1;
-        }
         enabled = false;
     });
+    controller.disable_serialization();
 }
 
 bool

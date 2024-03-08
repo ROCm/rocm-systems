@@ -173,6 +173,9 @@ public:
     template <typename FuncT>
     void signal_callback(FuncT&& func) const;
 
+    template <typename FuncT>
+    void lock_queue(FuncT&& func);
+
     virtual rocprofiler_queue_id_t get_id() const;
 
     // Fast check to see if we have any callbacks we need to notify
@@ -181,9 +184,10 @@ public:
     // Tracks the number of in flight kernel executions we
     // are waiting on. We cannot destroy Queue until all kernels
     // have comleted.
-    void async_started() { _active_async_packets++; }
-    void async_complete() { _active_async_packets--; }
-    void sync() const;
+    void    async_started() { _active_async_packets++; }
+    void    async_complete() { _active_async_packets--; }
+    int64_t active_async_packets() const { return _active_async_packets; }
+    void    sync() const;
 
     void register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb);
     void remove_callback(ClientID id);
@@ -206,6 +210,7 @@ private:
     rocprofiler::common::Synchronized<callback_map_t> _callbacks       = {};
     hsa_queue_t*                                      _intercept_queue = nullptr;
     queue_state                                       _state           = queue_state::normal;
+    std::mutex                                        _lock_queue;
 };
 
 inline rocprofiler_queue_id_t
@@ -219,6 +224,14 @@ inline void
 Queue::signal_callback(FuncT&& func) const
 {
     _callbacks.rlock([&func](const auto& data) { func(data); });
+}
+
+template <typename FuncT>
+void
+Queue::lock_queue(FuncT&& func)
+{
+    std::unique_lock<std::mutex> lock(_lock_queue);
+    func();
 }
 
 }  // namespace hsa

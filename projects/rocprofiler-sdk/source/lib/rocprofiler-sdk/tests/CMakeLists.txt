@@ -12,7 +12,7 @@ include(GoogleTest)
 # -------------------------------------------------------------------------------------- #
 
 set(rocprofiler_lib_sources agent.cpp buffer.cpp hsa.cpp naming.cpp timestamp.cpp
-                            version.cpp)
+                            version.cpp hsa_barrier.cpp)
 
 add_executable(rocprofiler-lib-tests)
 target_sources(rocprofiler-lib-tests PRIVATE ${rocprofiler_lib_sources} details/agent.cpp)

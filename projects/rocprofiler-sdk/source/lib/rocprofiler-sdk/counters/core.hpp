@@ -126,7 +126,8 @@ void
 stop_context(const context::context*);
 
 std::unique_ptr<rocprofiler::hsa::AQLPacket>
-queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
+queue_cb(const context::context*                                         ctx,
+         const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue&                                               queue,
          const hsa::rocprofiler_packet&                                  pkt,
          uint64_t                                                        kernel_id,
@@ -139,11 +140,12 @@ using inst_pkt_t = common::container::
     small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
 
 void
-completed_cb(const std::shared_ptr<counter_callback_info>&,
-             const hsa::Queue&,
+completed_cb(const context::context*                       ctx,
+             const std::shared_ptr<counter_callback_info>& info,
+             const hsa::Queue&                             queue,
              hsa::rocprofiler_packet,
-             const hsa::Queue::queue_info_session_t&,
-             inst_pkt_t& pkts);
+             const hsa::Queue::queue_info_session_t& session,
+             inst_pkt_t&                             pkts);
 
 std::shared_ptr<profile_config> get_profile_config(rocprofiler_profile_config_id_t);
 }  // namespace counters
