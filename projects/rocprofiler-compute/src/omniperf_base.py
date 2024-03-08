@@ -35,10 +35,11 @@ from utils.utils import (
     get_version_display,
     detect_rocprof,
     get_submodules,
+    console_debug,
     console_log,
     console_error,
 )
-from utils.logger import setup_logging_handler, setup_logging_priority
+from utils.logger import setup_console_handler, setup_logging_priority, setup_file_handler
 from argparser import omniarg_parser
 import config
 import pandas as pd
@@ -70,19 +71,22 @@ class Omniperf:
         self.__options = {}
         self.__supported_archs = SUPPORTED_ARCHS
         self.__mspec: MachineSpecs = None  # to be initalized in load_soc_specs()
-        setup_logging_handler()
+        setup_console_handler()
         self.set_version()
         self.parse_args()
-        self.__loglevel = setup_logging_priority(self.__args.verbose, self.__args.quiet)
-        setattr(self.__args, "loglevel", self.__loglevel)
         self.__mode = self.__args.mode
+        self.__loglevel = setup_logging_priority(
+            self.__args.verbose, self.__args.quiet, self.__mode
+        )
+
+        setattr(self.__args, "loglevel", self.__loglevel)
 
         if self.__mode == "profile":
             self.detect_profiler()
         elif self.__mode == "analyze":
             self.detect_analyze()
 
-        console_log("Execution mode = %s" % self.__mode)
+        console_debug("Execution mode = %s" % self.__mode)
 
     def print_graphic(self):
         """Log program name as ascii art to terminal."""
@@ -189,8 +193,6 @@ class Omniperf:
                 self.__args.path, self.__args.name, self.__mspec.gpu_model
             )
 
-        console_log("Profiler choice = %s" % self.__profiler_mode)
-
         # instantiate desired profiler
         if self.__profiler_mode == "rocprofv1":
             from omniperf_profile.profiler_rocprof_v1 import rocprof_v1_profiler
@@ -216,7 +218,11 @@ class Omniperf:
         # -----------------------
         # run profiling workflow
         # -----------------------
+
         self.__soc[self.__mspec.gpu_arch].profiling_setup()
+        # enable file-based logging
+        setup_file_handler(self.__args.loglevel, self.__args.path)
+
         profiler.pre_processing()
         profiler.run_profiling(self.__version["ver"], config.prog)
         profiler.post_processing()
