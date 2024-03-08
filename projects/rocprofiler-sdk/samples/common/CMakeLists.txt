@@ -2,6 +2,11 @@
 # common utilities for samples
 #
 
+# default FAIL_REGULAR_EXPRESSION for tests
+set(ROCPROFILER_DEFAULT_FAIL_REGEX
+    "threw an exception|Permission denied|Could not create logging file"
+    CACHE STRING "Default FAIL_REGULAR_EXPRESSION for tests")
+
 # build flags
 add_library(rocprofiler-samples-build-flags INTERFACE)
 add_library(rocprofiler::samples-build-flags ALIAS rocprofiler-samples-build-flags)

@@ -24,6 +24,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/dispatch_profile.h>
+#include <rocprofiler-sdk/fwd.h>
 
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
@@ -80,7 +81,6 @@ struct counter_callback_info
     // HSA Queue ClientID. This is an ID we get when we insert a callback into the
     // HSA queue interceptor. This ID can be used to disable the callback.
     rocprofiler::hsa::ClientID queue_id{-1};
-
     // Buffer to use for storing counter data. Used if callback is not set.
     std::optional<rocprofiler_buffer_id_t> buffer;
 
@@ -130,6 +130,7 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue&                                               queue,
          const hsa::rocprofiler_packet&                                  pkt,
          uint64_t                                                        kernel_id,
+         rocprofiler_user_data_t*                                        user_data,
          const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
          const context::correlation_id*                                  correlation_id);
 

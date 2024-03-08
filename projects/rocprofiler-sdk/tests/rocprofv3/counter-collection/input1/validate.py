@@ -1,30 +1,46 @@
-import pandas as pd
+#!/usr/bin/env python3
+
 import sys
 import pytest
+import numpy as np
+import pandas as pd
 
-kernel_list = ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
+kernel_list = sorted(
+    ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
+)
+
+
+def unique(lst):
+    return list(set(lst))
 
 
 def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
     df = input_data
 
-    assert df.empty == False
+    assert not df.empty
     assert (df["Agent_Id"].astype(int).values > 0).all()
     assert (df["Queue_Id"].astype(int).values > 0).all()
     assert (df["Process_Id"].astype(int).values > 0).all()
-    assert len(df["Kernel-Name"]) > 0
-    df_list = df["Kernel-Name"].values.flatten().tolist()
-    # Check if each string in kernel_list is present at least once
-    missing_kernels = []
-    for kernel in kernel_list:
-        if kernel not in df_list:
-            missing_kernels.append(kernel)
+    assert len(df["Kernel_Name"]) > 0
 
-    assert (
-        not missing_kernels
-    ), f"The following kernel names are missing from the out file: {missing_kernels}"
-    assert df["Counter_Name"].str.contains("SQ_WAVES").all()
+    assert kernel_list == sorted(df["Kernel_Name"].unique().tolist())
+
+    kernel_count = dict([[itr, 0] for itr in kernel_list])
+    assert len(kernel_count) == len(kernel_list)
+    for itr in df["Kernel_Name"]:
+        kernel_count[itr] += 1
+    kn_cnt = [itr for _, itr in kernel_count.items()]
+    assert min(kn_cnt) == max(kn_cnt) and len(unique(kn_cnt)) == 1
+
     assert len(df["Counter_Value"]) > 0
+    assert df["Counter_Name"].str.contains("SQ_WAVES").all()
+    assert (df["Counter_Value"].astype(int).values > 0).all()
+
+    di_list = df["Dispatch_Id"].astype(int).values.tolist()
+    di_uniq = sorted(df["Dispatch_Id"].unique().tolist())
+    # make sure the dispatch ids are unique and ordered
+    di_expect = [idx + 1 for idx in range(len(di_list))]
+    assert di_expect == di_uniq
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-tool-test-app-transpose LANGUAGES CXX HIP)
+project(rocprofiler-tests-bin-multistream LANGUAGES CXX HIP)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
@@ -32,15 +32,15 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(vector-ops.cpp PROPERTIES LANGUAGE HIP)
-add_executable(vector-ops)
-target_sources(vector-ops PRIVATE vector-ops.cpp)
-target_compile_options(vector-ops PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+set_source_files_properties(multistream_app.cpp PROPERTIES LANGUAGE HIP)
+add_executable(multistream)
+target_sources(multistream PRIVATE multistream_app.cpp)
+target_compile_options(multistream PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
 
 find_package(Threads REQUIRED)
-target_link_libraries(vector-ops PRIVATE Threads::Threads)
+target_link_libraries(multistream PRIVATE Threads::Threads)
 
 install(
-    TARGETS vector-ops
+    TARGETS multistream
     DESTINATION bin
     COMPONENT tests)

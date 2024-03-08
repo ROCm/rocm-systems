@@ -22,13 +22,27 @@
 
 #pragma once
 
+#include <glog/logging.h>
+
+#include <cstdint>
 #include <string_view>
 
 namespace rocprofiler
 {
 namespace common
 {
+struct logging_config
+{
+    bool    install_failure_handler = false;
+    bool    logtostderr             = true;
+    bool    alsologtostderr         = false;
+    int32_t loglevel                = google::WARNING;
+};
+
 void
-init_logging(std::string_view env_var);
-}
+init_logging(std::string_view env_var, logging_config cfg = logging_config{});
+
+void
+update_logging(const logging_config& cfg, bool setup_env = false, int env_override = 0);
+}  // namespace common
 }  // namespace rocprofiler

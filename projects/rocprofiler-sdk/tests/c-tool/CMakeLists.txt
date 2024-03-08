@@ -35,4 +35,4 @@ set_tests_properties(
                PASS_REGULAR_EXPRESSION
                "Test C tool is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
                FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

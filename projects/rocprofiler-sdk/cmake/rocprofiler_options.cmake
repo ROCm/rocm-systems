@@ -131,3 +131,8 @@ if(ASAN)
 endif()
 
 include(rocprofiler_memcheck)
+
+# default FAIL_REGULAR_EXPRESSION for tests
+set(ROCPROFILER_DEFAULT_FAIL_REGEX
+    "threw an exception|Permission denied|Could not create logging file"
+    CACHE STRING "Default FAIL_REGULAR_EXPRESSION for tests")

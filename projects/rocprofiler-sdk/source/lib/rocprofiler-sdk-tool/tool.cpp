@@ -33,6 +33,8 @@
 #include "lib/common/utility.hpp"
 
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -55,6 +57,21 @@
 namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
 
+namespace std
+{
+template <>
+struct hash<rocprofiler_agent_id_t>
+{
+    size_t operator()(rocprofiler_agent_id_t id) const { return id.handle; }
+};
+}  // namespace std
+
+inline bool
+operator==(rocprofiler_agent_id_t lhs, rocprofiler_agent_id_t rhs)
+{
+    return (lhs.handle == rhs.handle);
+}
+
 namespace
 {
 constexpr uint32_t lds_block_size = 128 * 4;
@@ -68,16 +85,23 @@ get_dereference(Tp* ptr)
     return *CHECK_NOTNULL(ptr);
 }
 
-template <typename Tp>
-void
-add_destructor(Tp*& ptr)
+auto
+get_destructors_lock()
 {
     static auto _mutex = std::mutex{};
-    auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+    return std::unique_lock<std::mutex>{_mutex};
+}
+
+template <typename Tp>
+Tp*&
+add_destructor(Tp*& ptr)
+{
+    auto _lk = get_destructors_lock();
     destructors->emplace_back([&ptr]() {
         delete ptr;
         ptr = nullptr;
     });
+    return ptr;
 }
 
 #define ADD_DESTRUCTOR(PTR)                                                                        \
@@ -155,7 +179,7 @@ get_counter_collection_file()
                                              "Process_Id",
                                              "Thread_Id",
                                              "Grid_Size",
-                                             "Kernel-Name",
+                                             "Kernel_Name",
                                              "Workgroup_Size",
                                              "LDS_Block_Size",
                                              "Scratch_Size",
@@ -255,6 +279,7 @@ get_buffers()
     return _v;
 }
 
+using rocprofiler_code_object_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
 using rocprofiler_kernel_symbol_data_t =
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
@@ -274,14 +299,46 @@ struct kernel_symbol_data : rocprofiler_kernel_symbol_data_t
     std::string truncated_kernel_name = {};
 };
 
+template <typename Tp>
+Tp*
+as_pointer(Tp&& _val)
+{
+    return new Tp{std::forward<Tp>(_val)};
+}
+
+using code_object_data_map_t   = std::unordered_map<uint64_t, rocprofiler_code_object_data_t>;
 using kernel_symbol_data_map_t = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data>;
-auto kernel_data               = common::Synchronized<kernel_symbol_data_map_t, true>{};
+using targeted_kernels_set_t   = std::unordered_set<rocprofiler_kernel_id_t>;
 using counter_dimension_info_map_t =
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>;
-std::atomic<uint64_t> dispatch_index{0};
-auto counter_dimension_data = common::Synchronized<counter_dimension_info_map_t, true>{};
-auto buffered_name_info     = get_buffer_id_names();
-auto callback_name_info     = get_callback_id_names();
+
+auto  code_obj_data          = common::Synchronized<code_object_data_map_t, true>{};
+auto  kernel_data            = common::Synchronized<kernel_symbol_data_map_t, true>{};
+auto  counter_dimension_data = common::Synchronized<counter_dimension_info_map_t, true>{};
+auto  target_kernels         = common::Synchronized<targeted_kernels_set_t>{};
+auto  dispatch_index         = std::atomic<uint64_t>{0};
+auto* buffered_name_info     = as_pointer(get_buffer_id_names());
+auto* callback_name_info     = as_pointer(get_callback_id_names());
+
+bool
+add_kernel_target(uint64_t _kern_id)
+{
+    return target_kernels
+        .wlock([](targeted_kernels_set_t& _targets_v,
+                  uint64_t                _kern_id_v) { return _targets_v.emplace(_kern_id_v); },
+               _kern_id)
+        .second;
+}
+
+bool
+is_targeted_kernel(uint64_t _kern_id)
+{
+    return target_kernels.rlock(
+        [](const targeted_kernels_set_t& _targets_v, uint64_t _kern_id_v) {
+            return (_targets_v.count(_kern_id_v) > 0);
+        },
+        _kern_id);
+}
 
 auto&
 get_client_ctx()
@@ -328,15 +385,16 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto ts = rocprofiler_timestamp_t{};
         rocprofiler_get_timestamp(&ts);
 
-        const auto* kind_name = callback_name_info.kind_names.at(record.kind);
+        const auto* kind_name = CHECK_NOTNULL(callback_name_info)->kind_names.at(record.kind);
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
         {
             user_data->value = ts;
         }
         else
         {
-            const auto* op_name =
-                callback_name_info.operation_names.at(record.kind).at(record.operation);
+            const auto* op_name = CHECK_NOTNULL(callback_name_info)
+                                      ->operation_names.at(record.kind)
+                                      .at(record.operation);
             auto ss = std::stringstream{};
             tool::csv::marker_csv_encoder::write_row(ss,
                                                      kind_name,
@@ -368,7 +426,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto ts = rocprofiler_timestamp_t{};
         rocprofiler_get_timestamp(&ts);
 
-        const auto* kind_name = callback_name_info.kind_names.at(record.kind);
+        const auto* kind_name = CHECK_NOTNULL(callback_name_info)->kind_names.at(record.kind);
         if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA)
         {
             if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
@@ -460,8 +518,9 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
             }
             else
             {
-                const auto* op_name =
-                    callback_name_info.operation_names.at(record.kind).at(record.operation);
+                const auto* op_name = CHECK_NOTNULL(callback_name_info)
+                                          ->operation_names.at(record.kind)
+                                          .at(record.operation);
                 auto ss = std::stringstream{};
                 tool::csv::marker_csv_encoder::write_row(ss,
                                                          kind_name,
@@ -482,78 +541,6 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 void
-counter_record_callback(rocprofiler_queue_id_t,
-                        const rocprofiler_agent_id_t,
-                        rocprofiler_correlation_id_t correlation_id,
-                        uint64_t,
-                        void*,
-                        size_t                        record_count,
-                        rocprofiler_record_counter_t* record_data)
-{
-    rocprofiler_tool_kernel_properties_t kernel_properties =
-        GetKernelProperties(correlation_id.internal);
-    std::map<const char*, uint64_t> counter_name_value;
-    for(size_t count = 0; count < record_count; count++)
-    {
-        auto profiler_record = static_cast<rocprofiler_record_counter_t>(record_data[count]);
-        rocprofiler_counter_id_t counter_id;
-        rocprofiler_query_record_counter_id(profiler_record.id, &counter_id);
-        rocprofiler_counter_info_v0_t version;
-        ROCPROFILER_CALL(
-            rocprofiler_query_counter_info(
-                counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
-            "Could not query counter_id");
-        const auto& dimension_pos_ss = counter_dimension_data.rlock(
-            [&profiler_record](const counter_dimension_info_map_t& counter_dimension_data_v,
-                               uint64_t                            handle) {
-                auto   dimensions = counter_dimension_data_v.at(handle);
-                size_t pos;
-                auto   pos_ss  = std::stringstream{};
-                size_t num_dim = dimensions.size();
-                for(size_t idx = 0; idx != num_dim; idx++)
-                {
-                    rocprofiler_query_record_dimension_position(
-                        profiler_record.id, dimensions[idx].id, &pos);
-                    pos_ss << dimensions[idx].name << ":" << pos;
-                    if(idx != num_dim - 1) pos_ss << ",";
-                }
-                return pos_ss;
-            },
-            counter_id.handle);
-        auto search = counter_name_value.find(version.name);
-        if(search == counter_name_value.end())
-            counter_name_value.emplace(
-                std::pair<const char*, uint64_t>{version.name, profiler_record.counter_value});
-        else
-            search->second = search->second + profiler_record.counter_value;
-    }
-
-    for(auto itr = counter_name_value.begin(); itr != counter_name_value.end(); ++itr)
-    {
-        auto counter_collection_ss = std::stringstream{};
-        tool::csv::counter_collection_csv_encoder::write_row(
-            counter_collection_ss,
-            correlation_id.internal,
-            kernel_properties.dispatch_index,
-            kernel_properties.gpu_agent.id.handle,
-            kernel_properties.queue_id.handle,
-            getpid(),
-            kernel_properties.thread_id,
-            kernel_properties.grid_size,
-            kernel_properties.kernel_name,
-            kernel_properties.workgroup_size,
-            ((kernel_properties.lds_size + (lds_block_size - 1)) & ~(lds_block_size - 1)),
-            kernel_properties.scratch_size,
-            kernel_properties.arch_vgpr_count,
-            kernel_properties.sgpr_count,
-            itr->first,
-            itr->second);
-
-        get_dereference(get_counter_collection_file()) << counter_collection_ss.str();
-    }
-}
-
-void
 code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                              rocprofiler_user_data_t*              user_data,
                              void*                                 data)
@@ -561,7 +548,19 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
        record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD)
     {
-        if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            auto* obj_data = static_cast<rocprofiler_code_object_data_t*>(record.payload);
+            if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+            {
+                code_obj_data.wlock(
+                    [](code_object_data_map_t& cdata, rocprofiler_code_object_data_t* obj_data_v) {
+                        cdata.emplace(obj_data_v->code_object_id, *obj_data_v);
+                    },
+                    CHECK_NOTNULL(obj_data));
+            }
+        }
+        else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
             flush();
         }
@@ -573,11 +572,50 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto* sym_data = static_cast<rocprofiler_kernel_symbol_data_t*>(record.payload);
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
         {
-            kernel_data.wlock(
+            auto itr = kernel_data.wlock(
                 [](kernel_symbol_data_map_t& kdata, rocprofiler_kernel_symbol_data_t* sym_data_v) {
-                    kdata.emplace(sym_data_v->kernel_id, kernel_symbol_data{*sym_data_v});
+                    return kdata.emplace(sym_data_v->kernel_id, kernel_symbol_data{*sym_data_v});
                 },
-                sym_data);
+                CHECK_NOTNULL(sym_data));
+
+            LOG_IF(WARNING, !itr.second)
+                << "duplicate kernel symbol data for kernel_id=" << sym_data->kernel_id;
+
+            // add the kernel to the kernel_targets if
+            if(itr.second)
+            {
+                // if kernel name is provided by user then by default all kernels in the application
+                // are targeted
+                if(tool::get_config().kernel_names.empty())
+                {
+                    add_kernel_target(sym_data->kernel_id);
+                }
+                else
+                {
+                    const auto& kernel_info = itr.first->second;
+                    for(const auto& name : tool::get_config().kernel_names)
+                    {
+                        if(name == kernel_info.truncated_kernel_name)
+                        {
+                            add_kernel_target(itr.first->first);
+                            break;
+                        }
+                        else
+                        {
+                            auto dkernel_name = std::string_view{kernel_info.demangled_kernel_name};
+                            auto pos          = dkernel_name.find(name);
+                            // if the demangled kernel name contains name and the next character is
+                            // '(' then mark as found
+                            if(pos != std::string::npos && (pos + 1) < dkernel_name.size() &&
+                               dkernel_name.at(pos + 1) == '(')
+                            {
+                                add_kernel_target(itr.first->first);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -622,7 +660,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto kernel_trace_ss = std::stringstream{};
                 tool::csv::kernel_trace_csv_encoder::write_row(
                     kernel_trace_ss,
-                    buffered_name_info.kind_names.at(record->kind),
+                    CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
                     record->agent_id.handle,
                     record->queue_id.handle,
                     record->kernel_id,
@@ -652,8 +690,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto hsa_trace_ss = std::stringstream{};
                 tool::csv::api_csv_encoder::write_row(
                     hsa_trace_ss,
-                    buffered_name_info.kind_names.at(record->kind),
-                    buffered_name_info.operation_names.at(record->kind).at(record->operation),
+                    CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
+                    CHECK_NOTNULL(buffered_name_info)
+                        ->operation_names.at(record->kind)
+                        .at(record->operation),
                     getpid(),
                     record->thread_id,
                     record->correlation_id.internal,
@@ -670,8 +710,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto memory_copy_trace_ss = std::stringstream{};
                 tool::csv::memory_copy_csv_encoder::write_row(
                     memory_copy_trace_ss,
-                    buffered_name_info.kind_names.at(record->kind),
-                    buffered_name_info.operation_names.at(record->kind).at(record->operation),
+                    CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
+                    CHECK_NOTNULL(buffered_name_info)
+                        ->operation_names.at(record->kind)
+                        .at(record->operation),
                     record->src_agent_id.handle,
                     record->dst_agent_id.handle,
                     record->correlation_id.internal,
@@ -689,8 +731,10 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 auto hip_trace_ss = std::stringstream{};
                 tool::csv::api_csv_encoder::write_row(
                     hip_trace_ss,
-                    buffered_name_info.kind_names.at(record->kind),
-                    buffered_name_info.operation_names.at(record->kind).at(record->operation),
+                    CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
+                    CHECK_NOTNULL(buffered_name_info)
+                        ->operation_names.at(record->kind)
+                        .at(record->operation),
                     getpid(),
                     record->thread_id,
                     record->correlation_id.internal,
@@ -710,7 +754,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
 using counter_vec_t = std::vector<rocprofiler_counter_id_t>;
 using agent_counter_map_t =
-    std::unordered_map<const rocprofiler_agent_t*, std::optional<rocprofiler_profile_config_id_t>>;
+    std::unordered_map<rocprofiler_agent_id_t, std::optional<rocprofiler_profile_config_id_t>>;
 
 rocprofiler_status_t
 dimensions_info_callback(rocprofiler_counter_id_t                   id,
@@ -740,14 +784,14 @@ dimensions_info_callback(rocprofiler_counter_id_t                   id,
 
 // this function creates a rocprofiler profile config on the first entry
 auto
-get_agent_profile(const rocprofiler_agent_t* agent)
+get_agent_profile(rocprofiler_agent_id_t agent_id)
 {
     static auto data = common::Synchronized<agent_counter_map_t>{};
 
     auto profile = std::optional<rocprofiler_profile_config_id_t>{};
     data.ulock(
-        [agent, &profile](const agent_counter_map_t& data_v) {
-            auto itr = data_v.find(agent);
+        [agent_id, &profile](const agent_counter_map_t& data_v) {
+            auto itr = data_v.find(agent_id);
             if(itr != data_v.end())
             {
                 profile = itr->second;
@@ -755,11 +799,11 @@ get_agent_profile(const rocprofiler_agent_t* agent)
             }
             return false;
         },
-        [agent, &profile](agent_counter_map_t& data_v) {
+        [agent_id, &profile](agent_counter_map_t& data_v) {
             auto counters_v = counter_vec_t{};
             ROCPROFILER_CALL(
                 rocprofiler_iterate_agent_supported_counters(
-                    agent->id,
+                    agent_id,
                     [](rocprofiler_agent_id_t,
                        rocprofiler_counter_id_t* counters,
                        size_t                    num_counters,
@@ -771,15 +815,15 @@ get_agent_profile(const rocprofiler_agent_t* agent)
                                                  counters[i], dimensions_info_callback, nullptr),
                                              "iterate_dimension_info");
 
-                            rocprofiler_counter_info_v0_t version;
+                            rocprofiler_counter_info_v0_t info;
 
                             ROCPROFILER_CALL(
                                 rocprofiler_query_counter_info(counters[i],
                                                                ROCPROFILER_COUNTER_INFO_VERSION_0,
-                                                               static_cast<void*>(&version)),
+                                                               static_cast<void*>(&info)),
                                 "Could not query counter_id");
 
-                            if(tool::get_config().counters.count(version.name) > 0)
+                            if(tool::get_config().counters.count(info.name) > 0)
                                 vec->emplace_back(counters[i]);
                         }
                         return ROCPROFILER_STATUS_SUCCESS;
@@ -791,16 +835,120 @@ get_agent_profile(const rocprofiler_agent_t* agent)
             {
                 auto profile_v = rocprofiler_profile_config_id_t{};
                 ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                                     agent->id, counters_v.data(), counters_v.size(), &profile_v),
+                                     agent_id, counters_v.data(), counters_v.size(), &profile_v),
                                  "Could not construct profile cfg");
                 profile = profile_v;
             }
 
-            data_v.emplace(agent, profile);
+            data_v.emplace(agent_id, profile);
             return true;
         });
 
     return profile;
+}
+
+struct counter_dispatch_data
+{
+    uint64_t thread_id      = 0;
+    uint64_t dispatch_index = 0;
+};
+
+void
+dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_user_data_t*                     user_data,
+                  void* /*callback_data_args*/)
+{
+    auto kernel_id = dispatch_data.kernel_id;
+    auto agent_id  = dispatch_data.agent_id;
+
+    if(!is_targeted_kernel(kernel_id))
+    {
+        return;
+    }
+    else if(auto profile = get_agent_profile(agent_id))
+    {
+        *config        = *profile;
+        user_data->ptr = new counter_dispatch_data{.thread_id      = common::get_tid(),
+                                                   .dispatch_index = ++dispatch_index};
+    }
+}
+
+void
+counter_record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+                        rocprofiler_record_counter_t*                record_data,
+                        size_t                                       record_count,
+                        rocprofiler_user_data_t                      user_data,
+                        void* /*callback_data_args*/)
+{
+    auto        kernel_id           = dispatch_data.kernel_id;
+    const auto* cnt_dispatch_data_v = static_cast<counter_dispatch_data*>(user_data.ptr);
+    const auto* kernel_info         = kernel_data.rlock(
+        [](const kernel_symbol_data_map_t& kdata, uint64_t kid) -> const auto* {
+            return &kdata.at(kid);
+        },
+        kernel_id);
+
+    LOG_IF(FATAL, !kernel_info) << "missing kernel information for kernel_id=" << kernel_id;
+
+    LOG_IF(ERROR, record_count == 0) << "zero record count for kernel_id=" << kernel_id
+                                     << " (name=" << kernel_info->kernel_name << ")";
+
+    auto counter_name_value = std::map<const char*, uint64_t>{};
+    for(size_t count = 0; count < record_count; count++)
+    {
+        auto profiler_record = static_cast<rocprofiler_record_counter_t>(record_data[count]);
+        auto counter_id      = rocprofiler_counter_id_t{};
+        auto info            = rocprofiler_counter_info_v0_t{};
+
+        ROCPROFILER_CALL(rocprofiler_query_record_counter_id(profiler_record.id, &counter_id),
+                         "query record counter id");
+        ROCPROFILER_CALL(
+            rocprofiler_query_counter_info(
+                counter_id, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
+            "query counter info");
+
+        auto search = counter_name_value.find(info.name);
+        if(search == counter_name_value.end())
+            counter_name_value.emplace(
+                std::pair<const char*, uint64_t>{info.name, profiler_record.counter_value});
+        else
+            search->second = search->second + profiler_record.counter_value;
+    }
+
+    auto lds_block_size_v =
+        (kernel_info->group_segment_size + (lds_block_size - 1)) & ~(lds_block_size - 1);
+
+    const auto& correlation_id = dispatch_data.correlation_id;
+
+    auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
+
+    for(auto& itr : counter_name_value)
+    {
+        using csv_encoder = tool::csv::counter_collection_csv_encoder;
+
+        auto counter_collection_ss = std::stringstream{};
+        csv_encoder::write_row(counter_collection_ss,
+                               correlation_id.internal,
+                               cnt_dispatch_data_v->dispatch_index,
+                               dispatch_data.agent_id.handle,
+                               dispatch_data.queue_id.handle,
+                               getpid(),
+                               cnt_dispatch_data_v->thread_id,
+                               magnitude(dispatch_data.grid_size),
+                               kernel_info->formatted_kernel_name,
+                               magnitude(dispatch_data.workgroup_size),
+                               lds_block_size_v,
+                               kernel_info->private_segment_size,
+                               kernel_info->arch_vgpr_count,
+                               kernel_info->sgpr_count,
+                               itr.first,
+                               itr.second);
+
+        get_dereference(get_counter_collection_file()) << counter_collection_ss.str();
+    }
+
+    delete cnt_dispatch_data_v;
 }
 
 rocprofiler_status_t
@@ -912,61 +1060,6 @@ list_metrics_iterate_agents(rocprofiler_agent_version_t,
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-void
-dispatch_callback(rocprofiler_queue_id_t              queue_id,
-                  const rocprofiler_agent_t*          agent,
-                  rocprofiler_correlation_id_t        correlation_id,
-                  const hsa_kernel_dispatch_packet_t* dispatch_packet,
-                  uint64_t                            kernel_id,
-                  void* /*callback_data_args*/,
-                  rocprofiler_profile_config_id_t* config)
-{
-    rocprofiler_tool_kernel_properties_t kernel_properties;
-    const auto&                          kernel_info =
-        kernel_data.rlock([](const kernel_symbol_data_map_t& kdata,
-                             uint64_t kernel_id_v) { return kdata.at(kernel_id_v); },
-                          kernel_id);
-    auto is_targeted_kernel = [&kernel_info]() {
-        // if kernel name is provided by user then by default all kernels in the application are
-        // targeted
-        if(tool::get_config().kernel_names.empty()) return true;
-
-        for(const auto& name : tool::get_config().kernel_names)
-        {
-            if(name == kernel_info.truncated_kernel_name)
-                return true;
-            else
-            {
-                auto dkernel_name = std::string_view{kernel_info.demangled_kernel_name};
-                auto pos          = dkernel_name.find(name);
-                // if the demangled kernel name contains name and the next character is '(' then
-                // mark as found
-                if(pos != std::string::npos && (pos + 1) < dkernel_name.size() &&
-                   dkernel_name.at(pos + 1) == '(')
-                    return true;
-            }
-        }
-        return false;
-    };
-
-    if(!is_targeted_kernel()) return;
-
-    auto profile = get_agent_profile(agent);
-
-    if(profile)
-    {
-        kernel_properties.kernel_name    = kernel_info.formatted_kernel_name;
-        kernel_properties.dispatch_index = ++dispatch_index;
-        kernel_properties.queue_id       = queue_id;
-        kernel_properties.gpu_agent      = *agent;
-        kernel_properties.thread_id      = common::get_tid();
-        populate_kernel_properties_data(&kernel_properties, dispatch_packet);
-        SetKernelProperties(correlation_id.internal, kernel_properties);
-
-        *config = *profile;
-    }
-}
-
 rocprofiler_client_finalize_t client_finalizer  = nullptr;
 rocprofiler_client_id_t*      client_identifier = nullptr;
 
@@ -1059,7 +1152,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             "buffer tracing service for memory copy configure");
     }
 
-    if(tool::get_config().hsa_api_trace)
+    if(tool::get_config().hsa_core_api_trace || tool::get_config().hsa_amd_ext_api_trace ||
+       tool::get_config().hsa_image_ext_api_trace || tool::get_config().hsa_finalizer_ext_api_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
                                                    buffer_size,
@@ -1070,18 +1164,27 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    &get_buffers().hsa_api_trace),
                          "buffer creation");
 
-        for(auto itr : {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
-                        ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-                        ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                        ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API})
+        using optpair_t = std::pair<bool, rocprofiler_buffer_tracing_kind_t>;
+        for(auto itr : {optpair_t{tool::get_config().hsa_core_api_trace,
+                                  ROCPROFILER_BUFFER_TRACING_HSA_CORE_API},
+                        optpair_t{tool::get_config().hsa_core_api_trace,
+                                  ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API},
+                        optpair_t{tool::get_config().hsa_core_api_trace,
+                                  ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API},
+                        optpair_t{tool::get_config().hsa_core_api_trace,
+                                  ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API}})
         {
-            ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
-                                 get_client_ctx(), itr, nullptr, 0, get_buffers().hsa_api_trace),
-                             "buffer tracing service for hsa api configure");
+            if(itr.first)
+            {
+                ROCPROFILER_CALL(
+                    rocprofiler_configure_buffer_tracing_service(
+                        get_client_ctx(), itr.second, nullptr, 0, get_buffers().hsa_api_trace),
+                    "buffer tracing service for hsa api configure");
+            }
         }
     }
 
-    if(tool::get_config().hip_api_trace || tool::get_config().hip_compiler_api_trace)
+    if(tool::get_config().hip_runtime_api_trace || tool::get_config().hip_compiler_api_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
                                                    buffer_size,
@@ -1092,7 +1195,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    &get_buffers().hip_api_trace),
                          "buffer creation");
 
-        if(tool::get_config().hip_api_trace)
+        if(tool::get_config().hip_runtime_api_trace)
         {
             ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                                  get_client_ctx(),
@@ -1187,7 +1290,8 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
-    common::init_logging("ROCPROF_LOG_LEVEL");
+    auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
+    common::init_logging("ROCPROF_LOG_LEVEL", logging_cfg);
     FLAGS_colorlogtostderr = true;
 
     // set the client name
@@ -1204,6 +1308,10 @@ rocprofiler_configure(uint32_t                 version,
     uint32_t major = version / 10000;
     uint32_t minor = (version % 10000) / 100;
     uint32_t patch = version % 100;
+
+    // ensure these pointers are not leaked
+    add_destructor(buffered_name_info);
+    add_destructor(callback_name_info);
 
     if(tool::get_config().list_metrics)
     {

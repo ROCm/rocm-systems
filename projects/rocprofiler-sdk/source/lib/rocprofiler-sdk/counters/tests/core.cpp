@@ -20,10 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <algorithm>
-#include <cstdint>
-#include <sstream>
-#include <tuple>
+#include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/buffer.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <rocprofiler-sdk/dispatch_profile.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
@@ -31,21 +44,10 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
-#include "lib/common/static_object.hpp"
-#include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/buffer.hpp"
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
-#include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
-#include "rocprofiler-sdk/registration.h"
+#include <algorithm>
+#include <cstdint>
+#include <sstream>
+#include <tuple>
 
 using namespace rocprofiler::counters;
 using namespace rocprofiler;
@@ -204,13 +206,10 @@ buffered_callback(rocprofiler_context_id_t,
 }
 
 void
-null_dispatch_callback(rocprofiler_queue_id_t,
-                       const rocprofiler_agent_t*,
-                       rocprofiler_correlation_id_t,
-                       const hsa_kernel_dispatch_packet_t*,
-                       uint64_t,
-                       void*,
-                       rocprofiler_profile_config_id_t*)
+null_dispatch_callback(rocprofiler_profile_counting_dispatch_data_t,
+                       rocprofiler_profile_config_id_t*,
+                       rocprofiler_user_data_t*,
+                       void*)
 {}
 
 void
@@ -223,13 +222,11 @@ null_buffered_callback(rocprofiler_context_id_t,
 {}
 
 void
-null_record_callback(rocprofiler_queue_id_t,
-                     rocprofiler_agent_id_t,
-                     rocprofiler_correlation_id_t,
-                     uint64_t,
-                     void*,
+null_record_callback(rocprofiler_profile_counting_dispatch_data_t,
+                     rocprofiler_record_counter_t*,
                      size_t,
-                     rocprofiler_record_counter_t*)
+                     rocprofiler_user_data_t,
+                     void*)
 {}
 
 }  // namespace
@@ -326,10 +323,10 @@ public:
     , _agent(a)
     , _id(id)
     {}
-    virtual const AgentCache&      get_agent() const override final { return _agent; };
-    virtual rocprofiler_queue_id_t get_id() const override final { return _id; };
+    const AgentCache&      get_agent() const final { return _agent; };
+    rocprofiler_queue_id_t get_id() const final { return _id; };
 
-    ~FakeQueue() {}
+    ~FakeQueue() override = default;
 
 private:
     const AgentCache&      _agent;
@@ -339,39 +336,60 @@ private:
 }  // namespace hsa
 }  // namespace rocprofiler
 
+bool
+operator==(rocprofiler_dim3_t lhs, rocprofiler_dim3_t rhs)
+{
+    return std::tie(lhs.x, lhs.y, lhs.z) == std::tie(rhs.x, rhs.y, rhs.z);
+}
+
+bool
+operator==(rocprofiler_agent_id_t lhs, rocprofiler_agent_id_t rhs)
+{
+    return (lhs.handle == rhs.handle);
+}
+
 namespace
 {
 struct expected_dispatch
 {
     // To pass back
-    rocprofiler_profile_config_id_t id;
-
-    rocprofiler_queue_id_t           queue_id;
-    const rocprofiler_agent_t*       agent;
-    rocprofiler_correlation_id_t     correlation_id;
-    hsa_kernel_dispatch_packet_t*    dispatch_packet;
-    uint64_t                         kernel_id;
-    rocprofiler_profile_config_id_t* config;
+    rocprofiler_profile_config_id_t  id             = {};
+    rocprofiler_queue_id_t           queue_id       = {.handle = 0};
+    rocprofiler_agent_id_t           agent_id       = {.handle = 0};
+    uint64_t                         kernel_id      = 0;
+    rocprofiler_correlation_id_t     correlation_id = {.internal = 0, .external = {.value = 0}};
+    rocprofiler_dim3_t               workgroup_size = {0, 0, 0};
+    rocprofiler_dim3_t               grid_size      = {0, 0, 0};
+    rocprofiler_profile_config_id_t* config         = nullptr;
 };
 
 void
-user_dispatch_cb(rocprofiler_queue_id_t              queue_id,
-                 const rocprofiler_agent_t*          agent,
-                 rocprofiler_correlation_id_t        correlation_id,
-                 const hsa_kernel_dispatch_packet_t* dispatch_packet,
-                 uint64_t                            kernel_id,
-                 void*                               callback_data_args,
-                 rocprofiler_profile_config_id_t*    config)
+user_dispatch_cb(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+                 rocprofiler_profile_config_id_t*             config,
+                 rocprofiler_user_data_t*                     user_data,
+                 void*                                        callback_data_args)
 {
     expected_dispatch& expected = *static_cast<expected_dispatch*>(callback_data_args);
-    ASSERT_EQ(expected.agent, agent);
-    ASSERT_EQ(expected.queue_id.handle, queue_id.handle);
-    ASSERT_EQ(expected.correlation_id.internal, correlation_id.internal);
-    ASSERT_EQ(expected.correlation_id.external.ptr, correlation_id.external.ptr);
-    ASSERT_EQ(expected.correlation_id.external.value, correlation_id.external.value);
-    ASSERT_EQ(expected.dispatch_packet, dispatch_packet);
-    ASSERT_EQ(expected.kernel_id, kernel_id);
+
+    auto agent_id       = dispatch_data.agent_id;
+    auto queue_id       = dispatch_data.queue_id;
+    auto correlation_id = dispatch_data.correlation_id;
+    auto kernel_id      = dispatch_data.kernel_id;
+
+    EXPECT_EQ(sizeof(rocprofiler_profile_counting_dispatch_data_t), dispatch_data.size);
+    EXPECT_EQ(expected.kernel_id, kernel_id);
+    EXPECT_EQ(expected.agent_id, agent_id);
+    EXPECT_EQ(expected.queue_id.handle, queue_id.handle);
+    EXPECT_EQ(expected.correlation_id.internal, correlation_id.internal);
+    EXPECT_EQ(expected.correlation_id.external.ptr, correlation_id.external.ptr);
+    EXPECT_EQ(expected.correlation_id.external.value, correlation_id.external.value);
+    EXPECT_EQ(expected.workgroup_size, dispatch_data.workgroup_size);
+    EXPECT_EQ(expected.grid_size, dispatch_data.grid_size);
+
+    ASSERT_NE(config, nullptr);
     config->handle = expected.id.handle;
+
+    (void) user_data;
 }
 
 }  // namespace
@@ -440,17 +458,22 @@ TEST(core, check_callbacks)
             hsa::rocprofiler_packet pkt;
             pkt.ext_amd_aql_pm4.header = count++;
 
-            expected.correlation_id  = {.internal = corr_id.internal,
+            expected.correlation_id = {.internal = corr_id.internal,
                                        .external = context::null_user_data};
-            expected.dispatch_packet = &pkt.kernel_dispatch;
-            expected.kernel_id       = count++;
-            expected.queue_id        = qid;
-            expected.agent           = fq.get_agent().get_rocp_agent();
+            expected.workgroup_size = {pkt.kernel_dispatch.workgroup_size_x,
+                                       pkt.kernel_dispatch.workgroup_size_y,
+                                       pkt.kernel_dispatch.workgroup_size_z};
+            expected.grid_size      = {pkt.kernel_dispatch.grid_size_x,
+                                  pkt.kernel_dispatch.grid_size_y,
+                                  pkt.kernel_dispatch.grid_size_z};
+            expected.kernel_id      = count++;
+            expected.queue_id       = qid;
+            expected.agent_id       = fq.get_agent().get_rocp_agent()->id;
 
             hsa::Queue::queue_info_session_t::external_corr_id_map_t extern_ids = {};
-
-            auto ret_pkt =
-                counters::queue_cb(cb_info, fq, pkt, expected.kernel_id, extern_ids, &corr_id);
+            auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
+            auto ret_pkt   = counters::queue_cb(
+                cb_info, fq, pkt, expected.kernel_id, &user_data, extern_ids, &corr_id);
 
             ASSERT_TRUE(ret_pkt) << fmt::format("Expected a packet to be generated for - {}",
                                                 metric.name());

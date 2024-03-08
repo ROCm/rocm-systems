@@ -20,16 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <algorithm>
-#include <cstdint>
-#include <sstream>
-#include <tuple>
-
-#include <fmt/core.h>
-#include <gtest/gtest.h>
-
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -37,7 +27,18 @@
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "rocprofiler-sdk/registration.h"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <fmt/core.h>
+#include <gtest/gtest.h>
+
+#include <algorithm>
+#include <cstdint>
+#include <sstream>
+#include <tuple>
 
 using namespace rocprofiler::counters;
 
@@ -125,13 +126,10 @@ buffered_callback(rocprofiler_context_id_t,
 {}
 
 void
-dispatch_callback(rocprofiler_queue_id_t,
-                  const rocprofiler_agent_t*,
-                  rocprofiler_correlation_id_t,
-                  const hsa_kernel_dispatch_packet_t*,
-                  uint64_t,
-                  void*,
-                  rocprofiler_profile_config_id_t*)
+dispatch_callback(rocprofiler_profile_counting_dispatch_data_t,
+                  rocprofiler_profile_config_id_t*,
+                  rocprofiler_user_data_t*,
+                  void*)
 {}
 
 rocprofiler_context_id_t&

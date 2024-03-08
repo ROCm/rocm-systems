@@ -67,8 +67,9 @@ set_target_properties(rocprofiler-object-library PROPERTIES POSITION_INDEPENDENT
 add_library(rocprofiler-shared-library SHARED)
 add_library(rocprofiler::rocprofiler-shared-library ALIAS rocprofiler-shared-library)
 
-target_sources(rocprofiler-shared-library
-               PRIVATE $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library>)
+target_sources(
+    rocprofiler-shared-library
+    PRIVATE $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library> shared_library.cpp)
 target_link_libraries(
     rocprofiler-shared-library
     INTERFACE rocprofiler::rocprofiler-headers

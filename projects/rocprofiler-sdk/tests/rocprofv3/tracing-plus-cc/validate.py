@@ -34,7 +34,7 @@ def test_validate_counter_collection_plus_tracing(input_dir: pd.DataFrame):
             with open(file_path, "r") as file:
                 df = pd.read_csv(file)
                 # check if either kernel-name/FUNCTION is present
-                assert "Kernel-Name" in df.columns or "Function" in df.columns
+                assert "Kernel_Name" in df.columns or "Function" in df.columns
 
 
 if __name__ == "__main__":

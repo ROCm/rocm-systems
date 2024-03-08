@@ -189,15 +189,46 @@ buffered_callback(rocprofiler_context_id_t,
     }
 }
 
-void
-dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
-                  const rocprofiler_agent_t* agent,
-                  rocprofiler_correlation_id_t /*correlation_id*/,
-                  const hsa_kernel_dispatch_packet_t* /*dispatch_packet*/,
-                  uint64_t /*kernel_id*/,
-                  void* /*callback_data_args*/,
-                  rocprofiler_profile_config_id_t* config)
+using agent_map_t = std::map<uint64_t, const rocprofiler_agent_v0_t*>;
+
+agent_map_t
+get_agent_info()
 {
+    auto iterate_cb = [](rocprofiler_agent_version_t agents_ver,
+                         const void**                agents_arr,
+                         size_t                      num_agents,
+                         void*                       user_data) {
+        if(agents_ver != ROCPROFILER_AGENT_INFO_VERSION_0)
+            throw std::runtime_error{"unexpected rocprofiler agent version"};
+
+        auto* agents_v = static_cast<agent_map_t*>(user_data);
+        for(size_t i = 0; i < num_agents; ++i)
+        {
+            const auto* itr = static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]);
+            agents_v->emplace(itr->id.handle, itr);
+        }
+        return ROCPROFILER_STATUS_SUCCESS;
+    };
+
+    auto _agents = agent_map_t{};
+    ROCPROFILER_CALL(
+        rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                           iterate_cb,
+                                           sizeof(rocprofiler_agent_t),
+                                           const_cast<void*>(static_cast<const void*>(&_agents))),
+        "query available agents");
+
+    return _agents;
+}
+
+void
+dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_user_data_t* /*user_data*/,
+                  void* /*callback_data_args*/)
+{
+    static auto agents = get_agent_info();
+
     auto& cap   = *get_capture();
     auto  wlock = std::unique_lock{cap.m_mutex};
 
@@ -211,7 +242,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     {
         std::vector<rocprofiler_counter_id_t> counters_needed;
         ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-                             agent->id,
+                             dispatch_data.agent_id,
                              [](rocprofiler_agent_id_t,
                                 rocprofiler_counter_id_t* counters,
                                 size_t                    num_counters,
@@ -237,9 +268,9 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
                              "Could not query counter_id");
             cap.expected_counter_names.emplace(found_counter.handle, std::string(version.name));
             size_t expected = 0;
-            ROCPROFILER_CALL(
-                rocprofiler_query_counter_instance_count(agent->id, found_counter, &expected),
-                "COULD NOT QUERY INSTANCES");
+            ROCPROFILER_CALL(rocprofiler_query_counter_instance_count(
+                                 dispatch_data.agent_id, found_counter, &expected),
+                             "COULD NOT QUERY INSTANCES");
             cap.remaining.push_back(found_counter);
             cap.expected.emplace(found_counter.handle, expected);
 
@@ -266,7 +297,8 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
         }
         if(cap.expected.empty())
         {
-            std::clog << "No counters found for agent - " << agent->name;
+            std::clog << "No counters found for agent " << dispatch_data.agent_id.handle << " ("
+                      << agents.at(dispatch_data.agent_id.handle)->name << ")";
         }
     }
     if(cap.remaining.empty()) return;
@@ -274,9 +306,9 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     rocprofiler_profile_config_id_t profile;
 
     // Select the next counter to collect.
-    ROCPROFILER_CALL(
-        rocprofiler_create_profile_config(agent->id, &(cap.remaining.back()), 1, &profile),
-        "Could not construct profile cfg");
+    ROCPROFILER_CALL(rocprofiler_create_profile_config(
+                         dispatch_data.agent_id, &(cap.remaining.back()), 1, &profile),
+                     "Could not construct profile cfg");
 
     cap.remaining.pop_back();
     *config = profile;

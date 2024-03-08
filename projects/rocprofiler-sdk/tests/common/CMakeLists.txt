@@ -6,6 +6,11 @@ include(FetchContent)
 
 set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/external)
 
+# default FAIL_REGULAR_EXPRESSION for tests
+set(ROCPROFILER_DEFAULT_FAIL_REGEX
+    "threw an exception|Permission denied|Could not create logging file"
+    CACHE STRING "Default FAIL_REGULAR_EXPRESSION for tests")
+
 # build flags
 add_library(rocprofiler-tests-build-flags INTERFACE)
 add_library(rocprofiler::tests-build-flags ALIAS rocprofiler-tests-build-flags)

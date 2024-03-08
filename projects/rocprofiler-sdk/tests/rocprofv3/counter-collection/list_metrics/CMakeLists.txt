@@ -41,7 +41,7 @@ set(cc-env-list-metrics
 set_tests_properties(
     rocprofv3-test-list-metrics-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-list-metrics}"
-               FAIL_REGULAR_EXPRESSION "threw an exception")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 set_tests_properties(
     rocprofv3-test-list-metrics-std-out-execute
@@ -76,6 +76,6 @@ set_tests_properties(
                DEPENDS
                rocprofv3-test-list-metrics-execute
                FAIL_REGULAR_EXPRESSION
-               "threw an exception"
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                ATTACHED_FILES_ON_FAIL
                "${VALIDATION_FILES}")

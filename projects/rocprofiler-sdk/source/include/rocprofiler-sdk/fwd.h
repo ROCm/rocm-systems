@@ -262,25 +262,15 @@ typedef enum
 } rocprofiler_intercept_table_t;
 
 /**
- * @brief Enumeration for specifying the data type contained within the union.
- */
-typedef enum
-{
-    ROCPROFILER_UNION_TYPE_NONE = 0,  ///< No union type
-    ROCPROFILER_UNION_TYPE_STRING,    ///< String Type set
-    ROCPROFILER_UNION_TYPE_INT,       ///< Integer Type Set
-    ROCPROFILER_UNION_TYPE_LAST,
-} rocprofiler_union_type_t;
-
-/**
  * @brief Enumeration for specifying the counter info struct version you want.
  */
 typedef enum
 {
     ROCPROFILER_COUNTER_INFO_VERSION_NONE,
-    ROCPROFILER_COUNTER_INFO_VERSION_0,  ///< @see rocprofiler_counter_info_v0_t
+    ROCPROFILER_COUNTER_INFO_VERSION_0,  ///< @see ::rocprofiler_counter_info_v0_t
     ROCPROFILER_COUNTER_INFO_VERSION_LAST,
 } rocprofiler_counter_info_version_id_t;
+
 //--------------------------------------------------------------------------------------//
 //
 //                                      ALIASES

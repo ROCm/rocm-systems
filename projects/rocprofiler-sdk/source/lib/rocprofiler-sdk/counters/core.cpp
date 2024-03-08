@@ -24,6 +24,7 @@
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
@@ -32,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 namespace rocprofiler
@@ -255,6 +257,7 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue&                                               queue,
          const hsa::rocprofiler_packet&                                  pkt,
          uint64_t                                                        kernel_id,
+         rocprofiler_user_data_t*                                        user_data,
          const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
          const context::correlation_id*                                  correlation_id)
 {
@@ -272,14 +275,25 @@ queue_cb(const std::shared_ptr<counter_callback_info>&                   info,
         }
     }
 
-    rocprofiler_profile_config_id_t req_profile = {.handle = 0};
-    info->user_cb(queue.get_id(),
-                  queue.get_agent().get_rocp_agent(),
-                  _corr_id_v,
-                  &pkt.kernel_dispatch,
-                  kernel_id,
-                  info->callback_args,
-                  &req_profile);
+    auto req_profile = rocprofiler_profile_config_id_t{.handle = 0};
+    auto dispatch_data =
+        common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
+
+    dispatch_data.kernel_id            = kernel_id;
+    dispatch_data.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+    dispatch_data.queue_id             = queue.get_id();
+    dispatch_data.correlation_id       = _corr_id_v;
+    dispatch_data.private_segment_size = pkt.kernel_dispatch.private_segment_size;
+    dispatch_data.group_segment_size   = pkt.kernel_dispatch.group_segment_size;
+    dispatch_data.workgroup_size       = {pkt.kernel_dispatch.workgroup_size_x,
+                                    pkt.kernel_dispatch.workgroup_size_y,
+                                    pkt.kernel_dispatch.workgroup_size_z};
+    dispatch_data.grid_size            = {pkt.kernel_dispatch.grid_size_x,
+                               pkt.kernel_dispatch.grid_size_y,
+                               pkt.kernel_dispatch.grid_size_z};
+
+    info->user_cb(dispatch_data, &req_profile, user_data, info->callback_args);
+
     if(req_profile.handle == 0) return nullptr;
 
     auto prof_config = get_controller().get_profile_cfg(req_profile);
@@ -407,13 +421,27 @@ completed_cb(const std::shared_ptr<counter_callback_info>& info,
     if(!out.empty())
     {
         CHECK(info->record_callback);
-        info->record_callback(queue.get_id(),
-                              queue.get_agent().get_rocp_agent()->id,
-                              _corr_id_v,
-                              session.kernel_id,
-                              info->record_callback_args,
-                              out.size(),
-                              out.data());
+
+        auto dispatch_data =
+            common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
+
+        const auto& kernel_dispatch_pkt = session.kernel_pkt.kernel_dispatch;
+
+        dispatch_data.kernel_id            = session.kernel_id;
+        dispatch_data.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+        dispatch_data.queue_id             = queue.get_id();
+        dispatch_data.correlation_id       = _corr_id_v;
+        dispatch_data.private_segment_size = kernel_dispatch_pkt.private_segment_size;
+        dispatch_data.group_segment_size   = kernel_dispatch_pkt.group_segment_size;
+        dispatch_data.workgroup_size       = {kernel_dispatch_pkt.workgroup_size_x,
+                                        kernel_dispatch_pkt.workgroup_size_y,
+                                        kernel_dispatch_pkt.workgroup_size_z};
+        dispatch_data.grid_size            = {kernel_dispatch_pkt.grid_size_x,
+                                   kernel_dispatch_pkt.grid_size_y,
+                                   kernel_dispatch_pkt.grid_size_z};
+
+        info->record_callback(
+            dispatch_data, out.data(), out.size(), session.user_data, info->record_callback_args);
     }
 }
 
@@ -436,9 +464,11 @@ start_context(const context::context* ctx)
                 [=](const hsa::Queue&                                               q,
                     const hsa::rocprofiler_packet&                                  kern_pkt,
                     uint64_t                                                        kernel_id,
+                    rocprofiler_user_data_t*                                        user_data,
                     const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
                     const context::correlation_id* correlation_id) {
-                    return queue_cb(cb, q, kern_pkt, kernel_id, extern_corr_ids, correlation_id);
+                    return queue_cb(
+                        cb, q, kern_pkt, kernel_id, user_data, extern_corr_ids, correlation_id);
                 },
                 // Completion CB
                 [=](const hsa::Queue&                       q,

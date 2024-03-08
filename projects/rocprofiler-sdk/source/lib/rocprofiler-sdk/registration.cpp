@@ -235,14 +235,15 @@ find_clients()
     {
         for(const auto& itr : env)
         {
-            LOG(INFO) << "searching " << itr << " for rocprofiler_configure";
+            LOG(INFO) << "[env] searching " << itr << " for rocprofiler_configure";
 
             void* handle = dlopen(itr.c_str(), RTLD_NOLOAD | RTLD_LAZY);
 
             if(!handle)
             {
-                LOG(INFO) << itr << " is not already loaded, doing a global lazy dlopen...";
-                handle = dlopen(itr.c_str(), RTLD_GLOBAL | RTLD_LAZY);
+                LOG(WARNING) << "[env] " << itr
+                             << " is not already loaded, doing a local lazy dlopen...";
+                handle = dlopen(itr.c_str(), RTLD_LOCAL | RTLD_LAZY);
             }
 
             if(!handle)

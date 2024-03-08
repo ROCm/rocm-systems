@@ -52,7 +52,7 @@ set_tests_properties(
         ENVIRONMENT
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
         FAIL_REGULAR_EXPRESSION
-        "threw an exception")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-callback-client SHARED)
 target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
@@ -80,7 +80,7 @@ set_tests_properties(
         ENVIRONMENT
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
         FAIL_REGULAR_EXPRESSION
-        "threw an exception")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_library(counter-collection-functional-counter-client SHARED)
 target_sources(counter-collection-functional-counter-client
@@ -109,4 +109,4 @@ set_tests_properties(
         ENVIRONMENT
         "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
         FAIL_REGULAR_EXPRESSION
-        "threw an exception")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

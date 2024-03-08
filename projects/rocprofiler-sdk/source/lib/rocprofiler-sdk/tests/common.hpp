@@ -22,11 +22,11 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/defines.hpp"
-#include "rocprofiler-sdk/fwd.h"
 
 #include <gtest/gtest.h>
 

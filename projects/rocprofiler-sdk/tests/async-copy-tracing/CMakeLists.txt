@@ -29,7 +29,8 @@ set(async-copy-tracing-env
 set_tests_properties(
     test-async-copy-tracing-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${async-copy-tracing-env}" FAIL_REGULAR_EXPRESSION "threw an exception")
+               "${async-copy-tracing-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 foreach(FILENAME validate.py pytest.ini conftest.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
@@ -44,4 +45,4 @@ set_tests_properties(
     test-async-copy-tracing-validate
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                test-async-copy-tracing-execute FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

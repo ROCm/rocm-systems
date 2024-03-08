@@ -28,17 +28,28 @@
 
 #include <fstream>
 #include <mutex>
+#include <string>
 #include <unordered_map>
 
 namespace rocprofiler
 {
 namespace common
 {
+namespace
+{
 void
-init_logging(std::string_view env_var)
+install_failure_signal_handler()
 {
     static auto _once = std::once_flag{};
-    std::call_once(_once, [env_var]() {
+    std::call_once(_once, []() { google::InstallFailureSignalHandler(); });
+}
+}  // namespace
+
+void
+init_logging(std::string_view env_var, logging_config cfg)
+{
+    static auto _once = std::once_flag{};
+    std::call_once(_once, [env_var, &cfg]() {
         auto get_argv0 = []() {
             auto ifs  = std::ifstream{"/proc/self/cmdline"};
             auto sarg = std::string{};
@@ -50,18 +61,16 @@ init_logging(std::string_view env_var)
             return sarg;
         };
 
-        static auto argv0 = get_argv0();
-        google::InitGoogleLogging(argv0.c_str());
-        auto loglvl = common::get_env(env_var, "error");
+        auto loglvl = common::get_env(env_var, "");
         for(auto& itr : loglvl)
             itr = tolower(itr);
         // default to warning
-        auto loglvl_v = google::WARNING;
-        if(loglvl.find_first_not_of("0123456789") == std::string::npos)
+        auto& loglvl_v = cfg.loglevel;
+        if(!loglvl.empty() && loglvl.find_first_not_of("0123456789") == std::string::npos)
         {
             loglvl_v = std::stoul(loglvl);
         }
-        else
+        else if(!loglvl.empty())
         {
             const auto opts =
                 std::unordered_map<std::string_view, uint32_t>{{"info", google::INFO},
@@ -77,10 +86,39 @@ init_logging(std::string_view env_var)
                 loglvl_v = opts.at(loglvl);
         }
 
-        FLAGS_minloglevel     = loglvl_v;
-        FLAGS_stderrthreshold = loglvl_v;
+        update_logging(cfg, true);
+
+        if(!google::IsGoogleLoggingInitialized())
+        {
+            static auto argv0 = get_argv0();
+            google::InitGoogleLogging(argv0.c_str());
+        }
+
+        update_logging(cfg);
+
         LOG(INFO) << "logging initialized via " << env_var;
     });
+}
+
+void
+update_logging(const logging_config& cfg, bool setup_env, int env_override)
+{
+    static auto _mtx = std::mutex{};
+    auto        _lk  = std::unique_lock<std::mutex>{_mtx};
+
+    FLAGS_timestamp_in_logfile_name = false;
+    FLAGS_minloglevel               = cfg.loglevel;
+    FLAGS_stderrthreshold           = cfg.loglevel;
+    FLAGS_logtostderr               = cfg.logtostderr;
+    FLAGS_alsologtostderr           = cfg.alsologtostderr;
+    if(cfg.install_failure_handler) install_failure_signal_handler();
+
+    if(setup_env)
+    {
+        common::set_env("GOOGLE_LOG_DIR", get_env("PWD", ""), env_override);
+        common::set_env("GOOGLE_LOGTOSTDERR", cfg.loglevel, env_override);
+        common::set_env("GOOGLE_ALSOLOGTOSTDERR", cfg.alsologtostderr, env_override);
+    }
 }
 }  // namespace common
 }  // namespace rocprofiler

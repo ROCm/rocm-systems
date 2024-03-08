@@ -57,4 +57,4 @@ set(callback-api-tracing-env
 set_tests_properties(
     callback-api-tracing
     PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${callback-api-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "threw an exception")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

@@ -29,7 +29,7 @@ set_tests_properties(
         ENVIRONMENT
         "${PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>;ROCPROFILER_TOOL_OUTPUT_FILE=counter-collection-test.json;ROCPROFILER_TOOL_CONTEXTS=COUNTER_COLLECTION;ROCPROF_COUNTERS=SQ_WAVES_sum"
         FAIL_REGULAR_EXPRESSION
-        "threw an exception")
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 foreach(FILENAME validate.py pytest.ini conftest.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
@@ -44,4 +44,4 @@ set_tests_properties(
     test-counter-collection-validate
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                test-counter-collection-execute FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

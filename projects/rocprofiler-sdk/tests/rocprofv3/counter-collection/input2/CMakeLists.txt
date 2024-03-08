@@ -40,7 +40,7 @@ set(cc-env-pmc2
 set_tests_properties(
     rocprofv3-test-counter-collection-pmc2-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc2}"
-               FAIL_REGULAR_EXPRESSION "threw an exception")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(NAME rocprofv3-test-counter-collection-pmc2-validate
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
@@ -50,4 +50,4 @@ set_tests_properties(
     rocprofv3-test-counter-collection-pmc2-validate
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                rocprofv3-test-counter-collection-pmc2-execute FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

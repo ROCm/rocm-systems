@@ -71,46 +71,6 @@
 constexpr size_t BUFFER_SIZE_BYTES = 4096;
 constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES / 2);
 
-// This can be different for different architecture
-// Lets follow the v1 rocprof
-// I will have a kernel id from the rocprofiler
-// address the kernel descriptor and access the information
-// This works for gfx9 but may not for Navi arch
-// Interecept the kernel symbol load build a table for kernel id
-// when kenel dispatch callback. Here is the kernel id
-// Use the kernel id
-typedef struct
-{
-    uint64_t               grid_size;
-    uint64_t               workgroup_size;
-    uint64_t               lds_size;
-    uint64_t               scratch_size;
-    uint64_t               arch_vgpr_count;
-    uint64_t               accum_vgpr_count;
-    uint64_t               sgpr_count;
-    uint64_t               wave_size;
-    uint64_t               signal_handle;
-    uint64_t               kernel_object;
-    rocprofiler_queue_id_t queue_id;
-    std::string            kernel_name;
-    rocprofiler_agent_t    gpu_agent;
-    uint64_t               thread_id;
-    uint64_t               dispatch_index;
-
-} rocprofiler_tool_kernel_properties_t;
-
-struct kernel_descriptor_t
-{
-    uint8_t  reserved0[16];
-    int64_t  kernel_code_entry_byte_offset;
-    uint8_t  reserved1[20];
-    uint32_t compute_pgm_rsrc3;
-    uint32_t compute_pgm_rsrc1;
-    uint32_t compute_pgm_rsrc2;
-    uint16_t kernel_code_properties;
-    uint8_t  reserved2[6];
-};
-
 using rocprofiler_tool_buffer_kind_names_t =
     std::unordered_map<rocprofiler_buffer_tracing_kind_t, const char*>;
 using rocprofiler_tool_buffer_kind_operation_names_t =
@@ -134,29 +94,6 @@ struct rocprofiler_tool_callback_name_info_t
     rocprofiler_tool_callback_kind_names_t           kind_names      = {};
     rocprofiler_tool_callback_kind_operation_names_t operation_names = {};
 };
-
-// std::vector<std::string>
-// GetCounterNames();
-
-void
-SetKernelDescriptorName(rocprofiler_address_t kernel_descriptor, const char* name);
-
-void
-SetKernelProperties(uint64_t                             correlation_id,
-                    rocprofiler_tool_kernel_properties_t kernel_properties);
-void
-SetKernelProperties(uint64_t                             correlation_id,
-                    rocprofiler_tool_kernel_properties_t kernel_properties);
-
-rocprofiler_tool_kernel_properties_t
-GetKernelProperties(uint64_t correlation_id);
-
-const char*
-GetKernelDescriptorName(rocprofiler_address_t kernel_descriptor);
-
-void
-populate_kernel_properties_data(rocprofiler_tool_kernel_properties_t* kernel_properties,
-                                const hsa_kernel_dispatch_packet_t*   dispatch_packet);
 
 rocprofiler_tool_buffer_name_info_t
 get_buffer_id_names();

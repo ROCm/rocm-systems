@@ -145,7 +145,7 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     if(argc > 3) nsync = atoll(argv[3]);
 
     auto_lock_t _lk{print_lock};
-    std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
+    std::cout << "[transpose][" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
     _lk.unlock();
 
     std::default_random_engine         _engine{std::random_device{}() * (rank + 1) * (tid + 1)};
@@ -173,7 +173,7 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     dim3 block(32, 32, 1);  // transpose_a
 
     print_lock.lock();
-    printf("[%i][%i] grid=(%i,%i,%i), block=(%i,%i,%i)\n",
+    printf("[transpose][%i][%i] grid=(%i,%i,%i), block=(%i,%i,%i)\n",
            rank,
            tid,
            grid.x,
@@ -198,8 +198,10 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     float  GB   = (float) size * nitr * 2 / (1 << 30);
 
     print_lock.lock();
-    std::cout << "[" << rank << "][" << tid << "] Runtime of transpose is " << time << " sec\n"
-              << "The average performance of transpose is " << GB / time << " GBytes/sec"
+    std::cout << "[transpose][" << rank << "][" << tid << "] Runtime of transpose is " << time
+              << " sec\n";
+    std::cout << "[transpose][" << rank << "][" << tid
+              << "] The average performance of transpose is " << GB / time << " GBytes/sec"
               << std::endl;
     print_lock.unlock();
 

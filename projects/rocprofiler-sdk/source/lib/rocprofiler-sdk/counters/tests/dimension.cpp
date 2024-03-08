@@ -20,14 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <gtest/gtest.h>
-
-#include <fmt/core.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ext_amd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -42,7 +34,15 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "rocprofiler-sdk/registration.h"
+
+#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <fmt/core.h>
+#include <gtest/gtest.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_ext_amd.h>
 
 namespace
 {

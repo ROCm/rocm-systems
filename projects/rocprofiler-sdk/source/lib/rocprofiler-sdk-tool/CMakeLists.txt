@@ -12,7 +12,6 @@ add_subdirectory(plugins)
 target_link_libraries(
     rocprofiler-sdk-tool
     PRIVATE rocprofiler::rocprofiler-shared-library
-            rocprofiler::rocprofiler-hsa-runtime
             rocprofiler::rocprofiler-headers
             rocprofiler::rocprofiler-build-flags
             rocprofiler::rocprofiler-memcheck

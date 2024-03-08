@@ -48,6 +48,13 @@ get_env(std::string_view, bool);
 
 template <typename Tp>
 Tp get_env(std::string_view, Tp, std::enable_if_t<std::is_integral<Tp>::value, sfinae> = {});
+
+int
+set_env(std::string_view, bool, int override = 0);
+
+template <typename Tp>
+int
+set_env(std::string_view, Tp, int override = 0);
 }  // namespace impl
 
 template <typename Tp>
@@ -64,6 +71,13 @@ get_env(std::string_view env_id, Tp&& _default)
     {
         return impl::get_env(env_id, std::forward<Tp>(_default));
     }
+}
+
+template <typename Tp>
+inline auto
+set_env(std::string_view env_id, Tp&& value, int override = 0)
+{
+    return impl::set_env(env_id, std::forward<Tp>(value), override);
 }
 
 struct env_config

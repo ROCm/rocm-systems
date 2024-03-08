@@ -57,19 +57,22 @@ struct config
 {
     config();
 
-    bool        demangle                 = get_env("ROCPROF_DEMANGLE_KERNELS", true);
-    bool        truncate                 = get_env("ROCPROF_TRUNCATE_KERNELS", false);
-    bool        kernel_trace             = get_env("ROCPROF_KERNEL_TRACE", false);
-    bool        hsa_api_trace            = get_env("ROCPROF_HSA_API_TRACE", false);
-    bool        marker_api_trace         = get_env("ROCPROF_MARKER_API_TRACE", false);
-    bool        memory_copy_trace        = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
-    bool        counter_collection       = get_env("ROCPROF_COUNTER_COLLECTION", false);
-    bool        hip_api_trace            = get_env("ROCPROF_HIP_API_TRACE", false);
-    bool        hip_compiler_api_trace   = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
-    bool        list_metrics             = get_env("ROCPROF_LIST_METRICS", false);
-    bool        list_metrics_output_file = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
-    int         mpi_size                 = get_mpi_size();
-    int         mpi_rank                 = get_mpi_rank();
+    bool        demangle                    = get_env("ROCPROF_DEMANGLE_KERNELS", true);
+    bool        truncate                    = get_env("ROCPROF_TRUNCATE_KERNELS", false);
+    bool        kernel_trace                = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool        hsa_core_api_trace          = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
+    bool        hsa_amd_ext_api_trace       = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
+    bool        hsa_image_ext_api_trace     = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
+    bool        hsa_finalizer_ext_api_trace = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
+    bool        marker_api_trace            = get_env("ROCPROF_MARKER_API_TRACE", false);
+    bool        memory_copy_trace           = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
+    bool        counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
+    bool        hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
+    bool        hip_compiler_api_trace      = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
+    bool        list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
+    bool        list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
+    int         mpi_size                    = get_mpi_size();
+    int         mpi_rank                    = get_mpi_rank();
     std::string output_path = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
     std::string output_file = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
     std::vector<std::string> kernel_names = {};

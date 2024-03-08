@@ -30,6 +30,8 @@
 
 #include <hsa/hsa_ven_amd_loader.h>
 
+#include <stdint.h>
+
 ROCPROFILER_EXTERN_C_INIT
 
 /**
@@ -141,9 +143,14 @@ typedef struct
     uint32_t kernarg_segment_alignment;  ///< Alignment (in bytes) of the buffer used to pass
                                          ///< arguments to the kernel
     uint32_t group_segment_size;    ///< Size of static group segment memory required by the kernel
-                                    ///< (per work-group), in bytes
+                                    ///< (per work-group), in bytes. AKA: LDS size
     uint32_t private_segment_size;  ///< Size of static private, spill, and arg segment memory
-                                    ///< required by this kernel (per work-item), in bytes.
+                                    ///< required by this kernel (per work-item), in bytes. AKA:
+                                    ///< scratch size
+    uint32_t sgpr_count;            ///< Scalar general purpose register count
+    uint32_t arch_vgpr_count;       ///< Architecture vector general purpose register count
+    uint32_t accum_vgpr_count;      ///< Accum vector general purpose register count
+
 } rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
 /**

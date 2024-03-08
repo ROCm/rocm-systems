@@ -48,6 +48,14 @@
 
 namespace fs = rocprofiler::common::filesystem;
 
+#if defined(ROCPROFILER_CI)
+#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
+#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(FATAL)
+#else
+#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
+#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
+#endif
+
 namespace rocprofiler
 {
 namespace agent
@@ -697,7 +705,7 @@ construct_agent_cache(::HsaApiTable* table)
         },
         &hsa_agents);
 
-    LOG_IF(FATAL, rocp_agents.size() != hsa_agents.size())
+    ROCP_CI_LOG_IF(ERROR, rocp_agents.size() != hsa_agents.size())
         << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
         << " HSA agents";
 

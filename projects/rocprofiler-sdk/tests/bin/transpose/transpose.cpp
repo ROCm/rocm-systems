@@ -189,7 +189,7 @@ run(int rank, int tid, int devid, int argc, char** argv)
     HIP_API_CALL(hipStreamCreate(&stream));
 
     auto_lock_t _lk{print_lock};
-    std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
+    std::cout << "[transpose][" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
     _lk.unlock();
 
     std::default_random_engine         _engine{std::random_device{}() * (rank + 1) * (tid + 1)};
@@ -230,8 +230,10 @@ run(int rank, int tid, int devid, int argc, char** argv)
     float  GB   = (float) size * nitr * 2 / (1 << 30);
 
     print_lock.lock();
-    std::cout << "[" << rank << "][" << tid << "] Runtime of transpose is " << time << " sec\n"
-              << "The average performance of transpose is " << GB / time << " GBytes/sec"
+    std::cout << "[transpose][" << rank << "][" << tid << "] Runtime of transpose is " << time
+              << " sec\n";
+    std::cout << "[transpose][" << rank << "][" << tid
+              << "] The average performance of transpose is " << GB / time << " GBytes/sec"
               << std::endl;
     print_lock.unlock();
 

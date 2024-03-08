@@ -122,6 +122,7 @@ public:
         rocprofiler_thread_id_t    tid              = common::get_tid();
         rocprofiler_kernel_id_t    kernel_id        = 0;
         rocprofiler_queue_id_t     queue_id         = {};
+        rocprofiler_user_data_t    user_data        = {.value = 0};
         hsa_agent_t                hsa_agent        = {};
         const rocprofiler_agent_t* rocp_agent       = nullptr;
         context::correlation_id*   correlation_id   = nullptr;
@@ -137,6 +138,7 @@ public:
         const Queue&,
         const rocprofiler_packet&,
         uint64_t,
+        rocprofiler_user_data_t*,
         const queue_info_session_t::external_corr_id_map_t&,
         const context::correlation_id*)>;
     // Signals the completion of the kernel packet.

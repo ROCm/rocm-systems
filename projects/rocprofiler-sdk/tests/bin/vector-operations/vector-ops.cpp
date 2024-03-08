@@ -1,24 +1,25 @@
-/*
-Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
+// MIT License
+//
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
-*/
 #include <assert.h>
 #include <hip/hip_runtime.h>
 #include <stdio.h>
@@ -132,8 +133,12 @@ divide_kernel(float* __restrict__ a,
 using namespace std;
 
 void
-run(int NUM_QUEUE)
+run(int NUM_QUEUE, int DEVICE_ID)
 {
+    HIP_API_CALL(hipSetDevice(DEVICE_ID));
+
+    HIP_API_CALL(hipDeviceSynchronize());
+
     std::vector<float*> hostA(NUM_QUEUE);
     std::vector<float*> hostB(NUM_QUEUE);
     std::vector<float*> hostC(NUM_QUEUE);
@@ -144,10 +149,18 @@ run(int NUM_QUEUE)
 
     std::vector<hipStream_t> streams(NUM_QUEUE);
 
-    hipDeviceProp_t devProp;
-    HIP_API_CALL(hipGetDeviceProperties(&devProp, 0));
+    auto sync_stream = [NUM_QUEUE, streams](int q) {
+        if(q < 0 || q >= NUM_QUEUE)
+            throw std::runtime_error{std::string{"invalid stream id: "} + std::to_string(q)};
 
-    int i;
+        HIP_API_CALL(hipStreamSynchronize(streams.at(q)));
+    };
+
+    auto sync_streams = [NUM_QUEUE, sync_stream]() {
+        for(int i = 0; i < NUM_QUEUE; ++i)
+            sync_stream(i);
+        HIP_API_CALL(hipDeviceSynchronize());
+    };
 
     for(int q = 0; q < NUM_QUEUE; q++)
     {
@@ -158,26 +171,26 @@ run(int NUM_QUEUE)
         HIP_API_CALL(hipHostMalloc(&hostC[q], NUM * sizeof(float), 0));
 
         // initialize the input data
-        for(i = 0; i < NUM; i++)
+        for(int i = 0; i < NUM; i++)
         {
-            hostB[q][i] = (float) i;
-            hostC[q][i] = (float) i * 100.0f;
+            hostB[q][i] = static_cast<float>(i);
+            hostC[q][i] = static_cast<float>(i * 100.0f);
         }
 
-        HIP_API_CALL(hipMalloc((void**) (&deviceA[q]), NUM * sizeof(float)));
-        HIP_API_CALL(hipMalloc((void**) (&deviceB[q]), NUM * sizeof(float)));
-        HIP_API_CALL(hipMalloc((void**) (&deviceC[q]), NUM * sizeof(float)));
+        HIP_API_CALL(hipMallocAsync(&deviceA[q], NUM * sizeof(float), streams[q]));
+        HIP_API_CALL(hipMallocAsync(&deviceB[q], NUM * sizeof(float), streams[q]));
+        HIP_API_CALL(hipMallocAsync(&deviceC[q], NUM * sizeof(float), streams[q]));
 
         HIP_API_CALL(hipMemcpyAsync(
             deviceB[q], hostB[q], NUM * sizeof(float), hipMemcpyHostToDevice, streams[q]));
         HIP_API_CALL(hipMemcpyAsync(
             deviceC[q], hostC[q], NUM * sizeof(float), hipMemcpyHostToDevice, streams[q]));
     }
-    HIP_API_CALL(hipDeviceSynchronize());
 
-    for(int RUN_I = 0; RUN_I < 2; RUN_I++)
+    sync_streams();
+
+    for(int q = 0; q < NUM_QUEUE; q++)
     {
-        int q = (4 * RUN_I + 0) % NUM_QUEUE;
         hipLaunchKernelGGL(addition_kernel,
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
@@ -189,8 +202,8 @@ run(int NUM_QUEUE)
                            WIDTH,
                            HEIGHT);
 
-        HIP_API_CALL(hipDeviceSynchronize());
-        q = (4 * RUN_I + 1) % NUM_QUEUE;
+        HIP_API_CALL(hipGetLastError());
+
         hipLaunchKernelGGL(subtract_kernel,
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
@@ -202,8 +215,8 @@ run(int NUM_QUEUE)
                            WIDTH,
                            HEIGHT);
 
-        HIP_API_CALL(hipDeviceSynchronize());
-        q = (4 * RUN_I + 2) % NUM_QUEUE;
+        HIP_API_CALL(hipGetLastError());
+
         hipLaunchKernelGGL(multiply_kernel,
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
@@ -215,8 +228,8 @@ run(int NUM_QUEUE)
                            WIDTH,
                            HEIGHT);
 
-        HIP_API_CALL(hipDeviceSynchronize());
-        q = (4 * RUN_I + 3) % NUM_QUEUE;
+        HIP_API_CALL(hipGetLastError());
+
         hipLaunchKernelGGL(divide_kernel,
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
@@ -227,17 +240,18 @@ run(int NUM_QUEUE)
                            deviceC[q],
                            WIDTH,
                            HEIGHT);
-        HIP_API_CALL(hipDeviceSynchronize());
+
+        HIP_API_CALL(hipGetLastError());
     }
 
-    for(int q = 0; q < NUM_QUEUE; q++)
-        HIP_API_CALL(hipMemcpyAsync(
-            hostA[q], deviceA[q], NUM * sizeof(float), hipMemcpyDeviceToHost, streams[q]));
+    sync_streams();
 
     for(int q = 0; q < NUM_QUEUE; q++)
     {
-        HIP_API_CALL(hipMemcpy(hostA[q], deviceA[q], NUM * sizeof(float), hipMemcpyDeviceToHost));
-        HIP_API_CALL(hipDeviceSynchronize());
+        HIP_API_CALL(hipMemcpyAsync(
+            hostA[q], deviceA[q], NUM * sizeof(float), hipMemcpyDeviceToHost, streams[q]));
+
+        sync_stream(q);
 
         HIP_API_CALL(hipFree(deviceA[q]));
         HIP_API_CALL(hipFree(deviceB[q]));
@@ -246,13 +260,21 @@ run(int NUM_QUEUE)
         HIP_API_CALL(hipHostFree(hostA[q]));
         HIP_API_CALL(hipHostFree(hostB[q]));
         HIP_API_CALL(hipHostFree(hostC[q]));
+
         HIP_API_CALL(hipStreamDestroy(streams[q]));
     }
+
+    HIP_API_CALL(hipDeviceSynchronize());
 }
 
 int
 main()
 {
-    run(1);
+    int device_count = 0;
+    HIP_API_CALL(hipGetDeviceCount(&device_count));
+
+    for(int i = 0; i < device_count; ++i)
+        run(4, i);
+
     return 0;
 }

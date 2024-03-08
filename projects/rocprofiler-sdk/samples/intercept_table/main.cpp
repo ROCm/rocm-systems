@@ -145,7 +145,7 @@ run(int rank, int tid, hipStream_t stream, int argc, char** argv)
     if(argc > 3) nsync = atoll(argv[3]);
 
     auto_lock_t _lk{print_lock};
-    std::cout << "[" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
+    std::cout << "[transpose][" << rank << "][" << tid << "] M: " << M << " N: " << N << std::endl;
     _lk.unlock();
 
     std::default_random_engine         _engine{std::random_device{}() * (rank + 1) * (tid + 1)};

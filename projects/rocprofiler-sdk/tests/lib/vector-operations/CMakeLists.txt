@@ -17,7 +17,7 @@ if(NOT CMAKE_HIP_COMPILER)
     endif()
 endif()
 
-project(rocprofiler-tool-test-app-transpose LANGUAGES CXX HIP)
+project(rocprofiler-tests-lib-vector-operations LANGUAGES CXX HIP)
 
 foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     if("${CMAKE_HIP_FLAGS_${_TYPE}}" STREQUAL "")
@@ -32,20 +32,18 @@ set(CMAKE_HIP_STANDARD 17)
 set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
-set_source_files_properties(simple-transpose.cpp PROPERTIES LANGUAGE HIP)
-add_executable(simple-transpose)
-target_sources(simple-transpose PRIVATE simple-transpose.cpp)
-target_compile_options(simple-transpose PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow
-                                                -Werror)
+set_source_files_properties(vector-ops.cpp PROPERTIES LANGUAGE HIP)
+add_library(vector-ops-shared-library SHARED)
+target_sources(vector-ops-shared-library PRIVATE vector-ops.cpp)
+target_compile_options(vector-ops-shared-library PRIVATE -W -Wall -Wextra -Wpedantic
+                                                         -Wshadow -Werror)
+target_include_directories(vector-ops-shared-library PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+set_target_properties(vector-ops-shared-library PROPERTIES OUTPUT_NAME vector-ops)
 
 find_package(Threads REQUIRED)
-target_link_libraries(simple-transpose PRIVATE Threads::Threads)
-
-find_package(rocprofiler-sdk-roctx REQUIRED)
-target_link_libraries(simple-transpose
-                      PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+target_link_libraries(vector-ops-shared-library PRIVATE Threads::Threads)
 
 install(
-    TARGETS simple-transpose
-    DESTINATION bin
+    TARGETS vector-ops-shared-library
+    DESTINATION lib
     COMPONENT tests)

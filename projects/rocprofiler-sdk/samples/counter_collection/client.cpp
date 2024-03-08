@@ -32,6 +32,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -116,13 +117,10 @@ buffered_callback(rocprofiler_context_id_t,
  * to collect the counter SQ_WAVES for all kernel dispatch packets.
  */
 void
-dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
-                  const rocprofiler_agent_t* agent,
-                  rocprofiler_correlation_id_t /*correlation_id*/,
-                  const hsa_kernel_dispatch_packet_t* /*dispatch_packet*/,
-                  uint64_t /*kernel_id*/,
-                  void* /*callback_data_args*/,
-                  rocprofiler_profile_config_id_t* config)
+dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+                  rocprofiler_profile_config_id_t*             config,
+                  rocprofiler_user_data_t* /*user_data*/,
+                  void* /*callback_data_args*/)
 {
     /**
      * This simple example uses the same profile counter set for all agents.
@@ -135,7 +133,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
     static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
 
     auto search_cache = [&]() {
-        if(auto pos = profile_cache.find(agent->id.handle); pos != profile_cache.end())
+        if(auto pos = profile_cache.find(dispatch_data.agent_id.handle); pos != profile_cache.end())
         {
             *config = pos->second;
             return true;
@@ -158,7 +156,7 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
 
     // Iterate through the agents and get the counters available on that agent
     ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-                         agent->id,
+                         dispatch_data.agent_id,
                          [](rocprofiler_agent_id_t,
                             rocprofiler_counter_id_t* counters,
                             size_t                    num_counters,
@@ -192,11 +190,12 @@ dispatch_callback(rocprofiler_queue_id_t /*queue_id*/,
 
     // Create a colleciton profile for the counters
     rocprofiler_profile_config_id_t profile;
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                         agent->id, collect_counters.data(), collect_counters.size(), &profile),
-                     "Could not construct profile cfg");
+    ROCPROFILER_CALL(
+        rocprofiler_create_profile_config(
+            dispatch_data.agent_id, collect_counters.data(), collect_counters.size(), &profile),
+        "Could not construct profile cfg");
 
-    profile_cache.emplace(agent->id.handle, profile);
+    profile_cache.emplace(dispatch_data.agent_id.handle, profile);
     // Return the profile to collect those counters for this dispatch
     *config = profile;
 }

@@ -20,10 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <hsa/hsa.h>
+#include <rocprofiler-sdk-roctx/api_trace.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
+#include <rocprofiler-sdk-roctx/types.h>
 #include <rocprofiler-sdk/buffer.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -33,13 +37,9 @@
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/tests/common.hpp"
-#include "rocprofiler-sdk-roctx/api_trace.h"
-#include "rocprofiler-sdk-roctx/types.h"
-#include "rocprofiler-sdk/callback_tracing.h"
-#include "rocprofiler-sdk/context.h"
-#include "rocprofiler-sdk/marker/api_id.h"
 
 #include <gtest/gtest.h>
+#include <hsa/hsa.h>
 
 #include <dlfcn.h>
 #include <pthread.h>

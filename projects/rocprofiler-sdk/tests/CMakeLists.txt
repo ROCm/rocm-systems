@@ -40,8 +40,11 @@ add_subdirectory(common)
 # tool libraries used for data collection during integration tests
 add_subdirectory(tools)
 
+# libraries used by integration test applications
+add_subdirectory(lib)
+
 # applications used by integration tests
-add_subdirectory(apps)
+add_subdirectory(bin)
 
 # validation tests
 add_subdirectory(kernel-tracing)

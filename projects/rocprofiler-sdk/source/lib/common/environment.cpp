@@ -112,9 +112,27 @@ get_env(std::string_view env_id, Tp _default, std::enable_if_t<std::is_integral<
     return _default;
 }
 
+int
+set_env(std::string_view env_id, bool value, int override)
+{
+    return ::setenv(env_id.data(), (value) ? "1" : "0", override);
+}
+
+template <typename Tp>
+int
+set_env(std::string_view env_id, Tp value, int override)
+{
+    auto str_value = std::stringstream{};
+    str_value << value;
+    return ::setenv(env_id.data(), str_value.str().c_str(), override);
+}
+
 #define SPECIALIZE_GET_ENV(TYPE)                                                                   \
     template TYPE get_env<TYPE>(                                                                   \
-        std::string_view, TYPE, std::enable_if_t<std::is_integral<TYPE>::value, sfinae>);
+        std::string_view, TYPE, std::enable_if_t<std::is_integral<TYPE>::value, sfinae>);          \
+    template int set_env<TYPE>(std::string_view, TYPE, int);
+
+#define SPECIALIZE_SET_ENV(TYPE) template int set_env<TYPE>(std::string_view, TYPE, int);
 
 SPECIALIZE_GET_ENV(int8_t)
 SPECIALIZE_GET_ENV(int16_t)
@@ -124,6 +142,11 @@ SPECIALIZE_GET_ENV(uint8_t)
 SPECIALIZE_GET_ENV(uint16_t)
 SPECIALIZE_GET_ENV(uint32_t)
 SPECIALIZE_GET_ENV(uint64_t)
+
+SPECIALIZE_SET_ENV(const char*)
+SPECIALIZE_SET_ENV(std::string)
+SPECIALIZE_SET_ENV(float)
+SPECIALIZE_SET_ENV(double)
 }  // namespace impl
 }  // namespace common
 }  // namespace rocprofiler

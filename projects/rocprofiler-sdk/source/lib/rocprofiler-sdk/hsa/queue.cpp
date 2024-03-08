@@ -253,8 +253,9 @@ WriteInterceptor(const void* packets,
         return;
     }
 
-    auto  thr_id  = common::get_tid();
-    auto* corr_id = context::get_latest_correlation_id();
+    auto  thr_id    = common::get_tid();
+    auto* corr_id   = context::get_latest_correlation_id();
+    auto  user_data = rocprofiler_user_data_t{.value = 0};
 
     // use thread-local value to reuse allocation
     auto extern_corr_ids = Queue::queue_info_session_t::external_corr_id_map_t{};
@@ -300,8 +301,8 @@ WriteInterceptor(const void* packets,
         queue.signal_callback([&](const auto& map) {
             for(const auto& [client_id, cb_pair] : map)
             {
-                if(auto maybe_pkt =
-                       cb_pair.first(queue, kernel_pkt, kernel_id, extern_corr_ids, corr_id))
+                if(auto maybe_pkt = cb_pair.first(
+                       queue, kernel_pkt, kernel_id, &user_data, extern_corr_ids, corr_id))
                 {
                     inst_pkt.push_back(std::make_pair(std::move(maybe_pkt), client_id));
                 }
@@ -381,6 +382,7 @@ WriteInterceptor(const void* packets,
                                             .tid              = thr_id,
                                             .kernel_id        = kernel_id,
                                             .queue_id         = queue.get_id(),
+                                            .user_data        = user_data,
                                             .hsa_agent        = queue.get_agent().get_hsa_agent(),
                                             .rocp_agent       = queue.get_agent().get_rocp_agent(),
                                             .correlation_id   = corr_id,

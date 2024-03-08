@@ -40,7 +40,7 @@ set(cc-tracing-env
 set_tests_properties(
     rocprofv3-test-tracing-plus-cc-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "threw an exception")
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(NAME rocprofv3-test-tracing-plus-cc-validate
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
@@ -50,4 +50,4 @@ set_tests_properties(
     rocprofv3-test-tracing-plus-cc-validate
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
                rocprofv3-test-tracing-plus-cc-execute FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
