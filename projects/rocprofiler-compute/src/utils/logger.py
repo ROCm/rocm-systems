@@ -51,8 +51,21 @@ class ColoredFormatter(logging.Formatter):
         return logging.Formatter.format(self, record)
 
 
-# Setup logger
-def setup_logging(verbosity, quietmode):
+# Setup logger handler - provided as separate function to be called
+# prior to argument parsing
+def setup_logging_handler():
+    if False:
+        formatter = ColoredFormatter("%(levelname)s %(message)s")
+    else:
+        formatter = logging.Formatter("%(message)s")
+
+    handler = logging.StreamHandler(sys.stdout)
+    handler.setFormatter(formatter)
+    logging.basicConfig(handlers=[handler])
+
+
+# Setup logger priority
+def setup_logging_priority(verbosity, quietmode):
     # register a trace level logger
     logging.TRACE = logging.DEBUG - 5
     logging.addLevelName(logging.TRACE, "TRACE")
@@ -82,11 +95,6 @@ def setup_logging(verbosity, quietmode):
             print("Ignoring unsupported OMNIPERF_LOGLEVEL setting (%s)" % loglevel)
             sys.exit(1)
 
-    if False:
-        formatter = ColoredFormatter("%(levelname)s %(message)s")
-    else:
-        formatter = ColoredFormatter("%(message)s")
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(formatter)
-    logging.basicConfig(level=loglevel, handlers=[handler])
+    # update priority
+    logging.getLogger().setLevel(loglevel)
     return loglevel

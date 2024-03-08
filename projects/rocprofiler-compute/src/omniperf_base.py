@@ -23,6 +23,7 @@
 ##############################################################################el
 
 import argparse
+import logging
 import sys
 import os
 from pathlib import Path
@@ -37,7 +38,7 @@ from utils.utils import (
     console_log,
     console_error,
 )
-from utils.logger import setup_logging
+from utils.logger import setup_logging_handler, setup_logging_priority
 from argparser import omniarg_parser
 import config
 import pandas as pd
@@ -69,10 +70,10 @@ class Omniperf:
         self.__options = {}
         self.__supported_archs = SUPPORTED_ARCHS
         self.__mspec: MachineSpecs = None  # to be initalized in load_soc_specs()
-
+        setup_logging_handler()
         self.set_version()
         self.parse_args()
-        self.__loglevel = setup_logging(self.__args.verbose, self.__args.quiet)
+        self.__loglevel = setup_logging_priority(self.__args.verbose, self.__args.quiet)
         setattr(self.__args, "loglevel", self.__loglevel)
         self.__mode = self.__args.mode
 
