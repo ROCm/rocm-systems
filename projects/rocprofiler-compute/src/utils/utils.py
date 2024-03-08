@@ -48,7 +48,7 @@ def demarcate(function):
     return wrap_function
 
 
-def console_error(*argv,exit=True):
+def console_error(*argv, exit=True):
     if len(argv) > 1:
         logging.error("ERROR: " + f"[{argv[0]}] {argv[1]}")
     else:
@@ -57,10 +57,10 @@ def console_error(*argv,exit=True):
         sys.exit(1)
 
 
-def console_log(*argv,indent_level=0):
-    indent = ''
+def console_log(*argv, indent_level=0):
+    indent = ""
     if indent_level >= 1:
-        indent = ' ' * 3 * indent_level + '|-> '  # spaces per indent level
+        indent = " " * 3 * indent_level + "|-> "  # spaces per indent level
 
     if len(argv) > 1:
         logging.info(indent + f"[{argv[0]}] {argv[1]}")
@@ -158,11 +158,12 @@ def detect_rocprof():
     else:
         # Resolve any sym links in file path
         rocprof_path = os.path.realpath(rocprof_path.rstrip("\n"))
-        console_log("ROC Profiler: " + str(rocprof_path))
+        console_debug("ROC Profiler: " + str(rocprof_path))
         return rocprof_cmd  # TODO: Do we still need to return this? It's not being used in the function call
 
 
 def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
+    console_debug("subprocess", subprocess_args)
     # Start subprocess
     # bufsize = 1 means output is line buffered
     # universal_newlines = True is required for line buffering
@@ -194,7 +195,7 @@ def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
         line = stream.readline()
         buf.write(line)
         if profileMode:
-            console_log(rocprof_cmd,line.strip(),indent_level=1)
+            console_log(rocprof_cmd, line.strip(), indent_level=1)
         else:
             console_log(line.strip())
 
@@ -252,14 +253,18 @@ def run_prof(fname, profiler_options, workload_dir, mspec, loglevel):
 
     # profile the app
     if new_env:
-        success, output = capture_subprocess_output([rocprof_cmd] + options, new_env=new_env, profileMode=True)
+        success, output = capture_subprocess_output(
+            [rocprof_cmd] + options, new_env=new_env, profileMode=True
+        )
     else:
-        success, output = capture_subprocess_output([rocprof_cmd] + options, profileMode=True)
+        success, output = capture_subprocess_output(
+            [rocprof_cmd] + options, profileMode=True
+        )
 
     if not success:
         if loglevel > logging.INFO:
             for line in output.splitlines():
-                console_error(output,exit=False)
+                console_error(output, exit=False)
         console_error("Profiling execution failed.")
 
     if new_env:
@@ -304,6 +309,7 @@ def run_prof(fname, profiler_options, workload_dir, mspec, loglevel):
     df = pd.read_csv(workload_dir + "/" + fbase + ".csv")
     df.rename(columns=output_headers, inplace=True)
     df.to_csv(workload_dir + "/" + fbase + ".csv", index=False)
+
 
 def replace_timestamps(workload_dir):
     df_stamps = pd.read_csv(workload_dir + "/timestamps.csv")
@@ -578,10 +584,12 @@ def is_workload_empty(path):
     else:
         console_error("profiling", "Cannot find pmc_perf.csv in %s" % path)
 
+
 def print_status(msg):
     msg_length = len(msg)
-    print("")
-    print("~" * (msg_length + 1))
-    print(msg)
-    print("~" * (msg_length + 1))
-    print("")
+
+    console_log("")
+    console_log("~" * (msg_length + 1))
+    console_log(msg)
+    console_log("~" * (msg_length + 1))
+    console_log("")
