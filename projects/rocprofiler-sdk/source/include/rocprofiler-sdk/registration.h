@@ -35,12 +35,14 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief A pointer to this data structure is provided to the client tool initialization function.
- * The name member can be set by the client to assist with debugging (e.g. rocprofiler cannot start
- * your context because there is a conflicting context started by `<name>` -- at least that is the
- * plan). The handle member is a unique identifer assigned by rocprofiler for the client and the
- * client can store it and pass it to the @ref rocprofiler_client_finalize_t function to force
- * finalization (i.e. deactivate all of it's contexts) for the client.
+ * @brief A client refers to an individual or entity engaged in the configuration of ROCprofiler
+ * services. e.g: any third party tool like PAPI or any internal tool (Omnitrace). A pointer to this
+ * data structure is provided to the client tool initialization function. The name member can be set
+ * by the client to assist with debugging (e.g. rocprofiler cannot start your context because there
+ * is a conflicting context started by `<name>` -- at least that is the plan). The handle member is
+ * a unique identifer assigned by rocprofiler for the client and the client can store it and pass it
+ * to the @ref rocprofiler_client_finalize_t function to force finalization (i.e. deactivate all of
+ * it's contexts) for the client.
  */
 typedef struct
 {

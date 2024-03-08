@@ -1,4 +1,4 @@
-# Building Tool Library
+# Tool Library
 
 ```eval_rst
 .. toctree::

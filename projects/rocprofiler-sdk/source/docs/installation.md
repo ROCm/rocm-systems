@@ -6,13 +6,16 @@
    :maxdepth: 4
 ```
 
-## Quick Start (Latest Release, Binary Installer)
-
-TODO: Installation quick start
-
 ## Operating System
 
-TODO: supported OSes
+ROCprofiler is only supported on Linux. The following distributions are tested:
+
+- Ubuntu 20.04
+- Ubuntu 22.04
+- OpenSUSE 15.4
+- RedHat 8.8
+
+Other OS distributions may be supported but are not tested.
 
 ### Identifying the Operating System
 
@@ -35,16 +38,42 @@ The relevent fields are `ID` and the `VERSION_ID`.
 
 ### Build Requirements
 
-TODO: build reqs
+ROCprofiler needs a CMake (https://cmake.org/) version 3.21 or higher.
+
+***If the system installed cmake is too old, installing a new version of cmake can be done through several methods. One of the easiest options is to use PyPi (i.e. python’s pip):***
+
+```bash
+pip install --user 'cmake==3.21.0'
+export PATH=${HOME}/.local/bin:${PATH}
+```
 
 ### Building ROCprofiler
 
-TODO: cmake build
+```bash
+git clone https://git@github.com:ROCm/rocprofiler-sdk-internal.git rocprofiler-sdk-source  
+cmake                                         \
+      -B rocprofiler-sdk-build                \
+      -D ROCPROFILER_BUILD_TESTS=ON           \
+      -D ROCPROFILER_BUILD_SAMPLES=ON         \
+      -D ROCPROFILER_BUILD_DOCS=ON            \
+      -D CMAKE_INSTALL_PREFIX=/opt/rocm       \
+       rocprofiler-sdk-source
+
+cmake --build rocprofiler-sdk-build --target all --parallel 8  
+```
 
 ### Testing ROCprofiler
 
-TODO: ctest
+To run the built tests, cd into the `rocprofiler-sdk-build` directory and run:
+
+```bash
+ctest --output-on-failure -O ctest.all.log
+```
 
 ### Installing ROCprofiler
 
-TODO: `make install` and/or `cpack`
+To install ROCprofiler from the `rocprofiler-sdk-build` directory, run:
+
+```bash
+cmake --build rocprofiler-sdk-build --target install
+```

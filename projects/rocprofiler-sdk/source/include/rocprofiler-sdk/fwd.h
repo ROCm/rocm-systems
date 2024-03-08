@@ -305,7 +305,9 @@ typedef uint64_t rocprofiler_thread_id_t;
 /**
  * @brief Tracing Operation ID. Depending on the kind, operations can be determined.
  * If the value is equal to zero that means all operations will be considered
- * for tracing.
+ * for tracing. Detailed API tracing operations can be found at associated header file
+ * for that partiular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
+ * operations, look at source/include/rocprofiler-sdk/hsa/amd_ext_api_id.h
  */
 typedef uint32_t rocprofiler_tracing_operation_t;
 

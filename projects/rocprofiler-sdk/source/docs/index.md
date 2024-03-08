@@ -10,9 +10,10 @@
    features
    installation
    tool_library_overview
-   callback_tracing
-   buffered_tracing
+   callback_services
+   buffered_services
    intercept_table
    developer_api
-   getting_started
+   samples
+   rocprofv3
 ```

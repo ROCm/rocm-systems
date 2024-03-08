@@ -1,4 +1,6 @@
-## Running Samples and Tool
+# Samples
+
+## Running Samples
 
 ```eval_rst
 .. toctree::
@@ -34,23 +36,3 @@ To run the built samples, cd into the `build-rocprofiler-sdk-samples` directory 
 
 ```bash
 ctest -V
-
-### Running Tool
-#### Build an HIP application:
-
-```bash
-cmake -B <build-directory> <source-directory> -DCMAKE_PREFIX_PATH=/opt/rocm
-cmake --build <build-directory> --target all --parallel <N>
-```
-
-#### Run the Tool:
-
-```bash 
-rocprofv3 --hsa-api ./MatrixTranspose
-```
-
-See more tool options with 
-
-```bash 
-rocprofv3 --help 
-``` 

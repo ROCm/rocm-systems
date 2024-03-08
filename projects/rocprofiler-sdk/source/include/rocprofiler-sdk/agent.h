@@ -98,7 +98,7 @@ typedef struct rocprofiler_agent_mem_bank_t
 } rocprofiler_agent_mem_bank_t;
 
 /**
- * @brief Agent.
+ * @brief Agent (rocprofiler_agent_t stores the properties of an Agent)
  */
 typedef struct rocprofiler_agent_v0_t
 {
