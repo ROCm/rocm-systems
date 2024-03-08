@@ -22,6 +22,7 @@
 # SOFTWARE.
 ##############################################################################el
 
+import locale
 import logging
 import sys
 import os
@@ -593,3 +594,13 @@ def print_status(msg):
     console_log(msg)
     console_log("~" * (msg_length + 1))
     console_log("")
+
+
+def set_locale_encoding():
+    try:
+        locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
+    except locale.Error as error:
+        print("Please ensure that the 'en_US.UTF-8' locale is available on your system.")
+        print("")
+        print("ERROR: ", error)
+        sys.exit(1)

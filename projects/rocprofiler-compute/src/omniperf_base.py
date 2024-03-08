@@ -38,6 +38,7 @@ from utils.utils import (
     console_debug,
     console_log,
     console_error,
+    set_locale_encoding,
 )
 from utils.logger import setup_console_handler, setup_logging_priority, setup_file_handler
 from argparser import omniarg_parser
@@ -57,6 +58,7 @@ SUPPORTED_ARCHS = {
 
 class Omniperf:
     def __init__(self):
+        set_locale_encoding()
         self.__args = None
         self.__profiler_mode = None
         self.__analyze_mode = None
