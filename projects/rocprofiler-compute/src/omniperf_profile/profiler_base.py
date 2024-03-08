@@ -346,7 +346,7 @@ class OmniProfiler_Base:
         input_files = glob.glob(self.get_args().path + "/perfmon/*.txt")
         input_files.sort()
 
-        for fname in tqdm(input_files,disable=disable_tqdm):
+        for fname in tqdm(input_files, disable=disable_tqdm):
             # Kernel filtering (in-place replacement)
             if not self.__args.kernel == None:
                 success, output = capture_subprocess_output(
