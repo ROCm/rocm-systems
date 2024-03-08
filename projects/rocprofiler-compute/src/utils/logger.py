@@ -51,21 +51,32 @@ class ColoredFormatter(logging.Formatter):
         return logging.Formatter.format(self, record)
 
 
-# Setup logger handler - provided as separate function to be called
+# Setup console handler - provided as separate function to be called
 # prior to argument parsing
-def setup_logging_handler():
+def setup_console_handler():
     if False:
         formatter = ColoredFormatter("%(levelname)s %(message)s")
     else:
         formatter = logging.Formatter("%(message)s")
 
-    handler = logging.StreamHandler(sys.stdout)
-    handler.setFormatter(formatter)
-    logging.basicConfig(handlers=[handler])
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.set_name("console")
+    logging.getLogger().addHandler(console_handler)
 
 
-# Setup logger priority
-def setup_logging_priority(verbosity, quietmode):
+# Setup file handler - enabled in profile mode
+def setup_file_handler(loglevel, workload_dir):
+    filename = os.path.join(workload_dir, "log.txt")
+    file_handler = logging.FileHandler(filename, "w")
+    file_loglevel = min([loglevel, logging.INFO])
+    file_handler.setLevel(file_loglevel)
+    file_handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.getLogger().addHandler(file_handler)
+
+
+# Setup logger priority - called after argument parsing
+def setup_logging_priority(verbosity, quietmode, appmode):
     # register a trace level logger
     logging.TRACE = logging.DEBUG - 5
     logging.addLevelName(logging.TRACE, "TRACE")
@@ -95,6 +106,16 @@ def setup_logging_priority(verbosity, quietmode):
             print("Ignoring unsupported OMNIPERF_LOGLEVEL setting (%s)" % loglevel)
             sys.exit(1)
 
-    # update priority
-    logging.getLogger().setLevel(loglevel)
+    # update console loglevel based on command-line args/env settings
+    for handler in logging.getLogger().handlers:
+        if handler.get_name() == "console":
+            handler.setLevel(loglevel)
+
+    # set global loglevel to min of console/file settings in profile mode
+    if appmode == "profile":
+        global_loglevel = min([logging.INFO, loglevel])
+        logging.getLogger().setLevel(global_loglevel)
+    else:
+        logging.getLogger().setLevel(loglevel)
+
     return loglevel
