@@ -54,7 +54,13 @@ class ColoredFormatter(logging.Formatter):
 # Setup console handler - provided as separate function to be called
 # prior to argument parsing
 def setup_console_handler():
-    if False:
+    color = False
+
+    if "OMNIPERF_COLOR" in os.environ.keys():
+        if os.environ["OMNIPERF_COLOR"] == "1":
+            color = True
+
+    if color:
         formatter = ColoredFormatter("%(levelname)s %(message)s")
     else:
         formatter = logging.Formatter("%(message)s")
