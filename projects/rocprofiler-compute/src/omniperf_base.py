@@ -265,7 +265,7 @@ class Omniperf:
 
             analyzer = webui_analysis(self.__args, self.__supported_archs)
         else:
-            console_error("Unsupported anlaysis mode -> %s" % self.__analyze_mode)
+            console_error("Unsupported analysis mode -> %s" % self.__analyze_mode)
 
         # -----------------------
         # run analysis workflow
