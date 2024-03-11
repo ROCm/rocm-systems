@@ -52,6 +52,6 @@ class rocscope_profiler(OmniProfiler_Base):
     def post_processing(self):
         """Perform any post-processing steps prior to profiling."""
         console_log(
-            "profiling" "performing post-processing using %s profiler" % self.__profiler
+            "profiling", "performing post-processing using %s profiler" % self.__profiler
         )
         # TODO: Finish implementation
