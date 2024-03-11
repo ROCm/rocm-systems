@@ -1,4 +1,4 @@
-name: mi100
+name: mi-rhel9
 
 on:
   push:
@@ -18,17 +18,30 @@ jobs:
     strategy:
       matrix:
         version: [5.7.1, 6.0.2]
+        hardware: [mi100, mi200]
       fail-fast: false
     runs-on: [mi100, rhel9]
 
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
-    name: ROCm v${{ matrix.version }}
+    name: ROCm v${{ matrix.version }} / ${{ matrix.hardware }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Python Path
         run: echo ${PYTHONPATH}
+      - name: Setup hardware-specific run details
+        run: |
+           if [ ${{ matrix.hardware }} == "mi100" ];then
+              echo "CI_QUEUE=ci" >> $GITHUB_ENV
+              echo "CI_ARCH=gfx908" >> $GITHUB_ENV
+           elif [ ${{ matrix.hardware }} == "mi200" ];then
+              echo "CI_QUEUE=mi2104x" >> $GITHUB_ENV
+              echo "CI_ARCH=gfx90a" >> $GITHUB_ENV
+           else
+              echo "Unsupported hardware"
+              exit 1
+           fi
       - name: Install Python collateral (build and test)
         run: |
            pip3 install -t ${PYTHONPATH} -r requirements.txt
@@ -45,6 +58,8 @@ jobs:
           echo "PATH=$PATH"
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
           echo "ROCM_PATH=$ROCM_PATH"
+          echo "CI_QUEUE=$CI_QUEUE"
+          echo "CI_ARCH=$CI_ARCH"
           ulimit -u
       - name: Configure
         run: |
@@ -53,21 +68,22 @@ jobs:
           ml cmake
           cmake -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=8 ..
       - name: Create HIP binary (vcopy)
-        run: hipcc -o tests/vcopy ./sample/vcopy.cpp
+        run: |
+          hipcc --offload-arch=$CI_ARCH -o tests/vcopy ./sample/vcopy.cpp
       - name: Run [profile] mode
         run: |
           cd build
-          srun -N 1 -J omniperf -p ci -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
+          srun -N 1 -J omniperf -p $CI_QUEUE -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
       - name: Run [analyze workloads] mode
         if: '!cancelled()'
         run: |
           cd build
-          srun -N 1 -J omniperf -p ci -t 00:10:00 ctest --verbose -R test_analyze_workloads
+          srun -N 1 -J omniperf -p $CI_QUEUE -t 00:10:00 ctest --verbose -R test_analyze_workloads
       - name: Run [analyze commands] mode
         if: '!cancelled()'
         run: |
           cd build
-          srun -N 1 -J omniperf -p ci -t 00:10:00 ctest --verbose -R test_analyze_commands
+          srun -N 1 -J omniperf -p $CI_QUEUE -t 00:10:00 ctest --verbose -R test_analyze_commands
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/linux@v2
         if: always()
