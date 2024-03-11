@@ -177,7 +177,7 @@ class OmniProfiler_Base:
                 msg = "Successfully joined {} in pmc_perf.csv".format(key)
                 console_debug(msg + "\n")
             if test_df_column_equality(_df) and self.__args.verbose:
-                console_log("profile", msg)
+                console_log("profiling", msg)
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
