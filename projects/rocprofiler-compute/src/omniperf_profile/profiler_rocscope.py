@@ -44,7 +44,7 @@ class rocscope_profiler(OmniProfiler_Base):
     def run_profiling(self, version, prog):
         """Run profiling."""
         console_log(
-            "profiling" "performing profiling using %s profiler" % self.__profiler
+            "profiling", "performing profiling using %s profiler" % self.__profiler
         )
         # TODO: Finish implementation
 
