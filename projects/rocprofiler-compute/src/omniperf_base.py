@@ -58,7 +58,6 @@ SUPPORTED_ARCHS = {
 
 class Omniperf:
     def __init__(self):
-        set_locale_encoding()
         self.__args = None
         self.__profiler_mode = None
         self.__analyze_mode = None
@@ -80,8 +79,8 @@ class Omniperf:
         self.__loglevel = setup_logging_priority(
             self.__args.verbose, self.__args.quiet, self.__mode
         )
-
         setattr(self.__args, "loglevel", self.__loglevel)
+        set_locale_encoding()
 
         if self.__mode == "profile":
             self.detect_profiler()

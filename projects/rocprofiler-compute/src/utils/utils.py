@@ -603,7 +603,8 @@ def set_locale_encoding():
     try:
         locale.setlocale(locale.LC_ALL, "en_US.UTF-8")
     except locale.Error as error:
-        print("Please ensure that the 'en_US.UTF-8' locale is available on your system.")
-        print("")
-        print("ERROR: ", error)
-        sys.exit(1)
+        console_error(
+            "Please ensure that the 'en_US.UTF-8' locale is available on your system.",
+            exit=False,
+        )
+        console_error(error)
