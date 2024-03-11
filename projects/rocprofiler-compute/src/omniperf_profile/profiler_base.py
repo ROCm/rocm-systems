@@ -386,7 +386,7 @@ class OmniProfiler_Base:
                     console_error(output)
                 else:
                     console_debug(output)
-            console_log("profile", "Current input file: %s" % fname)
+            console_log("profiling", "Current input file: %s" % fname)
 
             # Fetch any SoC/profiler specific profiling options
             options = self._soc.get_profiler_options()
