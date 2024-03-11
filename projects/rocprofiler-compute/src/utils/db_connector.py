@@ -104,7 +104,7 @@ class DatabaseConnector:
                     os.system(cmd)
                     i += 1
                 except pd.errors.EmptyDataError:
-                    console_warning("[database] Skipping empty file: %s" % file)
+                    console_warning("database", "Skipping empty file: %s" % file)
 
         console_log("database", "%s collections successfully added." % i)
         mydb = self.client["workload_names"]
