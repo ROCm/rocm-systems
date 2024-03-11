@@ -371,9 +371,9 @@ def detect_roofline(mspec):
             logging._SysExcInfoType("Detected user-supplied binary")
             return {"rocm_ver": "override", "distro": "override", "path": rooflineBinary}
         else:
-            msg = "[roofline] user-supplied path to binary not accessible"
+            msg = "user-supplied path to binary not accessible"
             msg += "--> ROOFLINE_BIN = %s\n" % target_binary
-            console_error(msg)
+            console_error("roofline", msg)
     elif rhel_distro == "platform:el8" or rhel_distro == "platform:el9":
         # Must be a valid RHEL machine
         distro = "platform:el8"
