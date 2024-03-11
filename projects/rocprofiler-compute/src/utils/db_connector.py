@@ -70,7 +70,7 @@ class DatabaseConnector:
             name = sys_info["workload_name"][0]
         else:
             console_error(
-                "[database] Unable to parse SoC and/or workload name from sysinfo.csv"
+                "database", "Unable to parse SoC and/or workload name from sysinfo.csv"
             )
 
         self.connection_info["db"] = (
