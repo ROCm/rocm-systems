@@ -88,6 +88,8 @@ int main(int argc, char* argv[]) {
   int devId = 0;
   int numIter = 1;
 
+  hipError_t hip_status;
+
   for (int i = 0; i < argc; i++){
     std::string arg = argv[i];
     if ((arg == "--blockSize" || arg == "-b") && i+1 < argc)
@@ -170,12 +172,12 @@ int main(int argc, char* argv[]) {
   // Execute the kernel
   for(int i = 0; i < numIter; i++){
     hipLaunchKernelGGL(vecCopy, dim3(gridSize), dim3(blockSize), 0, 0, d_a, d_b, d_c, n, stride);
-    hipDeviceSynchronize();
+    hip_status = hipDeviceSynchronize();
     printf("Finished executing kernel\n");
     // Optionally, launch a second kernel. Only here for testing purposes
     if (multiKernel){
       hipLaunchKernelGGL(vecCopy_2, dim3(gridSize), dim3(blockSize), 0, 0, d_a, d_b, d_c, n, stride);
-      hipDeviceSynchronize();
+      hip_status = hipDeviceSynchronize();
       printf("Finished executing kernel\n");
     }
   }
