@@ -77,7 +77,10 @@ def console_debug(*argv):
 
 
 def console_warning(msg: str):
-    logging.warning(msg)
+    if len(argv) > 1:
+        logging.warning(f"[{argv[0]}] {argv[1]}")
+    else:
+        logging.warning(f"{argv[0]}")
 
 
 def trace_logger(message, *args, **kwargs):
