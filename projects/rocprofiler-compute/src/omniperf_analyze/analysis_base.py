@@ -195,7 +195,6 @@ class OmniAnalyze_Base:
             else:
                 occurances.add(dir)
 
-
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
