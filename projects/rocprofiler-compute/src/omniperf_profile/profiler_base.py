@@ -330,10 +330,6 @@ class OmniProfiler_Base:
             console_log("IP Blocks: All")
         else:
             console_log("IP Blocks: " + str(self.__args.ipblocks))
-        if self.__args.kernel_verbose > 5:
-            console_log("KernelName verbose: DISABLED")
-        else:
-            console_log("KernelName verbose: " + str(self.__args.kernel_verbose))
 
         print_status("Collecting Performance Counters")
 

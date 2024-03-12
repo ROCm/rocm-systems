@@ -33,6 +33,7 @@ from utils.utils import (
 )
 from pymongo import MongoClient
 from tqdm import tqdm
+from utils.kernel_name_shortener import kernel_name_shortener
 
 import os
 import getpass
@@ -61,14 +62,13 @@ class DatabaseConnector:
 
     @demarcate
     def prep_import(self):
-
         # Extract SoC and workload name from sysinfo.csv
         sys_info = os.path.join(self.connection_info["workload"], "sysinfo.csv")
         if os.path.isfile(sys_info):
             sys_info = pd.read_csv(sys_info)
             try:
-                soc = sys_info["gpu_model"][0]
-                name = sys_info["workload_name"][0]
+                soc = sys_info["gpu_model"][0].strip()
+                name = sys_info["workload_name"][0].strip()
             except KeyError as e:
                 console_error(
                     f"Outdated workload. Cannot find {e} field. Please reprofile to update."
@@ -95,18 +95,25 @@ class DatabaseConnector:
                 )
                 try:
                     fileName = file[0 : file.find(".")]
-                    cmd = (
-                        "mongoimport --quiet --uri mongodb://{}:{}@{}:{}/{}?authSource=admin --file {} -c {} --drop --type csv --headerline"
-                    ).format(
-                        self.connection_info["username"],
-                        self.connection_info["password"],
-                        self.connection_info["host"],
-                        self.connection_info["port"],
-                        self.connection_info["db"],
-                        self.connection_info["workload"] + "/" + file,
-                        fileName,
+                    data = pd.read_csv(self.connection_info["workload"] + "/" + file)
+
+                    # Demangle original KernelNames
+                    kernel_name_shortener(data, self.args.kernel_verbose)
+                    data.reset_index(inplace=True)
+                    data_dict = data.to_dict("records")
+
+                    client = MongoClient(
+                        "mongodb://{}:{}@{}:{}/{}?authSource=admin".format(
+                            self.connection_info["username"],
+                            self.connection_info["password"],
+                            self.connection_info["host"],
+                            self.connection_info["port"],
+                            self.connection_info["db"],
+                        )
                     )
-                    os.system(cmd)
+                    db = client[self.connection_info["db"]]
+                    collection = db[fileName]
+                    collection.insert_many(data_dict)
                     i += 1
                 except pd.errors.EmptyDataError:
                     console_warning("database", "Skipping empty file: %s" % file)

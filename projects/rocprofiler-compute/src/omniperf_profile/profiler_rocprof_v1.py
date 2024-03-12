@@ -86,5 +86,3 @@ class rocprof_v1_profiler(OmniProfiler_Base):
             self.join_prof()
             # Replace timestamp data to solve a known rocprof bug
             replace_timestamps(self.get_args().path)
-            # Demangle and overwrite original KernelNames
-            kernel_name_shortener(self.get_args().path, self.get_args().kernel_verbose)

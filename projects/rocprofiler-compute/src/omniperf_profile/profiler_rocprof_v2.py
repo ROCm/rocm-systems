@@ -83,5 +83,3 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         if self.ready_to_profile:
             # Pass headers to join on
             self.join_prof()
-            # Demangle and overwrite original KernelNames
-            kernel_name_shortener(self.get_args().path, self.get_args().kernel_verbose)

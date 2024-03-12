@@ -228,14 +228,6 @@ Examples:
         nargs=argparse.REMAINDER,
         help="\t\t\tProvide command for profiling after double dash.",
     )
-    profile_group.add_argument(
-        "--kernel-verbose",
-        required=False,
-        metavar="",
-        help="\t\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 2) (DISABLE: 5)",
-        default=2,
-        type=int,
-    )
 
     ## Roofline Command Line Options
     roofline_group.add_argument(
@@ -382,6 +374,14 @@ Examples:
         metavar="",
         dest="workload",
         help="\t\t\t\tSpecify name of workload (to remove) or path to workload (to import)",
+    )
+    connection_group.add_argument(
+        "--kernel-verbose",
+        required=False,
+        metavar="",
+        help="\t\tSpecify Kernel Name verbose level 1-5. Lower the level, shorter the kernel name. (DEFAULT: 5) (DISABLE: 5)",
+        default=5,
+        type=int,
     )
 
     ## Analyze Command Line Options
