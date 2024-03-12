@@ -186,6 +186,16 @@ class OmniAnalyze_Base:
             # validate profiling data
             is_workload_empty(dir[0])
 
+        # no using same paths
+        occurances = set()
+        for dir in self.__args.path:
+            dir = dir[0]
+            if dir in occurances:
+                console_error("You cannot provide the same path twice.")
+            else:
+                occurances.add(dir)
+
+
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
