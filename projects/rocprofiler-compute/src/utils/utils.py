@@ -76,7 +76,7 @@ def console_debug(*argv):
         logging.debug(f"{argv[0]}")
 
 
-def console_warning(msg: str):
+def console_warning(*argv):
     if len(argv) > 1:
         logging.warning(f"[{argv[0]}] {argv[1]}")
     else:
