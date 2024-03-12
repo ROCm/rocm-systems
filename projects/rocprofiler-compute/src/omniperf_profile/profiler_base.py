@@ -361,7 +361,7 @@ class OmniProfiler_Base:
                 if not success:
                     console_error(output)
                 else:
-                    console_error(output)
+                    console_debug(output)
 
             # Dispatch filtering (inplace replacement)
             if not self.__args.dispatch == None:
