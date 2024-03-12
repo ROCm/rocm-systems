@@ -28,7 +28,7 @@ jobs:
 
     env:
        PYTHONPATH: /home1/ciuser/omniperf_deps
-       CI_VISIBLE_DEVICES 1
+       CI_VISIBLE_DEVICES: 1
     name: ROCm v${{ matrix.version }} / ${{ matrix.hardware }}
     steps:
       - name: Checkout
