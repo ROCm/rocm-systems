@@ -65,6 +65,7 @@ jobs:
           echo "ROCM_PATH=$ROCM_PATH"
           echo "CI_QUEUE=$CI_QUEUE"
           echo "CI_ARCH=$CI_ARCH"
+          echo "CI_VISIBLE_DEVICES=$CI_VISIBLE_DEVICES"
           ulimit -u
       - name: Configure
         run: |
