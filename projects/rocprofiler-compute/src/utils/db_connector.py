@@ -66,8 +66,13 @@ class DatabaseConnector:
         sys_info = os.path.join(self.connection_info["workload"], "sysinfo.csv")
         if os.path.isfile(sys_info):
             sys_info = pd.read_csv(sys_info)
-            soc = sys_info["name"][0]
-            name = sys_info["workload_name"][0]
+            try:
+                soc = sys_info["gpu_model"][0]
+                name = sys_info["workload_name"][0]
+            except KeyError as e:
+                console_error(
+                    f"Outdated workload. Cannot find {e} field. Please reprofile to update."
+                )
         else:
             console_error(
                 "database", "Unable to parse SoC and/or workload name from sysinfo.csv"
