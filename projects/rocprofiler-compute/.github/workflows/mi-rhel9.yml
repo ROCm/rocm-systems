@@ -98,7 +98,7 @@ jobs:
         if: always()
         run: coverage report
       - name: Upload code coverage
-        uses: zgosalvez/github-actions-report-lcov@v3
+        uses: zgosalvez/github-actions-report-lcov@v4
         if: always()
         with:
           coverage-files: tests/coverage.info
