@@ -19,7 +19,7 @@ jobs:
         python-version: [3.8, 3.9]
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     # Cancel any previous runs
     - name: Cancel Previous Runs
       uses: styfle/cancel-workflow-action@0.11.0
@@ -41,7 +41,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: Install dependencies
       run: |
         sudo apt-get update
@@ -64,7 +64,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
     - name: find-bytecode
       run: |
         set +e
