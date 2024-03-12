@@ -121,7 +121,7 @@ def discrete_background_color_bins(df, n_bins=5, columns="all"):
 ####################
 # GRAPHICAL ELEMENTS
 ####################
-def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
+def build_bar_chart(display_df, table_config, barchart_elements, norm_filt, hbm_bw):
     """
     Read data into a bar chart. ID will determine which subtype of barchart.
     """
@@ -221,20 +221,17 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt):
                     x="Avg",
                     y="Metric",
                     color="Avg",
-                    range_color=[0, 1638],
+                    range_color=[0, hbm_bw],
                     labels={"Avg": "GB/s"},
                     height=220,
                     orientation="h",
-                ).update_xaxes(range=[0, 1638])
+                ).update_xaxes(range=[0, hbm_bw])
             )  # append second GB/s chart
         else:
-            key = "Avg"
-            if table_config["id"] in [1101]:
-                key = "Pct of Peak"
             d_figs.append(
                 px.bar(
                     display_df,
-                    x=key,
+                    x="Avg",
                     y="Metric",
                     color="Avg",
                     range_color=[0, 100],
