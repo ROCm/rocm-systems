@@ -498,7 +498,7 @@ list(APPEND CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "/lib"
 # Only add extras to RUNTIME package (not tests)
 # It makes no sense to modify RDCD service when installing tests
 # https://cmake.org/cmake/help/latest/cpack_gen/rpm.html#variable:CPACK_RPM_PRE_INSTALL_SCRIPT_FILE
-set(CPACK_RPM_RUNTIME_PRE_INSTALL_SCRIPT_FILE
+set(CPACK_RPM_RUNTIME_POST_INSTALL_SCRIPT_FILE
     "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_post")
 set(CPACK_RPM_RUNTIME_PRE_UNINSTALL_SCRIPT_FILE
     "${CMAKE_CURRENT_SOURCE_DIR}/RPM/rpm_preun")
