@@ -41,7 +41,7 @@ typedef struct rocprofiler_hsa_api_no_args
     char empty;
 } rocprofiler_hsa_api_no_args;
 
-typedef union rocprofiler_hsa_api_retval_u
+typedef union rocprofiler_hsa_api_retval_t
 {
     uint64_t           uint64_t_retval;
     uint32_t           uint32_t_retval;
@@ -67,7 +67,7 @@ typedef void (*hsa_amd_runtime_queue_notifier)(const hsa_queue_t* queue,
                                                hsa_agent_t        agent,
                                                void*              data);
 
-typedef union rocprofiler_hsa_api_args_u
+typedef union rocprofiler_hsa_api_args_t
 {
     // block: CoreApi API
     struct

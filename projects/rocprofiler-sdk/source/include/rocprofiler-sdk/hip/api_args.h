@@ -23,6 +23,7 @@
 #pragma once
 
 #include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/version.h>
 
 #include <hip/hip_runtime.h>
@@ -43,8 +44,13 @@ typedef struct rocprofiler_hip_api_no_args
     char empty;
 } rocprofiler_hip_api_no_args;
 
-typedef union rocprofiler_hip_api_retval_u
+typedef union rocprofiler_hip_api_retval_t
 {
+#ifdef __cplusplus
+    rocprofiler_hip_api_retval_t()  = default;
+    ~rocprofiler_hip_api_retval_t() = default;
+#endif
+
     int                  int_retval;
     const char*          const_charp_retval;
     hipError_t           hipError_t_retval;
@@ -52,8 +58,15 @@ typedef union rocprofiler_hip_api_retval_u
     void**               voidpp_retval;
 } rocprofiler_hip_api_retval_t;
 
-typedef union rocprofiler_hip_api_args_u
+// NOTE: dim3 value arguments replaced with rocprofiler_dim3_t because dim3 has a non-trivial
+// destructor
+typedef union rocprofiler_hip_api_args_t
 {
+#ifdef __cplusplus
+    rocprofiler_hip_api_args_t()  = default;
+    ~rocprofiler_hip_api_args_t() = default;
+#endif
+
     // compiler
     struct
     {
@@ -64,10 +77,10 @@ typedef union rocprofiler_hip_api_args_u
     } __hipPopCallConfiguration;
     struct
     {
-        dim3        gridDim;
-        dim3        blockDim;
-        size_t      sharedMem;
-        hipStream_t stream;
+        rocprofiler_dim3_t gridDim;
+        rocprofiler_dim3_t blockDim;
+        size_t             sharedMem;
+        hipStream_t        stream;
     } __hipPushCallConfiguration;
     struct
     {
@@ -207,10 +220,10 @@ typedef union rocprofiler_hip_api_args_u
     } hipChooseDeviceR0000;
     struct
     {
-        dim3        gridDim;
-        dim3        blockDim;
-        size_t      sharedMem;
-        hipStream_t stream;
+        rocprofiler_dim3_t gridDim;
+        rocprofiler_dim3_t blockDim;
+        size_t             sharedMem;
+        hipStream_t        stream;
     } hipConfigureCall;
     struct
     {
@@ -558,15 +571,15 @@ typedef union rocprofiler_hip_api_args_u
     } hipExtGetLinkTypeAndHopCount;
     struct
     {
-        const void* function_address;
-        dim3        numBlocks;
-        dim3        dimBlocks;
-        void**      args;
-        size_t      sharedMemBytes;
-        hipStream_t stream;
-        hipEvent_t  startEvent;
-        hipEvent_t  stopEvent;
-        int         flags;
+        const void*        function_address;
+        rocprofiler_dim3_t numBlocks;
+        rocprofiler_dim3_t dimBlocks;
+        void**             args;
+        size_t             sharedMemBytes;
+        hipStream_t        stream;
+        hipEvent_t         startEvent;
+        hipEvent_t         stopEvent;
+        int                flags;
     } hipExtLaunchKernel;
     struct
     {
@@ -1311,12 +1324,12 @@ typedef union rocprofiler_hip_api_args_u
     } hipLaunchByPtr;
     struct
     {
-        const void*  func;
-        dim3         gridDim;
-        dim3         blockDimX;
-        void**       kernelParams;
-        unsigned int sharedMemBytes;
-        hipStream_t  stream;
+        const void*        func;
+        rocprofiler_dim3_t gridDim;
+        rocprofiler_dim3_t blockDimX;
+        void**             kernelParams;
+        unsigned int       sharedMemBytes;
+        hipStream_t        stream;
     } hipLaunchCooperativeKernel;
     struct
     {
@@ -1332,12 +1345,12 @@ typedef union rocprofiler_hip_api_args_u
     } hipLaunchHostFunc;
     struct
     {
-        const void* function_address;
-        dim3        numBlocks;
-        dim3        dimBlocks;
-        void**      args;
-        size_t      sharedMemBytes;
-        hipStream_t stream;
+        const void*        function_address;
+        rocprofiler_dim3_t numBlocks;
+        rocprofiler_dim3_t dimBlocks;
+        void**             args;
+        size_t             sharedMemBytes;
+        hipStream_t        stream;
     } hipLaunchKernel;
     struct
     {
@@ -2699,21 +2712,21 @@ typedef union rocprofiler_hip_api_args_u
     } hipEventRecord_spt;
     struct
     {
-        const void* func;
-        dim3        gridDim;
-        dim3        blockDim;
-        void**      kernelParams;
-        uint32_t    sharedMemBytes;
-        hipStream_t stream;
+        const void*        func;
+        rocprofiler_dim3_t gridDim;
+        rocprofiler_dim3_t blockDim;
+        void**             kernelParams;
+        uint32_t           sharedMemBytes;
+        hipStream_t        stream;
     } hipLaunchCooperativeKernel_spt;
     struct
     {
-        const void* function_address;
-        dim3        numBlocks;
-        dim3        dimBlocks;
-        void**      args;
-        size_t      sharedMemBytes;
-        hipStream_t stream;
+        const void*        function_address;
+        rocprofiler_dim3_t numBlocks;
+        rocprofiler_dim3_t dimBlocks;
+        void**             args;
+        size_t             sharedMemBytes;
+        hipStream_t        stream;
     } hipLaunchKernel_spt;
     struct
     {

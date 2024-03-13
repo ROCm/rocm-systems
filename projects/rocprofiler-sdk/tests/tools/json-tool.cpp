@@ -1521,7 +1521,8 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             auto ritr  = std::find_if(
                 hsa_api_cb_records.begin(), hsa_api_cb_records.end(), [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal);
+                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
+                            !citr.args.empty());
                 });
             if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
 
@@ -1559,7 +1560,8 @@ write_perfetto()
             auto _args = callback_arg_array_t{};
             auto ritr  = std::find_if(
                 hip_api_cb_records.begin(), hip_api_cb_records.end(), [&itr](const auto& citr) {
-                    return (citr.record.correlation_id.internal == itr.correlation_id.internal);
+                    return (citr.record.correlation_id.internal == itr.correlation_id.internal &&
+                            !citr.args.empty());
                 });
             if(ritr != hip_api_cb_records.end()) _args = ritr->args;
 

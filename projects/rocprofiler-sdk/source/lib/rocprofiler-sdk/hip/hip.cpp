@@ -109,6 +109,21 @@ set_data_retval(DataT& _data, Tp _val)
         static_assert(std::is_empty<Tp>::value, "Error! unsupported return type");
     }
 }
+
+template <typename Tp>
+decltype(auto)
+convert_arg_type(Tp&& val)
+{
+    using data_type = common::mpl::unqualified_type_t<Tp>;
+    if constexpr(std::is_same<data_type, dim3>::value)
+    {
+        return rocprofiler_dim3_t{val.x, val.y, val.z};
+    }
+    else
+    {
+        return std::forward<Tp>(val);
+    }
+}
 }  // namespace
 
 hip_api_table_t&
@@ -195,8 +210,6 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
     {
         if(!itr) continue;
 
-        // if(itr->pc_sampler) has_pc_sampling = true;
-
         if(itr->callback_tracer)
         {
             // if the given domain + op is not enabled, skip this context
@@ -228,7 +241,6 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
     auto thr_id            = common::get_tid();
     auto callback_contexts = std::vector<callback_context_data>{};
     auto buffered_contexts = std::vector<buffered_context_data>{};
-    auto has_pc_sampling   = false;
 
     populate_contexts(info_type::callback_domain_idx,
                       info_type::buffered_domain_idx,
@@ -245,11 +257,11 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
             return 0;
     }
 
-    auto  ref_count        = (has_pc_sampling) ? 4 : 2;
-    auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
-    auto  tracer_data      = callback_api_data_t{.size = sizeof(callback_api_data_t)};
-    auto* corr_id          = correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
+    constexpr auto ref_count        = 2;
+    auto           buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
+    auto           tracer_data      = common::init_public_api_struct(callback_api_data_t{});
+    auto*          corr_id          = correlation_service::construct(ref_count);
+    auto           internal_corr_id = corr_id->internal;
 
     // construct the buffered info before the callback so the callbacks are as closely wrapped
     // around the function call as possible
@@ -264,12 +276,12 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
     }
 
     tracer_data.size = sizeof(callback_api_data_t);
-    set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
 
     // invoke the callbacks
     if(!callback_contexts.empty())
     {
-        set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
+        set_data_args(info_type::get_api_data_args(tracer_data.args),
+                      convert_arg_type(std::forward<Args>(args))...);
 
         for(auto& itr : callback_contexts)
         {
@@ -455,7 +467,7 @@ iterate_args(const uint32_t                                   id,
                             arg_addr.at(i),                    // arg_value_addr
                             arg_list.at(i).indirection_level,  // indirection
                             arg_list.at(i).type,               // arg_type
-                            arg_list.at(i).name.c_str(),       // arg_name
+                            arg_list.at(i).name,               // arg_name
                             arg_list.at(i).value.c_str(),      // arg_value_str
                             arg_list.at(i).dereference_count,  // num deref in str
                             user_data);

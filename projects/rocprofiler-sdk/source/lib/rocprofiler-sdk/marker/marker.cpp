@@ -131,8 +131,7 @@ roctx_api_impl<TableIdx, OpIdx>::exec(FuncT&& _func, Args&&... args)
 
 namespace
 {
-using correlation_service        = context::correlation_tracing_service;
-using buffer_marker_api_record_t = rocprofiler_buffer_tracing_marker_api_record_t;
+using correlation_service = context::correlation_tracing_service;
 
 struct callback_context_data
 {
@@ -162,8 +161,6 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
     {
         if(!itr) continue;
 
-        // if(itr->pc_sampler) has_pc_sampling = true;
-
         if(itr->callback_tracer)
         {
             // if the given domain + op is not enabled, skip this context
@@ -190,6 +187,7 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 {
     using info_type           = roctx_api_info<TableIdx, OpIdx>;
     using callback_api_data_t = typename roctx_domain_info<TableIdx>::callback_data_type;
+    using buffered_api_data_t = typename roctx_domain_info<TableIdx>::buffer_data_type;
 
     auto thr_id            = common::get_tid();
     auto callback_contexts = std::vector<callback_context_data>{};
@@ -211,8 +209,8 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
     }
 
     auto  ref_count        = 2;
-    auto  buffer_record    = common::init_public_api_struct(buffer_marker_api_record_t{});
-    auto  tracer_data      = callback_api_data_t{.size = sizeof(callback_api_data_t)};
+    auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
+    auto  tracer_data      = common::init_public_api_struct(callback_api_data_t{});
     auto* corr_id          = correlation_service::construct(ref_count);
     auto  internal_corr_id = corr_id->internal;
 
@@ -420,7 +418,7 @@ iterate_args(const uint32_t                                        id,
                             arg_addr.at(i),                    // arg_value_addr
                             arg_list.at(i).indirection_level,  // indirection
                             arg_list.at(i).type,               // arg_type
-                            arg_list.at(i).name.c_str(),       // arg_name
+                            arg_list.at(i).name,               // arg_name
                             arg_list.at(i).value.c_str(),      // arg_value_str
                             arg_list.at(i).dereference_count,  // num deref in str
                             user_data);

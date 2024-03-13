@@ -72,9 +72,29 @@ template <typename... Args>
 auto
 stringize(int32_t max_deref, Args... args)
 {
-    return std::vector<common::stringified_argument>{common::stringize_arg(
+    using array_type = common::stringified_argument_array_t<sizeof...(Args)>;
+    return array_type{common::stringize_arg(
         max_deref, args, [](const auto& _v) { return stringize_impl(_v); })...};
 }
 }  // namespace utils
 }  // namespace hip
 }  // namespace rocprofiler
+
+namespace fmt
+{
+template <>
+struct formatter<rocprofiler_dim3_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    template <typename Ctx>
+    auto format(const rocprofiler_dim3_t& v, Ctx& ctx) const
+    {
+        return fmt::format_to(ctx.out(), "{}z={}, y={}, x={}{}", '{', v.z, v.y, v.x, '}');
+    }
+};
+}  // namespace fmt

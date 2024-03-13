@@ -40,14 +40,14 @@ typedef struct rocprofiler_marker_api_no_args
     char empty;
 } rocprofiler_marker_api_no_args;
 
-typedef union rocprofiler_marker_api_retval_u
+typedef union rocprofiler_marker_api_retval_t
 {
     int32_t          int32_t_retval;
     int64_t          int64_t_retval;
     roctx_range_id_t roctx_range_id_t_retval;
 } rocprofiler_marker_api_retval_t;
 
-typedef union rocprofiler_marker_api_args_u
+typedef union rocprofiler_marker_api_args_t
 {
     struct
     {

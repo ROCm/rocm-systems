@@ -66,7 +66,8 @@ template <typename... Args>
 auto
 stringize(int32_t max_deref, Args... args)
 {
-    return std::vector<common::stringified_argument>{common::stringize_arg(
+    using array_type = common::stringified_argument_array_t<sizeof...(Args)>;
+    return array_type{common::stringize_arg(
         max_deref, args, [](const auto& _v) { return stringize_impl(_v); })...};
 }
 

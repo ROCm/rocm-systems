@@ -167,7 +167,8 @@ get_table()
                                       .core_          = get_core_table(),
                                       .amd_ext_       = get_amd_ext_table(),
                                       .finalizer_ext_ = get_fini_ext_table(),
-                                      .image_ext_     = get_img_ext_table()};
+                                      .image_ext_     = get_img_ext_table(),
+                                      .tools_         = nullptr};
     return tbl;
 }
 
@@ -246,8 +247,6 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
     {
         if(!itr) continue;
 
-        // if(itr->pc_sampler) has_pc_sampling = true;
-
         if(itr->callback_tracer)
         {
             // if the given domain + op is not enabled, skip this context
@@ -286,7 +285,6 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
     auto thr_id            = common::get_tid();
     auto callback_contexts = std::vector<callback_context_data>{};
     auto buffered_contexts = std::vector<buffered_context_data>{};
-    auto has_pc_sampling   = false;
 
     populate_contexts(info_type::callback_domain_idx,
                       info_type::buffered_domain_idx,
@@ -303,11 +301,11 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
             return HSA_STATUS_SUCCESS;
     }
 
-    auto  ref_count        = (has_pc_sampling) ? 4 : 2;
-    auto  buffer_record    = common::init_public_api_struct(buffer_hsa_api_record_t{});
-    auto  tracer_data      = common::init_public_api_struct(callback_hsa_api_data_t{});
-    auto* corr_id          = correlation_service::construct(ref_count);
-    auto  internal_corr_id = corr_id->internal;
+    constexpr auto ref_count        = 2;
+    auto           buffer_record    = common::init_public_api_struct(buffer_hsa_api_record_t{});
+    auto           tracer_data      = common::init_public_api_struct(callback_hsa_api_data_t{});
+    auto*          corr_id          = correlation_service::construct(ref_count);
+    auto           internal_corr_id = corr_id->internal;
 
     // construct the buffered info before the callback so the callbacks are as closely wrapped
     // around the function call as possible
@@ -513,7 +511,7 @@ iterate_args(const uint32_t                                     id,
                             arg_addr.at(i),                    // arg_value_addr
                             arg_list.at(i).indirection_level,  // indirection
                             arg_list.at(i).type,               // arg_type
-                            arg_list.at(i).name.c_str(),       // arg_name
+                            arg_list.at(i).name,               // arg_name
                             arg_list.at(i).value.c_str(),      // arg_value_str
                             arg_list.at(i).dereference_count,  // num deref in str
                             user_data);

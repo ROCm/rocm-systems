@@ -147,6 +147,15 @@ template <typename Tp>
 struct indirection_level
 : indirection_level_impl_n<std::remove_cv_t<std::remove_reference_t<std::decay_t<Tp>>>, 0>
 {};
+
+template <typename Tp>
+struct unqualified_type
+{
+    using type = std::remove_reference_t<std::remove_cv_t<std::decay_t<Tp>>>;
+};
+
+template <typename Tp>
+using unqualified_type_t = typename unqualified_type<Tp>::type;
 }  // namespace mpl
 }  // namespace common
 }  // namespace rocprofiler

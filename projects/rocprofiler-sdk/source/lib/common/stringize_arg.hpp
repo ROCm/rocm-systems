@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/common/container/small_vector.hpp"
 #include "lib/common/mpl.hpp"
 
 #include <fmt/core.h>
@@ -40,9 +41,13 @@ struct stringified_argument
     int32_t     indirection_level = 0;
     int32_t     dereference_count = 0;
     const char* type              = nullptr;
-    std::string name              = {};
+    const char* name              = nullptr;
     std::string value             = {};
 };
+
+template <size_t N>
+using stringified_argument_array_t =
+    container::small_vector<stringified_argument, std::min<size_t>(N, 6)>;
 
 template <typename Tp, typename FuncT>
 auto
@@ -114,7 +119,7 @@ stringize_arg(int32_t max_deref, const std::pair<const char*, Tp>& arg, FuncT&& 
     auto _arg              = common::stringified_argument{};
     _arg.indirection_level = mpl::indirection_level<Tp>::value;
     _arg.type              = typeid(Tp).name();
-    _arg.name              = std::string{arg.first};
+    _arg.name              = arg.first;
     _arg.value             = stringize_arg_impl(
         arg.second, max_deref, _arg.dereference_count, std::forward<FuncT>(impl));
     return _arg;

@@ -50,6 +50,7 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <stdexcept>
 #include <type_traits>
 #include <utility>
 
@@ -342,6 +343,17 @@ public:
     const_reference operator[](size_type idx) const
     {
         assert(idx < size());
+        return begin()[idx];
+    }
+
+    reference at(size_type idx)
+    {
+        if(idx >= size()) throw std::out_of_range{"small_vector::at"};
+        return begin()[idx];
+    }
+    const_reference at(size_type idx) const
+    {
+        if(idx >= size()) throw std::out_of_range{"small_vector::at"};
         return begin()[idx];
     }
 

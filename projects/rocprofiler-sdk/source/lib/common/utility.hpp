@@ -109,24 +109,31 @@ get_val(Container& map, const Key& key)
 
 template <typename Tp>
 constexpr void
+assert_public_data_type_properties()
+{
+    static_assert(std::is_standard_layout<Tp>::value,
+                  "public data type struct should have a standard layout");
+    static_assert(std::is_trivial<Tp>::value, "public data type should be trivial");
+    static_assert(std::is_default_constructible<Tp>::value,
+                  "public data type struct should be default constructible");
+    static_assert(std::is_trivially_copy_constructible<Tp>::value,
+                  "public data type struct should be trivially copy constructible");
+    static_assert(std::is_trivially_move_constructible<Tp>::value,
+                  "public data type struct should be trivially move constructible");
+    static_assert(std::is_trivially_copy_assignable<Tp>::value,
+                  "public data type struct should be trivially move assignable");
+    static_assert(std::is_trivially_move_assignable<Tp>::value,
+                  "public data type struct should be trivially move assignable");
+    static_assert(std::is_trivially_copyable<Tp>::value,
+                  "public data type struct should be trivially move assignable");
+}
+
+template <typename Tp>
+constexpr void
 assert_public_api_struct_properties()
 {
+    assert_public_data_type_properties<Tp>();
     static_assert(std::is_class<Tp>::value, "this is not a public API struct");
-    static_assert(std::is_standard_layout<Tp>::value,
-                  "public API struct should have a standard layout");
-    static_assert(std::is_trivially_default_constructible<Tp>::value,
-                  "public API struct should be trivially default constructible");
-    static_assert(std::is_trivially_copy_constructible<Tp>::value,
-                  "public API struct should be trivially copy constructible");
-    static_assert(std::is_trivially_move_constructible<Tp>::value,
-                  "public API struct should be trivially move constructible");
-    static_assert(std::is_trivially_copy_assignable<Tp>::value,
-                  "public API struct should be trivially move assignable");
-    static_assert(std::is_trivially_move_assignable<Tp>::value,
-                  "public API struct should be trivially move assignable");
-    static_assert(std::is_trivially_copyable<Tp>::value,
-                  "public API struct should be trivially move assignable");
-    static_assert(std::is_trivial<Tp>::value, "public API struct should be trivial");
     static_assert(offsetof(Tp, size) == 0, "public API struct should have a size field first");
     static_assert(sizeof(std::declval<Tp>().size) == sizeof(uint64_t),
                   "public API struct size field should be 64 bits");
