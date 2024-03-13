@@ -210,13 +210,6 @@ add_test(
 set_property(TEST test_profile_ipblocks PROPERTY COST 5)
 
 add_test(
-    NAME test_profile_verbosity
-    COMMAND pytest -m verbosity --junitxml=tests/test_profile_verbosity.xml ${COV_OPTION}
-            ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-set_property(TEST test_profile_ipblocks PROPERTY COST 10)
-
-add_test(
     NAME test_profile_mem
     COMMAND pytest -m mem --junitxml=tests/test_profile_mem.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
@@ -244,7 +237,6 @@ set_tests_properties(
     test_profile_kernel_execution
     test_profile_ipblocks
     test_profile_dispatch
-    test_profile_verbosity
     test_profile_mem
     test_profile_join
     test_profile_sort

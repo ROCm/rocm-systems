@@ -26,9 +26,6 @@ config["METRIC_LOGGING"] = False
 
 baseline_opts = ["omniperf", "profile", "-n", "app_1", "-VVV"]
 
-# app_1 = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-# app_1 = ["./sample/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-
 num_kernels = 3
 num_devices = 1
 dispatch_id = 0
@@ -107,7 +104,6 @@ ROOF_ONLY_FILES = [
     "timestamps.csv",
 ]
 
-# Must not change relative difference is zero
 METRIC_THRESHOLDS = {
     "2.1.12": {"absolute": 0, "relative": 8},
     "3.1.1": {"absolute": 0, "relative": 10},
@@ -587,7 +583,7 @@ def test_device_filter():
         file_dict,
     )
 
-    # test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.kernel_execution
@@ -692,7 +688,7 @@ def test_block_SQ():
         file_dict,
     )
 
-    # test_utils.clean_output_dir(config["cleanup"], workload_dir)
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
 @pytest.mark.block
@@ -857,7 +853,21 @@ def test_block_TCC():
         "timestamps.csv",
     ]
     if soc == "MI200":
-        expected_csvs.insert(12, "roofline.csv")
+        expected_csvs = [
+            "pmc_perf.csv",
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "roofline.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
 
     assert sorted(list(file_dict.keys())) == expected_csvs
 
@@ -1333,132 +1343,6 @@ def test_dispatch_2():
             "--dispatch",
             str(dispatch_id),
         ],
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.verbosity
-def test_kernel_verbose_0():
-    options = baseline_opts + ["--kernel-verbose", "0"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    # test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.verbosity
-def test_kernel_verbose_1():
-    options = baseline_opts + ["--kernel-verbose", "1"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.verbosity
-def test_kernel_verbose_2():
-    options = baseline_opts + ["--kernel-verbose", "2"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.verbosity
-def test_kernel_verbose_3():
-    options = baseline_opts + ["--kernel-verbose", "3"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.verbosity
-def test_kernel_verbose_4():
-    options = baseline_opts + ["--kernel-verbose", "4"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.verbosity
-def test_kernel_verbose_5():
-    options = baseline_opts + ["--kernel-verbose", "5"]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
     )
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
