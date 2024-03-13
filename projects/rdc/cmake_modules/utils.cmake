@@ -99,6 +99,7 @@ function(get_version_from_tag DEFAULT_VERSION_STRING VERSION_PREFIX GIT)
     set( VERSION_STRING "${VERSION_STRING}" PARENT_SCOPE )
     set( VERSION_MAJOR  "${VERSION_MAJOR}" PARENT_SCOPE )
     set( VERSION_MINOR  "${VERSION_MINOR}" PARENT_SCOPE )
+    set( VERSION_PATCH  "${VERSION_PATCH}" PARENT_SCOPE )
 endfunction()
 
 function(num_change_since_prev_pkg VERSION_PREFIX)
