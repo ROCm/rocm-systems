@@ -41,7 +41,7 @@ namespace hip
 namespace detail
 {
 static int              HIP_depth_max     = 1;
-static int              HIP_depth_max_cnt = 0;
+static thread_local int HIP_depth_max_cnt = 0;
 static std::string_view HIP_structs_regex = {};
 
 inline static void
