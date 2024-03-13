@@ -562,8 +562,8 @@ def test_kernel_names():
 @pytest.mark.misc
 def test_device_filter():
     device_id = "0"
-    if "HIP_VISIBLE_DEVICES" in os.environ:
-        device_id = os.environ["HIP_VISIBLE_DEVICES"]
+    # if "HIP_VISIBLE_DEVICES" in os.environ:
+    #     device_id = os.environ["HIP_VISIBLE_DEVICES"]
 
     options = baseline_opts + ["--device", device_id]
     workload_dir = test_utils.get_output_dir()
