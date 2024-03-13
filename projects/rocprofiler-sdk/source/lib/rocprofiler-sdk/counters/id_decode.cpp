@@ -34,10 +34,10 @@ namespace rocprofiler
 {
 namespace counters
 {
-const std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view>&
+const DimensionMap&
 dimension_map()
 {
-    static std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view> map = {
+    static auto*& _v = common::static_object<DimensionMap>::construct(DimensionMap{
         {ROCPROFILER_DIMENSION_NONE, std::string_view("DIMENSION_NONE")},
         {ROCPROFILER_DIMENSION_XCC, std::string_view("DIMENSION_XCC")},
         {ROCPROFILER_DIMENSION_SHADER_ENGINE, std::string_view("DIMENSION_SHADER_ENGINE")},
@@ -45,8 +45,8 @@ dimension_map()
         {ROCPROFILER_DIMENSION_SHADER_ARRAY, std::string_view("DIMENSION_SHADER_ARRAY")},
         {ROCPROFILER_DIMENSION_CU, std::string_view("DIMENSION_CU")},
         {ROCPROFILER_DIMENSION_INSTANCE, std::string_view("DIMENSION_INSTANCE")},
-    };
-    return map;
+    });
+    return *_v;
 }
 
 const std::unordered_map<int, rocprofiler_profile_counter_instance_types>&

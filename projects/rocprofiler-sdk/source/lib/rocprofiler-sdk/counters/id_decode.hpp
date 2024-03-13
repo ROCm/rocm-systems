@@ -48,7 +48,10 @@ enum rocprofiler_profile_counter_instance_types
     ROCPROFILER_DIMENSION_LAST
 };
 
-const std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view>&
+using DimensionMap =
+    std::unordered_map<rocprofiler_profile_counter_instance_types, std::string_view>;
+
+const DimensionMap&
 dimension_map();
 
 inline rocprofiler_counter_id_t
