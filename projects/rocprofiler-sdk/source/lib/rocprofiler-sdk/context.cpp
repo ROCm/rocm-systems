@@ -41,6 +41,10 @@ extern "C" {
 rocprofiler_status_t
 rocprofiler_create_context(rocprofiler_context_id_t* context_id)
 {
+    // context already registered
+    if(rocprofiler::context::get_registered_context(*context_id))
+        return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+
     // always set to none first
     *context_id = rocprofiler_context_none;
 
@@ -56,7 +60,8 @@ rocprofiler_create_context(rocprofiler_context_id_t* context_id)
 rocprofiler_status_t
 rocprofiler_start_context(rocprofiler_context_id_t context_id)
 {
-    if(context_id.handle == rocprofiler_context_none.handle)
+    if(context_id.handle == rocprofiler_context_none.handle ||
+       !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     // if currently finalizing or finalized, don't allow starting a context
@@ -69,7 +74,8 @@ rocprofiler_start_context(rocprofiler_context_id_t context_id)
 rocprofiler_status_t
 rocprofiler_stop_context(rocprofiler_context_id_t context_id)
 {
-    if(context_id.handle == rocprofiler_context_none.handle)
+    if(context_id.handle == rocprofiler_context_none.handle ||
+       !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     return rocprofiler::context::stop_context(context_id);
@@ -105,7 +111,8 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
 {
     *status = 0;
 
-    if(context_id.handle == rocprofiler_context_none.handle)
+    if(context_id.handle == rocprofiler_context_none.handle ||
+       !rocprofiler::context::get_registered_context(context_id))
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     for(const auto& itr : rocprofiler::context::get_registered_contexts())
@@ -117,6 +124,7 @@ rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
             return _ret;
         }
     }
+
     return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 }
 }

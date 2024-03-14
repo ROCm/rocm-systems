@@ -79,8 +79,13 @@ struct correlation_id
     uint32_t add_ref_count();
     uint32_t sub_ref_count();
 
+    uint32_t get_kern_count() const { return m_kern_count.load(); }
+    uint32_t add_kern_count();
+    uint32_t sub_kern_count();
+
 private:
-    std::atomic<uint32_t> m_ref_count = {};
+    std::atomic<uint32_t> m_kern_count = {0};
+    std::atomic<uint32_t> m_ref_count  = {0};
 };
 
 correlation_id*

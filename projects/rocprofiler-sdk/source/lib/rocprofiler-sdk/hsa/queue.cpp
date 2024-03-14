@@ -192,6 +192,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             << "reference counter for correlation id " << _corr_id->internal << " from thread "
             << _corr_id->thread_idx << " has no reference count";
         _corr_id->sub_ref_count();
+        _corr_id->sub_kern_count();
     }
 
     queue_info_session.queue.async_complete();
@@ -380,7 +381,11 @@ WriteInterceptor(const void* packets,
         LOG_IF(FATAL, packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
             << "get_kernel_id below might need to be updated";
 
-        if(corr_id) corr_id->add_ref_count();
+        if(corr_id)
+        {
+            corr_id->add_ref_count();
+            corr_id->add_kern_count();
+        }
 
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.

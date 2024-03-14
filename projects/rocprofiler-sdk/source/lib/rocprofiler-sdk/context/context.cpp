@@ -181,6 +181,18 @@ correlation_id::sub_ref_count()
     return _ret;
 }
 
+uint32_t
+correlation_id::add_kern_count()
+{
+    return m_kern_count.fetch_add(1);
+}
+
+uint32_t
+correlation_id::sub_kern_count()
+{
+    return m_kern_count.fetch_sub(1);
+}
+
 correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
