@@ -38,6 +38,7 @@ COLORS = {
     "DEBUG": BLUE,
     "CRITICAL": YELLOW,
     "ERROR": RED,
+    "TRACE": MAGENTA,
 }
 
 
