@@ -156,6 +156,12 @@ struct unqualified_type
 
 template <typename Tp>
 using unqualified_type_t = typename unqualified_type<Tp>::type;
+
+template <typename Tp>
+struct assert_false
+{
+    static constexpr auto value = false;
+};
 }  // namespace mpl
 }  // namespace common
 }  // namespace rocprofiler

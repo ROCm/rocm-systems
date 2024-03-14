@@ -21,7 +21,13 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/context/domain.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+
+#include <glog/logging.h>
+
+#include <limits>
 
 namespace rocprofiler
 {
@@ -31,25 +37,41 @@ template <typename DomainT>
 bool
 domain_context<DomainT>::operator()(DomainT _domain) const
 {
-    return ((1 << _domain) & domains) == (1 << _domain);
+    constexpr uint64_t one = 1;
+
+    if(_domain <= domain_info<DomainT>::none) return false;
+
+    auto _didx = (_domain - 1);
+    return ((one << _didx) & domains) == (one << _didx);
 }
 
 template <typename DomainT>
 bool
 domain_context<DomainT>::operator()(DomainT _domain, uint32_t _op) const
 {
-    auto _offset = (_domain * opcode_padding_v);
-    return (*this)(_domain) && (opcodes.none() || opcodes.test(_offset + _op));
+    if(_domain <= domain_info<DomainT>::none) return false;
+
+    auto _didx = (_domain - 1);
+
+    if(_didx >= array_size) return false;
+
+    return (*this)(_domain) && (opcodes.at(_didx).none() || opcodes.at(_didx).test(_op));
 }
 
 template <typename DomainT>
 rocprofiler_status_t
 add_domain(domain_context<DomainT>& _cfg, DomainT _domain)
 {
-    if(_domain <= domain_info<DomainT>::none || _domain >= domain_info<DomainT>::last)
-        return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+    static_assert((1 << domain_info<DomainT>::last) < std::numeric_limits<uint64_t>::max(),
+                  "uint64_t cannot handle all the domains");
 
-    _cfg.domains |= (1 << _domain);
+    if(_domain <= domain_info<DomainT>::none) return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+
+    auto _didx = (_domain - 1);
+
+    if(_didx >= _cfg.array_size) return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+
+    _cfg.domains |= (1 << _didx);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -57,15 +79,13 @@ template <typename DomainT>
 rocprofiler_status_t
 add_domain_op(domain_context<DomainT>& _cfg, DomainT _domain, uint32_t _op)
 {
-    if(_domain <= domain_info<DomainT>::none || _domain >= domain_info<DomainT>::last)
+    if(_domain <= domain_info<DomainT>::none || (_domain - 1) >= _cfg.array_size)
         return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
 
     if(_op >= domain_info<DomainT>::padding) return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
 
-    auto _offset = (_domain * domain_info<DomainT>::padding);
-    if(_offset >= _cfg.opcodes.size()) return ROCPROFILER_STATUS_ERROR_OPERATION_NOT_FOUND;
-
-    _cfg.opcodes.set(_offset + _op, true);
+    auto _didx = (_domain - 1);
+    _cfg.opcodes.at(_didx).set(_op, true);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

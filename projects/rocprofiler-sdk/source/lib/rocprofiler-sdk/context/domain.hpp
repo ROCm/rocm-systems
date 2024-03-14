@@ -65,8 +65,16 @@ struct domain_context
                                                        rocprofiler_buffer_tracing_kind_t>;
     static_assert(common::mpl::is_one_of<DomainT, supported_domains_v>::value,
                   "Unsupported domain type");
-    static constexpr auto opcode_padding_v = domain_info<DomainT>::padding;
-    static constexpr auto max_opcodes_v    = opcode_padding_v * domain_info<DomainT>::last;
+    static constexpr auto none = domain_info<DomainT>::none;
+    static constexpr auto last = domain_info<DomainT>::last;
+
+    static_assert(last > none, "last must be > none");
+
+    static constexpr int64_t array_size = (last - none - 1);
+    static constexpr auto    span_size  = domain_info<DomainT>::padding;
+
+    using bitset_type = std::bitset<span_size>;
+    using array_type  = std::array<bitset_type, array_size>;
 
     /// check if domain is enabled
     bool operator()(DomainT) const;
@@ -74,8 +82,8 @@ struct domain_context
     /// check if op in a domain is enabled
     bool operator()(DomainT, uint32_t) const;
 
-    int64_t                    domains = 0;
-    std::bitset<max_opcodes_v> opcodes = {};
+    uint64_t   domains = 0;
+    array_type opcodes = {};
 };
 
 template <typename DomainT>
