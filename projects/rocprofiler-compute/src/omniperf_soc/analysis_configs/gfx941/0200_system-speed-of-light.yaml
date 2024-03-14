@@ -73,9 +73,9 @@ Panel Config:
           MFMA IOPs (Int8):
             value: AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp)))
             unit: GIOP
-            peak: ((($max_sclk * $cu_per_gpu) * 4096) / 1000)
+            peak: ((($max_sclk * $cu_per_gpu) * 8192) / 1000)
             pop: ((100 * AVG(((SQ_INSTS_VALU_MFMA_MOPS_I8 * 512) / (End_Timestamp - Start_Timestamp))))
-              / ((($max_sclk * $cu_per_gpu) * 4096) / 1000))
+              / ((($max_sclk * $cu_per_gpu) * 8192) / 1000))
             tips: 
           Active CUs:
             value: $numActiveCUs
