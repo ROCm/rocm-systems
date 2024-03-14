@@ -988,6 +988,7 @@ int KFDNode::get_gfx_target_version(uint64_t *gfx_target_version) {
      << " for gfx_target_version"
      << " | Data (*gfx_target_version): "
      << std::to_string(*gfx_target_version)
+     << " | Return: "
      << getRSMIStatusString(amd::smi::ErrnoToRsmiStatus(ret), false)
      << " | ";
   LOG_DEBUG(ss);

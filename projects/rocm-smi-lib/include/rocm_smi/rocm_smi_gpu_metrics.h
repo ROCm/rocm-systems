@@ -724,7 +724,7 @@ class GpuMetricsBase_t
 
 };
 using GpuMetricsBasePtr = std::shared_ptr<GpuMetricsBase_t>;
-using AMDGpuMetricFactories_t = std::map<AMDGpuMetricVersionFlags_t, GpuMetricsBasePtr>;
+using AMDGpuMetricFactories_t = const std::map<AMDGpuMetricVersionFlags_t, GpuMetricsBasePtr>;
 
 
 class GpuMetricsBase_v11_t final : public GpuMetricsBase_t

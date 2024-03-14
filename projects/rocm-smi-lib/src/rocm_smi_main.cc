@@ -57,10 +57,8 @@
 #include <set>
 #include <sstream>
 #include <string>
-#include <unordered_map>
 #include <utility>
 #include <vector>
-#include <climits>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_device.h"
@@ -78,85 +76,6 @@ static const char *kPathPowerRoot = "/sys/kernel/debug/dri";
 static const char *kDeviceNamePrefix = "card";
 
 static const char *kAMDMonitorTypes[] = {"radeon", "amdgpu", ""};
-
-static const std::string amdSMI = "amd::smi::";
-const std::map<amd::smi::DevInfoTypes, std::string>
-amd::smi::RocmSMI::devInfoTypesStrings = {
-  {amd::smi::kDevPerfLevel, amdSMI + "kDevPerfLevel"},
-  {amd::smi::kDevOverDriveLevel, amdSMI + "kDevOverDriveLevel"},
-  {amd::smi::kDevMemOverDriveLevel, amdSMI + "kDevMemOverDriveLevel"},
-  {amd::smi::kDevDevID, amdSMI + "kDevDevID"},
-  {amd::smi::kDevXGMIPhysicalID, amdSMI + "kDevXGMIPhysicalID"},
-  {amd::smi::kDevDevRevID, amdSMI + "kDevDevRevID"},
-  {amd::smi::kDevDevProdName, amdSMI + "kDevDevProdName"},
-  {amd::smi::kDevDevProdNum, amdSMI + "kDevDevProdNum"},
-  {amd::smi::kDevVendorID, amdSMI + "kDevVendorID"},
-  {amd::smi::kDevSubSysDevID, amdSMI + "kDevSubSysDevID"},
-  {amd::smi::kDevSubSysVendorID, amdSMI + "kDevSubSysVendorID"},
-  {amd::smi::kDevGPUMClk, amdSMI + "kDevGPUMClk"},
-  {amd::smi::kDevGPUSClk, amdSMI + "kDevGPUSClk"},
-  {amd::smi::kDevDCEFClk, amdSMI + "kDevDCEFClk"},
-  {amd::smi::kDevFClk, amdSMI + "kDevFClk"},
-  {amd::smi::kDevSOCClk, amdSMI + "kDevSOCClk"},
-  {amd::smi::kDevPCIEClk, amdSMI + "kDevPCIEClk"},
-  {amd::smi::kDevPowerProfileMode, amdSMI + "kDevPowerProfileMode"},
-  {amd::smi::kDevUsage, amdSMI + "kDevUsage"},
-  {amd::smi::kDevPowerODVoltage, amdSMI + "kDevPowerODVoltage"},
-  {amd::smi::kDevVBiosVer, amdSMI + "kDevVBiosVer"},
-  {amd::smi::kDevPCIEThruPut, amdSMI + "kDevPCIEThruPut"},
-  {amd::smi::kDevErrCntSDMA, amdSMI + "kDevErrCntSDMA"},
-  {amd::smi::kDevErrCntUMC, amdSMI + "kDevErrCntUMC"},
-  {amd::smi::kDevErrCntGFX, amdSMI + "kDevErrCntGFX"},
-  {amd::smi::kDevErrCntMMHUB, amdSMI + "kDevErrCntMMHUB"},
-  {amd::smi::kDevErrCntPCIEBIF, amdSMI + "kDevErrCntPCIEBIF"},
-  {amd::smi::kDevErrCntHDP, amdSMI + "kDevErrCntHDP"},
-  {amd::smi::kDevErrCntXGMIWAFL, amdSMI + "kDevErrCntXGMIWAFL"},
-  {amd::smi::kDevErrCntFeatures, amdSMI + "kDevErrCntFeatures"},
-  {amd::smi::kDevMemTotGTT, amdSMI + "kDevMemTotGTT"},
-  {amd::smi::kDevMemTotVisVRAM, amdSMI + "kDevMemTotVisVRAM"},
-  {amd::smi::kDevMemTotVRAM, amdSMI + "kDevMemTotVRAM"},
-  {amd::smi::kDevMemUsedGTT, amdSMI + "kDevMemUsedGTT"},
-  {amd::smi::kDevMemUsedVisVRAM, amdSMI + "kDevMemUsedVisVRAM"},
-  {amd::smi::kDevMemUsedVRAM, amdSMI + "kDevMemUsedVRAM"},
-  {amd::smi::kDevVramVendor, amdSMI + "kDevVramVendor"},
-  {amd::smi::kDevPCIEReplayCount, amdSMI + "kDevPCIEReplayCount"},
-  {amd::smi::kDevUniqueId, amdSMI + "kDevUniqueId"},
-  {amd::smi::kDevDFCountersAvailable, amdSMI + "kDevDFCountersAvailable"},
-  {amd::smi::kDevMemBusyPercent, amdSMI + "kDevMemBusyPercent"},
-  {amd::smi::kDevXGMIError, amdSMI + "kDevXGMIError"},
-  {amd::smi::kDevFwVersionAsd, amdSMI + "kDevFwVersionAsd"},
-  {amd::smi::kDevFwVersionCe, amdSMI + "kDevFwVersionCe"},
-  {amd::smi::kDevFwVersionDmcu, amdSMI + "kDevFwVersionDmcu"},
-  {amd::smi::kDevFwVersionMc, amdSMI + "kDevFwVersionMc"},
-  {amd::smi::kDevFwVersionMe, amdSMI + "kDevFwVersionMe"},
-  {amd::smi::kDevFwVersionMec, amdSMI + "kDevFwVersionMec"},
-  {amd::smi::kDevFwVersionMec2, amdSMI + "kDevFwVersionMec2"},
-  {amd::smi::kDevFwVersionMes, amdSMI + "kDevFwVersionMes"},
-  {amd::smi::kDevFwVersionMesKiq, amdSMI + "kDevFwVersionMesKiq"},
-  {amd::smi::kDevFwVersionPfp, amdSMI + "kDevFwVersionPfp"},
-  {amd::smi::kDevFwVersionRlc, amdSMI + "kDevFwVersionRlc"},
-  {amd::smi::kDevFwVersionRlcSrlc, amdSMI + "kDevFwVersionRlcSrlc"},
-  {amd::smi::kDevFwVersionRlcSrlg, amdSMI + "kDevFwVersionRlcSrlg"},
-  {amd::smi::kDevFwVersionRlcSrls, amdSMI + "kDevFwVersionRlcSrls"},
-  {amd::smi::kDevFwVersionSdma, amdSMI + "kDevFwVersionSdma"},
-  {amd::smi::kDevFwVersionSdma2, amdSMI + "kDevFwVersionSdma2"},
-  {amd::smi::kDevFwVersionSmc, amdSMI + "kDevFwVersionSmc"},
-  {amd::smi::kDevFwVersionSos, amdSMI + "kDevFwVersionSos"},
-  {amd::smi::kDevFwVersionTaRas, amdSMI + "kDevFwVersionTaRas"},
-  {amd::smi::kDevFwVersionTaXgmi, amdSMI + "kDevFwVersionTaXgmi"},
-  {amd::smi::kDevFwVersionUvd, amdSMI + "kDevFwVersionUvd"},
-  {amd::smi::kDevFwVersionVce, amdSMI + "kDevFwVersionVce"},
-  {amd::smi::kDevFwVersionVcn, amdSMI + "kDevFwVersionVcn"},
-  {amd::smi::kDevSerialNumber, amdSMI + "kDevSerialNumber"},
-  {amd::smi::kDevMemPageBad, amdSMI + "kDevMemPageBad"},
-  {amd::smi::kDevNumaNode, amdSMI + "kDevNumaNode"},
-  {amd::smi::kDevGpuMetrics, amdSMI + "kDevGpuMetrics"},
-  {amd::smi::kDevGpuReset, amdSMI + "kDevGpuReset"},
-  {amd::smi::kDevAvailableComputePartition, amdSMI +
-      "kDevAvailableComputePartition"},
-  {amd::smi::kDevComputePartition, amdSMI + "kDevComputePartition"},
-  {amd::smi::kDevMemoryPartition, amdSMI + "kDevMemoryPartition"}
-};
 
 namespace amd {
 namespace smi {
@@ -364,6 +283,7 @@ RocmSMI::Initialize(uint64_t flags) {
          << " | [before] device->path() = " << device->path()
          << "\n | bdfid = " << bdfid
          << "\n | device->bdfid() = " << device->bdfid()
+         << " (" << print_int_as_hex(device->bdfid()) << ")"
          << "\n | (xgmi node) setting to setting "
          << "device->set_bdfid(device->bdfid())";
       LOG_TRACE(ss);
@@ -374,6 +294,7 @@ RocmSMI::Initialize(uint64_t flags) {
          << " | [before] device->path() = " << device->path()
          << "\n | bdfid = " << bdfid
          << "\n | device->bdfid() = " << device->bdfid()
+         << " (" << print_int_as_hex(device->bdfid()) << ")"
          << "\n | (legacy/pcie card) setting device->set_bdfid(bdfid)";
       LOG_TRACE(ss);
       device->set_bdfid(bdfid);
@@ -382,6 +303,7 @@ RocmSMI::Initialize(uint64_t flags) {
          << " | [after] device->path() = " << device->path()
          << "\n | bdfid = " << bdfid
          << "\n | device->bdfid() = " << device->bdfid()
+         << " (" << print_int_as_hex(device->bdfid()) << ")"
          << "\n | final update: device->bdfid() holds correct device bdf";
       LOG_TRACE(ss);
   }
@@ -393,8 +315,11 @@ RocmSMI::Initialize(uint64_t flags) {
   for (uint32_t dv_ind = 0; dv_ind < devices_.size(); ++dv_ind) {
       dev = devices_[dv_ind];
       uint64_t bdfid = dev->bdfid();
+      bdfid = bdfid & 0xFFFFFFFF0FFFFFFF;  // clear out partition id in bdf
+      // NOTE: partition_id is not part of bdf (but is part of pci_id)
+      // which is why it is removed in sorting
       dv_to_id.push_back({bdfid, dev});
-    }
+  }
   ss << __PRETTY_FUNCTION__ << " Sort index based on BDF.";
   LOG_DEBUG(ss);
 
@@ -641,7 +566,7 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
   for (auto it=env_vars_.enum_overrides.begin();
        it != env_vars_.enum_overrides.end(); ++it) {
     DevInfoTypes type = static_cast<DevInfoTypes>(*it);
-    ss << (std::to_string(*it) + " (" + devInfoTypesStrings.at(type) + ")");
+    ss << (std::to_string(*it) + " (" + Device::devInfoTypesStrings.at(type) + ")");
     auto temp_it = it;
     if(++temp_it != env_vars_.enum_overrides.end()) {
       ss << ", ";
@@ -824,23 +749,47 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
     uint64_t s_gpu_id = 0;
     uint64_t s_unique_id = 0;
     uint64_t s_location_id = 0;
+    uint64_t s_bdf = 0;
+    uint64_t s_domain = 0;
+    uint8_t  s_bus = 0;
+    uint8_t  s_device = 0;
+    uint8_t  s_function = 0;
+    uint8_t  s_partition_id = 0;
+    uint64_t padding = 0;  // padding added in case new changes in future
   };
   // allSystemNodes[key = unique_id] => {node_id, gpu_id, unique_id,
-  //                                     location_id}
+  //                                     location_id, bdf, domain, bus, device,
+  //                                     partition_id}
   std::multimap<uint64_t, systemNode> allSystemNodes;
   uint32_t node_id = 0;
+  static const int BYTE = 8;
   while (true) {
-    uint64_t gpu_id = 0, unique_id = 0, location_id = 0;
+    uint64_t gpu_id = 0, unique_id = 0, location_id = 0, domain = 0;
     int ret_gpu_id = get_gpu_id(node_id, &gpu_id);
     int ret_unique_id = read_node_properties(node_id, "unique_id", &unique_id);
     int ret_loc_id =
       read_node_properties(node_id, "location_id", &location_id);
-    if (ret_gpu_id == 0 || ret_unique_id == 0 || ret_loc_id == 0) {
+    int ret_domain =
+      read_node_properties(node_id, "domain", &domain);
+    if (ret_gpu_id == 0 &&
+      ~(ret_unique_id != 0 || ret_loc_id != 0 || ret_unique_id != 0)) {
+        // Do not try to build a node if one of these fields
+        // do not exist in KFD (0 as values okay)
       systemNode myNode;
       myNode.s_node_id = node_id;
       myNode.s_gpu_id = gpu_id;
       myNode.s_unique_id = unique_id;
       myNode.s_location_id = location_id;
+      myNode.s_domain = domain & 0xFFFFFFFF;
+      myNode.s_bdf = (myNode.s_domain << 32) | (myNode.s_location_id);
+      myNode.s_location_id = myNode.s_bdf;
+      myNode.s_bdf |= ((domain & 0xFFFFFFFF) << 32);
+      myNode.s_location_id = myNode.s_bdf;
+      myNode.s_domain = myNode.s_location_id >> 32;
+      myNode.s_bus = ((myNode.s_location_id >> 8) & 0xFF);
+      myNode.s_device = ((myNode.s_location_id >> 3) & 0x1F);
+      myNode.s_function = myNode.s_location_id & 0x7;
+      myNode.s_partition_id = ((myNode.s_location_id >> 28) & 0xF);
       if (gpu_id != 0) {  // only add gpu nodes, 0 = CPU
         allSystemNodes.emplace(unique_id, myNode);
       }
@@ -856,6 +805,12 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
        << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
        << "; unique_id = " << std::to_string(i.second.s_unique_id)
        << "; location_id = " << std::to_string(i.second.s_location_id)
+       << "; bdf = " << print_int_as_hex(i.second.s_bdf)
+       << "; domain = " << print_int_as_hex(i.second.s_domain, true, 2*BYTE)
+       << "; bus = " << print_int_as_hex(i.second.s_bus, true, BYTE)
+       << "; device = " << print_int_as_hex(i.second.s_device, true, BYTE)
+       << "; function = " << std::to_string(i.second.s_function)
+       << "; partition_id = " << std::to_string(i.second.s_partition_id)
        << "], ";
   }
   ss << "}";
@@ -895,11 +850,47 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       auto temp_numb_nodes = allSystemNodes.count(device_uuid);
       auto primaryBdfId =
           allSystemNodes.lower_bound(device_uuid)->second.s_location_id;
+      auto i = allSystemNodes.lower_bound(device_uuid);
       if (doesDeviceSupportPartitions && temp_numb_nodes > 1
           && ret_unique_id == RSMI_STATUS_SUCCESS) {
         // helps identify xgmi nodes (secondary nodes) easier
+        ss << __PRETTY_FUNCTION__ << " | secondary node add ; "
+           << " BDF = " << std::to_string(primaryBdfId)
+           << " (" << print_int_as_hex(primaryBdfId) << ")";
+        LOG_DEBUG(ss);
+        ss << __PRETTY_FUNCTION__
+           << " | (secondary node add) B4 AddToDeviceList() -->"
+           << "\n[node_id = " << std::to_string(i->second.s_node_id)
+           << "; gpu_id = " << std::to_string(i->second.s_gpu_id)
+           << "; unique_id = " << std::to_string(i->second.s_unique_id)
+           << "; location_id = " << std::to_string(i->second.s_location_id)
+           << "; bdf = " << print_int_as_hex(i->second.s_bdf)
+           << "; domain = " << print_int_as_hex(i->second.s_domain, true, 2*BYTE)
+           << "; bus = " << print_int_as_hex(i->second.s_bus, true, BYTE)
+           << "; device = " << print_int_as_hex(i->second.s_device, true, BYTE)
+           << "; function = " << std::to_string(i->second.s_function)
+           << "; partition_id = " << std::to_string(i->second.s_partition_id)
+           << "], ";
+        LOG_DEBUG(ss);
         AddToDeviceList(d_name, primaryBdfId);
       } else {
+        ss << __PRETTY_FUNCTION__ << " | primary node add ; "
+           << " BDF = " << std::to_string(UINT64_MAX);
+        LOG_DEBUG(ss);
+        ss << __PRETTY_FUNCTION__
+           << " | (primary node add) After AddToDeviceList() -->"
+           << "\n[node_id = " << std::to_string(i->second.s_node_id)
+           << "; gpu_id = " << std::to_string(i->second.s_gpu_id)
+           << "; unique_id = " << std::to_string(i->second.s_unique_id)
+           << "; location_id = " << std::to_string(i->second.s_location_id)
+           << "; bdf = " << print_int_as_hex(i->second.s_bdf)
+           << "; domain = " << print_int_as_hex(i->second.s_domain, true, 2*BYTE)
+           << "; bus = " << print_int_as_hex(i->second.s_bus, true, BYTE)
+           << "; device = " << print_int_as_hex(i->second.s_device, true, BYTE)
+           << "; function = " << std::to_string(i->second.s_function)
+           << "; partition_id = " << std::to_string(i->second.s_partition_id)
+           << "], ";
+        LOG_DEBUG(ss);
         AddToDeviceList(d_name, UINT64_MAX);
       }
 
@@ -910,6 +901,12 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
            << "; gpu_id = " << std::to_string(i.second.s_gpu_id)
            << "; unique_id = " << std::to_string(i.second.s_unique_id)
            << "; location_id = " << std::to_string(i.second.s_location_id)
+           << "; bdf = " << print_int_as_hex(i.second.s_bdf)
+           << "; domain = " << print_int_as_hex(i.second.s_domain, true, 2*BYTE)
+           << "; bus = " << print_int_as_hex(i.second.s_bus, true, BYTE)
+           << "; device = " << print_int_as_hex(i.second.s_device, true, BYTE)
+           << "; function = " << std::to_string(i.second.s_function)
+           << "; partition_id = " << std::to_string(i.second.s_partition_id)
            << "], ";
       }
       ss << "}";
@@ -985,6 +982,7 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
           auto removalGpuId = it->second.s_gpu_id;
           auto removalUniqueId = it->second.s_unique_id;
           auto removalLocId = it->second.s_location_id;
+          auto removaldomain = it->second.s_domain;
           auto nodesErased = 1;
           primary_location_id = removalLocId;
           allSystemNodes.erase(it++);
@@ -995,6 +993,7 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
              << "; gpu_id = " << std::to_string(removalGpuId)
              << "; unique_id = " << std::to_string(removalUniqueId)
              << "; location_id = " << std::to_string(removalLocId)
+             << "; removaldomain = " << std::to_string(removaldomain)
              << "]";
           LOG_DEBUG(ss);
         }
@@ -1002,15 +1001,25 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
           break;
         }
         auto myBdfId = it->second.s_location_id;
-        AddToDeviceList(secNode, myBdfId);
+        ss << __PRETTY_FUNCTION__ << " | secondary node add #2; "
+           << " BDF = " << std::to_string(myBdfId)
+           << " (" << print_int_as_hex(myBdfId) << ")";
+        LOG_DEBUG(ss);
         ss << __PRETTY_FUNCTION__
-           << "\nSECONDARY --> After adding new node; ERASING -> [node_id = "
-           << std::to_string(it->second.s_node_id)
+           << " | (secondary node add #2) B4 AddToDeviceList() -->"
+           << "\n[node_id = " << std::to_string(it->second.s_node_id)
            << "; gpu_id = " << std::to_string(it->second.s_gpu_id)
            << "; unique_id = " << std::to_string(it->second.s_unique_id)
            << "; location_id = " << std::to_string(it->second.s_location_id)
-           << "]";
+           << "; bdf = " << print_int_as_hex(it->second.s_bdf)
+           << "; domain = " << print_int_as_hex(it->second.s_domain, true, 2*BYTE)
+           << "; bus = " << print_int_as_hex(it->second.s_bus, true, BYTE)
+           << "; device = " << print_int_as_hex(it->second.s_device, true, BYTE)
+           << "; function = " << std::to_string(it->second.s_function)
+           << "; partition_id = " << std::to_string(it->second.s_partition_id)
+           << "], ";
         LOG_DEBUG(ss);
+        AddToDeviceList(secNode, myBdfId);
         allSystemNodes.erase(it++);
         numb_nodes--;
         cardAdded++;

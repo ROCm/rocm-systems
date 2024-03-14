@@ -1712,16 +1712,18 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *
  *  The format of @p bdfid will be as follows:
  *
- *      BDFID = ((DOMAIN & 0xffffffff) << 32) | ((BUS & 0xff) << 8) |
- *                                   ((DEVICE & 0x1f) <<3 ) | (FUNCTION & 0x7)
+ *      BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((Partition & 0xF) << 28)
+ *              | ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 )
+ *              | (FUNCTION & 0x7)
  *
- *  | Name     | Field   |
- *  ---------- | ------- |
- *  | Domain   | [64:32] |
- *  | Reserved | [31:16] |
- *  | Bus      | [15: 8] |
- *  | Device   | [ 7: 3] |
- *  | Function | [ 2: 0] |
+ *  | Name         | Field   | KFD property       KFD -> PCIe ID (uint64_t)
+ *  -------------- | ------- | ---------------- | ---------------------------- |
+ *  | Domain       | [63:32] | "domain"         | (DOMAIN & 0xFFFFFFFF) << 32  |
+ *  | Partition id | [31:28] | "location id"    | (LOCATION & 0xF0000000)      |
+ *  | Reserved     | [27:16] | "location id"    | N/A                          |
+ *  | Bus          | [15: 8] | "location id"    | (LOCATION & 0xFF00)          |
+ *  | Device       | [ 7: 3] | "location id"    | (LOCATION & 0xF8)            |
+ *  | Function     | [ 2: 0] | "location id"    | (LOCATION & 0x7)             |
  *
  *  @param[in] dv_ind a device index
  *

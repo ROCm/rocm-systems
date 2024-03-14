@@ -192,7 +192,12 @@ def getBus(device, silent=False):
     bdfid = c_uint64(0)
     ret = rocmsmi.rsmi_dev_pci_id_get(device, byref(bdfid))
 
-    # BDFID = ((DOMAIN & 0xffffffff) << 32) | ((BUS & 0xff) << 8) |((DEVICE & 0x1f) <<3 ) | (FUNCTION & 0x7)
+    # BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) | ((BUS & 0xFF) << 8) |
+    # ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
+    # bits [63:32] = domain
+    # bits [31:28] = partition id
+    # bits [27:16] = reserved
+    # bits [15: 0] = pci bus/device/function
     domain = (bdfid.value >> 32) & 0xffffffff
     bus = (bdfid.value >> 8) & 0xff
     device = (bdfid.value >> 3) & 0x1f
@@ -201,6 +206,28 @@ def getBus(device, silent=False):
     pic_id = '{:04X}:{:02X}:{:02X}.{:0X}'.format(domain, bus, device, function)
     if rsmi_ret_ok(ret, device, 'get_pci_id', silent):
         return pic_id
+
+def getPartitionId(device, silent=False):
+    """ Return the partition identifier of a given device
+
+    :param device: DRM device identifier
+    :param silent: Turn on to silence error output
+        (you plan to handle manually). Default is off.
+    """
+    bdfid = c_uint64(0)
+    ret = rocmsmi.rsmi_dev_pci_id_get(device, byref(bdfid))
+
+    # BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) | ((BUS & 0xFF) << 8) |
+    # ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
+    # bits [63:32] = domain
+    # bits [31:28] = partition id
+    # bits [27:16]  = reserved
+    # bits [15: 0]  = pci bus/device/function
+    partition_num = (bdfid.value >> 28) & 0xf
+    pci_id = bdfid.value
+    partition_id = '{:d}'.format(partition_num)
+    if rsmi_ret_ok(ret, device, 'get_pci_id', silent):
+        return partition_id
 
 
 def getFanSpeed(device, silent=True):
@@ -1884,8 +1911,9 @@ def showAllConcise(deviceList):
     temp_type = "(" + available_temp_type.capitalize() + ")"
     header=['Device', 'Node','IDs','', 'Temp', 'Power', 'Partitions',
             'SCLK', 'MCLK', 'Fan', 'Perf', 'PwrCap', 'VRAM%', 'GPU%']
-    subheader = ['', '','(DID,  ', 'GUID)', temp_type, getPowerLabel(deviceList),
-                 '(Mem, Compute)', '', '', '', '', '', '', '']
+    subheader = ['', '','(DID,', 'GUID)', temp_type, getPowerLabel(deviceList),
+                 '(Mem, Compute, ID)',
+                   '', '', '', '', '', '', '']
     # add additional spaces to match header
     for idx, item in enumerate(subheader):
         header_size = len(header[idx])
@@ -1911,8 +1939,9 @@ def showAllConcise(deviceList):
             power_dict['power_type'] != 'INVALID_POWER_TYPE'):
             if power_dict['power'] != 0:
                 powerVal = power_dict['power'] + power_dict['unit']
-        combined_partition = (getMemoryPartition(device, silent) + ", "
-                             + getComputePartition(device, silent))
+        combined_partition_data = (getMemoryPartition(device, silent) + ", "
+                             + getComputePartition(device, silent)
+                             + ", " + getPartitionId(device, silent))
         sclk = showCurrentClocks([device], 'sclk', concise=silent)
         mclk = showCurrentClocks([device], 'mclk', concise=silent)
         (retCode, fanLevel, fanSpeed) = getFanSpeed(device, silent)
@@ -1939,10 +1968,11 @@ def showAllConcise(deviceList):
                                                           # values with no precision
 
         # Top Row - per device data
-        values['card%s' % (str(device))] = [device, getNodeId(device), 
+        values['card%s' % (str(device))] = [device, getNodeId(device),
                                             str(getDRMDeviceId(device)) + ", ",
                                             str(getGUID(device)),
-                                            temp_val, powerVal, combined_partition,
+                                            temp_val, powerVal, 
+                                            combined_partition_data,
                                             sclk, mclk, fan, str(perf).lower(),
                                             str(pwrCap),
                                             str(mem_use_pct),
@@ -1984,7 +2014,8 @@ def showAllConciseHw(deviceList):
     if PRINT_JSON:
         print('ERROR: Cannot print JSON/CSV output for concise hardware output')
         sys.exit(1)
-    header = ['GPU', 'NODE', 'DID', 'GUID', 'GFX VER', 'GFX RAS', 'SDMA RAS', 'UMC RAS', 'VBIOS', 'BUS']
+    header = ['GPU', 'NODE', 'DID', 'GUID', 'GFX VER', 'GFX RAS', 'SDMA RAS', 'UMC RAS', 'VBIOS', 'BUS'
+               , 'PARTITION ID']
     head_widths = [len(head) + 2 for head in header]
     values = {}
     silent = True
@@ -1992,6 +2023,7 @@ def showAllConciseHw(deviceList):
         did = getDRMDeviceId(device, silent)
         nodeid = getNodeId(device, silent)
         guid = getGUID(device, silent)
+        partition_id = getPartitionId(device, silent)
         gfxVer = getTargetGfxVersion(device, silent)
         gfxRas = getRasEnablement(device, 'GFX', silent)
         sdmaRas = getRasEnablement(device, 'SDMA', silent)
@@ -1999,7 +2031,7 @@ def showAllConciseHw(deviceList):
         vbios = getVbiosVersion(device, silent)
         bus = getBus(device, silent)
         values['card%s' % (str(device))] = [device, nodeid, did, guid, gfxVer, gfxRas, sdmaRas,
-                                            umcRas, vbios, bus]
+                                            umcRas, vbios, bus, partition_id]
     val_widths = {}
     for device in deviceList:
         val_widths[device] = [len(str(val)) + 2 for val in values['card%s' % (str(device))]]
@@ -3940,6 +3972,9 @@ if __name__ == '__main__':
         for device in args.device:
             if not doesDeviceExist(device):
                 logging.warning('No such device card%s', str(device))
+                sys.exit()
+            if device is None:
+                printLog(None, 'ERROR: No DRM devices detected. Exiting', None)
                 sys.exit()
             if (isAmdDevice(device) or args.alldevices) and device not in deviceList:
                 deviceList.append(device)
