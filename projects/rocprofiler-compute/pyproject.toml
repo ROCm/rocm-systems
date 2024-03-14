@@ -54,4 +54,5 @@ markers = [
 	"decimal",
 	"col",
 	"kernel_verbose",
+	"serial",
 ]

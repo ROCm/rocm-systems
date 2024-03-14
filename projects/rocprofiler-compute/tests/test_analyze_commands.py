@@ -373,7 +373,7 @@ def test_filter_block_6():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_kernel
+@pytest.mark.serial
 def test_filter_kernel_1():
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -406,7 +406,7 @@ def test_filter_kernel_1():
     assert e.value.code == 0
 
 
-@pytest.mark.filter_kernel
+@pytest.mark.serial
 def test_filter_kernel_2():
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -439,7 +439,7 @@ def test_filter_kernel_2():
     assert e.value.code == 1
 
 
-@pytest.mark.filter_kernel
+@pytest.mark.serial
 def test_filter_kernel_3():
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -474,7 +474,7 @@ def test_filter_kernel_3():
     assert e.value.code == 1
 
 
-@pytest.mark.dispatch
+@pytest.mark.serial
 def test_dispatch_1():
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -507,7 +507,7 @@ def test_dispatch_1():
     assert e.value.code == 0
 
 
-@pytest.mark.dispatch
+@pytest.mark.serial
 def test_dispatch_2():
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -540,7 +540,7 @@ def test_dispatch_2():
     assert e.value.code == 0
 
 
-@pytest.mark.dispatch
+@pytest.mark.serial
 def test_dispatch_3():
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -573,7 +573,7 @@ def test_dispatch_3():
     assert e.value.code == 0
 
 
-@pytest.mark.dispatch
+@pytest.mark.serial
 def test_dispatch_4():
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -608,7 +608,7 @@ def test_dispatch_4():
     assert e.value.code == 1
 
 
-@pytest.mark.dispatch
+@pytest.mark.serial
 def test_dispatch_5():
     with pytest.raises(SystemExit) as e:
         with patch(

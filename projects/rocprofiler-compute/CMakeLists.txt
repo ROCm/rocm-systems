@@ -253,60 +253,17 @@ set_tests_properties(
 
 add_test(
     NAME test_analyze_commands
-    COMMAND pytest -n ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_commands.xml
-            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
+    COMMAND
+        pytest -n ${PYTEST_NUMPROCS} -m "not serial"
+        --junitxml=tests/test_analyze_commands.xml ${COV_OPTION}
+        ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-# add_test( NAME test_analyze_commands_misc COMMAND pytest -m misc ${COV_OPTION}
-# ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_list_metrics COMMAND pytest -m list_metrics
-# ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_filter_metrics COMMAND pytest -m filter_metrics
-# ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_filter_kernel COMMAND pytest -m filter_kernel
-# ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_dispatch COMMAND pytest -m dispatch ${COV_OPTION}
-# ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_normal_unit COMMAND pytest -m normal_unit
-# ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_max_kernel COMMAND pytest -m max_kernel
-# ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_time_unit COMMAND pytest -m time_unit ${COV_OPTION}
-# ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_decimal COMMAND pytest -m decimal ${COV_OPTION}
-# ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_col COMMAND pytest -m col ${COV_OPTION}
-# ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# add_test( NAME test_analyze_commands_kernel_verbose COMMAND pytest -m kernel_verbose
-# ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-#
-# set_tests_properties( test_analyze_commands_misc test_analyze_commands_list_metrics
-# test_analyze_commands_filter_metrics test_analyze_commands_filter_kernel
-# test_analyze_commands_dispatch test_analyze_commands_normal_unit
-# test_analyze_commands_max_kernel test_analyze_commands_time_unit
-# test_analyze_commands_decimal test_analyze_commands_col
-# test_analyze_commands_kernel_verbose PROPERTIES LABELS "analyze_commands")
+add_test(
+    NAME test_analyze_commands_serial
+    COMMAND pytest -m "serial" --junitxml=tests/test_analyze_commands_serial.xml
+            ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 # ---------------------------
 # analyze workloads tests
