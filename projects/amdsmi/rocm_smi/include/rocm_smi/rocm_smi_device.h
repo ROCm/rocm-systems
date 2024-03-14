@@ -173,6 +173,7 @@ enum DevInfoTypes {
   kDevNumaNode,
   kDevGpuMetrics,
   kDevPmMetrics,
+  kDevDPMPolicy,
   kDevRegMetrics,
   kDevGpuReset,
   kDevAvailableComputePartition,
@@ -255,6 +256,7 @@ class Device {
     rsmi_status_t dev_log_gpu_metrics(std::ostringstream& outstream_metrics);
     AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
 
+    static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
 
  private:
     std::shared_ptr<Monitor> monitor_;

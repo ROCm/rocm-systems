@@ -368,7 +368,7 @@ GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t gpu_metric_v
                 << " |";
     LOG_TRACE(ostrstream);
 
-    return (amd_gpu_metrics_factory_table[gpu_metric_version]);
+    return (amd_gpu_metrics_factory_table.at(gpu_metric_version));
   }
 
   ostrstream << __PRETTY_FUNCTION__

@@ -151,7 +151,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_YEAR 24
 
 //! Major version should be changed for every header change (adding/deleting APIs, changing names, fields of structures, etc.)
-#define AMDSMI_LIB_VERSION_MAJOR 4
+#define AMDSMI_LIB_VERSION_MAJOR 5
 
 //! Minor version should be updated for each API change, but without changing headers
 #define AMDSMI_LIB_VERSION_MINOR 0
@@ -1150,6 +1150,37 @@ typedef struct {
      */
     uint64_t frequency[AMDSMI_MAX_NUM_FREQUENCIES];
 } amdsmi_frequencies_t;
+
+/**
+ * @brief The dpm policy.
+ */
+typedef struct {
+  uint32_t policy_id;
+  char policy_description[AMDSMI_MAX_NAME];
+} amdsmi_dpm_policy_entry_t;
+
+#define AMDSMI_MAX_NUM_PM_POLICIES 32
+
+/**
+ * @brief This structure holds information about dpm policies.
+ */
+typedef struct {
+    /**
+     * The number of supported policies
+     */
+    uint32_t num_supported;
+
+    /**
+     * The current policy index
+     */
+    uint32_t current;
+
+    /**
+     * List of policies.
+     * Only the first num_supported policies are valid.
+     */
+    amdsmi_dpm_policy_entry_t policies[AMDSMI_MAX_NUM_PM_POLICIES];
+} amdsmi_dpm_policy_t;
 
 /**
  * @brief This structure holds information about the possible PCIe
@@ -3333,6 +3364,47 @@ amdsmi_status_t amdsmi_set_gpu_overdrive_level(amdsmi_processor_handle processor
 amdsmi_status_t amdsmi_set_clk_freq(amdsmi_processor_handle processor_handle,
                              amdsmi_clk_type_t clk_type, uint64_t freq_bitmask);
 
+/**
+ * @brief Get the dpm policy for the processor
+ *
+ * @platform{gpu_bm_linux} @platform{guest_1vf}
+ *
+ * @details Given a processor handle @p processor_handle, this function will write
+ * current dpm policy settings to @p policy. All the processors at the same socket
+ * will have the same policy.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in, out] policy the dpm policy for this processor.
+ *  If this parameter is nullptr, this function will return
+ *  ::AMDSMI_STATUS_INVAL
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_dpm_policy(amdsmi_processor_handle processor_handle,
+                             amdsmi_dpm_policy_t* policy);
+
+/**
+ * @brief Set the dpm policy for the processor
+ *
+ * @platform{gpu_bm_linux} @platform{guest_1vf}
+ *
+ * @details Given a processor handle @p processor_handle and a dpm policy @p policy_id,
+ * this function will set the dpm policy for this processor. All the processors at
+ * the same socket will be set to the same policy.
+ *
+ *  @note This function requires root access
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] policy_id the dpm policy id to set. The id is the id in
+ *  amdsmi_dpm_policy_entry_t, which can be obtained by calling
+ *  amdsmi_get_dpm_policy()
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_dpm_policy(amdsmi_processor_handle processor_handle,
+                             uint32_t policy_id);
 /** @} End PerfCont */
 
 /*****************************************************************************/

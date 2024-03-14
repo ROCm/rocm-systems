@@ -360,7 +360,6 @@ class AmdSmiProcessorType(IntEnum):
     NON_AMD_GPU = amdsmi_wrapper.NON_AMD_GPU
     NON_AMD_CPU = amdsmi_wrapper.NON_AMD_CPU
 
-
 class AmdSmiEventReader:
     def __init__(
         self, processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
@@ -2690,6 +2689,19 @@ def amdsmi_set_clk_freq(
         )
     )
 
+def amdsmi_set_dpm_policy(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    policy_id: int,
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_dpm_policy(
+            processor_handle, policy_id
+        )
+    )
 
 def amdsmi_set_gpu_overdrive_level(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle, overdrive_value: int
@@ -3249,6 +3261,36 @@ def amdsmi_get_clk_freq(
         "frequency": list(freq.frequency)[: freq.num_supported - 1],
     }
 
+def amdsmi_get_dpm_policy(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    policy = amdsmi_wrapper.amdsmi_dpm_policy_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_dpm_policy(
+            processor_handle, ctypes.byref(policy)
+        )
+    )
+        
+    polices = []
+    for i in range(0, policy.num_supported):
+        id = policy.policies[i].policy_id
+        desc = policy.policies[i].policy_description
+        polices.append({
+            'policy_id' : id,
+            'policy_description': desc.decode()
+        })
+    current_id = policy.policies[policy.current].policy_id
+
+    return  {
+        "num_supported": policy.num_supported,
+        "current_id": current_id,
+        "policies": polices,
+    }
 
 def amdsmi_get_gpu_od_volt_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,

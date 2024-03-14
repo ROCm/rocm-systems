@@ -244,7 +244,7 @@ class AMDSMICommands():
 
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
                         limit=None, driver=None, ras=None, board=None, numa=None, vram=None,
-                        cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None):
+                        cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None, policy=None):
         """Get Static information for target gpu
 
         Args:
@@ -267,7 +267,7 @@ class AMDSMICommands():
             dfc_ucode (bool, optional): Value override for args.dfc_ucode. Defaults to None.
             fb_info (bool, optional): Value override for args.fb_info. Defaults to None.
             num_vf (bool, optional): Value override for args.num_vf. Defaults to None.
-
+            policy (bool, optional): Value override for args.policy. Defaults to None.
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -300,8 +300,10 @@ class AMDSMICommands():
                 args.partition = partition
             if limit:
                 args.limit = limit
-            current_platform_args += ["ras", "limit", "partition"]
-            current_platform_values += [args.ras, args.limit, args.partition]
+            if policy:
+                args.policy = policy
+            current_platform_args += ["ras", "limit", "partition", "policy"]
+            current_platform_values += [args.ras, args.limit, args.partition, args.policy]
 
         if self.helpers.is_linux() and not self.helpers.is_virtual_os():
             if numa:
@@ -344,7 +346,13 @@ class AMDSMICommands():
                 static_dict['asic'] = "N/A"
                 logging.debug("Failed to get asic info for gpu %s | %s", gpu_id, e.get_error_info())
         if args.bus:
-            bus_info = {}
+            bus_info = {
+                'bdf': "N/A",
+                'max_pcie_width': "N/A",
+                'max_pcie_speed': "N/A",
+                'pcie_interface_version': "N/A",
+                'slot_type': "N/A"
+            }
 
             try:
                 bus_info['bdf'] = amdsmi_interface.amdsmi_get_gpu_device_bdf(args.gpu)
@@ -356,7 +364,6 @@ class AMDSMICommands():
                 link_caps = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)
                 bus_info['max_pcie_width'] = link_caps['pcie_static']['max_pcie_width']
                 bus_info['max_pcie_speed'] = link_caps['pcie_static']['max_pcie_speed']
-                bus_info['pcie_slot_type'] = link_caps['pcie_static']['slot_type']
                 bus_info['pcie_interface_version'] = link_caps['pcie_static']['pcie_interface_version']
 
                 if bus_info['max_pcie_speed'] % 1000 != 0:
@@ -366,15 +373,13 @@ class AMDSMICommands():
 
                 bus_info['max_pcie_speed'] = pcie_speed_GTs_value
 
-                slot_type = bus_info.pop('pcie_slot_type')
+                slot_type = link_caps['pcie_static']['slot_type']
                 if isinstance(slot_type, int):
                     slot_types = amdsmi_interface.amdsmi_wrapper.amdsmi_card_form_factor_t__enumvalues
                     if slot_type in slot_types:
                         bus_info['slot_type'] = slot_types[slot_type].replace("AMDSMI_CARD_FORM_FACTOR_", "")
                     else:
                         bus_info['slot_type'] = "Unknown"
-                else:
-                    bus_info['slot_type'] = "N/A"
 
                 if bus_info['pcie_interface_version'] > 0:
                     bus_info['pcie_interface_version'] = f"Gen {bus_info['pcie_interface_version']}"
@@ -389,7 +394,6 @@ class AMDSMICommands():
                                                   "unit" : pcie_speed_unit}
 
             except amdsmi_exception.AmdSmiLibraryException as e:
-                bus_info = "N/A"
                 logging.debug("Failed to get bus info for gpu %s | %s", gpu_id, e.get_error_info())
 
             static_dict['bus'] = bus_info
@@ -483,6 +487,7 @@ class AMDSMICommands():
                     shutdown_temp_vram_limit_error = True
                     shutdown_temp_vram_limit = "N/A"
                     logging.debug("Failed to get vram temperature shutdown metrics for gpu %s | %s", gpu_id, e.get_error_info())
+
 
                 # Assign units
                 power_unit = 'W'
@@ -624,6 +629,15 @@ class AMDSMICommands():
 
                 static_dict['partition'] = {"compute_partition": compute_partition,
                                             "memory_partition": memory_partition}
+        if 'policy' in current_platform_args:
+            if args.policy:
+                try:
+                    policy_info = amdsmi_interface.amdsmi_get_dpm_policy(args.gpu)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    policy_info = "N/A"
+                    logging.debug("Failed to get policy info for gpu %s | %s", gpu_id, e.get_error_info())
+                
+                static_dict['dpm_policy'] = policy_info
         if 'numa' in current_platform_args:
             if args.numa:
                 try:
@@ -760,7 +774,7 @@ class AMDSMICommands():
                 bus=None, vbios=None, limit=None, driver=None, ras=None,
                 board=None, numa=None, vram=None, cache=None, partition=None,
                 dfc_ucode=None, fb_info=None, num_vf=None, cpu=None,
-                interface_ver=None):
+                interface_ver=None, policy=None):
         """Get Static information for target gpu and cpu
 
         Args:
@@ -783,7 +797,7 @@ class AMDSMICommands():
             num_vf (bool, optional): Value override for args.num_vf. Defaults to None.
             cpu (cpu_handle, optional): cpu_handle for target device. Defaults to None.
             interface_ver (bool, optional): Value override for args.interface_ver. Defaults to None
-
+            policy (bool, optional): Value override for args.policy. Defaults to None.
         Raises:
             IndexError: Index error if gpu list is empty
 
@@ -809,7 +823,7 @@ class AMDSMICommands():
         gpu_args_enabled = False
         gpu_attributes = ["asic", "bus", "vbios", "limit", "driver", "ras",
                           "board", "numa", "vram", "cache", "partition",
-                          "dfc_ucode", "fb_info", "num_vf"]
+                          "dfc_ucode", "fb_info", "num_vf", "policy"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -839,7 +853,7 @@ class AMDSMICommands():
                 self.static_gpu(args, multiple_devices, gpu, asic,
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
-                                    dfc_ucode, fb_info, num_vf)
+                                    dfc_ucode, fb_info, num_vf, policy)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None:
                 args.cpu = self.cpu_handles
@@ -853,7 +867,7 @@ class AMDSMICommands():
             self.static_gpu(args, multiple_devices, gpu, asic,
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
-                                dfc_ucode, fb_info, num_vf)
+                                dfc_ucode, fb_info, num_vf, policy)
 
 
     def firmware(self, args, multiple_devices=False, gpu=None, fw_list=True):
@@ -1124,14 +1138,14 @@ class AMDSMICommands():
                 args.temperature = temperature
             if ecc:
                 args.ecc = ecc
-            if pcie:
-                args.pcie = pcie
-            current_platform_args += ["usage", "power", "clock", "temperature", "ecc", "pcie"]
-            current_platform_values += [args.usage, args.power, args.clock, args.temperature, args.ecc, args.pcie]
-
-        if self.helpers.is_baremetal() and self.helpers.is_linux():
             if ecc_blocks:
                 args.ecc_blocks = ecc_blocks
+            if pcie:
+                args.pcie = pcie
+            current_platform_args += ["usage", "power", "clock", "temperature", "ecc", "ecc_blocks", "pcie"]
+            current_platform_values += [args.usage, args.power, args.clock, args.temperature, args.ecc, args.ecc_blocks, args.pcie]
+
+        if self.helpers.is_baremetal() and self.helpers.is_linux():
             if fan:
                 args.fan = fan
             if voltage_curve:
@@ -1144,8 +1158,8 @@ class AMDSMICommands():
                 args.xgmi_err = xgmi_err
             if energy:
                 args.energy = energy
-            current_platform_args += ["ecc_blocks", "fan", "voltage_curve", "overdrive", "perf_level", "xgmi_err", "energy"]
-            current_platform_values += [args.ecc_blocks, args.fan, args.voltage_curve, args.overdrive, args.perf_level, args.xgmi_err, args.energy]
+            current_platform_args += ["fan", "voltage_curve", "overdrive", "perf_level", "xgmi_err", "energy"]
+            current_platform_values += [args.fan, args.voltage_curve, args.overdrive, args.perf_level, args.xgmi_err, args.energy]
 
         if self.helpers.is_hypervisor():
             if schedule:
@@ -3094,7 +3108,7 @@ class AMDSMICommands():
 
     def set_gpu(self, args, multiple_devices=False, gpu=None, fan=None, perf_level=None,
                   profile=None, perf_determinism=None, compute_partition=None,
-                  memory_partition=None, power_cap=None):
+                  memory_partition=None, power_cap=None, dpm_policy=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -3108,6 +3122,7 @@ class AMDSMICommands():
             compute_partition (amdsmi_interface.AmdSmiComputePartitionType, optional): Value override for args.compute_partition. Defaults to None.
             memory_partition (amdsmi_interface.AmdSmiMemoryPartitionType, optional): Value override for args.memory_partition. Defaults to None.
             power_cap (int, optional): Value override for args.power_cap. Defaults to None.
+            dpm_policy (int, optional): Value override for args.dpm_policy. Defaults to None.
 
         Raises:
             ValueError: Value error if no gpu value is provided
@@ -3133,7 +3148,8 @@ class AMDSMICommands():
             args.memory_partition = memory_partition
         if power_cap:
             args.power_cap = power_cap
-
+        if dpm_policy:
+            args.dpm_policy = dpm_policy
         # Handle No GPU passed
         if args.gpu == None:
             raise ValueError('No GPU provided, specific GPU target(s) are needed')
@@ -3152,7 +3168,8 @@ class AMDSMICommands():
                     args.compute_partition,
                     args.memory_partition,
                     args.perf_determinism is not None,
-                    args.power_cap]):
+                    args.power_cap,
+                    args.dpm_policy]):
             command = " ".join(sys.argv[1:])
             raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -3216,6 +3233,16 @@ class AMDSMICommands():
                     raise PermissionError('Command requires elevation') from e
                 raise ValueError(f"Unable to set memory partition to {args.memory_partition} on {gpu_string}") from e
             self.logger.store_output(args.gpu, 'memorypartition', f"Successfully set memory partition to {args.memory_partition}")
+
+        if args.dpm_policy:
+            try:
+                amdsmi_interface.amdsmi_set_dpm_policy(args.gpu, args.dpm_policy)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                raise ValueError(f"Unable to set dpm policy to {args.dpm_policy} on {gpu_string}") from e
+            self.logger.store_output(args.gpu, 'dpmpolicy', f"Successfully set dpm policy to id {args.dpm_policy}")
+
         if isinstance(args.power_cap, int):
             try:
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
@@ -3255,7 +3282,7 @@ class AMDSMICommands():
                   cpu=None, cpu_pwr_limit=None, cpu_xgmi_link_width=None, cpu_lclk_dpm_level=None,
                   cpu_pwr_eff_mode=None, cpu_gmi3_link_width=None, cpu_pcie_link_rate=None,
                   cpu_df_pstate_range=None, cpu_enable_apb=None, cpu_disable_apb=None,
-                  soc_boost_limit=None, core=None, core_boost_limit=None):
+                  soc_boost_limit=None, core=None, core_boost_limit=None, dpm_policy=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -3284,6 +3311,7 @@ class AMDSMICommands():
 
             core (device_handle, optional): device_handle for target core. Defaults to None.
             core_boost_limit (int, optional): Value override for args.core_boost_limit. Defaults to None
+            dpm_policy (int, optional): Value override for args.dpm_policy. Defaults to None.
 
         Raises:
             ValueError: Value error if no gpu value is provided
@@ -3304,7 +3332,7 @@ class AMDSMICommands():
         # Check if a GPU argument has been set
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
-                          "memory_partition", "power_cap"]
+                          "memory_partition", "power_cap", "dpm_policy"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
@@ -3365,7 +3393,7 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_ouput()
                 self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                                 profile, perf_determinism, compute_partition,
-                                memory_partition, power_cap)
+                                memory_partition, power_cap, dpm_policy)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None and args.core == None:
                 raise ValueError('No CPU or CORE provided, specific target(s) are needed')
@@ -3384,7 +3412,7 @@ class AMDSMICommands():
             self.logger.clear_multiple_devices_ouput()
             self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                             profile, perf_determinism, compute_partition,
-                            memory_partition, power_cap)
+                            memory_partition, power_cap, dpm_policy)
 
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,

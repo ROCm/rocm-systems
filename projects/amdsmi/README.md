@@ -12,7 +12,7 @@ and [esmi_ib_library](https://github.com/amd/esmi_ib_library)
 
 At initial release, the AMD SMI library will support Linux bare metal and Linux virtual machine guest for AMD GPUs. In the future release, the library will be extended to support AMD EPYC™ CPUs.
 
-AMD SMI library can run on AMD ROCm supported platforms, please refer to [List of Supported Operating Systems and GPUs](https://rocm.docs.amd.com/en/latest/release/gpu_os_support.html)
+AMD SMI library can run on AMD ROCm supported platforms, refer to [System requirements (Linux)](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html) for more information.
 
 To run the AMD SMI library, the amdgpu driver and the hsmp driver needs to be installed. Optionally, the libdrm can be
 installed to query firmware information and hardware IPs.
@@ -195,7 +195,7 @@ python3 -m sphinx -T -E -b html -d _build/doctrees -D language=en . _build/html
 
 The output will be in `docs/_build/html`.
 
-For additional details, see the [ROCm Contributing Guide](https://rocm.docs.amd.com/en/latest/contributing.html#building-documentation)
+For additional details, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 ## Building AMD SMI
 

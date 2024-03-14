@@ -543,6 +543,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         vram_help = "All vram information"
         cache_help = "All cache information"
         board_help = "All board information"
+        dpm_policy_help = "The available DPM policy"
 
         # Options arguments help text for Hypervisors and Baremetal
         ras_help = "Displays RAS features information"
@@ -582,6 +583,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
                 static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
+                static_parser.add_argument('-P', '--policy', action='store_true', required=False, help=dpm_policy_help)
 
             if self.helpers.is_linux() and not self.helpers.is_virtual_os():
                 static_parser.add_argument('-u', '--numa', action='store_true', required=False, help=numa_help)
@@ -759,10 +761,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-t', '--temperature', action='store_true', required=False, help=temperature_help)
                 metric_parser.add_argument('-P', '--pcie', action='store_true', required=False, help=pcie_help)
                 metric_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
+                metric_parser.add_argument('-k', '--ecc-blocks', action='store_true', required=False, help=ecc_blocks_help)
 
             # Optional Args for Linux Baremetal Systems
             if self.helpers.is_baremetal() and self.helpers.is_linux():
-                metric_parser.add_argument('-k', '--ecc-blocks', action='store_true', required=False, help=ecc_blocks_help)
                 metric_parser.add_argument('-f', '--fan', action='store_true', required=False, help=fan_help)
                 metric_parser.add_argument('-C', '--voltage-curve', action='store_true', required=False, help=vc_help)
                 metric_parser.add_argument('-o', '--overdrive', action='store_true', required=False, help=overdrive_help)
@@ -963,6 +965,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_compute_partition_help = f"Set one of the following the compute partition modes:\n\t{compute_partition_choices_str}"
         set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
         set_power_cap_help = "Set power capacity limit"
+        set_dpm_policy_help = f"Set the GPU DPM policy using policy id\n"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
@@ -998,6 +1001,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_parser.add_argument('-C', '--compute-partition', action='store', choices=self.helpers.get_compute_partition_types(), type=str.upper, required=False, help=set_compute_partition_help, metavar='PARTITION')
             set_value_parser.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
             set_value_parser.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
+            set_value_parser.add_argument('-p', '--dpm-policy', action='store', required=False,  type=self._not_negative_int, help=set_dpm_policy_help, metavar='POLICY_ID')
 
         if self.helpers.is_amd_hsmp_initialized():
             # Optional CPU Args

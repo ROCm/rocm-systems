@@ -474,7 +474,7 @@ Command Modifiers:
 ```bash
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-o WATTS] [--cpu-pwr-limit PWR_LIMIT]
+                   [-o WATTS] [-p POLICY] [--cpu-pwr-limit PWR_LIMIT]
                    [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
@@ -512,6 +512,7 @@ Set Arguments:
   -M, --memory-partition PARTITION             Set one of the following the memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
   -o, --power-cap WATTS                        Set power capacity limit
+  -p, --dpm-policy POLICY_ID                   Set the GPU DPM policy using policy id
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                    Set power limit for the given socket. Input parameter is power limit value.
@@ -674,6 +675,18 @@ GPU: 0
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
+    POLICY:
+        NUM_SUPPORTED: 4
+        CURRENT_ID: 1
+        POLICIES:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: pstate_default
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: soc_pstate_0
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: soc_pstate_1
+            POLICY_ID: 3
+            POLICY_DESCRIPTION: soc_pstate_2
     NUMA:
         NODE: 0
         AFFINITY: 0
@@ -770,6 +783,18 @@ GPU: 1
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
+    POLICY:
+        NUM_SUPPORTED: 4
+        CURRENT_ID: 1
+        POLICIES:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: pstate_default
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: soc_pstate_0
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: soc_pstate_1
+            POLICY_ID: 3
+            POLICY_DESCRIPTION: soc_pstate_2
     NUMA:
         NODE: 1
         AFFINITY: 1
@@ -866,6 +891,18 @@ GPU: 2
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
+    POLICY:
+        NUM_SUPPORTED: 4
+        CURRENT_ID: 1
+        POLICIES:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: pstate_default
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: soc_pstate_0
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: soc_pstate_1
+            POLICY_ID: 3
+            POLICY_DESCRIPTION: soc_pstate_2
     NUMA:
         NODE: 2
         AFFINITY: 2
@@ -962,6 +999,18 @@ GPU: 3
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
+    POLICY:
+        NUM_SUPPORTED: 4
+        CURRENT_ID: 1
+        POLICIES:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: pstate_default
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: soc_pstate_0
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: soc_pstate_1
+            POLICY_ID: 3
+            POLICY_DESCRIPTION: soc_pstate_2
     NUMA:
         NODE: 3
         AFFINITY: 3

@@ -257,6 +257,16 @@ bool IsInteger(const std::string & n_str) {
   return (*tmp == 0);
 }
 
+bool stringToInteger(const std::string & n_str, int& value) {
+  try {
+    value = std::stoi(trim(n_str), nullptr);
+    return true;
+  } catch (...) {
+    return false;
+  }
+  return false;
+}
+
 rsmi_status_t handleException() {
   try {
     throw;
@@ -503,6 +513,7 @@ std::vector<std::string> getListOfAppTmpFiles() {
       continue;
     }
   }
+  closedir(dir);
   return tmpFiles;
 }
 

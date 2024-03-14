@@ -117,7 +117,6 @@ class RocmSMI {
     void debugRSMIEnvVarInfo();
     bool isLoggingOn(void);
     uint32_t getLogSetting(void);
-    static const std::map<amd::smi::DevInfoTypes, std::string> devInfoTypesStrings;
 
  private:
     std::vector<std::shared_ptr<Device>> devices_;

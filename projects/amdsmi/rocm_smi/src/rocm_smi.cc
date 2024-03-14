@@ -82,7 +82,7 @@ using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
 using amd::smi::AMDGpuMetricsUnitType_t;
 using amd::smi::AMDGpuMetricTypeId_t;
-auto &devInfoTypesStrings = amd::smi::RocmSMI::devInfoTypesStrings;
+auto &devInfoTypesStrings = amd::smi::Device::devInfoTypesStrings;
 
 static const uint32_t kMaxOverdriveLevel = 20;
 static const float kEnergyCounterResolution = 15.3F;
@@ -144,6 +144,7 @@ static uint64_t get_multiplier_from_str(char units_char) {
   }
   return multiplier;
 }
+
 
 /**
  * Parse a string of the form:
@@ -2014,6 +2015,133 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
 
   CATCH
 }
+
+
+rsmi_status_t
+rsmi_dev_dpm_policy_set(uint32_t dv_ind,
+                      uint32_t policy_id) {
+  rsmi_status_t ret;
+
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+
+  std::string value("soc_pstate ");
+  value += std::to_string(policy_id);
+  int ret = dev->writeDevInfo(amd::smi::kDevDPMPolicy , value);
+  return amd::smi::ErrnoToRsmiStatus(ret);
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_dpm_policy_get(uint32_t dv_ind,
+                      rsmi_dpm_policy_t* policy) {
+  rsmi_status_t ret;
+  std::vector<std::string> val_vec;
+
+  if (policy == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  *policy = {};
+
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+  DEVICE_MUTEX
+
+  ret = GetDevValueVec(amd::smi::kDevDPMPolicy, dv_ind, &val_vec);
+  if (ret == RSMI_STATUS_FILE_ERROR) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+       << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
+       << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+       << ", GetDevValueVec() ret was not RSMI_STATUS_SUCCESS"
+       << " -> reporting " << amd::smi::getRSMIStatusString(ret);
+    LOG_ERROR(ss);
+    return ret;
+  }
+  /*
+    It will reply on the number but no string as it may vary from soc to soc.
+    The current pstate marked with *
+    soc pstate
+    0 : soc_pstate_default
+    1 : soc_pstate_0
+    2 : soc_pstate_1*
+    3 : soc_pstate_2
+  */
+  bool see_soc_pstate = false;
+  bool see_current = false;
+  policy->num_supported = 0;
+  for (uint32_t i = 0; i < val_vec.size(); ++i) {
+    auto current_line = amd::smi::trim(val_vec[i]);
+    if (current_line == "soc pstate") {
+      see_soc_pstate = true;
+      continue;
+    }
+    if (see_soc_pstate == false) continue;
+
+    // Get tokens: <integer> : <string *>
+    std::vector<std::string> tokens;
+    std::istringstream f(current_line);
+    std::string s;
+    while (getline(f, s, ':')) {
+          tokens.push_back(s);
+    }
+
+    int value = 0;
+    // At the end
+    if (tokens.size() < 2 || !amd::smi::stringToInteger(tokens[0], value)) {
+      break;
+    }
+
+    if (value < 0 || policy->num_supported >= RSMI_MAX_NUM_PM_POLICIES) {
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+          << ", Unexpeced pstat data: the id is negative or too many policies.";
+          LOG_ERROR(ss);
+          return RSMI_STATUS_UNEXPECTED_DATA;
+    }
+
+    policy->policies[policy->num_supported].policy_id = value;
+    std::string description = amd::smi::trim(tokens[1]);
+    if (current_line.back() == '*') {  // current policy
+        description.pop_back();  // remove last *
+        description = amd::smi::trim(description);
+        policy->current = policy->num_supported;
+        see_current = true;
+    }
+    strncpy(policy->policies[policy->num_supported].policy_description,
+          description.c_str(),
+          RSMI_MAX_POLICY_NAME-1);
+    policy->num_supported++;
+  }  //  end for
+
+  if (!see_soc_pstate) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  if (!see_current) {
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+          << ", Unexpeced pstat data: cannot find the current policy.";
+          LOG_ERROR(ss);
+          return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+  // Cannot find it
+  return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
 static std::vector<std::string> pci_name_files = {
   "/usr/share/misc/pci.ids",
   "/usr/share/hwdata/pci.ids",
@@ -2027,7 +2155,7 @@ enum eNameStrType {
   NAME_STR_SUBSYS
 };
 
-std::map<std::string, rsmi_compute_partition_type_t>
+static const std::map<std::string, rsmi_compute_partition_type_t>
 mapStringToRSMIComputePartitionTypes {
   {"CPX", RSMI_COMPUTE_PARTITION_CPX},
   {"SPX", RSMI_COMPUTE_PARTITION_SPX},
@@ -2036,7 +2164,7 @@ mapStringToRSMIComputePartitionTypes {
   {"QPX", RSMI_COMPUTE_PARTITION_QPX}
 };
 
-std::map<rsmi_compute_partition_type_t, std::string>
+static const std::map<rsmi_compute_partition_type_t, std::string>
 mapRSMIToStringComputePartitionTypes {
   {RSMI_COMPUTE_PARTITION_INVALID, "UNKNOWN"},
   {RSMI_COMPUTE_PARTITION_CPX, "CPX"},
@@ -2046,7 +2174,7 @@ mapRSMIToStringComputePartitionTypes {
   {RSMI_COMPUTE_PARTITION_QPX, "QPX"}
 };
 
-std::map<rsmi_memory_partition_type_t, std::string>
+static const std::map<rsmi_memory_partition_type_t, std::string>
 mapRSMIToStringMemoryPartitionTypes {
   {RSMI_MEMORY_PARTITION_UNKNOWN, "UNKNOWN"},
   {RSMI_MEMORY_PARTITION_NPS1, "NPS1"},
@@ -2055,7 +2183,7 @@ mapRSMIToStringMemoryPartitionTypes {
   {RSMI_MEMORY_PARTITION_NPS8, "NPS8"}
 };
 
-std::map<std::string, rsmi_memory_partition_type_t>
+static const std::map<std::string, rsmi_memory_partition_type_t>
 mapStringToMemoryPartitionTypes {
   {"NPS1", RSMI_MEMORY_PARTITION_NPS1},
   {"NPS2", RSMI_MEMORY_PARTITION_NPS2},

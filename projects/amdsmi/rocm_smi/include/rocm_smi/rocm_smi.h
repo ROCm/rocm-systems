@@ -192,6 +192,39 @@ typedef enum {
 
   RSMI_DEV_PERF_LEVEL_UNKNOWN = 0x100   //!< Unknown performance level
 } rsmi_dev_perf_level_t;
+
+
+#define RSMI_MAX_NUM_PM_POLICIES 32
+#define RSMI_MAX_POLICY_NAME 32
+/**
+ * @brief The dpm policy.
+ */
+typedef struct {
+  uint32_t policy_id;
+  char policy_description[RSMI_MAX_POLICY_NAME];
+} rsmi_dpm_policy_entry_t;
+
+/**
+ * @brief This structure holds information about dpm policies.
+ */
+typedef struct {
+    /**
+     * The number of supported policies
+     */
+    uint32_t num_supported;
+
+    /**
+     * The current policy index
+     */
+    uint32_t current;
+
+    /**
+     * List of policies.
+     * Only the first num_supported policies are valid.
+     */
+    rsmi_dpm_policy_entry_t policies[RSMI_MAX_NUM_PM_POLICIES];
+} rsmi_dpm_policy_t;
+
 /// \cond Ignore in docs.
 typedef rsmi_dev_perf_level_t rsmi_dev_perf_level;
 /// \endcond
@@ -3294,6 +3327,42 @@ rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
  */
 rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
                              rsmi_clk_type_t clk_type, uint64_t freq_bitmask);
+
+/**
+ * @brief Get the dpm policy for a device
+ *
+ * @details Given a device index @p dv_ind,  this function will write
+ * current dpm policy settings to @p policy. All the devices at the same socket
+ * will have the same policy.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in, out] policy the dpm policy for this device.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVAL
+ *
+ *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
+ */
+rsmi_status_t rsmi_dev_dpm_policy_get(uint32_t dv_ind,
+                             rsmi_dpm_policy_t* policy);
+
+/**
+ * @brief Set the dpm policy for a device
+ *
+ * @details Given a device index @p dv_ind and a dpm policy @p policy_id,
+ * this function will set the DPM policy for this device. All the devices at
+ * the same socket will be set to the same policy.
+ *
+ *  @note This function requires root access
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] policy_id the dpm policy will be modified
+ *
+ *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
+ */
+rsmi_status_t rsmi_dev_dpm_policy_set(uint32_t dv_ind,
+                             uint32_t policy_id);
 
 /** @} */  // end of PerfCont
 

@@ -78,6 +78,7 @@ int isRegularFile(std::string fname, bool *is_reg);
 int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
 bool IsInteger(const std::string & n_str);
+bool stringToInteger(const std::string & n_str, int& value);
 std::pair<bool, std::string> executeCommand(std::string command,
                                             bool stdOut = true);
 rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName,
