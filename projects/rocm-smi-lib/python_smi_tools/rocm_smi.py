@@ -2982,7 +2982,7 @@ def showEvents(deviceList, eventTypes):
     if len(eventTypeList) == 0:
         eventTypeList = notification_type_names
         print2DArray([['DEVICE\t', 'TIME\t', 'TYPE\t', 'DESCRIPTION']])
-        # Create a seperate thread for each GPU
+        # Create a separate thread for each GPU
         for device in deviceList:
             try:
                 _thread.start_new_thread(printEventList, (device, 1000, eventTypeList))
@@ -3683,7 +3683,7 @@ def rsmi_ret_ok(my_ret, device=None, metric=None, silent=False):
     :param device: DRM device identifier
     :param my_ret: Return of RSMI call (rocm_smi_lib API)
     :param metric: Parameter of GPU currently being analyzed
-    :param silent: Echo verbose error reponse.
+    :param silent: Echo verbose error response.
         True silences err output, False does not silence err output (default).
     """
     global RETCODE
@@ -3869,7 +3869,7 @@ if __name__ == '__main__':
     groupActionReset.add_argument('--resetfans', help='Reset fans to automatic (driver) control', action='store_true')
     groupActionReset.add_argument('--resetprofile', help='Reset Power Profile back to default', action='store_true')
     groupActionReset.add_argument('--resetpoweroverdrive',
-                                  help='Set the maximum GPU power back to the device deafult state',
+                                  help='Set the maximum GPU power back to the device default state',
                                   action='store_true')
     groupActionReset.add_argument('--resetxgmierr', help='Reset XGMI error count', action='store_true')
     groupActionReset.add_argument('--resetperfdeterminism', help='Disable performance determinism', action='store_true')
@@ -3921,7 +3921,7 @@ if __name__ == '__main__':
     groupAction.add_argument('--rasdisable', help='Disable RAS for specified block and error type', type=str, nargs=2,
                              metavar=('BLOCK', 'ERRTYPE'))
     groupAction.add_argument('--rasinject',
-                             help='Inject RAS poison for specified block (ONLY WORKS ON UNSECURE BOARDS)', type=str,
+                             help='Inject RAS poison for specified block (ONLY WORKS ON UNSECURED BOARDS)', type=str,
                              metavar='BLOCK', nargs=1)
     groupActionGpuReset.add_argument('--gpureset', help='Reset specified GPU (One GPU must be specified)',
                                      action='store_true')
