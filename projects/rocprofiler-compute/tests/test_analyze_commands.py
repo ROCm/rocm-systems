@@ -39,6 +39,7 @@ def test_valid_path():
     assert e.value.code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
+
 @pytest.mark.misc
 def test_list_kernels():
     workload_dir = test_utils.setup_workload_dir(indir1)
@@ -1573,6 +1574,7 @@ def test_kernel_verbose_1():
             omniperf.main()
     assert e.value.code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
+
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_2():
