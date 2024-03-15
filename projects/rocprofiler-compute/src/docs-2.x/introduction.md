@@ -53,9 +53,9 @@ Detailed Feature List:
 
 ## Compatible SoCs
 
-| Platform          | Status         |
-| :---------------- | :------------- |
-| Vega 20 (MI50/60) | No support     |
-| MI100             | Supported      |
-| MI200             | Supported      |
-| MI300             | In development |
+| Platform          | Status     |
+| :---------------- | :--------- |
+| Vega 20 (MI50/60) | No support |
+| MI100             | Supported  |
+| MI200             | Supported  |
+| MI300             | Support    |
