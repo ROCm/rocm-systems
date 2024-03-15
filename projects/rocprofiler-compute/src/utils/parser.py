@@ -528,8 +528,10 @@ def build_dfs(archConfigs, filter_metrics, sys_info):
 
                         if (
                             (not filter_metrics)
-                            or (metric_idx in filter_metrics)  # no filter
-                            or  # metric in filter
+                            or (
+                                metric_idx in filter_metrics
+                            )  # no filter  # metric in filter
+                            or
                             # the whole table in filter
                             (data_source_idx in filter_metrics)
                             or
