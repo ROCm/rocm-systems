@@ -148,6 +148,7 @@ protected:
     //! Data allocated to store samples. Temporary.
     std::vector<std::unique_ptr<PCSamplingData>> data;
     //! Dispatches not yet completed.
+    // Uses only the internal correlation_id.
     std::unordered_map<uint64_t, dispatch_pkt_id_t> active_dispatches;
     //! List of correlation ids whose dispatches have been completed and can be forgotten after the
     //! buffer flip.

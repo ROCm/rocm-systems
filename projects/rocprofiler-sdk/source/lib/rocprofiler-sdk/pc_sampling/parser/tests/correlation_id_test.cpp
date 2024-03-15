@@ -52,7 +52,7 @@ static bool
 check_samples(pcsample_v1_t* samples, uint64_t size)
 {
     for(size_t i = 0; i < size; i++)
-        if(samples[i].correlation_id != samples[i].pc) return false;
+        if(samples[i].correlation_id.internal != samples[i].pc) return false;
     return true;
 }
 

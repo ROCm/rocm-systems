@@ -296,8 +296,8 @@ class WaveIssueAndErrorTest : public WaveSnapTest
     {
         pcsample_v1_t sample;
         ::memset(&sample, 0, sizeof(sample));
-        sample.pc             = dispatch->unique_id;
-        sample.correlation_id = dispatch->getMockId().raw;
+        sample.pc                      = dispatch->unique_id;
+        sample.correlation_id.internal = dispatch->getMockId().raw;
 
         sample.flags.valid              = valid && !error;
         sample.wave_issued              = issued;
@@ -353,7 +353,7 @@ class WaveOtherFieldsTest : public WaveSnapTest
             assert(compare[i].chiplet == parsed[0][i].chiplet);
             assert(compare[i].wave_id == parsed[0][i].wave_id);
             assert(compare[i].hw_id == parsed[0][i].hw_id);
-            assert(compare[i].correlation_id == parsed[0][i].correlation_id);
+            assert(compare[i].correlation_id.internal == parsed[0][i].correlation_id.internal);
         }
     }
 
@@ -367,10 +367,10 @@ class WaveOtherFieldsTest : public WaveSnapTest
         sample.workgroup_id_y = blky;
         sample.workgroup_id_z = blkz;
 
-        sample.chiplet        = chip;
-        sample.wave_id        = wave;
-        sample.hw_id          = hwid;
-        sample.correlation_id = dispatch->unique_id;
+        sample.chiplet                 = chip;
+        sample.wave_id                 = wave;
+        sample.hw_id                   = hwid;
+        sample.correlation_id.internal = dispatch->unique_id;
 
         compare.push_back(sample);
 

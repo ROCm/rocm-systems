@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/fwd.h>
+
 /**
  * ######## Parser Definitions ########
  */
@@ -130,9 +132,9 @@ typedef struct
     uint32_t workgroup_id_y;
     uint32_t workgroup_id_z;
 
-    uint32_t wave_count;
-    uint64_t timestamp;
-    uint64_t correlation_id;
+    uint32_t                     wave_count;
+    uint64_t                     timestamp;
+    rocprofiler_correlation_id_t correlation_id;
 
     pcsample_snapshot_v1_t snapshot;
 

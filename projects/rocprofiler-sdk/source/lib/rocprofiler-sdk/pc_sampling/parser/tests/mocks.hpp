@@ -188,12 +188,12 @@ public:
 
         packet_union_t uni;
         ::memset(&uni, 0, sizeof(uni));
-        uni.dispatch_id.type           = AMD_DISPATCH_PKT_ID;
-        uni.dispatch_id.doorbell_id    = doorbell_id;
-        uni.dispatch_id.queue_size     = queue->size;
-        uni.dispatch_id.write_index    = dispatch_id;
-        uni.dispatch_id.read_index     = queue->read_index;
-        uni.dispatch_id.correlation_id = unique_id;
+        uni.dispatch_id.type                    = AMD_DISPATCH_PKT_ID;
+        uni.dispatch_id.doorbell_id             = doorbell_id;
+        uni.dispatch_id.queue_size              = queue->size;
+        uni.dispatch_id.write_index             = dispatch_id;
+        uni.dispatch_id.read_index              = queue->read_index;
+        uni.dispatch_id.correlation_id.internal = unique_id;
         queue->submit(uni);
         queue->write_index++;
     };

@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/fwd.h>
+
 #include <stdint.h>
 
 /**
@@ -69,8 +71,9 @@ typedef struct
     uint64_t      queue_size;
     uint64_t      write_index;
     uint64_t      read_index;
-    uint64_t      correlation_id;
-    reserved_type _[4];
+    /// both internal and external correlation ID.
+    rocprofiler_correlation_id_t correlation_id;
+    reserved_type                _[2];
 } dispatch_pkt_id_t;
 
 typedef struct

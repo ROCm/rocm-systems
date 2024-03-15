@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/fwd.h>
+
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -133,7 +135,7 @@ public:
      * Given a device dev, doorbell and and wrapped dispatch_id,
      * @returns the correlation_id set by dispatch_pkt_id_t
      */
-    uint64_t get(device_handle dev, trap_correlation_id_t correlation_in)
+    rocprofiler_correlation_id_t get(device_handle dev, trap_correlation_id_t correlation_in)
     {
 #ifndef _PARSER_CORRELATION_DISABLE_CACHE
         if(dev.handle == cache_dev_id && correlation_in == cache_correlation_id_in)
@@ -166,12 +168,14 @@ public:
     }
 
 private:
-    std::unordered_map<DispatchPkt, uint64_t> dispatch_to_correlation{};
+    std::unordered_map<DispatchPkt, rocprofiler_correlation_id_t> dispatch_to_correlation{};
 
     // Making get() const and these cache variables mutable causes performance to be unstable
-    trap_correlation_id_t cache_correlation_id_in{.raw = ~0ul};  // Invalid value in cache
-    uint64_t              cache_correlation_id_out = ~0ul;
-    uint64_t              cache_dev_id             = ~0ul;  // Invalid device Id in cache
+    trap_correlation_id_t        cache_correlation_id_in{.raw = ~0ul};  // Invalid value in cache
+    rocprofiler_correlation_id_t cache_correlation_id_out{
+        .internal = ~0ul,
+        .external = rocprofiler_user_data_t{.value = ~0ul}};
+    uint64_t cache_dev_id = ~0ul;  // Invalid device Id in cache
 };
 }  // namespace Parser
 

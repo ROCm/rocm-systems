@@ -61,7 +61,7 @@ PCSamplingParserContext::newDispatch(const dispatch_pkt_id_t& pkt)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
     corr_map->newDispatch(pkt);
-    active_dispatches[pkt.correlation_id] = pkt;
+    active_dispatches[pkt.correlation_id.internal] = pkt;
 }
 
 void
