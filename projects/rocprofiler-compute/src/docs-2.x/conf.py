@@ -74,7 +74,7 @@ source_suffix = {
 
 sphinxmark_enable = True
 sphinxmark_image = "text"
-sphinxmark_text = "Tech Preview"
+sphinxmark_text = "Release Candidate"
 sphinxmark_text_size = 80
 sphinxmark_div = "document"
 sphinxmark_fixed = False
