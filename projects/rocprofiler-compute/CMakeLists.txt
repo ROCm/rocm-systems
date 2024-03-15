@@ -243,27 +243,20 @@ set_tests_properties(
     test_profile_misc
     PROPERTIES LABELS "profile" RESOURCE_GROUPS gpus:1)
 
-# original add_test( NAME test_profiler_general COMMAND pytest ${COV_OPTION}
-# ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-
 # ---------------------------
 # analysis command tests
 # ---------------------------
 
 add_test(
     NAME test_analyze_commands
-    COMMAND
-        pytest -n ${PYTEST_NUMPROCS} -m "not serial"
-        --junitxml=tests/test_analyze_commands.xml ${COV_OPTION}
-        ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
-    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
-
-add_test(
-    NAME test_analyze_commands_serial
-    COMMAND pytest -m "serial" --junitxml=tests/test_analyze_commands_serial.xml
+    COMMAND pytest -n ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_commands.xml
             ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
+
+# add_test( NAME test_analyze_commands_serial COMMAND pytest -m "serial"
+# --junitxml=tests/test_analyze_commands_serial.xml ${COV_OPTION}
+# ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
+# ${PROJECT_SOURCE_DIR})
 
 # ---------------------------
 # analyze workloads tests
