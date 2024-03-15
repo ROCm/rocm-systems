@@ -1,4 +1,4 @@
-name: Documentation
+name: Documentation 2.x
 
 on:
   push:
