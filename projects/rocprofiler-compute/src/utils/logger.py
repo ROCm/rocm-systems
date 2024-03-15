@@ -55,7 +55,7 @@ class ColoredFormatter(logging.Formatter):
 class PlainFormatter(logging.Formatter):
     def format(self, record):
         if record.levelno == logging.ERROR:
-            self._style._fmt = "%(levelname)s: %(message)s"
+            self._style._fmt = "%(levelname)s %(message)s"
         else:
             self._style._fmt = "%(message)s"
         return logging.Formatter.format(self, record)
@@ -64,15 +64,19 @@ class PlainFormatter(logging.Formatter):
 # Setup console handler - provided as separate function to be called
 # prior to argument parsing
 def setup_console_handler():
-    color = False
 
+    color_setting = 0
     if "OMNIPERF_COLOR" in os.environ.keys():
-        if os.environ["OMNIPERF_COLOR"] == "1":
-            color = True
+        color_setting = int(os.environ["OMNIPERF_COLOR"])
 
-    if color:
+    if color_setting == 1:
+        # colored levelname
         formatter = ColoredFormatter("%(levelname)16s %(message)s")
+    elif color_setting == 2:
+        # non-colored levelname
+        formatter = logging.Formatter("%(levelname)5s %(message)s")
     else:
+        # non-colored
         formatter = PlainFormatter()
 
     console_handler = logging.StreamHandler(sys.stdout)
