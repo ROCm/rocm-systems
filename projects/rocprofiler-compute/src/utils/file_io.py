@@ -33,7 +33,7 @@ import collections
 from collections import OrderedDict
 from pathlib import Path
 from utils import schema
-from utils.utils import console_debug, console_error
+from utils.utils import console_debug, console_error, demarcate
 from utils.kernel_name_shortener import kernel_name_shortener
 import config
 
@@ -84,6 +84,7 @@ def load_panel_configs(dir):
     return od
 
 
+@demarcate
 def create_df_kernel_top_stats(
     raw_data_dir,
     filter_gpu_ids,
@@ -158,6 +159,7 @@ def create_df_kernel_top_stats(
         grouped.to_csv(os.path.join(raw_data_dir, "pmc_kernel_top.csv"), index=False)
 
 
+@demarcate
 def create_df_pmc(raw_data_dir, kernel_verbose, verbose):
     """
     Load all raw pmc counters and join into one df.
@@ -180,7 +182,7 @@ def create_df_pmc(raw_data_dir, kernel_verbose, verbose):
                 coll_levels.append(f[:-4])
     final_df = pd.concat(dfs, keys=coll_levels, axis=1, copy=False)
     if verbose >= 2:
-        console_debug("pmc_raw_data final_df $s" % final_df.info())
+        console_debug("pmc_raw_data final_df %s" % final_df.info)
     return final_df
 
 
