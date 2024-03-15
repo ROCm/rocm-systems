@@ -12,7 +12,7 @@ omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 baseline_opts = ["omniperf", "analyze"]
 
 config = {}
-config["cleanup"] = False
+config["cleanup"] = True
 
 indir1 = "tests/workloads/vcopy/MI100"
 indir2 = "tests/workloads/vcopy/MI200"
@@ -37,7 +37,7 @@ def test_valid_path():
         ):
             omniperf.main()
     assert e.value.code == 0
-
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 @pytest.mark.misc
 def test_list_kernels():
@@ -1572,7 +1572,7 @@ def test_kernel_verbose_1():
         ):
             omniperf.main()
     assert e.value.code == 0
-
+    test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 @pytest.mark.kernel_verbose
 def test_kernel_verbose_2():
