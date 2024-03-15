@@ -390,14 +390,14 @@ Examples:
         "analyze",
         help="Analyze existing profiling results at command line",
         usage="""
-            \nomniperf analyze --path <workload_path> [analyze options]
+omniperf analyze --path <workload_path> [analyze options]
 
-            \n\n-------------------------------------------------------------------------------
-            \nExamples:
-            \n\tomniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
-            \n\tomniperf analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
-            \n\tomniperf analyze -p workloads/mixbench/mi200/ --gui
-            \n-------------------------------------------------------------------------------\n
+-----------------------------------------------------------------------------------
+Examples:
+\tomniperf analyze -p workloads/vcopy/mi200/ --list-metrics gfx90a
+\tomniperf analyze -p workloads/mixbench/mi200/ --dispatch 12 34 --decimal 3
+\tomniperf analyze -p workloads/mixbench/mi200/ --gui
+-----------------------------------------------------------------------------------
         """,
         prog="tool",
         allow_abbrev=False,
