@@ -66,6 +66,25 @@ def get_output_dir(suffix="_output", clean_existing=True):
     return output_dir
 
 
+def setup_workload_dir(input_dir, suffix="_tmp", clean_existing=True):
+    """Provides a unique input workoad directory with contents of input_dir
+    based on the name of the calling test function.
+
+    Setup is a NOOP when tests run serially.
+    """
+
+    if "PYTEST_XDIST_WORKER_COUNT" not in os.environ:
+        return input_dir
+
+    output_dir = inspect.stack()[1].function + suffix
+    if clean_existing:
+        if os.path.exists(output_dir):
+            shutil.rmtree(output_dir)
+
+    shutil.copytree(input_dir, output_dir)
+    return output_dir
+
+
 def clean_output_dir(cleanup, output_dir):
     """Remove output directory generated from omniperf execution
 
