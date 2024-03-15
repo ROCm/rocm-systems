@@ -31,7 +31,7 @@ import warnings
 import pandas as pd
 import numpy as np
 from utils import schema
-from utils.utils import console_warning, console_error
+from utils.utils import console_warning, console_error, demarcate
 from pathlib import Path
 
 # ------------------------------------------------------------------------------
@@ -422,6 +422,7 @@ def calc_builtin_var(var, sys_info):
         console_error('Built-in var " %s " is not supported' % var)
 
 
+@demarcate
 def build_dfs(archConfigs, filter_metrics, sys_info):
     """
     - Build dataframe for each type of data source within each panel.
@@ -664,6 +665,7 @@ def build_metric_value_string(dfs, dfs_type, normal_unit):
         # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
+@demarcate
 def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
     """
     Execute the expr string for each metric in the df.
@@ -829,6 +831,7 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
             # print(tabulate(df, headers='keys', tablefmt='fancy_grid'))
 
 
+@demarcate
 def apply_filters(workload, dir, is_gui, debug):
     """
     Apply user's filters to the raw_pmc df.
@@ -912,6 +915,7 @@ def apply_filters(workload, dir, is_gui, debug):
     return ret_df
 
 
+@demarcate
 def load_kernel_top(workload, dir):
     # NB:
     #   - Do pmc_kernel_top.csv loading before eval_metric because we need the kernel names.
@@ -945,6 +949,7 @@ def load_kernel_top(workload, dir):
     workload.dfs.update(tmp)
 
 
+@demarcate
 def load_table_data(workload, dir, is_gui, debug, verbose, skipKernelTop=False):
     """
     Load data for all "raw_csv_table".
