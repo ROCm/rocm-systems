@@ -418,8 +418,44 @@ def getMaxPower(device, silent=False):
     power_cap = c_uint64()
     ret = rocmsmi.rsmi_dev_power_cap_get(device, 0, byref(power_cap))
     if rsmi_ret_ok(ret, device, 'get_power_cap', silent):
-        return power_cap.value / 1000000
+        # take floor of result (round down to nearest integer)
+        return float(power_cap.value / 1000000) // 1
     return -1
+
+def getAllocatedMemoryPercent(device):
+    """ Return dictionary of allocated memory (VRAM) of a given device
+        Response of allocated_memory_vram dictionary:
+
+        .. code-block:: python
+
+            {
+                'value': float allocated vram memory (floor of %) or 'N/A' (for rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED),
+                'unit': %,
+                'combined': string (eg. '30%') or 'N/A' (for rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED)
+                'ret': rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED or rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED
+            }
+
+    :param device: DRM device identifier
+    """
+    allocated_memory_vram = {
+        'value': "N/A",
+        'unit': '%',
+        'combined': "N/A",
+        'ret': rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED
+    }
+    vram_used, vram_total = getMemInfo(device, 'vram', silent=True)
+    mem_use_pct = 0
+    if vram_used is None:
+        return allocated_memory_vram
+    if vram_used != None and vram_total != None and float(vram_total) != 0:
+        # take floor of result (round down to nearest integer)
+        mem_use_pct = (100 * (float(vram_used) / float(vram_total))) // 1
+        allocated_memory_vram['value'] = mem_use_pct
+        mem_use_pct = '{:<.0f}%'.format(mem_use_pct)  # left aligned
+                                                      # values with no precision
+        allocated_memory_vram['combined'] = mem_use_pct
+        allocated_memory_vram['ret'] = rsmi_status_t.RSMI_STATUS_SUCCESS
+    return allocated_memory_vram
 
 
 def getMemInfo(device, memType, silent=False):
@@ -1959,14 +1995,7 @@ def showAllConcise(deviceList):
             gpu_busy = str(getGpuUse(device, silent)) + '%'
         else:
             gpu_busy = 'Unsupported'
-        vram_used, vram_total = getMemInfo(device, 'vram', silent)
-        mem_use_pct = 0
-        if vram_used is None:
-            mem_use_pct='Unsupported'
-        if vram_used != None and vram_total != None and float(vram_total) != 0:
-            mem_use_pct = round(float(100 * (float(vram_used) / float(vram_total))))
-            mem_use_pct = '{:<.0f}%'.format(mem_use_pct)  # left aligned
-                                                          # values with no precision
+        allocated_mem_percent = getAllocatedMemoryPercent(device)
 
         # Top Row - per device data
         values['card%s' % (str(device))] = [device, getNodeId(device),
@@ -1976,7 +2005,7 @@ def showAllConcise(deviceList):
                                             combined_partition_data,
                                             sclk, mclk, fan, str(perf).lower(),
                                             str(pwrCap),
-                                            str(mem_use_pct),
+                                            allocated_mem_percent['combined'],
                                             str(gpu_busy)]
 
     val_widths = {}
@@ -2477,9 +2506,12 @@ def showMemUse(deviceList):
     avgMemBandwidth = c_uint16()
     printLogSpacer(' Current Memory Use ')
     for device in deviceList:
+        allocated_mem_percent = getAllocatedMemoryPercent(device)
+        printLog(device, 'GPU Memory Allocated (VRAM%)',
+                 int(allocated_mem_percent['value']))
         ret = rocmsmi.rsmi_dev_memory_busy_percent_get(device, byref(memoryUse))
         if rsmi_ret_ok(ret, device, '% memory use'):
-            printLog(device, 'GPU memory use (%)', memoryUse.value)
+            printLog(device, 'GPU Memory Read/Write Activity (%)', memoryUse.value)
         util_counters = getCoarseGrainUtil(device, "Memory Activity")
         if util_counters != -1:
             for ut_counter in util_counters:
