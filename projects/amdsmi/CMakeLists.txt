@@ -69,12 +69,14 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 include(GNUInstallDirs)
 
 option(BUILD_TESTS "Build test suite" OFF)
-# TODO: Enable once virtualenv is installed on CI machines
-option(BUILD_WRAPPER "Rebuild AMDSMI-wrapper" OFF)
-option(BUILD_CLI "Build AMDSMI-CLI and install" ON)
-option(ENABLE_LDCONFIG "Set library links and caches using ldconfig." ON)
 option(ENABLE_ASAN_PACKAGING "" OFF)
 option(ENABLE_ESMI_LIB "" ON)
+
+include(CMakeDependentOption)
+# these options don't work without BUILD_SHARED_LIBS
+cmake_dependent_option(BUILD_WRAPPER "Rebuild AMDSMI-wrapper" OFF "BUILD_SHARED_LIBS" OFF)
+cmake_dependent_option(BUILD_CLI "Build AMDSMI-CLI and install" ON "BUILD_SHARED_LIBS" OFF)
+cmake_dependent_option(ENABLE_LDCONFIG "Set library links and caches using ldconfig." ON "BUILD_SHARED_LIBS" OFF)
 
 # Set share path here because project name != amd_smi
 set(SHARE_INSTALL_PREFIX "share/${AMD_SMI}" CACHE STRING "Tests and Example install directory")
@@ -185,10 +187,12 @@ if(BUILD_TESTS)
     add_subdirectory("tests/amd_smi_test")
 endif()
 
-add_subdirectory("py-interface")
-
-if(BUILD_CLI)
-    add_subdirectory("amdsmi_cli")
+# python interface and CLI depend on shared libraries
+if(BUILD_SHARED_LIBS)
+    add_subdirectory("py-interface")
+    if(BUILD_CLI)
+        add_subdirectory("amdsmi_cli")
+    endif()
 endif()
 
 include(CMakePackageConfigHelpers)
