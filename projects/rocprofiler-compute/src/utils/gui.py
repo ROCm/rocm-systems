@@ -227,6 +227,24 @@ def build_bar_chart(display_df, table_config, barchart_elements, norm_filt, hbm_
                     orientation="h",
                 ).update_xaxes(range=[0, hbm_bw])
             )  # append second GB/s chart
+        elif table_config["id"] == 1101:
+            # Special formatting reference 'Pct of Peak' value
+            display_df["Pct of Peak"] = [
+                x.astype(float) if x != "" else float(0)
+                for x in display_df["Pct of Peak"]
+            ]
+            d_figs.append(
+                px.bar(
+                    display_df,
+                    x="Pct of Peak",
+                    y="Metric",
+                    color="Pct of Peak",
+                    range_color=[0, 100],
+                    labels={"Avg": "%"},
+                    height=400,
+                    orientation="h",
+                ).update_xaxes(range=[0, 110])
+            )
         else:
             d_figs.append(
                 px.bar(
