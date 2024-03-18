@@ -1290,7 +1290,7 @@ rsmi_status_t rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_sku_get(uint32_t dv_ind, char *sku);
+rsmi_status_t rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *sku);
 
 /**
  *  @brief Get the device vendor id associated with the device with provided
