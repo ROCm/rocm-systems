@@ -13,6 +13,7 @@ After=network.target
 #Requires=
 
 [Service]
+EnvironmentFile=-/@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_SYSCONFDIR@/rdc_options
 User=rdc
 Group=rdc
 
@@ -25,7 +26,7 @@ AmbientCapabilities=CAP_DAC_OVERRIDE
 # ExecStartPre=
 # update-alternative has been run for rdcd and
 # soft link will be available in usr/bin
-ExecStart=rdcd
+ExecStart=rdcd $RDC_OPTS
 
 # If we need to start anything after rdcd use this
 # ExecStartPost=
