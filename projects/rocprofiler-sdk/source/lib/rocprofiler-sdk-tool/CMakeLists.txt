@@ -11,13 +11,9 @@ add_subdirectory(plugins)
 
 target_link_libraries(
     rocprofiler-sdk-tool
-    PRIVATE rocprofiler::rocprofiler-shared-library
-            rocprofiler::rocprofiler-headers
-            rocprofiler::rocprofiler-build-flags
-            rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-cxx-filesystem
-            atomic)
+    PRIVATE rocprofiler::rocprofiler-shared-library rocprofiler::rocprofiler-headers
+            rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
+            rocprofiler::rocprofiler-common-library)
 
 set_target_properties(
     rocprofiler-sdk-tool

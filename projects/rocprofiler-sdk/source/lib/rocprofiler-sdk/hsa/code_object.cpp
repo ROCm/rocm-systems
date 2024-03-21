@@ -255,7 +255,15 @@ accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
                 1) *
                (8 - arch_vgpr_count(name, kernel_code));
 
-    LOG(WARNING) << "Missing support for accum_vgpr_count for " << name;
+    bool emplaced = false;
+    {
+        static auto warned = std::unordered_set<std::string>{};
+        static auto mtx    = std::mutex{};
+        auto        lk     = std::unique_lock<std::mutex>{mtx};
+        emplaced           = warned.emplace(name).second;
+    }
+
+    LOG_IF(WARNING, emplaced) << "Missing support for accum_vgpr_count for " << name;
     return 0;
 }
 

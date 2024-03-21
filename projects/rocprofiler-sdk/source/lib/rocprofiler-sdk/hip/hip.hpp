@@ -74,8 +74,8 @@ struct hip_api_impl : hip_domain_info<TableIdx>
     template <typename FuncT, typename... Args>
     static auto exec(FuncT&&, Args&&... args);
 
-    template <typename... Args>
-    static auto functor(Args&&... args);
+    template <typename RetT, typename... Args>
+    static RetT functor(Args... args);
 };
 
 template <size_t TableIdx>

@@ -79,11 +79,11 @@ public:
 
     void queue_ready(hsa_queue_t* hsa_queue, const Queue& queue);
     // Enable the serializer
-    void enable(queue_map_t& queues);
+    void enable(const queue_map_t& queues);
     // Disable the serializer
-    void disable(queue_map_t& queues);
+    void disable(const queue_map_t& queues);
 
-    void destory_queue(hsa_queue_t* id, const Queue& queue);
+    void destroy_queue(hsa_queue_t* id, const Queue& queue);
 
     static void add_queue(hsa_queue_t** hsa_queues, const Queue& queue);
 

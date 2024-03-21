@@ -34,10 +34,11 @@ bool
 profiler_serializer_ready_signal_handler(hsa_signal_value_t /* signal_value */, void* data)
 {
     auto*       hsa_queue = static_cast<hsa_queue_t*>(data);
-    const auto* queue     = get_queue_controller().get_queue(*hsa_queue);
+    const auto* queue     = CHECK_NOTNULL(get_queue_controller())->get_queue(*hsa_queue);
     CHECK(queue);
-    get_queue_controller().serializer().wlock(
-        [&](auto& serializer) { serializer.queue_ready(hsa_queue, *queue); });
+    CHECK_NOTNULL(get_queue_controller())->serializer().wlock([&](auto& serializer) {
+        serializer.queue_ready(hsa_queue, *queue);
+    });
     return true;
 }
 
@@ -63,8 +64,14 @@ void
 profiler_serializer::add_queue(hsa_queue_t** hsa_queues, const Queue& queue)
 {
     hsa_signal_t signal = queue.ready_signal;
-    hsa_status_t status = get_queue_controller().get_ext_table().hsa_amd_signal_async_handler_fn(
-        signal, HSA_SIGNAL_CONDITION_EQ, -1, profiler_serializer_ready_signal_handler, *hsa_queues);
+    hsa_status_t status =
+        CHECK_NOTNULL(get_queue_controller())
+            ->get_ext_table()
+            .hsa_amd_signal_async_handler_fn(signal,
+                                             HSA_SIGNAL_CONDITION_EQ,
+                                             -1,
+                                             profiler_serializer_ready_signal_handler,
+                                             *hsa_queues);
     if(status != HSA_STATUS_SUCCESS) LOG(FATAL) << "hsa_amd_signal_async_handler failed";
 }
 
@@ -96,16 +103,19 @@ profiler_serializer::kernel_completion_signal(const Queue& completed)
 
     CHECK(_dispatch_queue);
     _dispatch_queue = nullptr;
-    get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(completed.block_signal,
-                                                                          1);
-    get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(completed.ready_signal,
-                                                                          0);
+    CHECK_NOTNULL(get_queue_controller())
+        ->get_core_table()
+        .hsa_signal_store_screlease_fn(completed.block_signal, 1);
+    CHECK_NOTNULL(get_queue_controller())
+        ->get_core_table()
+        .hsa_signal_store_screlease_fn(completed.ready_signal, 0);
     if(!_dispatch_ready.empty())
     {
         const auto* queue = _dispatch_ready.front();
         _dispatch_ready.erase(_dispatch_ready.begin());
-        get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(queue->block_signal,
-                                                                              0);
+        CHECK_NOTNULL(get_queue_controller())
+            ->get_core_table()
+            .hsa_signal_store_screlease_fn(queue->block_signal, 0);
         _dispatch_queue = queue;
     }
 }
@@ -114,20 +124,34 @@ void
 profiler_serializer::queue_ready(hsa_queue_t* hsa_queue, const Queue& queue)
 {
     {
+        LOG(INFO) << "Obtaining queue mutex lock...";
         std::lock_guard<std::mutex> cv_lock(queue.cv_mutex);
+        LOG(INFO) << "Queue mutex lock obtained";
         if(queue.get_state() == queue_state::to_destroy)
         {
-            get_queue_controller().set_queue_state(queue_state::done_destroy, hsa_queue);
-            get_queue_controller().get_core_table().hsa_signal_destroy_fn(queue.ready_signal);
+            LOG(INFO) << "Setting queue state to done_destroy...";
+            CHECK_NOTNULL(get_queue_controller())
+                ->set_queue_state(queue_state::done_destroy, hsa_queue);
+            LOG(INFO) << "Destroying ready signal...";
+            CHECK_NOTNULL(get_queue_controller())
+                ->get_core_table()
+                .hsa_signal_destroy_fn(queue.ready_signal);
+            LOG(INFO) << "Notifying queue condition variable...";
             queue.cv_ready_signal.notify_one();
             return;
         }
     }
-    get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(queue.ready_signal, 1);
+
+    LOG(INFO) << "setting queue ready signal to 1...";
+    CHECK_NOTNULL(get_queue_controller())
+        ->get_core_table()
+        .hsa_signal_store_screlease_fn(queue.ready_signal, 1);
+
     if(_dispatch_queue == nullptr)
     {
-        get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(queue.block_signal,
-                                                                              0);
+        CHECK_NOTNULL(get_queue_controller())
+            ->get_core_table()
+            .hsa_signal_store_screlease_fn(queue.block_signal, 0);
         _dispatch_queue = &queue;
     }
     else
@@ -178,8 +202,10 @@ profiler_serializer::kernel_dispatch(const Queue& queue) const
 }
 
 void
-profiler_serializer::destory_queue(hsa_queue_t* id, const Queue& queue)
+profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
 {
+    LOG(INFO) << "destroying queue...";
+
     /*Deletes the queue to be destructed from the dispatch ready.*/
     for(auto& barriers : _barrier)
     {
@@ -206,41 +232,56 @@ profiler_serializer::destory_queue(hsa_queue_t* id, const Queue& queue)
                 return false;
             }),
         _dispatch_ready.end());
-    get_queue_controller().set_queue_state(queue_state::to_destroy, id);
-    get_queue_controller().get_core_table().hsa_signal_store_screlease_fn(queue.ready_signal, 0);
+    CHECK_NOTNULL(get_queue_controller())->set_queue_state(queue_state::to_destroy, id);
+    CHECK_NOTNULL(get_queue_controller())
+        ->get_core_table()
+        .hsa_signal_store_screlease_fn(queue.ready_signal, 0);
+
+    LOG(INFO) << "queue destroyed";
 }
 
 // Enable the serializer
 void
-profiler_serializer::enable(queue_map_t& queues)
+profiler_serializer::enable(const queue_map_t& queues)
 {
     if(_serializer_status == Status::ENABLED) return;
+
+    LOG(INFO) << "Enabling profiler serialization...";
+
     _serializer_status = Status::ENABLED;
     if(queues.empty()) return;
 
     clear_complete_barriers(_barrier);
 
-    _barrier.emplace_back(
-        Status::DISABLED,
-        std::make_unique<hsa_barrier>([] {}, get_queue_controller().get_core_table()));
+    _barrier.emplace_back(Status::DISABLED,
+                          std::make_unique<hsa_barrier>(
+                              [] {}, CHECK_NOTNULL(get_queue_controller())->get_core_table()));
     _serializer_status = Status::ENABLED;
     _barrier.back().barrier->set_barrier(queues);
+
+    LOG(INFO) << "Profiler serialization enabled";
 }
 
 // Disable the serializer
 void
-profiler_serializer::disable(queue_map_t& queues)
+profiler_serializer::disable(const queue_map_t& queues)
 {
     if(_serializer_status == Status::DISABLED) return;
+
+    LOG(INFO) << "Disabling profiler serialization...";
+
     _serializer_status = Status::DISABLED;
     if(queues.empty()) return;
+
     clear_complete_barriers(_barrier);
 
-    _barrier.emplace_back(
-        Status::ENABLED,
-        std::make_unique<hsa_barrier>([] {}, get_queue_controller().get_core_table()));
+    _barrier.emplace_back(Status::ENABLED,
+                          std::make_unique<hsa_barrier>(
+                              [] {}, CHECK_NOTNULL(get_queue_controller())->get_core_table()));
     _serializer_status = Status::DISABLED;
     _barrier.back().barrier->set_barrier(queues);
+
+    LOG(INFO) << "Profiler serialization disabled";
 }
 
 }  // namespace hsa

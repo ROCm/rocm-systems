@@ -90,11 +90,18 @@ CoreApiTable&
 get_api_table()
 {
     static auto _v = []() {
-        auto val                  = CoreApiTable{};
-        val.hsa_iterate_agents_fn = hsa_iterate_agents;
-        val.hsa_agent_get_info_fn = hsa_agent_get_info;
-        val.hsa_queue_create_fn   = hsa_queue_create;
-        val.hsa_queue_destroy_fn  = hsa_queue_destroy;
+        auto val                           = CoreApiTable{};
+        val.hsa_iterate_agents_fn          = hsa_iterate_agents;
+        val.hsa_agent_get_info_fn          = hsa_agent_get_info;
+        val.hsa_queue_create_fn            = hsa_queue_create;
+        val.hsa_queue_destroy_fn           = hsa_queue_destroy;
+        val.hsa_signal_create_fn           = hsa_signal_create;
+        val.hsa_signal_destroy_fn          = hsa_signal_destroy;
+        val.hsa_signal_store_screlease_fn  = hsa_signal_store_screlease;
+        val.hsa_signal_load_scacquire_fn   = hsa_signal_load_scacquire;
+        val.hsa_signal_add_relaxed_fn      = hsa_signal_add_relaxed;
+        val.hsa_signal_subtract_relaxed_fn = hsa_signal_subtract_relaxed;
+        val.hsa_signal_wait_relaxed_fn     = hsa_signal_wait_relaxed;
         return val;
     }();
     return _v;
@@ -131,7 +138,8 @@ test_init()
     table.amd_ext_ = &get_ext_table();
     table.core_    = &get_api_table();
     agent::construct_agent_cache(&table);
-    hsa::get_queue_controller().init(get_api_table(), get_ext_table());
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
 }
 
 }  // namespace
@@ -235,8 +243,8 @@ TEST(core, check_packet_generation)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
-
-    auto agents = hsa::get_queue_controller().get_supported_agents();
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
@@ -319,7 +327,7 @@ class FakeQueue : public Queue
 {
 public:
     FakeQueue(const AgentCache& a, rocprofiler_queue_id_t id)
-    : Queue(a)
+    : Queue(a, get_api_table())
     , _agent(a)
     , _id(id)
     {}
@@ -418,9 +426,10 @@ TEST(core, check_callbacks)
     ctx.counter_collection = std::make_unique<rocprofiler::context::counter_collection_service>();
     ctx.counter_collection->enabled.wlock([](auto& data) { data = true; });
 
-    auto agents = hsa::get_queue_controller().get_supported_agents();
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
-    hsa::get_queue_controller().disable_serialization();
+    hsa::get_queue_controller()->disable_serialization();
 
     for(const auto& [_, agent] : agents)
     {
@@ -540,7 +549,7 @@ TEST(core, destroy_counter_profile)
     context::push_client(1);
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
-    auto agents = hsa::get_queue_controller().get_supported_agents();
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
@@ -613,7 +622,7 @@ TEST(core, start_stop_buffered_ctx)
     EXPECT_TRUE(found);
 
     found = false;
-    hsa::get_queue_controller().iterate_callbacks([&](auto cid, const auto&) {
+    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
         if(cid == ctx.counter_collection->callbacks.at(0)->queue_id)
         {
             found = true;
@@ -678,7 +687,7 @@ TEST(core, start_stop_callback_ctx)
     EXPECT_TRUE(found);
 
     found = false;
-    hsa::get_queue_controller().iterate_callbacks([&](auto cid, const auto&) {
+    hsa::get_queue_controller()->iterate_callbacks([&](auto cid, const auto&) {
         if(cid == ctx.counter_collection->callbacks.at(0)->queue_id)
         {
             found = true;
@@ -707,7 +716,7 @@ TEST(core, public_api_iterate_agents)
     registration::init_logging();
     registration::set_init_status(-1);
     context::push_client(1);
-    auto agents = hsa::get_queue_controller().get_supported_agents();
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
     for(const auto& [_, agent] : agents)
     {
         std::set<uint64_t> from_api;

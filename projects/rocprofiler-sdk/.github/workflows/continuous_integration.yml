@@ -24,44 +24,22 @@ env:
   PATH: "/usr/bin:$PATH"
 
 jobs:
-  # Changed job name from mi200-ubuntu to vega20-ubuntu
-  # TODO: Change it back when re-enabling on mi200
-  vega20-ubuntu:
+  core:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
       fail-fast: true
-      max-parallel: 4
       matrix:
-        include:
-          # Run job on vega20 instead of mi200 as mi200 is unstable, as per ammar's instructions.
-          # TODO: Change it back when re-enabling on mi200
-          # - os: 'ubuntu-22.04'
-          #   runner: 'renderD131'
-          #   device: '/renderD131'
-          #   build-type: 'RelWithDebInfo'
-          #   ci-flags: '--linter clang-tidy'
-          #   name-tag: ''
-          - os: 'ubuntu-22.04'
-            runner: 'vega20'
-            build-type: 'RelWithDebInfo'
-            ci-flags: '--linter clang-tidy'
-            name-tag: ''
+        os: ['ubuntu-22.04']
+        runner: ['vega20']
+        build-type: ['RelWithDebInfo']
+        ci-flags: ['--linter clang-tidy']
+        name-tag: ['']
 
     runs-on: ${{ matrix.runner }}
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-
-    # TODO: Uncomment this when re-enabling tests on the mi200 as it contains --memory and --cpus flag for the mi200. Remove these 2 options when running on vega20.
-    # vega20 machine only has 24 cpus available.
-    # container:
-    #   # TODO(aelwazir): Adding multiple os distros
-    #   image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-rocprofiler-sdk-staging-base:latest
-    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
-    #   credentials:
-    #     username: ${{ secrets.DOCKER_USERNAME }}
-    #     password: ${{ secrets.DOCKER_PASSWORD }}
 
     container:
       # TODO(aelwazir): Adding multiple os distros
@@ -99,8 +77,6 @@ jobs:
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
-      # Replaced 'mi200' with '${{ matrix.runner }}' when disabling jobs on mi200 and running it on vega20.
-      # TODO: Change it back when re-enabling on mi200
       run:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}${{ matrix.name-tag }}
@@ -112,7 +88,7 @@ jobs:
           -DROCPROFILER_DEP_ROCMCORE=ON
           -DROCPROFILER_BUILD_DOCS=ON
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler/v2
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
@@ -131,9 +107,9 @@ jobs:
       timeout-minutes: 10
       shell: bash
       run: |
-        CMAKE_PREFIX_PATH=/opt/rocprofiler/v2 cmake -B build-samples samples
-        CMAKE_PREFIX_PATH=/opt/rocprofiler/v2 cmake -B build-tests tests
-        export LD_LIBRARY_PATH=/opt/rocprofiler/v2/lib:${LD_LIBRARY_PATH}
+        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
+        CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
+        export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 8
         cmake --build build-tests --target all --parallel 8
         ctest --test-dir build-samples --output-on-failure
@@ -171,7 +147,6 @@ jobs:
   code-coverage:
     strategy:
       fail-fast: true
-      max-parallel: 4
       matrix:
       # TODO: Change it back when re-enabling on mi200
         include:
@@ -263,8 +238,6 @@ jobs:
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
       shell: bash
-      # Replaced 'mi200' with '${{ matrix.runner }}' when disabling jobs on mi200 and running it on vega20.
-      # TODO: Change it back when re-enabling on mi200
       run:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-codecov
@@ -337,18 +310,19 @@ jobs:
         echo -e "\n.codecov:"
         ls -la .codecov
 
-        get-md-contents() { cat .codecov/${1}.png.md .codecov/${1}.md; }
+        get-base-md-contents() { cat .codecov/${1}.png.md; }
+        get-full-md-contents() { cat .codecov/${1}.png.md .codecov/${1}.md; }
         cat << EOF > .codecov/report.md
         # Code Coverage Report
 
         ## Tests Only
-        $(get-md-contents tests)
+        $(get-base-md-contents tests)
 
         ## Samples Only
-        $(get-md-contents samples)
+        $(get-base-md-contents samples)
 
         ## Tests + Samples
-        $(get-md-contents all)
+        $(get-full-md-contents all)
 
         EOF
 
@@ -405,42 +379,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          # Run job on vega20 instead of mi200 as mi200 is unstable, as per ammar's instructions.
-          # TODO: Change it back when re-enabling on mi200
-          - os: 'ubuntu-22.04'
-            runner: 'vega20'
-            build-type: 'RelWithDebInfo'
-            ci-flags: ''
-            sanitizer: 'AddressSanitizer'
-          - os: 'ubuntu-22.04'
-            runner: 'vega20'
-            build-type: 'RelWithDebInfo'
-            ci-flags: ''
-            sanitizer: 'ThreadSanitizer'
-          - os: 'ubuntu-22.04'
-            runner: 'vega20'
-            build-type: 'RelWithDebInfo'
-            ci-flags: ''
-            sanitizer: 'LeakSanitizer'
-          # - os: 'ubuntu-22.04'
-          #   runner: 'renderD131'
-          #   device: '/renderD131'
-          #   build-type: 'RelWithDebInfo'
-          #   ci-flags: ''
-          #   sanitizer: 'AddressSanitizer'
-          # - os: 'ubuntu-22.04'
-          #   runner: 'renderD131'
-          #   device: '/renderD131'
-          #   build-type: 'RelWithDebInfo'
-          #   ci-flags: ''
-          #   sanitizer: 'ThreadSanitizer'
-          # - os: 'ubuntu-22.04'
-          #   runner: 'renderD131'
-          #   device: '/renderD131'
-          #   build-type: 'RelWithDebInfo'
-          #   ci-flags: ''
-          #   sanitizer: 'LeakSanitizer'
+        os: ['ubuntu-22.04']
+        runner: ['vega20']
+        build-type: ['RelWithDebInfo']
+        sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer']
+        ci-flags: ['']
 
     runs-on: ${{ matrix.runner }}
 

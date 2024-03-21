@@ -89,13 +89,8 @@
         template <typename RetT, typename... Args>                                                 \
         static auto get_functor(RetT (*)(Args...))                                                 \
         {                                                                                          \
-            if constexpr(std::is_void<RetT>::value)                                                \
-                return [](Args... args) -> RetT { base_type::functor(args...); };                  \
-            else                                                                                   \
-                return [](Args... args) -> RetT { return base_type::functor(args...); };           \
+            return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
-                                                                                                   \
-        static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
         static std::vector<void*> as_arg_addr(callback_data_type) { return std::vector<void*>{}; } \
                                                                                                    \
@@ -174,13 +169,8 @@
         template <typename RetT, typename... Args>                                                 \
         static auto get_functor(RetT (*)(Args...))                                                 \
         {                                                                                          \
-            if constexpr(std::is_same<RetT, void>::value)                                          \
-                return [](Args... args) -> RetT { base_type::functor(args...); };                  \
-            else                                                                                   \
-                return [](Args... args) -> RetT { return base_type::functor(args...); };           \
+            return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
-                                                                                                   \
-        static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
         static std::vector<void*> as_arg_addr(callback_data_type trace_data)                       \
         {                                                                                          \

@@ -61,11 +61,12 @@ CoreApiTable&
 get_api_table()
 {
     static auto _v = []() {
-        auto val                  = CoreApiTable{};
-        val.hsa_iterate_agents_fn = hsa_iterate_agents;
-        val.hsa_agent_get_info_fn = hsa_agent_get_info;
-        val.hsa_queue_create_fn   = hsa_queue_create;
-        val.hsa_queue_destroy_fn  = hsa_queue_destroy;
+        auto val                       = CoreApiTable{};
+        val.hsa_iterate_agents_fn      = hsa_iterate_agents;
+        val.hsa_agent_get_info_fn      = hsa_agent_get_info;
+        val.hsa_queue_create_fn        = hsa_queue_create;
+        val.hsa_queue_destroy_fn       = hsa_queue_destroy;
+        val.hsa_signal_wait_relaxed_fn = hsa_signal_wait_relaxed;
         return val;
     }();
     return _v;
@@ -102,7 +103,8 @@ test_init()
     table.amd_ext_ = &get_ext_table();
     table.core_    = &get_api_table();
     agent::construct_agent_cache(&table);
-    hsa::get_queue_controller().init(get_api_table(), get_ext_table());
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
 }
 
 }  // namespace rocprofiler
@@ -113,7 +115,7 @@ TEST(aql_profile, construct_packets)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     rocprofiler::test_init();
-    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    auto agents = rocprofiler::hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
@@ -129,7 +131,7 @@ TEST(aql_profile, too_many_counters)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     rocprofiler::test_init();
-    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    auto agents = rocprofiler::hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
@@ -157,7 +159,7 @@ TEST(aql_profile, packet_generation_single)
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     rocprofiler::test_init();
 
-    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    auto agents = rocprofiler::hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
@@ -175,7 +177,7 @@ TEST(aql_profile, packet_generation_multi)
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     rocprofiler::test_init();
 
-    auto agents = rocprofiler::hsa::get_queue_controller().get_supported_agents();
+    auto agents = rocprofiler::hsa::get_queue_controller()->get_supported_agents();
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {

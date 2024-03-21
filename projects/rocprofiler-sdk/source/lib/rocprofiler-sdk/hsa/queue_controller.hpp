@@ -112,7 +112,7 @@ private:
     common::Synchronized<hsa::profiler_serializer> _profiler_serializer;
 };
 
-QueueController&
+QueueController*
 get_queue_controller();
 
 void

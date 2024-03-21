@@ -147,6 +147,8 @@ public:
                                               const Queue::queue_info_session_t&,
                                               inst_pkt_t&)>;
     using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
+
+    Queue(const AgentCache& agent, CoreApiTable table);
     Queue(const AgentCache&  agent,
           uint32_t           size,
           hsa_queue_type32_t type,
@@ -157,11 +159,6 @@ public:
           CoreApiTable       core_api,
           AmdExtTable        ext_api,
           hsa_queue_t**      queue);
-
-    Queue(const AgentCache& agent)
-    : _agent(agent)
-    {}
-
     virtual ~Queue();
 
     const hsa_queue_t*        intercept_queue() const { return _intercept_queue; };
@@ -184,10 +181,13 @@ public:
     // Tracks the number of in flight kernel executions we
     // are waiting on. We cannot destroy Queue until all kernels
     // have comleted.
-    void    async_started() { _active_async_packets++; }
-    void    async_complete() { _active_async_packets--; }
-    int64_t active_async_packets() const { return _active_async_packets; }
-    void    sync() const;
+    void    async_started() { _core_api.hsa_signal_add_relaxed_fn(_active_kernels, 1); }
+    void    async_complete() { _core_api.hsa_signal_subtract_relaxed_fn(_active_kernels, 1); }
+    int64_t active_async_packets() const
+    {
+        return _core_api.hsa_signal_load_scacquire_fn(_active_kernels);
+    }
+    void sync() const;
 
     void register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb);
     void remove_callback(ClientID id);
@@ -211,6 +211,7 @@ private:
     hsa_queue_t*                                      _intercept_queue = nullptr;
     queue_state                                       _state           = queue_state::normal;
     std::mutex                                        _lock_queue;
+    hsa_signal_t                                      _active_kernels = {.handle = 0};
 };
 
 inline rocprofiler_queue_id_t

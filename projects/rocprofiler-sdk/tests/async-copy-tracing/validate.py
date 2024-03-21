@@ -224,12 +224,12 @@ def test_retired_correlation_ids(input_data):
     for cid, itr in async_corr_ids.items():
         assert cid in retired_corr_ids.keys()
         ts = retired_corr_ids[cid]["timestamp"]
-        assert ts > itr["end_timestamp"]
+        assert (ts - itr["end_timestamp"]) > 0, f"correlation-id: {cid}, data: {itr}"
 
     for cid, itr in api_corr_ids.items():
         assert cid in retired_corr_ids.keys()
         ts = retired_corr_ids[cid]["timestamp"]
-        assert ts > itr["end_timestamp"]
+        assert (ts - itr["end_timestamp"]) > 0, f"correlation-id: {cid}, data: {itr}"
 
     assert len(api_corr_ids.keys()) == (len(retired_corr_ids.keys()))
 

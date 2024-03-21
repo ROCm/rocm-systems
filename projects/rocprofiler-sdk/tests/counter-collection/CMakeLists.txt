@@ -17,19 +17,17 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
+set(counter-collection-env
+    "${PRELOAD_ENV}" "ROCPROFILER_TOOL_OUTPUT_FILE=counter-collection-test.json"
+    "ROCPROFILER_TOOL_CONTEXTS=COUNTER_COLLECTION" "ROCPROF_COUNTERS=SQ_WAVES_sum")
+
 add_test(NAME test-counter-collection-execute COMMAND $<TARGET_FILE:multistream>)
 
 set_tests_properties(
     test-counter-collection-execute
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "integration-tests"
-        ENVIRONMENT
-        "${PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>;ROCPROFILER_TOOL_OUTPUT_FILE=counter-collection-test.json;ROCPROFILER_TOOL_CONTEXTS=COUNTER_COLLECTION;ROCPROF_COUNTERS=SQ_WAVES_sum"
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+               "${counter-collection-env}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 foreach(FILENAME validate.py pytest.ini conftest.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}

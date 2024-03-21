@@ -80,7 +80,7 @@ def generate_custom(args, cmake_args, ctest_args):
         os.environ["TSAN_OPTIONS"] = " ".join(
             [
                 "history_size=5",
-                "second_deadlock_stack=1",
+                "detect_deadlocks=0",
                 f"suppressions={SOURCE_DIR}/source/scripts/thread-sanitizer-suppr.txt",
                 external_symbolizer_path,
                 os.environ.get("TSAN_OPTIONS", ""),

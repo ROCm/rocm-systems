@@ -26,14 +26,13 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-set(tracing-env
-    "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
-    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
+set(tracing-env "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
 
 set_tests_properties(
     rocprofv3-test-trace-execute
     PROPERTIES
+        TIMEOUT
+        45
         LABELS
         "integration-tests"
         ENVIRONMENT
@@ -91,6 +90,8 @@ add_test(
 set_tests_properties(
     rocprofv3-test-systrace-execute
     PROPERTIES
+        TIMEOUT
+        45
         LABELS
         "integration-tests"
         ENVIRONMENT

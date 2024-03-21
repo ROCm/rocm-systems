@@ -123,13 +123,8 @@
         template <typename RetT, typename... Args>                                                 \
         static auto get_functor(RetT (*)(Args...))                                                 \
         {                                                                                          \
-            if constexpr(std::is_void<RetT>::value)                                                \
-                return [](Args... args) -> RetT { base_type::functor(args...); };                  \
-            else                                                                                   \
-                return [](Args... args) -> RetT { return base_type::functor(args...); };           \
+            return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
-                                                                                                   \
-        static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
         static std::vector<void*> as_arg_addr(rocprofiler_callback_tracing_hsa_api_data_t)         \
         {                                                                                          \
@@ -203,13 +198,8 @@
         template <typename RetT, typename... Args>                                                 \
         static auto get_functor(RetT (*)(Args...))                                                 \
         {                                                                                          \
-            if constexpr(std::is_void<RetT>::value)                                                \
-                return [](Args... args) -> RetT { base_type::functor(args...); };                  \
-            else                                                                                   \
-                return [](Args... args) -> RetT { return base_type::functor(args...); };           \
+            return &base_type::functor<RetT, Args...>;                                             \
         }                                                                                          \
-                                                                                                   \
-        static auto get_functor() { return get_functor(get_table_func()); }                        \
                                                                                                    \
         static std::vector<void*> as_arg_addr(                                                     \
             rocprofiler_callback_tracing_hsa_api_data_t trace_data)                                \

@@ -236,8 +236,8 @@ counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& 
     if(!ret_pkt)
     {
         // If we do not have a packet in the cache, create one.
-        ret_pkt =
-            profile->pkt_generator->construct_packet(hsa::get_queue_controller().get_ext_table());
+        ret_pkt = profile->pkt_generator->construct_packet(
+            CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
     }
 
     ret_pkt->before_krn_pkt.clear();
@@ -268,7 +268,7 @@ queue_cb(const context::context*                                         ctx,
     // and maybe adds barrier packets if the state is transitioning from serialized <->
     // unserialized
     auto maybe_add_serialization = [&](auto& gen_pkt) {
-        hsa::get_queue_controller().serializer().rlock([&](const auto& serializer) {
+        CHECK_NOTNULL(hsa::get_queue_controller())->serializer().rlock([&](const auto& serializer) {
             for(auto& s_pkt : serializer.kernel_dispatch(queue))
             {
                 gen_pkt->before_krn_pkt.push_back(s_pkt.ext_amd_aql_pm4);
@@ -392,8 +392,9 @@ completed_cb(const context::context*                       ctx,
 
     if(!pkt) return;
 
-    hsa::get_queue_controller().serializer().wlock(
-        [&](auto& serializer) { serializer.kernel_completion_signal(session.queue); });
+    CHECK_NOTNULL(hsa::get_queue_controller())->serializer().wlock([&](auto& serializer) {
+        serializer.kernel_completion_signal(session.queue);
+    });
 
     // We have no profile config, nothing to output.
     if(!prof_config) return;
@@ -478,10 +479,10 @@ start_context(const context::context* ctx)
 {
     if(!ctx || !ctx->counter_collection) return;
 
-    auto& controller = hsa::get_queue_controller();
+    auto* controller = hsa::get_queue_controller();
 
     bool already_enabled = true;
-    controller.enable_serialization();
+    CHECK_NOTNULL(controller)->enable_serialization();
     ctx->counter_collection->enabled.wlock([&](auto& enabled) {
         if(enabled) return;
         already_enabled = false;
@@ -495,7 +496,7 @@ start_context(const context::context* ctx)
             // Insert our callbacks into HSA Interceptor. This
             // turns on counter instrumentation.
             if(cb->queue_id != rocprofiler::hsa::ClientID{-1}) continue;
-            cb->queue_id = controller.add_callback(
+            cb->queue_id = controller->add_callback(
                 std::nullopt,
                 [=](const hsa::Queue&                                               q,
                     const hsa::rocprofiler_packet&                                  kern_pkt,
@@ -526,13 +527,14 @@ stop_context(const context::context* ctx)
 {
     if(!ctx || !ctx->counter_collection) return;
 
-    auto& controller = hsa::get_queue_controller();
+    auto* controller = hsa::get_queue_controller();
 
     ctx->counter_collection->enabled.wlock([&](auto& enabled) {
         if(!enabled) return;
         enabled = false;
     });
-    controller.disable_serialization();
+
+    if(controller) controller->disable_serialization();
 }
 
 bool

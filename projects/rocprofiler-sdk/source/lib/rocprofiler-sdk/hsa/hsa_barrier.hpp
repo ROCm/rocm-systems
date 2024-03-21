@@ -44,22 +44,11 @@ class hsa_barrier
 {
 public:
     using queue_map_t = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
-    hsa_barrier(std::function<void()>&& finished, CoreApiTable core_api)
-    : _barried_finished(std::move(finished))
-    , _core_api(core_api)
-    {
-        // Create the barrier signal
-        _core_api.hsa_signal_create_fn(0, 0, nullptr, &_barrier_signal);
-    }
 
-    ~hsa_barrier()
-    {
-        // Destroy the barrier signal
-        _core_api.hsa_signal_store_screlease_fn(_barrier_signal, 0);
-        _core_api.hsa_signal_destroy_fn(_barrier_signal);
-    }
+    hsa_barrier(std::function<void()>&& finished, CoreApiTable core_api);
+    ~hsa_barrier();
 
-    void set_barrier(queue_map_t& q);
+    void set_barrier(const queue_map_t& q);
 
     std::optional<rocprofiler_packet> enqueue_packet(const Queue* queue);
     bool                              register_completion(const Queue* queue);

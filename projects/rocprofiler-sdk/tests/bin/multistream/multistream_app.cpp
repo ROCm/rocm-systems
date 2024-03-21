@@ -78,15 +78,15 @@ LaunchMultiStreamKernels()
     HIP_ASSERT(hipMemcpy(d_x, x, N * sizeof(float), hipMemcpyHostToDevice));
     HIP_ASSERT(hipMemcpy(d_y, y, N * sizeof(float), hipMemcpyHostToDevice));
 
-    // Launch kernel on 1M elements on the GPU
+    // Launch kernel on one or two warps on the GPU
     int blockSize = 64;
     // This Kernel will always be launched with one wave
     int numBlocks = 1;
     for(int i = 0; i < 100; i++)
     {
-        for(size_t j = 0; j < hip_streams.size(); j++)
+        for(auto& hip_stream : hip_streams)
         {
-            hipLaunchKernelGGL(add, numBlocks, blockSize, 0, hip_streams[j], N, d_x, d_y);
+            hipLaunchKernelGGL(add, numBlocks, blockSize, 0, hip_stream, N, d_x, d_y);
         }
     }
 
@@ -103,9 +103,9 @@ LaunchMultiStreamKernels()
     delete[] x;
     delete[] y;
 
-    for(size_t i = 0; i < hip_streams.size(); i++)
+    for(auto& hip_stream : hip_streams)
     {
-        HIP_ASSERT(hipStreamDestroy(hip_streams[i]));
+        HIP_ASSERT(hipStreamDestroy(hip_stream));
     }
 }
 

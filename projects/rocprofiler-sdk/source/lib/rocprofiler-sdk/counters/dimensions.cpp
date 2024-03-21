@@ -56,7 +56,8 @@ getBlockDimensions(std::string_view agent, const Metric& metric)
 
     std::vector<MetricDimension> ret;
 
-    for(const auto& [_, maybe_agent] : hsa::get_queue_controller().get_supported_agents())
+    for(const auto& [_, maybe_agent] :
+        CHECK_NOTNULL(hsa::get_queue_controller())->get_supported_agents())
     {
         if(maybe_agent.name() == agent)
         {
@@ -106,7 +107,9 @@ get_dimension_cache()
                  * Fails if HSA is not loaded by retruning nothing. This should not remain after
                  * AQL is transistioned away from HSA.
                  */
-                if(rocprofiler::hsa::get_queue_controller().get_supported_agents().empty())
+                if(CHECK_NOTNULL(rocprofiler::hsa::get_queue_controller())
+                       ->get_supported_agents()
+                       .empty())
                 {
                     return {};
                 }

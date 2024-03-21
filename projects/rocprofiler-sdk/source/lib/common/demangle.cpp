@@ -22,10 +22,11 @@
 
 #include "lib/common/demangle.hpp"
 
-#include <amd_comgr/amd_comgr.h>
+#include <glog/logging.h>
 
 #include <cxxabi.h>
 #include <cstdarg>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <iomanip>
@@ -34,18 +35,6 @@
 #include <sstream>
 #include <string>
 
-#define amd_comgr_(call)                                                                           \
-    do                                                                                             \
-    {                                                                                              \
-        if(amd_comgr_status_t status = amd_comgr_##call; status != AMD_COMGR_STATUS_SUCCESS)       \
-        {                                                                                          \
-            const char* reason = "";                                                               \
-            amd_comgr_status_string(status, &reason);                                              \
-            fprintf(stderr, #call " failed: %s\n", reason);                                        \
-            abort();                                                                               \
-        }                                                                                          \
-    } while(false)
-
 namespace rocprofiler
 {
 namespace common
@@ -53,7 +42,6 @@ namespace common
 std::string
 cxa_demangle(std::string_view _mangled_name, int* _status)
 {
-    constexpr size_t buffer_len = 4096;
     // return the mangled since there is no buffer
     if(_mangled_name.empty())
     {
@@ -91,26 +79,14 @@ cxa_demangle(std::string_view _mangled_name, int* _status)
         }
         case -1:
         {
-            char _msg[buffer_len];
-            ::memset(_msg, '\0', buffer_len * sizeof(char));
-            ::snprintf(_msg,
-                       buffer_len,
-                       "memory allocation failure occurred demangling %s",
-                       _demangled_name.c_str());
-            ::perror(_msg);
+            PLOG(ERROR) << "memory allocation failure occurred demangling " << _demangled_name;
             break;
         }
         case -2: break;
         case -3:
         {
-            char _msg[buffer_len];
-            ::memset(_msg, '\0', buffer_len * sizeof(char));
-            ::snprintf(_msg,
-                       buffer_len,
-                       "Invalid argument in: (\"%s\", nullptr, nullptr, %p)",
-                       _demangled_name.c_str(),
-                       (void*) _status);
-            ::perror(_msg);
+            PLOG(ERROR) << "Invalid argument in: (\"" << _demangled_name << "\", nullptr, nullptr, "
+                        << _status << ")";
             break;
         }
         default: break;
@@ -130,27 +106,10 @@ cxx_demangle(std::string_view symbol)
 {
     int  _status       = 0;
     auto demangled_str = cxa_demangle(symbol, &_status);
-    if(_status == 0)
-    {
-        return demangled_str;
-    }
 
-    amd_comgr_data_t mangled_data;
-    amd_comgr_(create_data(AMD_COMGR_DATA_KIND_BYTES, &mangled_data));
-    amd_comgr_(set_data(mangled_data, symbol.size(), symbol.data()));
+    if(_status == 0) return demangled_str;
 
-    amd_comgr_data_t demangled_data;
-    amd_comgr_(demangle_symbol_name(mangled_data, &demangled_data));
-
-    size_t demangled_size = 0;
-    amd_comgr_(get_data(demangled_data, &demangled_size, nullptr));
-
-    demangled_str.resize(demangled_size);
-    amd_comgr_(get_data(demangled_data, &demangled_size, demangled_str.data()));
-
-    amd_comgr_(release_data(mangled_data));
-    amd_comgr_(release_data(demangled_data));
-    return demangled_str;
+    return std::string{symbol};
 }
 
 // The function extracts the kernel name from

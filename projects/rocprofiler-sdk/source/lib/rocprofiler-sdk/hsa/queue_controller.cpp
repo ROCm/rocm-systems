@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -47,7 +48,8 @@ create_queue(hsa_agent_t        agent,
              uint32_t      group_segment_size,
              hsa_queue_t** queue)
 {
-    for(const auto& [_, agent_info] : get_queue_controller().get_supported_agents())
+    auto* controller = CHECK_NOTNULL(get_queue_controller());
+    for(const auto& [_, agent_info] : controller->get_supported_agents())
     {
         if(agent_info.get_hsa_agent().handle == agent.handle)
         {
@@ -58,13 +60,13 @@ create_queue(hsa_agent_t        agent,
                                                      data,
                                                      private_segment_size,
                                                      group_segment_size,
-                                                     get_queue_controller().get_core_table(),
-                                                     get_queue_controller().get_ext_table(),
+                                                     controller->get_core_table(),
+                                                     controller->get_ext_table(),
                                                      queue);
 
-            get_queue_controller().serializer().wlock(
+            controller->serializer().wlock(
                 [&](auto& serializer) { serializer.add_queue(queue, *new_queue); });
-            get_queue_controller().add_queue(*queue, std::move(new_queue));
+            controller->add_queue(*queue, std::move(new_queue));
 
             return HSA_STATUS_SUCCESS;
         }
@@ -76,7 +78,7 @@ create_queue(hsa_agent_t        agent,
 hsa_status_t
 destroy_queue(hsa_queue_t* hsa_queue)
 {
-    get_queue_controller().destroy_queue(hsa_queue);
+    if(get_queue_controller()) get_queue_controller()->destroy_queue(hsa_queue);
     return HSA_STATUS_SUCCESS;
 }
 
@@ -108,16 +110,20 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
-    const auto*                  queue = get_queue_controller().get_queue(*id);
-    std::unique_lock<std::mutex> cvlock(queue->cv_mutex);
+    if(!id) return;
 
-    serializer().wlock([&](auto& serializer) { serializer.destory_queue(id, *queue); });
+    const auto* queue = get_queue(*id);
 
-    queue->cv_ready_signal.wait(
-        cvlock, [queue] { return queue->get_state() == queue_state::done_destroy; });
-    if(queue->block_signal.handle != 0)
-        get_queue_controller().get_core_table().hsa_signal_destroy_fn(queue->block_signal);
+    // return if queue does not exist
+    if(!queue) return;
+
+    LOG(INFO) << "destroying queue...";
+
+    queue->sync();
+    if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
+
+    LOG(INFO) << "queue destroyed";
 }
 
 ClientID
@@ -232,18 +238,20 @@ QueueController::get_queue(const hsa_queue_t& _hsa_queue) const
 void
 QueueController::disable_serialization()
 {
-    _queues.wlock([](queue_map_t& _queues_v) {
-        get_queue_controller().serializer().wlock(
-            [&](auto& serializer) { serializer.disable(_queues_v); });
+    _queues.rlock([](const queue_map_t& _queues_v) {
+        if(get_queue_controller())
+            get_queue_controller()->serializer().wlock(
+                [&](auto& serializer) { serializer.disable(_queues_v); });
     });
 }
 
 void
 QueueController::enable_serialization()
 {
-    _queues.wlock([](queue_map_t& _queues_v) {
-        get_queue_controller().serializer().wlock(
-            [&](auto& serializer) { serializer.enable(_queues_v); });
+    _queues.rlock([](const queue_map_t& _queues_v) {
+        if(get_queue_controller())
+            get_queue_controller()->serializer().wlock(
+                [&](auto& serializer) { serializer.enable(_queues_v); });
     });
 }
 
@@ -272,7 +280,7 @@ QueueController::print_debug_signals() const
 }
 
 void
-QueueController::set_queue_state(enum queue_state state, hsa_queue_t* hsa_queue)
+QueueController::set_queue_state(queue_state state, hsa_queue_t* hsa_queue)
 {
     _queues.wlock([&](auto& map) { map[hsa_queue]->set_state(state); });
 }
@@ -299,23 +307,24 @@ QueueController::iterate_callbacks(const callback_iterator_cb_t& cb) const
     });
 }
 
-QueueController&
+QueueController*
 get_queue_controller()
 {
     static auto*& controller = common::static_object<QueueController>::construct();
-    return *(CHECK_NOTNULL(controller));
+    return controller;
 }
 
 void
 queue_controller_init(HsaApiTable* table)
 {
-    get_queue_controller().init(*table->core_, *table->amd_ext_);
+    CHECK_NOTNULL(get_queue_controller())->init(*table->core_, *table->amd_ext_);
 }
 
 void
 queue_controller_fini()
 {
-    get_queue_controller().iterate_queues([](const Queue* _queue) { _queue->sync(); });
+    if(get_queue_controller())
+        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
 }
 }  // namespace hsa
 }  // namespace rocprofiler

@@ -32,10 +32,7 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-set(cc-tracing-env
-    "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
-    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
+set(cc-tracing-env "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
 
 set_tests_properties(
     rocprofv3-test-tracing-plus-cc-execute

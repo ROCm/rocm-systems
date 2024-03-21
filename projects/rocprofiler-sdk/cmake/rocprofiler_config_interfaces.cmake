@@ -81,6 +81,14 @@ endforeach()
 
 # ----------------------------------------------------------------------------------------#
 #
+# atomic library
+#
+# ----------------------------------------------------------------------------------------#
+
+target_link_libraries(rocprofiler-atomic INTERFACE atomic)
+
+# ----------------------------------------------------------------------------------------#
+#
 # filesystem library
 #
 # ----------------------------------------------------------------------------------------#
@@ -185,6 +193,28 @@ target_link_libraries(rocprofiler-hsa-aql INTERFACE ${hsa-amd-aqlprofile64_libra
 
 # ----------------------------------------------------------------------------------------#
 #
+# HSAKMT
+#
+# ----------------------------------------------------------------------------------------#
+
+find_package(
+    hsakmt
+    REQUIRED
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATH_SUFFIXES
+    lib/cmake/hsakmt)
+
+target_link_libraries(rocprofiler-hsakmt INTERFACE hsakmt::hsakmt)
+rocprofiler_config_nolink_target(rocprofiler-hsakmt-nolink hsakmt::hsakmt)
+
+# ----------------------------------------------------------------------------------------#
+#
 # drm
 #
 # ----------------------------------------------------------------------------------------#
@@ -218,11 +248,3 @@ find_library(
 target_include_directories(rocprofiler-drm SYSTEM INTERFACE ${drm_INCLUDE_DIR}
                                                             ${xf86drm_INCLUDE_DIR})
 target_link_libraries(rocprofiler-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})
-
-# ----------------------------------------------------------------------------------------#
-#
-# interface targets which emulate another interface target but do not link to the library.
-# E.g. rocprofiler-hip-nolink has the include directories, compile definitions, and
-# compile options of rocprofiler-hip but does not link to the HIP runtime library
-#
-# ----------------------------------------------------------------------------------------#

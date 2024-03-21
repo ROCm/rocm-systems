@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/marker/utils.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -181,13 +182,15 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
 }  // namespace
 
 template <size_t TableIdx, size_t OpIdx>
-template <typename... Args>
-auto
-roctx_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
+template <typename RetT, typename... Args>
+RetT
+roctx_api_impl<TableIdx, OpIdx>::functor(Args... args)
 {
     using info_type           = roctx_api_info<TableIdx, OpIdx>;
     using callback_api_data_t = typename roctx_domain_info<TableIdx>::callback_data_type;
     using buffered_api_data_t = typename roctx_domain_info<TableIdx>::buffer_data_type;
+
+    LOG_IF(INFO, registration::get_fini_status() != 0) << "Executing " << info_type::name;
 
     auto thr_id            = common::get_tid();
     auto callback_contexts = std::vector<callback_context_data>{};
@@ -201,11 +204,11 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 
     if(callback_contexts.empty() && buffered_contexts.empty())
     {
-        auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
-        if constexpr(!std::is_same<decltype(_ret), null_type>::value)
+        [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_void<RetT>::value)
             return _ret;
         else
-            return 0;
+            return;
     }
 
     auto  ref_count        = 2;
@@ -330,10 +333,7 @@ roctx_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 
     context::pop_latest_correlation_id(corr_id);
 
-    if constexpr(!std::is_same<decltype(_ret), null_type>::value)
-        return _ret;
-    else
-        return 0;
+    if constexpr(!std::is_void<RetT>::value) return _ret;
 }
 }  // namespace marker
 }  // namespace rocprofiler
@@ -505,8 +505,6 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
     {
         auto _info = roctx_api_info<TableIdx, OpIdx>{};
 
-        LOG(INFO) << "updating table entry for " << _info.name;
-
         // make sure we don't access a field that doesn't exist in input table
         if(_info.offset() >= _orig->size) return;
 
@@ -515,6 +513,8 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
         if(!should_wrap_functor(
                _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
             return;
+
+        LOG(INFO) << "updating table entry for " << _info.name;
 
         // 1. get the sub-table containing the function pointer in original table
         // 2. get reference to function pointer in sub-table in original table

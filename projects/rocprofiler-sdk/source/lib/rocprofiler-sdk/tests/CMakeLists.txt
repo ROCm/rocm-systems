@@ -59,7 +59,6 @@ gtest_add_tests(
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
 set(rocprofiler-lib-tests-env
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler-shared-library>"
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
 
 set_tests_properties(

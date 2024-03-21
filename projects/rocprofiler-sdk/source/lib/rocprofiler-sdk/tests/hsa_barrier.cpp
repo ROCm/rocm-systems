@@ -14,35 +14,9 @@
 #include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "rocprofiler-sdk/registration.h"
 
 using namespace rocprofiler;
 using namespace rocprofiler::hsa;
-
-namespace rocprofiler
-{
-namespace hsa
-{
-class FakeQueue : public Queue
-{
-public:
-    FakeQueue(const AgentCache& a, rocprofiler_queue_id_t id)
-    : Queue(a)
-    , _agent(a)
-    , _id(id)
-    {}
-    virtual const AgentCache&      get_agent() const override final { return _agent; };
-    virtual rocprofiler_queue_id_t get_id() const override final { return _id; };
-
-    ~FakeQueue() {}
-
-private:
-    const AgentCache&      _agent;
-    rocprofiler_queue_id_t _id = {};
-};
-
-}  // namespace hsa
-}  // namespace rocprofiler
 
 namespace
 {
@@ -66,35 +40,76 @@ CoreApiTable&
 get_api_table()
 {
     static auto _v = []() {
-        auto val                          = CoreApiTable{};
-        val.hsa_iterate_agents_fn         = hsa_iterate_agents;
-        val.hsa_agent_get_info_fn         = hsa_agent_get_info;
-        val.hsa_queue_create_fn           = hsa_queue_create;
-        val.hsa_queue_destroy_fn          = hsa_queue_destroy;
-        val.hsa_signal_create_fn          = hsa_signal_create;
-        val.hsa_signal_destroy_fn         = hsa_signal_destroy;
-        val.hsa_signal_store_screlease_fn = hsa_signal_store_screlease;
-        val.hsa_signal_load_scacquire_fn  = hsa_signal_load_scacquire;
+        auto val                           = CoreApiTable{};
+        val.hsa_iterate_agents_fn          = hsa_iterate_agents;
+        val.hsa_agent_get_info_fn          = hsa_agent_get_info;
+        val.hsa_queue_create_fn            = hsa_queue_create;
+        val.hsa_queue_destroy_fn           = hsa_queue_destroy;
+        val.hsa_signal_create_fn           = hsa_signal_create;
+        val.hsa_signal_destroy_fn          = hsa_signal_destroy;
+        val.hsa_signal_store_screlease_fn  = hsa_signal_store_screlease;
+        val.hsa_signal_load_scacquire_fn   = hsa_signal_load_scacquire;
+        val.hsa_signal_add_relaxed_fn      = hsa_signal_add_relaxed;
+        val.hsa_signal_subtract_relaxed_fn = hsa_signal_subtract_relaxed;
+        val.hsa_signal_wait_relaxed_fn     = hsa_signal_wait_relaxed;
         return val;
     }();
     return _v;
 }
+
+namespace rocprofiler
+{
+namespace hsa
+{
+class FakeQueue : public Queue
+{
+public:
+    FakeQueue(const AgentCache& a, rocprofiler_queue_id_t id)
+    : Queue(a, get_api_table())
+    , _agent(a)
+    , _id(id)
+    {}
+    virtual const AgentCache&      get_agent() const override final { return _agent; };
+    virtual rocprofiler_queue_id_t get_id() const override final { return _id; };
+
+    ~FakeQueue() {}
+
+private:
+    const AgentCache&      _agent;
+    rocprofiler_queue_id_t _id = {};
+};
+
+}  // namespace hsa
+}  // namespace rocprofiler
 
 QueueController::queue_map_t
 create_queue_map(size_t count)
 {
     QueueController::queue_map_t ret;
 
-    auto agents = hsa::get_queue_controller().get_supported_agents();
+    // ensure test fails if null
+    EXPECT_TRUE(hsa::get_queue_controller() != nullptr);
+
+    // prevent segfault
+    if(!hsa::get_queue_controller()) return ret;
+
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
 
     for(size_t i = 0; i < count; i++)
     {
         auto& agent_cache = agents.begin()->second;
         // Create queue
         hsa_queue_t* queue;
-        hsa_queue_create(
-            agent_cache.get_hsa_agent(), 2048, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, 0, 0, &queue);
-        ret[queue] = std::make_unique<FakeQueue>(agent_cache, rocprofiler_queue_id_t{.handle = i});
+        hsa_queue_create(agent_cache.get_hsa_agent(),
+                         2048,
+                         HSA_QUEUE_TYPE_SINGLE,
+                         nullptr,
+                         nullptr,
+                         0,
+                         0,
+                         &queue);
+        ret[queue] = std::make_unique<rocprofiler::hsa::FakeQueue>(
+            agent_cache, rocprofiler_queue_id_t{.handle = i});
     }
 
     return ret;
@@ -171,8 +186,9 @@ test_init()
     HsaApiTable table;
     table.amd_ext_ = &get_ext_table();
     table.core_    = &get_api_table();
-    rocprofiler::agent::construct_agent_cache(&table);
-    hsa::get_queue_controller().init(get_api_table(), get_ext_table());
+    agent::construct_agent_cache(&table);
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
 }
 }  // namespace
 
@@ -191,7 +207,7 @@ TEST(hsa_barrier, no_block_single)
     auto queues = create_queue_map(1);
 
     // Immediate return of barrier due to no active async packets
-    rocprofiler::hsa::hsa_barrier barrier(finished_func, get_api_table());
+    hsa::hsa_barrier barrier(finished_func, get_api_table());
     barrier.set_barrier(queues);
     executed_handlers = 0;
     ASSERT_TRUE(barrier.complete());
@@ -222,7 +238,7 @@ TEST(hsa_barrier, no_block_multi)
     auto queues = create_queue_map(10);
 
     // Immediate return of barrier due to no active async packets
-    rocprofiler::hsa::hsa_barrier barrier(finished_func, get_api_table());
+    hsa::hsa_barrier barrier(finished_func, get_api_table());
     barrier.set_barrier(queues);
     ASSERT_TRUE(barrier.complete());
     should_execute_handler = true;
@@ -253,7 +269,7 @@ TEST(hsa_barrier, block_single)
 
     auto queues = create_queue_map(1);
 
-    rocprofiler::hsa::hsa_barrier barrier(finished_func, get_api_table());
+    hsa::hsa_barrier barrier(finished_func, get_api_table());
 
     // Simulate waiting on packets already in the queue to complete
     for(auto& [_, queue] : queues)
@@ -308,7 +324,7 @@ TEST(hsa_barrier, block_multi)
     auto queues = create_queue_map(10);
 
     // Immediate return of barrier due to no active async packets
-    rocprofiler::hsa::hsa_barrier barrier(finished_func, get_api_table());
+    hsa::hsa_barrier barrier(finished_func, get_api_table());
 
     // Simulate waiting on packets already in the queue to complete
     for(auto& [_, queue] : queues)

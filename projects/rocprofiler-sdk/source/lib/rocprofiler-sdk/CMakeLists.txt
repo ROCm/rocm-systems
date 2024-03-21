@@ -50,9 +50,10 @@ target_link_libraries(
     PRIVATE rocprofiler::rocprofiler-build-flags
             rocprofiler::rocprofiler-memcheck
             rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-cxx-filesystem
-            rocprofiler::rocprofiler-dl
-            rocprofiler::rocprofiler-amd-comgr)
+            rocprofiler::rocprofiler-amd-comgr
+            rocprofiler::rocprofiler-hsa-aql
+            rocprofiler::rocprofiler-drm
+            rocprofiler::rocprofiler-hsakmt-nolink)
 
 target_compile_definitions(rocprofiler-object-library PRIVATE rocprofiler_EXPORTS=1)
 

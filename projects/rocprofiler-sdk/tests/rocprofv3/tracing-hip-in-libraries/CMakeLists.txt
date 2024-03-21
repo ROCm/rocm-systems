@@ -21,12 +21,13 @@ add_test(
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(tracing-env "${PRELOAD_ENV}"
-                "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
+set(tracing-env "${PRELOAD_ENV}")
 
 set_tests_properties(
     rocprofv3-test-trace-hip-in-libraries-execute
     PROPERTIES
+        TIMEOUT
+        45
         LABELS
         "integration-tests"
         ENVIRONMENT

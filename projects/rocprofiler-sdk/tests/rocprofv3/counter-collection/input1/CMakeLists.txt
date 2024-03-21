@@ -32,10 +32,7 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-set(cc-env-pmc1
-    "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
-    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
+set(cc-env-pmc1 "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
 
 set_tests_properties(
     rocprofv3-test-counter-collection-pmc1-execute

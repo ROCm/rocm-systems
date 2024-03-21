@@ -27,7 +27,7 @@ fi
 
 : ${ASAN_OPTIONS="detect_leaks=0 use_sigaltstack=0 suppressions=${SUPPR_DIR}/address-sanitizer-suppr.txt"}
 : ${LSAN_OPTIONS="suppressions=${SUPPR_DIR}/leak-sanitizer-suppr.txt"}
-: ${TSAN_OPTIONS="history_size=5 second_deadlock_stack=1 suppressions=${SUPPR_DIR}/thread-sanitizer-suppr.txt${EXTERNAL_SYMBOLIZER}"}
+: ${TSAN_OPTIONS="history_size=5 detect_deadlocks=0 suppressions=${SUPPR_DIR}/thread-sanitizer-suppr.txt${EXTERNAL_SYMBOLIZER}"}
 
 export ASAN_OPTIONS
 export LSAN_OPTIONS

@@ -167,8 +167,7 @@ get_table()
                                       .core_          = get_core_table(),
                                       .amd_ext_       = get_amd_ext_table(),
                                       .finalizer_ext_ = get_fini_ext_table(),
-                                      .image_ext_     = get_img_ext_table(),
-                                      .tools_         = nullptr};
+                                      .image_ext_     = get_img_ext_table()};
     return tbl;
 }
 
@@ -267,19 +266,21 @@ populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
 }  // namespace
 
 template <size_t TableIdx, size_t OpIdx>
-template <typename... Args>
-auto
-hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
+template <typename RetT, typename... Args>
+RetT
+hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
 {
     using info_type = hsa_api_info<TableIdx, OpIdx>;
 
+    LOG_IF(INFO, registration::get_fini_status() != 0) << "Executing " << info_type::name;
+
     if(registration::get_fini_status() != 0)
     {
-        auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
-        if constexpr(!std::is_same<decltype(_ret), null_type>::value)
+        [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_void<RetT>::value)
             return _ret;
         else
-            return HSA_STATUS_SUCCESS;
+            return;
     }
 
     auto thr_id            = common::get_tid();
@@ -294,11 +295,11 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 
     if(callback_contexts.empty() && buffered_contexts.empty())
     {
-        auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
-        if constexpr(!std::is_same<decltype(_ret), null_type>::value)
+        [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        if constexpr(!std::is_void<RetT>::value)
             return _ret;
         else
-            return HSA_STATUS_SUCCESS;
+            return;
     }
 
     constexpr auto ref_count        = 2;
@@ -423,10 +424,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args&&... args)
 
     context::pop_latest_correlation_id(corr_id);
 
-    if constexpr(!std::is_same<decltype(_ret), null_type>::value)
-        return _ret;
-    else
-        return HSA_STATUS_SUCCESS;
+    if constexpr(!std::is_void<RetT>::value) return _ret;
 }
 }  // namespace hsa
 }  // namespace rocprofiler
@@ -601,8 +599,6 @@ update_table(const context::context_array_t& _contexts,
     {
         auto _info = hsa_api_info<TableIdx, OpIdx>{};
 
-        LOG(INFO) << "updating table entry for " << _info.name;
-
         // make sure we don't access a field that doesn't exist in input table
         if(_info.offset() >= _orig->version.minor_id) return;
 
@@ -613,6 +609,8 @@ update_table(const context::context_array_t& _contexts,
                                 _info.buffered_domain_idx,
                                 _info.operation_idx))
             return;
+
+        LOG(INFO) << "updating table entry for " << _info.name;
 
         // 1. get the sub-table containing the function pointer in original table
         // 2. get reference to function pointer in sub-table in original table

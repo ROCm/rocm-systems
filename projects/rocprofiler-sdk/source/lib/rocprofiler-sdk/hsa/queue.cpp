@@ -78,8 +78,6 @@ context_filter(const context::context* ctx)
 bool
 AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 {
-    // LOG(ERROR) << "signal value is " << signal_v;
-
     if(!data) return true;
     auto& queue_info_session = *static_cast<Queue::queue_info_session_t*>(data);
 
@@ -173,8 +171,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     if(queue_info_session.interrupt_signal.handle != 0u)
     {
 #if !defined(NDEBUG)
-        hsa::get_queue_controller()._debug_signals.wlock(
-            [&](auto& signals) { signals.erase(queue_info_session.interrupt_signal.handle); });
+        CHECK_NOTNULL(hsa::get_queue_controller())->_debug_signals.wlock([&](auto& signals) {
+            signals.erase(queue_info_session.interrupt_signal.handle);
+        });
 #endif
         hsa::get_core_table()->hsa_signal_store_screlease_fn(queue_info_session.interrupt_signal,
                                                              -1);
@@ -235,8 +234,7 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
-    using context_array_t = Queue::context_array_t;
-
+    using context_array_t      = Queue::context_array_t;
     auto&& CreateBarrierPacket = [](hsa_signal_t*                    dependency_signal,
                                     hsa_signal_t*                    completion_signal,
                                     std::vector<rocprofiler_packet>& _packets) {
@@ -345,7 +343,7 @@ WriteInterceptor(const void* packets,
             barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
             // barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
             // barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
-            // barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
+            barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
             barrier.completion_signal = original_packet.completion_signal;
             transformed_packets.emplace_back(barrier);
         }
@@ -410,27 +408,11 @@ WriteInterceptor(const void* packets,
 }
 }  // namespace
 
-Queue::~Queue() { sync(); }
-
-void
-Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const
+Queue::Queue(const AgentCache& agent, CoreApiTable table)
+: _core_api(table)
+, _agent(agent)
 {
-#if !defined(NDEBUG)
-    hsa::get_queue_controller()._debug_signals.wlock(
-        [&](auto& signals) { signals[signal.handle] = signal; });
-#endif
-    hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-        signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, static_cast<void*>(data));
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: hsa_amd_signal_async_handler failed";
-}
-
-void
-Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
-{
-    hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: hsa_amd_signal_create failed";
+    _core_api.hsa_signal_create_fn(0, 0, nullptr, &_active_kernels);
 }
 
 Queue::Queue(const AgentCache&  agent,
@@ -470,30 +452,48 @@ Queue::Queue(const AgentCache&  agent,
 
     create_signal(0, &ready_signal);
     create_signal(0, &block_signal);
+    create_signal(0, &_active_kernels);
     _core_api.hsa_signal_store_screlease_fn(ready_signal, 0);
+    _core_api.hsa_signal_store_screlease_fn(_active_kernels, 0);
     *queue = _intercept_queue;
+}
+
+Queue::~Queue()
+{
+    sync();
+    _core_api.hsa_signal_destroy_fn(_active_kernels);
+}
+
+void
+Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const
+{
+#if !defined(NDEBUG)
+    CHECK_NOTNULL(hsa::get_queue_controller())->_debug_signals.wlock([&](auto& signals) {
+        signals[signal.handle] = signal;
+    });
+#endif
+    hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
+        signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, static_cast<void*>(data));
+    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "Error: hsa_amd_signal_async_handler failed";
+}
+
+void
+Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
+{
+    hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
+    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+        << "Error: hsa_amd_signal_create failed";
 }
 
 void
 Queue::sync() const
 {
-    // Potentially replace with condition variable at some point
-    // but performance may not matter here.
-    constexpr auto max_wait_time  = std::chrono::milliseconds{1000};
-    constexpr auto query_interval = std::chrono::milliseconds{10};
-    auto           _orig_active   = _active_async_packets.load(std::memory_order_relaxed);
-    auto           _curr_active   = _orig_active;
-    auto           inactive       = common::yield(
-        [this, &_curr_active]() {
-            return ((_curr_active = _active_async_packets.load(std::memory_order_relaxed)) == 0);
-        },
-        max_wait_time,
-        query_interval);
-
-    LOG_IF(WARNING, !inactive)
-        << "rocprofiler-sdk Queue (instance=" << this << ") abandoned waiting for " << _orig_active
-        << " async completion callbacks after " << max_wait_time.count() << " msecs. There were "
-        << _curr_active << " async completion callbacks which were not delivered at that time.";
+    if(_active_kernels.handle != 0u)
+    {
+        _core_api.hsa_signal_wait_relaxed_fn(
+            _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_ACTIVE);
+    }
 }
 
 void

@@ -21,17 +21,36 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 namespace rocprofiler
 {
 namespace hsa
 {
+hsa_barrier::hsa_barrier(std::function<void()>&& finished, CoreApiTable core_api)
+: _barried_finished(std::move(finished))
+, _core_api(core_api)
+{
+    // Create the barrier signal
+    _core_api.hsa_signal_create_fn(0, 0, nullptr, &_barrier_signal);
+}
+
+hsa_barrier::~hsa_barrier()
+{
+    // Destroy the barrier signal
+    if(registration::get_fini_status() < 1)
+    {
+        _core_api.hsa_signal_store_screlease_fn(_barrier_signal, 0);
+        _core_api.hsa_signal_destroy_fn(_barrier_signal);
+    }
+}
+
 void
-hsa_barrier::set_barrier(queue_map_t& q)
+hsa_barrier::set_barrier(const queue_map_t& q)
 {
     _core_api.hsa_signal_store_screlease_fn(_barrier_signal, 1);
     _queue_waiting.wlock([&](auto& queue_waiting) {
-        for(auto& [_, queue] : q)
+        for(const auto& [_, queue] : q)
         {
             queue->lock_queue([ptr = queue.get(), &queue_waiting]() {
                 if(ptr->active_async_packets() > 0)
