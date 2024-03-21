@@ -3819,7 +3819,7 @@ if __name__ == '__main__':
     groupDisplayPages.add_argument('--showretiredpages', help='Show retired pages', action='store_true')
     groupDisplayPages.add_argument('--showunreservablepages', help='Show unreservable pages', action='store_true')
     groupDisplayHw.add_argument('-f', '--showfan', help='Show current fan speed', action='store_true')
-    groupDisplayHw.add_argument('-P', '--showpower', help='Show current Average Graphics Package Power Consumption',
+    groupDisplayHw.add_argument('-P', '--showpower', help='Show current average or instant socket graphics package power consumption',
                                 action='store_true')
     groupDisplayHw.add_argument('-t', '--showtemp', help='Show current temperature', action='store_true')
     groupDisplayHw.add_argument('-u', '--showuse', help='Show current GPU use', action='store_true')

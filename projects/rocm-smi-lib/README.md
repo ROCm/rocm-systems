@@ -8,7 +8,20 @@ For additional information refer to [ROCm Documentation](https://rocm.docs.amd.c
 
 The information contained herein is for informational purposes only, and is subject to change without notice. In addition, any stated support is planned and is also subject to change. While every precaution has been taken in the preparation of this document, it may contain technical inaccuracies, omissions and typographical errors, and AMD is under no obligation to update or otherwise correct this information. Advanced Micro Devices, Inc. makes no representations or warranties with respect to the accuracy or completeness of the contents of this document, and assumes no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
 
-© 2022-2023 Advanced Micro Devices, Inc. All Rights Reserved.
+© 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
+
+## Installation
+
+### Install amdgpu using ROCm
+  * Install amdgpu driver:  
+See example below, your release and link may differ. The `amdgpu-install --usecase=rocm` triggers both an amdgpu driver update and ROCm SMI packages to be installed on your device.
+```shell
+sudo apt update
+wget https://repo.radeon.com/amdgpu-install/6.0.2/ubuntu/jammy/amdgpu-install_6.0.60002-1_all.deb
+sudo apt install ./amdgpu-install_6.0.60002-1_all.deb
+sudo amdgpu-install --usecase=rocm
+```
+* rocm-smi --help
 
 ## Building ROCm SMI
 
