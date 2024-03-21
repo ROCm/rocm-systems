@@ -2,7 +2,7 @@ name: Documentation 2.x
 
 on:
   push:
-    branches: ["2.x"]
+    branches: ["main"]
     paths:
       - 'src/docs-2.x'
       - 'src/docs-1.x'
