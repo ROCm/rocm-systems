@@ -23,6 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
        image: colramos/target-images:rhel8
+       options: --user="$(id --user):$(id --group)"
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: Install baseline OS dependencies
