@@ -24,7 +24,7 @@ contribution process.
 
 * Licensing information can be found in the [LICENSE](LICENSE) file.
 
-## Development 
+## Development
 
 Omniperf follows a
 [main-dev](https://nvie.com/posts/a-successful-git-branching-model/)
@@ -59,4 +59,3 @@ style reference is provided below for convenience:
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }
 ```
-

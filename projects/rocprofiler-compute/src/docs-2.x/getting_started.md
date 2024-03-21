@@ -9,7 +9,7 @@
 ## Quickstart
 
 1. **Launch & Profile the target application with the command line profiler**
-   
+
     The command line profiler launches the target application, calls the rocProfiler API via the rocProf binary, and collects profile results for the specified kernels, dispatches, and/or hardware components.  If not specified, Omniperf will default to collecting all available counters for all kernels/dispatches launched by the user's executable.
 
     To collect the default set of data for all kernels in the target application, launch, e.g.:
@@ -19,13 +19,13 @@
     The app runs, each kernel is launched, and profiling results are generated. By default, results are written to e.g., ./workloads/vcopy_data (configurable via the `-n` argument). To collect all requested profile information, it may be required to replay kernels multiple times.
 
 2. **Customize data collection**
-    
+
     Options are available to specify for which kernels/metrics data should be collected.
     Note that filtering can be applied either in the profiling or analysis stage, however filtering at during profiling collection will often speed up your overall profiling run time.
 
     Some common filters include:
 
-    - `-k`/`--kernel` enables filtering kernels by name. 
+    - `-k`/`--kernel` enables filtering kernels by name.
     - `-d`/`--dispatch` enables filtering based on dispatch ID.
     - `-b`/`--block` enables collects metrics for only the specified (one or more) hardware component blocks.
 
@@ -35,7 +35,7 @@
     ```
 
 3. **Analyze at the command line**
-   
+
    After generating a local output folder (./workloads/\<name>), the command line tool can also be used to quickly interface with profiling results. View different metrics derived from your profiled results and get immediate access all metrics organized by IP blocks.
 
    If no kernel, dispatch, or hardware block filters are applied at this stage, analysis will be reflective of the entirety of the profiling data.
@@ -43,7 +43,7 @@
    To interact with profiling results from a different session, users just provide the workload path.  `-p`/`--path` enables users to analyze existing profiling data in the Omniperf CLI.
 
 4. **Analyze in the Grafana GUI**
-   
+
    To conduct a more in-depth analysis of profiling results we recommend users utilize the Omniperf Grafana GUI. To interact with profiling results, users must import their data to the MongoDB instance included in the Omniperf dockerfile.
 
     To interact with Grafana GUI data, stored in the Omniperf DB, users can enter ***database*** mode. For example:
