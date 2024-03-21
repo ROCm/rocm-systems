@@ -1688,7 +1688,8 @@ struct_amdsmi_error_count_t._pack_ = 1 # source:False
 struct_amdsmi_error_count_t._fields_ = [
     ('correctable_count', ctypes.c_uint64),
     ('uncorrectable_count', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint64 * 2),
+    ('deferred_count', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint64 * 5),
 ]
 
 amdsmi_error_count_t = struct_amdsmi_error_count_t

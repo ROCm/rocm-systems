@@ -15,7 +15,7 @@ Recommended: At least one AMD GPU with AMD driver installed
 
 ### Installation
 
-* Install amdgpu driver
+* [Install amdgpu driver](../README.md#install-amdgpu-using-rocm)
 * Optionally install amd_hsmp driver for ESMI CPU functions
 * Install amd-smi-lib package through package manager
 * amd-smi --help
