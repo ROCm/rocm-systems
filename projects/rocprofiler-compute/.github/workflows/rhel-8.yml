@@ -37,6 +37,7 @@ jobs:
           yum -y install cmake3
           yum -y install which
       - name: Install Python prereqs
+        run: |
           python3.9 -m pip install -r requirements.txt
           python3.9 -m pip install pyinstaller pytest pytest-cov mock
       - name: Configure and install
