@@ -48,10 +48,13 @@ static std::vector<std::string> lsof(const char* filename) {
   DIR *dp = nullptr;
   std::vector<std::string> process_id;
 
+  pid_t cur_pid = getpid();
   dp = opendir("/proc");
   if (dp != nullptr) {
     while ((entry = readdir(dp))) {
       std::string id(entry->d_name);
+      // ignore current process
+      if (id == std::to_string(cur_pid)) continue;
       // the process id should be a number
       if (std::all_of(id.begin(), id.end(), ::isdigit)) {
         process_id.push_back(entry->d_name);
@@ -132,6 +135,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
   int ret;
 
   ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
+  pid_t cur_pid = getpid();
 
   if (ret == EOWNERDEAD) {
     ret = pthread_mutex_consistent(mutex_ptr);
@@ -149,6 +153,12 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
       throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
       return mutex;
     }
+
+    fprintf(stderr, "%s: %d detected dead process, and make mutex consistent.\n", name, cur_pid);
+    // The mutex is locked even if EOWNERDEAD was returned,and need to unlock it.
+    if (pthread_mutex_unlock(mutex_ptr)) {
+      perror("pthread_mutex_unlock");
+    }
   } else if (ret || (mutex.created == 0 &&
                      reinterpret_cast<shared_mutex_t *>(addr)->ptr == NULL)) {
     // Something is out of sync.
@@ -158,6 +168,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     if (!retried) {
       std::vector<std::string> ids = lsof(name);
       if (ids.size() == 0) {  // no process is using it
+        fprintf(stderr, "%s: %d re-init the mutex since no one use it.\n", name, cur_pid);
         memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
         // Set mutex.created == 1 so that it can be initialized latter.
         mutex.created = 1;
@@ -181,7 +192,8 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     }
   }
 
-  if (mutex.created) {
+  // also need to set the attribute when retried as the mutex is re-initialized.
+  if (mutex.created || retried) {
     pthread_mutexattr_t attr;
     if (pthread_mutexattr_init(&attr)) {
       perror("pthread_mutexattr_init");
