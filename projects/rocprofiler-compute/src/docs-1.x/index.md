@@ -1,4 +1,4 @@
-# Welcome to the [Omniperf](https://github.com/AMDResearch/omniperf) Documentation!
+# Welcome to the [Omniperf](https://github.com/ROCm/omniperf) Documentation!
 
 ```eval_rst
 .. toctree::

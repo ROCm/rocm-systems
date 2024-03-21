@@ -51,7 +51,7 @@ defined as follows:
 
 A typical install will begin by downloading the latest release tarball
 available from the
-[Releases](https://github.com/AMDResearch/omniperf/releases) section
+[Releases](https://github.com/ROCm/omniperf/releases) section
 of the Omniperf development site. From there, untar and descend into
 the top-level directory as follows:
 

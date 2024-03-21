@@ -6,7 +6,7 @@
    :maxdepth: 5
 ```
 
-The [Omniperf](https://github.com/AMDResearch/omniperf) repository
+The [Omniperf](https://github.com/ROCm/omniperf) repository
 includes source code for a sample GPU compute workload,
 __vcopy.cpp__. A copy of this file is available in the `share/sample`
 subdirectory after a normal Omniperf installation, or via the

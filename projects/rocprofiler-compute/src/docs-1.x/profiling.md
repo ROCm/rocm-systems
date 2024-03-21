@@ -6,7 +6,7 @@
    :maxdepth: 5
 ```
 
-The [Omniperf](https://github.com/AMDResearch/omniperf) repository
+The [Omniperf](https://github.com/ROCm/omniperf) repository
 includes source code for a sample GPU compute workload,
 __vcopy.cpp__. A copy of this file is available in the `share/sample`
 subdirectory after a normal Omniperf installation, or via the
@@ -37,7 +37,7 @@ Releasing CPU memory
 ```
 
 ## Omniperf Profiling
-The *omniperf* script, availible through the [Omniperf](https://github.com/AMDResearch/omniperf) repository, is used to aquire all necessary perfmon data through analysis of compute workloads.
+The *omniperf* script, availible through the [Omniperf](https://github.com/ROCm/omniperf) repository, is used to aquire all necessary perfmon data through analysis of compute workloads.
 
 **omniperf help:**
 ```shell-session

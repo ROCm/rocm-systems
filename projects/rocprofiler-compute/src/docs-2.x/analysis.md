@@ -12,7 +12,7 @@ While analyzing with the CLI offers quick and straightforward access to Omniperf
 See sections below for more information on each.
 
 ## CLI Analysis
-> Profiling results from the [aforementioned vcopy workload](https://amdresearch.github.io/omniperf/profiling.html#workload-compilation) will be used in the following sections to demonstrate the use of Omniperf in MI GPU performance analysis. Unless otherwise noted, the performance analysis is done on the MI200 platform.
+> Profiling results from the [aforementioned vcopy workload](https://rocm.github.io/omniperf/profiling.html#workload-compilation) will be used in the following sections to demonstrate the use of Omniperf in MI GPU performance analysis. Unless otherwise noted, the performance analysis is done on the MI200 platform.
 
 ### Features
 
@@ -266,7 +266,7 @@ Analysis mode = cli
                 2.1.30 -> L1I Fetch Latency
 ...
 ```
-3. Choose your own customized subset of metrics with `-b` (a.k.a. `--block`), or build your own config following [config_template](https://github.com/AMDResearch/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
+3. Choose your own customized subset of metrics with `-b` (a.k.a. `--block`), or build your own config following [config_template](https://github.com/ROCm/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/MI200/ -b 2
 --------
@@ -363,7 +363,7 @@ be generated directly from the command-line. This option is provided
 as an alternative for users wanting to explore profiling results
 graphically, but without the additional setup requirements or
 server-side overhead of Omniperf's detailed [Grafana
-interface](https://amdresearch.github.io/omniperf/analysis.html#grafana-based-gui)
+interface](https://rocm.github.io/omniperf/analysis.html#grafana-based-gui)
 option.  The standalone GUI analyzer is provided as simple
 [Flask](https://flask.palletsprojects.com/en/2.2.x/) application
 allowing users to view results from within a web browser.
@@ -377,7 +377,7 @@ between the desired web browser host (e.g. login node or remote workstation) and
 required. Alternatively, users may find it more convenient to download
 profiled workloads to perform analysis on their local system.
 
-See [FAQ](https://amdresearch.github.io/omniperf/faq.html) for more details on SSH tunneling.
+See [FAQ](https://rocm.github.io/omniperf/faq.html) for more details on SSH tunneling.
 ```
 
 #### Usage
@@ -437,7 +437,7 @@ Once you have applied a filter, you will also see several additional
 sections become available with detailed metrics specific to that area
 of AMD hardware. These detailed sections mirror the data displayed in
 Omniperf's [Grafana
-interface](https://amdresearch.github.io/omniperf/analysis.html#grafana-based-gui).
+interface](https://rocm.github.io/omniperf/analysis.html#grafana-based-gui).
 
 ### Grafana-based GUI
 
@@ -487,7 +487,7 @@ For example, if one wants to inspect Dispatch Range from 17 to 48, inclusive, th
 ##### Incremental Profiling
 Omniperf supports incremental profiling to significantly speed up performance analysis.
 
-> Refer to [*Hardware Component Filtering*](https://amdresearch.github.io/omniperf/profiling.html#hardware-component-filtering) section for this command.
+> Refer to [*Hardware Component Filtering*](https://rocm.github.io/omniperf/profiling.html#hardware-component-filtering) section for this command.
 
 By default, the entire application is profiled to collect performance counters for all hardware blocks, giving a complete view of where the workload stands in terms of performance optimization opportunities and bottlenecks. 
 

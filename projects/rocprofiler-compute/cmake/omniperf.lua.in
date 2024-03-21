@@ -12,7 +12,7 @@ whatis("Name: omniperf")
 whatis("Version: @OMNIPERF_FULL_VERSION@")
 whatis("Keywords: Profiling, Performance, GPU")
 whatis("Description: tool for GPU performance profiling")
-whatis("URL: https://github.com/AMDResearch/omniperf")
+whatis("URL: https://github.com/ROCm/omniperf")
 
 -- Export environmental variables
 local topDir="@CMAKE_INSTALL_PREFIX@"

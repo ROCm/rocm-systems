@@ -1,7 +1,7 @@
-[![Ubuntu 20.04](https://github.com/AMDResearch/omniperf/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omniperf/actions/workflows/ubuntu-focal.yml)
-[![RHEL 8](https://github.com/AMDResearch/omniperf/actions/workflows/opensuse.yml/badge.svg)](https://github.com/AMDResearch/omniperf/actions/workflows/opensuse.yml)
-[![MI100](https://github.com/AMDResearch/omniperf/actions/workflows/mi100.yml/badge.svg?branch=2.x)](https://github.com/AMDResearch/omniperf/actions/workflows/mi100.yml)
-[![Docs](https://github.com/AMDResearch/omniperf/actions/workflows/docs.yml/badge.svg)](https://amdresearch.github.io/omniperf/)
+[![Ubuntu 20.04](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-focal.yml)
+[![RHEL 8](https://github.com/ROCm/omniperf/actions/workflows/opensuse.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/opensuse.yml)
+[![MI100](https://github.com/ROCm/omniperf/actions/workflows/mi100.yml/badge.svg?branch=2.x)](https://github.com/ROCm/omniperf/actions/workflows/mi100.yml)
+[![Docs](https://github.com/ROCm/omniperf/actions/workflows/docs.yml/badge.svg)](https://rocm.github.io/omniperf/)
 [![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
 
 
@@ -14,7 +14,7 @@ targets usage on MI100 and MI200 accelerators.
 
 * For more information on available features, installation steps, and
 workload profiling and analysis, please refer to the online
-[documentation](https://amdresearch.github.io/omniperf).
+[documentation](https://rocm.github.io/omniperf).
 
 * Omniperf is an AMD open source research project and is not supported
 as part of the ROCm software stack. We welcome contributions and

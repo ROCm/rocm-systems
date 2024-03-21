@@ -10,7 +10,7 @@ This documentation was created to provide a detailed breakdown of all facets of 
 
 This project is proudly open source, and we welcome all feedback! For more details on how to contribute, please see our Contribution Guide.
 
-[Browse Omniperf source code on Github](https://github.com/AMDResearch/omniperf)
+[Browse Omniperf source code on Github](https://github.com/ROCm/omniperf)
 
 ## What is Omniperf
 

@@ -6,11 +6,11 @@
    :maxdepth: 4
 ```
 
-[Browse Omniperf source code on Github](https://github.com/AMDResearch/omniperf)
+[Browse Omniperf source code on Github](https://github.com/ROCm/omniperf)
 
 ## Scope
 
-MI Performance Profiler ([Omniperf](https://github.com/AMDResearch/omniperf)) is a system performance profiling tool for Machine Learning/HPC workloads running on AMD Instinct (tm) Accelerators. It is currently built on top of the [rocProfiler](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/rocprof.html) to monitor hardware performance counters. The Omniperf tool primarily targets accelerators in the MI100 and MI200 families. Development is in progress to support MI300 and Radeon (tm) RDNA (tm) GPUs.
+MI Performance Profiler ([Omniperf](https://github.com/ROCm/omniperf)) is a system performance profiling tool for Machine Learning/HPC workloads running on AMD Instinct (tm) Accelerators. It is currently built on top of the [rocProfiler](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/rocprof.html) to monitor hardware performance counters. The Omniperf tool primarily targets accelerators in the MI100 and MI200 families. Development is in progress to support MI300 and Radeon (tm) RDNA (tm) GPUs.
 
 ## Features
 

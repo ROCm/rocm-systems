@@ -29,7 +29,7 @@ project(
     VERSION ${OMNIPERF_VERSION}
     LANGUAGES C
     DESCRIPTION "OmniPerf"
-    HOMEPAGE_URL "https://github.com/AMDResearch/omniperf")
+    HOMEPAGE_URL "https://github.com/ROCm/omniperf")
 
 include(ExternalProject)
 include(GNUInstallDirs)
