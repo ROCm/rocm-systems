@@ -23,7 +23,6 @@ jobs:
     runs-on: ubuntu-latest
     container:
        image: colramos/target-images:rhel8
-       options: --user="$(id --user):$(id --group)"
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
       - name: Install baseline OS dependencies
@@ -37,6 +36,8 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Python prereqs
         run: |
+	  # https://github.com/actions/runner/issues/2033
+          chown -R $(id -u):$(id -g) $PWD
           python3.9 -m pip install -r requirements.txt
           python3.9 -m pip install pyinstaller pytest pytest-cov mock
       - name: Configure and install
