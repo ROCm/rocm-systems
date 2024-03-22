@@ -172,12 +172,10 @@ class OmniProfiler_Base:
                 msg = "Detected differing {} values while joining pmc_perf.csv".format(
                     key
                 )
-                console_warning(msg + "\n")
+                console_warning(msg)
             else:
                 msg = "Successfully joined {} in pmc_perf.csv".format(key)
-                console_debug(msg + "\n")
-            if test_df_column_equality(_df) and self.__args.verbose:
-                console_log("profiling", msg)
+                console_debug(msg)
 
         # now, we can:
         #   A) throw away any of the "boring" duplicates
