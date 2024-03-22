@@ -149,6 +149,7 @@ def show_all(args, runs, archConfigs, output):
                                             .astype(float)
                                             .round(args.decimal)
                                             .map(str)
+                                            .astype(str)
                                             + " ("
                                             + t_df_pretty.map(str)
                                             + "%)"
