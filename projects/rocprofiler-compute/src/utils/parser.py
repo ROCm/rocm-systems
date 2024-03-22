@@ -928,7 +928,9 @@ def load_kernel_top(workload, dir):
             if file.exists():
                 tmp[id] = pd.read_csv(file)
             else:
-                console_warning("Issue loading top kernels. Check pmc_kernel_top.csv")
+                console_warning(
+                    f"Couldn't load {file.name}. This may result in missing analysis data."
+                )
         # NB: Special case for sysinfo. Probably room for improvement in this whole function design
         elif "from_csv_columnwise" in df.columns and id == 101:
             tmp[id] = workload.sys_info.transpose()
@@ -946,7 +948,9 @@ def load_kernel_top(workload, dir):
                 #   so tty could detect them and show them correctly in comparison.
                 tmp[id].columns = ["Info"]
             else:
-                console_warning("Issue loading top kernels. Check pmc_kernel_top.csv")
+                console_warning(
+                    f"Couldn't load {file.name}. This may result in missing analysis data."
+                )
     workload.dfs.update(tmp)
 
 
