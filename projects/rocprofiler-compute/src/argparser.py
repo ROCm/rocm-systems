@@ -33,25 +33,11 @@ def print_avail_arch(avail_arch: list):
         ret_str += "\n\t\t   {}".format(arch)
     return ret_str
 
-
-def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
-    # -----------------------------------------
-    # Parse arguments (dependent on mode)
-    # -----------------------------------------
-
-    ## General Command Line Options
-    ## ----------------------------
+def add_general_group(parser, omniperf_version):
     general_group = parser.add_argument_group("General Options")
-    parser._positionals.title = "Modes"
-    parser._optionals.title = "Help"
+
     general_group.add_argument(
         "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
-    )
-    general_group.add_argument(
-        "-s", "--specs", action="store_true", help="Print system specs."
-    )
-    general_group.add_argument(
-        "-q", "--quiet", action="store_true", help="Run in quiet mode."
     )
     general_group.add_argument(
         "-V",
@@ -60,6 +46,25 @@ def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
         action="count",
         default=0,
     )
+    general_group.add_argument(
+        "-q", "--quiet", action="store_true", help="Run in quiet mode."
+    )
+    # Nowhere to load specs from in db mode
+    if "database" not in parser.usage:
+        general_group.add_argument(
+            "-s", "--specs", action="store_true", help="Print system specs."
+        )
+
+def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
+    # -----------------------------------------
+    # Parse arguments (dependent on mode)
+    # -----------------------------------------
+
+    ## General Command Line Options
+    ## ----------------------------
+    add_general_group(parser, omniperf_version)
+    parser._positionals.title = "Modes"
+    parser._optionals.title = "Help"
 
     subparsers = parser.add_subparsers(
         dest="mode", help="Select mode of interaction with the target application:"
@@ -91,26 +96,9 @@ Examples:
     )
     profile_parser._optionals.title = "Help"
 
-    general_group = profile_parser.add_argument_group("General Options")
+    add_general_group(profile_parser, omniperf_version)
     profile_group = profile_parser.add_argument_group("Profile Options")
     roofline_group = profile_parser.add_argument_group("Standalone Roofline Options")
-
-    general_group.add_argument(
-        "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
-    )
-    general_group.add_argument(
-        "-q", "--quiet", action="store_true", help="Run in quiet mode."
-    )
-    general_group.add_argument(
-        "-V",
-        "--verbose",
-        help="Increase output verbosity (use multiple times for higher levels)",
-        action="count",
-        default=0,
-    )
-    general_group.add_argument(
-        "-s", "--specs", action="store_true", help="Print system specs."
-    )
 
     profile_group.add_argument(
         "-n",
@@ -300,23 +288,9 @@ Examples:
     )
     db_parser._optionals.title = "Help"
 
-    general_group = db_parser.add_argument_group("General Options")
+    add_general_group(db_parser, omniperf_version)
     interaction_group = db_parser.add_argument_group("Interaction Type")
     connection_group = db_parser.add_argument_group("Connection Options")
-
-    general_group.add_argument(
-        "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
-    )
-    general_group.add_argument(
-        "-V",
-        "--verbose",
-        help="Increase output verbosity (use multiple times for higher levels)",
-        action="count",
-        default=0,
-    )
-    general_group.add_argument(
-        "-s", "--specs", action="store_true", help="Print system specs."
-    )
 
     interaction_group.add_argument(
         "-i",
@@ -407,23 +381,9 @@ Examples:
     )
     analyze_parser._optionals.title = "Help"
 
-    general_group = analyze_parser.add_argument_group("General Options")
+    add_general_group(analyze_parser, omniperf_version)
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
-
-    general_group.add_argument(
-        "-v", "--version", action="version", version=omniperf_version["ver_pretty"]
-    )
-    general_group.add_argument(
-        "-V",
-        "--verbose",
-        help="Increase output verbosity (use multiple times for higher levels)",
-        action="count",
-        default=0,
-    )
-    general_group.add_argument(
-        "-s", "--specs", action="store_true", help="Print system specs."
-    )
 
     analyze_group.add_argument(
         "-p",
