@@ -68,13 +68,13 @@ def test_memory_copy_trace(memory_copy_input_data):
     row = memory_copy_input_data[0]
     assert row["Direction"] == "HOST_TO_DEVICE"
     assert int(row["Source_Agent_Id"]) == 0
-    assert int(row["Destination_Agent_Id"]) == 1
+    assert int(row["Destination_Agent_Id"]) >= 1
     assert int(row["Correlation_Id"]) > 0
     assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
     row = memory_copy_input_data[1]
     assert row["Direction"] == "DEVICE_TO_HOST"
-    assert int(row["Source_Agent_Id"]) == 1
+    assert int(row["Source_Agent_Id"]) >= 1
     assert int(row["Destination_Agent_Id"]) == 0
     assert int(row["Correlation_Id"]) > 0
     assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])

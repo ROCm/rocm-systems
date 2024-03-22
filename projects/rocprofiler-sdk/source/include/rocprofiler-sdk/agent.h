@@ -98,7 +98,14 @@ typedef struct rocprofiler_agent_mem_bank_t
 } rocprofiler_agent_mem_bank_t;
 
 /**
- * @brief Agent (rocprofiler_agent_t stores the properties of an Agent)
+ * @brief Stores the properties of an agent (CPU, GPU, etc.)
+ *
+ * The `node_id` member is the KFD topology node id. It should be considered the "universal"
+ * indexing number. It is equivalent to the HSA-runtime HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
+ * of a `hsa_agent_t`. The `const char*` fields (`name`, `vendor_name`, etc.) are guaranteed to be
+ * valid pointers to null-terminated strings during tool finalization. Pointers to the agents via
+ * @see ::rocprofiler_query_available_agents are constant and will not be deallocated until after
+ * tool finalization. Making copies of the agent struct is also valid.
  */
 typedef struct rocprofiler_agent_v0_t
 {
@@ -187,9 +194,10 @@ typedef struct rocprofiler_agent_v0_t
                                        ///< based on the device type.
     const rocprofiler_pc_sampling_configuration_t*
              pc_sampling_configs;  ///< GPU only. Array of PC sampling configuration types.
-    uint32_t node_id;    ///< Node sequence number. This will be equivalent to the HSA-runtime
-                         ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
-    uint32_t reserved0;  ///< reserved padding
+    uint32_t node_id;         ///< Node sequence number. This will be equivalent to the HSA-runtime
+                              ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
+    int32_t logical_node_id;  ///< Logical sequence number. This will always be [0..N) where N is
+                              ///< the total number of agents
 } rocprofiler_agent_v0_t;
 
 typedef rocprofiler_agent_v0_t rocprofiler_agent_t;

@@ -56,6 +56,7 @@ struct system_info_t
 // calls, and is later used for reference when displaying the information.
 struct agent_info_t
 {
+    hsa_agent_t                       hsa_agent           = {.handle = 0};
     char                              name[64]            = {'\0'};
     char                              vendor_name[64]     = {'\0'};
     char                              device_mkt_name[64] = {'\0'};

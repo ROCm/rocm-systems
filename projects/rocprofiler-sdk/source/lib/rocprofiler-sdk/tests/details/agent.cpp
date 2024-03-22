@@ -103,6 +103,9 @@ AcquireSystemInfo(system_info_t* sys_info)
 hsa_status_t
 AcquireAgentInfoEntry(hsa_agent_t agent, agent_info_t* agent_i)
 {
+    // store the hsa_agent_t value
+    agent_i->hsa_agent = agent;
+
     hsa_status_t err;
     // Get agent name and vendor
     err = hsa_agent_get_info(agent, HSA_AGENT_INFO_NAME, agent_i->name);

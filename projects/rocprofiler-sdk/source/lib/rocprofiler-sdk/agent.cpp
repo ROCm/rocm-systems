@@ -27,18 +27,24 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
+#include <fmt/core.h>
 #include <fmt/format.h>
+#include <fmt/ranges.h>
 #include <glog/logging.h>
+#include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <libdrm/amdgpu.h>
 #include <xf86drm.h>
 
 #include <fstream>
 #include <limits>
+#include <random>
 #include <regex>
+#include <set>
 #include <shared_mutex>
 #include <sstream>
 #include <string>
@@ -90,6 +96,18 @@ get_string_entry(std::string_view name)
     return get_string_array()
         ->emplace_back(std::make_pair(_hash_v, std::make_unique<std::string>(name)))
         .second.get();
+}
+
+uint64_t
+get_agent_offset()
+{
+    static uint64_t _v = []() {
+        auto gen = std::mt19937{std::random_device{}()};
+        auto rng = std::uniform_int_distribution<uint64_t>{std::numeric_limits<uint8_t>::max(),
+                                                           std::numeric_limits<uint16_t>::max()};
+        return rng(gen);
+    }();
+    return _v;
 }
 
 struct cpu_info
@@ -377,8 +395,8 @@ read_topology()
 
     while(true)
     {
-        auto idx       = idcount++;
-        auto node_path = sysfs_nodes_path / std::to_string(idx);
+        auto node_id   = nodecount++;
+        auto node_path = sysfs_nodes_path / std::to_string(node_id);
         // assumes that nodes are monotonically increasing and thus once we are missing a node
         // folder for a number, there are no more nodes
         if(!fs::exists(node_path)) break;
@@ -403,13 +421,11 @@ read_topology()
         // we may have been able to open the properties file but if it was empty, we ignore it
         if(properties.empty()) continue;
 
-        auto agent_info = rocprofiler_agent_t{};
-        memset(&agent_info, 0, sizeof(agent_info));
-
-        agent_info.size      = sizeof(rocprofiler_agent_t);
-        agent_info.id.handle = idx;
-        agent_info.type      = ROCPROFILER_AGENT_TYPE_NONE;
-        agent_info.node_id   = nodecount++;
+        auto agent_info            = common::init_public_api_struct(rocprofiler_agent_t{});
+        agent_info.type            = ROCPROFILER_AGENT_TYPE_NONE;
+        agent_info.logical_node_id = idcount++;
+        agent_info.node_id         = node_id;
+        agent_info.id.handle       = (agent_info.logical_node_id) + get_agent_offset();
 
         if(!name_prop.empty())
             agent_info.model_name =
@@ -705,9 +721,57 @@ construct_agent_cache(::HsaApiTable* table)
         },
         &hsa_agents);
 
-    ROCP_CI_LOG_IF(ERROR, rocp_agents.size() != hsa_agents.size())
+    auto get_hsa_status_string = [table](hsa_status_t _status) -> std::string_view {
+        const char* _status_msg = nullptr;
+        return (table->core_->hsa_status_string_fn(_status, &_status_msg) == HSA_STATUS_SUCCESS &&
+                _status_msg)
+                   ? std::string_view{_status_msg}
+                   : std::string_view{"(unknown HSA error)"};
+    };
+
+    auto rocp_hsa_agent_node_ids = std::set<uint32_t>{};
+    if(rocp_agents.size() != hsa_agents.size())
+    {
+        for(auto hitr : hsa_agents)
+        {
+            auto internal_node_id = std::numeric_limits<uint32_t>::max();
+            auto ret              = table->core_->hsa_agent_get_info_fn(
+                hitr,
+                static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
+                &internal_node_id);
+
+            LOG_IF(ERROR, ret != HSA_STATUS_SUCCESS)
+                << "hsa_agent_get_info(hsa_agent_t=" << hitr.handle
+                << ", HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, ...) returned " << ret
+                << " :: " << get_hsa_status_string(ret);
+
+            if(ret == HSA_STATUS_SUCCESS)
+            {
+                {
+                    auto ret_emplace = rocp_hsa_agent_node_ids.emplace(internal_node_id).second;
+                    LOG_IF(WARNING, !ret_emplace)
+                        << "duplicate internal node id " << internal_node_id;
+                }
+
+                for(const auto* ritr : rocp_agents)
+                {
+                    if(ritr->node_id == internal_node_id)
+                    {
+                        rocp_hsa_agent_node_ids.erase(internal_node_id);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    LOG_IF(FATAL, !rocp_hsa_agent_node_ids.empty())
         << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
-        << " HSA agents";
+        << " HSA agents. HSA agents contained " << rocp_hsa_agent_node_ids.size()
+        << " internal node ids not found by rocprofiler: "
+        << fmt::format(
+               "{}",
+               fmt::join(rocp_hsa_agent_node_ids.begin(), rocp_hsa_agent_node_ids.end(), ", "));
 
     get_agent_mapping().reserve(get_agent_mapping().size() + rocp_agents.size());
 
@@ -745,7 +809,9 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
-    LOG_IF(ERROR, agent_map.size() != hsa_agents.size())
+    LOG(ERROR) << "# agent node maps: " << hsa_agent_node_map.size();
+
+    LOG_IF(FATAL, agent_map.size() != hsa_agents.size())
         << "rocprofiler was only able to map " << agent_map.size()
         << " rocprofiler agents to HSA agents, expected " << hsa_agents.size();
 
@@ -833,8 +899,10 @@ construct_agent_cache(::HsaApiTable* table)
 std::optional<hsa_agent_t>
 get_hsa_agent(const rocprofiler_agent_t* agent)
 {
+    LOG(ERROR) << "# of agent mappings: " << get_agent_mapping().size();
     for(const auto& itr : get_agent_mapping())
     {
+        LOG(ERROR) << "checking " << itr.rocp_agent->id.handle << " vs. " << agent->id.handle;
         if(itr.rocp_agent->id.handle == agent->id.handle) return itr.hsa_agent;
     }
 

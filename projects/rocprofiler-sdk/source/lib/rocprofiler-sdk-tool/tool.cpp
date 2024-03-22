@@ -311,6 +311,7 @@ using kernel_symbol_data_map_t = std::unordered_map<rocprofiler_kernel_id_t, ker
 using targeted_kernels_set_t   = std::unordered_set<rocprofiler_kernel_id_t>;
 using counter_dimension_info_map_t =
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>;
+using agent_info_map_t = std::unordered_map<rocprofiler_agent_id_t, const rocprofiler_agent_t*>;
 
 auto  code_obj_data          = common::Synchronized<code_object_data_map_t, true>{};
 auto  kernel_data            = common::Synchronized<kernel_symbol_data_map_t, true>{};
@@ -319,6 +320,7 @@ auto  target_kernels         = common::Synchronized<targeted_kernels_set_t>{};
 auto  dispatch_index         = std::atomic<uint64_t>{0};
 auto* buffered_name_info     = as_pointer(get_buffer_id_names());
 auto* callback_name_info     = as_pointer(get_callback_id_names());
+auto* agent_info             = as_pointer(agent_info_map_t{});
 
 bool
 add_kernel_target(uint64_t _kern_id)
@@ -661,7 +663,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                 tool::csv::kernel_trace_csv_encoder::write_row(
                     kernel_trace_ss,
                     CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
-                    record->agent_id.handle,
+                    agent_info->at(record->agent_id)->node_id,
                     record->queue_id.handle,
                     record->kernel_id,
                     std::move(kernel_name),
@@ -714,8 +716,8 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     CHECK_NOTNULL(buffered_name_info)
                         ->operation_names.at(record->kind)
                         .at(record->operation),
-                    record->src_agent_id.handle,
-                    record->dst_agent_id.handle,
+                    agent_info->at(record->src_agent_id)->node_id,
+                    agent_info->at(record->dst_agent_id)->node_id,
                     record->correlation_id.internal,
                     record->start_timestamp,
                     record->end_timestamp);
@@ -931,7 +933,7 @@ counter_record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_da
         csv_encoder::write_row(counter_collection_ss,
                                correlation_id.internal,
                                cnt_dispatch_data_v->dispatch_index,
-                               dispatch_data.agent_id.handle,
+                               agent_info->at(dispatch_data.agent_id)->node_id,
                                dispatch_data.queue_id.handle,
                                getpid(),
                                cnt_dispatch_data_v->thread_id,
@@ -1320,6 +1322,21 @@ rocprofiler_configure(uint32_t                 version,
                          "api registration");
         return nullptr;
     }
+
+    ROCPROFILER_CALL(
+        rocprofiler_query_available_agents(
+            ROCPROFILER_AGENT_INFO_VERSION_0,
+            [](rocprofiler_agent_version_t, const void** agents, size_t num_agents, void*) {
+                for(size_t i = 0; i < num_agents; ++i)
+                {
+                    auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[i]);
+                    agent_info->emplace(agent->id, agent);
+                }
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            sizeof(rocprofiler_agent_t),
+            nullptr),
+        "Iterate rocporfiler agents")
 
     LOG(INFO) << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";

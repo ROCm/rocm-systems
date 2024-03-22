@@ -24,11 +24,14 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tests/details/agent.hpp"
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
+#include <hsa/hsa.h>
+#include <hsa/hsa_api_trace.h>
 
 #include <pthread.h>
 #include <cstdint>
@@ -101,7 +104,7 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, num_pc_sampling_configs), 280) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, pc_sampling_configs), 288) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, node_id), 296) << msg;
-    EXPECT_EQ(offsetof(rocprofiler_agent_t, reserved0), 300) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_id), 300) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
     constexpr auto expected_rocp_agent_size = 304;
@@ -145,7 +148,6 @@ TEST(rocprofiler_lib, agent)
         if(agents_ver != ROCPROFILER_AGENT_INFO_VERSION_0) return ROCPROFILER_STATUS_ERROR;
 
         auto* agents_v = static_cast<std::vector<const rocprofiler_agent_t*>*>(user_data);
-        // EXPECT_EQ(num_agents, hsa_agents_v.size());
         for(size_t i = 0; i < num_agents; ++i)
         {
             const auto* agent = static_cast<const rocprofiler_agent_t*>(agents_arr[i]);
@@ -153,6 +155,26 @@ TEST(rocprofiler_lib, agent)
         }
         return ROCPROFILER_STATUS_SUCCESS;
     };
+
+    hsa_init();
+    {
+        auto table         = ::HsaApiTable{};
+        auto core_table    = ::CoreApiTable{};
+        auto amd_ext_table = ::AmdExtTable{};
+
+        memset(&table, 0, sizeof(table));
+        memset(&core_table, 0, sizeof(core_table));
+        memset(&amd_ext_table, 0, sizeof(amd_ext_table));
+
+        core_table.hsa_iterate_agents_fn                    = &hsa_iterate_agents;
+        core_table.hsa_status_string_fn                     = &hsa_status_string;
+        core_table.hsa_agent_get_info_fn                    = &hsa_agent_get_info;
+        amd_ext_table.hsa_amd_agent_iterate_memory_pools_fn = &hsa_amd_agent_iterate_memory_pools;
+        amd_ext_table.hsa_amd_memory_pool_get_info_fn       = &hsa_amd_memory_pool_get_info;
+        table.core_                                         = &core_table;
+        table.amd_ext_                                      = &amd_ext_table;
+        rocprofiler::agent::construct_agent_cache(&table);
+    }
 
     std::cout << "# querying available agents...\n" << std::flush;
     auto status =
@@ -168,10 +190,12 @@ TEST(rocprofiler_lib, agent)
 
     auto& hsa_agents_v = _rocm_info.agents;
 
-    ASSERT_EQ(agents.size(), hsa_agents_v.size());
-    for(size_t i = 0; i < agents.size(); ++i)
+    EXPECT_GE(agents.size(), hsa_agents_v.size());
+
+    uint64_t skipped = 0;
+    for(const auto* agent : agents)
     {
-        const auto* agent = agents.at(i);
+        ASSERT_NE(agent, nullptr);
 
         auto msg = fmt::format("name={}, model={}, gfx version={}, id={}, type={}",
                                agent->name,
@@ -180,11 +204,26 @@ TEST(rocprofiler_lib, agent)
                                agent->node_id,
                                agent->type == ROCPROFILER_AGENT_TYPE_CPU ? "CPU" : "GPU");
 
-        // std::cout << msg << std::endl;
-        EXPECT_LT(i, hsa_agents_v.size()) << msg;
-        if(i >= hsa_agents_v.size()) continue;
+        rocprofiler::test::agent_info_t* hsa_agent = nullptr;
+        {
+            auto _hsa_agent = rocprofiler::agent::get_hsa_agent(agent);
 
-        auto* hsa_agent = &hsa_agents_v.at(i);
+            if(!_hsa_agent)
+            {
+                ++skipped;
+                continue;
+            }
+
+            for(auto& hitr : hsa_agents_v)
+            {
+                if(_hsa_agent && _hsa_agent->handle == hitr.hsa_agent.handle)
+                {
+                    hsa_agent = &hitr;
+                    break;
+                }
+            }
+            ASSERT_NE(hsa_agent, nullptr) << msg;
+        }
 
         if(agent->type == ROCPROFILER_AGENT_TYPE_CPU)
         {
@@ -237,6 +276,8 @@ TEST(rocprofiler_lib, agent)
                 << msg;
         }
     }
+
+    EXPECT_EQ(skipped, (agents.size() - hsa_agents_v.size()));
 
     // clean up memory leak
     for(auto& itr : _rocm_info.isas)

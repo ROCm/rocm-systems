@@ -487,6 +487,7 @@ save(ArchiveT& ar, const rocprofiler_agent_t& data)
     SAVE_DATA_CSTR(model_name);
     SAVE_DATA_FIELD(num_pc_sampling_configs);
     SAVE_DATA_FIELD(node_id);
+    SAVE_DATA_FIELD(logical_node_id);
 
     auto generate = [&](auto name, const auto* value, uint64_t size) {
         using value_type = std::remove_const_t<std::remove_pointer_t<decltype(value)>>;
