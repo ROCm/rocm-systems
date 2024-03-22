@@ -106,7 +106,10 @@ class OmniProfiler_Base:
         if type(self.__args.path) == str:
             if out is None:
                 out = self.__args.path + "/pmc_perf.csv"
+            # we sort so that we have a consistent ordering of files between runs
+            # regardless of the file-system, etc.
             files = glob.glob(self.__args.path + "/" + "pmc_perf_*.csv")
+            file.sort()
         elif type(self.__args.path) == list:
             files = self.__args.path
         else:
@@ -339,6 +342,8 @@ class OmniProfiler_Base:
             disable_tqdm = False
 
         # Run profiling on each input file
+        # we sort so that we have a consistent ordering of files between runs
+        # regardless of the file-system, etc.
         input_files = glob.glob(self.get_args().path + "/perfmon/*.txt")
         input_files.sort()
 
