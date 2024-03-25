@@ -8,12 +8,11 @@ jobs:
   git-mirror:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: net-engine/github-repository-sync-action@v1
+      - name: git-sync
+        uses: wei/git-sync@v3
         with:
-          # The SSH private key for SSH connection to the target repository.
-          # We strongly recommend saving this value as a GitHub Secret and using deploy
-          # keys within the target repository
+          source_repo: "git@github.com:ROCm/rocprofiler-register-internal.git"
+          source_branch: "amd-staging"
+          destination_repo: "git@github.com:ROCm/rocprofiler-register.git"
+          destination_branch: "amd-staging"
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # The SSH-based URL to the target repository
-          target_repo_url: git@github.com:ROCm/rocprofiler-register.git
