@@ -24,8 +24,7 @@
 
 import os
 from omniperf_profile.profiler_base import OmniProfiler_Base
-from utils.utils import demarcate, console_log
-from utils.kernel_name_shortener import kernel_name_shortener
+from utils.utils import demarcate, console_log, replace_timestamps
 
 
 class rocprof_v2_profiler(OmniProfiler_Base):
@@ -81,5 +80,7 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         super().post_processing()
 
         if self.ready_to_profile:
-            # Pass headers to join on
+            # Manually join each pmc_perf*.csv output
             self.join_prof()
+            # Replace timestamp data to solve a known rocprof bug
+            replace_timestamps(self.get_args().path)

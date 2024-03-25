@@ -33,6 +33,7 @@ def print_avail_arch(avail_arch: list):
         ret_str += "\n\t\t   {}".format(arch)
     return ret_str
 
+
 def add_general_group(parser, omniperf_version):
     general_group = parser.add_argument_group("General Options")
 
@@ -54,6 +55,7 @@ def add_general_group(parser, omniperf_version):
         general_group.add_argument(
             "-s", "--specs", action="store_true", help="Print system specs."
         )
+
 
 def omniarg_parser(parser, omniperf_home, supported_archs, omniperf_version):
     # -----------------------------------------
