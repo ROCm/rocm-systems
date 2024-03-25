@@ -2,4 +2,4 @@ pmc:  TCC_ATOMIC[0] TCC_CYCLE[0] TCC_EA_ATOMIC[0] TCC_EA_ATOMIC_LEVEL[0] TCC_ATO
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

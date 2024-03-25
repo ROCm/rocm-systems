@@ -35,7 +35,7 @@ jobs:
       - name: Install Python prereqs
         run: |
           python3 -m pip install -r requirements.txt
-          python3 -m pip install pyinstaller pytest pytest-cov mock
+          python3 -m pip install pyinstaller pytest pytest-cov mock pytest-xdist
       - name: Configure and install
         run: |
           mkdir build

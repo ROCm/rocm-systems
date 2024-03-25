@@ -2,4 +2,4 @@ pmc:  SQ_INSTS_SMEM_NORM SQ_INSTS_MFMA SQ_INSTS_VALU_MFMA_I8 SQ_INSTS_VALU_MFMA_
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

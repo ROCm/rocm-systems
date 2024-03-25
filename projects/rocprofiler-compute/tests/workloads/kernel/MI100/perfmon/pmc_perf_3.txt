@@ -2,4 +2,4 @@ pmc:  SQC_DCACHE_REQ_READ_2 SQC_DCACHE_REQ_READ_4 SQ_INSTS_VMEM_WR SQ_INSTS_VMEM
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

@@ -2,4 +2,4 @@ pmc:  SQ_LDS_BANK_CONFLICT SQ_LDS_ADDR_CONFLICT SQ_LDS_UNALIGNED_STALL SQ_WAVES_
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

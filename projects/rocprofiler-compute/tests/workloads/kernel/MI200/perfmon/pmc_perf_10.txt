@@ -2,4 +2,4 @@ pmc:  SQC_TC_DATA_WRITE_REQ SQC_TC_DATA_ATOMIC_REQ SQC_TC_STALL SQC_TC_REQ SQC_D
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

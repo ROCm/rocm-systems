@@ -2,4 +2,4 @@ pmc:  SQ_ITEMS SQ_LDS_MEM_VIOLATIONS SQ_LDS_ATOMIC_RETURN SQ_LDS_IDX_ACTIVE SQ_W
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

@@ -21,57 +21,27 @@ omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
 ##################################################
 
 
-def test_device_inv_int_MI100():
+def test_analyze_ipblocks_SQ_TA_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/device_inv_int/MI100"],
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ_TA/MI100"],
         ):
             omniperf.main()
     assert e.value.code == 0
 
 
-def test_dispatch_0_1_MI100():
+def test_analyze_ipblocks_SQ_TA_MI200():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_0_1/MI100"],
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ_TA/MI200"],
         ):
             omniperf.main()
     assert e.value.code == 0
 
 
-def test_dispatch_0_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_0/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_dispatch_2_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_2/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_dispatch_6_8_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_6_8/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 1
-
-
-def test_dispatch_7_MI100():
+def test_analyze_dispatch_7_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -81,27 +51,72 @@ def test_dispatch_7_MI100():
     assert e.value.code == 1
 
 
-def test_dispatch_invalid_MI100():
+def test_analyze_dispatch_7_MI200():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_invalid/MI100"],
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_7/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 1
+
+
+def test_analyze_kernel_substr_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/kernel_substr/MI100"],
         ):
             omniperf.main()
     assert e.value.code == 0
 
 
-def test_ipblocks_CPC_MI100():
+def test_analyze_kernel_substr_MI200():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_CPC/MI100"],
+            ["omniperf", "analyze", "--path", "tests/workloads/kernel_substr/MI200"],
         ):
             omniperf.main()
     assert e.value.code == 0
 
 
-def test_ipblocks_CPF_MI100():
+def test_analyze_dispatch_6_8_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_6_8/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 1
+
+
+def test_analyze_dispatch_6_8_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_6_8/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 1
+
+
+def test_analyze_mem_levels_L2_vL1d_LDS_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            [
+                "omniperf",
+                "analyze",
+                "--path",
+                "tests/workloads/mem_levels_L2_vL1d_LDS/MI200",
+            ],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_CPF_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -111,47 +126,17 @@ def test_ipblocks_CPF_MI100():
     assert e.value.code == 0
 
 
-def test_ipblocks_SPI_MI100():
+def test_analyze_ipblocks_CPF_MI200():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SPI/MI100"],
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_CPF/MI200"],
         ):
             omniperf.main()
     assert e.value.code == 0
 
 
-def test_ipblocks_SQC_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQC/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_ipblocks_SQ_CPC_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ_CPC/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_ipblocks_SQ_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_ipblocks_SQ_SPI_MI100():
+def test_analyze_ipblocks_SQ_SPI_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -161,7 +146,358 @@ def test_ipblocks_SQ_SPI_MI100():
     assert e.value.code == 0
 
 
-def test_ipblocks_SQ_SPI_TA_TCC_CPF_MI100():
+def test_analyze_ipblocks_SQ_SPI_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ_SPI/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQ_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQ_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_no_roof_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv", ["omniperf", "analyze", "--path", "tests/workloads/no_roof/MI100"]
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_no_roof_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv", ["omniperf", "analyze", "--path", "tests/workloads/no_roof/MI200"]
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_join_type_grid_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/join_type_grid/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_join_type_grid_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/join_type_grid/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQC_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQC/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQC_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQC/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TCP_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TCP/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TCP_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TCP/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TA_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TA/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TA_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TA/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TCC_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TCC/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TCC_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TCC/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TD_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TD/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_TD_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TD/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_0_1_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_0_1/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_0_1_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_0_1/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_inv_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_inv/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_inv_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_inv/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_device_inv_int_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/device_inv_int/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_device_inv_int_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/device_inv_int/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_mem_levels_HBM_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/mem_levels_HBM/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_mem_levels_L2_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/mem_levels_L2/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_device_filter_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/device_filter/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_device_filter_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/device_filter/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SPI_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SPI/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SPI_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SPI/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_mem_levels_vL1d_LDS_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            [
+                "omniperf",
+                "analyze",
+                "--path",
+                "tests/workloads/mem_levels_vL1d_LDS/MI200",
+            ],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_mem_levels_vL1D_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/mem_levels_vL1D/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_kernel_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv", ["omniperf", "analyze", "--path", "tests/workloads/kernel/MI100"]
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_kernel_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv", ["omniperf", "analyze", "--path", "tests/workloads/kernel/MI200"]
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_join_type_kernel_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/join_type_kernel/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_join_type_kernel_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/join_type_kernel/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -176,7 +512,82 @@ def test_ipblocks_SQ_SPI_TA_TCC_CPF_MI100():
     assert e.value.code == 0
 
 
-def test_ipblocks_SQ_SQC_TCP_CPC_MI100():
+def test_analyze_ipblocks_SQ_SPI_TA_TCC_CPF_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            [
+                "omniperf",
+                "analyze",
+                "--path",
+                "tests/workloads/ipblocks_SQ_SPI_TA_TCC_CPF/MI200",
+            ],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_kernel_inv_str_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/kernel_inv_str/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 1
+
+
+def test_analyze_kernel_inv_str_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/kernel_inv_str/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 1
+
+
+def test_analyze_kernel_inv_int_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/kernel_inv_int/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 1
+
+
+def test_analyze_kernel_inv_int_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/kernel_inv_int/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 1
+
+
+def test_analyze_mem_levels_HBM_LDS_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/mem_levels_HBM_LDS/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_sort_dispatches_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/sort_dispatches/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
@@ -191,188 +602,144 @@ def test_ipblocks_SQ_SQC_TCP_CPC_MI100():
     assert e.value.code == 0
 
 
-def test_ipblocks_SQ_TA_MI100():
+def test_analyze_ipblocks_SQ_SQC_TCP_CPC_MI200():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ_TA/MI100"],
+            [
+                "omniperf",
+                "analyze",
+                "--path",
+                "tests/workloads/ipblocks_SQ_SQC_TCP_CPC/MI200",
+            ],
         ):
             omniperf.main()
     assert e.value.code == 0
 
 
-def test_ipblocks_TA_MI100():
+def test_analyze_kernel_names_MI200():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TA/MI100"],
+            ["omniperf", "analyze", "--path", "tests/workloads/kernel_names/MI200"],
         ):
             omniperf.main()
     assert e.value.code == 0
 
 
-def test_ipblocks_TCC_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TCC/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_ipblocks_TCP_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TCP/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_ipblocks_TD_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_TD/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_join_type_grid_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/join_type_grid/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_join_type_kernel_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/join_type_kernel/MI100"],
-        ):
-            omniperf.main()
-
-
-def test_kernel_inv_int_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_inv_int/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 1
-
-
-def test_kernel_inv_str_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_inv_str/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 1
-
-
-def test_kernel_substr_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_substr/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_kernel_summaries_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_summaries/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_kernel_verbose_0_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_verbose_0/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_kernel_verbose_1_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_verbose_1/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_kernel_verbose_2_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_verbose_2/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_kernel_verbose_3_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_verbose_3/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_kernel_verbose_4_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_verbose_4/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_kernel_verbose_5_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv",
-            ["omniperf", "analyze", "--path", "tests/workloads/kernel_verbose_5/MI100"],
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_no_roof_MI100():
-    with pytest.raises(SystemExit) as e:
-        with patch(
-            "sys.argv", ["omniperf", "analyze", "--path", "tests/workloads/no_roof/MI100"]
-        ):
-            omniperf.main()
-    assert e.value.code == 0
-
-
-def test_path_MI100():
+def test_analyze_path_MI100():
     with pytest.raises(SystemExit) as e:
         with patch(
             "sys.argv", ["omniperf", "analyze", "--path", "tests/workloads/path/MI100"]
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_path_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv", ["omniperf", "analyze", "--path", "tests/workloads/path/MI200"]
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_sort_kernels_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/sort_kernels/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_0_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_0/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_0_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_0/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQ_CPC_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ_CPC/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_SQ_CPC_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_SQ_CPC/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_2_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_2/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_dispatch_2_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/dispatch_2/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_CPC_MI100():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_CPC/MI100"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_ipblocks_CPC_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/ipblocks_CPC/MI200"],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+
+def test_analyze_mem_levels_LDS_MI200():
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            ["omniperf", "analyze", "--path", "tests/workloads/mem_levels_LDS/MI200"],
         ):
             omniperf.main()
     assert e.value.code == 0

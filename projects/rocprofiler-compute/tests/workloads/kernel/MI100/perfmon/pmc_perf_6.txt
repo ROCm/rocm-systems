@@ -2,4 +2,4 @@ pmc:  SQ_ACTIVE_INST_MISC SQ_ACTIVE_INST_FLAT SQ_INST_CYCLES_VMEM_WR SQ_INST_CYC
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

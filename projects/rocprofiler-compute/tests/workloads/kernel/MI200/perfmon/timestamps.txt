@@ -2,4 +2,4 @@ pmc:
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

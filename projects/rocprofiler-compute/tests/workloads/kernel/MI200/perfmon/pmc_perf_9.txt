@@ -2,4 +2,4 @@ pmc:  SQ_INSTS_FLAT_LDS_ONLY SQ_INSTS_VALU_MFMA_MOPS_I8 SQ_INSTS_VALU_MFMA_MOPS_
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

@@ -2,4 +2,4 @@ pmc:  SQ_INSTS_FLAT SQ_INSTS_LDS SQ_INSTS_GDS SQ_INSTS_EXP_GDS SQ_INSTS_BRANCH S
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

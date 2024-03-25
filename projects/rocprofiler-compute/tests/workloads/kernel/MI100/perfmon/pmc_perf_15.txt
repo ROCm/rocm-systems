@@ -2,4 +2,4 @@ pmc:  TCC_HIT[0] TCC_MISS[0] TCC_READ[0] TCC_REQ[0] TCC_HIT[1] TCC_MISS[1] TCC_R
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

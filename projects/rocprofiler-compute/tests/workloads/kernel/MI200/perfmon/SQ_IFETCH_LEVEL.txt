@@ -2,4 +2,4 @@ pmc: GRBM_COUNT GRBM_GUI_ACTIVE SQ_WAVES SQ_IFETCH SQ_IFETCH_LEVEL  SQ_ACCUM_PRE
 
 gpu:
 range:
-kernel: "vecCopy(double*,,double*,,double*,,int,,int),[clone,.kd]"
+kernel: vecCopy

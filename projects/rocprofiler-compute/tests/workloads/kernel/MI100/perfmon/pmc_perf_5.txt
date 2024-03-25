@@ -2,4 +2,4 @@ pmc:  SQ_WAIT_INST_ANY SQ_ACTIVE_INST_ANY SQ_INSTS_VALU SQ_ACTIVE_INST_VMEM SQ_A
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

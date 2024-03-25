@@ -2,4 +2,4 @@ pmc:  TCC_RW_REQ[0] TCC_TOO_MANY_EA_WRREQS_STALL[0] TCC_WRITE[0] TCC_RW_REQ[1] T
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

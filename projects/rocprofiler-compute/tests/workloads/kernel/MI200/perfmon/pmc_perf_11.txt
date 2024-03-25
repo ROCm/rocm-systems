@@ -2,4 +2,4 @@ pmc:  SQC_ICACHE_MISSES_DUPLICATE SQC_DCACHE_INPUT_VALID_READYB SQC_DCACHE_ATOMI
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

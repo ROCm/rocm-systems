@@ -2,4 +2,4 @@ pmc:  SQ_THREAD_CYCLES_VALU SQ_IFETCH SQ_LDS_BANK_CONFLICT SQ_LDS_ADDR_CONFLICT 
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

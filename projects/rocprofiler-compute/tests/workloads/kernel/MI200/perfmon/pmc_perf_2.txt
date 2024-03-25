@@ -2,4 +2,4 @@ pmc:  SQ_INSTS_VALU_MUL_F32 SQ_INSTS_VALU_FMA_F32 SQ_INSTS_VALU_TRANS_F32 SQ_INS
 
 gpu:
 range:
-kernel:
+kernel: vecCopy

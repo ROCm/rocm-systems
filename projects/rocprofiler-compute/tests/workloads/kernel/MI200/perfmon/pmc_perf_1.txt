@@ -2,4 +2,4 @@ pmc:  SQ_INSTS_VSKIPPED SQ_INSTS SQ_INSTS_VALU SQ_INSTS_VALU_ADD_F16 SQ_INSTS_VA
 
 gpu:
 range:
-kernel:
+kernel: vecCopy
