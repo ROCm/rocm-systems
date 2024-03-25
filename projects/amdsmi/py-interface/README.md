@@ -580,7 +580,7 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`fw_list`| List of dictionaries that contain information about a certain firmware block
+`fw_list` | List of dictionaries that contain information about a certain firmware block
 
 Exceptions that can be thrown by `amdsmi_get_fw_info` function:
 
@@ -619,7 +619,7 @@ Output: Dictionary of activites to their respective usage percentage or 'N/A' if
 
 Field | Description
 ---|---
-`gfx_activity`| graphics engine usage percentage (0 - 100)
+`gfx_activity` | graphics engine usage percentage (0 - 100)
 `umc_activity` | memory engine usage percentage (0 - 100)
 `mm_activity` | average multimedia engine usages in percentage (0 - 100)
 
@@ -659,7 +659,7 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`average_socket_power`| average socket power
+`average_socket_power` | average socket power
 `gfx_voltage` | voltage gfx
 `power_limit` | power limit
 
@@ -699,7 +699,7 @@ Output: Dictionary with fields
 Field | Description
 ---|---
 `vram_total` | VRAM total
-`vram_used`| VRAM currently in use
+`vram_used` | VRAM currently in use
 
 Exceptions that can be thrown by `amdsmi_get_gpu_vram_usage` function:
 
@@ -751,7 +751,7 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`cur_clk`| Current clock for given clock type
+`cur_clk` | Current clock for given clock type
 `max_clk` | Maximum clock for given clock type
 `min_clk` | Minimum clock for given clock type
 
@@ -780,20 +780,19 @@ except AmdSmiException as e:
 
 ### amdsmi_get_pcie_info
 
-Description: Returns the pcie link status for the given GPU.
+Description: Returns the pcie metric and static information for the given GPU.
 It is not supported on virtual machine guest
 
 Input parameters:
 
 * `processor_handle` device which to query
 
-Output: Dictionary with fields
+Output: Dictionary with 2 fields `pcie_static` and `pcie_metric`
 
-Field | Description
+Fields | Description
 ---|---
-`pcie_width`| pcie lanes in use
-`pcie_speed`| current pcie speed
-`pcie_interface_version`| current pcie generation
+`pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in GT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: PCIE, OAM, or Unknown</td></tr></tbody></table>
+`pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed capable in GT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
 
@@ -810,10 +809,9 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            pcie_link_status = amdsmi_get_pcie_info(device)
-            print(pcie_link_status["pcie_width"])
-            print(pcie_link_status["pcie_speed"])
-            print(pcie_link_status["pcie_interface_version"])
+            pcie_info = amdsmi_get_pcie_info(device)
+            print(pcie_info["pcie_static"])
+            print(pcie_info["pcie_metric"])
 except AmdSmiException as e:
     print(e)
 ```
@@ -949,8 +947,8 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`correctable_count`| Correctable ECC error count
-`uncorrectable_count`| Uncorrectable ECC error count
+`correctable_count` | Correctable ECC error count
+`uncorrectable_count` | Uncorrectable ECC error count
 
 Exceptions that can be thrown by `amdsmi_get_gpu_total_ecc_count` function:
 
@@ -2021,9 +2019,9 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`num_supported`| The number of supported frequencies
-`current`| The current frequency index
-`frequency`| List of frequencies, only the first num_supported frequencies are valid
+`num_supported` | The number of supported frequencies
+`current` | The current frequency index
+`frequency` | List of frequencies, only the first num_supported frequencies are valid
 
 Exceptions that can be thrown by `amdsmi_get_clk_freq` function:
 
@@ -2062,8 +2060,8 @@ Field | Description
 `curr_mclk_range` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range</td></tr></tbody></table>
 `sclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range limt</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range limit</td></tr></tbody></table>
 `mclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range limit</td></tr></tbody></table>
-`curve.vc_points`| The number of supported frequencies
-`num_regions`| The current frequency index
+`curve.vc_points` | The number of supported frequencies
+`num_regions` | The current frequency index
 
 Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_info` function:
 
@@ -2228,9 +2226,9 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`available_profiles`| Which profiles are supported by this system
-`current`| Which power profile is currently active
-`num_profiles`| How many power profiles are available
+`available_profiles` | Which profiles are supported by this system
+`current` | Which power profile is currently active
+`num_profiles` | How many power profiles are available
 
 Exceptions that can be thrown by `amdsmi_get_gpu_power_profile_presets` function:
 
@@ -2391,9 +2389,9 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`value`| Counter value
-`time_enabled`| Time that the counter was enabled in nanoseconds
-`time_running`| Time that the counter was running in nanoseconds
+`value` | Counter value
+`time_enabled` | Time that the counter was enabled in nanoseconds
+`time_running` | Time that the counter was running in nanoseconds
 
 Exceptions that can be thrown by `amdsmi_gpu_read_counter` function:
 
@@ -2661,8 +2659,8 @@ Output: Dict containing information about error counts
 
 Field | Description
 ---|---
-`correctable_count`| Count of correctable errors
-`uncorrectable_count`| Count of uncorrectable errors
+`correctable_count` | Count of correctable errors
+`uncorrectable_count` | Count of uncorrectable errors
 
 Exceptions that can be thrown by `amdsmi_get_gpu_ecc_count` function:
 

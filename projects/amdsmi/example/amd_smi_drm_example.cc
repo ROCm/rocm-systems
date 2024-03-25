@@ -411,6 +411,14 @@ int main() {
             printf("\tPCIe max lanes: %d\n", pcie_info.pcie_static.max_pcie_width);
             printf("\tPCIe max speed: %d\n", pcie_info.pcie_static.max_pcie_speed);
 
+            // additional pcie related metrics
+            printf("\tPCIe bandwidth: %d\n", pcie_info.pcie_metric.pcie_bandwidth);
+            printf("\tPCIe replay count: %d\n", pcie_info.pcie_metric.pcie_replay_count);
+            printf("\tPCIe L0 recovery count: %d\n", pcie_info.pcie_metric.pcie_l0_to_recovery_count);
+            printf("\tPCIe rollover count: %d\n", pcie_info.pcie_metric.pcie_replay_roll_over_count);
+            printf("\tPCIe nak received count: %d\n", pcie_info.pcie_metric.pcie_nak_received_count);
+            printf("\tPCIe nak sent count: %d\n", pcie_info.pcie_metric.pcie_nak_sent_count);
+
             // Get VRAM temperature limit
             int64_t temperature = 0;
             ret = amdsmi_get_temp_metric(

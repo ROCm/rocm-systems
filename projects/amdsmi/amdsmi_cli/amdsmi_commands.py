@@ -361,25 +361,17 @@ class AMDSMICommands():
                 logging.debug("Failed to get bdf for gpu %s | %s", gpu_id, e.get_error_info())
 
             try:
-                link_caps = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)
-                bus_info['max_pcie_width'] = link_caps['pcie_static']['max_pcie_width']
-                bus_info['max_pcie_speed'] = link_caps['pcie_static']['max_pcie_speed']
-                bus_info['pcie_interface_version'] = link_caps['pcie_static']['pcie_interface_version']
-
+                pcie_static = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)['pcie_static']
+                bus_info['max_pcie_width'] = pcie_static['max_pcie_width']
+                bus_info['max_pcie_speed'] = pcie_static['max_pcie_speed']
+                bus_info['pcie_interface_version'] = pcie_static['pcie_interface_version']
+                bus_info['slot_type'] = pcie_static['slot_type']
                 if bus_info['max_pcie_speed'] % 1000 != 0:
                     pcie_speed_GTs_value = round(bus_info['max_pcie_speed'] / 1000, 1)
                 else:
                     pcie_speed_GTs_value = round(bus_info['max_pcie_speed'] / 1000)
 
                 bus_info['max_pcie_speed'] = pcie_speed_GTs_value
-
-                slot_type = link_caps['pcie_static']['slot_type']
-                if isinstance(slot_type, int):
-                    slot_types = amdsmi_interface.amdsmi_wrapper.amdsmi_card_form_factor_t__enumvalues
-                    if slot_type in slot_types:
-                        bus_info['slot_type'] = slot_types[slot_type].replace("AMDSMI_CARD_FORM_FACTOR_", "")
-                    else:
-                        bus_info['slot_type'] = "Unknown"
 
                 if bus_info['pcie_interface_version'] > 0:
                     bus_info['pcie_interface_version'] = f"Gen {bus_info['pcie_interface_version']}"
@@ -636,7 +628,7 @@ class AMDSMICommands():
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     policy_info = "N/A"
                     logging.debug("Failed to get policy info for gpu %s | %s", gpu_id, e.get_error_info())
-                
+
                 static_dict['dpm_policy'] = policy_info
         if 'numa' in current_platform_args:
             if args.numa:
@@ -1460,6 +1452,7 @@ class AMDSMICommands():
             if args.pcie:
                 pcie_dict = {"width": "N/A",
                              "speed": "N/A",
+                             "bandwidth": "N/A",
                              "replay_count" : "N/A",
                              "l0_to_recovery_count" : "N/A",
                              "replay_roll_over_count" : "N/A",
@@ -1470,64 +1463,42 @@ class AMDSMICommands():
                              "max_packet_size": "N/A"}
 
                 try:
-                    pcie_link_status = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)
+                    pcie_metric = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)['pcie_metric']
+                    logging.debug("PCIE Metric for %s | %s", gpu_id, pcie_metric)
 
-                    if pcie_link_status['pcie_metric']['pcie_speed'] % 1000 != 0:
-                        pcie_speed_GTs_value = round(pcie_link_status['pcie_metric']['pcie_speed'] / 1000, 1)
-                    else:
-                        pcie_speed_GTs_value = round(pcie_link_status['pcie_metric']['pcie_speed'] / 1000)
+                    pcie_dict['width'] = pcie_metric['pcie_width']
 
-                    pcie_dict['width'] = pcie_link_status['pcie_metric']['pcie_width']
-                    pcie_dict['speed'] = pcie_speed_GTs_value
+                    if pcie_metric['pcie_speed'] != "N/A":
+                        if pcie_metric['pcie_speed'] % 1000 != 0:
+                            pcie_speed_GTs_value = round(pcie_metric['pcie_speed'] / 1000, 1)
+                        else:
+                            pcie_speed_GTs_value = round(pcie_metric['pcie_speed'] / 1000)
+                        pcie_dict['speed'] = pcie_speed_GTs_value
+
+                    pcie_dict['bandwidth'] = pcie_metric['pcie_bandwidth']
+                    pcie_dict['replay_count'] = pcie_metric['pcie_replay_count']
+                    pcie_dict['l0_to_recovery_count'] = pcie_metric['pcie_l0_to_recovery_count']
+                    pcie_dict['replay_roll_over_count'] = pcie_metric['pcie_replay_roll_over_count']
+                    pcie_dict['nak_received_count'] = pcie_metric['pcie_nak_received_count']
+                    pcie_dict['nak_sent_count'] = pcie_metric['pcie_nak_sent_count']
 
                     pcie_speed_unit = 'GT/s'
+                    pcie_bw_unit = 'Mb/s'
                     if self.logger.is_human_readable_format():
-                        pcie_dict['speed'] = f"{pcie_dict['speed']} {pcie_speed_unit}"
+                        if pcie_dict['speed'] != "N/A":
+                            pcie_dict['speed'] = f"{pcie_dict['speed']} {pcie_speed_unit}"
+                        if pcie_dict['bandwidth'] != "N/A":
+                            pcie_dict['bandwidth'] = f"{pcie_dict['bandwidth']} {pcie_bw_unit}"
                     if self.logger.is_json_format():
-                        pcie_dict['speed'] = {"value" : pcie_dict['speed'],
-                                              "unit" : pcie_speed_unit}
+                        if pcie_dict['speed'] != "N/A":
+                            pcie_dict['speed'] = {"value" : pcie_dict['speed'],
+                                                  "unit" : pcie_speed_unit}
+                        if pcie_dict['bandwidth'] != "N/A":
+                            pcie_dict['bandwidth'] = {"value" : pcie_dict['bandwidth'],
+                                                      "unit" : pcie_bw_unit}
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get pcie link status for gpu %s | %s", gpu_id, e.get_error_info())
-
-                try:
-                    pci_replay_counter = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['pcie_replay_count_acc']
-                    if pci_replay_counter == "N/A":
-                        # raising exception here to fall back to sysfs
-                        raise amdsmi_exception.AmdSmiLibraryException(amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
-                    pcie_dict['replay_count'] = pci_replay_counter
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    logging.debug("Failed to get pci replay counter for gpu %s | %s", gpu_id, e.get_error_info())
-                    logging.debug("Falling back to sysfs pci replay counter for gpu %s | %s", gpu_id, e.get_error_info())
-                    try:
-                        pci_replay_counter = amdsmi_interface.amdsmi_get_gpu_pci_replay_counter(args.gpu)
-                        pcie_dict['replay_count'] = pci_replay_counter
-                    except amdsmi_exception.AmdSmiLibraryException as err:
-                        pcie_dict['replay_count'] = "N/A"
-                        logging.debug("Failed to get sysfs fallback pci replay counter for gpu %s | %s", gpu_id, err.get_error_info())
-
-                try:
-                    l0_to_recovery_counter = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['pcie_l0_to_recov_count_acc']
-                    pcie_dict['l0_to_recovery_count'] = l0_to_recovery_counter
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    pcie_dict['l0_to_recovery_count'] = "N/A"
-                    logging.debug("Failed to get pcie l0 to recovery counter for gpu %s | %s", gpu_id, e.get_error_info())
-
-                try:
-                    pci_replay_rollover_counter = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['pcie_replay_rover_count_acc']
-                    pcie_dict['replay_roll_over_count'] = pci_replay_rollover_counter
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    pcie_dict['replay_roll_over_count'] = "N/A"
-                    logging.debug("Failed to get pcie replay rollover counter for gpu %s | %s", gpu_id, e.get_error_info())
-
-                try:
-                    gpu_metrics_info = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)
-                    pcie_dict['nak_sent_count'] = gpu_metrics_info['pcie_nak_sent_count_acc']
-                    pcie_dict['nak_received_count'] = gpu_metrics_info['pcie_nak_rcvd_count_acc']
-                except amdsmi_exception.AmdSmiLibraryException as e:
-                    pcie_dict['nak_sent_count'] = "N/A"
-                    pcie_dict['nak_received_count'] = "N/A"
-                    logging.debug("Failed to get pcie nak info for gpu %s | %s", gpu_id, e.get_error_info())
 
                 try:
                     pcie_bw = amdsmi_interface.amdsmi_get_gpu_pci_throughput(args.gpu)
@@ -2511,6 +2482,8 @@ class AMDSMICommands():
         if args.pid:
             process_pids = []
             for process_info in filtered_process_values:
+                if process_info['process_info'] == "N/A":
+                    continue
                 pid = str(process_info['process_info']['pid'])
                 if str(args.pid) == pid:
                     process_pids.append(process_info)
@@ -2520,36 +2493,45 @@ class AMDSMICommands():
         if args.name:
             process_names = []
             for process_info in filtered_process_values:
+                if process_info['process_info'] == "N/A":
+                    continue
                 process_name = str(process_info['process_info']['name']).lower()
                 if str(args.name).lower() == process_name:
                     process_names.append(process_info)
             filtered_process_values = process_names
 
+        logging.debug(f"Process Info for GPU {gpu_id} | {filtered_process_values}")
+
         multiple_devices_csv_override = False
         # Convert and store output by pid for csv format
         if self.logger.is_csv_format():
-            for process_info in filtered_process_values:
-                for key, value in process_info['process_info'].items():
-                    multiple_devices_csv_override = True
+            # Check for empty list first
+            if filtered_process_values == []:
+                self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
+            else:
+                for process_info in filtered_process_values:
+                    if process_info['process_info'] == "N/A":
+                        self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
+                    else:
+                        for key, value in process_info['process_info'].items():
+                            multiple_devices_csv_override = True
+                            if watching_output:
+                                self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
+                            self.logger.store_output(args.gpu, key, value)
 
-                    if watching_output:
-                        self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
-                    self.logger.store_output(args.gpu, key, value)
-
-                self.logger.store_multiple_device_output()
+                    self.logger.store_multiple_device_output()
         else:
-            # Remove brackets if there is only one value
-            if len(filtered_process_values) == 1:
-                filtered_process_values = filtered_process_values[0]
-
             if watching_output:
                 self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
 
             # Store values in logger.output
             if filtered_process_values == []:
-                self.logger.store_output(args.gpu, 'values', {'process_info': 'Not Found'})
+                self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
             else:
-                self.logger.store_output(args.gpu, 'values', filtered_process_values)
+                for process_info in filtered_process_values:
+                    if process_info['process_info'] == "N/A":
+                        process_info['process_info'] = 'No running processes detected'
+                    self.logger.store_output(args.gpu, 'process_info', process_info['process_info'])
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -4123,14 +4105,14 @@ class AMDSMICommands():
                 }
 
                 try:
-                    pcie_info = amdsmi_interface.amdsmi_get_pcie_info(src_gpu)['pcie_static']
-                    if pcie_info['max_pcie_speed'] % 1000 != 0:
-                        pcie_speed_GTs_value = round(pcie_info['max_pcie_speed'] / 1000, 1)
+                    pcie_static = amdsmi_interface.amdsmi_get_pcie_info(src_gpu)['pcie_static']
+                    if pcie_static['max_pcie_speed'] % 1000 != 0:
+                        pcie_speed_GTs_value = round(pcie_static['max_pcie_speed'] / 1000, 1)
                     else:
-                        pcie_speed_GTs_value = round(pcie_info['max_pcie_speed'] / 1000)
+                        pcie_speed_GTs_value = round(pcie_static['max_pcie_speed'] / 1000)
 
                     bitrate = pcie_speed_GTs_value
-                    max_bandwidth = bitrate * pcie_info['max_pcie_width']
+                    max_bandwidth = bitrate * pcie_static['max_pcie_width']
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     logging.debug("Failed to get bitrate and bandwidth for GPU %s | %s", src_gpu_id,
                                     e.get_error_info())

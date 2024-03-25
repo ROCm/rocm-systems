@@ -509,7 +509,7 @@ typedef struct {
   struct pcie_metric_ {
     uint16_t pcie_width;                  //!< current PCIe width
     uint32_t pcie_speed;                  //!< current PCIe speed in MT/s
-    uint32_t pcie_bandwidth;              //!< current PCIe bandwidth Mb/s
+    uint32_t pcie_bandwidth;              //!< current instantaneous PCIe bandwidth in Mb/s
     uint64_t pcie_replay_count;           //!< total number of the replays issued on the PCIe link
     uint64_t pcie_l0_to_recovery_count;   //!< total number of times the PCIe link transitioned from L0 to the recovery state
     uint64_t pcie_replay_roll_over_count; //!< total number of replay rollovers issued on the PCIe link

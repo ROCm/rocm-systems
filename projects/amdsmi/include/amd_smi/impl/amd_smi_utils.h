@@ -21,6 +21,9 @@
 #ifndef AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 #define AMD_SMI_INCLUDE_AMD_SMI_UTILS_H_
 
+#include <limits>
+#include <type_traits>
+
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -44,5 +47,56 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
 amdsmi_status_t smi_amdgpu_get_pcie_speed_from_pcie_type(uint16_t pcie_type, uint32_t *pcie_speed);
 amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(uint32_t device_id, char *market_name);
 amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDevice* device, bool *enabled);
+
+
+template<typename>
+constexpr bool is_dependent_false_v = false;
+
+template<typename T>
+inline constexpr bool is_supported_type_v = (
+    std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, std::uint8_t>  ||
+    std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, std::uint16_t> ||
+    std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, std::uint32_t> ||
+    std::is_same_v<std::remove_cv_t<std::remove_reference_t<T>>, std::uint64_t>
+);
+
+template<typename T>
+constexpr T get_std_num_limit()
+{
+    if constexpr (is_supported_type_v<T>) {
+        return std::numeric_limits<T>::max();
+    }
+    else {
+        return std::numeric_limits<T>::min();
+        static_assert(is_dependent_false_v<T>, "Error: Type not supported...");
+    }
+}
+
+template<typename T>
+constexpr bool is_std_num_limit(T value)
+{
+    return (value == get_std_num_limit<T>());
+}
+
+template<typename T, typename U,  typename V = T>
+constexpr T translate_umax_or_assign_value(U source_value, V target_value)
+{
+    T result{};
+    if constexpr (is_supported_type_v<T> && is_supported_type_v<U>) {
+        // If the source value is uint<U>::max(), then return is uint<T>::max()
+        if (is_std_num_limit(source_value)) {
+            result = get_std_num_limit<T>();
+        } else {
+            result = static_cast<T>(target_value);
+        }
+
+        return result;
+    }
+    else {
+        static_assert(is_dependent_false_v<T>, "Error: Type not supported...");
+    }
+
+    return result;
+}
 
 #endif //

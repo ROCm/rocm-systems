@@ -2134,7 +2134,7 @@ def amdsmi_get_pcie_info(
         )
     )
 
-    return {
+    pcie_info_dict = {
         "pcie_static": {
             "max_pcie_width": pcie_info.pcie_static.max_pcie_width,
             "max_pcie_speed": pcie_info.pcie_static.max_pcie_speed,
@@ -2152,6 +2152,49 @@ def amdsmi_get_pcie_info(
             "pcie_nak_received_count": pcie_info.pcie_metric.pcie_nak_received_count,
         }
     }
+
+    # Check pcie static values for uint max
+    if pcie_info_dict['pcie_static']['max_pcie_width'] == 0xFFFF:
+        pcie_info_dict['pcie_static']['max_pcie_width'] = "N/A"
+    if pcie_info_dict['pcie_static']['max_pcie_speed'] == 0xFFFFFFFF:
+        pcie_info_dict['pcie_static']['max_pcie_speed'] = "N/A"
+    if pcie_info_dict['pcie_static']['pcie_interface_version'] == 0xFFFFFFFF:
+        pcie_info_dict['pcie_static']['pcie_interface_version'] = "N/A"
+
+    slot_type = pcie_info_dict['pcie_static']['slot_type']
+    if isinstance(slot_type, int):
+        slot_types = amdsmi_wrapper.amdsmi_card_form_factor_t__enumvalues
+        if slot_type in slot_types:
+            pcie_info_dict['pcie_static']['slot_type'] = slot_types[slot_type].replace("AMDSMI_CARD_FORM_FACTOR_", "")
+        else:
+            pcie_info_dict['pcie_static']['slot_type'] = "Unknown"
+    else:
+        pcie_info_dict['pcie_static']['slot_type'] = "N/A"
+
+    # Check pcie metric values for uint max
+    if pcie_info_dict['pcie_metric']['pcie_width'] == 0xFFFF:
+        pcie_info_dict['pcie_metric']['pcie_width'] = "N/A"
+    if pcie_info_dict['pcie_metric']['pcie_speed'] == 0xFFFFFFFF:
+        pcie_info_dict['pcie_metric']['pcie_speed'] = "N/A"
+    if pcie_info_dict['pcie_metric']['pcie_bandwidth'] == 0xFFFFFFFF:
+        pcie_info_dict['pcie_metric']['pcie_bandwidth'] = "N/A"
+
+    # TODO Just Navi 21 has a different uint max size for pcie_bandwidth
+    # if pcie_info_dict['pcie_metric']['pcie_bandwidth'] == 0xFFFFFFFF:
+    #     pcie_info_dict['pcie_metric']['pcie_bandwidth'] = "N/A"
+
+    if pcie_info_dict['pcie_metric']['pcie_replay_count'] == 0xFFFFFFFFFFFFFFFF:
+        pcie_info_dict['pcie_metric']['pcie_replay_count'] = "N/A"
+    if pcie_info_dict['pcie_metric']['pcie_l0_to_recovery_count'] == 0xFFFFFFFFFFFFFFFF:
+        pcie_info_dict['pcie_metric']['pcie_l0_to_recovery_count'] = "N/A"
+    if pcie_info_dict['pcie_metric']['pcie_replay_roll_over_count'] == 0xFFFFFFFFFFFFFFFF:
+        pcie_info_dict['pcie_metric']['pcie_replay_roll_over_count'] = "N/A"
+    if pcie_info_dict['pcie_metric']['pcie_nak_sent_count'] == 0xFFFFFFFFFFFFFFFF:
+        pcie_info_dict['pcie_metric']['pcie_nak_sent_count'] = "N/A"
+    if pcie_info_dict['pcie_metric']['pcie_nak_received_count'] == 0xFFFFFFFFFFFFFFFF:
+        pcie_info_dict['pcie_metric']['pcie_nak_received_count'] = "N/A"
+
+    return pcie_info_dict
 
 
 def amdsmi_get_processor_handle_from_bdf(bdf):
@@ -3275,7 +3318,7 @@ def amdsmi_get_dpm_policy(
             processor_handle, ctypes.byref(policy)
         )
     )
-        
+
     polices = []
     for i in range(0, policy.num_supported):
         id = policy.policies[i].policy_id

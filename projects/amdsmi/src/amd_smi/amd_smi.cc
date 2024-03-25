@@ -2052,8 +2052,32 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
         status = smi_amdgpu_get_pcie_speed_from_pcie_type(metric_info.pcie_link_speed, &info->pcie_metric.pcie_speed); // mapping to MT/s
     } else {
         // gpu metrics returns pcie link speed in .1 GT/s ex. 160 vs 16
-        info->pcie_metric.pcie_speed = metric_info.pcie_link_speed * 100;
+        info->pcie_metric.pcie_speed = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_speed)>
+                                          (metric_info.pcie_link_speed, (metric_info.pcie_link_speed * 100));
     }
+
+    // additional pcie related metrics
+    /**
+     * pcie_metric.pcie_bandwidth:      MB/s  (uint32_t)
+     * metric_info.pcie_bandwidth_inst: GB/s  (uint64_t)
+     */
+    info->pcie_metric.pcie_bandwidth = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_bandwidth)>
+                                          (metric_info.pcie_bandwidth_inst, metric_info.pcie_bandwidth_inst);
+    info->pcie_metric.pcie_replay_count = metric_info.pcie_replay_count_acc;
+    info->pcie_metric.pcie_l0_to_recovery_count = metric_info.pcie_l0_to_recov_count_acc;
+    info->pcie_metric.pcie_replay_roll_over_count = metric_info.pcie_replay_rover_count_acc;
+    /**
+     * pcie_metric.pcie_nak_received_count: (uint64_t)
+     * metric_info.pcie_nak_rcvd_count_acc: (uint32_t)
+     */
+    info->pcie_metric.pcie_nak_received_count = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_received_count)>
+                                                  (metric_info.pcie_nak_rcvd_count_acc, (metric_info.pcie_nak_rcvd_count_acc));
+    /**
+     * pcie_metric.pcie_nak_sent_count:     (uint64_t)
+     * metric_info.pcie_nak_sent_count_acc: (uint32_t)
+     */
+    info->pcie_metric.pcie_nak_sent_count = translate_umax_or_assign_value<decltype(info->pcie_metric.pcie_nak_sent_count)>
+                                              (metric_info.pcie_nak_sent_count_acc, (metric_info.pcie_nak_sent_count_acc));
 
     return AMDSMI_STATUS_SUCCESS;
 }
