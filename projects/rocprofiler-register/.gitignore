@@ -37,4 +37,5 @@
 /compile_commands.json
 
 # Github Workflows
-/.github/workflows/continuous-integration.yml
+.github/workflows/continuous-integration.yml
+.github/workflows/*.yaml
