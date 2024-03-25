@@ -327,9 +327,9 @@ class OmniProfiler_Base:
         console_log("Kernel Selection: " + str(self.__args.kernel))
         console_log("Dispatch Selection: " + str(self.__args.dispatch))
         if self.__args.ipblocks == None:
-            console_log("IP Blocks: All")
+            console_log("Hardware Blocks: All")
         else:
-            console_log("IP Blocks: " + str(self.__args.ipblocks))
+            console_log("Hardware Blocks: " + str(self.__args.ipblocks))
 
         print_status("Collecting Performance Counters")
 

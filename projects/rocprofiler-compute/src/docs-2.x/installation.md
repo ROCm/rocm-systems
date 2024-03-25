@@ -10,7 +10,7 @@ Omniperf is broken into two installation components:
 
 1. **Omniperf Client-side (_Required_)**
    - Provides core application profiling capability
-   - Allows collection of performance counters, filtering by IP block, dispatch, kernel, etc
+   - Allows collection of performance counters, filtering by hardware block, dispatch, kernel, etc
    - CLI based analysis mode
    - Stand alone web interface for importing analysis metrics
 2. **Omniperf Server-side (_Optional_)**

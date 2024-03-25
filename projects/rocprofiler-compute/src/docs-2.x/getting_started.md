@@ -16,7 +16,7 @@
     ```shell
     $ omniperf profile -n vcopy_data -- ./vcopy -n 1048576 -b 256
     ```
-    The app runs, each kernel is launched, and profiling results are generated. By default, results are written to e.g., ./workloads/vcopy_data (configurable via the `-n` argument). To collect all requested profile information, it may be required to replay kernels multiple times.
+    The app runs, each kernel is launched, and profiling results are generated. By default, results are written to a subdirectory with your accelerator's name e.g., ./workloads/vcopy_data/MI200/ (where name is configurable via the `-n` argument). To collect all requested profile information, it may be required to replay kernels multiple times.
 
 2. **Customize data collection**
 
@@ -29,14 +29,14 @@
     - `-d`/`--dispatch` enables filtering based on dispatch ID.
     - `-b`/`--block` enables collects metrics for only the specified (one or more) hardware component blocks.
 
-    To view available metrics by IP Block you can use the `--list-metrics` argument:
+    To view available metrics by hardware Block you can use the `--list-metrics` argument:
     ```shell
     $ omniperf analyze --list-metrics <sys_arch>
     ```
 
 3. **Analyze at the command line**
 
-   After generating a local output folder (./workloads/\<name>), the command line tool can also be used to quickly interface with profiling results. View different metrics derived from your profiled results and get immediate access all metrics organized by IP blocks.
+   After generating a local output folder (./workloads/\<name>), the command line tool can also be used to quickly interface with profiling results. View different metrics derived from your profiled results and get immediate access all metrics organized by hardware blocks.
 
    If no kernel, dispatch, or hardware block filters are applied at this stage, analysis will be reflective of the entirety of the profiling data.
 

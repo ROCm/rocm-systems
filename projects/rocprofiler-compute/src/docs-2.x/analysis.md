@@ -16,10 +16,10 @@ See sections below for more information on each.
 
 ### Features
 
-- All of Omniperf's built-in metrics.
-- Multiple runs base line comparison.
-- Metrics customization: pick up subset of build-in metrics or build your own profiling configuration.
-- Kernel, gpu-id, dispatch-id filters.
+- __Derived metrics__: All of Omniperf's built-in metrics.
+- __Baseline comparison__: Compare multiple runs in a side-by-side manner.
+- __Metric customization__: Isolate a subset of built-in metrics or build your own profiling configuration.
+- __Filtering__: Hone in on a particular kernel, gpu-id, and/or dispatch-id via post-process filtering.
 
 Run `omniperf analyze -h` for more details.
 
@@ -444,7 +444,7 @@ interface](https://rocm.github.io/omniperf/analysis.html#grafana-based-gui).
 #### Features
 The Omniperf Grafana GUI Analyzer supports the following features to facilitate MI GPU performance profiling and analysis:
 
-- System and Hardware Component (IP Block) Speed-of-Light (SOL)
+- System and Hardware Component (Hardware Block) Speed-of-Light (SOL)
 - Multiple normalization options, including per-cycle, per-wave, per-kernel and per-second.
 - Baseline comparisons 
 - Regex based Dispatch ID filtering
@@ -470,7 +470,7 @@ Multiple performance number normalizations are provided to allow performance ins
 - per second
 
 ##### Baseline Comparison
-Omniperf enables baseline comparison to allow checking A/B effect. The current release limits the baseline comparison to the same SoC. Cross comparison between SoCs is in development.
+Omniperf enables baseline comparison to allow checking A/B effect. Currently baseline comparison is limited to the same SoC. Cross comparison between SoCs is in development.
 
 For both the Current Workload and the Baseline Workload, one can independently setup the following filters to allow fine grained comparions:
 - Workload Name 
@@ -480,7 +480,7 @@ For both the Current Workload and the Baseline Workload, one can independently s
 - Omniperf Panels (multi-selection)
 
 ##### Regex based Dispatch ID filtering
-This release enables Regular Expression (regex), a standard Linux string matching syntax, based dispatch ID filtering to flexibly choose the kernel invocations. One may refer to [Regex Numeric Range Generator](https://3widgets.com/), to generate typical number ranges.
+Omniperf enables Regular Expression (regex), a standard Linux string matching syntax, based dispatch ID filtering to flexibly choose the kernel invocations. One may refer to [Regex Numeric Range Generator](https://3widgets.com/), to generate typical number ranges.
 
 For example, if one wants to inspect Dispatch Range from 17 to 48, inclusive, the corresponding regex is : **(1[7-9]|[23]\d|4[0-8])**. The generated expression can be copied over for filtering.
 

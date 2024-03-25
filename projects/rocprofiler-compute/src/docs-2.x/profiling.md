@@ -38,7 +38,7 @@ Releasing CPU memory
 ```
 
 ## Omniperf Profiling
-The *omniperf* script, available through the Omniperf repository, is used to aquire all necessary performance monitoring data through analysis of compute workloads.
+The *omniperf* executable, available through the Omniperf repository, is used to aquire all necessary performance monitoring data through analysis of compute workloads.
 
 **omniperf help:**
 ```shell-session
@@ -101,13 +101,6 @@ Standalone Roofline Options:
   --kernel-names                                        Include kernel names in roofline plot.
 ```
 
-- The `-k` \<kernel> flag allows for kernel filtering, which is compatible with the current rocProf utility.
-
-- The `-d` \<dispatch> flag allows for dispatch ID filtering,  which is compatible with the current rocProf utility.
-
-- The `-b` \<ipblocks> allows system profiling on one or more selected hardware components to speed up the profiling process. One can gradually include more hardware components, without overwriting performance data acquired on other hardware components.
-
-
 The following sample command profiles the *vcopy* workload.
 
 **vcopy profiling:**
@@ -128,7 +121,7 @@ Target: MI200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: None
 Dispatch Selection: None
-IP Blocks: All
+Hardware Blocks: All
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Collecting Performance Counters
@@ -213,6 +206,7 @@ etc.  The SoC names are generated as a part of Omniperf, and do not necessarily 
 $ ls workloads/vcopy/MI200/
 total 112
 total 60
+-rw-r--r-- 1 auser agroup 27937 Mar  1 15:15 log.txt
 drwxr-xr-x 1 auser agroup     0 Mar  1 15:15 perfmon
 -rw-r--r-- 1 auser agroup 26175 Mar  1 15:15 pmc_perf.csv
 -rw-r--r-- 1 auser agroup  1708 Mar  1 15:17 roofline.csv
@@ -232,11 +226,11 @@ To reduce profiling time and the counters collected one may use profiling filter
 
 Filtering Options:
 
-- The `-k` \<kernel> flag allows for kernel filtering. Useage is equivalent with the current rocProf utility ([see details below](#kernel-filtering)).
+- The `-k` / `--kernel` flag allows for kernel filtering. Useage is equivalent with the current rocProf utility ([see details below](#kernel-filtering)).
 
-- The `-d` \<dispatch> flag allows for dispatch ID filtering. Useage is equivalent with the current rocProf utility ([see details below](#dispatch-filtering)).
+- The `-d` / `--dispatch` flag allows for dispatch ID filtering. Useage is equivalent with the current rocProf utility ([see details below](#dispatch-filtering)).
 
-- The `-b` \<ipblocks> allows system profiling on one or more selected hardware components to speed up the profiling process. One can gradually include more hardware components, without overwriting performance data acquired on other hardware components.
+- The `-b` / `--block` flag allows system profiling on one or more selected hardware components to speed up the profiling process ([see details below](#hardware-component-filtering)).
 
 ```{note}
 Be cautious while combining different profiling filters in the same call. Conflicting filters may result in error.
@@ -245,7 +239,7 @@ i.e. filtering dispatch X, but dispatch X does not match your kernel name filter
 ```
 
 #### Hardware Component Filtering
-One can profile specific hardware components to speed up the profiling process. In Omniperf, we use the term IP block to refer to a hardware component or a group of hardware components. All profiling results are accumulated in the same target directory, without overwriting those for other hardware components, hence enabling the incremental profiling and analysis.
+One can profile specific hardware components to speed up the profiling process. In Omniperf, we use the term hardware block to refer to a hardware component or a group of hardware components. All profiling results are accumulated in the same target directory, without overwriting those for other hardware components, hence enabling the incremental profiling and analysis.
 
 The following example only gathers hardware counters for the Shader Sequencer (SQ) and L2 Cache (TCC) components, skipping all other hardware components:
 ```shell-session
@@ -280,7 +274,7 @@ Target: MI200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: None
 Dispatch Selection: None
-IP Blocks: ['sq', 'tcc']
+Hardware Blocks: ['sq', 'tcc']
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Collecting Performance Counters
@@ -309,7 +303,7 @@ Target: MI200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: ['vecCopy']
 Dispatch Selection: None
-IP Blocks: All
+Hardware Blocks: All
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Collecting Performance Counters
@@ -320,7 +314,7 @@ Collecting Performance Counters
 #### Dispatch Filtering
 Dispatch filtering is based on the *global* dispatch index of kernels in a run. 
 
-The following example profiles only the 0th dispatched kernel in execution of the application:
+The following example profiles only the first kernel dispatch in execution of the application (please note zero-based indexing):
 ```shell-session
 $ omniperf profile --name vcopy -d 0 -- ./vcopy -n 1048576 -b 256
 
@@ -338,7 +332,7 @@ Target: MI200
 Command: ./vcopy -n 1048576 -b 256
 Kernel Selection: None
 Dispatch Selection: ['0']
-IP Blocks: All
+Hardware Blocks: All
 
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Collecting Performance Counters
