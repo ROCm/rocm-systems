@@ -32,6 +32,12 @@ namespace rocprofiler
 {
 namespace hsa
 {
+struct tracing_table
+{};
+
+struct internal_table
+{};
+
 using hsa_api_table_t      = ::HsaApiTable;
 using hsa_table_version_t  = ::ApiTableVersion;
 using hsa_core_table_t     = ::CoreApiTable;
@@ -56,6 +62,18 @@ get_fini_ext_table();
 
 hsa_img_ext_table_t*
 get_img_ext_table();
+
+hsa_core_table_t*
+get_tracing_core_table();
+
+hsa_amd_ext_table_t*
+get_tracing_amd_ext_table();
+
+hsa_fini_ext_table_t*
+get_tracing_fini_ext_table();
+
+hsa_img_ext_table_t*
+get_tracing_img_ext_table();
 
 template <size_t Idx>
 struct hsa_table_lookup;
@@ -130,6 +148,6 @@ copy_table(TableT* _orig, uint64_t _tbl_instance);
 
 template <typename TableT>
 void
-update_table(TableT* _orig);
+update_table(TableT* _orig, uint64_t _tbl_instance);
 }  // namespace hsa
 }  // namespace rocprofiler

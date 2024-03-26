@@ -718,25 +718,24 @@ rocprofiler_set_api_table(const char* name,
 
         auto* hsa_api_table = static_cast<HsaApiTable*>(*tables);
 
+        // store a reference of the HsaApiTable implementations for invoking these functions
+        // without going through tracing wrappers
+        rocprofiler::hsa::copy_table(hsa_api_table->core_, lib_instance);
+        rocprofiler::hsa::copy_table(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::hsa::copy_table(hsa_api_table->image_ext_, lib_instance);
+        rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_, lib_instance);
+
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
         rocprofiler::hsa::code_object_init(hsa_api_table);
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
 
-        // any internal modifications to the HsaApiTable need to be done before we make the
-        // copy or else those modifications will be lost when HSA API tracing is enabled
-        // because the HSA API tracing invokes the function pointers from the copy below
-        rocprofiler::hsa::copy_table(hsa_api_table->core_, lib_instance);
-        rocprofiler::hsa::copy_table(hsa_api_table->amd_ext_, lib_instance);
-        rocprofiler::hsa::copy_table(hsa_api_table->image_ext_, lib_instance);
-        rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_, lib_instance);
-
         // install rocprofiler API wrappers
-        rocprofiler::hsa::update_table(hsa_api_table->core_);
-        rocprofiler::hsa::update_table(hsa_api_table->amd_ext_);
-        rocprofiler::hsa::update_table(hsa_api_table->image_ext_);
-        rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_);
+        rocprofiler::hsa::update_table(hsa_api_table->core_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->amd_ext_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(

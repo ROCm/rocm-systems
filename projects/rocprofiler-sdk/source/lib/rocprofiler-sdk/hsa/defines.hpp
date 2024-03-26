@@ -39,8 +39,6 @@
         using this_type     = hsa_api_meta<table_idx, operation_idx>;                              \
         using function_type = hsa_api_func<decltype(::HSA_FUNC)*>::function_type;                  \
                                                                                                    \
-        static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
-                                                                                                   \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
         {                                                                                          \
@@ -60,8 +58,6 @@
                 return _table.HSA_FUNC_PTR;                                                        \
             }                                                                                      \
         }                                                                                          \
-                                                                                                   \
-        static auto& get_table_func() { return get_table_func(get_table()); }                      \
     };                                                                                             \
     }                                                                                              \
     }
@@ -90,7 +86,10 @@
             return offsetof(hsa_table_lookup<table_idx>::type, HSA_FUNC_PTR);                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
+        static auto& get_table(tracing_table)                                                      \
+        {                                                                                          \
+            return hsa_table_lookup<table_idx>{}(tracing_table{});                                 \
+        }                                                                                          \
                                                                                                    \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
@@ -112,7 +111,7 @@
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table_func() { return get_table_func(get_table()); }                      \
+        static auto& get_table_func() { return get_table_func(get_table(tracing_table{})); }       \
                                                                                                    \
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
@@ -165,7 +164,10 @@
             return offsetof(hsa_table_lookup<table_idx>::type, HSA_FUNC_PTR);                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table() { return hsa_table_lookup<table_idx>{}(); }                       \
+        static auto& get_table(tracing_table)                                                      \
+        {                                                                                          \
+            return hsa_table_lookup<table_idx>{}(tracing_table{});                                 \
+        }                                                                                          \
                                                                                                    \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
@@ -187,7 +189,7 @@
             }                                                                                      \
         }                                                                                          \
                                                                                                    \
-        static auto& get_table_func() { return get_table_func(get_table()); }                      \
+        static auto& get_table_func() { return get_table_func(get_table(tracing_table{})); }       \
                                                                                                    \
         template <typename DataT>                                                                  \
         static auto& get_api_data_args(DataT& _data)                                               \
@@ -224,13 +226,17 @@
     {                                                                                              \
     namespace hsa                                                                                  \
     {                                                                                              \
+    struct tracing_table;                                                                          \
+    struct internal_table;                                                                         \
+                                                                                                   \
     template <>                                                                                    \
     struct hsa_table_lookup<TABLE_ID>                                                              \
     {                                                                                              \
         using type = TYPE;                                                                         \
         auto& operator()(type& _v) const { return _v; }                                            \
         auto& operator()(type* _v) const { return *_v; }                                           \
-        auto& operator()() const { return (*this)(get_##NAME##_table()); }                         \
+        auto& operator()(tracing_table) const { return (*this)(get_tracing_##NAME##_table()); }    \
+        auto& operator()(internal_table) const { return (*this)(get_##NAME##_table()); }           \
     };                                                                                             \
                                                                                                    \
     template <>                                                                                    \

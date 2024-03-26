@@ -108,18 +108,50 @@ DEFINE_TABLE_VERSION(img_ext, IMAGE_API)
 #undef DEFINE_TABLE_VERSION
 #undef DEFINE_TABLE_VERSION_IMPL
 
-template <typename Tp>
+// helper to ensure that table type is paired with the correct table version
+#define GET_TABLE_IMPL(ALIAS, TYPE)                                                                \
+    get_table_impl<hsa_##ALIAS##_table_t, TYPE>(hsa_##ALIAS##_table_version);
+
+template <typename Tp, typename TableT>
 Tp*&
 get_table_impl(hsa_table_version_t _version)
 {
-    static_assert(common::static_object<Tp>::is_trivial_standard_layout(),
+    static_assert(common::static_object<Tp, TableT>::is_trivial_standard_layout(),
                   "This HSA API table is not a trivial, standard layout type as it should be");
 
-    auto*& val   = common::static_object<Tp>::construct();
+    auto*& val   = common::static_object<Tp, TableT>::construct();
     val->version = _version;
     return val;
 }
 }  // namespace
+
+hsa_core_table_t*
+get_tracing_core_table()
+{
+    static auto*& val = GET_TABLE_IMPL(core, tracing_table);
+    return val;
+}
+
+hsa_amd_ext_table_t*
+get_tracing_amd_ext_table()
+{
+    static auto*& val = GET_TABLE_IMPL(amd_ext, tracing_table);
+    return val;
+}
+
+hsa_fini_ext_table_t*
+get_tracing_fini_ext_table()
+{
+    static auto*& val = GET_TABLE_IMPL(fini_ext, tracing_table);
+    return val;
+}
+
+hsa_img_ext_table_t*
+get_tracing_img_ext_table()
+{
+    static auto*& val = GET_TABLE_IMPL(img_ext, tracing_table);
+    return val;
+}
 
 hsa_table_version_t
 get_table_version()
@@ -127,34 +159,31 @@ get_table_version()
     return hsa_api_table_version;
 }
 
-// helper to ensure that table type is paired with the correct table version
-#define GET_TABLE_IMPL(ALIAS) get_table_impl<hsa_##ALIAS##_table_t>(hsa_##ALIAS##_table_version);
-
 hsa_core_table_t*
 get_core_table()
 {
-    static auto*& val = GET_TABLE_IMPL(core);
+    static auto*& val = GET_TABLE_IMPL(core, internal_table);
     return val;
 }
 
 hsa_amd_ext_table_t*
 get_amd_ext_table()
 {
-    static auto*& val = GET_TABLE_IMPL(amd_ext);
+    static auto*& val = GET_TABLE_IMPL(amd_ext, internal_table);
     return val;
 }
 
 hsa_fini_ext_table_t*
 get_fini_ext_table()
 {
-    static auto*& val = GET_TABLE_IMPL(fini_ext);
+    static auto*& val = GET_TABLE_IMPL(fini_ext, internal_table);
     return val;
 }
 
 hsa_img_ext_table_t*
 get_img_ext_table()
 {
-    static auto*& val = GET_TABLE_IMPL(img_ext);
+    static auto*& val = GET_TABLE_IMPL(img_ext, internal_table);
     return val;
 }
 
@@ -547,7 +576,7 @@ should_wrap_functor(const context::context_array_t&     _contexts,
     return false;
 }
 
-template <size_t TableIdx, typename Tp, size_t OpIdx>
+template <size_t TableIdx, typename LookupT = internal_table, typename Tp, size_t OpIdx>
 void
 copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpIdx>)
 {
@@ -567,7 +596,7 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         // 3. get the sub-table containing the function pointer in saved table
         // 4. get reference to function pointer in sub-table in saved table
         // 5. save the original function in the saved table
-        auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}());
+        auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}(LookupT{}));
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
         LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
@@ -621,13 +650,17 @@ update_table(const context::context_array_t& _contexts,
     }
 }
 
-template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
+template <size_t TableIdx,
+          typename LookupT = internal_table,
+          typename Tp,
+          size_t OpIdx,
+          size_t... OpIdxTail>
 void
 copy_table(Tp* _orig, uint64_t _tbl_instance, std::index_sequence<OpIdx, OpIdxTail...>)
 {
-    copy_table<TableIdx>(_orig, _tbl_instance, std::integral_constant<size_t, OpIdx>{});
+    copy_table<TableIdx, LookupT>(_orig, _tbl_instance, std::integral_constant<size_t, OpIdx>{});
     if constexpr(sizeof...(OpIdxTail) > 0)
-        copy_table<TableIdx>(_orig, _tbl_instance, std::index_sequence<OpIdxTail...>{});
+        copy_table<TableIdx, LookupT>(_orig, _tbl_instance, std::index_sequence<OpIdxTail...>{});
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>
@@ -702,17 +735,20 @@ copy_table(TableT* _orig, uint64_t _tbl_instance)
 {
     constexpr auto TableIdx = hsa_table_id_lookup<TableT>::value;
     if(_orig)
-        copy_table<TableIdx>(
+        copy_table<TableIdx, internal_table>(
             _orig, _tbl_instance, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
 }
 
 template <typename TableT>
 void
-update_table(TableT* _orig)
+update_table(TableT* _orig, uint64_t _tbl_instance)
 {
     constexpr auto TableIdx = hsa_table_id_lookup<TableT>::value;
     if(_orig)
     {
+        copy_table<TableIdx, tracing_table>(
+            _orig, _tbl_instance, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
+
         auto _contexts = context::get_registered_contexts();
         update_table<TableIdx>(
             _contexts, _orig, std::make_index_sequence<hsa_domain_info<TableIdx>::last>{});
@@ -722,14 +758,14 @@ update_table(TableT* _orig)
 using iterate_args_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
 using iterate_args_cb_t   = rocprofiler_callback_tracing_operation_args_cb_t;
 
-#define INSTANTIATE_HSA_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                          \
-    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);  \
-    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl);                 \
-    template const char*              name_by_id<TABLE_IDX>(uint32_t);                             \
-    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                          \
-    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                        \
-    template std::vector<const char*> get_names<TABLE_IDX>();                                      \
-    template void                     iterate_args<TABLE_IDX>(                                     \
+#define INSTANTIATE_HSA_TABLE_FUNC(TABLE_TYPE, TABLE_IDX)                                           \
+    template void                     copy_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv);   \
+    template void                     update_table<TABLE_TYPE>(TABLE_TYPE * _tbl, uint64_t _instv); \
+    template const char*              name_by_id<TABLE_IDX>(uint32_t);                              \
+    template uint32_t                 id_by_name<TABLE_IDX>(const char*);                           \
+    template std::vector<uint32_t>    get_ids<TABLE_IDX>();                                         \
+    template std::vector<const char*> get_names<TABLE_IDX>();                                       \
+    template void                     iterate_args<TABLE_IDX>(                                      \
         uint32_t, const iterate_args_data_t&, iterate_args_cb_t, int32_t, void*);
 
 INSTANTIATE_HSA_TABLE_FUNC(hsa_core_table_t, ROCPROFILER_HSA_TABLE_ID_Core)
