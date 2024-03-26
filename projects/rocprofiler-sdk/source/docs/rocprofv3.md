@@ -375,13 +375,8 @@ Each row of the CSV file is an instance of kernel execution. Here is a truncated
 ```bash
 $ cat pmc_1/218_counter_collection.csv
 
-"Counter_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel-Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","SGPR_Count","Counter_Name","Counter_Value"
-365,1,139713210765312,239,239,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,128,"SQ_WAVES[0]",1404
-365,1,139713210765312,239,239,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,128,"SQ_WAVES[64]",1336
-365,1,139713210765312,239,239,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,128,"SQ_WAVES[128]",1401
-365,1,139713210765312,239,239,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,128,"SQ_WAVES[192]",1323
-365,1,139713210765312,239,239,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,128,"SQ_WAVES[256]",1402
-365,1,139713210765312,239,239,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,128,"SQ_WAVES[320]",1396
+"Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","SGPR_Count","Counter_Name","Counter_Value"
+0,1,1,139892123975680,5619,5619,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,16,"SQ_WAVES",65536
 ```
 
 ### Output file fields
