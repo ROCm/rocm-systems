@@ -209,7 +209,7 @@ class DatabaseConnector:
             except Exception as e:
                 console_error("database", "PASSWORD ERROR %s" % e)
             else:
-                console_log("database", "Password recieved")
+                console_log("database", "Password received")
         else:
             password = self.connection_info["password"]
 

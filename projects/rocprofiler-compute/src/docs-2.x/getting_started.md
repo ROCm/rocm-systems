@@ -36,7 +36,7 @@
 
 3. **Analyze at the command line**
 
-   After generating a local output folder (./workloads/\<name>), the command line tool can also be used to quickly interface with profiling results. View different metrics derived from your profiled results and get immediate access all metrics organized by hardware blocks.
+   After generating a local output folder (e.g. ./workloads/vcopy_data/MI200), the command line tool can also be used to quickly interface with profiling results. View different metrics derived from your profiled results and get immediate access all metrics organized by hardware blocks.
 
    If no kernel, dispatch, or hardware block filters are applied at this stage, analysis will be reflective of the entirety of the profiling data.
 
@@ -64,7 +64,7 @@ Modes change the fundamental behavior of the Omniperf command line tool. Dependi
 
 - **Analyze**: Profiling data from `-p`/`--path` directory is loaded into the Omniperf CLI analyzer where users have immediate access to profiling results and generated metrics. Metrics are quickly generated from the entirety of your profiled application or a subset you’ve identified through the Omniperf CLI analysis filters.
 
-    To gererate a lightweight GUI interface users can add the `--gui` flag to their analysis command.
+    To generate a lightweight GUI interface users can add the `--gui` flag to their analysis command.
 
     This mode is designed to be a middle ground to the highly detailed Omniperf Grafana GUI and is great for users who want immediate access to a hardware component they’re already familiar with.
 

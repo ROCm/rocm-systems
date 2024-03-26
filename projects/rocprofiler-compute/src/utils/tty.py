@@ -244,8 +244,6 @@ def show_kernel_stats(args, runs, archConfigs, output):
     """
     Show the kernels and dispatches from "Top Stats" section.
     """
-    # print("\n" + "-" * 80, file=output)
-    # print("Detected Kernels (sorted decending by duration)", file=output)
 
     df = pd.DataFrame()
     for panel_id, panel in archConfigs.panel_configs.items():
@@ -260,7 +258,8 @@ def show_kernel_stats(args, runs, archConfigs, output):
                     if table_config["id"] == 1:
                         print("\n" + "-" * 80, file=output)
                         print(
-                            "Detected Kernels (sorted decending by duration)", file=output
+                            "Detected Kernels (sorted descending by duration)",
+                            file=output,
                         )
                         df = pd.concat([df, single_df["Kernel_Name"]], axis=1)
 

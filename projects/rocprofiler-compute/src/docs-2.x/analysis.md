@@ -5,7 +5,7 @@
    :glob:
    :maxdepth: 4
 ```
-Omniperf offers several ways to interact with the metrics it generates from profiling. The option you choose will likely be influnced by your familiarity with the profiled application, computing enviroment, and experience with Omniperf.
+Omniperf offers several ways to interact with the metrics it generates from profiling. The option you choose will likely be influenced by your familiarity with the profiled application, computing environment, and experience with Omniperf.
 
 While analyzing with the CLI offers quick and straightforward access to Omniperf metrics from terminal, the GUI adds an extra layer of styling and interactiveness some users may prefer.
 
@@ -59,7 +59,7 @@ Run `omniperf analyze -h` for more details.
   [analysis] deriving Omniperf metrics...
 
   --------------------------------------------------------------------------------
-  Detected Kernels (sorted decending by duration)
+  Detected Kernels (sorted descending by duration)
   ╒════╤══════════════════════════════════════════════╕
   │    │ Kernel_Name                                  │
   ╞════╪══════════════════════════════════════════════╡
@@ -472,7 +472,7 @@ Multiple performance number normalizations are provided to allow performance ins
 ##### Baseline Comparison
 Omniperf enables baseline comparison to allow checking A/B effect. Currently baseline comparison is limited to the same SoC. Cross comparison between SoCs is in development.
 
-For both the Current Workload and the Baseline Workload, one can independently setup the following filters to allow fine grained comparions:
+For both the Current Workload and the Baseline Workload, one can independently setup the following filters to allow fine grained comparisons:
 - Workload Name 
 - GPU ID filtering (multi-selection)
 - Kernel Name filtering (multi-selection)
@@ -576,7 +576,7 @@ Found sysinfo file
 KernelName shortening enabled
 Kernel name verbose level: 2
 Password:
-Password recieved
+Password received
 -- Conversion & Upload in Progress --
   0%|                                                                                                                                                                                                             | 0/11 [00:00<?, ?it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/SQ_IFETCH_LEVEL.csv
   9%|█████████████████▉                                                                                                                                                                                   | 1/11 [00:00<00:01,  8.53it/s]/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/pmc_perf.csv
@@ -669,7 +669,7 @@ There are currently 18 main panel categories available for analyzing the compute
   - Per-channel L2-EA Atomic requests
   - Per-channel L2-EA Read latency
   - Per-channel L2-EA Write latency
-  - Per-channel L2-EA Atomic  latency
+  - Per-channel L2-EA Atomic latency
   - Per-channel L2-EA Read stall (I/O, GMI, HBM)
   - Per-channel L2-EA Write stall (I/O, GMI, HBM, Starve)
 

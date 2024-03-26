@@ -19,7 +19,7 @@ Omniperf is broken into two installation components:
 
 Determine what you need to install based on how you would like to interact with Omniperf. See the decision tree below to help determine what installation is right for you.
 
-![Omniperf Installtion Decision Tree](images/install_decision_tree.png)
+![Omniperf Installation Decision Tree](images/install_decision_tree.png)
 
 ---
 
@@ -162,7 +162,7 @@ Omniperf server-side requires the following basic software dependencies prior to
 
 The recommended process for enabling the server-side of Omniperf is to use the provided Docker file to build the Grafana and MongoDB instance.
 
-Once you have decided which machine you would like to use to host the Grafana and MongoDB instance, please follow the set up instructions below.
+Once you have decided which machine you would like to use to host the Grafana and MongoDB instance, please follow the set-up instructions below.
 
 ### Install MongoDB Utils
 Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database. Install for Ubuntu 20.04 is as follows:
@@ -192,6 +192,13 @@ $ sudo docker-compose build
 $ sudo docker-compose up -d
 ```
 > Note that TCP ports for Grafana (4000) and MongoDB (27017) in the docker container are mapped to 14000 and 27018, respectively, on the host side.
+
+### Restart (Debug)
+In the event that your Grafana or MongoDB instance crash fatally, you can always restart the server. Just navigate to your install directory and run:
+```bash
+$ sudo docker-compose down
+$ sudo docker-compose up -d
+```
 
 ### Setup Grafana Instance
 Once you have launched your docker container you should be able to reach Grafana at **http://\<host-ip>:14000**. The default login credentials for the first-time Grafana setup are:
@@ -233,7 +240,7 @@ Once you have imported a dashboard you are ready to begin! Start by browsing ava
 
 ![Opening your dashboard](images/opening_dashboard.png)
 
-Remeber, you will need to upload workload data to the DB backend before analyzing in your Grafana interface. We provide a detailed example of this in our [Analysis section](./analysis.md#grafana-gui-import).
+Remember, you will need to upload workload data to the DB backend before analyzing in your Grafana interface. We provide a detailed example of this in our [Analysis section](./analysis.md#grafana-gui-import).
 
 After a workload has been successfully uploaded, you should be able to select it from the workload dropdown located at the top of your Grafana dashboard.
 

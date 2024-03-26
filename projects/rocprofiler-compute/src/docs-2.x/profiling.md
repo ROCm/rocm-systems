@@ -38,7 +38,7 @@ Releasing CPU memory
 ```
 
 ## Omniperf Profiling
-The *omniperf* executable, available through the Omniperf repository, is used to aquire all necessary performance monitoring data through analysis of compute workloads.
+The *omniperf* executable, available through the Omniperf repository, is used to acquire all necessary performance monitoring data through analysis of compute workloads.
 
 **omniperf help:**
 ```shell-session
@@ -128,7 +128,7 @@ Collecting Performance Counters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 [profiling] Current input file: /home/auser/repos/omniperf/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt
-   |-> [rocprof] RPL: on '240312_174329' from '/opt/rocm-5.2.1' in '/home/colramos/GitHub/omniperf'
+   |-> [rocprof] RPL: on '240312_174329' from '/opt/rocm-5.2.1' in '/home/auser/repos/omniperf/src/omniperf'
    |-> [rocprof] RPL: profiling '""./vcopy -n 1048576 -b 256""'
    |-> [rocprof] RPL: input file '/home/auser/repos/omniperf/sample/workloads/vcopy/MI200/perfmon/SQ_IFETCH_LEVEL.txt'
    |-> [rocprof] RPL: output dir '/tmp/rpl_data_240312_174329_692890'
@@ -226,11 +226,11 @@ To reduce profiling time and the counters collected one may use profiling filter
 
 Filtering Options:
 
-- The `-k` / `--kernel` flag allows for kernel filtering. Useage is equivalent with the current rocProf utility ([see details below](#kernel-filtering)).
+- The `-k` / `--kernel` \<kernel-substr> flag allows for kernel filtering. Usage is equivalent with the current rocProf utility ([see details below](#kernel-filtering)).
 
-- The `-d` / `--dispatch` flag allows for dispatch ID filtering. Useage is equivalent with the current rocProf utility ([see details below](#dispatch-filtering)).
+- The `-d` / `--dispatch` \<dispatch-id> flag allows for dispatch ID filtering. Usage is equivalent with the current rocProf utility ([see details below](#dispatch-filtering)).
 
-- The `-b` / `--block` flag allows system profiling on one or more selected hardware components to speed up the profiling process ([see details below](#hardware-component-filtering)).
+- The `-b` / `--block` \<block-name> flag allows system profiling on one or more selected hardware components to speed up the profiling process ([see details below](#hardware-component-filtering)).
 
 ```{note}
 Be cautious while combining different profiling filters in the same call. Conflicting filters may result in error.
@@ -348,9 +348,9 @@ Standalone Roofline Options:
 
 - The `--sort` \<desired_sort> allows you to specify whether you would like to overlay top kernel or top dispatch data in your roofline plot.
 
-- The `-m` \<cache_level> allows you to specify specific level(s) of cache you would like to include in your roofline plot.
+- The `-m`/`--mem-level` \<cache_level> allows you to specify specific level(s) of cache you would like to include in your roofline plot.
 
-- The `--device` \<gpu_id> allows you to specify a device id to collect performace data from when running our roofline benchmark on your system.
+- The `--device` \<gpu_id> allows you to specify a device id to collect performance data from when running our roofline benchmark on your system.
 
 - If you would like to distinguish different kernels in your .pdf roofline plot use `--kernel-names`. This will give each kernel a unique marker identifiable from the plot's key.
 
