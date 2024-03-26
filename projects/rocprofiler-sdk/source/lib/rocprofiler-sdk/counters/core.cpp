@@ -206,7 +206,16 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }
         config.asts.push_back(*counter_ast);
-        config.asts.back().set_dimensions();
+
+        try
+        {
+            config.asts.back().set_dimensions();
+        } catch(std::runtime_error& e)
+        {
+            LOG(ERROR) << metric.name() << " has improper dimensions"
+                       << " " << e.what();
+            return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
+        }
     }
 
     profile->pkt_generator = std::make_unique<rocprofiler::aql::AQLPacketConstruct>(

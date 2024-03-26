@@ -117,10 +117,18 @@ get_dimension_cache()
                 const auto& asts = counters::get_ast_map();
                 for(const auto& [gfx, metrics] : asts)
                 {
-                    for(const auto& [_, ast] : metrics)
+                    for(const auto& [metric, ast] : metrics)
                     {
                         auto ast_copy = ast;
-                        dims.emplace(ast.out_id().handle, ast_copy.set_dimensions());
+                        try
+                        {
+                            dims.emplace(ast.out_id().handle, ast_copy.set_dimensions());
+                        } catch(std::runtime_error& e)
+                        {
+                            LOG(ERROR) << metric << " has improper dimensions"
+                                       << " " << e.what();
+                            throw;
+                        }
                     }
                 }
                 return dims;
