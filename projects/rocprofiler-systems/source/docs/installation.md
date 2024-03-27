@@ -150,7 +150,7 @@ and Dyninst requires TBB), and the CMake option to build the package alongside o
 
 ### Optional Third-Party Packages
 
-- [ROCm](https://rocmdocs.amd.com/en/latest/Installation_Guide/Installation_new.html)
+- [ROCm](https://rocm.docs.amd.com/projects/install-on-linux/en/latest)
   - HIP
   - Roctracer for HIP API and kernel tracing
   - ROCM-SMI for GPU monitoring
