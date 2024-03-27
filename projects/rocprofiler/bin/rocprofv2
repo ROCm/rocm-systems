@@ -17,6 +17,7 @@ fi
 
 export ROCPROFILER_METRICS_PATH=$ROCM_DIR/libexec/rocprofiler/counters/derived_counters.xml
 export LD_LIBRARY_PATH=$ROCM_DIR/lib:$LD_LIBRARY_PATH
+export HSA_TOOLS_LIB=$ROCM_DIR/lib/librocprofiler64.so.2
 
 # Define color code
 GREEN='\033[0;32m'
@@ -282,6 +283,8 @@ if [ -z $ROCPROFILER_PLUGIN_LIB ]; then
   fi
 fi
 
+export LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so
+
 if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then
   COUNTER=1
   for i in ${!PMC_LINES[@]}; do
@@ -295,13 +298,13 @@ if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then
       export OUTPUT_PATH=$FINAL_PATH
     fi
     let COUNTER=COUNTER+1
-    LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
+    exec "${@}"
     if [ -n "$OUTPUT_PATH" ]; then
       echo -e "\nThe output path for the following counters: $OUTPUT_PATH"
     fi
   done
 else
-  LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so $*
+  exec "${@}"
 fi
 
 get_pmc_results_txt_path() {
