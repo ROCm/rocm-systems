@@ -151,7 +151,7 @@ class Roofline:
 
             fp32_fig.write_image(
                 self.__run_parameters["workload_dir"]
-                + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id)
+                + "/empirRoof_gpu-{}_fp32_fp64.pdf".format(dev_id)
             )
             ml_combo_fig.write_image(
                 self.__run_parameters["workload_dir"]
@@ -166,7 +166,7 @@ class Roofline:
             # Re-save to remove loading MathJax pop up
             fp32_fig.write_image(
                 self.__run_parameters["workload_dir"]
-                + "/empirRoof_gpu-{}_fp32.pdf".format(dev_id)
+                + "/empirRoof_gpu-{}_fp32_fp64.pdf".format(dev_id)
             )
             ml_combo_fig.write_image(
                 self.__run_parameters["workload_dir"]
@@ -253,6 +253,7 @@ class Roofline:
             )
 
         # Plot peak VALU ceiling
+        # VALU info I8/FP16 not collected via microbench
         if dtype != "FP16" and dtype != "I8":
             fig.add_trace(
                 go.Scatter(
@@ -303,6 +304,7 @@ class Roofline:
         #######################
         if dtype != "I8":
             # Plot the arithmetic intensity points for each cache level
+            # Omitting I8 AIs to clean up graph. FP16 tends to be higher.
             fig.add_trace(
                 go.Scatter(
                     x=self.__ai_data["ai_l1"][0],
