@@ -40,66 +40,15 @@ Releasing CPU memory
 ## Omniperf Profiling
 The *omniperf* executable, available through the Omniperf repository, is used to acquire all necessary performance monitoring data through analysis of compute workloads.
 
-**omniperf help:**
-```shell-session
-$ omniperf profile --help
-usage: 
+### Features
 
-omniperf profile --name <workload_name> [profile options] [roofline options] -- <profile_cmd>
+- __Automate counter collection__: Omniperf handles all of your profiling via preconfigured input files.
+- __Filtering__: Apply runtime filters to speed up the profiling process.
+- __Standalone Roofline__: Isolate a subset of built-in metrics or build your own profiling configuration.
 
----------------------------------------------------------------------------------
-Examples:
-        omniperf profile -n vcopy_all -- ./vcopy -n 1048576 -b 256
-        omniperf profile -n vcopy_SPI_TCC -b SQ TCC -- ./vcopy -n 1048576 -b 256
-        omniperf profile -n vcopy_kernel -k vecCopy -- ./vcopy -n 1048576 -b 256
-        omniperf profile -n vcopy_disp -d 0 -- ./vcopy -n 1048576 -b 256
-        omniperf profile -n vcopy_roof --roof-only -- ./vcopy -n 1048576 -b 256
----------------------------------------------------------------------------------
-        
+Run `omniperf profile -h` for more details.
 
-Help:
-  -h, --help                       show this help message and exit
-
-General Options:
-  -v, --version                    show program's version number and exit
-  -q, --quiet                      Run in quiet mode.
-  -V, --verbose                    Increase output verbosity (use multiple times for higher levels)
-  -s, --specs                      Print system specs.
-
-Profile Options:
-  -n , --name                                           Assign a name to workload.
-  -p , --path                                           Specify path to save workload.
-  -k  [ ...], --kernel  [ ...]                          Kernel filtering.
-  -d  [ ...], --dispatch  [ ...]                        Dispatch ID filtering.
-  -b  [ ...], --block  [ ...]                           Hardware block filtering:
-                                                           SQ
-                                                           SQC
-                                                           TA
-                                                           TD
-                                                           TCP
-                                                           TCC
-                                                           SPI
-                                                           CPC
-                                                           CPF
-  --join-type                                           Choose how to join rocprof runs: (DEFAULT: grid)
-                                                           kernel (i.e. By unique kernel name dispatches)
-                                                           grid (i.e. By unique kernel name + grid size dispatches)
-  --no-roof                                             Profile without collecting roofline data.
-  -- [ ...]                                             Provide command for profiling after double dash.
-
-Standalone Roofline Options:
-  --roof-only                                           Profile roofline data only.
-  --sort                                                Overlay top kernels or top dispatches: (DEFAULT: kernels)
-                                                           kernels
-                                                           dispatches
-  -m  [ ...], --mem-level  [ ...]                       Filter by memory level: (DEFAULT: ALL)
-                                                           HBM
-                                                           L2
-                                                           vL1D
-                                                           LDS
-  --device                                              Target GPU device ID. (DEFAULT: ALL)
-  --kernel-names                                        Include kernel names in roofline plot.
-```
+### Demo
 
 The following sample command profiles the *vcopy* workload.
 
@@ -193,14 +142,23 @@ GPU Device 2: Profiling...
 GPU Device 3: Profiling...
 ...
 ```
-You will notice two main stages in *default* Omniperf profiling. The first stage collects all the counters needed for Omniperf analysis (omitting any filters you have provided). The second stage collects data for the roofline analysis (this stage can be disabled using `--no-roof`)
+You will notice two main stages in *default* Omniperf profiling. 
+
+1. The first stage collects all the counters needed for Omniperf analysis (omitting any filters you have provided).
+
+2. The second stage collects data for the roofline analysis (this stage can be disabled using `--no-roof`)
 
 In this document, we use the term System on Chip (SoC) to refer to a particular family of accelerators. At the end of profiling, all resulting csv files should be located in a SoC specific target directory, e.g.:
-  - "mi200" for the AMD Instinct (tm) MI200 family of accelerators
-  - "mi100" for the AMD Instinct (tm) MI100 family of accelerators
-etc.  The SoC names are generated as a part of Omniperf, and do not necessarily distinguish between different accelerators in the same family (e.g., an AMD Instinct (tm) MI210 vs an MI250)
+  - "MI300A" or "MI300X" for the AMD Instinct (tm) MI300 family of accelerators
+  - "MI200" for the AMD Instinct (tm) MI200 family of accelerators
+  - "MI100" for the AMD Instinct (tm) MI100 family of accelerators
+  - etc.
+  
+  The SoC names are generated as a part of Omniperf, and do not _always_ distinguish between different accelerators in the same family (e.g., an AMD Instinct (tm) MI210 vs an MI250)
 
-> Note: Additionally, you will notice a few extra files. An SoC parameters file, *sysinfo.csv*, is created to reflect the target device settings. All profiling output is stored in *log.txt*. Roofline specific benchmark results are stored in *roofline.csv*.
+```{note}
+Additionally, you will notice a few extra files. An SoC parameters file, *sysinfo.csv*, is created to reflect the target device settings. All profiling output is stored in *log.txt*. Roofline specific benchmark results are stored in *roofline.csv*.
+```
 
 ```shell-session
 $ ls workloads/vcopy/MI200/
@@ -232,7 +190,7 @@ Filtering Options:
 
 - The `-b` / `--block` \<block-name> flag allows system profiling on one or more selected hardware components to speed up the profiling process ([see details below](#hardware-component-filtering)).
 
-```{note}
+```{tip}
 Be cautious while combining different profiling filters in the same call. Conflicting filters may result in error.
 
 i.e. filtering dispatch X, but dispatch X does not match your kernel name filter
@@ -376,7 +334,7 @@ An inspection of our workload output folder shows .pdf plots were generated succ
 ```shell-session
 $ ls workloads/vcopy/MI200/
 total 48
--rw-r--r-- 1 auser agroup 13331 Mar  1 16:05 empirRoof_gpu-0_fp32.pdf
+-rw-r--r-- 1 auser agroup 13331 Mar  1 16:05 empirRoof_gpu-0_fp32_fp64.pdf
 -rw-r--r-- 1 auser agroup 13136 Mar  1 16:05 empirRoof_gpu-0_int8_fp16.pdf
 drwxr-xr-x 1 auser agroup     0 Mar  1 16:03 perfmon
 -rw-r--r-- 1 auser agroup  1101 Mar  1 16:03 pmc_perf.csv
@@ -384,6 +342,10 @@ drwxr-xr-x 1 auser agroup     0 Mar  1 16:03 perfmon
 -rw-r--r-- 1 auser agroup   650 Mar  1 16:03 sysinfo.csv
 -rw-r--r-- 1 auser agroup   399 Mar  1 16:03 timestamps.csv
 ```
-A sample *empirRoof_gpu-ALL_fp32.pdf* looks something like this:
+```{note}
+Omniperf generates two roofline outputs to organize results and reduce clutter. One chart plots FP32/FP64 performance while the other plots I8/FP16 performance.
+```
+
+A sample *empirRoof_gpu-ALL_fp32_fp64.pdf* looks something like this:
 
 ![Sample Standalone Roof Plot](images/sample-roof-plot.png)

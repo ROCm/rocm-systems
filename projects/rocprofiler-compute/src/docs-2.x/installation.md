@@ -33,7 +33,11 @@ Omniperf client-side requires the following basic software dependencies prior to
 
 In addition, Omniperf leverages a number of Python packages that are
 documented in the top-level `requirements.txt` file.  These must be
-installed prior to Omniperf configuration.  
+installed prior to Omniperf configuration.
+
+```{note}
+If you're interested in building docs locally or running Omniperf's CI suite via PyTest, please see documented dependencies in `requirements-doc.txt` and `requirements-test.txt`, respectively.
+```
 
 The recommended procedure for Omniperf usage is to install into a shared file system so that multiple users can access the final installation.  The following steps illustrate how to install the necessary python dependencies using [pip](https://packaging.python.org/en/latest/) and Omniperf into a shared location controlled by the `INSTALL_DIR` environment variable.
 
@@ -154,7 +158,9 @@ wishes to use instead.
 
 ## Server-side Setup
 
-> Note: Server-side setup is not required to profile or analyze performance data from the CLI. It is provided as an additional mechanism to import performance data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
+```{note}
+Server-side setup is not required to profile or analyze performance data from the CLI. It is provided as an additional mechanism to import performance data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
+```
 
 Omniperf server-side requires the following basic software dependencies prior to usage:
 
@@ -191,10 +197,12 @@ We are now ready to build our Docker file. Navigate to your Omniperf install dir
 $ sudo docker-compose build
 $ sudo docker-compose up -d
 ```
-> Note that TCP ports for Grafana (4000) and MongoDB (27017) in the docker container are mapped to 14000 and 27018, respectively, on the host side.
+> TCP ports for Grafana (4000) and MongoDB (27017) in the docker container are mapped to 14000 and 27018, respectively, on the host side.
 
-### Restart (Debug)
+```{tip}
 In the event that your Grafana or MongoDB instance crash fatally, you can always restart the server. Just navigate to your install directory and run:
+```
+
 ```bash
 $ sudo docker-compose down
 $ sudo docker-compose up -d
@@ -216,9 +224,9 @@ The MongoDB Datasource must be configured prior to the first-time use. Navigate 
 
 Configure the following fields in the datasource settings:
 
-- HTTP URL: set to *http://localhost:3333*
-- MongoDB URL: set to *mongodb://temp:temp123@\<host-ip>:27018/admin?authSource=admin*
-- Database Name: set to *admin*
+- __HTTP URL__: set to `http://localhost:3333`
+- __MongoDB URL__: set to `mongodb://temp:temp123@\<host-ip>:27018/admin?authSource=admin`
+- __Database Name__: set to `admin`
 
 After properly configuring these fields click **Save & Test** (as shown below) to make sure your connection is successful.
 

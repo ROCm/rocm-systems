@@ -17,5 +17,6 @@ The [Omniperf](https://github.com/ROCm/omniperf) Tool is architecturally compose
 
 ![Omniperf Architectural Diagram](images/omniperf_server_vs_client_install.png)
 
-> Note: To learn more about the client vs. server model of Omniperf and our install process please see the [Deployment section](./installation.md) of the docs.
-
+```{note}
+To learn more about the client vs. server model of Omniperf and our install process please see the [Deployment section](./installation.md) of the docs.
+```

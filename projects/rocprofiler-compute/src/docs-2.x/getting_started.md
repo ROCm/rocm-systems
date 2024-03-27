@@ -16,7 +16,11 @@
     ```shell
     $ omniperf profile -n vcopy_data -- ./vcopy -n 1048576 -b 256
     ```
-    The app runs, each kernel is launched, and profiling results are generated. By default, results are written to a subdirectory with your accelerator's name e.g., ./workloads/vcopy_data/MI200/ (where name is configurable via the `-n` argument). To collect all requested profile information, it may be required to replay kernels multiple times.
+    The app runs, each kernel is launched, and profiling results are generated. By default, results are written to a subdirectory with your accelerator's name e.g., ./workloads/vcopy_data/MI200/ (where name is configurable via the `-n` argument).
+    
+    ```{note}
+    To collect all requested profile information, it may be required to replay kernels multiple times.
+    ```
 
 2. **Customize data collection**
 

@@ -32,8 +32,8 @@ def install(package):
 # -- Project information -----------------------------------------------------
 
 project = "Omniperf"
-copyright = "2023-2024, Audacious Software Group"
-author = "Audacious Software Group"
+copyright = "2023-2024, Advanced Micro Devices, Inc. All Rights Reserved"
+author = "AMD Research"
 
 # The short X.Y version
 version = repo_version
@@ -72,16 +72,16 @@ source_suffix = {
     ".md": "markdown",
 }
 
-sphinxmark_enable = True
-sphinxmark_image = "text"
-sphinxmark_text = "Release Candidate"
-sphinxmark_text_size = 80
-sphinxmark_div = "document"
-sphinxmark_fixed = False
-sphinxmark_text_rotation = 30
-sphinxmark_text_color = (128, 128, 128)
-sphinxmark_text_spacing = 800
-sphinxmark_text_opacity = 30
+# sphinxmark_enable = True
+# sphinxmark_image = "text"
+# sphinxmark_text = "Release Candidate"
+# sphinxmark_text_size = 80
+# sphinxmark_div = "document"
+# sphinxmark_fixed = False
+# sphinxmark_text_rotation = 30
+# sphinxmark_text_color = (128, 128, 128)
+# sphinxmark_text_spacing = 800
+# sphinxmark_text_opacity = 30
 
 from recommonmark.parser import CommonMarkParser
 
@@ -138,6 +138,7 @@ latex_elements = {
 # Output file base name for HTML help builder.
 htmlhelp_basename = "Omniperfdoc"
 
+html_logo = 'images/amd-header-logo.svg'
 html_theme_options = {
     "analytics_id": "G-C5DYLCE9ED",  #  Provided by Google in your dashboard
     "analytics_anonymize_ip": False,

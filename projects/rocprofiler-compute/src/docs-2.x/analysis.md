@@ -11,8 +11,11 @@ While analyzing with the CLI offers quick and straightforward access to Omniperf
 
 See sections below for more information on each.
 
+```{note}
+Profiling results from the [aforementioned vcopy workload](https://rocm.github.io/omniperf/profiling.html#workload-compilation) will be used in the following sections to demonstrate the use of Omniperf in MI GPU performance analysis. Unless otherwise noted, the performance analysis is done on the MI200 platform.
+```
+
 ## CLI Analysis
-> Profiling results from the [aforementioned vcopy workload](https://rocm.github.io/omniperf/profiling.html#workload-compilation) will be used in the following sections to demonstrate the use of Omniperf in MI GPU performance analysis. Unless otherwise noted, the performance analysis is done on the MI200 platform.
 
 ### Features
 
@@ -24,94 +27,6 @@ See sections below for more information on each.
 Run `omniperf analyze -h` for more details.
 
 ### Demo
-
-- Single run
-  ```shell
-  $ omniperf analyze -p workloads/vcopy/MI200/
-  ```
-
-- List top kernels and dispatches
-  ```shell
-  $ omniperf analyze -p workloads/vcopy/MI200/  --list-stats
-  ```
-
-- List metrics
-
-  ```shell
-  $ omniperf analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
-  ```
-
-- Customized profiling "System Speed-of-Light" and "CS_Busy" only
-  
-  ```shell
-  $ omniperf analyze -p workloads/vcopy/MI200/  -b 2  5.1.0
-  ```
-
-  > Note: Users can filter single metric or the whole hardware component by its id. In this case, 1 is the id for "system speed of light" and 5.1.0 the id for metric "GPU Busy Cycles".
-
-- Filter kernels
-
-  First, list the top kernels in your application using `--list-stats`.
-  ```shell-session
-  $ omniperf analyze -p workloads/vcopy/MI200/ --list-stats
-  
-  Analysis mode = cli
-  [analysis] deriving Omniperf metrics...
-
-  --------------------------------------------------------------------------------
-  Detected Kernels (sorted descending by duration)
-  ╒════╤══════════════════════════════════════════════╕
-  │    │ Kernel_Name                                  │
-  ╞════╪══════════════════════════════════════════════╡
-  │  0 │ vecCopy(double*, double*, double*, int, int) │
-  ╘════╧══════════════════════════════════════════════╛
-
-  --------------------------------------------------------------------------------
-  Dispatch list
-  ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
-  │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
-  ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
-  │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
-  ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
-
-  ```
-
-  Second, select the index of the kernel you would like to filter (i.e. __vecCopy(double*, double*, double*, int, int) [clone .kd]__ at index __0__). Then, use this index to apply the filter via `-k/--kernels`.
-
-  ```shell-session
-  $ omniperf analyze -p workloads/vcopy/MI200/ -k 0
-  
-  Analysis mode = cli
-  [analysis] deriving Omniperf metrics...
-
-  --------------------------------------------------------------------------------
-  0. Top Stats
-  0.1 Top Kernels
-  ╒════╤══════════════════════════════════════════╤═════════╤═══════════╤════════════╤══════════════╤════════╤═════╕
-  │    │ Kernel_Name                              │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
-  ╞════╪══════════════════════════════════════════╪═════════╪═══════════╪════════════╪══════════════╪════════╪═════╡
-  │  0 │ vecCopy(double*, double*, double*, int,  │    1.00 │  18560.00 │   18560.00 │     18560.00 │ 100.00 │ *   │
-  │    │ int)                                     │         │           │            │              │        │     │
-  ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
-  ... ...
-  ```
-  
-  > Note: You will see your filtered kernel(s) indicated by an asterisk in the Top Stats table
-
-
-- Baseline comparison
-  
-  ```shell
-  omniperf analyze -p workload1/path/  -p workload2/path/
-  ```
-  > Note: You can also apply different filters to each workload.
-  
-  OR
-  ```shell
-  omniperf analyze -p workload1/path/ -k 0  -p workload2/path/ -k 1
-  ```
-
-### Recommended workflow
 
 1) To begin, generate a high-level analysis report utilizing Omniperf's `-b` (a.k.a. `--block`) flag. 
 ```shell-session
@@ -347,10 +262,104 @@ Analyze
 │ 2.1.28  │ Instr Fetch Latency       │ 21.729248046875       │ Cycles           │                    │                        │
 ╘═════════╧═══════════════════════════╧═══════════════════════╧══════════════════╧════════════════════╧════════════════════════╛
 ```
-> **Note:** Some cells may be blank indicating a missing/unavailable hardware counter or NULL value
+
+```{note}
+Some cells may be blank indicating a missing/unavailable hardware counter or NULL value
+```
 
 3. Optimize application, iterate, and re-profile to inspect performance changes.
 4. Redo a comprehensive analysis with Omniperf CLI at any milestone or at the end.
+
+### More options
+
+- __Single run__
+  ```shell
+  $ omniperf analyze -p workloads/vcopy/MI200/
+  ```
+
+- __List top kernels and dispatches__
+  ```shell
+  $ omniperf analyze -p workloads/vcopy/MI200/  --list-stats
+  ```
+
+- __List metrics__
+
+  ```shell
+  $ omniperf analyze -p workloads/vcopy/MI200/  --list-metrics gfx90a
+  ```
+
+- __Show "System Speed-of-Light" and "CS_Busy" blocks only__
+  
+  ```shell
+  $ omniperf analyze -p workloads/vcopy/MI200/  -b 2  5.1.0
+  ```
+
+  ```{note}
+  Users can filter single metric or the whole hardware component by its id. In this case, 1 is the id for "system speed of light" and 5.1.0 the id for metric "GPU Busy Cycles".
+  ```
+
+- __Filter kernels__
+
+  First, list the top kernels in your application using `--list-stats`.
+  ```shell-session
+  $ omniperf analyze -p workloads/vcopy/MI200/ --list-stats
+  
+  Analysis mode = cli
+  [analysis] deriving Omniperf metrics...
+
+  --------------------------------------------------------------------------------
+  Detected Kernels (sorted descending by duration)
+  ╒════╤══════════════════════════════════════════════╕
+  │    │ Kernel_Name                                  │
+  ╞════╪══════════════════════════════════════════════╡
+  │  0 │ vecCopy(double*, double*, double*, int, int) │
+  ╘════╧══════════════════════════════════════════════╛
+
+  --------------------------------------------------------------------------------
+  Dispatch list
+  ╒════╤═══════════════╤══════════════════════════════════════════════╤══════════╕
+  │    │   Dispatch_ID │ Kernel_Name                                  │   GPU_ID │
+  ╞════╪═══════════════╪══════════════════════════════════════════════╪══════════╡
+  │  0 │             0 │ vecCopy(double*, double*, double*, int, int) │        0 │
+  ╘════╧═══════════════╧══════════════════════════════════════════════╧══════════╛
+
+  ```
+
+  Second, select the index of the kernel you would like to filter (i.e. __vecCopy(double*, double*, double*, int, int) [clone .kd]__ at index __0__). Then, use this index to apply the filter via `-k/--kernels`.
+
+  ```shell-session
+  $ omniperf analyze -p workloads/vcopy/MI200/ -k 0
+  
+  Analysis mode = cli
+  [analysis] deriving Omniperf metrics...
+
+  --------------------------------------------------------------------------------
+  0. Top Stats
+  0.1 Top Kernels
+  ╒════╤══════════════════════════════════════════╤═════════╤═══════════╤════════════╤══════════════╤════════╤═════╕
+  │    │ Kernel_Name                              │   Count │   Sum(ns) │   Mean(ns) │   Median(ns) │    Pct │ S   │
+  ╞════╪══════════════════════════════════════════╪═════════╪═══════════╪════════════╪══════════════╪════════╪═════╡
+  │  0 │ vecCopy(double*, double*, double*, int,  │    1.00 │  18560.00 │   18560.00 │     18560.00 │ 100.00 │ *   │
+  │    │ int)                                     │         │           │            │              │        │     │
+  ╘════╧══════════════════════════════════════════╧═════════╧═══════════╧════════════╧══════════════╧════════╧═════╛
+  ... ...
+  ```
+  
+  ```{note}
+  You will see your filtered kernel(s) indicated by an asterisk in the Top Stats table
+  ```
+
+
+- __Baseline comparison__
+  
+  ```shell
+  omniperf analyze -p workload1/path/  -p workload2/path/
+  ```
+  OR
+  ```shell
+  omniperf analyze -p workload1/path/ -k 0  -p workload2/path/ -k 1
+  ```
+
 
 ## GUI Analysis
 
