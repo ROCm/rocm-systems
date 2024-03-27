@@ -33,18 +33,13 @@ THE SOFTWARE.
 
 namespace rocprofiler {
 
-typedef std::vector<double> xcc_results_t;
-
 class results_t {
  public:
-  results_t(std::string in_name, event_t in_event, uint32_t xcc_count)
-      : name(in_name), val_double(0), event(in_event) {
-    xcc_vals.resize(xcc_count);
-    std::fill(xcc_vals.begin(), xcc_vals.end(), 0);
-  }
+  results_t(std::string in_name, event_t in_event, int xcc_count)
+      : name(in_name), val_double(0), event(in_event) { xcc_vals.reserve(xcc_count); }
   std::string name;
   double val_double;
-  xcc_results_t xcc_vals;
+  std::vector<double> xcc_vals;
   event_t event;
 };
 

@@ -30,24 +30,12 @@ struct block_status_t {
 typedef struct {
   std::vector<results_t*>* results;
   size_t index;
-  uint32_t single_xcc_buff_size;
-  uint32_t umc_buff_size;
 } callback_data_t;
 
 static inline bool IsEventMatch(const hsa_ven_amd_aqlprofile_event_t& event1,
                                 const hsa_ven_amd_aqlprofile_event_t& event2) {
   return (event1.block_name == event2.block_name) && (event1.block_index == event2.block_index) &&
       (event1.counter_id == event2.counter_id);
-}
-
-uint32_t calculate_xcc_index(callback_data_t* passed_data) {
-  // xcc_0 is special case as it contains all umc event results
-  // after xcc_0, there are no umc event results
-  uint32_t xcc_zero_size = passed_data->umc_buff_size + passed_data->single_xcc_buff_size;
-  uint32_t xcc_index = 0;
-  if (passed_data->index >= xcc_zero_size)
-    xcc_index = 1 + floor((passed_data->index - xcc_zero_size) / passed_data->single_xcc_buff_size);
-  return xcc_index;
 }
 
 hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
@@ -61,9 +49,8 @@ hsa_status_t pmcCallback(hsa_ven_amd_aqlprofile_info_type_t info_type,
       if (info_type != HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) continue;
       if (!IsEventMatch(info_data->pmc_data.event, (*data_it)->event)) continue;
 
-      uint32_t xcc_index = calculate_xcc_index(passed_data);
-      // stores event result from each xcc separately
-      (*data_it)->xcc_vals.at(xcc_index) += info_data->pmc_data.result;
+      // stores event result from each event separately
+      (*data_it)->xcc_vals.push_back(info_data->pmc_data.result);
       // stores accumulated event result from all xccs
       (*data_it)->val_double += info_data->pmc_data.result;
     }
@@ -197,38 +184,30 @@ bool metrics::ExtractMetricEvents(
   return true;
 }
 
+bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
+                             std::vector<results_t*>& results_list) {
+  size_t gpu_xcc_count = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
+  callback_data_t callback_data{&results_list, 0};
+  hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);
 
-std::pair<uint32_t, uint32_t> get_umc_and_xcc_sample_count(
-    hsa_ven_amd_aqlprofile_profile_t* profile, uint32_t xcc_num) {
-  const uint32_t UMC_SAMPLE_BYTE_SIZE = 8;
+  for (auto& data : *(callback_data.results))
+  {
+    size_t xcc_count = (data->event.block_name != HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC) ? gpu_xcc_count : 1;
+    std::vector<double> xcc_results = std::move(data->xcc_vals);
+    data->xcc_vals.clear();
+    data->xcc_vals.reserve(xcc_count);
+    size_t split = (xcc_results.size()+xcc_count-1) / xcc_count;
 
-  uint32_t umc_sample_count = 0;
-  if (xcc_num > 1) {
-    // We count the UMC samples per XCC for MI300: for each event there are AID samples
-    for (const hsa_ven_amd_aqlprofile_event_t* p = profile->events;
-         p < profile->events + profile->event_count; ++p) {
-      if (p->block_name == HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_UMC) {
-          ++umc_sample_count;
-      }
+    // Exploit the fact AQLprofile calls counter in order per XCC
+    for (size_t xcc=0; xcc < xcc_count; xcc++)
+    {
+      double accumulated = 0;
+      for (size_t s=xcc*split; s<std::min(xcc_results.size(), (xcc+1)*split); s++)
+        accumulated += xcc_results.at(s);
+      data->xcc_vals.push_back(accumulated);
     }
   }
 
-  // per xcc sample count
-  uint32_t xcc_sample_count =
-      (profile->output_buffer.size - umc_sample_count * UMC_SAMPLE_BYTE_SIZE) /
-      (sizeof(uint64_t) * xcc_num);
-
-  return std::make_pair(xcc_sample_count, umc_sample_count);
-}
-
-bool metrics::GetCounterData(hsa_ven_amd_aqlprofile_profile_t* profile, hsa_agent_t gpu_agent,
-                             std::vector<results_t*>& results_list) {
-  uint32_t xcc_count = HSASupport_Singleton::GetInstance().GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
-  auto umc_count_and_xcc_sample_count = get_umc_and_xcc_sample_count(profile, xcc_count);
-  uint32_t single_xcc_buff_size = umc_count_and_xcc_sample_count.first;
-  uint32_t umc_buff_size = umc_count_and_xcc_sample_count.second;
-  callback_data_t callback_data{&results_list, 0, single_xcc_buff_size, umc_buff_size};
-  hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(profile, pmcCallback, &callback_data);
   return (status == HSA_STATUS_SUCCESS);
 }
 
@@ -257,15 +236,11 @@ void metrics::GetCountersAndMetricResultsByXcc(uint32_t xcc_index,
                                                std::map<std::string, results_t*>& results_map,
                                                std::vector<const Metric*>& metrics_list,
                                                uint64_t kernel_duration) {
-  for (auto it = results_list.begin(); it != results_list.end(); it++) {
-    (*it)->val_double =
-        (*it)->xcc_vals[xcc_index];  // set val_double to hold value for specific xcc
-  }
+  for (auto* it : results_list) // set val_double to hold value for specific xcc
+    it->val_double = it->xcc_vals[xcc_index];
 
-  for (auto it = results_map.begin(); it != results_map.end(); it++) {
-    it->second->val_double =
-        it->second->xcc_vals[xcc_index];  // set val_double to hold value for specific xcc
-  }
+  for (auto& [str, it] : results_map)
+    it->val_double = it->xcc_vals[xcc_index];
 
   GetMetricsData(results_map, metrics_list, kernel_duration);
 }
