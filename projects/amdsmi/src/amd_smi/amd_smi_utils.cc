@@ -229,6 +229,12 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         case CLK_TYPE_VCLK1:
             fullpath += "/pp_dpm_vclk1";
             break;
+        case CLK_TYPE_DCLK0:
+            fullpath += "/pp_dpm_dclk";
+            break;
+        case CLK_TYPE_DCLK1:
+            fullpath += "/pp_dpm_dclk1";
+            break;
         default:
             return AMDSMI_STATUS_INVAL;
     }

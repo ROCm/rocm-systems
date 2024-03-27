@@ -1369,6 +1369,22 @@ amdsmi_status_t amdsmi_get_dpm_policy(amdsmi_processor_handle processor_handle,
                     reinterpret_cast<rsmi_dpm_policy_t*>(policy));
 }
 
+amdsmi_status_t amdsmi_set_xgmi_plpd(amdsmi_processor_handle processor_handle,
+                         uint32_t policy) {
+    AMDSMI_CHECK_INIT();
+
+    return rsmi_wrapper(rsmi_dev_xgmi_plpd_set, processor_handle,
+                    policy);
+}
+
+amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
+                         amdsmi_dpm_policy_t* policy) {
+    AMDSMI_CHECK_INIT();
+
+    return rsmi_wrapper(rsmi_dev_xgmi_plpd_get, processor_handle,
+                    reinterpret_cast<rsmi_dpm_policy_t*>(policy));
+}
+
 amdsmi_status_t
 amdsmi_get_gpu_memory_reserved_pages(amdsmi_processor_handle processor_handle,
                                     uint32_t *num_pages,
@@ -1634,6 +1650,12 @@ amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, amdsmi_clk_type_
         break;
     case CLK_TYPE_VCLK1:
         info->cur_clk = metrics.current_vclk1;
+        break;
+    case CLK_TYPE_DCLK0:
+        info->cur_clk = metrics.current_dclk0;
+      break;
+    case CLK_TYPE_DCLK1:
+        info->cur_clk = metrics.current_dclk1;
         break;
     default:
         return AMDSMI_STATUS_INVAL;
@@ -2028,11 +2050,14 @@ amdsmi_status_t amdsmi_get_pcie_info(amdsmi_processor_handle processor_handle, a
             processor_handle, &slot_type);
     if (status == AMDSMI_STATUS_SUCCESS) {
         switch (slot_type) {
+            case RSMI_PCIE_SLOT_PCIE:
+                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_PCIE;
+                break;
             case RSMI_PCIE_SLOT_OAM:
                 info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_OAM;
                 break;
-            case RSMI_PCIE_SLOT_PCIE:
-                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_PCIE;
+            case RSMI_PCIE_SLOT_CEM:
+                info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_CEM;
                 break;
             default:
                 info->pcie_static.slot_type = AMDSMI_CARD_FORM_FACTOR_UNKNOWN;

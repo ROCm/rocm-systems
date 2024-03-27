@@ -737,27 +737,16 @@ amdsmi_bdf_t = union_amdsmi_bdf_t
 amdsmi_card_form_factor_t__enumvalues = {
     0: 'AMDSMI_CARD_FORM_FACTOR_PCIE',
     1: 'AMDSMI_CARD_FORM_FACTOR_OAM',
-    2: 'AMDSMI_CARD_FORM_FACTOR_UNKNOWN',
+    2: 'AMDSMI_CARD_FORM_FACTOR_CEM',
+    3: 'AMDSMI_CARD_FORM_FACTOR_UNKNOWN',
 }
 AMDSMI_CARD_FORM_FACTOR_PCIE = 0
 AMDSMI_CARD_FORM_FACTOR_OAM = 1
-AMDSMI_CARD_FORM_FACTOR_UNKNOWN = 2
+AMDSMI_CARD_FORM_FACTOR_CEM = 2
+AMDSMI_CARD_FORM_FACTOR_UNKNOWN = 3
 amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
-]
 
 class struct_pcie_metric_(Structure):
     pass
@@ -775,6 +764,19 @@ struct_pcie_metric_._fields_ = [
     ('pcie_nak_sent_count', ctypes.c_uint64),
     ('pcie_nak_received_count', ctypes.c_uint64),
     ('reserved', ctypes.c_uint64 * 13),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('reserved', ctypes.c_uint64 * 10),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -2058,6 +2060,12 @@ amdsmi_get_dpm_policy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct
 amdsmi_set_dpm_policy = _libraries['libamd_smi.so'].amdsmi_set_dpm_policy
 amdsmi_set_dpm_policy.restype = amdsmi_status_t
 amdsmi_set_dpm_policy.argtypes = [amdsmi_processor_handle, uint32_t]
+amdsmi_get_xgmi_plpd = _libraries['libamd_smi.so'].amdsmi_get_xgmi_plpd
+amdsmi_get_xgmi_plpd.restype = amdsmi_status_t
+amdsmi_get_xgmi_plpd.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_dpm_policy_t)]
+amdsmi_set_xgmi_plpd = _libraries['libamd_smi.so'].amdsmi_set_xgmi_plpd
+amdsmi_set_xgmi_plpd.restype = amdsmi_status_t
+amdsmi_set_xgmi_plpd.argtypes = [amdsmi_processor_handle, uint32_t]
 amdsmi_get_lib_version = _libraries['libamd_smi.so'].amdsmi_get_lib_version
 amdsmi_get_lib_version.restype = amdsmi_status_t
 amdsmi_get_lib_version.argtypes = [ctypes.POINTER(struct_amdsmi_version_t)]
@@ -2341,10 +2349,10 @@ __all__ = \
     'AMDSMI_CACHE_PROPERTY_DATA_CACHE',
     'AMDSMI_CACHE_PROPERTY_ENABLED',
     'AMDSMI_CACHE_PROPERTY_INST_CACHE',
-    'AMDSMI_CACHE_PROPERTY_SIMD_CACHE', 'AMDSMI_CARD_FORM_FACTOR_OAM',
-    'AMDSMI_CARD_FORM_FACTOR_PCIE', 'AMDSMI_CARD_FORM_FACTOR_UNKNOWN',
-    'AMDSMI_CNTR_CMD_START', 'AMDSMI_CNTR_CMD_STOP',
-    'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
+    'AMDSMI_CACHE_PROPERTY_SIMD_CACHE', 'AMDSMI_CARD_FORM_FACTOR_CEM',
+    'AMDSMI_CARD_FORM_FACTOR_OAM', 'AMDSMI_CARD_FORM_FACTOR_PCIE',
+    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CNTR_CMD_START',
+    'AMDSMI_CNTR_CMD_STOP', 'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
     'AMDSMI_COARSE_GRAIN_MEM_ACTIVITY', 'AMDSMI_CURRENT_POWER',
     'AMDSMI_DEV_PERF_LEVEL_AUTO', 'AMDSMI_DEV_PERF_LEVEL_DETERMINISM',
     'AMDSMI_DEV_PERF_LEVEL_FIRST', 'AMDSMI_DEV_PERF_LEVEL_HIGH',
@@ -2594,8 +2602,9 @@ __all__ = \
     'amdsmi_get_processor_info', 'amdsmi_get_processor_type',
     'amdsmi_get_socket_handles', 'amdsmi_get_socket_info',
     'amdsmi_get_temp_metric', 'amdsmi_get_utilization_count',
-    'amdsmi_get_xgmi_info', 'amdsmi_gpu_block_t',
-    'amdsmi_gpu_cache_info_t', 'amdsmi_gpu_control_counter',
+    'amdsmi_get_xgmi_info', 'amdsmi_get_xgmi_plpd',
+    'amdsmi_gpu_block_t', 'amdsmi_gpu_cache_info_t',
+    'amdsmi_gpu_control_counter',
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
     'amdsmi_gpu_read_counter', 'amdsmi_gpu_xgmi_error_status',
@@ -2636,10 +2645,10 @@ __all__ = \
     'amdsmi_set_gpu_overdrive_level', 'amdsmi_set_gpu_pci_bandwidth',
     'amdsmi_set_gpu_perf_determinism_mode',
     'amdsmi_set_gpu_perf_level', 'amdsmi_set_gpu_power_profile',
-    'amdsmi_set_power_cap', 'amdsmi_shut_down',
-    'amdsmi_smu_fw_version_t', 'amdsmi_socket_handle',
-    'amdsmi_status_code_to_string', 'amdsmi_status_t',
-    'amdsmi_stop_gpu_event_notification',
+    'amdsmi_set_power_cap', 'amdsmi_set_xgmi_plpd',
+    'amdsmi_shut_down', 'amdsmi_smu_fw_version_t',
+    'amdsmi_socket_handle', 'amdsmi_status_code_to_string',
+    'amdsmi_status_t', 'amdsmi_stop_gpu_event_notification',
     'amdsmi_temp_range_refresh_rate_t', 'amdsmi_temperature_metric_t',
     'amdsmi_temperature_type_t', 'amdsmi_topo_get_link_type',
     'amdsmi_topo_get_link_weight', 'amdsmi_topo_get_numa_node_number',

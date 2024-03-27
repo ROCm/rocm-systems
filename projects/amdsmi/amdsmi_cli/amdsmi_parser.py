@@ -544,6 +544,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         cache_help = "All cache information"
         board_help = "All board information"
         dpm_policy_help = "The available DPM policy"
+        xgmi_plpd_help = "The available XGMI per-link power down policy"
 
         # Options arguments help text for Hypervisors and Baremetal
         ras_help = "Displays RAS features information"
@@ -584,6 +585,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--policy', action='store_true', required=False, help=dpm_policy_help)
+                static_parser.add_argument('-x', '--xgmi-plpd', action='store_true', required=False, help=xgmi_plpd_help)
 
             if self.helpers.is_linux() and not self.helpers.is_virtual_os():
                 static_parser.add_argument('-u', '--numa', action='store_true', required=False, help=numa_help)
@@ -966,6 +968,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
         set_power_cap_help = "Set power capacity limit"
         set_dpm_policy_help = f"Set the GPU DPM policy using policy id\n"
+        set_xgmi_plpd_help = f"Set the GPU XGMI per-link power down policy using policy id\n"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
@@ -1002,6 +1005,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_parser.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
             set_value_parser.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
             set_value_parser.add_argument('-p', '--dpm-policy', action='store', required=False,  type=self._not_negative_int, help=set_dpm_policy_help, metavar='POLICY_ID')
+            set_value_parser.add_argument('-x', '--xgmi-plpd', action='store', required=False,  type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
 
         if self.helpers.is_amd_hsmp_initialized():
             # Optional CPU Args

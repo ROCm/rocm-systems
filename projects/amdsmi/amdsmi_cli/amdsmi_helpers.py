@@ -412,7 +412,7 @@ class AMDSMIHelpers():
         return True, selected_device_handles
 
 
-    def handle_gpus(self, args,logger, subcommand):
+    def handle_gpus(self, args, logger, subcommand):
         """This function will run execute the subcommands based on the number
             of gpus passed in via args.
         params:
@@ -708,3 +708,21 @@ class AMDSMIHelpers():
                 return f"{bytes_input:3.1f} {unit}"
             bytes_input /= 1024
         return f"{bytes_input:.1f} YB"
+
+
+    def unit_format(self, logger, value, unit):
+        """This function will format output with unit based on the logger output format
+
+        params:
+            args - argparser args to pass to subcommand
+            logger (AMDSMILogger) - Logger to print out output
+            value - the value to be formatted
+            unit - the unit to be formatted with the value
+        return:
+            str or dict : formatted output
+        """
+        if logger.is_json_format():
+            return {"value": value, "unit": unit}
+        if logger.is_human_readable_format():
+            return f"{value} {unit}"
+        return f"{value}"

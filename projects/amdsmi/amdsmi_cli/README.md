@@ -79,7 +79,7 @@ amd-smi will report the version and current platform detected when running the c
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.4.0.0 | ROCm version: 6.1.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 24.5.0.0 | ROCm version: 6.1.1 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -513,6 +513,7 @@ Set Arguments:
                                                 NPS1, NPS2, NPS4, NPS8
   -o, --power-cap WATTS                        Set power capacity limit
   -p, --dpm-policy POLICY_ID                   Set the GPU DPM policy using policy id
+  -x, --xgmi-plpd POLICY_ID                    Set the GPU XGMI per-link power down policy using policy id
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                    Set power limit for the given socket. Input parameter is power limit value.
@@ -675,7 +676,7 @@ GPU: 0
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
-    POLICY:
+    DPM_POLICY:
         NUM_SUPPORTED: 4
         CURRENT_ID: 1
         POLICIES:
@@ -687,6 +688,16 @@ GPU: 0
             POLICY_DESCRIPTION: soc_pstate_1
             POLICY_ID: 3
             POLICY_DESCRIPTION: soc_pstate_2
+    XGMI_PLPD:
+        NUM_SUPPORTED: 3
+        CURRENT_ID: 1
+        PLPDS:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: plpd_disallow
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: plpd_default
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: plpd_optimized
     NUMA:
         NODE: 0
         AFFINITY: 0
@@ -783,7 +794,7 @@ GPU: 1
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
-    POLICY:
+    DPM_POLICY:
         NUM_SUPPORTED: 4
         CURRENT_ID: 1
         POLICIES:
@@ -795,6 +806,16 @@ GPU: 1
             POLICY_DESCRIPTION: soc_pstate_1
             POLICY_ID: 3
             POLICY_DESCRIPTION: soc_pstate_2
+    XGMI_PLPD:
+        NUM_SUPPORTED: 3
+        CURRENT_ID: 1
+        PLPDS:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: plpd_disallow
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: plpd_default
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: plpd_optimized
     NUMA:
         NODE: 1
         AFFINITY: 1
@@ -891,7 +912,7 @@ GPU: 2
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
-    POLICY:
+    DPM_POLICY:
         NUM_SUPPORTED: 4
         CURRENT_ID: 1
         POLICIES:
@@ -903,6 +924,16 @@ GPU: 2
             POLICY_DESCRIPTION: soc_pstate_1
             POLICY_ID: 3
             POLICY_DESCRIPTION: soc_pstate_2
+    XGMI_PLPD:
+        NUM_SUPPORTED: 3
+        CURRENT_ID: 1
+        PLPDS:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: plpd_disallow
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: plpd_default
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: plpd_optimized
     NUMA:
         NODE: 2
         AFFINITY: 2
@@ -999,7 +1030,7 @@ GPU: 3
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
-    POLICY:
+    DPM_POLICY:
         NUM_SUPPORTED: 4
         CURRENT_ID: 1
         POLICIES:
@@ -1011,6 +1042,16 @@ GPU: 3
             POLICY_DESCRIPTION: soc_pstate_1
             POLICY_ID: 3
             POLICY_DESCRIPTION: soc_pstate_2
+    XGMI_PLPD:
+        NUM_SUPPORTED: 3
+        CURRENT_ID: 1
+        PLPDS:
+            POLICY_ID: 0
+            POLICY_DESCRIPTION: plpd_disallow
+            POLICY_ID: 1
+            POLICY_DESCRIPTION: plpd_default
+            POLICY_ID: 2
+            POLICY_DESCRIPTION: plpd_optimized
     NUMA:
         NODE: 3
         AFFINITY: 3

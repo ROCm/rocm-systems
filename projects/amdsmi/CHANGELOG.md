@@ -1,14 +1,172 @@
 # Change Log for AMD SMI Library
 
-Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).  
+Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/](https://rocm.docs.amd.com/projects/amdsmi/en/latest/).
 
 ***All information listed below is for reference and subject to change.***
+
+## amd_smi_lib for ROCm 6.1.1
+
+### Changed
+
+- **Updated metrics --clocks**  
+Output for `amd-smi metric --clock` is updated to reflect each engine and bug fixes for the clock lock status and deep sleep status.
+
+``` shell
+$ amd-smi metric --clock
+GPU: 0
+    CLOCK:
+        GFX_0:
+            CLK: 113 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        GFX_1:
+            CLK: 113 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        GFX_2:
+            CLK: 112 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        GFX_3:
+            CLK: 113 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        GFX_4:
+            CLK: 113 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        GFX_5:
+            CLK: 113 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        GFX_6:
+            CLK: 113 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        GFX_7:
+            CLK: 113 MHz
+            MIN_CLK: 500 MHz
+            MAX_CLK: 1800 MHz
+            CLK_LOCKED: DISABLED
+            DEEP_SLEEP: ENABLED
+        MEM_0:
+            CLK: 900 MHz
+            MIN_CLK: 900 MHz
+            MAX_CLK: 1200 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: DISABLED
+        VCLK_0:
+            CLK: 29 MHz
+            MIN_CLK: 914 MHz
+            MAX_CLK: 1480 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+        VCLK_1:
+            CLK: 29 MHz
+            MIN_CLK: 914 MHz
+            MAX_CLK: 1480 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+        VCLK_2:
+            CLK: 29 MHz
+            MIN_CLK: 914 MHz
+            MAX_CLK: 1480 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+        VCLK_3:
+            CLK: 29 MHz
+            MIN_CLK: 914 MHz
+            MAX_CLK: 1480 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+        DCLK_0:
+            CLK: 22 MHz
+            MIN_CLK: 711 MHz
+            MAX_CLK: 1233 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+        DCLK_1:
+            CLK: 22 MHz
+            MIN_CLK: 711 MHz
+            MAX_CLK: 1233 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+        DCLK_2:
+            CLK: 22 MHz
+            MIN_CLK: 711 MHz
+            MAX_CLK: 1233 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+        DCLK_3:
+            CLK: 22 MHz
+            MIN_CLK: 711 MHz
+            MAX_CLK: 1233 MHz
+            CLK_LOCKED: N/A
+            DEEP_SLEEP: ENABLED
+```
+
+- **Added deferred ecc counts**  
+Added deferred error correctable counts to `amd-smi metric --ecc --ecc-blocks`
+
+```shell
+$ amd-smi metric --ecc --ecc-blocks
+GPU: 0
+    ECC:
+        TOTAL_CORRECTABLE_COUNT: 0
+        TOTAL_UNCORRECTABLE_COUNT: 0
+        TOTAL_DEFERRED_COUNT: 0
+        CACHE_CORRECTABLE_COUNT: 0
+        CACHE_UNCORRECTABLE_COUNT: 0
+    ECC_BLOCKS:
+        UMC:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        SDMA:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        ...
+```
+
+### Fixed
+
+- **Fix for GPU reset error on non-amdgpu cards**
+Previously our reset could attempting to reset non-amd GPUS- resuting in "Unable to reset non-amd GPU" error. Fix
+updates CLI to target only AMD ASICs.
+
+- **Fix for `amd-smi metric --pcie` and `amdsmi_get_pcie_info()`Navi32/31 cards**  
+Updated API to include `amdsmi_card_form_factor_t.AMDSMI_CARD_FORM_FACTOR_CEM`. Prevously, this would report "UNKNOWN". This fix
+provides the correct board `SLOT_TYPE` associated with these ASICs (and other Navi cards).
+
+- **Improved Error handling for `amd-smi process`**  
+Fixed Attribute Error when getting process in csv format
+
+### Known issues
+
+- `amd-smi bad-pages` can results with "ValueError: NULL pointer access" with certain PM FW versions
 
 ## amd_smi_lib for ROCm 6.1.0
 
 ### Added
+
 - **Added Monitor Command**  
 Provides users the ability to customize GPU metrics to capture, collect, and observe. Output is provided in a table view. This aligns closer to ROCm SMI `rocm-smi` (no argument), additionally allows uers to customize what data is helpful for their use-case.
+
 ```shell
 $ amd-smi monitor -h
 usage: amd-smi monitor [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
@@ -52,6 +210,7 @@ Command Modifiers:
   --loglevel LEVEL             Set the logging level from the possible choices:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
+
 ```shell
 $ amd-smi monitor -ptumv
 GPU  POWER  GPU_TEMP  MEM_TEMP  GFX_UTIL  GFX_CLOCK  MEM_UTIL  MEM_CLOCK  VRAM_USED  VRAM_TOTAL
@@ -66,9 +225,9 @@ GPU  POWER  GPU_TEMP  MEM_TEMP  GFX_UTIL  GFX_CLOCK  MEM_UTIL  MEM_CLOCK  VRAM_U
 ```
 
 - **Integrated ESMI Tool**  
-Users can get CPU metrics and telemetry through our API and CLI tools. This information can be seen in `amd-smi static` and `amd-smi metric` commands. Only available for limited target processors. As of ROCm 6.0.2, this is listed as:  
-  - AMD Zen3 based CPU Family 19h Models 0h-Fh and 30h-3Fh  
-  - AMD Zen4 based CPU Family 19h Models 10h-1Fh and A0-AFh  
+Users can get CPU metrics and telemetry through our API and CLI tools. This information can be seen in `amd-smi static` and `amd-smi metric` commands. Only available for limited target processors. As of ROCm 6.0.2, this is listed as:
+  - AMD Zen3 based CPU Family 19h Models 0h-Fh and 30h-3Fh
+  - AMD Zen4 based CPU Family 19h Models 10h-1Fh and A0-AFh
 
   See a few examples listed below.
 
@@ -80,6 +239,7 @@ CPU: 0
     INTERFACE_VERSION:
         PROTO VERSION: 6
 ```
+
 ```shell
 $ amd-smi metric -O 0 1 2
 CORE: 0
@@ -106,6 +266,7 @@ CORE: 2
     CORE_ENERGY:
         VALUE: N/A
 ```
+
 ```shell
 $ amd-smi metric -U all
 CPU: 0
@@ -212,6 +373,7 @@ CPU: 0
     CPU_TEMP:
         RESPONSE: N/A
 ```
+
 - **Added support for new metrics: VCN, JPEG engines, and PCIe errors**  
 Using the AMD SMI tool, users can retreive VCN, JPEG engines, and PCIe errors by calling `amd-smi metric -P` or `amd-smi metric --usage`. Depending on device support, `VCN_ACTIVITY` will update for MI3x ASICs (with 4 separate VCN engine activities) for older asics `MM_ACTIVITY` with UVD/VCN engine activity (average of all engines). `JPEG_ACTIVITY` is a new field for MI3x ASICs, where device can support up to 32 JPEG engine activities. See our documentation for more in-depth understanding of these new fields.
 
@@ -230,6 +392,7 @@ GPU: 0
         CURRENT_BANDWIDTH_RECEIVED: N/A
         MAX_PACKET_SIZE: N/A
 ```
+
 ```shell
 $ amd-smi metric --usage
 GPU: 0
@@ -243,11 +406,13 @@ GPU: 0
             0 %, 0 %, 0 %, 0 %]
 
 ```
+
 - **Added AMDSMI Tool Version**  
 AMD SMI will report ***three versions***: AMDSMI Tool, AMDSMI Library version, and ROCm version.  
 The AMDSMI Tool version is the CLI/tool version number with commit ID appended after `+` sign.  
 The AMDSMI Library version is the library package version number.  
 The ROCm version is the system's installed ROCm version, if ROCm is not installed it will report N/A.
+
 ```shell
 $ amd-smi version
 AMDSMI Tool: 23.4.2+505b858 | AMDSMI Library version: 24.2.0.0 | ROCm version: 6.1.0
@@ -255,6 +420,7 @@ AMDSMI Tool: 23.4.2+505b858 | AMDSMI Library version: 24.2.0.0 | ROCm version: 6
 
 - **Added XGMI table**  
 Displays XGMI information for AMD GPU devices in a table format. Only available on supported ASICs (eg. MI300). Here users can view read/write data XGMI or PCIe accumulated data transfer size (in KiloBytes).
+
 ```shell
 $ amd-smi xgmi
 LINK METRIC TABLE:
@@ -285,10 +451,12 @@ GPU7   0000:df:00.0 32 Gb/s  512 Gb/s      XGMI
  Write                                               0 KB         1 KB         1 KB         1 KB         1 KB         1 KB         1 KB         N/A
 
 ```
+
 - **Added units of measure to JSON output.**  
 We added unit of measure to JSON/CSV `amd-smi metric`, `amd-smi static`, and `amd-smi monitor` commands.
 
 Ex.  
+
 ```shell
 amd-smi metric -p --json
 [
@@ -321,7 +489,8 @@ amd-smi metric -p --json
 ### Changed
 
 - **Topology is now left-aligned with BDF of each device listed individual table's row/coloumns.**  
-We provided each device's BDF for every table's row/columns, then left aligned data. We want AMD SMI Tool output to be easy to understand and digest for our users. Having users scroll up to find this information made it difficult to follow, especially for devices which have many devices associated with one ASIC. 
+We provided each device's BDF for every table's row/columns, then left aligned data. We want AMD SMI Tool output to be easy to understand and digest for our users. Having users scroll up to find this information made it difficult to follow, especially for devices which have many devices associated with one ASIC.
+
 ```shell
 $ amd-smi topology
 ACCESS TABLE:
@@ -381,6 +550,7 @@ NUMA BW TABLE:
 ```
 
 ### Optimizations
+
 - N/A
 
 ### Fixed
@@ -388,19 +558,19 @@ NUMA BW TABLE:
 - **Fix for Navi3X/Navi2X/MI100 `amdsmi_get_gpu_pci_bandwidth()` in frequencies_read tests**  
 Devices which do not report (eg. Navi3X/Navi2X/MI100) we have added checks to confirm these devices return AMDSMI_STATUS_NOT_SUPPORTED. Otherwise, tests now display a return string.
 - **Fix for devices which have an older pyyaml installed**  
-Platforms which are identified as having an older pyyaml version or pip, we no manually update both pip and pyyaml as needed. This corrects issues identified below. Fix impacts the following CLI commands:  
+Platforms which are identified as having an older pyyaml version or pip, we no manually update both pip and pyyaml as needed. This corrects issues identified below. Fix impacts the following CLI commands:
   - `amd-smi list`
   - `amd-smi static`
   - `amd-smi firmware`
   - `amd-smi metric`
   - `amd-smi topology`
+
 ```shell
 TypeError: dump_all() got an unexpected keyword argument 'sort_keys'
 ```
-- **Fix for crash when user is not a member of video/render groups**
+
+- **Fix for crash when user is not a member of video/render groups**  
 AMD SMI now uses same mutex handler for devices as rocm-smi. This helps avoid crashes when DRM/device data is inaccessable to the logged in user.
-
-
 
 ### Known Issues
 
@@ -419,12 +589,11 @@ You can now query MI300 device metrics to get real-time information. Metrics inc
 - **Compute and memory partition support**  
 Users can now view, set, and reset partitions. The topology display can provide a more in-depth look at the device's current configuration.
 
-
 ### Changed
 
 - **GPU index sorting made consistent with other tools**  
 To ensure alignment with other ROCm software tools, GPU index sorting is optimized to use Bus:Device.Function (BDF) rather than the card number.
-- **Topology output is now aligned with GPU BDF table**
+- **Topology output is now aligned with GPU BDF table**  
 Earlier versions of the topology output were difficult to read since each GPU was displayed linearly.
 Now the information is displayed as a table by each GPU's BDF, which closer resembles rocm-smi output.
 
@@ -436,7 +605,6 @@ Now the information is displayed as a table by each GPU's BDF, which closer rese
 
 - **Fix for driver not initialized**  
 If driver module is not loaded, user retrieve error reponse indicating amdgpu module is not loaded.
-
 
 ### Known Issues
 

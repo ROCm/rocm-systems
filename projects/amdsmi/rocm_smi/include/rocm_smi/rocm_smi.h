@@ -3364,6 +3364,45 @@ rsmi_status_t rsmi_dev_dpm_policy_get(uint32_t dv_ind,
 rsmi_status_t rsmi_dev_dpm_policy_set(uint32_t dv_ind,
                              uint32_t policy_id);
 
+/**
+ * @brief Get the xgmi per-link power down policy parameter for a device
+ *
+ *
+ * @details Given a device index @p dv_ind, this function will write
+ * current xgmi plpd settings to @p xgmi_plpd. All the processors at the same socket
+ * will have the same policy.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[in, out] xgmi_plpd the xgmi_plpd policy for this device.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVAL
+ *
+ *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
+ */
+rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
+                             rsmi_dpm_policy_t* xgmi_plpd);
+
+/**
+ * @brief Set the xgmi per-link power down policy parameter for a device
+ *
+ *
+ * @details  Given a device index @p dv_ind, and a dpm policy @p plpd_id,
+ * this function will set the xgmi plpd for this processor. All the processors at
+ * the same socket will be set to the same policy.
+ *
+ *  @note This function requires root access
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] xgmi_plpd_id the xgmi plpd id to set. The id is the id in
+ *  rsmi_dpm_policy_entry_t, which can be obtained by calling
+ *  rsmi_dev_xgmi_plpd_get()
+ *
+ *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
+ */
+rsmi_status_t rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
+                             uint32_t plpd_id);
 /** @} */  // end of PerfCont
 
 /*****************************************************************************/

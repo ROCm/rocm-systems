@@ -73,9 +73,9 @@ except AmdSmiException as e:
 
 ### amdsmi_init
 
-Description: Dynamically initialize amdsmi with amd_hsmp and amdgpu drivers
+Description: Initialize amdsmi with AmdSmiInitFlags
 
-Input parameters: `None`
+Input parameters: AmdSmiInitFlags
 
 Output: `None`
 
@@ -83,19 +83,37 @@ Exceptions that can be thrown by `amdsmi_init` function:
 
 * `AmdSmiLibraryException`
 
-Example:
+Initialize GPUs only example:
 
 ```python
 try:
+    # by default we initalize with AmdSmiInitFlags.INIT_AMD_GPUS
     init_flag = amdsmi_init()
-    # Print out integer bitmask of initialized drivers
-    # 1 is for amd_hsmp
-    # 2 is for amdgpu
-    # 3 is for amd_hsmp and amdgpu
-    print(init_flag)
     # continue with amdsmi
 except AmdSmiException as e:
-    print("Init failed")
+    print("Init GPUs failed")
+    print(e)
+```
+
+Initialize CPUs only example:
+
+```python
+try:
+    init_flag = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    # continue with amdsmi
+except AmdSmiException as e:
+    print("Init CPUs failed")
+    print(e)
+```
+
+Initialize both GPUs and CPUs example:
+
+```python
+try:
+    init_flag = amdsmi_init(AmdSmiInitFlags.INIT_AMD_APUS)
+    # continue with amdsmi
+except AmdSmiException as e:
+    print("Init both GPUs & CPUs failed")
     print(e)
 ```
 
@@ -791,7 +809,7 @@ Output: Dictionary with 2 fields `pcie_static` and `pcie_metric`
 
 Fields | Description
 ---|---
-`pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in GT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: PCIE, OAM, or Unknown</td></tr></tbody></table>
+`pcie_static` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`max_pcie_width`</td><td>Maximum number of pcie lanes available</td></tr><tr><td>`max_pcie_speed`</td><td>Maximum capable pcie speed in GT/s</td></tr><tr><td>`pcie_interface_version`</td><td>PCIe generation ie. 3,4,5...</td></tr><tr><td>`slot_type`</td><td>The type of form factor of the slot: OAM, PCIE, CEM, or Unknown</td></tr></tbody></table>
 `pcie_metric` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`pcie_width`</td><td>Current number of pcie lanes available</td></tr><tr><td>`pcie_speed`</td><td>Current pcie speed capable in GT/s</td></tr><tr><td>`pcie_bandwidth`</td><td>Current instantaneous bandwidth usage in Mb/s</td></tr><tr><td>`pcie_replay_count`</td><td>Total number of PCIe replays (NAKs)</td></tr><tr><td>`pcie_l0_to_recovery_count`</td><td>PCIE L0 to recovery state transition accumulated count</td></tr><tr><td>`pcie_replay_roll_over_count`</td><td>PCIe Replay accumulated count</td></tr><tr><td>`pcie_nak_sent_count`</td><td>PCIe NAK sent accumulated count</td></tr><tr><td>`pcie_nak_received_count`</td><td>PCIe NAK received accumulated count</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_pcie_info` function:
@@ -909,8 +927,8 @@ Field | Description
 `name` | Name of process
 `pid` | Process ID
 `mem` | Process memory usage
-`engine_usage`| <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
-`memory_usage`| <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage</td></tr><tr><td>`vram_mem`</td><td>VRAM memory usage</td></tr> </tbody></table>
+`engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
+`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage</td></tr><tr><td>`vram_mem`</td><td>VRAM memory usage</td></tr> </tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_info` function:
 
@@ -949,6 +967,7 @@ Field | Description
 ---|---
 `correctable_count` | Correctable ECC error count
 `uncorrectable_count` | Uncorrectable ECC error count
+`deferred_count` | Deferred ECC error count
 
 Exceptions that can be thrown by `amdsmi_get_gpu_total_ecc_count` function:
 
@@ -2137,7 +2156,7 @@ Output: Dictionary with fields
 `indep_throttle_status` | ASIC independent throttle status (see drivers/gpu/drm/amd/pm/swsmu/inc/amdgpu_smu.h for bit flags) |
 `current_socket_power` | Current socket power (also known as instant socket power) | W
 `vcn_activity` | List of VCN encode/decode engine utilization per AID | %
-`gfxclk_lock_status` | Clock lock status. Each bit corresponds to clock instance. |
+`gfxclk_lock_status` | Clock lock status. Bits 0:7 correspond to each gfx clock engine instance. Bits 0:5 for APU/AID devices |
 `xgmi_link_width` | XGMI bus width | lanes
 `xgmi_link_speed` | XGMI bitrate | GB/s
 `pcie_bandwidth_acc` | PCIe accumulated bandwidth | GB/s
@@ -2612,6 +2631,74 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_set_xgmi_plpd
+
+Description: Set the xgmi per-link power down policy parameter for the processor
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `policy_id` the xgmi plpd id to set.
+
+Output: None
+
+Exceptions that can be thrown by `amdsmi_set_xgmi_plpd` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            amdsmi_set_xgmi_plpd(device, 0)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_xgmi_plpd
+
+Description: Get the xgmi per-link power down policy parameter for the processor
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Dict containing information about xgmi per-link power down policy
+
+Field | Description
+---|---
+`num_supported` | The number of supported policies
+`current_id` | The current policy index
+`plpds` | List of policies.
+
+Exceptions that can be thrown by `amdsmi_get_xgmi_plpd` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            xgmi_plpd =  amdsmi_get_xgmi_plpd(device)
+            print(xgmi_plpd)
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_set_gpu_overdrive_level
 
 Description: **deprecated** Set the overdrive percent associated with the
@@ -2661,6 +2748,7 @@ Field | Description
 ---|---
 `correctable_count` | Count of correctable errors
 `uncorrectable_count` | Count of uncorrectable errors
+`deferred_count` | Count of deferred errors
 
 Exceptions that can be thrown by `amdsmi_get_gpu_ecc_count` function:
 

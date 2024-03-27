@@ -1821,16 +1821,17 @@ def amdsmi_get_gpu_total_ecc_count(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    error_count = amdsmi_wrapper.amdsmi_error_count_t()
+    ec = amdsmi_wrapper.amdsmi_error_count_t()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_total_ecc_count(
-            processor_handle, ctypes.byref(error_count)
+            processor_handle, ctypes.byref(ec)
         )
     )
 
     return {
-        "correctable_count": error_count.correctable_count,
-        "uncorrectable_count": error_count.uncorrectable_count,
+        "correctable_count": ec.correctable_count,
+        "uncorrectable_count": ec.uncorrectable_count,
+        "deferred_count": ec.deferred_count,
     }
 
 
@@ -1848,13 +1849,19 @@ def amdsmi_get_gpu_board_info(
             processor_handle, ctypes.byref(board_info))
     )
 
-    return {
+    board_info_dict = {
         "model_number": board_info.model_number.decode("utf-8").strip(),
         "product_serial": board_info.product_serial.decode("utf-8").strip(),
         "fru_id": board_info.fru_id.decode("utf-8").strip(),
         "product_name": board_info.product_name.decode("utf-8").strip(),
         "manufacturer_name": board_info.manufacturer_name.decode("utf-8").strip()
     }
+
+    for key, value in board_info_dict.items():
+        if value == "":
+            board_info_dict[key] = "N/A"
+
+    return board_info_dict
 
 
 def amdsmi_get_gpu_ras_feature_info(
@@ -2032,7 +2039,7 @@ def amdsmi_get_power_info(
         )
     )
 
-    return {
+    power_info_dict = {
         "current_socket_power": power_measure.current_socket_power,
         "average_socket_power": power_measure.average_socket_power,
         "gfx_voltage": power_measure.gfx_voltage,
@@ -2040,6 +2047,12 @@ def amdsmi_get_power_info(
         "mem_voltage": power_measure.mem_voltage,
         "power_limit" : power_measure.power_limit,
     }
+
+    for key, value in power_info_dict.items():
+        if value == 0xFFFF:
+            power_info_dict[key] = "N/A"
+
+    return power_info_dict
 
 
 def amdsmi_is_gpu_power_management_enabled(
@@ -2746,6 +2759,20 @@ def amdsmi_set_dpm_policy(
         )
     )
 
+def amdsmi_set_xgmi_plpd(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+    policy_id: int,
+):
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+    _check_res(
+        amdsmi_wrapper.amdsmi_set_xgmi_plpd(
+            processor_handle, policy_id
+        )
+    )
+
 def amdsmi_set_gpu_overdrive_level(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle, overdrive_value: int
 ):
@@ -3335,6 +3362,37 @@ def amdsmi_get_dpm_policy(
         "policies": polices,
     }
 
+def amdsmi_get_xgmi_plpd(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+) -> Dict[str, Any]:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    policy = amdsmi_wrapper.amdsmi_dpm_policy_t()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_xgmi_plpd(
+            processor_handle, ctypes.byref(policy)
+        )
+    )
+
+    polices = []
+    for i in range(0, policy.num_supported):
+        id = policy.policies[i].policy_id
+        desc = policy.policies[i].policy_description
+        polices.append({
+            'policy_id' : id,
+            'policy_description': desc.decode()
+        })
+    current_id = policy.policies[policy.current].policy_id
+
+    return  {
+        "num_supported": policy.num_supported,
+        "current_id": current_id,
+        "plpds": polices,
+    }
+
 def amdsmi_get_gpu_od_volt_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
 ) -> Dict[str, Any]:
@@ -3462,7 +3520,7 @@ def amdsmi_get_gpu_metrics_info(
         if gpu_metrics_output[metric] == 0xFFFF:
             gpu_metrics_output[metric] = "N/A"
 
-    uint_32_metrics = ['gfx_activity_acc','mem_activity_acc', 'pcie_nak_sent_count_acc', 'pcie_nak_rcvd_count_acc']
+    uint_32_metrics = ['gfx_activity_acc','mem_activity_acc', 'pcie_nak_sent_count_acc', 'pcie_nak_rcvd_count_acc', 'gfxclk_lock_status']
     for metric in uint_32_metrics:
         if gpu_metrics_output[metric] == 0xFFFFFFFF:
             gpu_metrics_output[metric] = "N/A"
@@ -3476,7 +3534,7 @@ def amdsmi_get_gpu_metrics_info(
             gpu_metrics_output[metric] = "N/A"
 
     # Custom validation for metrics in a bool format
-    uint_32_bool_metrics = ['throttle_status', 'gfxclk_lock_status']
+    uint_32_bool_metrics = ['throttle_status']
     for metric in uint_32_bool_metrics:
         if gpu_metrics_output[metric] == 0xFFFFFFFF:
             gpu_metrics_output[metric] = "N/A"
@@ -3598,6 +3656,7 @@ def amdsmi_get_gpu_ecc_count(
     return {
         "correctable_count": ec.correctable_count,
         "uncorrectable_count": ec.uncorrectable_count,
+        "deferred_count": ec.deferred_count,
     }
 
 

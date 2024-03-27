@@ -495,6 +495,7 @@ typedef union {
 typedef enum {
   AMDSMI_CARD_FORM_FACTOR_PCIE,
   AMDSMI_CARD_FORM_FACTOR_OAM,
+  AMDSMI_CARD_FORM_FACTOR_CEM,
   AMDSMI_CARD_FORM_FACTOR_UNKNOWN
 } amdsmi_card_form_factor_t;
 
@@ -3405,6 +3406,49 @@ amdsmi_status_t amdsmi_get_dpm_policy(amdsmi_processor_handle processor_handle,
  */
 amdsmi_status_t amdsmi_set_dpm_policy(amdsmi_processor_handle processor_handle,
                              uint32_t policy_id);
+
+/**
+ * @brief Get the xgmi per-link power down policy parameter for the processor
+ *
+ * @platform{gpu_bm_linux}
+ *
+ * @details Given a processor handle @p processor_handle, this function will write
+ * current xgmi plpd settings to @p policy. All the processors at the same socket
+ * will have the same policy.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in, out] policy the xgmi plpd for this processor.
+ *  If this parameter is nullptr, this function will return
+ *  ::AMDSMI_STATUS_INVAL
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
+                             amdsmi_dpm_policy_t* xgmi_plpd);
+
+/**
+ * @brief Set the xgmi per-link power down policy parameter for the processor
+ *
+ * @platform{gpu_bm_linux}
+ *
+ * @details Given a processor handle @p processor_handle and a dpm policy @p plpd_id,
+ * this function will set the xgmi plpd for this processor. All the processors at
+ * the same socket will be set to the same policy.
+ *
+ *  @note This function requires root access
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] xgmi_plpd_id the xgmi plpd id to set. The id is the id in
+ *  amdsmi_dpm_policy_entry_t, which can be obtained by calling
+ *  amdsmi_get_xgmi_plpd()
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_xgmi_plpd(amdsmi_processor_handle processor_handle,
+                             uint32_t plpd_id);
+
 /** @} End PerfCont */
 
 /*****************************************************************************/
