@@ -299,7 +299,7 @@ def get_header(raw_pmc, input_filters, kernel_names):
                                         children=[
                                             # Report bug button
                                             html.A(
-                                                href="",
+                                                href="https://github.com/ROCm/omniperf/issues",
                                                 children=[
                                                     html.Button(
                                                         className="report",

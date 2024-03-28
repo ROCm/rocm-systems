@@ -138,7 +138,7 @@ latex_elements = {
 # Output file base name for HTML help builder.
 htmlhelp_basename = "Omniperfdoc"
 
-html_logo = 'images/amd-header-logo.svg'
+html_logo = "images/amd-header-logo.svg"
 html_theme_options = {
     "analytics_id": "G-C5DYLCE9ED",  #  Provided by Google in your dashboard
     "analytics_anonymize_ip": False,
