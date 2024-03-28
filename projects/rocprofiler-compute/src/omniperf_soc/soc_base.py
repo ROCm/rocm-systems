@@ -215,10 +215,12 @@ class OmniSoC_Base:
         if not roofline_perfmon_only:
             # we sort so that we have a consistent ordering of files between runs
             # regardless of the file-system, etc.
-            ref_pmc_files_list = sorted(glob.glob(self.__perfmon_dir + "/" + "pmc_*perf*.txt"))
-            ref_pmc_files_list += sorted(glob.glob(
-                self.__perfmon_dir + "/" + self.__arch + "/pmc_*_perf*.txt"
-            ))
+            ref_pmc_files_list = sorted(
+                glob.glob(self.__perfmon_dir + "/" + "pmc_*perf*.txt")
+            )
+            ref_pmc_files_list += sorted(
+                glob.glob(self.__perfmon_dir + "/" + self.__arch + "/pmc_*_perf*.txt")
+            )
 
             # Perfmon list filtering
             if self.__args.ipblocks != None:
@@ -242,7 +244,9 @@ class OmniSoC_Base:
         else:
             # we sort so that we have a consistent ordering of files between runs
             # regardless of the file-system, etc.
-            ref_pmc_files_list = sorted(glob.glob(self.__perfmon_dir + "/" + "pmc_roof_perf.txt"))
+            ref_pmc_files_list = sorted(
+                glob.glob(self.__perfmon_dir + "/" + "pmc_roof_perf.txt")
+            )
             pmc_files_list = ref_pmc_files_list
 
         # Coalesce and writeback workload specific perfmon
