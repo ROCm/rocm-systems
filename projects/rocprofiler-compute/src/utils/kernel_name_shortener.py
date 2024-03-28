@@ -23,7 +23,6 @@
 ##############################################################################el
 
 import os
-import logging
 import re
 import subprocess
 import pandas as pd

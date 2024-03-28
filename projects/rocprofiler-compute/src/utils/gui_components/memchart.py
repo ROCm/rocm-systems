@@ -22,8 +22,6 @@
 # SOFTWARE.
 ##############################################################################el
 
-import sys
-
 from dash import html
 from dash_svg import Svg, G, Path, Rect, Text
 from utils.utils import console_error

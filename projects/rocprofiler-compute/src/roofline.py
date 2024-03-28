@@ -24,7 +24,6 @@
 
 from abc import ABC, abstractmethod
 import os
-import sys
 import time
 from dash import dcc
 from utils.utils import (

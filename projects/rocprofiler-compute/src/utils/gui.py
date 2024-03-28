@@ -22,7 +22,6 @@
 # SOFTWARE.
 ##############################################################################el
 
-import sys
 import pandas as pd
 from dash import html, dash_table
 import plotly.express as px

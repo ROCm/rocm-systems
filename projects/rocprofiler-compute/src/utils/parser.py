@@ -23,7 +23,6 @@
 ##############################################################################el
 
 import ast
-import sys
 import astunparse
 import re
 import os

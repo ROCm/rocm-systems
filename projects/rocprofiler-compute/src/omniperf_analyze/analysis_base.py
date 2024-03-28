@@ -36,8 +36,6 @@ from utils.utils import (
     console_error,
 )
 from utils import schema, file_io, parser
-import pandas as pd
-from tabulate import tabulate
 
 
 class OmniAnalyze_Base:
