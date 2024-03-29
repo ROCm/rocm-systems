@@ -882,13 +882,24 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_process_list
 
-Description: Returns the list of processes for the given GPU
+Description: Returns the list of processes for the given GPU.
+The list is of type `amdsmi_proc_info_t` and holds information about the running process.
 
 Input parameters:
 
 * `processor_handle` device which to query
 
-Output: List of process handles found
+Output: List of process processes with fields
+
+Output: Dictionary with fields
+
+Field | Description
+---|---
+`name` | Name of process
+`pid` | Process ID
+`mem` | Process memory usage
+`engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
+`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage</td></tr><tr><td>`vram_mem`</td><td>VRAM memory usage</td></tr> </tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
@@ -906,48 +917,11 @@ try:
     else:
         for device in devices:
             processes = amdsmi_get_gpu_process_list(device)
-            print(processes)
-except AmdSmiException as e:
-    print(e)
-```
-
-### amdsmi_get_gpu_process_info
-
-Description: Returns the info for the given process
-
-Input parameters:
-
-* `processor_handle` device which to query
-* `process_handle` process which to query
-
-Output: Dictionary with fields
-
-Field | Description
----|---
-`name` | Name of process
-`pid` | Process ID
-`mem` | Process memory usage
-`engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
-`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage</td></tr><tr><td>`vram_mem`</td><td>VRAM memory usage</td></tr> </tbody></table>
-
-Exceptions that can be thrown by `amdsmi_get_gpu_process_info` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-* `AmdSmiParameterException`
-
-Example:
-
-```python
-try:
-    devices = amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            processes = amdsmi_get_gpu_process_list(device)
-            for process in processes:
-                print(amdsmi_get_gpu_process_info(device, process))
+            if len(processes) == 0:
+                print("No processes running on this GPU")
+            else:
+                for process in processes:
+                    print(process)
 except AmdSmiException as e:
     print(e)
 ```

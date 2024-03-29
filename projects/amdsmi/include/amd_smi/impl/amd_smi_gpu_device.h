@@ -53,7 +53,20 @@
 namespace amd {
 namespace smi {
 
+
+// PID, amdsmi_proc_info_t
+using GPUComputeProcessList_t = std::map<amdsmi_process_handle_t, amdsmi_proc_info_t>;
+using ComputeProcessListClassType_t = uint16_t;
+
+enum class ComputeProcessListType_t : ComputeProcessListClassType_t
+{
+    kAllProcesses,
+    kAllProcessesOnDevice,
+};
+
+
 class AMDSmiGPUDevice: public AMDSmiProcessor {
+
  public:
     AMDSmiGPUDevice(uint32_t gpu_id, uint32_t fd, std::string path, amdsmi_bdf_t bdf, AMDSmiDrm& drm):
             AMDSmiProcessor(AMD_GPU), gpu_id_(gpu_id), fd_(fd), path_(path), bdf_(bdf), drm_(drm) {}
@@ -73,6 +86,10 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     amdsmi_bdf_t  get_bdf();
     bool check_if_drm_is_supported() { return drm_.check_if_drm_is_supported(); }
     uint32_t get_vendor_id();
+    const GPUComputeProcessList_t& amdgpu_get_compute_process_list(ComputeProcessListType_t list_type = ComputeProcessListType_t::kAllProcessesOnDevice);
+    const GPUComputeProcessList_t& amdgpu_get_all_compute_process_list() {
+        return amdgpu_get_compute_process_list(ComputeProcessListType_t::kAllProcesses);
+    }
 
     amdsmi_status_t amdgpu_query_info(unsigned info_id,
                     unsigned size, void *value) const;
@@ -83,6 +100,7 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     amdsmi_status_t amdgpu_query_vbios(void *info) const;
     amdsmi_status_t amdgpu_query_driver_name(std::string& name) const;
     amdsmi_status_t amdgpu_query_driver_date(std::string& date) const;
+
  private:
     uint32_t gpu_id_;
     uint32_t fd_;
@@ -90,6 +108,10 @@ class AMDSmiGPUDevice: public AMDSmiProcessor {
     amdsmi_bdf_t bdf_;
     uint32_t vendor_id_;
     AMDSmiDrm& drm_;
+    GPUComputeProcessList_t compute_process_list_;
+    int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
+                                          ComputeProcessListType_t list_type);
+
 };
 
 

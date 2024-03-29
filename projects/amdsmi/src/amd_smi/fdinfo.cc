@@ -220,12 +220,10 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
 		}
 	}
 
-
 	closedir(d);
 
-	if (!pasids.size())
-		return AMDSMI_STATUS_NOT_FOUND;
-
+  //  Note: If possible at all, try to get the name of the process/container.
+  //        In case the other info fail, get at least something.
 	std::ifstream filename(name_path.c_str());
 	std::string name;
 
@@ -252,8 +250,11 @@ amdsmi_status_t gpuvsmi_get_pid_info(const amdsmi_bdf_t &bdf, long int pid,
 		if (strlen(info.container_name) > 0)
 			break;
 	}
-
 	info.pid = (uint32_t)pid;
+
+	if (!pasids.size()) {
+		return AMDSMI_STATUS_NOT_FOUND;
+  }
 
 	return AMDSMI_STATUS_SUCCESS;
 }

@@ -2212,10 +2212,7 @@ amdsmi_get_gpu_vram_usage.restype = amdsmi_status_t
 amdsmi_get_gpu_vram_usage.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_vram_usage_t)]
 amdsmi_get_gpu_process_list = _libraries['libamd_smi.so'].amdsmi_get_gpu_process_list
 amdsmi_get_gpu_process_list.restype = amdsmi_status_t
-amdsmi_get_gpu_process_list.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.c_uint32)]
-amdsmi_get_gpu_process_info = _libraries['libamd_smi.so'].amdsmi_get_gpu_process_info
-amdsmi_get_gpu_process_info.restype = amdsmi_status_t
-amdsmi_get_gpu_process_info.argtypes = [amdsmi_processor_handle, amdsmi_process_handle_t, ctypes.POINTER(struct_amdsmi_proc_info_t)]
+amdsmi_get_gpu_process_list.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_proc_info_t)]
 amdsmi_get_gpu_total_ecc_count = _libraries['libamd_smi.so'].amdsmi_get_gpu_total_ecc_count
 amdsmi_get_gpu_total_ecc_count.restype = amdsmi_status_t
 amdsmi_get_gpu_total_ecc_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_error_count_t)]
@@ -2580,7 +2577,7 @@ __all__ = \
     'amdsmi_get_gpu_pci_throughput', 'amdsmi_get_gpu_perf_level',
     'amdsmi_get_gpu_pm_metrics_info',
     'amdsmi_get_gpu_power_profile_presets',
-    'amdsmi_get_gpu_process_info', 'amdsmi_get_gpu_process_list',
+    'amdsmi_get_gpu_process_list',
     'amdsmi_get_gpu_ras_block_features_enabled',
     'amdsmi_get_gpu_ras_feature_info',
     'amdsmi_get_gpu_reg_table_info', 'amdsmi_get_gpu_revision',

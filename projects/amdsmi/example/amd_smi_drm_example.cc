@@ -432,7 +432,9 @@ int main() {
             ret = amdsmi_get_temp_metric(
                 processor_handles[j], TEMPERATURE_TYPE_EDGE,
                 AMDSMI_TEMP_CRITICAL, &temperature);
-            CHK_AMDSMI_RET(ret)
+            if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+            }
             printf("\tGPU GFX temp limit: %ld\n\n", temperature);
 
             // Get temperature measurements
@@ -447,7 +449,9 @@ int main() {
                     processor_handles[j], temp_type,
                     AMDSMI_TEMP_CURRENT,
                     &temp_measurements[(int)(temp_type)]);
-                CHK_AMDSMI_RET(ret)
+                if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+                    CHK_AMDSMI_RET(ret)
+                }
             }
             printf("    Output of amdsmi_get_temp_metric:\n");
             printf("\tGPU Edge temp measurement: %ld\n",
@@ -526,14 +530,13 @@ int main() {
             };
 
             uint32_t num_process = 0;
-            ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process,
-                                          nullptr);
+            ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, nullptr);
             CHK_AMDSMI_RET(ret)
             if (!num_process) {
                 printf("No processes found.\n");
             } else {
-                amdsmi_process_handle_t process_list[num_process];
-                amdsmi_proc_info_t info_list[num_process];
+                std::cout << "Processes found: " << num_process << "\n";
+                amdsmi_proc_info_t process_info_list[num_process];
                 amdsmi_proc_info_t process = {};
                 uint64_t mem = 0, gtt_mem = 0, cpu_mem = 0, vram_mem = 0;
                 uint64_t gfx = 0, enc = 0;
@@ -544,24 +547,14 @@ int main() {
                         bdf.fields.device_number,
                         bdf.fields.function_number);
                 int num = 0;
-                ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process,
-                                            process_list);
-                CHK_AMDSMI_RET(ret)
-                for (uint32_t it = 0; it < num_process; it += 1) {
-                    if (getpid() == process_list[it]) {
-                        continue;
-                    }
-                    ret = amdsmi_get_gpu_process_info(processor_handles[j],
-                                                  process_list[it], &process);
-                    if (ret != AMDSMI_STATUS_SUCCESS) {
-                        printf("amdsmi_get_gpu_process_info() failed for "
-                               "process_list[%d], returned %d\n",
-                               it, ret);
-                        continue;
-                    }
-                    info_list[num++] = process;
+                ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, process_info_list);
+                std::cout << "Allocation size for process list: " << num_process << "\n";
+                CHK_AMDSMI_RET(ret);
+                for (auto idx = uint32_t(0); idx < num_process; ++idx) {
+                    process = static_cast<amdsmi_proc_info_t>(process_info_list[idx]);
+                    printf("\t *Process id: %ld / Name: %s / VRAM: %lld \n", process.pid, process.name, process.memory_usage.vram_mem);
                 }
-                qsort(info_list, num, sizeof(info_list[0]), compare);
+
                 printf("+=======+==================+============+=============="
                        "+=============+=============+=============+============"
                        "==+=========================================+\n");
@@ -575,41 +568,41 @@ int main() {
                 printf("+=======+"
                        "+=============+=============+=============+============"
                        "==+=========================================+\n");
-                for (int it = 0; it < num; it++) {
+                for (int it = 0; it < num_process; it++) {
                     char command[30];
                     struct passwd *pwd = nullptr;
                     struct stat st;
 
-                    sprintf(command, "/proc/%d", info_list[it].pid);
+                    sprintf(command, "/proc/%d", process_info_list[it].pid);
                     if (stat(command, &st))
                         continue;
                     pwd = getpwuid(st.st_uid);
                     if (!pwd)
                         printf("| %5d | %16s | %10d | %s | %7ld KiB | %7ld KiB "
                                "| %7ld KiB | %7ld KiB  | %lu  %lu |\n",
-                               info_list[it].pid, info_list[it].name, st.st_uid,
-                               bdf_str, info_list[it].mem / 1024,
-                               info_list[it].memory_usage.gtt_mem / 1024,
-                               info_list[it].memory_usage.cpu_mem / 1024,
-                               info_list[it].memory_usage.vram_mem / 1024,
-                               info_list[it].engine_usage.gfx,
-                               info_list[it].engine_usage.enc);
+                               process_info_list[it].pid, process_info_list[it].name, st.st_uid,
+                               bdf_str, process_info_list[it].mem / 1024,
+                               process_info_list[it].memory_usage.gtt_mem / 1024,
+                               process_info_list[it].memory_usage.cpu_mem / 1024,
+                               process_info_list[it].memory_usage.vram_mem / 1024,
+                               process_info_list[it].engine_usage.gfx,
+                               process_info_list[it].engine_usage.enc);
                     else
                         printf("| %5d | %16s | %10s | %s | %7ld KiB | %7ld KiB "
                                "| %7ld KiB | %7ld KiB  | %lu  %lu |\n",
-                               info_list[it].pid, info_list[it].name,
-                               pwd->pw_name, bdf_str, info_list[it].mem / 1024,
-                               info_list[it].memory_usage.gtt_mem / 1024,
-                               info_list[it].memory_usage.cpu_mem / 1024,
-                               info_list[it].memory_usage.vram_mem / 1024,
-                               info_list[it].engine_usage.gfx,
-                               info_list[it].engine_usage.enc);
-                    mem += info_list[it].mem / 1024;
-                    gtt_mem += info_list[it].memory_usage.gtt_mem / 1024;
-                    cpu_mem += info_list[it].memory_usage.cpu_mem / 1024;
-                    vram_mem += info_list[it].memory_usage.vram_mem / 1024;
-                    gfx = info_list[it].engine_usage.gfx;
-                    enc = info_list[it].engine_usage.enc;
+                               process_info_list[it].pid, process_info_list[it].name,
+                               pwd->pw_name, bdf_str, process_info_list[it].mem / 1024,
+                               process_info_list[it].memory_usage.gtt_mem / 1024,
+                               process_info_list[it].memory_usage.cpu_mem / 1024,
+                               process_info_list[it].memory_usage.vram_mem / 1024,
+                               process_info_list[it].engine_usage.gfx,
+                               process_info_list[it].engine_usage.enc);
+                    mem += process_info_list[it].mem / 1024;
+                    gtt_mem += process_info_list[it].memory_usage.gtt_mem / 1024;
+                    cpu_mem += process_info_list[it].memory_usage.cpu_mem / 1024;
+                    vram_mem += process_info_list[it].memory_usage.vram_mem / 1024;
+                    gfx = process_info_list[it].engine_usage.gfx;
+                    enc = process_info_list[it].engine_usage.enc;
                     printf(
                         "+-------+------------------+------------+-------------"
                         "-+-------------+-------------+-------------+----------"
@@ -644,7 +637,9 @@ int main() {
             int64_t val_i64 = 0;
             ret =  amdsmi_get_temp_metric(processor_handles[j], TEMPERATURE_TYPE_EDGE,
                                              AMDSMI_TEMP_CURRENT, &val_i64);
-            CHK_AMDSMI_RET(ret)
+            if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
+                CHK_AMDSMI_RET(ret)
+            }
             printf("    Output of  amdsmi_get_temp_metric:\n");
             std::cout << "\t\tTemperature: " << val_i64 << "C"
                       << "\n\n";

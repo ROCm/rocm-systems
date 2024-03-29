@@ -1785,76 +1785,55 @@ amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor_handle, amdsmi_
 }
 
 amdsmi_status_t
-amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_process_handle_t *list) {
+amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list) {
     AMDSMI_CHECK_INIT();
-
-    if (max_processes == nullptr) {
+    if (!max_processes) {
         return AMDSMI_STATUS_INVAL;
     }
 
-    std::vector<long int> pids;
-    uint32_t i = 0;
-    uint64_t size = 0;
-    amdsmi_status_t status;
     amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
+    amdsmi_status_t status_code = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (status_code != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
+        return status_code;
+    }
 
-    if (gpu_device->check_if_drm_is_supported()){
-        amdsmi_bdf_t bdf = gpu_device->get_bdf();
-        status = gpuvsmi_get_pids(bdf, pids, &size);
-        if (status != AMDSMI_STATUS_SUCCESS) {
-            return status;
-        }
-        if (*max_processes == 0 || (pids.size() == 0)) {
-            *max_processes = (uint32_t)pids.size();
-            return AMDSMI_STATUS_SUCCESS;
-        }
-        if (!list) {
-            return AMDSMI_STATUS_INVAL;
-        }
-        if (*max_processes < pids.size()) {
-            return AMDSMI_STATUS_OUT_OF_RESOURCES;
-        }
-        for (auto &pid : pids) {
-            if (i >= *max_processes) {
-                break;
+    auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
+    if ((*max_processes == 0) || compute_process_list.empty()) {
+        *max_processes = static_cast<uint32_t>(compute_process_list.size());
+        return amdsmi_status_t::AMDSMI_STATUS_SUCCESS;
+    }
+    if (!list) {
+        return amdsmi_status_t::AMDSMI_STATUS_INVAL;
+    }
+
+    const auto max_processes_original_size(*max_processes);
+    auto idx = uint32_t(0);
+    auto is_required_previlegies_required(false);
+    for (auto& process : compute_process_list) {
+        if (idx < *max_processes) {
+            list[idx++] = static_cast<amdsmi_proc_info_t>(process.second);
+            //  Note: If we could not read the process info for an existing process,
+            //        that is likely a permission error.
+            if (!is_required_previlegies_required && std::string(process.second.name).empty()) {
+                is_required_previlegies_required = true;
             }
-            list[i++] = (uint32_t)pid;
+        } else {
+            break;
         }
-        *max_processes = (uint32_t)pids.size();
-    }
-    else {
-        // rocm
     }
 
-    return AMDSMI_STATUS_SUCCESS;
-}
-
-amdsmi_status_t
-amdsmi_get_gpu_process_info(amdsmi_processor_handle processor_handle, amdsmi_process_handle_t process, amdsmi_proc_info_t *info) {
-    AMDSMI_CHECK_INIT();
-
-    if (info == nullptr) {
-        return AMDSMI_STATUS_INVAL;
-    }
-
-    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
-    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
-    if (r != AMDSMI_STATUS_SUCCESS)
-        return r;
-
-    amdsmi_status_t status;
-    if (gpu_device->check_if_drm_is_supported()) {
-        status = gpuvsmi_get_pid_info(gpu_device->get_bdf(), process, *info);
-        if (status != AMDSMI_STATUS_SUCCESS) return status;
-    }
-    else {
-        // rocm
-    }
-
-    return AMDSMI_STATUS_SUCCESS;
+    //  Note: If the reserved size for processes is smaller than the number of
+    //        actual processes running. The AMDSMI_STATUS_OUT_OF_RESOURCES is
+    //        an indication the caller should handle the situation (resize).
+    //        The max_processes is always changed to reflect the actual size of
+    //        list of processes running, so the caller knows where it is at.
+    //        Holding a copy of max_process before it is passed in will be helpful
+    //        for the caller.
+    status_code = is_required_previlegies_required
+          ? amdsmi_status_t::AMDSMI_STATUS_NO_PERM : AMDSMI_STATUS_SUCCESS;
+    *max_processes = static_cast<uint32_t>(compute_process_list.size());
+    return (max_processes_original_size >= static_cast<uint32_t>(compute_process_list.size()))
+            ? status_code : amdsmi_status_t::AMDSMI_STATUS_OUT_OF_RESOURCES;
 }
 
 amdsmi_status_t

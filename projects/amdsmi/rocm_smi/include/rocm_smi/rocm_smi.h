@@ -902,7 +902,7 @@ typedef struct {
   struct {
     uint32_t cache_size_kb; /* In KB */
     uint32_t cache_level;
-    /* 
+    /*
     HSA_CACHE_TYPE_DATA     0x00000001
     HSA_CACHE_TYPE_INSTRUCTION  0x00000002
     HSA_CACHE_TYPE_CPU      0x00000004
@@ -1248,12 +1248,14 @@ typedef struct {
  */
 typedef struct {
     uint32_t process_id;      //!< Process ID
-    uint32_t pasid;           //!< PASID
+    uint32_t pasid;           //!< PASID: (Process Address Space ID)
     uint64_t vram_usage;      //!< VRAM usage
     uint64_t sdma_usage;      //!< SDMA usage in microseconds
     uint32_t cu_occupancy;    //!< Compute Unit usage in percent
 } rsmi_process_info_t;
 
+//! CU occupancy invalidation value for the GFX revisions not providing cu_occupancy debugfs method
+#define CU_OCCUPANCY_INVALID 0xFFFFFFFF
 
 /**
  * @brief Opaque handle to function-support object
@@ -1447,7 +1449,7 @@ rsmi_status_t rsmi_dev_vendor_id_get(uint32_t dv_ind, uint16_t *id);
  *
  *  @details Given a device index @p dv_ind, a pointer to a caller provided
  *  char buffer @p name, and a length of this buffer @p len, this function will
- *  write the name of the PCIe vendor (up to @p len characters) buffer @p name. 
+ *  write the name of the PCIe vendor (up to @p len characters) buffer @p name.
  *
  *  If the integer ID associated with the PCIe vendor is not found in one of the
  *  system files containing device name information (e.g.
@@ -2294,9 +2296,9 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
 
 /**
  *  @brief Get gpu cache info.
- * 
- *  @details Given a device index @p dv_ind, and a pointer to a cache 
- *  info @p info, this function will write the cache size and level 
+ *
+ *  @details Given a device index @p dv_ind, and a pointer to a cache
+ *  info @p info, this function will write the cache size and level
  *  to the location pointed to by @p info.
  *  @param[in] dv_ind a device index
  *
@@ -2930,16 +2932,16 @@ rsmi_status_t rsmi_dev_gpu_metrics_info_get(uint32_t dv_ind,
  *  @brief Get the pm metrics table with provided device index.
  *
  *  @details Given a device index @p dv_ind, @p pm_metrics pointer,
- *  and @p num_of_metrics pointer, 
+ *  and @p num_of_metrics pointer,
  *  this function will write the pm metrics name value pair
  *  to the array at @p pm_metrics and the number of metrics retreived to @p num_of_metrics
  *  Note: the library allocated memory for pm_metrics, and user must call
  *  free(pm_metrics) to free it after use.
- * 
+ *
  *  @param[in] dv_ind a device index
  *
  *  @param[inout] pm_metrics A pointerto an array to hold multiple PM metrics. On successs,
- *  the library will allocate memory of pm_metrics and write metrics to this array. 
+ *  the library will allocate memory of pm_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
@@ -2964,18 +2966,18 @@ rsmi_status_t rsmi_dev_pm_metrics_info_get(uint32_t dv_ind,
  *  @brief Get the register metrics table with provided device index and registertype.
  *
  *  @details Given a device index @p dv_ind, @p reg_type, @p reg_metrics pointer,
- *  and @p num_of_metrics pointer, 
+ *  and @p num_of_metrics pointer,
  *  this function will write the register metrics name value pair
  *  to the array at @p reg_metrics and the number of metrics retreived to @p num_of_metrics
  *  Note: the library allocated memory for reg_metrics, and user must call
  *  free(reg_metrics) to free it after use.
- * 
+ *
  *  @param[in] dv_ind a device index
- * 
+ *
  *  @param[in] reg_type The register type
  *
  *  @param[inout] reg_metrics A pointerto an array to hold multiple register metrics. On successs,
- *  the library will allocate memory of reg_metrics and write metrics to this array. 
+ *  the library will allocate memory of reg_metrics and write metrics to this array.
  *  The caller must free this memory after usage to avoid memory leak.
  *
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of

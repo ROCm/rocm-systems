@@ -1923,15 +1923,16 @@ def amdsmi_get_gpu_ras_block_features_enabled(
 
 def amdsmi_get_gpu_process_list(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-) -> List[amdsmi_wrapper.amdsmi_process_handle_t]:
+) -> List[amdsmi_wrapper.amdsmi_proc_info_t]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
+    # This will get populated with the number of processes found
     max_processes = ctypes.c_uint32(MAX_NUM_PROCESSES)
 
-    process_list = (amdsmi_wrapper.amdsmi_process_handle_t *
+    process_list = (amdsmi_wrapper.amdsmi_proc_info_t *
                     max_processes.value)()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_process_list(
@@ -1939,42 +1940,37 @@ def amdsmi_get_gpu_process_list(
         )
     )
 
-    return [amdsmi_wrapper.amdsmi_process_handle_t(process_list[x])\
-    for x in range(0, max_processes.value)]
+    result = []
+    for index in range(max_processes.value):
+        result.append(process_list[index])
+    return result
 
 
 def amdsmi_get_gpu_process_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-    process: amdsmi_wrapper.amdsmi_process_handle_t,
+    process: amdsmi_wrapper.amdsmi_proc_info_t,
 ) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    if not isinstance(process, amdsmi_wrapper.amdsmi_process_handle_t):
+    if not isinstance(process, amdsmi_wrapper.amdsmi_proc_info_t):
         raise AmdSmiParameterException(
-            process, amdsmi_wrapper.amdsmi_process_handle_t)
-
-    info = amdsmi_wrapper.amdsmi_proc_info_t()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_gpu_process_info(
-            processor_handle, process, ctypes.byref(info)
-        )
-    )
+            process, amdsmi_wrapper.amdsmi_proc_info_t)
 
     return {
-        "name": info.name.decode("utf-8"),
-        "pid": info.pid,
-        "mem": info.mem,
+        "name": process.name.decode("utf-8"),
+        "pid": process.pid,
+        "mem": process.mem,
         "engine_usage": {
-            "gfx": info.engine_usage.gfx,
-            "enc": info.engine_usage.enc
+            "gfx": process.engine_usage.gfx,
+            "enc": process.engine_usage.enc
         },
         "memory_usage": {
-            "gtt_mem": info.memory_usage.gtt_mem,
-            "cpu_mem": info.memory_usage.cpu_mem,
-            "vram_mem": info.memory_usage.vram_mem,
+            "gtt_mem": process.memory_usage.gtt_mem,
+            "cpu_mem": process.memory_usage.cpu_mem,
+            "vram_mem": process.memory_usage.vram_mem,
         },
     }
 
