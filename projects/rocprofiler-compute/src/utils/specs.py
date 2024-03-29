@@ -353,15 +353,17 @@ class MachineSpecs:
     gpu_l1: str = field(
         default=None,
         metadata={
-            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs in the system in KiB",
+            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
             "name": "GPU L1",
+            "unit": "KiB",
         },
     )
     gpu_l2: str = field(
         default=None,
         metadata={
-            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs in the system in KiB",
+            "doc": "The size of the vL1D cache (per compute-unit) on the accelerators/GPUs.",
             "name": "GPU L2",
+            "unit": "KiB",
         },
     )
     cu_per_gpu: str = field(

@@ -64,7 +64,13 @@ class PlainFormatter(logging.Formatter):
 # Setup console handler - provided as separate function to be called
 # prior to argument parsing
 def setup_console_handler():
+    # register a trace level logger
+    logging.TRACE = logging.DEBUG - 5
+    logging.addLevelName(logging.TRACE, "TRACE")
+    setattr(logging, "TRACE", logging.TRACE)
+    setattr(logging, "trace", trace_logger)
 
+    # setup log formatting
     color_setting = 0
     if "OMNIPERF_COLOR" in os.environ.keys():
         color_setting = int(os.environ["OMNIPERF_COLOR"])
@@ -97,11 +103,6 @@ def setup_file_handler(loglevel, workload_dir):
 
 # Setup logger priority - called after argument parsing
 def setup_logging_priority(verbosity, quietmode, appmode):
-    # register a trace level logger
-    logging.TRACE = logging.DEBUG - 5
-    logging.addLevelName(logging.TRACE, "TRACE")
-    setattr(logging, "TRACE", logging.TRACE)
-    setattr(logging, "trace", trace_logger)
 
     # set loglevel based on selected verbosity and quietmode
     levels = [logging.INFO, logging.DEBUG, logging.TRACE]
