@@ -23,7 +23,6 @@
 ##############################################################################el
 
 from abc import ABC, abstractmethod
-from collections import OrderedDict
 import os
 import math
 import shutil
@@ -213,13 +212,9 @@ class OmniSoC_Base:
         os.makedirs(workload_perfmon_dir)
 
         if not roofline_perfmon_only:
-            # we sort so that we have a consistent ordering of files between runs
-            # regardless of the file-system, etc.
-            ref_pmc_files_list = sorted(
-                glob.glob(self.__perfmon_dir + "/" + "pmc_*perf*.txt")
-            )
-            ref_pmc_files_list += sorted(
-                glob.glob(self.__perfmon_dir + "/" + self.__arch + "/pmc_*_perf*.txt")
+            ref_pmc_files_list = glob.glob(self.__perfmon_dir + "/" + "pmc_*perf*.txt")
+            ref_pmc_files_list += glob.glob(
+                self.__perfmon_dir + "/" + self.__arch + "/pmc_*_perf*.txt"
             )
 
             # Perfmon list filtering
@@ -242,11 +237,7 @@ class OmniSoC_Base:
                 # default: take all perfmons
                 pmc_files_list = ref_pmc_files_list
         else:
-            # we sort so that we have a consistent ordering of files between runs
-            # regardless of the file-system, etc.
-            ref_pmc_files_list = sorted(
-                glob.glob(self.__perfmon_dir + "/" + "pmc_roof_perf.txt")
-            )
+            ref_pmc_files_list = glob.glob(self.__perfmon_dir + "/" + "pmc_roof_perf.txt")
             pmc_files_list = ref_pmc_files_list
 
         # Coalesce and writeback workload specific perfmon
@@ -281,8 +272,7 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
 
     # match pattern for pmc counters
     mpattern = r"^pmc:(.*)"
-    # ordered dict again to ensure consistent ordering between runs
-    pmc_list = OrderedDict(
+    pmc_list = dict(
         [
             ("SQ", []),
             ("GRBM", []),
@@ -294,7 +284,7 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
             ("CPC", []),
             ("CPF", []),
             ("GDS", []),
-            ("TCC2", OrderedDict()),  # per-channel TCC perfmon
+            ("TCC2", {}),  # per-channel TCC perfmon
         ]
     )
     for ch in range(perfmon_config["TCC_channels"]):
@@ -358,8 +348,7 @@ def update_pmc_bucket(
         )
     if pmc_list is None:
         detected_external_call = True
-        # ordered dict again to ensure consistent ordering between runs
-        pmc_list = OrderedDict(
+        pmc_list = dict(
             [
                 ("SQ", []),
                 ("GRBM", []),
@@ -371,7 +360,7 @@ def update_pmc_bucket(
                 ("CPC", []),
                 ("CPF", []),
                 ("GDS", []),
-                ("TCC2", OrderedDict()),  # per-channel TCC perfmon
+                ("TCC2", {}),  # per-channel TCC perfmon
             ]
         )
         for ch in range(perfmon_config["TCC_channels"]):
@@ -402,25 +391,16 @@ def update_pmc_bucket(
 
         if IP_block != "TCC":
             # Insert unique pmc counters into its bucket
-            # NOTE: we specifically do _not_ exclude multiple versions of
-            # the same counter, because some counters are particularly
-            # sensitive to run-to-run variation (e.g., SQ_WAVE_CYCLES).
-            # Often, the resulting metrics do not make sense if they
-            # are taken from different runs, see:
-            # https://github.com/ROCm/omniperf/issues/332
-            pmc_list[IP_block].append(counter)
+            if counter not in pmc_list[IP_block]:
+                pmc_list[IP_block].append(counter)
+
         else:
             # TCC counters processing
             m = re.match(r"[\s\S]+\[(\d+)\]", counter)
             if m is None:
                 # Aggregated TCC counters
-                # NOTE: we specifically do _not_ exclude multiple versions of
-                # the same counter, because some counters are particularly
-                # sensitive to run-to-run variation (e.g., SQ_WAVE_CYCLES).
-                # Often, the resulting metrics do not make sense if they
-                # are taken from different runs, see:
-                # https://github.com/ROCm/omniperf/issues/332
-                pmc_list[IP_block].append(counter)
+                if counter not in pmc_list[IP_block]:
+                    pmc_list[IP_block].append(counter)
 
             else:
                 # TCC channel ID
@@ -429,13 +409,8 @@ def update_pmc_bucket(
                 # fake IP block for per channel TCC
                 if str(ch) in pmc_list["TCC2"]:
                     # append unique counter into the channel
-                    # NOTE: we specifically do _not_ exclude multiple versions of
-                    # the same counter, because some counters are particularly
-                    # sensitive to run-to-run variation (e.g., SQ_WAVE_CYCLES).
-                    # Often, the resulting metrics do not make sense if they
-                    # are taken from different runs, see:
-                    # https://github.com/ROCm/omniperf/issues/332
-                    pmc_list["TCC2"][str(ch)].append(counter)
+                    if counter not in pmc_list["TCC2"][str(ch)]:
+                        pmc_list["TCC2"][str(ch)].append(counter)
                 else:
                     # initial counter in this channel
                     pmc_list["TCC2"][str(ch)] = [counter]
