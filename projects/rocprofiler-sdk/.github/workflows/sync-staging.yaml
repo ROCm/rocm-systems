@@ -1,0 +1,18 @@
+name: Sync amd-staging to public repository
+
+on:
+  push:
+    branches: [ amd-staging ]
+
+jobs:
+  git-mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: git-sync
+        uses: wei/git-sync@v3
+        with:
+          source_repo: "git@github.com:ROCm/rocprofiler-sdk-internal.git"
+          source_branch: "amd-staging"
+          destination_repo: "git@github.com:ROCm/rocprofiler-sdk.git"
+          destination_branch: "amd-staging"
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
