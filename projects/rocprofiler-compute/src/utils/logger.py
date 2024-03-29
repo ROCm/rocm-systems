@@ -73,7 +73,22 @@ def setup_console_handler():
     setattr(logging, "TRACE", logging.TRACE)
     setattr(logging, "trace", trace_logger)
 
-    formatter = ColoredFormatter()
+    color_setting = 1
+    if "OMNIPERF_COLOR" in os.environ.keys():
+        if type(os.environ["OMNIPERF_COLOR"]) != int:
+            raise TypeError(
+                "OMNIPERF_COLOR must be of type int. Detected: {}".format(
+                    type(os.environ["OMNIPERF_COLOR"])
+                )
+            )
+        color_setting = int(os.environ["OMNIPERF_COLOR"])
+
+    if color_setting == 1:
+        # colored loglevel and message
+        formatter = ColoredFormatter()
+    else:
+        # non-colored
+        formatter = PlainFormatter()
 
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
