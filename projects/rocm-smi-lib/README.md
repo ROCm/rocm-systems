@@ -10,6 +10,11 @@ The information contained herein is for informational purposes only, and is subj
 
 © 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 
+## Planned Deprication Notice 
+ROCm System Management Interface (ROCm SMI) Library is planned to be ***depricated***. Release date to be announced soon. Please start migrating to AMD SMI.
+  - Documentation: [https://rocm.docs.amd.com](https://rocm.docs.amd.com/projects/amdsmi/en/latest/)
+  - Github: [https://github.com/ROCm/amdsmi](https://github.com/ROCm/amdsmi)
+
 ## Installation
 
 ### Install amdgpu using ROCm
@@ -21,7 +26,7 @@ wget https://repo.radeon.com/amdgpu-install/6.0.2/ubuntu/jammy/amdgpu-install_6.
 sudo apt install ./amdgpu-install_6.0.60002-1_all.deb
 sudo amdgpu-install --usecase=rocm
 ```
-* rocm-smi --help
+* `rocm-smi --help`
 
 ## Building ROCm SMI
 
