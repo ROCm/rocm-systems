@@ -8,7 +8,6 @@ on:
       - '*.md'
       - 'source/docs/**'
   pull_request:
-    branches: [ amd-staging, amd-mainline ]
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
