@@ -3,12 +3,12 @@ name: Continuous Integration
 on:
   workflow_dispatch:
   push:
-    branches: [ "amd-staging", "amd-mainline" ]
+    branches: [ amd-staging, amd-mainline ]
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
   pull_request:
-    branches: [ "amd-staging", "amd-mainline" ]
+    branches: [ amd-staging, amd-mainline ]
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
