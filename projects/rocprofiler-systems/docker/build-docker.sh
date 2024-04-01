@@ -257,11 +257,10 @@ do
                     send-error "Unsupported combination :: ${DISTRO}-${VERSION} + ROCm ${ROCM_VERSION}"
                 ;;
             esac
-            PERL_REPO="SLE_${VERSION_MAJOR}_SP${VERSION_MINOR}"
-            if [ "${VERSION_MAJOR}" -ge 15 ]; then
-                if [ "${VERSION_MINOR}" -ge 4 ]; then
-                    PERL_REPO="${VERSION_MAJOR}.${VERSION_MINOR}"
-                fi
+            if [[ "${VERSION_MAJOR}" -le 15 && "${VERSION_MINOR}" -le 5 ]]; then
+                PERL_REPO="15.6"
+            else
+                PERL_REPO="${VERSION_MAJOR}.${VERSION_MINOR}"
             fi
             verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PERL_REPO=${PERL_REPO} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         fi
