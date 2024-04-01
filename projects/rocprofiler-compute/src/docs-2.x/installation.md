@@ -35,8 +35,14 @@ In addition, Omniperf leverages a number of Python packages that are
 documented in the top-level `requirements.txt` file.  These must be
 installed prior to Omniperf configuration.
 
-```{note}
-If you're interested in building docs locally or running Omniperf's CI suite via PyTest, please see documented dependencies in `requirements-doc.txt` and `requirements-test.txt`, respectively.
+```{admonition} Optional packages
+If you would like to build Omniperf as a developer, consider these additional requirements:
+
+| Requirement file      | Description                                                    |
+| --------------------- | -------------------------------------------------------------- |
+| requirements-doc.txt  | Python packages required to build docs from source             |
+| requirements-test.txt | Python packages required to run Omniperf's CI suite via PyTest |
+
 ```
 
 The recommended procedure for Omniperf usage is to install into a shared file system so that multiple users can access the final installation.  The following steps illustrate how to install the necessary python dependencies using [pip](https://packaging.python.org/en/latest/) and Omniperf into a shared location controlled by the `INSTALL_DIR` environment variable.
@@ -159,7 +165,7 @@ wishes to use instead.
 ## Server-side Setup
 
 ```{note}
-Server-side setup is not required to profile or analyze performance data from the CLI. It is provided as an additional mechanism to import performance data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
+Server-side setup is **not required** to profile or analyze performance data from the CLI. It is provided as an additional mechanism to import performance data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
 ```
 
 Omniperf server-side requires the following basic software dependencies prior to usage:

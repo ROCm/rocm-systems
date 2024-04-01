@@ -85,14 +85,28 @@ Modes change the fundamental behavior of the Omniperf command line tool. Dependi
     ```shell
     $ omniperf database --help
     ```
+### Global Options
+The Omniperf command line tool has a set of 'global' options that are available across all modes. 
+
+| Argument           | Description                                                       |
+| :----------------- | :---------------------------------------------------------------- |
+| `-v` / `--version` | Print Omniperf version and exit.                                  |
+| `-V` / `--verbose` | Increase output verbosity (use multiple times for higher levels). |
+| `-q` / `--quiet`   | Reduce output and run quietly.                                    |
+| `-s` / `--specs`   | Print system specs and exit.                                      |
+
+```{note}
+Omniperf also recognizes the project variable, `OMNIPERF_COLOR`, should the user choose to disable colorful output. To disable default colorful behavior, set this variable to `0`.
+```
+
 
 ## Basic Operations
 
-Operation | Mode | Required Arguments
-:--|:--|:--
-Profile a workload | profile | `--name`, `-- <profile_cmd>`
-Standalone roofline analysis | profile | `--name`, `--roof-only`, `-- <profile_cmd>`
-Import a workload to database | database | `--import`, `--host`, `--username`, `--workload`, `--team`
-Remove a workload from database | database | `--remove`, `--host`, `--username`, `--workload`, `--team`
-Launch standalone GUI from CLI | analyze | `--path`, `--gui`
-Interact with profiling results from CLI | analyze | `--path`
+| Operation                                | Mode     | Required Arguments                                         |
+| :--------------------------------------- | :------- | :--------------------------------------------------------- |
+| Profile a workload                       | profile  | `--name`, `-- <profile_cmd>`                               |
+| Standalone roofline analysis             | profile  | `--name`, `--roof-only`, `-- <profile_cmd>`                |
+| Import a workload to database            | database | `--import`, `--host`, `--username`, `--workload`, `--team` |
+| Remove a workload from database          | database | `--remove`, `--host`, `--username`, `--workload`, `--team` |
+| Launch standalone GUI from CLI           | analyze  | `--path`, `--gui`                                          |
+| Interact with profiling results from CLI | analyze  | `--path`                                                   |

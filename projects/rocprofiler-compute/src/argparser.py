@@ -48,12 +48,12 @@ def add_general_group(parser, omniperf_version):
         default=0,
     )
     general_group.add_argument(
-        "-q", "--quiet", action="store_true", help="Run in quiet mode."
+        "-q", "--quiet", action="store_true", help="Reduce output and run quietly."
     )
     # Nowhere to load specs from in db mode
     if "database" not in parser.usage:
         general_group.add_argument(
-            "-s", "--specs", action="store_true", help="Print system specs."
+            "-s", "--specs", action="store_true", help="Print system specs and exit."
         )
 
 
