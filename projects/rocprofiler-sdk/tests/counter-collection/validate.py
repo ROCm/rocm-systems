@@ -32,7 +32,7 @@ def test_counter_values(input_data):
 
     for itr in data["rocprofiler-sdk-json-tool"]["buffer_records"]["counter_collection"]:
         value = itr["counter_value"]
-        assert int(round(value, 0)) == int(round(1 * scaling_factor, 0))
+        assert int(round(value, 0)) == int(round(1 * scaling_factor, 0)), str(data)
 
 
 if __name__ == "__main__":
