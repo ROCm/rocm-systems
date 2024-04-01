@@ -45,7 +45,7 @@ if [ -z "$PACKAGE_PREFIX" ] ; then PACKAGE_PREFIX="$ROCM_PATH/$COMPONENT"; fi
 if [ -z "$PREFIX_PATH" ] ; then PREFIX_PATH=$PACKAGE_ROOT; fi
 if [ -z "$HIP_VDI" ] ; then HIP_VDI=0; fi
 if [ -n "$ROCM_RPATH" ] ; then LD_RUNPATH_FLAG=" -Wl,--enable-new-dtags -Wl,--rpath,${ROCM_RPATH}"; fi
-if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx940 gfx1030 gfx1100 gfx1101 gfx1102"; fi
+if [ -z "$GPU_LIST" ] ; then GPU_LIST="gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"; fi
 
 ROCTRACER_ROOT=$(cd $ROCTRACER_ROOT && echo $PWD)
 
