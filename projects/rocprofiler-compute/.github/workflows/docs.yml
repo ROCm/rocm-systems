@@ -5,8 +5,8 @@ on:
     branches: ["main"]
     paths:
       - 'src/docs-2.x'
-      - 'src/docs-1.x'
-      - '.github/workflows/docs-2.x.yml'
+      - 'src/archive/docs-1.x'
+      - '.github/workflows/docs.yml'
       - 'VERSION'
 
   workflow_dispatch:
@@ -36,19 +36,19 @@ jobs:
         uses: actions/configure-pages@v4
       - name: Build 1.x docs
         run: |
-          cd src/docs-1.x
+          cd src/archive/docs-1.x
           make html	
-      - name: Build 2.x docs
+      - name: Build current docs
         run: |
-          cd src/docs-2.x
+          cd src/docs
           make html
-      - name: Relocate 2.x docs
+      - name: Relocate 1.x docs
         run: |
-          mv src/docs-2.x/_build/html src/docs-1.x/_build/html/2.x
+          mv src/archive/docs-1.x/_build/html src/docs/_build/html/1.x
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./src/docs-1.x/_build/html
+          path: ./src/docs/_build/html
 
   # Deployment job
   deploy:
