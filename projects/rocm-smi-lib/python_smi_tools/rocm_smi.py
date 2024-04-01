@@ -2940,7 +2940,7 @@ def showVbiosVersion(deviceList):
     """
     printLogSpacer(' VBIOS ')
     for device in deviceList:
-        printLog(device, 'VBIOS version', getVbiosVersion(device))
+        printLog(device, 'VBIOS version', getVbiosVersion(device, silent=True))
     printLogSpacer()
 
 
