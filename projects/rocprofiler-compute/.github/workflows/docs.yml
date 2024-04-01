@@ -1,10 +1,10 @@
-name: Documentation 2.x
+name: Documentation
 
 on:
   push:
     branches: ["main"]
     paths:
-      - 'src/docs-2.x'
+      - 'src/docs'
       - 'src/archive/docs-1.x'
       - '.github/workflows/docs.yml'
       - 'VERSION'
