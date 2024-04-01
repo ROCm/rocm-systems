@@ -24,7 +24,12 @@
 
 import os
 from omniperf_profile.profiler_base import OmniProfiler_Base
-from utils.utils import demarcate, console_log, replace_timestamps
+from utils.utils import (
+    demarcate,
+    console_log,
+    replace_timestamps,
+    fixup_rocprofv2_dispatch_ids,
+)
 
 
 class rocprof_v2_profiler(OmniProfiler_Base):
@@ -75,22 +80,6 @@ class rocprof_v2_profiler(OmniProfiler_Base):
             console_log("roofline", "Detected existing pmc_perf.csv")
 
     @demarcate
-    def fixup_rocprofv2_dispatch_ids(self):
-        # Workaround for rocprofv2 being silly and using 1-based dispatch indicies
-        import pandas as pd
-        import glob
-
-        # first read pmc_perf
-        df = pd.read_csv(self.get_args().path + "/pmc_perf.csv")
-        df["Dispatch_ID"] -= 1
-        df.to_csv(self.get_args().path + "/pmc_perf.csv", index=False)
-        # next glob for *LEVEL*.csv
-        for f in glob.glob(self.get_args().path + "/*LEVEL*.csv"):
-            df = pd.read_csv(f)
-            df["Dispatch_ID"] -= 1
-            df.to_csv(f, index=False)
-
-    @demarcate
     def post_processing(self):
         """Perform any post-processing steps prior to profiling."""
         super().post_processing()
@@ -98,5 +87,7 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
+            # Correct dispatch ids
+            fixup_rocprofv2_dispatch_ids(self.get_args().path)
             # Replace timestamp data to solve a known rocprof bug
             replace_timestamps(self.get_args().path)

@@ -613,3 +613,16 @@ def set_locale_encoding():
             exit=False,
         )
         console_error(error)
+
+
+def fixup_rocprofv2_dispatch_ids(workload_dir):
+    # Workaround for rocprofv2 using 1-based dispatch indicies
+    # first read pmc_perf
+    df = pd.read_csv(workload_dir + "/pmc_perf.csv")
+    df["Dispatch_ID"] -= 1
+    df.to_csv(workload_dir + "/pmc_perf.csv", index=False)
+    # next glob for *LEVEL*.csv
+    for f in glob.glob(workload_dir + "/*LEVEL*.csv"):
+        df = pd.read_csv(f)
+        df["Dispatch_ID"] -= 1
+        df.to_csv(f, index=False)
