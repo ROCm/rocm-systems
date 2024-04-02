@@ -244,7 +244,9 @@ TEST(rocprofiler_lib, agent)
         EXPECT_EQ(std::string_view{agent->product_name},
                   std::string_view{hsa_agent->device_mkt_name})
             << msg;
-        EXPECT_EQ(agent->node_id, hsa_agent->internal_node_id) << msg;
+        // TODO(aelwazir): To be changed back to use node id once ROCR fixes the hsa_agents to use
+        // the real node id
+        EXPECT_EQ(agent->logical_node_id, hsa_agent->internal_node_id) << msg;
         EXPECT_EQ(agent->location_id, hsa_agent->bdf_id) << msg;
         EXPECT_EQ(agent->device_id, hsa_agent->chip_id) << msg;
         EXPECT_EQ(agent->simd_count, hsa_agent->compute_unit * hsa_agent->simds_per_cu) << msg;

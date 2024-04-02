@@ -755,7 +755,9 @@ construct_agent_cache(::HsaApiTable* table)
 
                 for(const auto* ritr : rocp_agents)
                 {
-                    if(ritr->node_id == internal_node_id)
+                    // TODO(aelwazir): To be changed back to use node id once ROCR fixes
+                    // the hsa_agents to use the real node id
+                    if(ritr->logical_node_id == static_cast<int64_t>(internal_node_id))
                     {
                         rocp_hsa_agent_node_ids.erase(internal_node_id);
                         break;
@@ -799,9 +801,11 @@ construct_agent_cache(::HsaApiTable* table)
                    static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
                    &node_id) == HSA_STATUS_SUCCESS)
             {
-                if(ritr->node_id == node_id)
+                // TODO(aelwazir): To be changed back to use node id once ROCR fixes
+                // the hsa_agents to use the real node id
+                if(ritr->logical_node_id == static_cast<int64_t>(node_id))
                 {
-                    agent_map.emplace(ritr->node_id, std::make_tuple(ritr, hitr));
+                    agent_map.emplace(ritr->logical_node_id, std::make_tuple(ritr, hitr));
                     get_agent_mapping().emplace_back(agent_pair{ritr, hitr});
                     break;
                 }
@@ -888,8 +892,10 @@ construct_agent_cache(::HsaApiTable* table)
         {
             if(rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
             {
+                // TODO(aelwazir): To be changed back to use node id once ROCR fixes
+                // the hsa_agents to use the real node id
                 LOG(ERROR) << fmt::format("rocprofiler agent <-> HSA agent mapping failed: {} ({})",
-                                          rocp_agent->node_id,
+                                          rocp_agent->logical_node_id,
                                           err.what());
             }
         }

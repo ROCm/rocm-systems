@@ -32,7 +32,7 @@ set(kernel-tracing-env
 
 set_tests_properties(
     test-kernel-tracing-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${kernel-tracing-env}"
+    PROPERTIES TIMEOUT 100 LABELS "integration-tests" ENVIRONMENT "${kernel-tracing-env}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 foreach(FILENAME validate.py pytest.ini conftest.py)

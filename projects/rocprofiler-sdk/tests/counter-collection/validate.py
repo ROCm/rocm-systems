@@ -30,9 +30,17 @@ def test_counter_values(input_data):
             scaling_factor = 64 / itr["wave_front_size"]
             break
 
-    for itr in data["rocprofiler-sdk-json-tool"]["buffer_records"]["counter_collection"]:
-        value = itr["counter_value"]
-        assert int(round(value, 0)) == int(round(1 * scaling_factor, 0)), str(data)
+        scaling_factor = 64 / itr["wave_front_size"]
+
+        for itr in data["rocprofiler-sdk-json-tool"]["buffer_records"][
+            "counter_collection"
+        ]:
+            value = itr["counter_value"]
+            assert int(round(value, 0)) == int(round(1 * scaling_factor, 0)), (
+                f"Failure on agent "
+                f"{str(itr)} expected {1 * scaling_factor} but got {value} "
+                f"Debug Info:\n {str(data)}"
+            )
 
 
 if __name__ == "__main__":
