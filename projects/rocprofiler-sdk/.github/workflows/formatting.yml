@@ -18,7 +18,7 @@ jobs:
   cmake:
     runs-on: ubuntu-22.04
     env:
-      ACCESS_TOKEN: ${{ secrets.TOKEN }}
+      ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -59,7 +59,7 @@ jobs:
   source:
     runs-on: ubuntu-22.04
     env:
-      ACCESS_TOKEN: ${{ secrets.TOKEN }}
+      ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -104,7 +104,7 @@ jobs:
       matrix:
         python-version: ['3.10']
     env:
-      ACCESS_TOKEN: ${{ secrets.TOKEN }}
+      ACCESS_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
