@@ -2763,20 +2763,115 @@ class AMDSMICommands():
 
         # Populate the possible gpus
         topo_values = []
-        for gpu in args.gpu:
-            gpu_id = self.helpers.get_gpu_id_from_device_handle(gpu)
-            topo_values.append({"gpu" : gpu_id})
-            gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(gpu)
-            self.logger.table_header += gpu_bdf.rjust(13)
+        for src_gpu_index, src_gpu in enumerate(args.gpu):
+            src_gpu_id = self.helpers.get_gpu_id_from_device_handle(src_gpu)
+            topo_values.append({"gpu" : src_gpu_id})
+            src_gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
+            topo_values[src_gpu_index]['bdf'] = src_gpu_bdf
+            self.logger.table_header += src_gpu_bdf.rjust(13)
+
+            if not self.logger.is_json_format():
+                continue  # below is for JSON format only
+
+            ##########################
+            # JSON formatting start  #
+            ##########################
+            links = []
+            # create json obj for data alignment
+            #  dest_gpu_links = {
+            #         "gpu": GPU #
+            #         "bdf": BDF identification
+            #         "weight": 0 - self (current node); weight >= 0 correlated with hops (GPU-CPU, GPU-GPU, GPU-CPU-CPU-GPU, etc..)
+            #         "link_status": "ENABLED" - devices linked; "DISABLED" - devices not linked
+            #         "link_type": "SELF" - current node, "PCIE", "XGMI", "N/A" - no link,"UNKNOWN" - unidentified link type
+            #         "num_hops": num_hops - # of hops between devices
+            #         "bandwidth": numa_bw - The NUMA "minimum bandwidth-maximum bandwidth" beween src and dest nodes
+            #                      "N/A" - self node or not connected devices
+            #         "fb_sharing": "ENABLED/DISABLED" - same output as defined in link_status. Devices in a hive setup should
+            #                       all have sharing enabled.
+            #     }
+
+            for dest_gpu_index, dest_gpu in enumerate(args.gpu):
+                link_type = "SELF"
+                if src_gpu != dest_gpu:
+                    link_type = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['type']
+                if isinstance(link_type, int):
+                    if link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_UNDEFINED:
+                        link_type = "UNKNOWN"
+                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_PCIEXPRESS:
+                        link_type = "PCIE"
+                    elif link_type == amdsmi_interface.amdsmi_wrapper.AMDSMI_IOLINK_TYPE_XGMI:
+                        link_type = "XGMI"
+                    else:
+                        link_type = "N/A"
+
+                numa_bw = "N/A"
+                if src_gpu != dest_gpu:
+                    try:
+                        bw_dict = amdsmi_interface.amdsmi_get_minmax_bandwidth_between_processors(src_gpu, dest_gpu)
+                        numa_bw = f"{bw_dict['min_bandwidth']}-{bw_dict['max_bandwidth']}"
+                    except amdsmi_exception.AmdSmiLibraryException as e:
+                        logging.debug("Failed to get min max bandwidth for %s to %s | %s",
+                                    self.helpers.get_gpu_id_from_device_handle(src_gpu),
+                                    self.helpers.get_gpu_id_from_device_handle(dest_gpu),
+                                    e.get_error_info())
+
+                weight = 0
+                num_hops = 0
+                if src_gpu != dest_gpu: 
+                    weight = amdsmi_interface.amdsmi_topo_get_link_weight(src_gpu, dest_gpu)
+                    num_hops = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['hops']
+                link_status = amdsmi_interface.amdsmi_is_P2P_accessible(src_gpu, dest_gpu)
+                if link_status:
+                    link_status = "ENABLED"
+                else:
+                    link_status = "DISABLED"
+
+                # fb_sharing in BM - in a hive configuration, this is
+                # link_status = amdsmi_is_P2P_accessible(src,dest)
+                dest_gpu_links = {
+                    "gpu": self.helpers.get_gpu_id_from_device_handle(dest_gpu),
+                    "bdf": amdsmi_interface.amdsmi_get_gpu_device_bdf(dest_gpu),
+                    "weight": weight,
+                    "link_status": link_status,
+                    "link_type": link_type,
+                    "num_hops": num_hops,
+                    "bandwidth": numa_bw,
+                    "fb_sharing": link_status
+                }
+                if not args.access: # currently includes fb_sharing
+                    del dest_gpu_links['link_status']
+                    del dest_gpu_links['fb_sharing']
+                if not args.weight:
+                    del dest_gpu_links['weight']
+                if not args.link_type:
+                    del dest_gpu_links['link_type']
+                if not args.hops:
+                    del dest_gpu_links['num_hops']
+                if not args.numa_bw:
+                    del dest_gpu_links['bandwidth']
+                links.append(dest_gpu_links)
+                isEndOfDest = dest_gpu_index+1 == len(args.gpu)
+                isEndOfSrc = src_gpu_index+1 == len(args.gpu)
+                if isEndOfDest:
+                    topo_values[src_gpu_index]['links'] = links
+                    continue
+            if isEndOfSrc:
+                self.logger.multiple_device_output = topo_values
+                self.logger.print_output(multiple_device_enabled=True, tabular=True)
+                return
+            ##########################
+            # JSON formatting end    #
+            ##########################
 
         if args.access:
             tabular_output = []
             for src_gpu_index, src_gpu in enumerate(args.gpu):
-                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
+                src_gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
                 if self.logger.is_human_readable_format():
-                    tabular_output_dict = {'gpu' : f"{gpu_bdf} "}
+                    tabular_output_dict = {'gpu' : f"{src_gpu_bdf} "}
                 else:
-                    tabular_output_dict = {'gpu' : gpu_bdf}
+                    tabular_output_dict = {'gpu' : src_gpu_bdf}
                 src_gpu_links = {}
                 for dest_gpu in args.gpu:
                     dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)
@@ -2808,11 +2903,11 @@ class AMDSMICommands():
         if args.weight:
             tabular_output = []
             for src_gpu_index, src_gpu in enumerate(args.gpu):
-                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
+                src_gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
                 if self.logger.is_human_readable_format():
-                    tabular_output_dict = {'gpu' : f"{gpu_bdf} "}
+                    tabular_output_dict = {'gpu' : f"{src_gpu_bdf} "}
                 else:
-                    tabular_output_dict = {'gpu' : gpu_bdf}
+                    tabular_output_dict = {'gpu' : src_gpu_bdf}
                 src_gpu_weight = {}
                 for dest_gpu in args.gpu:
                     dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)
@@ -2845,11 +2940,11 @@ class AMDSMICommands():
         if args.hops:
             tabular_output = []
             for src_gpu_index, src_gpu in enumerate(args.gpu):
-                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
+                src_gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
                 if self.logger.is_human_readable_format():
-                    tabular_output_dict = {'gpu' : f"{gpu_bdf} "}
+                    tabular_output_dict = {'gpu' : f"{src_gpu_bdf} "}
                 else:
-                    tabular_output_dict = {'gpu' : gpu_bdf}
+                    tabular_output_dict = {'gpu' : src_gpu_bdf}
                 src_gpu_hops = {}
                 for dest_gpu in args.gpu:
                     dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)
@@ -2882,11 +2977,11 @@ class AMDSMICommands():
         if args.link_type:
             tabular_output = []
             for src_gpu_index, src_gpu in enumerate(args.gpu):
-                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
+                src_gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
                 if self.logger.is_human_readable_format():
-                    tabular_output_dict = {'gpu' : f"{gpu_bdf} "}
+                    tabular_output_dict = {'gpu' : f"{src_gpu_bdf} "}
                 else:
-                    tabular_output_dict = {'gpu' : gpu_bdf}
+                    tabular_output_dict = {'gpu' : src_gpu_bdf}
                 src_gpu_link_type = {}
                 for dest_gpu in args.gpu:
                     dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)
@@ -2924,11 +3019,11 @@ class AMDSMICommands():
         if args.numa_bw:
             tabular_output = []
             for src_gpu_index, src_gpu in enumerate(args.gpu):
-                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
+                src_gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(src_gpu)
                 if self.logger.is_human_readable_format():
-                    tabular_output_dict = {'gpu' : f"{gpu_bdf} "}
+                    tabular_output_dict = {'gpu' : f"{src_gpu_bdf} "}
                 else:
-                    tabular_output_dict = {'gpu' : gpu_bdf}
+                    tabular_output_dict = {'gpu' : src_gpu_bdf}
                 src_gpu_link_type = {}
                 for dest_gpu in args.gpu:
                     dest_gpu_id = self.helpers.get_gpu_id_from_device_handle(dest_gpu)

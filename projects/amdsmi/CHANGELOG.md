@@ -6,6 +6,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/](
 
 ## amd_smi_lib for ROCm 6.1.1
 
+### Added
+
+- N/A
+
 ### Changed
 
 - **Updated metrics --clocks**
@@ -142,6 +146,142 @@ GPU: 0
             DEFERRED_COUNT: 0
         ...
 ```
+
+- **Updated `amd-smi topology --json` to align with host/guest**  
+Topology's `--json` output now is changed to align with output reported bt host/guest systems. Additionally, users can select/filter specific topology details as desired (refer to `amd-smi topology -h` for full list). See examples shown below.
+
+*Previous format:*  
+```shell
+$ amd-smi topology --json
+[
+    {
+        "gpu": 0,
+        "link_accessibility": {
+            "gpu_0": "ENABLED",
+            "gpu_1": "DISABLED"
+        },
+        "weight": {
+            "gpu_0": 0,
+            "gpu_1": 40
+        },
+        "hops": {
+            "gpu_0": 0,
+            "gpu_1": 2
+        },
+        "link_type": {
+            "gpu_0": "SELF",
+            "gpu_1": "PCIE"
+        },
+        "numa_bandwidth": {
+            "gpu_0": "N/A",
+            "gpu_1": "N/A"
+        }
+    },
+    {
+        "gpu": 1,
+        "link_accessibility": {
+            "gpu_0": "DISABLED",
+            "gpu_1": "ENABLED"
+        },
+        "weight": {
+            "gpu_0": 40,
+            "gpu_1": 0
+        },
+        "hops": {
+            "gpu_0": 2,
+            "gpu_1": 0
+        },
+        "link_type": {
+            "gpu_0": "PCIE",
+            "gpu_1": "SELF"
+        },
+        "numa_bandwidth": {
+            "gpu_0": "N/A",
+            "gpu_1": "N/A"
+        }
+    }
+]
+```
+
+*New format:*
+```shell
+$ amd-smi topology --json
+[
+    {
+        "gpu": 0,
+        "bdf": "0000:01:00.0",
+        "links": [
+            {
+                "gpu": 0,
+                "bdf": "0000:01:00.0",
+                "weight": 0,
+                "link_status": "ENABLED",
+                "link_type": "SELF",
+                "num_hops": 0,
+                "bandwidth": "N/A",
+                "fb_sharing": "ENABLED"
+            },
+            {
+                "gpu": 1,
+                "bdf": "0001:01:00.0",
+                "weight": 15,
+                "link_status": "ENABLED",
+                "link_type": "XGMI",
+                "num_hops": 1,
+                "bandwidth": "50000-100000",
+                "fb_sharing": "ENABLED"
+            },
+        ...
+        ]
+    },
+    ...
+]
+```
+```shell
+$ /opt/rocm/bin/amd-smi topology -a -t --json
+[
+    {
+        "gpu": 0,
+        "bdf": "0000:08:00.0",
+        "links": [
+            {
+                "gpu": 0,
+                "bdf": "0000:08:00.0",
+                "link_status": "ENABLED",
+                "link_type": "SELF"
+            },
+            {
+                "gpu": 1,
+                "bdf": "0000:44:00.0",
+                "link_status": "DISABLED",
+                "link_type": "PCIE"
+            }
+        ]
+    },
+    {
+        "gpu": 1,
+        "bdf": "0000:44:00.0",
+        "links": [
+            {
+                "gpu": 0,
+                "bdf": "0000:08:00.0",
+                "link_status": "DISABLED",
+                "link_type": "PCIE"
+            },
+            {
+                "gpu": 1,
+                "bdf": "0000:44:00.0",
+                "link_status": "ENABLED",
+                "link_type": "SELF"
+            }
+        ]
+    }
+]
+```
+
+### Optimizations
+
+- N/A
 
 ### Fixed
 
