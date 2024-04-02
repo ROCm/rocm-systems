@@ -160,10 +160,59 @@ struct async_copy_data
     external_corr_id_map_t              extern_corr_ids = {};
 };
 
-auto*
+struct active_signals
+{
+    static hsa_signal_t get_signal()
+    {
+        static hsa_signal_t signal = []() {
+            hsa_signal_t _signal;
+            ROCP_HSA_TABLE_CALL(ERROR,
+                                get_core_table()->hsa_signal_create_fn(0, 0, nullptr, &_signal));
+            return _signal;
+        }();
+
+        return signal;
+    }
+
+    void sync() const
+    {
+        if(_is_set)
+        {
+            ROCP_HSA_TABLE_CALL(
+                ERROR,
+                get_core_table()->hsa_signal_wait_relaxed_fn(
+                    get_signal(), HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_ACTIVE));
+        }
+    }
+
+    void fetch_sub(int v)
+    {
+        _is_set = true;
+        get_core_table()->hsa_signal_subtract_relaxed_fn(get_signal(), v);
+    }
+
+    void fetch_add(int v)
+    {
+        _is_set = true;
+        get_core_table()->hsa_signal_add_relaxed_fn(get_signal(), v);
+    }
+
+    ~active_signals()
+    {
+        if(_is_set)
+        {
+            sync();
+            ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(get_signal()));
+        }
+    }
+
+    std::atomic<bool> _is_set{false};
+};
+
+active_signals*
 get_active_signals()
 {
-    static auto* _v = common::static_object<std::atomic<int64_t>>::construct();
+    static auto* _v = common::static_object<active_signals>::construct();
     return _v;
 }
 
@@ -635,25 +684,7 @@ void
 async_copy_fini()
 {
     if(!async_copy::get_active_signals()) return;
-
-    // Potentially replace with condition variable at some point
-    // but performance may not matter here.
-    constexpr auto max_wait_time  = std::chrono::milliseconds{1000};
-    constexpr auto query_interval = std::chrono::milliseconds{10};
-    auto           _orig_active = async_copy::get_active_signals()->load(std::memory_order_relaxed);
-    auto           _curr_active = _orig_active;
-    auto           inactive     = common::yield(
-        [&_curr_active]() {
-            return ((_curr_active =
-                         async_copy::get_active_signals()->load(std::memory_order_relaxed)) == 0);
-        },
-        max_wait_time,
-        query_interval);
-
-    LOG_IF(WARNING, !inactive)
-        << "rocprofiler-sdk abandoned waiting for " << _orig_active
-        << " async copy signal callbacks after " << max_wait_time.count() << " msecs. There were "
-        << _curr_active << " async copy signal callbacks which were not delivered at that time.";
+    async_copy::get_active_signals()->sync();
 }
 }  // namespace hsa
 }  // namespace rocprofiler
