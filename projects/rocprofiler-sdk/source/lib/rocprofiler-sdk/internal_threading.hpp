@@ -29,10 +29,12 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/allocator.hpp"
 
-#include <PTL/TaskGroup.hh>
+#include <PTL/TaskManager.hh>
 #include <PTL/ThreadPool.hh>
 
 #include <cstdint>
+#include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -40,28 +42,32 @@ namespace rocprofiler
 {
 namespace internal_threading
 {
-class ThreadPool : public PTL::ThreadPool
+class TaskGroup : private PTL::TaskManager
 {
 public:
-    using parent_type = PTL::ThreadPool;
+    using thread_pool_t = PTL::ThreadPool;
+    using parent_type   = PTL::TaskManager;
+    using task_type     = PTL::PackagedTask<void>;
 
-    ThreadPool(const parent_type::Config&);
-    ~ThreadPool();
-};
+    TaskGroup();
+    ~TaskGroup() override;
 
-class TaskGroup : public PTL::TaskGroup<void>
-{
-public:
-    using parent_type = PTL::TaskGroup<void>;
+    TaskGroup(const TaskGroup&)     = delete;
+    TaskGroup(TaskGroup&&) noexcept = delete;
+    TaskGroup& operator=(const TaskGroup&) = delete;
+    TaskGroup& operator=(TaskGroup&&) noexcept = delete;
 
-    TaskGroup(std::shared_ptr<ThreadPool>);
+    void exec(std::function<void()>&&);
+    void wait();
+    void join();
 
 private:
-    std::shared_ptr<ThreadPool> m_pool = {};
+    std::mutex                             m_mutex = {};
+    thread_pool_t*                         m_pool  = nullptr;
+    std::deque<std::shared_ptr<task_type>> m_tasks = {};
 };
 
-using thread_pool_t = ThreadPool;
-using task_group_t  = TaskGroup;
+using task_group_t = TaskGroup;
 
 void notify_pre_internal_thread_create(rocprofiler_runtime_library_t);
 void notify_post_internal_thread_create(rocprofiler_runtime_library_t);
