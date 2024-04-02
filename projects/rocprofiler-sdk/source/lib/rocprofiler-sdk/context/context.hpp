@@ -182,8 +182,9 @@ validate_context(const context* cfg);
 rocprofiler_status_t
 start_context(rocprofiler_context_id_t id);
 
-/// \brief disable the contexturation.
-rocprofiler_status_t stop_context(rocprofiler_context_id_t);
+/// \brief remove context from active array
+rocprofiler_status_t
+stop_context(rocprofiler_context_id_t id);
 
 using context_array_t = common::container::small_vector<const context*>;
 
@@ -216,10 +217,16 @@ get_active_contexts(context_array_t& data, context_filter_t filter = default_con
 context_array_t
 get_active_contexts(context_filter_t filter = default_context_filter);
 
-void deactivate_client_contexts(rocprofiler_client_id_t);
+/// \brief disable the contexturation.
+rocprofiler_status_t
+stop_client_contexts(rocprofiler_client_id_t id);
+
+void
+deactivate_client_contexts(rocprofiler_client_id_t id);
 
 // should only be called if the client failed to initialize
-void deregister_client_contexts(rocprofiler_client_id_t);
+void
+deregister_client_contexts(rocprofiler_client_id_t id);
 
 inline bool
 default_context_filter(const context* val)

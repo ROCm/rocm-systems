@@ -278,8 +278,10 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
 
     static fini_func_t tool_fini = [](void* client_data) -> void {
         auto* cb_data = static_cast<callback_data*>(client_data);
-        ROCPROFILER_CALL(rocprofiler_stop_context(cb_data->client_ctx),
-                         "rocprofiler context stop failed");
+        int   status  = 0;
+        ROCPROFILER_CALL(rocprofiler_context_is_active(cb_data->client_ctx, &status),
+                         "rocprofiler_context_is_active failed");
+        EXPECT_EQ(status, 0);
 
         static_cast<callback_data*>(client_data)->client_workflow_count++;
     };
@@ -429,8 +431,10 @@ TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
         auto* cb_data = static_cast<callback_data*>(client_data);
         ROCPROFILER_CALL(rocprofiler_flush_buffer(cb_data->client_buffer),
                          "rocprofiler context stop failed");
-        ROCPROFILER_CALL(rocprofiler_stop_context(cb_data->client_ctx),
-                         "rocprofiler context stop failed");
+        int status = 0;
+        ROCPROFILER_CALL(rocprofiler_context_is_active(cb_data->client_ctx, &status),
+                         "rocprofiler_context_is_active failed");
+        EXPECT_EQ(status, 0);
 
         static_cast<callback_data*>(client_data)->client_workflow_count++;
     };

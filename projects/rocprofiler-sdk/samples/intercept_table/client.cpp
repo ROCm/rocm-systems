@@ -76,8 +76,8 @@ using callback_kind_operation_names_t =
     std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, const char*>>;
 using wrap_count_t = std::pair<source_location, size_t>;
 
-rocprofiler_client_id_t*       client_id        = nullptr;
-std::map<size_t, wrap_count_t> client_wrap_data = {};
+rocprofiler_client_id_t* client_id        = nullptr;
+auto*                    client_wrap_data = new std::map<size_t, wrap_count_t>{};
 
 void
 print_call_stack(const call_stack_t& _call_stack)
@@ -113,7 +113,7 @@ print_call_stack(const call_stack_t& _call_stack)
     {
         *ofs << std::left << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size()
              << " [" << common::fs::path{itr.file}.filename() << ":" << itr.line << "] "
-             << std::setw(20) << itr.function;
+             << std::setw(41) << itr.function;
         if(!itr.context.empty()) *ofs << " :: " << itr.context;
         *ofs << "\n";
     }
@@ -131,7 +131,7 @@ tool_fini(void* tool_data)
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
 
     size_t wrapped_count = 0;
-    for(const auto& itr : client_wrap_data)
+    for(const auto& itr : *client_wrap_data)
     {
         auto src_loc = itr.second.first;
         src_loc.context += "call_count=" + std::to_string(itr.second.second);
@@ -144,6 +144,7 @@ tool_fini(void* tool_data)
     print_call_stack(*_call_stack);
 
     delete _call_stack;
+    delete client_wrap_data;
 
     if(wrapped_count == 0)
     {
@@ -152,21 +153,31 @@ tool_fini(void* tool_data)
 }
 
 template <size_t Idx, typename RetT, typename... Args>
+RetT (*underlying_function)(Args...) = nullptr;
+
+template <size_t Idx, typename RetT, typename... Args>
+RetT
+get_wrapper_function(Args... args)
+{
+    if(client_wrap_data->at(Idx).second == 0)
+        std::clog << "First invocation of wrapped function: '"
+                  << client_wrap_data->at(Idx).first.function << "'...\n"
+                  << std::flush;
+
+    client_wrap_data->at(Idx).second += 1;
+    if(underlying_function<Idx, RetT, Args...>)
+        return underlying_function<Idx, RetT, Args...>(args...);
+    if constexpr(!std::is_void<RetT>::value) return RetT{};
+}
+
+template <size_t Idx, typename RetT, typename... Args>
 auto
 generate_wrapper(const char* name, RetT (*func)(Args...))
 {
-    using functor_type = RetT (*)(Args...);
+    client_wrap_data->emplace(Idx, wrap_count_t{source_location{name, __FILE__, __LINE__, ""}, 0});
 
-    client_wrap_data.emplace(Idx, wrap_count_t{source_location{name, __FILE__, __LINE__, ""}, 0});
-
-    static functor_type underlying_func = func;
-    static functor_type wrapped_func    = [](Args... args) -> RetT {
-        client_wrap_data.at(Idx).second += 1;
-        if(underlying_func) return underlying_func(args...);
-        if constexpr(!std::is_void<RetT>::value) return RetT{};
-    };
-
-    return wrapped_func;
+    underlying_function<Idx, RetT, Args...> = func;
+    return &get_wrapper_function<Idx, RetT, Args...>;
 }
 
 #define GENERATE_WRAPPER(TABLE, FUNC)                                                              \

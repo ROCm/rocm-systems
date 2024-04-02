@@ -218,8 +218,10 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
 
     static fini_func_t tool_fini = [](void* client_data) -> void {
         auto* cb_data = static_cast<callback_data_ext*>(client_data);
-        ROCPROFILER_CALL(rocprofiler_stop_context(cb_data->client_hsa_ctx),
-                         "rocprofiler context stop failed");
+        int   status  = 0;
+        ROCPROFILER_CALL(rocprofiler_context_is_active(cb_data->client_hsa_ctx, &status),
+                         "rocprofiler_context_is_active failed");
+        EXPECT_EQ(status, 0);
 
         static_cast<callback_data_ext*>(client_data)->client_workflow_count++;
     };
@@ -375,9 +377,10 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
 
     static fini_func_t tool_fini = [](void* client_data) -> void {
         auto* cb_data = static_cast<callback_data_ext*>(client_data);
-        ROCPROFILER_CALL_EXPECT(rocprofiler_stop_context(cb_data->client_hsa_ctx),
-                                "rocprofiler context stop",
-                                ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND);
+        int   status  = 0;
+        ROCPROFILER_CALL(rocprofiler_context_is_active(cb_data->client_hsa_ctx, &status),
+                         "rocprofiler_context_is_active failed");
+        EXPECT_EQ(status, 0);
 
         ROCPROFILER_CALL_EXPECT(rocprofiler_start_context(cb_data->client_hsa_ctx),
                                 "rocprofiler context start",

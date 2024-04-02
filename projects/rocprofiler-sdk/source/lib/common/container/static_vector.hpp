@@ -30,6 +30,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <initializer_list>
+#include <type_traits>
 
 namespace rocprofiler
 {
@@ -208,7 +209,7 @@ static_vector<Tp, N, AtomicSizeV>::emplace_back(Args&&... _v)
         else
             m_data[_idx] = Tp{std::forward<Args>(_v)...};
     }
-    else
+    else if constexpr(std::is_move_assignable<Tp>::value || std::is_copy_assignable<Tp>::value)
     {
         m_data[_idx] = {};
     }

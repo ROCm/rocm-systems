@@ -50,9 +50,8 @@ namespace context
 {
 namespace
 {
-using reserve_size_t = common::container::reserve_size;
-using unique_context_vec_t =
-    common::container::stable_vector<allocator::unique_static_ptr_t<context>, 8>;
+using reserve_size_t       = common::container::reserve_size;
+using stable_context_vec_t = common::container::stable_vector<std::optional<context>, 8>;
 using active_context_vec_t = common::container::stable_vector<std::atomic<const context*>, 8>;
 
 constexpr auto invalid_client_idx = std::numeric_limits<uint32_t>::max();
@@ -83,10 +82,11 @@ get_client_index()
     return _v;
 }
 
-unique_context_vec_t&
+stable_context_vec_t*&
 get_registered_contexts_impl()
 {
-    static auto _v = unique_context_vec_t{reserve_size_t{unique_context_vec_t::chunk_size}};
+    static auto*& _v = common::static_object<stable_context_vec_t>::construct(
+        reserve_size_t{stable_context_vec_t::chunk_size});
     return _v;
 }
 
@@ -100,14 +100,7 @@ get_num_active_contexts()
 active_context_vec_t&
 get_active_contexts_impl()
 {
-    static auto* _v    = new active_context_vec_t{reserve_size_t{active_context_vec_t::chunk_size}};
-    static auto  _once = std::once_flag{};
-    std::call_once(_once, std::atexit, []() {
-        for(auto& itr : *_v)
-        {
-            itr.store(nullptr);
-        }
-    });
+    static auto* _v = new active_context_vec_t{reserve_size_t{active_context_vec_t::chunk_size}};
     return *_v;
 }
 
@@ -243,13 +236,16 @@ context_array_t&
 get_registered_contexts(context_array_t& data, context_filter_t filter)
 {
     data.clear();
-    auto num_ctx = get_registered_contexts_impl().size();
+
+    if(!get_registered_contexts_impl()) return data;
+
+    auto num_ctx = get_registered_contexts_impl()->size();
     if(num_ctx <= 0) return data;
 
     data.reserve(num_ctx);
-    for(auto& itr : get_registered_contexts_impl())
+    for(auto& itr : *get_registered_contexts_impl())
     {
-        const auto* ctx = itr.get();
+        const auto* ctx = &itr.value();
         if(ctx)
         {
             if(!filter || (filter && filter(ctx))) data.emplace_back(ctx);
@@ -332,15 +328,15 @@ allocate_context()
     auto _lk = std::unique_lock<std::mutex>{get_contexts_mutex()};
 
     // initial context identifier number
-    auto _idx = get_registered_contexts_impl().size() + get_contexts_offset();
+    auto _idx = get_registered_contexts_impl()->size() + get_contexts_offset();
 
     // make space in registered
-    get_registered_contexts_impl().emplace_back(nullptr);
+    get_registered_contexts_impl()->emplace_back();
 
     // create an entry in the registered
-    auto& _cfg_v = get_registered_contexts_impl().back();
-    _cfg_v       = allocator::make_unique_static<context>();
-    auto* _cfg   = _cfg_v.get();
+    auto& _cfg_v = get_registered_contexts_impl()->back();
+    _cfg_v.emplace();
+    auto* _cfg = &_cfg_v.value();
     // ...
 
     if(!_cfg) return std::nullopt;
@@ -361,8 +357,8 @@ get_mutable_registered_context(rocprofiler_context_id_t id)
 {
     if(id.handle < get_contexts_offset()) return nullptr;
     auto _idx = id.handle - get_contexts_offset();
-    if(_idx >= get_registered_contexts_impl().size()) return nullptr;
-    return get_registered_contexts_impl().at(_idx).get();
+    if(_idx >= get_registered_contexts_impl()->size()) return nullptr;
+    return &get_registered_contexts_impl()->at(_idx).value();
 }
 
 const context*
@@ -382,7 +378,9 @@ start_context(rocprofiler_context_id_t context_id)
 {
     if(context_id.handle < get_contexts_offset()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
-    if((context_id.handle - get_contexts_offset()) >= get_registered_contexts_impl().size())
+    if(!get_registered_contexts_impl()) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    if((context_id.handle - get_contexts_offset()) >= get_registered_contexts_impl()->size())
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
 
     const auto* cfg = get_registered_context(context_id);
@@ -406,7 +404,7 @@ start_context(rocprofiler_context_id_t context_id)
         }
     }
 
-    uint64_t rocp_tot_contexts = get_registered_contexts_impl().size();
+    uint64_t rocp_tot_contexts = get_registered_contexts_impl()->size();
     auto     idx               = rocp_tot_contexts;
     auto&    active_contexts   = get_active_contexts_impl();
     {
@@ -482,6 +480,25 @@ stop_context(rocprofiler_context_id_t idx)
     return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;  // compare exchange failed
 }
 
+rocprofiler_status_t
+stop_client_contexts(rocprofiler_client_id_t client_id)
+{
+    if(!get_registered_contexts_impl()) return ROCPROFILER_STATUS_ERROR;
+
+    auto ret = ROCPROFILER_STATUS_SUCCESS;
+    for(auto& itr : *get_registered_contexts_impl())
+    {
+        if(itr->client_idx == client_id.handle)
+        {
+            auto status = stop_context(rocprofiler_context_id_t{itr->context_idx});
+            if(status != ROCPROFILER_STATUS_SUCCESS &&
+               status != ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND)
+                ret = status;
+        }
+    }
+    return ret;
+}
+
 void
 deactivate_client_contexts(rocprofiler_client_id_t client_id)
 {
@@ -498,7 +515,7 @@ deactivate_client_contexts(rocprofiler_client_id_t client_id)
 void
 deregister_client_contexts(rocprofiler_client_id_t client_id)
 {
-    for(auto& itr : get_registered_contexts_impl())
+    for(auto& itr : *get_registered_contexts_impl())
     {
         if(itr->client_idx == client_id.handle && buffer::get_buffers())
         {
