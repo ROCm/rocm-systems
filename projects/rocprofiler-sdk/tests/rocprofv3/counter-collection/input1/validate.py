@@ -4,6 +4,7 @@ import sys
 import pytest
 import numpy as np
 import pandas as pd
+import re
 
 kernel_list = sorted(
     ["addition_kernel", "subtract_kernel", "multiply_kernel", "divide_kernel"]
@@ -23,11 +24,19 @@ def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
     assert (df["Process_Id"].astype(int).values > 0).all()
     assert len(df["Kernel_Name"]) > 0
 
-    assert kernel_list == sorted(df["Kernel_Name"].unique().tolist())
+    counter_collection_pmc1_kernel_list = [
+        x
+        for x in sorted(df["Kernel_Name"].unique().tolist())
+        if not re.search(r"__amd_rocclr_.*", x)
+    ]
+
+    assert kernel_list == counter_collection_pmc1_kernel_list
 
     kernel_count = dict([[itr, 0] for itr in kernel_list])
     assert len(kernel_count) == len(kernel_list)
     for itr in df["Kernel_Name"]:
+        if re.search(r"__amd_rocclr_.*", itr):
+            continue
         kernel_count[itr] += 1
     kn_cnt = [itr for _, itr in kernel_count.items()]
     assert min(kn_cnt) == max(kn_cnt) and len(unique(kn_cnt)) == 1

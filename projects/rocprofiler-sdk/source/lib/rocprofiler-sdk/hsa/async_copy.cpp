@@ -272,8 +272,9 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     {
         ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
         delete _data;
-        get_active_signals()->fetch_sub(1);
     }
+
+    get_active_signals()->fetch_sub(1);
 
     if(_corr_id) _corr_id->sub_ref_count();
 

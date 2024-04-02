@@ -660,10 +660,12 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     record);
 
                 auto kernel_trace_ss = std::stringstream{};
+                // TODO(aelwazir): To be changed back to use node id once ROCR fixes
+                // the hsa_agents to use the real node id
                 tool::csv::kernel_trace_csv_encoder::write_row(
                     kernel_trace_ss,
                     CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
-                    agent_info->at(record->agent_id)->node_id,
+                    agent_info->at(record->agent_id)->logical_node_id,
                     record->queue_id.handle,
                     record->kernel_id,
                     std::move(kernel_name),
@@ -710,14 +712,16 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
 
                 auto memory_copy_trace_ss = std::stringstream{};
+                // TODO(aelwazir): To be changed back to use node id once ROCR fixes
+                // the hsa_agents to use the real node id
                 tool::csv::memory_copy_csv_encoder::write_row(
                     memory_copy_trace_ss,
                     CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
                     CHECK_NOTNULL(buffered_name_info)
                         ->operation_names.at(record->kind)
                         .at(record->operation),
-                    agent_info->at(record->src_agent_id)->node_id,
-                    agent_info->at(record->dst_agent_id)->node_id,
+                    agent_info->at(record->src_agent_id)->logical_node_id,
+                    agent_info->at(record->dst_agent_id)->logical_node_id,
                     record->correlation_id.internal,
                     record->start_timestamp,
                     record->end_timestamp);
@@ -930,10 +934,12 @@ counter_record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_da
         using csv_encoder = tool::csv::counter_collection_csv_encoder;
 
         auto counter_collection_ss = std::stringstream{};
+        // TODO(aelwazir): To be changed back to use node id once ROCR fixes
+        // the hsa_agents to use the real node id
         csv_encoder::write_row(counter_collection_ss,
                                correlation_id.internal,
                                cnt_dispatch_data_v->dispatch_index,
-                               agent_info->at(dispatch_data.agent_id)->node_id,
+                               agent_info->at(dispatch_data.agent_id)->logical_node_id,
                                dispatch_data.queue_id.handle,
                                getpid(),
                                cnt_dispatch_data_v->thread_id,
@@ -963,7 +969,9 @@ list_metrics_iterate_agents(rocprofiler_agent_version_t,
     {
         const auto* agent      = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
         auto        counters_v = counter_vec_t{};
-        uint32_t    node_id    = agent->node_id;
+        // TODO(aelwazir): To be changed back to use node id once ROCR fixes
+        // the hsa_agents to use the real node id
+        uint32_t node_id = agent->logical_node_id;
         ROCPROFILER_CALL(
             rocprofiler_iterate_agent_supported_counters(
                 agent->id,

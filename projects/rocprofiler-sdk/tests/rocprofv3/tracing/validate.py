@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import sys
+import subprocess
 import pytest
 
 
@@ -67,15 +68,39 @@ def test_memory_copy_trace(memory_copy_input_data):
 
     row = memory_copy_input_data[0]
     assert row["Direction"] == "HOST_TO_DEVICE"
-    assert int(row["Source_Agent_Id"]) == 0
-    assert int(row["Destination_Agent_Id"]) >= 1
+    output = subprocess.check_output(
+        'rocminfo | grep "Node: *'
+        + row["Source_Agent_Id"]
+        + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
+        shell=True,
+    )
+    assert int(str(output).find("CPU")) >= 0
+    output = subprocess.check_output(
+        'rocminfo | grep "Node: *'
+        + row["Destination_Agent_Id"]
+        + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
+        shell=True,
+    )
+    assert int(str(output).find("GPU")) >= 0
     assert int(row["Correlation_Id"]) > 0
     assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
     row = memory_copy_input_data[1]
     assert row["Direction"] == "DEVICE_TO_HOST"
-    assert int(row["Source_Agent_Id"]) >= 1
-    assert int(row["Destination_Agent_Id"]) == 0
+    output = subprocess.check_output(
+        'rocminfo | grep "Node: *'
+        + row["Source_Agent_Id"]
+        + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
+        shell=True,
+    )
+    assert int(str(output).find("GPU")) >= 0
+    output = subprocess.check_output(
+        'rocminfo | grep "Node: *'
+        + row["Destination_Agent_Id"]
+        + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
+        shell=True,
+    )
+    assert int(str(output).find("CPU")) >= 0
     assert int(row["Correlation_Id"]) > 0
     assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 

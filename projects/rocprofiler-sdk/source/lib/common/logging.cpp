@@ -116,8 +116,6 @@ update_logging(const logging_config& cfg, bool setup_env, int env_override)
     if(setup_env)
     {
         common::set_env("GOOGLE_LOG_DIR", get_env("PWD", ""), env_override);
-        common::set_env("GOOGLE_LOGTOSTDERR", cfg.loglevel, env_override);
-        common::set_env("GOOGLE_ALSOLOGTOSTDERR", cfg.alsologtostderr, env_override);
     }
 }
 }  // namespace common

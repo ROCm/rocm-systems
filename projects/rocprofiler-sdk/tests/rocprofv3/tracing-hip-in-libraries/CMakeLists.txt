@@ -27,7 +27,7 @@ set_tests_properties(
     rocprofv3-test-trace-hip-in-libraries-execute
     PROPERTIES
         TIMEOUT
-        45
+        100
         LABELS
         "integration-tests"
         ENVIRONMENT

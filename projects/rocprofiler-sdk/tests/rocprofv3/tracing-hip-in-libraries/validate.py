@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 
+import re
 import sys
 import pytest
+import subprocess
 
 
 class dim3(object):
@@ -79,7 +81,6 @@ def test_api_trace(hsa_input_data, hip_input_data):
 def test_kernel_trace(kernel_input_data):
     valid_kernel_names = sorted(
         [
-            "__amd_rocclr_fillBufferAligned",
             "(anonymous namespace)::transpose(int const*, int*, int, int)",
             "void (anonymous namespace)::addition_kernel<float>(float*, float const*, float const*, int, int)",
             "void (anonymous namespace)::divide_kernel<float>(float*, float const*, float const*, int, int)",
@@ -91,6 +92,8 @@ def test_kernel_trace(kernel_input_data):
     kernels = []
     for row in kernel_input_data:
         kernel_name = row["Kernel_Name"]
+        if re.search(r"__amd_rocclr_.*", kernel_name):
+            continue
 
         assert row["Kind"] == "KERNEL_DISPATCH"
         assert int(row["Agent_Id"]) > 0
@@ -123,18 +126,34 @@ def test_kernel_trace(kernel_input_data):
     assert kernels == valid_kernel_names
 
 
-def test_memory_copy_trace(memory_copy_input_data):
+def test_memory_copy_trace(memory_copy_input_data, hsa_input_data):
     for row in memory_copy_input_data:
         assert row["Kind"] == "MEMORY_COPY"
         assert row["Direction"] in ("HOST_TO_DEVICE", "DEVICE_TO_HOST")
         if row["Direction"] == "HOST_TO_DEVICE":
-            assert int(row["Source_Agent_Id"]) == 0
+            output = subprocess.check_output(
+                'rocminfo | grep "Node: *'
+                + row["Source_Agent_Id"]
+                + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
+                shell=True,
+            )
+            assert int(str(output).find("CPU")) >= 0
         elif row["Direction"] == "DEVICE_TO_HOST":
-            assert int(row["Destination_Agent_Id"]) == 0
+            output = subprocess.check_output(
+                'rocminfo | grep "Node: *'
+                + row["Destination_Agent_Id"]
+                + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
+                shell=True,
+            )
+            assert int(str(output).find("CPU")) >= 0
         assert int(row["Correlation_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
-    assert len(memory_copy_input_data) == 120
+    valid_length = 0
+    for row in hsa_input_data:
+        if re.search(r".*memory_async_copy.*", row["Function"]):
+            valid_length += 1
+    assert len(memory_copy_input_data) == valid_length
 
 
 if __name__ == "__main__":

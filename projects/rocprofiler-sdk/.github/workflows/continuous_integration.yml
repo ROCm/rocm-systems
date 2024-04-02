@@ -11,6 +11,8 @@ on:
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
+  issue_comment:
+    types: [created]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,11 +30,32 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        os: ['ubuntu-22.04']
-        runner: ['vega20']
-        build-type: ['RelWithDebInfo']
+        runner: [mi200-runner-set, mi300-runner-set, vega20-runner-set, navi3-runner-set, rocprofiler-runner-set-multi-gpus]
+        vega20:
+          - ${{ github.event_name ==  'issue_comment' && contains(github.event.comment.body, 'rerun') && contains(github.event.comment.body, 'vega20') }}
+        navi3:
+          - ${{ github.event_name ==  'issue_comment' && contains(github.event.comment.body, 'rerun') && contains(github.event.comment.body, 'navi3') }}
+        mi300:
+          - ${{ github.event_name ==  'issue_comment' && contains(github.event.comment.body, 'rerun') && contains(github.event.comment.body, 'mi300') }}
+        mi200:
+          - ${{ github.event_name ==  'issue_comment' && contains(github.event.comment.body, 'rerun') && contains(github.event.comment.body, 'mi200') }}
+        general:
+          - ${{ github.event_name ==  'pull_request' || github.event_name ==  'push' }}
+        os: [ubuntu-22.04]
+        build-type: [RelWithDebInfo]
         ci-flags: ['--linter clang-tidy']
         name-tag: ['']
+        exclude:
+          - mi300: false
+            runner: mi300-runner-set
+          - mi200: false
+            runner: mi200-runner-set
+          - navi3: false
+            runner: navi3-runner-set
+          - vega20: false
+            runner: vega20-runner-set
+          - general: false
+            runner: rocprofiler-runner-set-multi-gpus
 
     runs-on: ${{ matrix.runner }}
 
@@ -40,18 +63,8 @@ jobs:
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
-    container:
-      # TODO(aelwazir): Adding multiple os distros
-      image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-rocprofiler-sdk-staging-base:latest
-      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
-      credentials:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: true
 
     - name: Install requirements
       shell: bash
@@ -72,15 +85,16 @@ jobs:
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python python3 git cmake ctest; do which-realpath $i; done
         ls -la
+        cat /sys/class/kfd/kfd/topology/nodes/*/gpu_id || true; /opt/rocm/bin/rocminfo | grep gfx
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}${{ matrix.name-tag }}
-          --build-jobs 8
-          --site ${{ matrix.runner }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
+          --build-jobs 16
+          --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_LIST }}
           ${{ matrix.ci-flags }}
           --
@@ -95,12 +109,12 @@ jobs:
     - name: Install
       timeout-minutes: 10
       run:
-        cmake --build build --target install --parallel 8
+        cmake --build build --target install --parallel 16
 
     - name: Build Packaging
       timeout-minutes: 10
       run:
-        cmake --build build --target package --parallel 8
+        cmake --build build --target package --parallel 16
 
     - name: Test Install Build
       timeout-minutes: 10
@@ -109,8 +123,8 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-samples samples
         CMAKE_PREFIX_PATH=/opt/rocprofiler-sdk cmake -B build-tests tests
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
-        cmake --build build-samples --target all --parallel 8
-        cmake --build build-tests --target all --parallel 8
+        cmake --build build-samples --target all --parallel 16
+        cmake --build build-tests --target all --parallel 16
         ctest --test-dir build-samples --output-on-failure
         ctest --test-dir build-tests --output-on-failure
 
@@ -129,8 +143,8 @@ jobs:
       run: |
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-samples-deb /opt/rocm/share/rocprofiler-sdk/samples
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
-        cmake --build build-samples-deb --target all --parallel 8
-        cmake --build build-tests-deb --target all --parallel 8
+        cmake --build build-samples-deb --target all --parallel 16
+        cmake --build build-tests-deb --target all --parallel 16
         ctest --test-dir build-samples-deb --output-on-failure
         ctest --test-dir build-tests-deb --output-on-failure
 
@@ -147,40 +161,17 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-      # TODO: Change it back when re-enabling on mi200
         include:
             - os: 'ubuntu-22.04'
-              runner: 'vega20'
+              runner: 'rocprofiler-cluster-runner-set'
               build-type: 'Release'
-        # include:
-        #     - os: 'ubuntu-22.04'
-        #       runner: 'renderD131'
-        #       device: '/renderD131'
-        #       build-type: 'Release'
 
+    if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-
-    # TODO: Uncomment this when re-enabling tests on the mi200 as it contains --memory and --cpus flag for the mi200. Remove these 2 options when running on vega20.
-    # vega20 machine only has 24 cpus available.
-    container:
-      # TODO(aelwazir): Adding multiple os distros
-      image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-rocprofiler-sdk-staging-base:latest
-      options: --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
-      credentials:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-
-    # container:
-    #   # TODO(aelwazir): Adding multiple os distros
-    #   image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-rocprofiler-sdk-staging-base:latest
-    #   options: --memory=128g --cpus=32 --ipc=host --device=/dev/kfd --device=/dev/dri${{ matrix.device }} --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
-    #   credentials:
-    #     username: ${{ secrets.DOCKER_USERNAME }}
-    #     password: ${{ secrets.DOCKER_PASSWORD }}
 
     steps:
     - name: Patch Git
@@ -191,10 +182,9 @@ jobs:
         add-apt-repository -y ppa:git-core/ppa
         apt-get update
         apt-get install -y git
+        cat /sys/class/kfd/kfd/topology/nodes/*/gpu_id || true; /opt/rocm/bin/rocminfo | grep gfx
 
     - uses: actions/checkout@v4
-      with:
-        submodules: true
 
     - name: Load Existing XML Code Coverage
       if: github.event_name == 'pull_request'
@@ -239,9 +229,9 @@ jobs:
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-codecov
-          --build-jobs 8
-          --site ${{ matrix.runner }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-codecov
+          --build-jobs 16
+          --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_LIST }}
           --coverage all
           --
@@ -254,9 +244,9 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-codecov-tests
-          --build-jobs 8
-          --site ${{ matrix.runner }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-codecov-tests
+          --build-jobs 16
+          --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_LIST }}
           --coverage tests
           --
@@ -269,9 +259,9 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-codecov-samples
-          --build-jobs 8
-          --site ${{ matrix.runner }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-codecov-samples
+          --build-jobs 16
+          --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_LIST }}
           --coverage samples
           --
@@ -379,29 +369,20 @@ jobs:
       fail-fast: false
       matrix:
         os: ['ubuntu-22.04']
-        runner: ['vega20']
+        runner: ['rocprofiler-cluster-runner-set']
         build-type: ['RelWithDebInfo']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer']
         ci-flags: ['']
 
+    if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
-    container:
-      # TODO(aelwazir): Adding multiple os distros
-      image: evuedsoacr.azurecr.io/ml-lang-comp-us/rocm-tools/rocm-rocprofiler-sdk-staging-base:latest
-      options: --privileged --ipc=host --device=/dev/kfd --device=/dev/dri --group-add video --cap-add=SYS_PTRACE --cap-add CAP_SYS_ADMIN --security-opt seccomp=unconfined
-      credentials:
-        username: ${{ secrets.DOCKER_USERNAME }}
-        password: ${{ secrets.DOCKER_PASSWORD }}
-
     steps:
     - uses: actions/checkout@v4
-      with:
-        submodules: true
 
     - name: List Files
       shell: bash
@@ -409,6 +390,7 @@ jobs:
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python python3 git cmake ctest; do which-realpath $i; done
         ls -la
+        cat /sys/class/kfd/kfd/topology/nodes/*/gpu_id || true; /opt/rocm/bin/rocminfo | grep gfx
 
     - name: Install requirements
       shell: bash
@@ -432,9 +414,9 @@ jobs:
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.runner }}-${{ matrix.os }}-${{ matrix.sanitizer }}
-          --build-jobs 8
-          --site ${{ matrix.runner }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.sanitizer }}
+          --build-jobs 16
+          --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_LIST }}
           --memcheck=${{ matrix.sanitizer }}
           ${{ matrix.ci-flags }}
