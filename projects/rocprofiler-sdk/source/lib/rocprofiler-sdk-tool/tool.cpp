@@ -1177,11 +1177,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         using optpair_t = std::pair<bool, rocprofiler_buffer_tracing_kind_t>;
         for(auto itr : {optpair_t{tool::get_config().hsa_core_api_trace,
                                   ROCPROFILER_BUFFER_TRACING_HSA_CORE_API},
-                        optpair_t{tool::get_config().hsa_core_api_trace,
+                        optpair_t{tool::get_config().hsa_amd_ext_api_trace,
                                   ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API},
-                        optpair_t{tool::get_config().hsa_core_api_trace,
+                        optpair_t{tool::get_config().hsa_image_ext_api_trace,
                                   ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API},
-                        optpair_t{tool::get_config().hsa_core_api_trace,
+                        optpair_t{tool::get_config().hsa_finalizer_ext_api_trace,
                                   ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API}})
         {
             if(itr.first)
