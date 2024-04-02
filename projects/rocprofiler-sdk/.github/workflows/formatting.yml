@@ -17,6 +17,8 @@ concurrency:
 jobs:
   cmake:
     runs-on: ubuntu-22.04
+    env:
+      ACCESS_TOKEN: ${{ secrets.TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -48,12 +50,16 @@ jobs:
 
     - name: Create pull request
       if: failure()
-      uses: parkerbxyz/suggest-changes@v1
+      uses: googleapis/code-suggester@v2
       with:
-        comment: 'Please commit the suggested changes from cmake formatting (cmake-format).'
+        command: review
+        pull_number: ${{ github.event.pull_request.number }}
+        git_dir: '.'
 
   source:
     runs-on: ubuntu-22.04
+    env:
+      ACCESS_TOKEN: ${{ secrets.TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -86,15 +92,19 @@ jobs:
 
     - name: Create pull request
       if: failure()
-      uses: parkerbxyz/suggest-changes@v1
+      uses: googleapis/code-suggester@v2
       with:
-        comment: 'Please commit the suggested changes from source formatting (clang-format v11).'
+        command: review
+        pull_number: ${{ github.event.pull_request.number }}
+        git_dir: '.'
 
   python:
     runs-on: ubuntu-22.04
     strategy:
       matrix:
         python-version: ['3.10']
+    env:
+      ACCESS_TOKEN: ${{ secrets.TOKEN }}
 
     steps:
     - uses: actions/checkout@v4
@@ -129,6 +139,8 @@ jobs:
 
     - name: Create pull request
       if: failure()
-      uses: parkerbxyz/suggest-changes@v1
+      uses: googleapis/code-suggester@v2
       with:
-        comment: 'Please commit the suggested changes from python formatting (black).'
+        command: review
+        pull_number: ${{ github.event.pull_request.number }}
+        git_dir: '.'
