@@ -14,23 +14,42 @@ from trace_view import view_trace
 import sys
 import glob
 import numpy as np
-from stitch import stitch
+import stitch
 import gc
 from collections import defaultdict
-from service import CodeobjService
+import service
 
-ATT_VERSION = 4
+ATT_VERSION = 5
+
+class pcInfo(ctypes.Structure):
+    _fields_ = [
+        ("addr", c_uint64),
+        ("marker_id", c_uint64)
+    ]
+    def to_v2_pc(self):
+        if self.marker_id == 0:
+            return self.addr
+        return self.addr | (self.marker_id<<service.ID_OFFSET) | (1<<service.HEADER_OFFSET)
 
 class TraceData(ctypes.Structure):
     _fields_ = [
-        ("num_waves", c_uint64),
-        ("type", c_uint64),
-        ("cycles", c_uint64)
+        ("type", c_uint64, 8),
+        ("hitcount", c_uint64, 56),
+        ("latency", c_uint64),
+        ("pc", pcInfo)
     ]
+
+class TraceDataTranslated:
+    def __init__(self, inst) -> None:
+        self.type = inst.type
+        self.num_waves = inst.hitcount
+        self.cycles = inst.latency
+        if self.type == stitch.PCINFO:
+            self.cycles = inst.pc.to_v2_pc()
 
 class Trace:
     def __init__(self, traceid, tracesize, instructions_array):
-        self.instructions = [deepcopy(instructions_array[k]) for k in range(tracesize)]
+        self.instructions = [TraceDataTranslated(instructions_array[k]) for k in range(tracesize)]
         self.traceid = traceid
 
 class PerfEvent(ctypes.Structure):
@@ -81,6 +100,18 @@ class ReturnAssemblyInfo(ctypes.Structure):
                 ('jumps_len', ctypes.c_int)]
 
 
+class WaveState(ctypes.Structure):
+    _fields_ = [
+        ("type", c_int32),
+        ("duration", c_int32)
+    ]
+
+class WaveInstruction(ctypes.Structure):
+    _fields_ = [
+        ("time", c_int64),
+        ("duration", c_int64)
+    ]
+
 class Wave(ctypes.Structure):
     _fields_ = [
         ("simd", ctypes.c_uint8),
@@ -90,40 +121,40 @@ class Wave(ctypes.Structure):
 
         # total VMEM/FLAT/LDS/SMEM instructions issued
         # VMEM Pipeline: instrs and stalls
-        ("num_vmem_instrs", ctypes.c_uint32),
-        ("num_vmem_stalls", ctypes.c_uint32),
+        ("num_vmem_instrs", ctypes.c_int),
+        ("num_vmem_stalls", ctypes.c_int),
         # FLAT instrs and stalls
-        ("num_flat_instrs", ctypes.c_uint32),
-        ("num_flat_stalls", ctypes.c_uint32),
+        ("num_flat_instrs", ctypes.c_int),
+        ("num_flat_stalls", ctypes.c_int),
         # LDS instr and stalls
-        ("num_lds_instrs", ctypes.c_uint32),
-        ("num_lds_stalls", ctypes.c_uint32),
+        ("num_lds_instrs", ctypes.c_int),
+        ("num_lds_stalls", ctypes.c_int),
         # SCA instrs stalls
-        ("num_salu_instrs", ctypes.c_uint32),
-        ("num_smem_instrs", ctypes.c_uint32),
-        ("num_salu_stalls", ctypes.c_uint32),
-        ("num_smem_stalls", ctypes.c_uint32),
+        ("num_salu_instrs", ctypes.c_int),
+        ("num_smem_instrs", ctypes.c_int),
+        ("num_salu_stalls", ctypes.c_int),
+        ("num_smem_stalls", ctypes.c_int),
         # Branch
-        ("num_branch_instrs", ctypes.c_uint32),
-        ("num_branch_taken_instrs", ctypes.c_uint32),
-        ("num_branch_stalls", ctypes.c_uint32),
+        ("num_branch_instrs", ctypes.c_int),
+        ("num_branch_taken_instrs", ctypes.c_int),
+        ("num_branch_stalls", ctypes.c_int),
 
         # total issued memory instructions
-        ("num_mem_instrs", ctypes.c_uint32),
+        ("num_mem_instrs", ctypes.c_int),
         # total valus insts and stalls
-        ("num_valu_stalls", ctypes.c_uint32),
-        ("num_valu_instrs", ctypes.c_uint64),
+        ("num_valu_stalls", ctypes.c_int),
+        ("num_valu_instrs", ctypes.c_size_t),
         # total issued instructions (compute + memory)
-        ("num_issued_instrs", ctypes.c_uint64),
+        ("num_issued_instrs", ctypes.c_size_t),
         # Begin and end cycle
-        ("begin_time", ctypes.c_uint64),
-        ("end_time", ctypes.c_uint64),
+        ("begin_time", ctypes.c_int64),
+        ("end_time", ctypes.c_int64),
         ("traceid", ctypes.c_int64),
 
-        ("timeline_size", ctypes.c_uint64),
-        ("instructions_size", ctypes.c_uint64),
-        ("timeline_array", POINTER(ctypes.c_int32)),
-        ("instructions_array", POINTER(ctypes.c_uint64)),
+        ("timeline_size", ctypes.c_size_t),
+        ("instructions_size", ctypes.c_size_t),
+        ("timeline_array", POINTER(WaveState)),
+        ("instructions_array", POINTER(WaveInstruction)),
     ]
 
 
@@ -136,13 +167,13 @@ class PythonWave:
                 pass
 
         self.timeline = [
-            (int(sourcew.timeline_array[2 * k]), int(sourcew.timeline_array[2 * k + 1]))
+            (int(sourcew.timeline_array[k].type), int(sourcew.timeline_array[k].duration))
             for k in range(self.timeline_size)
         ]
         self.timeline_array = None
 
         self.instructions = [
-            (int(sourcew.instructions_array[2*k+0]), int(sourcew.instructions_array[2*k+1]))
+            (int(sourcew.instructions_array[k].time), int(sourcew.instructions_array[k].duration))
             for k in range(self.instructions_size)
         ]
         self.instructions_array = None
@@ -161,7 +192,7 @@ class ReturnInfo(ctypes.Structure):
         ("perfevents", POINTER(PerfEvent)),
         ("occupancy", POINTER(ctypes.c_uint64)),
         ("num_occupancy", ctypes.c_uint64),
-        ("kernel_id_addr", POINTER(ctypes.c_uint64)),
+        ("kernel_id_addr", POINTER(pcInfo)),
         ("num_kernel_ids", ctypes.c_uint64),
 
         ("wavedata", POINTER(Wave)),
@@ -225,7 +256,7 @@ def getWaves_binary(name):
         print('Invalid trace ', name)
         return ([], [], [], [], None, [])
     flags = "navi" if (info.flags & 0x2) else "vega"
-    kernel_addr = [int(info.kernel_id_addr[k]) for k in range(info.num_kernel_ids)]
+    kernel_addr = [info.kernel_id_addr[k].to_v2_pc() for k in range(info.num_kernel_ids)]
     events = [deepcopy(info.perfevents[k]) for k in range(info.num_events)]
     occupancy = [int(info.occupancy[k]) for k in range(int(info.num_occupancy))]
 
@@ -249,7 +280,7 @@ def getWaves_binary(name):
 
 def getWaves_stitch(traces, code, jumps, flags, latency_map, hitcount_map, bIsAuto, codeobjservice):
     for id in traces.keys():
-        traces[id].instructions = stitch(traces[id].instructions, code, jumps, flags, bIsAuto, codeobjservice)
+        traces[id].instructions = stitch.stitch(traces[id].instructions, code, jumps, flags, bIsAuto, codeobjservice)
         if len(code) > hitcount_map.size:
             hitcount_map = np.pad(hitcount_map, [0,len(code)-hitcount_map.size])
             latency_map = np.pad(latency_map, [0,len(code)-latency_map.size])
@@ -543,7 +574,7 @@ if __name__ == "__main__":
 
         gc.collect()
         if bIsAuto:
-            codeservice = CodeobjService(gpu_id, att_kernel_f, SO.classify_asm_line)
+            codeservice = service.CodeobjService(gpu_id, att_kernel_f, SO.classify_asm_line)
         else:
             codeservice = None
 
