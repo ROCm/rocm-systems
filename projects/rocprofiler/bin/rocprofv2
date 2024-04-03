@@ -298,13 +298,13 @@ if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then
       export OUTPUT_PATH=$FINAL_PATH
     fi
     let COUNTER=COUNTER+1
-    exec "${@}"
+    LD_PRELOAD=$LD_PRELOAD "${@}"
     if [ -n "$OUTPUT_PATH" ]; then
       echo -e "\nThe output path for the following counters: $OUTPUT_PATH"
     fi
   done
 else
-  exec "${@}"
+ LD_PRELOAD=$LD_PRELOAD "${@}"
 fi
 
 get_pmc_results_txt_path() {
