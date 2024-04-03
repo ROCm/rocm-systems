@@ -80,7 +80,7 @@ getBlockDimensions(std::string_view agent, const Metric& metric)
                     }
                     else
                     {
-                        LOG(ERROR) << "Unknown AQL Profiler Dimension " << id << " " << extent;
+                        ROCP_ERROR << "Unknown AQL Profiler Dimension " << id << " " << extent;
                     }
                 }
             }
@@ -125,7 +125,7 @@ get_dimension_cache()
                             dims.emplace(ast.out_id().handle, ast_copy.set_dimensions());
                         } catch(std::runtime_error& e)
                         {
-                            LOG(ERROR) << metric << " has improper dimensions"
+                            ROCP_ERROR << metric << " has improper dimensions"
                                        << " " << e.what();
                             throw;
                         }

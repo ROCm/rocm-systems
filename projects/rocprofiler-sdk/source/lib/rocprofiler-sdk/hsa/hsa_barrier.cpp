@@ -85,7 +85,7 @@ hsa_barrier::enqueue_packet(const Queue* queue)
     rocprofiler_packet barrier{};
     barrier.barrier_and.header        = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
     barrier.barrier_and.dep_signal[0] = _barrier_signal;
-    LOG(ERROR) << "Barrier Added: " << _barrier_signal.handle;
+    ROCP_ERROR << "Barrier Added: " << _barrier_signal.handle;
     return barrier;
 }
 

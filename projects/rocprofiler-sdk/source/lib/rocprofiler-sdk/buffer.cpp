@@ -139,7 +139,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
 {
     if(registration::get_fini_status() > 0)
     {
-        LOG(ERROR) << "ignoring rocprofiler buffer flush (handle=" << buffer_id.handle
+        ROCP_ERROR << "ignoring rocprofiler buffer flush (handle=" << buffer_id.handle
                    << ") request after finalization";
         return ROCPROFILER_STATUS_ERROR_FINALIZED;
     }
@@ -202,14 +202,14 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
                 }
             } catch(std::exception& e)
             {
-                LOG(ERROR) << "buffer callback threw an exception: " << e.what();
+                ROCP_ERROR << "buffer callback threw an exception: " << e.what();
             }
             // clear the buffer
             buff_internal_v.clear();
         }
         else
         {
-            LOG(INFO) << "buffer at " << buffer_id.handle << " is empty...";
+            ROCP_INFO << "buffer at " << buffer_id.handle << " is empty...";
         }
 
         buff_v->syncer.clear();
@@ -242,7 +242,7 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
     auto* existing_buff = rocprofiler::buffer::get_buffer(*buffer_id);
     if(existing_buff)
     {
-        LOG(ERROR) << "buffer (handle=" << buffer_id->handle
+        ROCP_ERROR << "buffer (handle=" << buffer_id->handle
                    << ") already allocated: handle=" << existing_buff->buffer_id;
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
     }

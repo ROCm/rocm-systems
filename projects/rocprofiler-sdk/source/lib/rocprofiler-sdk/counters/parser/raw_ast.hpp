@@ -194,7 +194,7 @@ struct RawAST
         }
         else
         {
-            LOG(ERROR) << "select_dimension_set creation failed.";
+            ROCP_ERROR << "select_dimension_set creation failed.";
         }
     }
 

@@ -50,7 +50,7 @@
 
 #if defined(ROCPROFILER_CI)
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(FATAL)
+#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
 #else
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
 #    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
@@ -491,7 +491,7 @@ async_copy_impl(Args... args)
 
         if(_status != HSA_STATUS_SUCCESS)
         {
-            LOG(ERROR) << "hsa_signal_create returned non-zero error code " << _status;
+            ROCP_ERROR << "hsa_signal_create returned non-zero error code " << _status;
 
             delete _data;
             return invoke(get_next_dispatch<TableIdx, OpIdx>(),
@@ -513,7 +513,7 @@ async_copy_impl(Args... args)
 
         if(_status != HSA_STATUS_SUCCESS)
         {
-            LOG(ERROR) << "hsa_amd_signal_async_handler returned non-zero error code " << _status;
+            ROCP_ERROR << "hsa_amd_signal_async_handler returned non-zero error code " << _status;
 
             ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal))
                 << ":: failed to destroy signal after async handler failed";
@@ -576,12 +576,12 @@ async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance)
 
     if(!_copy_func)
     {
-        LOG(INFO) << "copying table entry for " << _meta.name;
+        ROCP_INFO << "copying table entry for " << _meta.name;
         _copy_func = _orig_func;
     }
     else
     {
-        LOG(INFO) << "skipping copying table entry for " << _meta.name << " from table instance "
+        ROCP_INFO << "skipping copying table entry for " << _meta.name << " from table instance "
                   << _tbl_instance;
     }
 }

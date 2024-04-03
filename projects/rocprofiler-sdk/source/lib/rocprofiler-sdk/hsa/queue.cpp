@@ -56,7 +56,7 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
 
 #if defined(ROCPROFILER_CI)
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(FATAL)
+#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
 #else
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
 #    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)

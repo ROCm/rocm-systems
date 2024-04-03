@@ -773,8 +773,8 @@ code_object_load_callback(hsa_executable_t         executable,
     const auto* _rocp_agent = agent::get_rocprofiler_agent(data.hsa_agent);
     if(!_rocp_agent)
     {
-        ROCP_CI_LOG(ERROR) << "hsa agent (handle=" << _hsa_agent.handle
-                           << ") did not map to a rocprofiler agent";
+        ROCP_ERROR << "hsa agent (handle=" << _hsa_agent.handle
+                   << ") did not map to a rocprofiler agent";
         return HSA_STATUS_ERROR_INVALID_AGENT;
     }
     data.rocp_agent = _rocp_agent->id;
@@ -792,7 +792,7 @@ code_object_load_callback(hsa_executable_t         executable,
     }
     else
     {
-        LOG(ERROR) << "hsa_executable_iterate_agent_symbols failed for " << data.uri;
+        ROCP_ERROR << "hsa_executable_iterate_agent_symbols failed for " << data.uri;
     }
 
     return _status;
@@ -814,13 +814,13 @@ code_object_unload_callback(hsa_executable_t         executable,
     CHECK_NOTNULL(code_obj_arr);
 
     // auto _size = get_code_objects().rlock([](const auto& data) { return data.size(); });
-    // LOG(INFO) << "[inp] executable=" << executable.handle
+    // ROCP_INFO << "[inp] executable=" << executable.handle
     //            << ", code_object=" << loaded_code_object.handle << " vs. " << _size;
 
     get_code_objects().rlock([&](const code_object_array_t& arr) {
         for(const auto& itr : arr)
         {
-            // LOG(INFO) << "[cmp] executable=" << itr->hsa_executable.handle
+            // ROCP_INFO << "[cmp] executable=" << itr->hsa_executable.handle
             //            << ", code_object=" << itr->hsa_code_object.handle;
             if(itr->hsa_executable.handle == executable.handle &&
                itr->hsa_code_object.handle == loaded_code_object.handle)
@@ -858,7 +858,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
     hsa_status_t status = CHECK_NOTNULL(get_freeze_function())(executable, options);
     if(status != HSA_STATUS_SUCCESS) return status;
 
-    LOG(INFO) << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
+    ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
 
     get_executables().wlock(
         [executable](executable_array_t& data) { data.emplace_back(executable); });
@@ -999,7 +999,7 @@ executable_destroy(hsa_executable_t executable)
 std::vector<code_object_unload>
 shutdown(hsa_executable_t executable)
 {
-    LOG(INFO) << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
+    ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
 
     auto _unloaded = std::vector<code_object_unload>{};
     hsa::get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(

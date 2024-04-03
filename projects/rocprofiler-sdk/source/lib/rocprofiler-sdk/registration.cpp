@@ -198,7 +198,7 @@ find_clients()
 
     if(get_forced_configure() && is_unique_configure_func(get_forced_configure()))
     {
-        LOG(ERROR) << "adding forced configure";
+        ROCP_ERROR << "adding forced configure";
         emplace_client("(forced)", nullptr, get_forced_configure());
     }
 
@@ -235,7 +235,7 @@ find_clients()
     {
         for(const auto& itr : env)
         {
-            LOG(INFO) << "[env] searching " << itr << " for rocprofiler_configure";
+            ROCP_INFO << "[env] searching " << itr << " for rocprofiler_configure";
 
             void* handle = dlopen(itr.c_str(), RTLD_NOLOAD | RTLD_LAZY);
 
@@ -248,7 +248,7 @@ find_clients()
 
             if(!handle)
             {
-                LOG(ERROR) << "error dlopening " << itr;
+                ROCP_ERROR << "error dlopening " << itr;
                 continue;
             }
 
@@ -290,7 +290,7 @@ find_clients()
     {
         for(const auto& itr : get_link_map())
         {
-            LOG(INFO) << "searching " << itr << " for rocprofiler_configure";
+            ROCP_INFO << "searching " << itr << " for rocprofiler_configure";
 
             void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
             LOG_IF(ERROR, handle == nullptr) << "error dlopening " << itr;
@@ -300,7 +300,7 @@ find_clients()
             // symbol not found
             if(!_sym)
             {
-                LOG(INFO) << "|_" << itr << " did not contain rocprofiler_configure symbol";
+                ROCP_INFO << "|_" << itr << " did not contain rocprofiler_configure symbol";
                 continue;
             }
 
@@ -327,7 +327,7 @@ find_clients()
         }
     }
 
-    LOG(ERROR) << __FUNCTION__ << " found " << data.size() << " clients";
+    ROCP_ERROR << __FUNCTION__ << " found " << data.size() << " clients";
 
     return data;
 }
@@ -356,7 +356,7 @@ invoke_client_configures()
 
     auto _lk = scoped_lock_t{get_registration_mutex()};
 
-    LOG(ERROR) << __FUNCTION__;
+    ROCP_ERROR << __FUNCTION__;
 
     if(!get_clients()) return false;
 
@@ -366,7 +366,7 @@ invoke_client_configures()
 
         if(!itr->configure_func)
         {
-            LOG(ERROR) << "rocprofiler::registration::invoke_client_configures() attempted to "
+            ROCP_ERROR << "rocprofiler::registration::invoke_client_configures() attempted to "
                           "invoke configure function from "
                        << itr->name << " that had no configuration function";
             continue;
@@ -374,7 +374,7 @@ invoke_client_configures()
 
         if(get_invoked_configures().find(itr->configure_func) != get_invoked_configures().end())
         {
-            LOG(ERROR) << "rocprofiler::registration::invoke_client_configures() attempted to "
+            ROCP_ERROR << "rocprofiler::registration::invoke_client_configures() attempted to "
                           "invoke configure function from "
                        << itr->name << " (addr="
                        << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
@@ -383,7 +383,7 @@ invoke_client_configures()
         }
         else
         {
-            LOG(INFO) << "rocprofiler::registration::invoke_client_configures() invoking configure "
+            ROCP_INFO << "rocprofiler::registration::invoke_client_configures() invoking configure "
                          "function from "
                       << itr->name << " (addr="
                       << fmt::format("{:#018x}", reinterpret_cast<uint64_t>(itr->configure_func))
@@ -418,7 +418,7 @@ invoke_client_initializers()
 
     auto _lk = scoped_lock_t{get_registration_mutex()};
 
-    LOG(ERROR) << __FUNCTION__;
+    ROCP_ERROR << __FUNCTION__;
 
     if(!get_clients()) return false;
 
@@ -460,7 +460,7 @@ invoke_client_finalizers()
 void
 invoke_client_finalizer(rocprofiler_client_id_t client_id)
 {
-    LOG(ERROR) << __FUNCTION__ << "(client_id=" << client_id.handle << ")";
+    ROCP_ERROR << __FUNCTION__ << "(client_id=" << client_id.handle << ")";
 
     auto _lk = scoped_lock_t{get_registration_mutex()};
 
@@ -539,17 +539,17 @@ set_fini_status(int v)
 void
 initialize()
 {
-    LOG(INFO) << "rocprofiler initialize called...";
+    ROCP_INFO << "rocprofiler initialize called...";
 
     if(get_init_status() != 0)
     {
-        LOG(INFO) << "rocprofiler initialize ignored...";
+        ROCP_INFO << "rocprofiler initialize ignored...";
         return;
     }
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
-        LOG(INFO) << "rocprofiler initialize started...";
+        ROCP_INFO << "rocprofiler initialize started...";
         // initialization is in process
         set_init_status(-1);
         std::atexit([]() {
@@ -570,20 +570,20 @@ finalize()
 {
     if(get_fini_status() != 0)
     {
-        LOG(INFO) << "ignoring finalization request (value=" << get_fini_status() << ")";
+        ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
         return;
     }
 
     static auto _sync = std::atomic_flag{};
     if(_sync.test_and_set())
     {
-        LOG(INFO) << "ignoring finalization request [already finalized] (value="
+        ROCP_INFO << "ignoring finalization request [already finalized] (value="
                   << get_fini_status() << ")";
         return;
     }
     // above returns true for all invocations after the first one
 
-    LOG(INFO) << "finalizing rocprofiler (value=" << get_fini_status() << ")";
+    ROCP_INFO << "finalizing rocprofiler (value=" << get_fini_status() << ")";
 
     static auto _once = std::once_flag{};
     std::call_once(_once, []() {
@@ -620,7 +620,7 @@ rocprofiler_is_finalized(int* status)
 rocprofiler_status_t
 rocprofiler_force_configure(rocprofiler_configure_func_t configure_func)
 {
-    LOG(INFO) << "forcing rocprofiler configuration";
+    ROCP_INFO << "forcing rocprofiler configuration";
 
     auto& forced_config = rocprofiler::registration::get_forced_configure();
 
@@ -650,7 +650,7 @@ rocprofiler_set_api_table(const char* name,
     // implementation has a call once
     rocprofiler::registration::init_logging();
 
-    LOG(ERROR) << __FUNCTION__ << "(\"" << name << "\", " << lib_version << ", " << lib_instance
+    ROCP_ERROR << __FUNCTION__ << "(\"" << name << "\", " << lib_version << ", " << lib_instance
                << ", ..., " << num_tables << ")";
 
     static auto _once = std::once_flag{};
@@ -780,7 +780,7 @@ rocprofiler_set_api_table(const char* name,
     }
     else
     {
-        LOG(ERROR) << "rocprofiler does not accept API tables from " << name;
+        ROCP_ERROR << "rocprofiler does not accept API tables from " << name;
 
         return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
     }
@@ -816,8 +816,8 @@ OnLoad(HsaApiTable*       table,
 void
 OnUnload()
 {
-    LOG(INFO) << "Unloading hsa-runtime...";
+    ROCP_INFO << "Unloading hsa-runtime...";
     ::rocprofiler::registration::finalize();
-    LOG(INFO) << "Finalization complete.";
+    ROCP_INFO << "Finalization complete.";
 }
 }

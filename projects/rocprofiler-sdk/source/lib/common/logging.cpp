@@ -25,6 +25,7 @@
 
 #include <fmt/format.h>
 #include <glog/logging.h>
+#include <glog/vlog_is_on.h>
 
 #include <fstream>
 #include <mutex>
@@ -65,25 +66,31 @@ init_logging(std::string_view env_var, logging_config cfg)
         for(auto& itr : loglvl)
             itr = tolower(itr);
         // default to warning
-        auto& loglvl_v = cfg.loglevel;
+        auto& loglvl_v   = cfg.loglevel;
+        auto& vlog_level = cfg.vlog_level;
         if(!loglvl.empty() && loglvl.find_first_not_of("0123456789") == std::string::npos)
         {
-            loglvl_v = std::stoul(loglvl);
+            loglvl_v   = std::stoul(loglvl);
+            vlog_level = loglvl_v;
         }
         else if(!loglvl.empty())
         {
-            const auto opts =
-                std::unordered_map<std::string_view, uint32_t>{{"info", google::INFO},
-                                                               {"warning", google::WARNING},
-                                                               {"error", google::ERROR},
-                                                               {"fatal", google::FATAL}};
+            const auto opts = std::unordered_map<std::string_view, std::pair<uint32_t, uint32_t>>{
+                {"trace", {google::INFO, ROCP_LEVEL_TRACE}},
+                {"info", {google::INFO, ROCP_LEVEL_INFO}},
+                {"warning", {google::WARNING, ROCP_LEVEL_WARNING}},
+                {"error", {google::ERROR, ROCP_NO_VLOG}},
+                {"fatal", {google::ERROR, ROCP_NO_VLOG}}};
             if(opts.find(loglvl) == opts.end())
-                throw std::runtime_error{
-                    fmt::format("invalid specifier for ROCPROFILER_LOG_LEVEL: {}. Supported: info, "
-                                "warning, error, fatal",
-                                loglvl)};
+                throw std::runtime_error{fmt::format(
+                    "invalid specifier for ROCPROFILER_LOG_LEVEL: {}. Supported: trace, info, "
+                    "warning, error, fatal",
+                    loglvl)};
             else
-                loglvl_v = opts.at(loglvl);
+            {
+                loglvl_v   = opts.at(loglvl).first;
+                vlog_level = opts.at(loglvl).second;
+            }
         }
 
         update_logging(cfg, true);
@@ -91,12 +98,24 @@ init_logging(std::string_view env_var, logging_config cfg)
         if(!google::IsGoogleLoggingInitialized())
         {
             static auto argv0 = get_argv0();
+            // Prevent glog from crashing if vmodule is empty
+            if(FLAGS_vmodule.empty())
+            {
+                FLAGS_vmodule = " ";
+            }
+
             google::InitGoogleLogging(argv0.c_str());
+            ROCP_WARNING << "Log Level: " << loglvl << " VLOG Level: " << vlog_level;
+
+            // Swap out memory to avoid leaking the string
+            if(FLAGS_vmodule == " ")
+            {
+                std::string().swap(FLAGS_vmodule);
+            }
         }
 
         update_logging(cfg);
-
-        LOG(INFO) << "logging initialized via " << env_var;
+        ROCP_INFO << "logging initialized via " << env_var;
     });
 }
 
@@ -111,10 +130,13 @@ update_logging(const logging_config& cfg, bool setup_env, int env_override)
     FLAGS_stderrthreshold           = cfg.loglevel;
     FLAGS_logtostderr               = cfg.logtostderr;
     FLAGS_alsologtostderr           = cfg.alsologtostderr;
+    FLAGS_v                         = cfg.vlog_level;
+
     if(cfg.install_failure_handler) install_failure_signal_handler();
 
     if(setup_env)
     {
+        common::set_env("GLOG_v", cfg.vlog_level, env_override);
         common::set_env("GOOGLE_LOG_DIR", get_env("PWD", ""), env_override);
     }
 }

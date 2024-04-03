@@ -140,7 +140,7 @@ get_ast_map()
                 yyparse(&ast);
                 if(!ast)
                 {
-                    LOG(ERROR) << fmt::format("Unable to parse metric {}", metric);
+                    ROCP_ERROR << fmt::format("Unable to parse metric {}", metric);
                     throw std::runtime_error(fmt::format("Unable to parse metric {}", metric));
                 }
                 try
@@ -155,7 +155,7 @@ get_ast_map()
                                    // logic as a Finish() method
                 } catch(std::exception& e)
                 {
-                    LOG(ERROR) << e.what();
+                    ROCP_ERROR << e.what();
                     throw std::runtime_error(
                         fmt::format("AST was not generated for {}:{}", gfx, metric.name()));
                 }

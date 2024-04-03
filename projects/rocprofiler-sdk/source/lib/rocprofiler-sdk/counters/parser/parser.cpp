@@ -81,7 +81,7 @@ yylex(void);
 void
 yyerror(rocprofiler::counters::RawAST**, const char* s)
 {
-    LOG(ERROR) << s;
+    ROCP_ERROR << s;
 }
 
 #line 85 "parser.cpp"

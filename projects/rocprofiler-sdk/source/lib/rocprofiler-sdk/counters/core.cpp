@@ -173,7 +173,7 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
 
         if(!req_counters)
         {
-            LOG(ERROR) << fmt::format("Could not find counter {}", metric.name());
+            ROCP_ERROR << fmt::format("Could not find counter {}", metric.name());
             return ROCPROFILER_STATUS_ERROR_PROFILE_COUNTER_NOT_FOUND;
         }
 
@@ -195,14 +195,14 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
         const auto* agent_map = rocprofiler::common::get_val(asts, agent_name);
         if(!agent_map)
         {
-            LOG(ERROR) << fmt::format("Coult not build AST for {}", agent_name);
+            ROCP_ERROR << fmt::format("Coult not build AST for {}", agent_name);
             return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
         }
 
         const auto* counter_ast = rocprofiler::common::get_val(*agent_map, metric.name());
         if(!counter_ast)
         {
-            LOG(ERROR) << fmt::format("Coult not find AST for {}", metric.name());
+            ROCP_ERROR << fmt::format("Coult not find AST for {}", metric.name());
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }
         config.asts.push_back(*counter_ast);
@@ -212,7 +212,7 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
             config.asts.back().set_dimensions();
         } catch(std::runtime_error& e)
         {
-            LOG(ERROR) << metric.name() << " has improper dimensions"
+            ROCP_ERROR << metric.name() << " has improper dimensions"
                        << " " << e.what();
             return ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND;
         }

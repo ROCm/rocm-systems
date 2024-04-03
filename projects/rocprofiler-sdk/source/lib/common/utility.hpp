@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/common/defines.hpp"
+#include "lib/common/logging.hpp"
 
 #include <glog/logging.h>
 
@@ -69,7 +70,7 @@ get_ticks(clockid_t clk_id_v) noexcept
     if(ROCPROFILER_UNLIKELY(ret != 0))
     {
         auto _err = errno;
-        LOG(FATAL) << "clock_gettime failed: " << strerror(_err);
+        ROCP_FATAL << "clock_gettime failed: " << strerror(_err);
     }
 
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);

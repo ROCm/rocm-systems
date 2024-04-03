@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/common/xml.hpp"
+#include "lib/common/logging.hpp"
 
 #include <glog/logging.h>
 
@@ -304,7 +305,7 @@ Xml::Process()
                 break;
             default:
             {
-                LOG(ERROR) << "XML parser error: wrong state: " << state_;
+                ROCP_ERROR << "XML parser error: wrong state: " << state_;
                 abort();
             }
         }
@@ -418,7 +419,7 @@ void
 Xml::BadFormat(token_t token)
 {
     token.push_back('\0');
-    LOG(ERROR) << "Error: " << file_name_ << ", line " << file_line_ << ", bad XML token '"
+    ROCP_ERROR << "Error: " << file_name_ << ", line " << file_line_ << ", bad XML token '"
                << token.data() << "'";
     abort();
 }

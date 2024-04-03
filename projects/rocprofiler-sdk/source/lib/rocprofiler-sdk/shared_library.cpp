@@ -46,9 +46,9 @@ lifetime::lifetime()
 
     if(common::get_env("ROCPROFILER_LIBRARY_CTOR", false))
     {
-        LOG(INFO) << "Initializing rocprofiler-sdk library...";
+        ROCP_INFO << "Initializing rocprofiler-sdk library...";
         registration::initialize();
-        LOG(INFO) << "rocprofiler-sdk library initialized";
+        ROCP_INFO << "rocprofiler-sdk library initialized";
     }
 }
 
@@ -56,9 +56,9 @@ lifetime::~lifetime()
 {
     if(common::get_env("ROCPROFILER_LIBRARY_DTOR", false))
     {
-        LOG(INFO) << "Finalizing rocprofiler-sdk library...";
+        ROCP_INFO << "Finalizing rocprofiler-sdk library...";
         registration::finalize();
-        LOG(INFO) << "rocprofiler-sdk library finalized";
+        ROCP_INFO << "rocprofiler-sdk library finalized";
     }
 }
 

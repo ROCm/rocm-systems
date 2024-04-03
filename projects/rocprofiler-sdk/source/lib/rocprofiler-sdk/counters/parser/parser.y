@@ -16,7 +16,7 @@ using namespace rocprofiler::counters;
 
 int yyparse(rocprofiler::counters::RawAST** result);
 int yylex(void);
-void yyerror(rocprofiler::counters::RawAST**, const char *s) { LOG(ERROR) << s; }
+void yyerror(rocprofiler::counters::RawAST**, const char *s) { ROCP_ERROR << s; }
 %}
 
 /* declare tokens */

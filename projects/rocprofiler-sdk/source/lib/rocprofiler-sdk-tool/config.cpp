@@ -153,12 +153,12 @@ parse_kernel_names(const std::string& line)
     {
         if(has_kernel_name_format(kernel_name))
         {
-            LOG(INFO) << "kernel name " << kernel_names.size() << ": " << kernel_name;
+            ROCP_INFO << "kernel name " << kernel_names.size() << ": " << kernel_name;
             kernel_names.emplace(kernel_name);
         }
         else
         {
-            LOG(ERROR) << "invalid kernel name: " << kernel_name;
+            ROCP_ERROR << "invalid kernel name: " << kernel_name;
         }
     }
 

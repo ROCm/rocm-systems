@@ -71,7 +71,7 @@ create_queue(hsa_agent_t        agent,
             return HSA_STATUS_SUCCESS;
         }
     }
-    LOG(FATAL) << "Could not find agent - " << agent.handle;
+    ROCP_FATAL << "Could not find agent - " << agent.handle;
     return HSA_STATUS_ERROR_FATAL;
 }
 
@@ -117,13 +117,13 @@ QueueController::destroy_queue(hsa_queue_t* id)
     // return if queue does not exist
     if(!queue) return;
 
-    LOG(INFO) << "destroying queue...";
+    ROCP_INFO << "destroying queue...";
 
     queue->sync();
     if(queue->block_signal.handle != 0) get_core_table().hsa_signal_destroy_fn(queue->block_signal);
     _queues.wlock([&](auto& map) { map.erase(id); });
 
-    LOG(INFO) << "queue destroyed";
+    ROCP_INFO << "queue destroyed";
 }
 
 ClientID
@@ -262,7 +262,7 @@ QueueController::print_debug_signals() const
     _debug_signals.rlock([&](const auto& signals) {
         for(const auto& [id, signal] : signals)
         {
-            LOG(ERROR) << "Signal " << signal.handle << " "
+            ROCP_ERROR << "Signal " << signal.handle << " "
                        << get_core_table().hsa_signal_load_scacquire_fn(signal);
         }
     });
@@ -271,7 +271,7 @@ QueueController::print_debug_signals() const
     _queues.rlock([&](const auto& queues) {
         for(const auto& [_, queue] : queues)
         {
-            LOG(ERROR) << "Queue " << queue->get_id().handle << " " << queue->ready_signal.handle
+            ROCP_ERROR << "Queue " << queue->get_id().handle << " " << queue->ready_signal.handle
                        << ":" << get_core_table().hsa_signal_load_scacquire_fn(queue->ready_signal)
                        << " " << queue->block_signal.handle << ":"
                        << get_core_table().hsa_signal_load_scacquire_fn(queue->block_signal);

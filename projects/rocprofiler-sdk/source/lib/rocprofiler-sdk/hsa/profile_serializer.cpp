@@ -72,7 +72,7 @@ profiler_serializer::add_queue(hsa_queue_t** hsa_queues, const Queue& queue)
                                              -1,
                                              profiler_serializer_ready_signal_handler,
                                              *hsa_queues);
-    if(status != HSA_STATUS_SUCCESS) LOG(FATAL) << "hsa_amd_signal_async_handler failed";
+    if(status != HSA_STATUS_SUCCESS) ROCP_FATAL << "hsa_amd_signal_async_handler failed";
 }
 
 void
@@ -124,25 +124,25 @@ void
 profiler_serializer::queue_ready(hsa_queue_t* hsa_queue, const Queue& queue)
 {
     {
-        LOG(INFO) << "Obtaining queue mutex lock...";
+        ROCP_TRACE << "Obtaining queue mutex lock...";
         std::lock_guard<std::mutex> cv_lock(queue.cv_mutex);
-        LOG(INFO) << "Queue mutex lock obtained";
+        ROCP_TRACE << "Queue mutex lock obtained";
         if(queue.get_state() == queue_state::to_destroy)
         {
-            LOG(INFO) << "Setting queue state to done_destroy...";
+            ROCP_TRACE << "Setting queue state to done_destroy...";
             CHECK_NOTNULL(get_queue_controller())
                 ->set_queue_state(queue_state::done_destroy, hsa_queue);
-            LOG(INFO) << "Destroying ready signal...";
+            ROCP_TRACE << "Destroying ready signal...";
             CHECK_NOTNULL(get_queue_controller())
                 ->get_core_table()
                 .hsa_signal_destroy_fn(queue.ready_signal);
-            LOG(INFO) << "Notifying queue condition variable...";
+            ROCP_TRACE << "Notifying queue condition variable...";
             queue.cv_ready_signal.notify_one();
             return;
         }
     }
 
-    LOG(INFO) << "setting queue ready signal to 1...";
+    ROCP_TRACE << "setting queue ready signal to 1...";
     CHECK_NOTNULL(get_queue_controller())
         ->get_core_table()
         .hsa_signal_store_screlease_fn(queue.ready_signal, 1);
@@ -204,7 +204,7 @@ profiler_serializer::kernel_dispatch(const Queue& queue) const
 void
 profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
 {
-    LOG(INFO) << "destroying queue...";
+    ROCP_INFO << "destroying queue...";
 
     /*Deletes the queue to be destructed from the dispatch ready.*/
     for(auto& barriers : _barrier)
@@ -224,7 +224,7 @@ profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
                     {
                         // insert fatal condition here
                         // ToDO [srnagara]: Need to find a solution rather than abort.
-                        LOG(FATAL)
+                        ROCP_FATAL
                             << "Queue is being destroyed while kernel launch is still active";
                     }
                     return true;
@@ -237,7 +237,7 @@ profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
         ->get_core_table()
         .hsa_signal_store_screlease_fn(queue.ready_signal, 0);
 
-    LOG(INFO) << "queue destroyed";
+    ROCP_INFO << "queue destroyed";
 }
 
 // Enable the serializer
@@ -246,7 +246,7 @@ profiler_serializer::enable(const queue_map_t& queues)
 {
     if(_serializer_status == Status::ENABLED) return;
 
-    LOG(INFO) << "Enabling profiler serialization...";
+    ROCP_INFO << "Enabling profiler serialization...";
 
     _serializer_status = Status::ENABLED;
     if(queues.empty()) return;
@@ -259,7 +259,7 @@ profiler_serializer::enable(const queue_map_t& queues)
     _serializer_status = Status::ENABLED;
     _barrier.back().barrier->set_barrier(queues);
 
-    LOG(INFO) << "Profiler serialization enabled";
+    ROCP_INFO << "Profiler serialization enabled";
 }
 
 // Disable the serializer
@@ -268,7 +268,7 @@ profiler_serializer::disable(const queue_map_t& queues)
 {
     if(_serializer_status == Status::DISABLED) return;
 
-    LOG(INFO) << "Disabling profiler serialization...";
+    ROCP_INFO << "Disabling profiler serialization...";
 
     _serializer_status = Status::DISABLED;
     if(queues.empty()) return;
@@ -281,7 +281,7 @@ profiler_serializer::disable(const queue_map_t& queues)
     _serializer_status = Status::DISABLED;
     _barrier.back().barrier->set_barrier(queues);
 
-    LOG(INFO) << "Profiler serialization disabled";
+    ROCP_INFO << "Profiler serialization disabled";
 }
 
 }  // namespace hsa

@@ -22,6 +22,7 @@
 //
 
 #include "lib/common/utility.hpp"
+#include "lib/common/logging.hpp"
 
 #include <glog/logging.h>
 
@@ -77,13 +78,13 @@ get_clock_period_ns_impl(clockid_t _clk_id)
     if(ROCPROFILER_UNLIKELY(ret != 0))
     {
         auto _err = errno;
-        LOG(FATAL) << "error getting clock resolution for " << get_clock_name(_clk_id) << ": "
+        ROCP_FATAL << "error getting clock resolution for " << get_clock_name(_clk_id) << ": "
                    << strerror(_err);
     }
     else if(ROCPROFILER_UNLIKELY(ts.tv_sec != 0 ||
                                  ts.tv_nsec >= std::numeric_limits<uint32_t>::max()))
     {
-        LOG(FATAL) << "clock_getres(" << get_clock_name(_clk_id)
+        ROCP_FATAL << "clock_getres(" << get_clock_name(_clk_id)
                    << ") returned very low frequency (<1Hz)";
     }
 

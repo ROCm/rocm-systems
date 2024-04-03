@@ -352,16 +352,16 @@ get_client_ctx()
 void
 flush()
 {
-    LOG(INFO) << "flushing buffers...";
+    ROCP_INFO << "flushing buffers...";
     for(auto itr : get_buffers().as_array())
     {
         if(itr.handle > 0)
         {
-            LOG(INFO) << "flushing buffer " << itr.handle;
+            ROCP_INFO << "flushing buffer " << itr.handle;
             ROCPROFILER_CALL(rocprofiler_flush_buffer(itr), "buffer flush");
         }
     }
-    LOG(INFO) << "Buffers flushed";
+    ROCP_INFO << "Buffers flushed";
 }
 
 void
@@ -633,7 +633,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                           void* /*user_data*/,
                           uint64_t /*drop_count*/)
 {
-    LOG(INFO) << "Executing buffered tracing callback for " << num_headers << " headers";
+    ROCP_INFO << "Executing buffered tracing callback for " << num_headers << " headers";
 
     LOG_IF(ERROR, headers == nullptr)
         << "rocprofiler invoked a buffer callback with a null pointer to the array of headers. "
@@ -751,7 +751,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
             }
             else
             {
-                LOG(FATAL) << fmt::format(
+                ROCP_FATAL << fmt::format(
                     "unsupported category + kind: {} + {}", header->category, header->kind);
             }
         }
@@ -1242,11 +1242,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {
             auto cb_thread = rocprofiler_callback_thread_t{};
 
-            LOG(INFO) << "creating dedicated callback thread for buffer " << itr.handle;
+            ROCP_INFO << "creating dedicated callback thread for buffer " << itr.handle;
             ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_thread),
                              "creating callback thread");
 
-            LOG(INFO) << "assigning buffer " << itr.handle << " to callback thread "
+            ROCP_INFO << "assigning buffer " << itr.handle << " to callback thread "
                       << cb_thread.handle;
             ROCPROFILER_CALL(rocprofiler_assign_callback_thread(itr, cb_thread),
                              "assigning callback thread");
@@ -1346,7 +1346,7 @@ rocprofiler_configure(uint32_t                 version,
             nullptr),
         "Iterate rocporfiler agents")
 
-    LOG(INFO) << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
+    ROCP_INFO << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
               << " (" << runtime_version << ")";
 
     // create configure data

@@ -22,6 +22,7 @@
 
 #include "output_file.hpp"
 #include "config.hpp"
+#include "lib/common/logging.hpp"
 
 #include <fmt/format.h>
 
@@ -57,7 +58,7 @@ get_output_stream(const std::string& fname, const std::string& ext)
     if(!_ofs && !*_ofs)
         throw std::runtime_error{fmt::format("Failed to open {} for output", output_file)};
 
-    LOG(ERROR) << "Opened result file: " << output_file;
+    ROCP_ERROR << "Opened result file: " << output_file;
 
     return {_ofs, [](std::ostream*& v) {
                 if(v) dynamic_cast<std::ofstream*>(v)->close();
@@ -69,9 +70,9 @@ get_output_stream(const std::string& fname, const std::string& ext)
 output_file::~output_file()
 {
     if(m_stream)
-        LOG(INFO) << "Closing result file: " << m_name;
+        ROCP_INFO << "Closing result file: " << m_name;
     else
-        LOG(WARNING) << "output_file::~output_file does not have a output stream instance!";
+        ROCP_WARNING << "output_file::~output_file does not have a output stream instance!";
 
     m_dtor(m_stream);
 }

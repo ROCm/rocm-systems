@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/common/demangle.hpp"
+#include "lib/common/logging.hpp"
 
 #include <glog/logging.h>
 
@@ -79,14 +80,14 @@ cxa_demangle(std::string_view _mangled_name, int* _status)
         }
         case -1:
         {
-            PLOG(ERROR) << "memory allocation failure occurred demangling " << _demangled_name;
+            ROCP_ERROR << "memory allocation failure occurred demangling " << _demangled_name;
             break;
         }
         case -2: break;
         case -3:
         {
-            PLOG(ERROR) << "Invalid argument in: (\"" << _demangled_name << "\", nullptr, nullptr, "
-                        << _status << ")";
+            ROCP_ERROR << "Invalid argument in: (\"" << _demangled_name << "\", nullptr, nullptr, "
+                       << _status << ")";
             break;
         }
         default: break;

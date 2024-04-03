@@ -211,7 +211,7 @@ get_table_impl()
                                                table_array.size(),
                                                &lib_id);
 
-    LOG(INFO) << "[rocprofiler-sdk-roctx][" << getpid() << "] rocprofiler-register returned code "
+    ROCP_INFO << "[rocprofiler-sdk-roctx][" << getpid() << "] rocprofiler-register returned code "
               << rocp_reg_status << ": " << rocprofiler_register_error_string(rocp_reg_status);
 
     LOG_IF(WARNING, rocp_reg_status != ROCP_REG_SUCCESS && rocp_reg_status != ROCP_REG_NO_TOOLS)

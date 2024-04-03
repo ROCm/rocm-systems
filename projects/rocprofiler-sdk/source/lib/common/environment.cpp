@@ -22,6 +22,7 @@
 
 #include "lib/common/environment.hpp"
 #include "lib/common/demangle.hpp"
+#include "lib/common/logging.hpp"
 
 #include <cctype>
 #include <cstdint>
@@ -103,7 +104,7 @@ get_env(std::string_view env_id, Tp _default, std::enable_if_t<std::is_integral<
                 return static_cast<Tp>(std::stoul(env_var));
         } catch(std::exception& _e)
         {
-            LOG(ERROR) << "[rocprofiler][get_env] Exception thrown converting getenv(\"" << env_id
+            ROCP_ERROR << "[rocprofiler][get_env] Exception thrown converting getenv(\"" << env_id
                        << "\") = " << env_var << " to " << cxx_demangle(typeid(Tp).name())
                        << " :: " << _e.what() << ". Using default value of " << _default << "\n";
         }

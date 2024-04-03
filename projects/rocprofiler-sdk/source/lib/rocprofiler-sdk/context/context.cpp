@@ -212,13 +212,13 @@ pop_latest_correlation_id(correlation_id* val)
 {
     if(!val)
     {
-        LOG(ERROR) << "passed nullptr to correlation id";
+        ROCP_ERROR << "passed nullptr to correlation id";
         return nullptr;
     }
 
     if(get_latest_correlation_id_impl().empty())
     {
-        LOG(ERROR) << "empty thread-local correlation id stack";
+        ROCP_ERROR << "empty thread-local correlation id stack";
         return nullptr;
     }
 

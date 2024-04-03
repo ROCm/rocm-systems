@@ -90,7 +90,7 @@ MetricMap
 loadXml(const std::string& filename, bool load_constants = false)
 {
     MetricMap ret;
-    DLOG(INFO) << "Loading Counter Config: " << filename;
+    ROCP_INFO << "Loading Counter Config: " << filename;
     // todo: return unique_ptr....
     auto xml = common::Xml::Create(filename);
     LOG_IF(FATAL, !xml)
@@ -142,7 +142,7 @@ std::string
 findViaInstallPath(const std::string& filename)
 {
     Dl_info dl_info = {};
-    DLOG(INFO) << filename << " is being looked up via install path";
+    ROCP_INFO << filename << " is being looked up via install path";
     if(dladdr(reinterpret_cast<const void*>(rocprofiler_query_available_agents), &dl_info) != 0)
     {
         return common::filesystem::path{dl_info.dli_fname}.parent_path().parent_path() /
@@ -156,7 +156,7 @@ findViaEnvironment(const std::string& filename)
 {
     if(const char* metrics_path = nullptr; (metrics_path = getenv("ROCPROFILER_METRICS_PATH")))
     {
-        DLOG(INFO) << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
+        ROCP_INFO << filename << " is being looked up via env variable ROCPROFILER_METRICS_PATH";
         return common::filesystem::path{std::string{metrics_path}} / filename;
     }
     // No environment variable, lookup via install path

@@ -56,7 +56,7 @@ namespace fs = rocprofiler::common::filesystem;
 
 #if defined(ROCPROFILER_CI)
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(FATAL)
+#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
 #else
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
 #    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
@@ -200,7 +200,7 @@ parse_cpu_info()
             processor_info.emplace_back(info_v);
         else
         {
-            LOG(ERROR) << "Invalid processor info: "
+            ROCP_ERROR << "Invalid processor info: "
                        << fmt::format("processor={}, vendor={}, family={}, model={}, name={}, "
                                       "physical id={}, core id={}, apicid={}",
                                       info_v.processor,
@@ -326,7 +326,7 @@ read_property(const MapT& data, const std::string& label, Tp& value)
 
         if(data.find(label) == data.end())
         {
-            LOG(ERROR) << "agent properties map missing " << label << " entry";
+            ROCP_ERROR << "agent properties map missing " << label << " entry";
             return;
         }
 
@@ -413,7 +413,7 @@ read_topology()
             gpu_id_prop = read_file(node_path / "gpu_id");
         } catch(std::runtime_error& e)
         {
-            LOG(ERROR) << "Error reading '" << (node_path / "properties").string()
+            ROCP_ERROR << "Error reading '" << (node_path / "properties").string()
                        << "' :: " << e.what();
             continue;
         }
@@ -813,7 +813,7 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
-    LOG(ERROR) << "# agent node maps: " << hsa_agent_node_map.size();
+    ROCP_ERROR << "# agent node maps: " << hsa_agent_node_map.size();
 
     LOG_IF(FATAL, agent_map.size() != hsa_agents.size())
         << "rocprofiler was only able to map " << agent_map.size()
@@ -894,7 +894,7 @@ construct_agent_cache(::HsaApiTable* table)
             {
                 // TODO(aelwazir): To be changed back to use node id once ROCR fixes
                 // the hsa_agents to use the real node id
-                LOG(ERROR) << fmt::format("rocprofiler agent <-> HSA agent mapping failed: {} ({})",
+                ROCP_ERROR << fmt::format("rocprofiler agent <-> HSA agent mapping failed: {} ({})",
                                           rocp_agent->logical_node_id,
                                           err.what());
             }
@@ -905,10 +905,10 @@ construct_agent_cache(::HsaApiTable* table)
 std::optional<hsa_agent_t>
 get_hsa_agent(const rocprofiler_agent_t* agent)
 {
-    LOG(ERROR) << "# of agent mappings: " << get_agent_mapping().size();
+    ROCP_ERROR << "# of agent mappings: " << get_agent_mapping().size();
     for(const auto& itr : get_agent_mapping())
     {
-        LOG(ERROR) << "checking " << itr.rocp_agent->id.handle << " vs. " << agent->id.handle;
+        ROCP_ERROR << "checking " << itr.rocp_agent->id.handle << " vs. " << agent->id.handle;
         if(itr.rocp_agent->id.handle == agent->id.handle) return itr.hsa_agent;
     }
 
@@ -973,14 +973,14 @@ rocprofiler_query_available_agents(rocprofiler_agent_version_t             versi
     {
         if(agent_size > sizeof(rocprofiler_agent_v0_t))
         {
-            LOG(ERROR) << "size of rocprofiler agent struct used by caller is ABI-incompatible "
+            ROCP_ERROR << "size of rocprofiler agent struct used by caller is ABI-incompatible "
                           "with rocprofiler_agent_v0_t in rocprofiler";
             return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI;
         }
     }
     else
     {
-        LOG(FATAL) << "rocprofiler-sdk does not support given agent info version";
+        ROCP_FATAL << "rocprofiler-sdk does not support given agent info version";
     }
 
     auto&& pointers   = rocprofiler::agent::get_agents();

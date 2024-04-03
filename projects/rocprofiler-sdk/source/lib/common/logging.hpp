@@ -27,6 +27,18 @@
 #include <cstdint>
 #include <string_view>
 
+#define ROCP_LEVEL_TRACE   12
+#define ROCP_LEVEL_INFO    11
+#define ROCP_LEVEL_WARNING 10
+#define ROCP_NO_VLOG       -1
+
+#define ROCP_TRACE   VLOG(ROCP_LEVEL_TRACE)
+#define ROCP_INFO    VLOG(ROCP_LEVEL_INFO)
+#define ROCP_WARNING VLOG(ROCP_LEVEL_WARNING)
+#define ROCP_ERROR   LOG(ERROR)
+#define ROCP_FATAL   LOG(FATAL)
+#define ROCP_DFATAL  DLOG(FATAL)
+
 namespace rocprofiler
 {
 namespace common
@@ -36,6 +48,7 @@ struct logging_config
     bool    install_failure_handler = false;
     bool    logtostderr             = true;
     bool    alsologtostderr         = false;
+    int32_t vlog_level              = ROCP_NO_VLOG;
     int32_t loglevel                = google::WARNING;
 };
 

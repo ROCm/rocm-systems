@@ -219,7 +219,7 @@ add_constants(std::unordered_map<std::string, Metric>& metrics, uint64_t start_i
     rocprofiler::agent::get_agents();
     for(const auto& prop : rocprofiler::agent::get_agent_available_properties())
     {
-        LOG(ERROR) << prop;
+        ROCP_ERROR << prop;
         metrics[prop] = {"constant",
                          prop,
                          "",
@@ -299,7 +299,7 @@ TEST(evaluate_ast, counter_constants)
     {
         auto eval_counters =
             rocprofiler::counters::get_required_hardware_counters(asts, "gfx9", metrics[name]);
-        LOG(INFO) << name;
+        ROCP_INFO << name;
         ASSERT_TRUE(eval_counters);
         EXPECT_EQ(eval_counters->size(), expected.size());
         for(const auto& c : *eval_counters)
@@ -505,7 +505,7 @@ TEST(evaluate_ast, evaluate_simple_counters)
 
     for(auto& [name, expected, eval_count] : derived_counters)
     {
-        LOG(INFO) << name;
+        ROCP_INFO << name;
         auto eval_counters =
             rocprofiler::counters::get_required_hardware_counters(asts, "gfx9", metrics[name]);
         ASSERT_TRUE(eval_counters);
@@ -558,7 +558,7 @@ run_reduce_test(
 
     for(auto& [name, expected, eval_count] : derived_counters)
     {
-        LOG(INFO) << name;
+        ROCP_INFO << name;
         auto eval_counters =
             rocprofiler::counters::get_required_hardware_counters(asts, "gfx9", metrics[name]);
         ASSERT_TRUE(eval_counters);
@@ -1001,7 +1001,7 @@ TEST(evaluate_ast, evaluate_mixed_counters)
 
     for(auto& [name, expected, eval_count] : derived_counters)
     {
-        LOG(INFO) << name;
+        ROCP_INFO << name;
         auto eval_counters =
             rocprofiler::counters::get_required_hardware_counters(asts, "gfx9", metrics[name]);
         ASSERT_TRUE(eval_counters);

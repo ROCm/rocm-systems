@@ -78,11 +78,11 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
     std::vector<counters::Metric> ret;
     auto                          all_counters = counters::getBaseHardwareMetrics();
 
-    LOG(ERROR) << "Looking up counters for " << std::string(agent.name());
+    ROCP_ERROR << "Looking up counters for " << std::string(agent.name());
     auto gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
-        LOG(ERROR) << "No counters found for " << std::string(agent.name());
+        ROCP_ERROR << "No counters found for " << std::string(agent.name());
         return ret;
     }
 

@@ -74,7 +74,7 @@ TEST(metrics, base_load)
     auto find = [&rocp_data_v](const auto& v) -> std::optional<counters::Metric> {
         for(const auto& ditr : rocp_data_v)
         {
-            LOG(ERROR) << fmt::format("{}", ditr);
+            ROCP_ERROR << fmt::format("{}", ditr);
             if(ditr.name() == v.name()) return ditr;
         }
         return std::nullopt;
