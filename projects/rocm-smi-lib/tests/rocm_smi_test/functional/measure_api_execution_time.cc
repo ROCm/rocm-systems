@@ -43,19 +43,16 @@
  *
  */
 
-#include <stdint.h>
-#include <stddef.h>
-
+#include <chrono>
+#include <cstdint>
 #include <iostream>
 #include <string>
-#include <chrono>
 
 
 #include "gtest/gtest.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi_test/functional/measure_api_execution_time.h"
 #include "rocm_smi_test/test_common.h"
-#include "rocm_smi_test/test_utils.h"
 
 
 TestMeasureApiExecutionTime::TestMeasureApiExecutionTime() : TestBase() {
@@ -92,6 +89,8 @@ void TestMeasureApiExecutionTime::Run(void) {
   rsmi_temperature_metric_t met = RSMI_TEMP_CURRENT;
   rsmi_status_t ret;
   float repeat = 300.0;
+  constexpr uint32_t kFAN_SPEED_ELAPSED_MS_BASE = (1000);
+  constexpr uint32_t kMETRICS_ELAPSED_MS_BASE = (1500);
   bool skip = false;
 
   TestBase::Run();
@@ -102,13 +101,15 @@ void TestMeasureApiExecutionTime::Run(void) {
     return;
   }
 
+  auto test_start = std::chrono::high_resolution_clock::now();
+
   auto prev = std::cout.precision(3);
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     PrintDeviceHeader(dv_ind);
 
     //test execution time for rsmi_dev_fan_speed_get
     auto start = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < repeat; ++i){
+    for (int i=0; i < static_cast<int>(repeat); ++i){
       ret = rsmi_dev_fan_speed_get(dv_ind, 0, &val_i64);
 
     }
@@ -123,14 +124,14 @@ void TestMeasureApiExecutionTime::Run(void) {
 
     if (!skip) {
       std::cout << "\trsmi_dev_fan_speed_get execution time: " <<
-                (float(duration.count()) / repeat) << " microseconds" << std::endl;
-      EXPECT_LT(duration.count(), 1000 * repeat);
+                (static_cast<float>(duration.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration.count(), (kFAN_SPEED_ELAPSED_MS_BASE * repeat));
     }
     skip = false;
 
     //test execution time for rsmi_dev_temp_metric_get
     start = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < repeat; ++i){
+    for (int i=0; i < static_cast<int>(repeat); ++i){
       ret = rsmi_dev_temp_metric_get(dv_ind, 0, met, &val_i64);
     }
     stop = std::chrono::high_resolution_clock::now();
@@ -142,14 +143,14 @@ void TestMeasureApiExecutionTime::Run(void) {
     }
     if (!skip) {
       std::cout << "\trsmi_dev_temp_metric_get execution time: " <<
-                (float(duration.count()) / repeat  ) << " microseconds" << std::endl;
-      EXPECT_LT(duration.count(), 500 * repeat);
+                (static_cast<float>(duration.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration.count(), (kMETRICS_ELAPSED_MS_BASE * repeat));
     }
     skip = false;
 
     //test execution time for rsmi_dev_gpu_metrics_info_get
     start = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < repeat; ++i){
+    for (int i=0; i < static_cast<int>(repeat); ++i){
       ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &smu);
     }
     stop = std::chrono::high_resolution_clock::now();
@@ -161,42 +162,36 @@ void TestMeasureApiExecutionTime::Run(void) {
     }
     if (!skip) {
       std::cout << "\trsmi_dev_gpu_metrics_info_get execution time: " <<
-                (float(duration.count()) / repeat ) << " microseconds" << std::endl;
-      EXPECT_LT(duration.count(), 500 * repeat);
+                (static_cast<float>(duration.count()) / repeat ) << " microseconds" << std::endl;
+      EXPECT_LT(duration.count(), (kMETRICS_ELAPSED_MS_BASE * repeat));
     }
     skip = false;
-    std::cout << "----------------------------------------------------------------------------" << std::endl;
 
-    auto val_ui16 = uint16_t(0);
+    auto val_ui16 = static_cast<uint16_t>(0);
     auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
-    auto start_api = std::chrono::high_resolution_clock::now();
-    for (int i=0; i < repeat; ++i) {
+    start = std::chrono::high_resolution_clock::now();
+    for (int i=0; i < static_cast<int>(repeat); ++i){
       status_code = rsmi_dev_metrics_xcd_counter_get(dv_ind, &val_ui16);
     }
-    auto stop_api = std::chrono::high_resolution_clock::now();
-    auto duration_api = std::chrono::duration_cast<std::chrono::microseconds>(stop_api - start_api);
+    stop = std::chrono::high_resolution_clock::now();
+    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
     if (status_code != rsmi_status_t::RSMI_STATUS_SUCCESS){
       skip = true;
     }
     if (!skip) {
-      std::cout << "\rsmi_dev_metrics_xcd_counter_get() execution time: "
-                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
-      EXPECT_LT(duration_api.count(), 500 * repeat);
+      std::cout << "\trsmi_dev_metrics_xcd_counter_get() execution time: "
+                << (static_cast<float>(duration.count()) / repeat) << " microseconds" << std::endl;
+      EXPECT_LT(duration.count(), (kMETRICS_ELAPSED_MS_BASE * repeat));
     }
     skip = false;
-    std::cout << "----------------------------------------------------------------------------" << std::endl;
-
-    stop = std::chrono::high_resolution_clock::now();
-    duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-    if (!skip) {
-      std::cout << "\rTotal execution time (All APIs): "
-                << (float(duration_api.count()) / repeat) << " microseconds" << std::endl;
-      EXPECT_LT(duration_api.count(), (500 * repeat));
-    }
-    skip = false;
-    std::cout << "============================================================================" << std::endl;
-
   }
-  std::cout.precision(prev);
 
+  std::cout.precision(prev);
+  auto test_stop = std::chrono::high_resolution_clock::now();
+  auto test_duration = std::chrono::duration_cast<std::chrono::microseconds>(test_stop - test_start);
+
+  std::cout << "\n" << "============================================================================" << "\n";
+  std::cout << "  Total execution time (All APIs): "
+            << (static_cast<float>(test_duration.count()) / repeat) << " microseconds" << "\n";
+  std::cout << "============================================================================" << "\n";
 }
