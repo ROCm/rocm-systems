@@ -249,6 +249,7 @@ int WriteBufferRecords(const rocprofiler_record_header_t* begin,
         break;
       }
       case ROCPROFILER_PC_SAMPLING_RECORD: {
+        [[deprecated("PC Sampling is deprecated")]]
         const rocprofiler_record_pc_sample_t* pc_sampling_record =
             reinterpret_cast<const rocprofiler_record_pc_sample_t*>(begin);
         FlushPCSamplingRecord(pc_sampling_record);

@@ -185,50 +185,6 @@ install(TARGETS tracer_hip_hsa_async
                 COMPONENT samples)
 
 # ########################################################################################
-# PC Sampling Samples
-# ########################################################################################
-
-set(CODE_PRINTING_SAMPLE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/pcsampler/code_printing_sample)
-file(GLOB PC_SAMPLING_CODE_PRINTING_FILES ${CODE_PRINTING_SAMPLE_DIR}/*.cpp)
-set_source_files_properties(${PC_SAMPLING_CODE_PRINTING_FILES}
-                            PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-hip_add_executable(
-    pc_sampling_code_printing ${PC_SAMPLING_CODE_PRINTING_FILES} HIPCC_OPTIONS -std=c++17
-    # Include debugging symbols and source for the contextual disassembly
-    -gdwarf-4)
-rocprofiler_sample_add_test(pc_sampling_code_printing "-d;0;-n;100000000;10;43532")
-
-check_c_source_compiles(
-    "
-  #define _GNU_SOURCE
-  #include <sys/mman.h>
-  int main() { return memfd_create (\"cmake_test\", 0); }
-  "
-    HAVE_MEMFD_CREATE)
-if(HAVE_MEMFD_CREATE)
-    target_compile_definitions(pc_sampling_code_printing PRIVATE HAVE_MEMFD_CREATE)
-endif()
-
-target_link_libraries(
-    pc_sampling_code_printing
-    PRIVATE rocprofiler-v2 rocm-dbgapi ${LIBELF_LIBRARIES} ${LIBDW_LIBRARIES}
-            hsa-runtime64::hsa-runtime64 Threads::Threads dl)
-target_include_directories(
-    pc_sampling_code_printing PRIVATE ${TEST_DIR} ${ROOT_DIR} ${HSA_RUNTIME_INC_PATH}
-                                      ${PROJECT_SOURCE_DIR})
-target_link_options(pc_sampling_code_printing PRIVATE "-Wl,--build-id=md5")
-add_dependencies(samples pc_sampling_code_printing)
-install(TARGETS pc_sampling_code_printing
-        RUNTIME DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples
-                COMPONENT samples)
-
-install(
-    DIRECTORY "${PROJECT_SOURCE_DIR}/samples/"
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/samples-src
-    OPTIONAL
-    COMPONENT samples)
-
-# ########################################################################################
 # Scripts to run samples
 # ########################################################################################
 

@@ -328,3 +328,9 @@ Example for file plugin output:
 - Fixed ROCprofiler to match versioning changes in HIP Runtime.
 - Fixed plugins race condition.
 - Updated metrics to MI300.
+
+## ROCprofiler for rocm 6.2
+
+### Removed
+
+- pcsampler sample code has been removed due to deprecation from v2.
