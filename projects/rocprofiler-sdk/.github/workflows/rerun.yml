@@ -21,6 +21,7 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
+        runner: [mi300-runner-set, mi200-runner-set, navi3-runner-set, vega20-runner-set]
         vega20:
           - |
             ${{ github.event.issue.pull_request &&
@@ -45,14 +46,14 @@ jobs:
         build-type: [RelWithDebInfo]
         ci-flags: ['--linter clang-tidy']
         name-tag: ['']
-        include:
-          - mi300: true
+        exclude:
+          - mi300: false
             runner: mi300-runner-set
-          - mi200: true
+          - mi200: false
             runner: mi200-runner-set
-          - navi3: true
+          - navi3: false
             runner: navi3-runner-set
-          - vega20: true
+          - vega20: false
             runner: vega20-runner-set
 
     runs-on: ${{ matrix.runner }}
