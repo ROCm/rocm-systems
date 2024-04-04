@@ -34,7 +34,7 @@ COLOR_SEQ = "\033[%dm"
 
 COLORS = {
     "WARNING": YELLOW,
-    "INFO": WHITE,
+    "INFO": GREEN,
     "DEBUG": BLUE,
     "CRITICAL": RED,
     "ERROR": RED,
@@ -47,10 +47,19 @@ class ColoredFormatter(logging.Formatter):
     def format(self, record):
         levelname = record.levelname
         if levelname in COLORS:
-            if levelname == "WARNING" or levelname == "ERROR" or levelname == "DEBUG":
-                log_fmt = f"{COLOR_SEQ % (30 + COLORS[levelname])}%(levelname)s: %(message)s{RESET_SEQ}"
+            levelname_color = COLOR_SEQ % (30 + COLORS[levelname]) + levelname + RESET_SEQ
+            record.levelname = levelname_color
+        return logging.Formatter.format(self, record)
+
+
+class ColoredFormatterAll(logging.Formatter):
+    def format(self, record):
+        levelname = record.levelname
+        if levelname in COLORS:
+            if levelname == "INFO":
+                log_fmt = f"%(message)s"
             else:
-                log_fmt = f"{COLOR_SEQ % (30 + COLORS[levelname])}%(message)s{RESET_SEQ}"
+                log_fmt = f"{COLOR_SEQ % (30 + COLORS[levelname])}%(levelname)s: %(message)s{RESET_SEQ}"
             formatter = logging.Formatter(log_fmt)
         return formatter.format(record)
 
@@ -75,20 +84,23 @@ def setup_console_handler():
 
     color_setting = 1
     if "OMNIPERF_COLOR" in os.environ.keys():
-        if type(os.environ["OMNIPERF_COLOR"]) != int:
-            raise TypeError(
-                "OMNIPERF_COLOR must be of type int. Detected: {}".format(
-                    type(os.environ["OMNIPERF_COLOR"])
-                )
-            )
         color_setting = int(os.environ["OMNIPERF_COLOR"])
 
-    if color_setting == 1:
-        # colored loglevel and message
-        formatter = ColoredFormatter()
-    else:
+    if color_setting == 0:
         # non-colored
         formatter = PlainFormatter()
+    elif color_setting == 1:
+        # colored loglevel and with non-colored message
+        formatter = ColoredFormatter("%(levelname)16s %(message)s")
+    elif color_setting == 2:
+        # non-colored levelname included
+        formatter = logging.Formatter("%(levelname)5s %(message)s")
+    elif color_setting == 3:
+        # no color or levelname for INFO, other log messages entirely in color
+        formatter = ColoredFormatterAll()
+    else:
+        print("Unsupported setting for OMNIPERF_COLOR - set to 0, 1, 2 or 3.")
+        sys.exit(1)
 
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
