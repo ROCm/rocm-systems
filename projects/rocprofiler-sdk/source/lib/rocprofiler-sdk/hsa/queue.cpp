@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
+#include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
@@ -404,6 +405,10 @@ WriteInterceptor(const void* packets,
                                             .extern_corr_ids  = extern_corr_ids});
     }
 
+    // Command is only executed if GLOG_v=2 or higher, otherwise it is a no-op
+    ROCP_TRACE << fmt::format(
+        "QueueID {}: {}", queue.get_id().handle, fmt::join(transformed_packets, fmt::format(" ")));
+
     writer(transformed_packets.data(), transformed_packets.size());
 }
 }  // namespace
@@ -428,7 +433,6 @@ Queue::Queue(const AgentCache&  agent,
 : _core_api(core_api)
 , _ext_api(ext_api)
 , _agent(agent)
-
 {
     LOG_IF(FATAL,
            _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_hsa_agent(),
