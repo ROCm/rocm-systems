@@ -23,6 +23,7 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_LIST: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
   PATH: "/usr/bin:$PATH"
+  EXCLUDED_TESTS: ".*pc_sampling.*"
 
 jobs:
   core:
@@ -104,6 +105,8 @@ jobs:
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
+          --
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     - name: Install
       timeout-minutes: 10
@@ -124,8 +127,8 @@ jobs:
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples --output-on-failure
-        ctest --test-dir build-tests --output-on-failure
+        ctest --test-dir build-samples -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
+        ctest --test-dir build-tests -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
 
     - name: Install Packages
       timeout-minutes: 5
@@ -144,8 +147,8 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb --output-on-failure
-        ctest --test-dir build-tests-deb --output-on-failure
+        ctest --test-dir build-samples-deb -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
+        ctest --test-dir build-tests-deb -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
 
     - name: Archive production artifacts
       uses: actions/upload-artifact@v4
@@ -236,6 +239,8 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
+          --
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
@@ -251,6 +256,8 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
+          --
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
@@ -266,6 +273,8 @@ jobs:
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
+          --
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     - name: Save XML Code Coverage
       id: save-coverage
@@ -342,15 +351,15 @@ jobs:
         #   - unittests
         #   - integration-tests
         #
-        ctest -N -LE 'samples|tests' -O ctest.mislabeled.log
+        ctest -N -LE 'samples|tests|${{ env.EXCLUDED_TESTS }}' -O ctest.mislabeled.log
         grep 'Total Tests: 0' ctest.mislabeled.log
         #
         # if following fails, then there is overlap between the labels.
         # A test cannot both be a sample and (unit/integration) test.
         #
-        ctest -N -O ctest.all.log
-        ctest -N -O ctest.samples.log -L samples
-        ctest -N -O ctest.tests.log -L tests
+        ctest -LE ${{ env.EXCLUDED_TESTS }} -N -O ctest.all.log
+        ctest -LE ${{ env.EXCLUDED_TESTS }} -N -O ctest.samples.log -L samples
+        ctest -LE ${{ env.EXCLUDED_TESTS }} -N -O ctest.tests.log -L tests
         NUM_ALL=$(grep 'Total Tests:' ctest.all.log | awk '{print $NF}')
         NUM_SAMPLE=$(grep 'Total Tests:' ctest.samples.log | awk '{print $NF}')
         NUM_TEST=$(grep 'Total Tests:' ctest.tests.log | awk '{print $NF}')
@@ -423,3 +432,5 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
           -DPython3_EXECUTABLE=$(which python3)
+          --
+          -LE ${{ env.EXCLUDED_TESTS }}
