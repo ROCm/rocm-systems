@@ -91,7 +91,7 @@ union rocprofiler_packet
     rocprofiler_packet(const rocprofiler_packet&)     = default;
     rocprofiler_packet(rocprofiler_packet&&) noexcept = default;
 
-    rocprofiler_packet& operator=(const rocprofiler_packet&)     = default;
+    rocprofiler_packet& operator=(const rocprofiler_packet&) = default;
     rocprofiler_packet& operator=(rocprofiler_packet&&) noexcept = default;
 };
 enum class queue_state
