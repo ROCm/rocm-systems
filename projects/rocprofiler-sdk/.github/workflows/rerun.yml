@@ -25,22 +25,22 @@ jobs:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun vega20' &&
-            !github.event.issue.closed_at }}
+            github.event.issue.state=='open' }}
         navi3:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun navi3' &&
-            !github.event.issue.closed_at }}
+            github.event.issue.state=='open' }}
         mi300:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun mi300' &&
-            !github.event.issue.closed_at }}
+            github.event.issue.state=='open' }}
         mi200:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun mi200' &&
-            !github.event.issue.closed_at }}
+            github.event.issue.state=='open' }}
         os: [ubuntu-22.04]
         build-type: [RelWithDebInfo]
         ci-flags: ['--linter clang-tidy']
