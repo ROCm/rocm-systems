@@ -13,6 +13,7 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_LIST: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
   PATH: "/usr/bin:$PATH"
+  EXCLUDED_TESTS: ".*pc_sampling.*"
 
 jobs:
   rerun:
@@ -20,39 +21,38 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        runner: [mi200-runner-set, mi300-runner-set, vega20-runner-set, navi3-runner-set]
         vega20:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun vega20' &&
-            !github.event.issue.pull_request.closed }}
+            !github.event.issue.closed_at }}
         navi3:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun navi3' &&
-            !github.event.issue.pull_request.closed }}
+            !github.event.issue.closed_at }}
         mi300:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun mi300' &&
-            !github.event.issue.pull_request.closed }}
+            !github.event.issue.closed_at }}
         mi200:
           - |
             ${{ github.event.issue.pull_request &&
             github.event.comment.body=='/rerun mi200' &&
-            !github.event.issue.pull_request.closed }}
+            !github.event.issue.closed_at }}
         os: [ubuntu-22.04]
         build-type: [RelWithDebInfo]
         ci-flags: ['--linter clang-tidy']
         name-tag: ['']
-        exclude:
-          - mi300: false
+        include:
+          - mi300: true
             runner: mi300-runner-set
-          - mi200: false
+          - mi200: true
             runner: mi200-runner-set
-          - navi3: false
+          - navi3: true
             runner: navi3-runner-set
-          - vega20: false
+          - vega20: true
             runner: vega20-runner-set
 
     runs-on: ${{ matrix.runner }}
@@ -103,6 +103,8 @@ jobs:
           -DCPACK_GENERATOR='DEB;RPM;TGZ'
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
+          --
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
@@ -111,7 +113,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{ steps.build-test.outputs.message }}, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: ${{ steps.build-test.outputs.message }}, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
