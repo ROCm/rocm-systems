@@ -89,7 +89,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!
+        body: ${{ steps.build-test.outputs.message }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -101,7 +101,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed"
+        body: "Rerun Failed , please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -178,7 +178,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!
+        body: ${{ steps.build-test.outputs.message }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -190,7 +190,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed"
+        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -267,7 +267,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!
+        body: ${{ steps.build-test.outputs.message }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -279,7 +279,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed"
+        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -356,7 +356,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!
+        body: ${{ steps.build-test.outputs.message }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -368,7 +368,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed"
+        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -445,7 +445,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!
+        body: ${{ steps.build-test.outputs.message }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -457,6 +457,6 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed"
+        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
