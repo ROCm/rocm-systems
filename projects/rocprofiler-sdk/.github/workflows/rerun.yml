@@ -80,7 +80,10 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
+          result_code=${PIPESTATUS[0]}
+          echo "::set-output name=step-output::$(cat test.log)"
+          exit $result_code"
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
@@ -89,7 +92,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{ steps.build-test.outputs.message }}"
+        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -101,7 +104,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed , please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -169,7 +172,10 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
+          result_code=${PIPESTATUS[0]}
+          echo "::set-output name=step-output::$(cat test.log)"
+          exit $result_code"
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
@@ -178,7 +184,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{ steps.build-test.outputs.message }}"
+        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -190,7 +196,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -258,7 +264,10 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
+          result_code=${PIPESTATUS[0]}
+          echo "::set-output name=step-output::$(cat test.log)"
+          exit $result_code"
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
@@ -267,7 +276,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{ steps.build-test.outputs.message }}"
+        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -279,7 +288,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -347,7 +356,10 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
+          result_code=${PIPESTATUS[0]}
+          echo "::set-output name=step-output::$(cat test.log)"
+          exit $result_code"
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
@@ -356,7 +368,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{ steps.build-test.outputs.message }}"
+        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -368,7 +380,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -436,7 +448,10 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
+          result_code=${PIPESTATUS[0]}
+          echo "::set-output name=step-output::$(cat test.log)"
+          exit $result_code"
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
@@ -445,7 +460,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{ steps.build-test.outputs.message }}"
+        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -457,6 +472,6 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
