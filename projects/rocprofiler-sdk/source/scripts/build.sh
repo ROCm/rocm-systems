@@ -1,7 +1,8 @@
 #!/bin/bash
 
 sudo apt-get update
-sudo apt-get install -y cmake clang-tidy g++-11 g++-12 python3-pip
+sudo apt-get install -y cmake clang-tidy-15 g++-11 g++-12 python3-pip libdw-dev
+sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-17 10
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
 sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
 #python3 -m pip install -r requirements.txt
