@@ -219,7 +219,6 @@ $ amd-smi topology --json
                 "link_type": "SELF",
                 "num_hops": 0,
                 "bandwidth": "N/A",
-                "fb_sharing": "ENABLED"
             },
             {
                 "gpu": 1,
@@ -229,7 +228,6 @@ $ amd-smi topology --json
                 "link_type": "XGMI",
                 "num_hops": 1,
                 "bandwidth": "50000-100000",
-                "fb_sharing": "ENABLED"
             },
         ...
         ]

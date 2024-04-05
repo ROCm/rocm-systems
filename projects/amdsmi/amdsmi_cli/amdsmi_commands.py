@@ -2782,13 +2782,11 @@ class AMDSMICommands():
             #         "gpu": GPU #
             #         "bdf": BDF identification
             #         "weight": 0 - self (current node); weight >= 0 correlated with hops (GPU-CPU, GPU-GPU, GPU-CPU-CPU-GPU, etc..)
-            #         "link_status": "ENABLED" - devices linked; "DISABLED" - devices not linked
+            #         "link_status": "ENABLED" - devices linked; "DISABLED" - devices not linked; Correlated to access
             #         "link_type": "SELF" - current node, "PCIE", "XGMI", "N/A" - no link,"UNKNOWN" - unidentified link type
             #         "num_hops": num_hops - # of hops between devices
             #         "bandwidth": numa_bw - The NUMA "minimum bandwidth-maximum bandwidth" beween src and dest nodes
             #                      "N/A" - self node or not connected devices
-            #         "fb_sharing": "ENABLED/DISABLED" - same output as defined in link_status. Devices in a hive setup should
-            #                       all have sharing enabled.
             #     }
 
             for dest_gpu_index, dest_gpu in enumerate(args.gpu):
@@ -2818,7 +2816,7 @@ class AMDSMICommands():
 
                 weight = 0
                 num_hops = 0
-                if src_gpu != dest_gpu: 
+                if src_gpu != dest_gpu:
                     weight = amdsmi_interface.amdsmi_topo_get_link_weight(src_gpu, dest_gpu)
                     num_hops = amdsmi_interface.amdsmi_topo_get_link_type(src_gpu, dest_gpu)['hops']
                 link_status = amdsmi_interface.amdsmi_is_P2P_accessible(src_gpu, dest_gpu)
@@ -2827,7 +2825,6 @@ class AMDSMICommands():
                 else:
                     link_status = "DISABLED"
 
-                # fb_sharing in BM - in a hive configuration, this is
                 # link_status = amdsmi_is_P2P_accessible(src,dest)
                 dest_gpu_links = {
                     "gpu": self.helpers.get_gpu_id_from_device_handle(dest_gpu),
@@ -2837,11 +2834,9 @@ class AMDSMICommands():
                     "link_type": link_type,
                     "num_hops": num_hops,
                     "bandwidth": numa_bw,
-                    "fb_sharing": link_status
                 }
-                if not args.access: # currently includes fb_sharing
+                if not args.access:
                     del dest_gpu_links['link_status']
-                    del dest_gpu_links['fb_sharing']
                 if not args.weight:
                     del dest_gpu_links['weight']
                 if not args.link_type:
@@ -2851,9 +2846,9 @@ class AMDSMICommands():
                 if not args.numa_bw:
                     del dest_gpu_links['bandwidth']
                 links.append(dest_gpu_links)
-                isEndOfDest = dest_gpu_index+1 == len(args.gpu)
+                dest_end = dest_gpu_index+1 == len(args.gpu)
                 isEndOfSrc = src_gpu_index+1 == len(args.gpu)
-                if isEndOfDest:
+                if dest_end:
                     topo_values[src_gpu_index]['links'] = links
                     continue
             if isEndOfSrc:
