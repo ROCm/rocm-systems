@@ -45,7 +45,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
@@ -104,7 +104,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun finished successfully!"
+        body: "Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -116,7 +116,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Failed!"
+        body: "Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -149,7 +149,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
@@ -210,7 +210,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun finished successfully!"
+        body: "Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -222,7 +222,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Failed!"
+        body: "Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -255,7 +255,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
@@ -316,7 +316,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun finished successfully!"
+        body: "Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -328,7 +328,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Failed!"
+        body: "Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -361,7 +361,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
@@ -422,7 +422,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun finished successfully!"
+        body: "Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -434,7 +434,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Failed!"
+        body: "Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -467,7 +467,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     
@@ -528,7 +528,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun finished successfully!"
+        body: "Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -540,6 +540,6 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "${{github.run_id}}: Rerun Failed!"
+        body: "Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
