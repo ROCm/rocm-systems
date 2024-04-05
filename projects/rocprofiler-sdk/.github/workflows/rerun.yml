@@ -89,7 +89,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}
+        body: "${{ steps.build-test.outputs.message }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -178,7 +178,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}
+        body: "${{ steps.build-test.outputs.message }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -267,7 +267,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}
+        body: "${{ steps.build-test.outputs.message }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -356,7 +356,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}
+        body: "${{ steps.build-test.outputs.message }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -445,7 +445,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: ${{ steps.build-test.outputs.message }}
+        body: "${{ steps.build-test.outputs.message }}"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
