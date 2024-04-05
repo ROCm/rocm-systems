@@ -38,6 +38,17 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    # Post a start comment to the PR.
+    - name: Add comment to PR
+      uses: octokit/request-action@v2.x
+      with:
+        route: POST /repos/{repository}/issues/{issue_number}/comments
+        repository: ${{ github.repository }}
+        issue_number: ${{ github.event.issue.number }}
+        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -67,9 +78,7 @@ jobs:
       env:
         URL: ${{ github.event.issue.comments_url }}
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      run: |
-        curl -X POST $URL -H "Content-Type: application/json"
-            -H "Authorization: token $GITHUB_TOKEN" --data '{ "body": "Rerun Started!" }';
+      run:
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
@@ -87,7 +96,7 @@ jobs:
           --
           -LE ${{ env.EXCLUDED_TESTS }}
 
-    # Post a success/failure comment to the PR.
+    # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
       uses: octokit/request-action@v2.x
@@ -95,7 +104,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -107,7 +116,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -133,6 +142,17 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    # Post a start comment to the PR.
+    - name: Add comment to PR
+      uses: octokit/request-action@v2.x
+      with:
+        route: POST /repos/{repository}/issues/{issue_number}/comments
+        repository: ${{ github.repository }}
+        issue_number: ${{ github.event.issue.number }}
+        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -182,7 +202,7 @@ jobs:
           --
           -LE ${{ env.EXCLUDED_TESTS }}
 
-    # Post a success/failure comment to the PR.
+    # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
       uses: octokit/request-action@v2.x
@@ -190,7 +210,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -202,7 +222,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -228,6 +248,17 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    # Post a start comment to the PR.
+    - name: Add comment to PR
+      uses: octokit/request-action@v2.x
+      with:
+        route: POST /repos/{repository}/issues/{issue_number}/comments
+        repository: ${{ github.repository }}
+        issue_number: ${{ github.event.issue.number }}
+        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -277,7 +308,7 @@ jobs:
           --
           -LE ${{ env.EXCLUDED_TESTS }}
 
-    # Post a success/failure comment to the PR.
+    # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
       uses: octokit/request-action@v2.x
@@ -285,7 +316,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -297,7 +328,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -323,6 +354,17 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    # Post a start comment to the PR.
+    - name: Add comment to PR
+      uses: octokit/request-action@v2.x
+      with:
+        route: POST /repos/{repository}/issues/{issue_number}/comments
+        repository: ${{ github.repository }}
+        issue_number: ${{ github.event.issue.number }}
+        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -372,7 +414,7 @@ jobs:
           --
           -LE ${{ env.EXCLUDED_TESTS }}
 
-    # Post a success/failure comment to the PR.
+    # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
       uses: octokit/request-action@v2.x
@@ -380,7 +422,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -392,7 +434,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -418,6 +460,17 @@ jobs:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
 
     steps:
+    # Post a start comment to the PR.
+    - name: Add comment to PR
+      uses: octokit/request-action@v2.x
+      with:
+        route: POST /repos/{repository}/issues/{issue_number}/comments
+        repository: ${{ github.repository }}
+        issue_number: ${{ github.event.issue.number }}
+        body: "${{github.run_id}}: Rerun Started!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -467,7 +520,7 @@ jobs:
           --
           -L ${{ env.EXCLUDED_TESTS }}
 
-    # Post a success/failure comment to the PR.
+    # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
       uses: octokit/request-action@v2.x
@@ -475,7 +528,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun finished successfully!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -487,6 +540,6 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+        body: "${{github.run_id}}: Rerun Failed!"
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
