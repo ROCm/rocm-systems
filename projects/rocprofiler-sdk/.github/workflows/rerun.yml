@@ -64,7 +64,12 @@ jobs:
       id: build-test
       timeout-minutes: 30
       shell: bash
-      run:
+      env:
+        URL: ${{ github.event.issue.comments_url }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        curl -X POST $URL -H "Content-Type: application/json"
+            -H "Authorization: token $GITHUB_TOKEN" --data '{ "body": "Rerun Started!" }';
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
@@ -80,19 +85,17 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
-          result_code=${PIPESTATUS[0]}
-          echo "::set-output name=step-output::$(cat test.log)"
-          exit $result_code"
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
+      if: ${{ success() }}
       uses: octokit/request-action@v2.x
       with:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -104,7 +107,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
+        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -156,7 +159,12 @@ jobs:
       id: build-test
       timeout-minutes: 30
       shell: bash
-      run:
+      env:
+        URL: ${{ github.event.issue.comments_url }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        curl -X POST $URL -H "Content-Type: application/json"
+            -H "Authorization: token $GITHUB_TOKEN" --data '{ "body": "Rerun Started!" }';
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
@@ -172,19 +180,17 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
-          result_code=${PIPESTATUS[0]}
-          echo "::set-output name=step-output::$(cat test.log)"
-          exit $result_code"
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
+      if: ${{ success() }}
       uses: octokit/request-action@v2.x
       with:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -196,7 +202,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
+        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -248,7 +254,12 @@ jobs:
       id: build-test
       timeout-minutes: 30
       shell: bash
-      run:
+      env:
+        URL: ${{ github.event.issue.comments_url }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        curl -X POST $URL -H "Content-Type: application/json"
+            -H "Authorization: token $GITHUB_TOKEN" --data '{ "body": "Rerun Started!" }';
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
@@ -264,19 +275,17 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
-          result_code=${PIPESTATUS[0]}
-          echo "::set-output name=step-output::$(cat test.log)"
-          exit $result_code"
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
+      if: ${{ success() }}
       uses: octokit/request-action@v2.x
       with:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -288,7 +297,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
+        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -340,7 +349,12 @@ jobs:
       id: build-test
       timeout-minutes: 30
       shell: bash
-      run:
+      env:
+        URL: ${{ github.event.issue.comments_url }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        curl -X POST $URL -H "Content-Type: application/json"
+            -H "Authorization: token $GITHUB_TOKEN" --data '{ "body": "Rerun Started!" }';
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
@@ -356,19 +370,17 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
-          result_code=${PIPESTATUS[0]}
-          echo "::set-output name=step-output::$(cat test.log)"
-          exit $result_code"
+          -LE ${{ env.EXCLUDED_TESTS }}
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
+      if: ${{ success() }}
       uses: octokit/request-action@v2.x
       with:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -380,7 +392,7 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
+        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -432,7 +444,12 @@ jobs:
       id: build-test
       timeout-minutes: 30
       shell: bash
-      run:
+      env:
+        URL: ${{ github.event.issue.comments_url }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        curl -X POST $URL -H "Content-Type: application/json"
+            -H "Authorization: token $GITHUB_TOKEN" --data '{ "body": "Rerun Started!" }';
         python3 ./source/scripts/run-ci.py -B build
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
@@ -448,19 +465,17 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }} 2> test.log
-          result_code=${PIPESTATUS[0]}
-          echo "::set-output name=step-output::$(cat test.log)"
-          exit $result_code"
+          -L ${{ env.EXCLUDED_TESTS }}
 
     # Post a success/failure comment to the PR.
     - name: Add comment to PR
+      if: ${{ success() }}
       uses: octokit/request-action@v2.x
       with:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun is finished, please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details!"
+        body: "Rerun finished successfully!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
@@ -472,6 +487,6 @@ jobs:
         route: POST /repos/{repository}/issues/{issue_number}/comments
         repository: ${{ github.repository }}
         issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed:\n\n${{ join(steps.build-test.outputs.step-output, '\n') }}"
+        body: "Rerun Failed!\nPlease check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
