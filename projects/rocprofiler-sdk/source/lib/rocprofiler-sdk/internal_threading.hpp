@@ -34,6 +34,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -62,9 +63,10 @@ public:
     void join();
 
 private:
-    std::mutex                             m_mutex = {};
-    thread_pool_t*                         m_pool  = nullptr;
-    std::deque<std::shared_ptr<task_type>> m_tasks = {};
+    std::mutex                             m_mutex           = {};
+    thread_pool_t*                         m_pool            = nullptr;
+    std::deque<std::shared_ptr<task_type>> m_tasks           = {};
+    std::deque<std::shared_ptr<task_type>> m_completed_tasks = {};
 };
 
 using task_group_t = TaskGroup;

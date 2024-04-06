@@ -99,7 +99,12 @@ TaskGroup::wait()
     auto lk = std::unique_lock<std::mutex>{m_mutex};
     for(auto& itr : m_tasks)
         itr->wait();
-    m_tasks.clear();
+    // we hold the handles for the completed tasks to prevent a rare (but possible) data race on the
+    // destruction of the shared_ptr
+    m_completed_tasks.clear();
+    // makes m_tasks empty but delays the destruction of the shared_ptrs until the next wait or the
+    // destruction of the task group
+    std::swap(m_tasks, m_completed_tasks);
 }
 
 void

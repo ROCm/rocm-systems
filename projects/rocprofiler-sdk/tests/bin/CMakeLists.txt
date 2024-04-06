@@ -12,6 +12,7 @@ add_subdirectory(simple-transpose)
 add_subdirectory(multistream)
 add_subdirectory(vector-operations)
 add_subdirectory(hip-in-libraries)
+add_subdirectory(scratch-memory)
 
 set(CMAKE_BUILD_RPATH
     "\$ORIGIN:\$ORIGIN/../lib:$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>"

@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
@@ -725,6 +726,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::copy_table(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::hsa::copy_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_, lib_instance);
+        rocprofiler::hsa::copy_table(hsa_api_table->tools_, lib_instance);
 
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
@@ -737,6 +739,7 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::update_table(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
+        rocprofiler::hsa::update_table(hsa_api_table->tools_, lib_instance);
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(

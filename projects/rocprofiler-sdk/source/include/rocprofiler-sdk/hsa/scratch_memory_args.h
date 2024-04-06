@@ -22,14 +22,51 @@
 
 #pragma once
 
-// NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+#include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/hsa/api_trace_version.h>
+#include <rocprofiler-sdk/version.h>
+
+#include <hsa/hsa.h>
+#include <hsa/hsa_amd_tool.h>
+
+ROCPROFILER_EXTERN_C_INIT
+
+// Empty struct has a size of 0 in C but size of 1 in C++.
+// This struct is added to the union members which represent
+// functions with no arguments to ensure ABI compatibility
+typedef struct rocprofiler_scratch_memory_no_args
 {
-    ROCPROFILER_HSA_TABLE_ID_NONE = -1,
-    ROCPROFILER_HSA_TABLE_ID_Core = 0,
-    ROCPROFILER_HSA_TABLE_ID_AmdExt,
-    ROCPROFILER_HSA_TABLE_ID_ImageExt,
-    ROCPROFILER_HSA_TABLE_ID_FinalizeExt,
-    ROCPROFILER_HSA_TABLE_ID_AmdTool,
-    ROCPROFILER_HSA_TABLE_ID_LAST,
-} rocprofiler_hsa_table_id_t;
+    char empty;
+} rocprofiler_scratch_memory_no_args;
+
+typedef union rocprofiler_scratch_memory_args_t
+{
+    struct
+    {
+        uint64_t dispatch_id;
+    } alloc_start;
+    struct
+    {
+        uint64_t dispatch_id;
+        size_t   size;
+        size_t   num_slots;
+    } alloc_end;
+    struct
+    {
+        rocprofiler_scratch_memory_no_args no_args;
+    } free_start;
+    struct
+    {
+        rocprofiler_scratch_memory_no_args no_args;
+    } free_end;
+    struct
+    {
+        rocprofiler_scratch_memory_no_args no_args;
+    } async_reclaim_start;
+    struct
+    {
+        rocprofiler_scratch_memory_no_args no_args;
+    } async_reclaim_end;
+} rocprofiler_scratch_memory_args_t;
+
+ROCPROFILER_EXTERN_C_FINI

@@ -49,6 +49,7 @@ add_subdirectory(bin)
 # validation tests
 add_subdirectory(kernel-tracing)
 add_subdirectory(async-copy-tracing)
+add_subdirectory(scratch-memory-tracing)
 add_subdirectory(c-tool)
 
 # rocprofv3 validation tests

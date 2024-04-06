@@ -34,6 +34,7 @@ usage() {
   echo -e "${GREEN}--marker-trace ${RESET}               For Collecting Marker (ROCTx) Traces"
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel Dispatch Traces"
   echo -e "${GREEN}--memory-copy-trace ${RESET}          For Collecting Memory Copy Traces"
+  echo -e "${GREEN}--scratch-memory-trace ${RESET}       For Collecting Scratch Memory operations Traces"
   echo -e ""
   echo -e "${GREEN}--hsa-trace ${RESET}                  For Collecting HSA API Traces (core + amd + image + finalizer)"
   echo -e "${GREEN}--hsa-core-trace ${RESET}             For Collecting HSA API Traces (core API)"
@@ -149,6 +150,9 @@ while true; do
     shift
   elif [ "$1" == "--memory-copy-trace" ]; then
     export ROCPROF_MEMORY_COPY_TRACE=1
+    shift
+  elif [ "$1" == "--scratch-memory-trace" ]; then
+    export ROCPROF_SCRATCH_MEMORY_TRACE=1
     shift
   elif [ "$1" == "--marker-trace" ]; then
     export ROCPROF_MARKER_API_TRACE=1

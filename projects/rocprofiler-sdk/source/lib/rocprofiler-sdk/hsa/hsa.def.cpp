@@ -26,11 +26,15 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
+
+#include <hsa/hsa_api_trace.h>
 
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_Core, ::CoreApiTable, core)
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ::AmdExtTable, amd_ext)
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_ImageExt, ::ImageExtTable, img_ext)
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ::FinalizerExtTable, fini_ext)
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdTool, ::ToolsApiTable, amd_tool)
 
 namespace rocprofiler
 {
@@ -49,44 +53,54 @@ template <>
 struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_Core>
 : hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
 {
+    using enum_type                           = rocprofiler_hsa_core_api_id_t;
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API;
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_CORE_API;
     static constexpr auto none                = ROCPROFILER_HSA_CORE_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_CORE_API_ID_LAST;
-    using enum_type                           = rocprofiler_hsa_core_api_id_t;
 };
 
 template <>
 struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_AmdExt>
 : hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
 {
+    using enum_type                           = rocprofiler_hsa_amd_ext_api_id_t;
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API;
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API;
     static constexpr auto none                = ROCPROFILER_HSA_AMD_EXT_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_AMD_EXT_API_ID_LAST;
-    using enum_type                           = rocprofiler_hsa_amd_ext_api_id_t;
 };
 
 template <>
 struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_ImageExt>
 : hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
 {
+    using enum_type                           = rocprofiler_hsa_image_ext_api_id_t;
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API;
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API;
     static constexpr auto none                = ROCPROFILER_HSA_IMAGE_EXT_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_IMAGE_EXT_API_ID_LAST;
-    using enum_type                           = rocprofiler_hsa_image_ext_api_id_t;
 };
 
 template <>
 struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>
 : hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
 {
+    using enum_type                           = rocprofiler_hsa_finalize_ext_api_id_t;
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API;
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API;
     static constexpr auto none                = ROCPROFILER_HSA_FINALIZE_EXT_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_FINALIZE_EXT_API_ID_LAST;
-    using enum_type                           = rocprofiler_hsa_finalize_ext_api_id_t;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_AmdTool>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_NONE;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_NONE;
+    static constexpr auto none                = 0;
+    static constexpr auto last                = 0;
 };
 }  // namespace hsa
 }  // namespace rocprofiler

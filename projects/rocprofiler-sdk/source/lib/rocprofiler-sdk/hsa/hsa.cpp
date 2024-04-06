@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
+#include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/types.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -104,6 +105,7 @@ DEFINE_TABLE_VERSION(core, CORE_API)
 DEFINE_TABLE_VERSION(amd_ext, AMD_EXT_API)
 DEFINE_TABLE_VERSION(fini_ext, FINALIZER_API)
 DEFINE_TABLE_VERSION(img_ext, IMAGE_API)
+DEFINE_TABLE_VERSION(amd_tool, TOOLS_API)
 
 #undef DEFINE_TABLE_VERSION
 #undef DEFINE_TABLE_VERSION_IMPL
@@ -153,6 +155,13 @@ get_tracing_img_ext_table()
     return val;
 }
 
+hsa_amd_tool_table_t*
+get_tracing_amd_tool_table()  // table is never traced
+{
+    static auto*& val = GET_TABLE_IMPL(amd_tool, tracing_table);
+    return val;
+}
+
 hsa_table_version_t
 get_table_version()
 {
@@ -187,6 +196,13 @@ get_img_ext_table()
     return val;
 }
 
+hsa_amd_tool_table_t*
+get_amd_tool_table()
+{
+    static auto*& val = GET_TABLE_IMPL(amd_tool, internal_table);
+    return val;
+}
+
 #undef GET_TABLE_IMPL
 
 hsa_api_table_t&
@@ -196,7 +212,8 @@ get_table()
                                       .core_          = get_core_table(),
                                       .amd_ext_       = get_amd_ext_table(),
                                       .finalizer_ext_ = get_fini_ext_table(),
-                                      .image_ext_     = get_img_ext_table()};
+                                      .image_ext_     = get_img_ext_table(),
+                                      .tools_         = get_amd_tool_table()};
     return tbl;
 }
 
@@ -772,6 +789,20 @@ INSTANTIATE_HSA_TABLE_FUNC(hsa_core_table_t, ROCPROFILER_HSA_TABLE_ID_Core)
 INSTANTIATE_HSA_TABLE_FUNC(hsa_amd_ext_table_t, ROCPROFILER_HSA_TABLE_ID_AmdExt)
 INSTANTIATE_HSA_TABLE_FUNC(hsa_img_ext_table_t, ROCPROFILER_HSA_TABLE_ID_ImageExt)
 INSTANTIATE_HSA_TABLE_FUNC(hsa_fini_ext_table_t, ROCPROFILER_HSA_TABLE_ID_FinalizeExt)
+
+template <>
+void
+copy_table<hsa_amd_tool_table_t>(hsa_amd_tool_table_t* _tbl, uint64_t _instv)
+{
+    scratch_memory::copy_table(_tbl, _instv);
+}
+
+template <>
+void
+update_table<hsa_amd_tool_table_t>(hsa_amd_tool_table_t* _tbl, uint64_t _instv)
+{
+    scratch_memory::update_table(_tbl, _instv);
+}
 
 #undef INSTANTIATE_HSA_TABLE_FUNC
 }  // namespace hsa

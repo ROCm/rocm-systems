@@ -81,6 +81,7 @@ using memory_copy_csv_encoder          = csv_encoder<7>;
 using marker_csv_encoder               = csv_encoder<7>;
 using list_basic_metrics_csv_encoder   = csv_encoder<5>;
 using list_derived_metrics_csv_encoder = csv_encoder<5>;
+using scratch_memory_encoder           = csv_encoder<8>;
 }  // namespace csv
 }  // namespace tool
 }  // namespace rocprofiler

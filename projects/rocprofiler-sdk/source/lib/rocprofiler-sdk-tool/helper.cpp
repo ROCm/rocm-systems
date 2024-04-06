@@ -48,6 +48,7 @@ get_buffer_id_names()
         ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,
         ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,
         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
     };
 
     auto cb_name_info = rocprofiler_tool_buffer_name_info_t{};

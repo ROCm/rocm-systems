@@ -208,6 +208,25 @@ get_memory_copy_trace_file()
     return _v;
 }
 
+auto&
+get_scratch_memory_trace_file()
+{
+    static auto* _v = new tool::output_file{"scratch_memory_trace",
+                                            tool::csv::scratch_memory_encoder{},
+                                            {
+                                                "Kind",
+                                                "Operation",
+                                                "Agent_Id",
+                                                "Queue_Id",
+                                                "Thread_Id",
+                                                "Alloc_flags",
+                                                "Start_Timestamp",
+                                                "End_Timestamp",
+                                            }};
+    ADD_DESTRUCTOR(_v);
+    return _v;
+}
+
 tool::output_file*&
 get_marker_api_file()
 {
@@ -264,11 +283,16 @@ struct buffer_ids
     rocprofiler_buffer_id_t kernel_trace       = {};
     rocprofiler_buffer_id_t memory_copy_trace  = {};
     rocprofiler_buffer_id_t counter_collection = {};
+    rocprofiler_buffer_id_t scratch_memory     = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 5>{
-            hsa_api_trace, hip_api_trace, kernel_trace, memory_copy_trace, counter_collection};
+        return std::array<rocprofiler_buffer_id_t, 6>{hsa_api_trace,
+                                                      hip_api_trace,
+                                                      kernel_trace,
+                                                      memory_copy_trace,
+                                                      counter_collection,
+                                                      scratch_memory};
     }
 };
 
@@ -728,6 +752,27 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 
                 get_dereference(get_memory_copy_trace_file()) << memory_copy_trace_ss.str();
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_scratch_memory_record_t*>(
+                    header->payload);
+
+                auto scratch_memory_trace = std::stringstream{};
+                tool::csv::scratch_memory_encoder::write_row(
+                    scratch_memory_trace,
+                    CHECK_NOTNULL(buffered_name_info)->kind_names.at(record->kind),
+                    CHECK_NOTNULL(buffered_name_info)
+                        ->operation_names.at(record->kind)
+                        .at(record->operation),
+                    agent_info->at(record->agent_id)->node_id,
+                    record->queue_id.handle,
+                    record->thread_id,
+                    record->flags,
+                    record->start_timestamp,
+                    record->end_timestamp);
+
+                get_dereference(get_scratch_memory_trace_file()) << scratch_memory_trace.str();
+            }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API ||
                     header->kind == ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API)
             {
@@ -1160,6 +1205,26 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          0,
                                                          get_buffers().memory_copy_trace),
             "buffer tracing service for memory copy configure");
+    }
+
+    if(tool::get_config().scratch_memory)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                                   buffer_size,
+                                                   buffer_watermark,
+                                                   ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                   buffered_tracing_callback,
+                                                   tool_data,
+                                                   &get_buffers().scratch_memory),
+                         "buffer creation");
+
+        ROCPROFILER_CALL(
+            rocprofiler_configure_buffer_tracing_service(get_client_ctx(),
+                                                         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                                         nullptr,
+                                                         0,
+                                                         get_buffers().scratch_memory),
+            "buffer tracing service for scratch memory configure");
     }
 
     if(tool::get_config().hsa_core_api_trace || tool::get_config().hsa_amd_ext_api_trace ||

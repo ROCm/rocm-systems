@@ -217,7 +217,7 @@ private:
 inline rocprofiler_queue_id_t
 Queue::get_id() const
 {
-    return {.handle = reinterpret_cast<uint64_t>(intercept_queue())};
+    return {.handle = intercept_queue()->id};
 };
 
 template <typename FuncT>

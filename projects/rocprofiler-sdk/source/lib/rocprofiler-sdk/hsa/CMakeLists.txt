@@ -8,7 +8,8 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     queue_controller.cpp
     queue.cpp
     hsa_barrier.cpp
-    profile_serializer.cpp)
+    profile_serializer.cpp
+    scratch_memory.cpp)
 
 set(ROCPROFILER_LIB_HSA_HEADERS
     agent_cache.hpp
@@ -21,6 +22,7 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     profile_serializer.hpp
     queue_controller.hpp
     queue.hpp
+    scratch_memory.hpp
     types.hpp
     utils.hpp)
 

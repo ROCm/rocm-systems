@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -104,7 +105,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          c
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     static auto unsupported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY};
+        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION};
     if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
@@ -194,6 +195,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::hsa::async_copy::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
+        {
+            val = rocprofiler::hsa::scratch_memory::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API:
         {
             val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(operation);
@@ -222,7 +228,6 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         }
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
-        case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
@@ -294,6 +299,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::hsa::async_copy::get_ids();
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
+        {
+            ops = rocprofiler::hsa::scratch_memory::get_ids();
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API:
         {
             ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>();
@@ -321,7 +331,6 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         }
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
         case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
-        case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;

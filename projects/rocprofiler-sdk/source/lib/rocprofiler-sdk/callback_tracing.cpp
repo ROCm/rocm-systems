@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -74,6 +75,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CORE_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_CONTROL_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_NAME_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(CODE_OBJECT)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_DISPATCH)
 
 template <size_t Idx, size_t... Tail>
@@ -179,6 +181,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::hsa::name_by_id<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>(operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
+        {
+            val = rocprofiler::hsa::scratch_memory::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
         {
             val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>(operation);
@@ -276,6 +283,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API:
         {
             ops = rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
+        {
+            ops = rocprofiler::hsa::scratch_memory::get_ids();
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API:
@@ -437,6 +449,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
+        case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         {

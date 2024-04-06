@@ -28,6 +28,9 @@
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
 
+#include <hsa/hsa.h>
+#include <hsa/hsa_amd_tool.h>
+#include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
 #include <stdint.h>
@@ -152,6 +155,19 @@ typedef struct
     uint32_t accum_vgpr_count;      ///< Accum vector general purpose register count
 
 } rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+
+/**
+ * @brief ROCProfiler Scratch Memory Callback Data.
+ */
+typedef struct
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_agent_id_t            agent_id;
+    rocprofiler_queue_id_t            queue_id;
+    rocprofiler_scratch_alloc_flag_t  flags;
+    hsa_amd_tool_event_kind_t         args_kind;
+    rocprofiler_scratch_memory_args_t args;
+} rocprofiler_callback_tracing_scratch_memory_data_t;
 
 /**
  * @brief API Tracing callback function. This function is invoked twice per API function: once

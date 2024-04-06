@@ -44,6 +44,7 @@ using hsa_core_table_t     = ::CoreApiTable;
 using hsa_amd_ext_table_t  = ::AmdExtTable;
 using hsa_fini_ext_table_t = ::FinalizerExtTable;
 using hsa_img_ext_table_t  = ::ImageExtTable;
+using hsa_amd_tool_table_t = ::ToolsApiTable;
 
 hsa_api_table_t&
 get_table();
@@ -63,6 +64,9 @@ get_fini_ext_table();
 hsa_img_ext_table_t*
 get_img_ext_table();
 
+hsa_amd_tool_table_t*
+get_amd_tool_table();
+
 hsa_core_table_t*
 get_tracing_core_table();
 
@@ -74,6 +78,9 @@ get_tracing_fini_ext_table();
 
 hsa_img_ext_table_t*
 get_tracing_img_ext_table();
+
+hsa_amd_tool_table_t*
+get_tracing_amd_tool_table();
 
 template <size_t Idx>
 struct hsa_table_lookup;

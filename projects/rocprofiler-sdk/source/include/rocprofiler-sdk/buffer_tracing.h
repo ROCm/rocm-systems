@@ -152,16 +152,21 @@ typedef struct
 } rocprofiler_buffer_tracing_page_migration_record_t;
 
 /**
- * @brief ROCProfiler Buffer Scratch Memory Tracer Record. Not implemented.
+ * @brief ROCProfiler Buffer Scratch Memory Tracer Record
  */
 typedef struct
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY
-    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
-    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
-    // Not Sure What is the info needed here?
+    rocprofiler_scratch_memory_operation_t
+                                     operation;  ///< @see rocprofiler_scratch_memory_operation_t
+    rocprofiler_agent_id_t           agent_id;   ///< agent kernel was dispatched on
+    rocprofiler_queue_id_t           queue_id;   ///< queue kernel was dispatched on
+    rocprofiler_thread_id_t          thread_id;  ///< id for thread generating this record
+    rocprofiler_timestamp_t          start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t          end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_correlation_id_t     correlation_id;   ///< correlation ids for record
+    rocprofiler_scratch_alloc_flag_t flags;
 } rocprofiler_buffer_tracing_scratch_memory_record_t;
 
 /**

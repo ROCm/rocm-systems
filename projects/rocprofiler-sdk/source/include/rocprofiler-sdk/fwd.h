@@ -24,6 +24,8 @@
 
 #include <rocprofiler-sdk/defines.h>
 
+#include <hsa/hsa_amd_tool.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -146,7 +148,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,  ///< @see
                                                       ///< ::rocprofiler_marker_control_api_id_t
     ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,      ///< @see ::rocprofiler_code_object_operation_t
+    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,     ///< @see ::rocprofiler_code_object_operation_t
+    ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,  ///< @see ::rocprofiler_scratch_memory_operation_t
     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
@@ -232,6 +235,31 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_POLICY_LOSSLESS,  ///< Block when buffer is full
     ROCPROFILER_BUFFER_POLICY_LAST,
 } rocprofiler_buffer_policy_t;
+
+/**
+ * @brief Scratch event kind
+ */
+typedef enum
+{
+    ROCPROFILER_SCRATCH_MEMORY_NONE = 0,       ///< Unknown scratch operation
+    ROCPROFILER_SCRATCH_MEMORY_ALLOC,          ///< Scratch memory allocation event
+    ROCPROFILER_SCRATCH_MEMORY_FREE,           ///< Scratch memory free event
+    ROCPROFILER_SCRATCH_MEMORY_ASYNC_RECLAIM,  ///< Scratch memory asynchronously reclaimed
+    ROCPROFILER_SCRATCH_MEMORY_LAST,
+} rocprofiler_scratch_memory_operation_t;
+
+/**
+ * @brief Allocation flags for @see rocprofiler_buffer_tracing_scratch_memory_record_t
+ */
+typedef enum
+{
+    ROCPROFILER_SCRATCH_ALLOC_FLAG_NONE = 0,
+    ROCPROFILER_SCRATCH_ALLOC_FLAG_USE_ONCE =
+        HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_USE_ONCE,  ///< This scratch allocation is only valid for 1
+                                                    ///< dispatch.
+    ROCPROFILER_SCRATCH_ALLOC_FLAG_ALT =
+        HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT,  ///< Used alternate scratch instead of main scratch
+} rocprofiler_scratch_alloc_flag_t;
 
 /**
  * @brief Enumeration for specifying runtime libraries supported by rocprofiler. This enumeration is

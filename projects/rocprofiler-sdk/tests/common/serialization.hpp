@@ -162,6 +162,62 @@ save(ArchiveT& ar, rocprofiler_hsa_api_retval_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, const hsa_queue_t& data)
+{
+    ar(make_nvp("queue_id", data.id));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, hsa_amd_event_scratch_alloc_start_t data)
+{
+    ar(make_nvp("queue_id", *data.queue));
+    SAVE_DATA_FIELD(dispatch_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, hsa_amd_event_scratch_alloc_end_t data)
+{
+    ar(make_nvp("queue_id", *data.queue));
+    SAVE_DATA_FIELD(dispatch_id);
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(num_slots);
+    SAVE_DATA_FIELD(flags);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, hsa_amd_event_scratch_free_start_t data)
+{
+    ar(make_nvp("queue_id", *data.queue));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, hsa_amd_event_scratch_free_end_t data)
+{
+    ar(make_nvp("queue_id", *data.queue));
+    SAVE_DATA_FIELD(flags);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, hsa_amd_event_scratch_async_reclaim_start_t data)
+{
+    ar(make_nvp("queue_id", *data.queue));
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, hsa_amd_event_scratch_async_reclaim_end_t data)
+{
+    ar(make_nvp("queue_id", *data.queue));
+    SAVE_DATA_FIELD(flags);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_marker_api_retval_t data)
 {
     SAVE_DATA_FIELD(int64_t_retval);
@@ -199,6 +255,17 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_hip_api_data_t data)
     SAVE_DATA_FIELD(size);
     // SAVE_DATA_FIELD(args);
     SAVE_DATA_FIELD(retval);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_scratch_memory_data_t data)
+{
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(agent_id);
+    SAVE_DATA_FIELD(queue_id);
+    SAVE_DATA_FIELD(flags);
+    SAVE_DATA_FIELD(args_kind);
 }
 
 template <typename ArchiveT>
@@ -286,6 +353,22 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_copy_record_t data)
     SAVE_DATA_FIELD(end_timestamp);
     SAVE_DATA_FIELD(dst_agent_id);
     SAVE_DATA_FIELD(src_agent_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_scratch_memory_record_t data)
+{
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(kind);
+    SAVE_DATA_FIELD(operation);
+    SAVE_DATA_FIELD(agent_id);
+    SAVE_DATA_FIELD(queue_id);
+    SAVE_DATA_FIELD(thread_id);
+    SAVE_DATA_FIELD(start_timestamp);
+    SAVE_DATA_FIELD(end_timestamp);
+    SAVE_DATA_FIELD(correlation_id);
+    SAVE_DATA_FIELD(flags);
 }
 
 template <typename ArchiveT>
