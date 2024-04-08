@@ -136,8 +136,8 @@ public:
      *
      */
     static std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> read_pkt(
-        const aql::AQLPacketConstruct* pkt_gen,
-        hsa::AQLPacket&                pkt);
+        const aql::CounterPacketConstruct* pkt_gen,
+        hsa::AQLPacket&                    pkt);
 
     /**
      * @brief Insert special counter values, such as constants of the agent (i.e. max waves)

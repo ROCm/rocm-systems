@@ -59,7 +59,7 @@ struct profile_config
     std::vector<counters::EvaluateAST> asts{};
     rocprofiler_profile_config_id_t    id{.handle = 0};
     // Packet generator to create AQL packets for insertion
-    std::unique_ptr<rocprofiler::aql::AQLPacketConstruct> pkt_generator{nullptr};
+    std::unique_ptr<rocprofiler::aql::CounterPacketConstruct> pkt_generator{nullptr};
     // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
     // allocation of new packets/destruction).
     rocprofiler::common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>>

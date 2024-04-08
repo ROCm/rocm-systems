@@ -42,6 +42,7 @@ add_subdirectory(counters)
 add_subdirectory(aql)
 add_subdirectory(pc_sampling)
 add_subdirectory(marker)
+add_subdirectory(thread_trace)
 
 target_link_libraries(
     rocprofiler-object-library

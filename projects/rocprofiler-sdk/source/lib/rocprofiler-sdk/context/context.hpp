@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
 
 #include <array>
 #include <atomic>
@@ -153,6 +154,7 @@ struct context
     std::unique_ptr<callback_tracing_service>   callback_tracer    = {};
     std::unique_ptr<buffer_tracing_service>     buffered_tracer    = {};
     std::unique_ptr<counter_collection_service> counter_collection = {};
+    std::shared_ptr<rocprofiler::ThreadTracer>  thread_trace       = {};
 };
 
 // set the client index needs to be called before allocate_context()

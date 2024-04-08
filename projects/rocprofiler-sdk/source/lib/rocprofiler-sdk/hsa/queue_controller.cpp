@@ -90,6 +90,9 @@ constexpr rocprofiler_agent_t default_agent =
 void
 QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
+    for(auto& pre_initialize_fn : pre_initialize)
+        pre_initialize_fn(queue->get_agent(), get_core_table(), get_ext_table());
+
     CHECK(queue);
     _callback_cache.wlock([&](auto& callbacks) {
         _queues.wlock([&](auto& map) {
@@ -111,6 +114,11 @@ void
 QueueController::destroy_queue(hsa_queue_t* id)
 {
     if(!id) return;
+    _queues.wlock([&](auto& map) {
+        for(auto& deinitialize_fn : pre_deinitialize)
+            if(map.find(id) != map.end())
+                deinitialize_fn(map.at(id)->get_agent(), get_core_table(), get_ext_table());
+    });
 
     const auto* queue = get_queue(*id);
 
@@ -195,7 +203,8 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     {
         constexpr auto expected_context_size = 160UL;
         static_assert(
-            sizeof(context::context) == expected_context_size,
+            sizeof(context::context) ==
+                expected_context_size + sizeof(std::shared_ptr<rocprofiler::ThreadTracer>),
             "If you added a new field to context struct, make sure there is a check here if it "
             "requires queue interception. Once you have done so, increment expected_context_size");
 
@@ -211,6 +220,20 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
                 enable_intercepter = true;
                 break;
             }
+        }
+        else if(itr->thread_trace)
+        {
+            enable_intercepter                             = true;
+            std::weak_ptr<rocprofiler::ThreadTracer> trace = itr->thread_trace;
+            pre_initialize.emplace_back(
+                [trace](const AgentCache& cache, const CoreApiTable& core, const AmdExtTable& ext) {
+                    if(auto locked = trace.lock()) locked->resource_init(cache, core, ext);
+                });
+            pre_deinitialize.emplace_back(
+                [trace](const AgentCache& cache, const CoreApiTable&, const AmdExtTable&) {
+                    if(auto locked = trace.lock()) locked->resource_deinit(cache);
+                });
+            break;
         }
     }
 

@@ -127,9 +127,8 @@ run(int tid, int devid)
 {
     auto roctx_range_id = roctxRangeStart("run");
 
-    constexpr int min_sa         = 8;
-    constexpr int min_avail_simd = 24;
-    dim3          grid(min_sa * min_avail_simd);
+    constexpr int min_avail_simd = 128;
+    dim3          grid(min_avail_simd);
     dim3          block(32);
     double        time   = 0.0;
     hipStream_t   stream = {};

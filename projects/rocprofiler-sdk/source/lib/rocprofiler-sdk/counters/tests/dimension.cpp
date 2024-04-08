@@ -251,8 +251,8 @@ TEST(dimension, block_dim_test)
             }
             else
             {
-                aql::AQLPacketConstruct pkt_gen(agent, {metric});
-                const auto&             events = pkt_gen.get_counter_events(metric);
+                aql::CounterPacketConstruct pkt_gen(agent, {metric});
+                const auto&                 events = pkt_gen.get_counter_events(metric);
                 for(const auto& event : events)
                 {
                     std::map<int, uint64_t> dims;

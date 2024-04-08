@@ -450,16 +450,16 @@ EvaluateAST::read_special_counters(
 }
 
 std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>
-EvaluateAST::read_pkt(const aql::AQLPacketConstruct* pkt_gen, hsa::AQLPacket& pkt)
+EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket& pkt)
 {
     struct it_data
     {
         std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>* data;
-        const aql::AQLPacketConstruct*                                           pkt_gen;
+        const aql::CounterPacketConstruct*                                       pkt_gen;
     };
 
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> ret;
-    if(pkt.empty) return ret;
+    if(pkt.isEmpty()) return ret;
     it_data aql_data{.data = &ret, .pkt_gen = pkt_gen};
     ;
     hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(

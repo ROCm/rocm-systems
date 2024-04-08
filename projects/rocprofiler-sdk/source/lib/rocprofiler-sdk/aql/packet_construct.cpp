@@ -26,12 +26,22 @@
 #include <hsa/hsa_ext_amd.h>
 #include "glog/logging.h"
 
+#define CHECK_HSA(fn, message)                                                                     \
+    {                                                                                              \
+        auto status = (fn);                                                                        \
+        if(status != HSA_STATUS_SUCCESS)                                                           \
+        {                                                                                          \
+            std::cerr << "HSA Err: " << status << "\n";                                            \
+            exit(1);                                                                               \
+        }                                                                                          \
+    }
+
 namespace rocprofiler
 {
 namespace aql
 {
-AQLPacketConstruct::AQLPacketConstruct(const hsa::AgentCache&               agent,
-                                       const std::vector<counters::Metric>& metrics)
+CounterPacketConstruct::CounterPacketConstruct(const hsa::AgentCache&               agent,
+                                               const std::vector<counters::Metric>& metrics)
 : _agent(agent)
 {
     // Validate that the counter exists and construct the block instances
@@ -67,12 +77,11 @@ AQLPacketConstruct::AQLPacketConstruct(const hsa::AgentCache&               agen
     _events = get_all_events();
 }
 
-std::unique_ptr<hsa::AQLPacket>
-AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
+std::unique_ptr<hsa::CounterAQLPacket>
+CounterPacketConstruct::construct_packet(const AmdExtTable& ext)
 {
-    const size_t MEM_PAGE_MASK = 0x1000 - 1;
-    auto         pkt_ptr       = std::make_unique<hsa::AQLPacket>(ext.hsa_amd_memory_pool_free_fn);
-    auto&        pkt           = *pkt_ptr;
+    auto  pkt_ptr = std::make_unique<hsa::CounterAQLPacket>(ext.hsa_amd_memory_pool_free_fn);
+    auto& pkt     = *pkt_ptr;
     if(_events.empty())
     {
         return pkt_ptr;
@@ -104,15 +113,7 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
                         _agent.get_hsa_agent().handle));
     }
 
-    auto throw_if_failed = [](auto status, auto& message) {
-        if(status != HSA_STATUS_SUCCESS)
-        {
-            throw std::runtime_error(message);
-        }
-    };
-
-    throw_if_failed(hsa_ven_amd_aqlprofile_start(&profile, nullptr),
-                    "could not generate packet sizes");
+    CHECK_HSA(hsa_ven_amd_aqlprofile_start(&profile, nullptr), "could not generate packet sizes");
 
     if(profile.command_buffer.size == 0 || profile.output_buffer.size == 0)
     {
@@ -125,7 +126,7 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
     // Allocate buffers and check the results
     auto alloc_and_check = [&](auto& pool, auto** mem_loc, auto size) -> bool {
         bool   malloced     = false;
-        size_t page_aligned = (size + MEM_PAGE_MASK) & ~MEM_PAGE_MASK;
+        size_t page_aligned = getPageAligned(size);
         if(ext.hsa_amd_memory_pool_allocate_fn(
                pool, page_aligned, 0, static_cast<void**>(mem_loc)) != HSA_STATUS_SUCCESS)
         {
@@ -153,22 +154,74 @@ AQLPacketConstruct::construct_packet(const AmdExtTable& ext) const
         _agent.kernarg_pool(), &profile.output_buffer.ptr, profile.output_buffer.size);
     memset(profile.output_buffer.ptr, 0x0, profile.output_buffer.size);
 
-    // throw if we do not construct the packets correctly.
-    throw_if_failed(hsa_ven_amd_aqlprofile_start(&profile, &pkt.start),
-                    "could not generate start packet");
-    throw_if_failed(hsa_ven_amd_aqlprofile_stop(&profile, &pkt.stop),
-                    "could not generate stop packet");
-    throw_if_failed(hsa_ven_amd_aqlprofile_read(&profile, &pkt.read),
-                    "could not generate read packet");
+    CHECK_HSA(hsa_ven_amd_aqlprofile_start(&profile, &pkt.start), "failed to create start packet");
+    CHECK_HSA(hsa_ven_amd_aqlprofile_stop(&profile, &pkt.stop), "failed to create stop packet");
+    CHECK_HSA(hsa_ven_amd_aqlprofile_read(&profile, &pkt.read), "failed to create read packet");
     pkt.start.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
     pkt.stop.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
     pkt.read.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-
     return pkt_ptr;
 }
 
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wnarrowing"
+
+ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
+    const hsa::AgentCache&                    agent,
+    std::shared_ptr<thread_trace_parameters>& params,
+    const CoreApiTable&                       coreapi,
+    const AmdExtTable&                        ext)
+{
+    this->tracepool                  = std::make_shared<hsa::TraceMemoryPool>();
+    this->tracepool->allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
+    this->tracepool->allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
+    this->tracepool->free_fn         = ext.hsa_amd_memory_pool_free_fn;
+    this->tracepool->api_copy_fn     = coreapi.hsa_memory_copy_fn;
+    this->tracepool->gpu_agent       = agent.get_hsa_agent();
+    this->tracepool->cpu_pool_       = agent.cpu_pool();
+    this->tracepool->gpu_pool_       = agent.gpu_pool();
+
+    this->aql_params.clear();
+    auto& p = this->aql_params;
+    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET, params->target_cu});
+    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK, params->shader_engine_mask});
+    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION, params->simd_select});
+    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, params->buffer_size});
+
+    this->profile = aqlprofile_att_profile_t{agent.get_hsa_agent(), p.data(), p.size()};
+}
+
+#pragma GCC diagnostic pop
+
+std::unique_ptr<hsa::TraceAQLPacket>
+ThreadTraceAQLPacketFactory::construct_packet()
+{
+    auto packet = std::make_unique<hsa::TraceAQLPacket>(this->tracepool);
+    /*hsa_status_t _status = aqlprofile_att_create_packets(&packet->handle,
+                                                         &packet->packets,
+                                                         this->profile,
+                                                         &hsa::TraceAQLPacket::Alloc,
+                                                         &hsa::TraceAQLPacket::Free,
+                                                         &hsa::TraceAQLPacket::Copy,
+                                                         packet.get());
+    CHECK_HSA(_status, "failed to create ATT packet");*/
+
+    packet->before_krn_pkt.clear();
+    packet->after_krn_pkt.clear();
+    packet->packets.start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    packet->packets.stop_packet.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+
+    packet->empty = false;
+    packet->start = packet->packets.start_packet;
+    packet->stop  = packet->packets.stop_packet;
+    packet->before_krn_pkt.push_back(packet->start);
+    packet->after_krn_pkt.push_back(packet->stop);
+
+    return packet;
+}
+
 std::vector<hsa_ven_amd_aqlprofile_event_t>
-AQLPacketConstruct::get_all_events() const
+CounterPacketConstruct::get_all_events() const
 {
     std::vector<hsa_ven_amd_aqlprofile_event_t> ret;
     for(const auto& metric : _metrics)
@@ -179,7 +232,7 @@ AQLPacketConstruct::get_all_events() const
 }
 
 const counters::Metric*
-AQLPacketConstruct::event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const
+CounterPacketConstruct::event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const
 {
     if(const auto* ptr = rocprofiler::common::get_val(
            _event_to_metric,
@@ -191,7 +244,7 @@ AQLPacketConstruct::event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event)
 }
 
 const std::vector<hsa_ven_amd_aqlprofile_event_t>&
-AQLPacketConstruct::get_counter_events(const counters::Metric& metric) const
+CounterPacketConstruct::get_counter_events(const counters::Metric& metric) const
 {
     for(const auto& prof_metric : _metrics)
     {
@@ -204,7 +257,7 @@ AQLPacketConstruct::get_counter_events(const counters::Metric& metric) const
 }
 
 void
-AQLPacketConstruct::can_collect()
+CounterPacketConstruct::can_collect()
 {
     // Verify that the counters fit within harrdware limits
     std::map<std::pair<hsa_ven_amd_aqlprofile_block_name_t, uint32_t>, int64_t> counter_count;

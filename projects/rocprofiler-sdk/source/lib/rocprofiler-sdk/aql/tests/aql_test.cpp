@@ -122,7 +122,7 @@ TEST(aql_profile, construct_packets)
         LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
         auto metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
         ASSERT_EQ(metrics.size(), 1);
-        AQLPacketConstruct(agent, metrics);
+        CounterPacketConstruct(agent, metrics);
     }
     hsa_shut_down();
 }
@@ -142,7 +142,7 @@ TEST(aql_profile, too_many_counters)
             {
                 try
                 {
-                    AQLPacketConstruct(agent, metrics);
+                    CounterPacketConstruct(agent, metrics);
                 } catch(const std::exception& e)
                 {
                     EXPECT_NE(e.what(), nullptr) << e.what();
@@ -163,9 +163,9 @@ TEST(aql_profile, packet_generation_single)
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
-        auto               metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
-        AQLPacketConstruct pkt(agent, metrics);
-        auto               test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
+        auto                   metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
+        CounterPacketConstruct pkt(agent, metrics);
+        auto                   test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
         EXPECT_TRUE(test_pkt);
     }
 
@@ -183,13 +183,29 @@ TEST(aql_profile, packet_generation_multi)
     {
         auto metrics =
             rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES", "TA_FLAT_READ_WAVEFRONTS"});
-        AQLPacketConstruct pkt(agent, metrics);
-        auto               test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
+        CounterPacketConstruct pkt(agent, metrics);
+        auto                   test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
         EXPECT_TRUE(test_pkt);
     }
 
     hsa_shut_down();
 }
+
+class TestAqlPacket : public rocprofiler::hsa::CounterAQLPacket
+{
+public:
+    TestAqlPacket(bool mallocd)
+    : rocprofiler::hsa::CounterAQLPacket([](void* x) -> hsa_status_t {
+        ::free(x);
+        return HSA_STATUS_SUCCESS;
+    })
+    {
+        this->profile.output_buffer.ptr  = malloc(sizeof(double));
+        this->profile.command_buffer.ptr = malloc(sizeof(double));
+        this->command_buf_mallocd        = mallocd;
+        this->output_buffer_malloced     = mallocd;
+    }
+};
 
 TEST(aql_profile, test_aql_packet)
 {
@@ -201,25 +217,12 @@ TEST(aql_profile, test_aql_packet)
                val.completion_signal.handle == null_val.completion_signal.handle;
     };
 
-    rocprofiler::hsa::AQLPacket test_pkt([](void* x) -> hsa_status_t {
-        ::free(x);
-        return HSA_STATUS_SUCCESS;
-    });
+    TestAqlPacket test_pkt(true);
     EXPECT_TRUE(check_null(test_pkt.start)) << "Start packet not null";
     EXPECT_TRUE(check_null(test_pkt.stop)) << "Stop packet not null";
     EXPECT_TRUE(check_null(test_pkt.read)) << "Read packet not null";
 
-    // If this leaks, then AQLPacket is not freeing data correctly.
-    test_pkt.profile.output_buffer.ptr  = malloc(sizeof(double));
-    test_pkt.profile.command_buffer.ptr = malloc(sizeof(double));
-    test_pkt.command_buf_mallocd        = true;
-    test_pkt.output_buffer_malloced     = true;
-
     // test custom destructor as well
-    rocprofiler::hsa::AQLPacket test_pkt2([](void* x) -> hsa_status_t {
-        ::free(x);
-        return HSA_STATUS_SUCCESS;
-    });
-    test_pkt2.profile.output_buffer.ptr  = malloc(sizeof(double));
-    test_pkt2.profile.command_buffer.ptr = malloc(sizeof(double));
+    // Why is this valid?
+    TestAqlPacket test_pkt2(false);
 }

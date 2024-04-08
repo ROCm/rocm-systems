@@ -61,8 +61,8 @@ getBlockDimensions(std::string_view agent, const Metric& metric)
     {
         if(maybe_agent.name() == agent)
         {
-            aql::AQLPacketConstruct pkt_gen(maybe_agent, {metric});
-            const auto&             events = pkt_gen.get_counter_events(metric);
+            aql::CounterPacketConstruct pkt_gen(maybe_agent, {metric});
+            const auto&                 events = pkt_gen.get_counter_events(metric);
 
             for(const auto& event : events)
             {

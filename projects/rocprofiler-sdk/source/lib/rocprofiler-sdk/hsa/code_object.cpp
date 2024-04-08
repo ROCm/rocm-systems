@@ -672,10 +672,10 @@ code_object_load_callback(hsa_executable_t         executable,
         if(_status != HSA_STATUS_SUCCESS) return _status;                                          \
     }
 
-    auto& loader_table  = get_loader_table();
-    auto  code_obj_v    = code_object{};
-    auto& data          = code_obj_v.rocp_data;
-    int   _storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE;
+    auto&    loader_table  = get_loader_table();
+    auto     code_obj_v    = code_object{};
+    auto&    data          = code_obj_v.rocp_data;
+    uint32_t _storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE;
 
     LOG_IF(FATAL, data.size == 0) << "code object did not properly initialized the size field upon "
                                      "construction (this is likely a compiler bug)";

@@ -103,6 +103,7 @@ public:
 private:
     using client_id_map_t   = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using agent_cache_map_t = std::unordered_map<uint32_t, AgentCache>;
+    using resource_alloc_t  = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 
     CoreApiTable                                   _core_table       = {};
     AmdExtTable                                    _ext_table        = {};
@@ -110,6 +111,9 @@ private:
     common::Synchronized<client_id_map_t>          _callback_cache   = {};
     agent_cache_map_t                              _supported_agents = {};
     common::Synchronized<hsa::profiler_serializer> _profiler_serializer;
+
+    std::vector<std::function<resource_alloc_t>> pre_initialize;
+    std::vector<std::function<resource_alloc_t>> pre_deinitialize;
 };
 
 QueueController*

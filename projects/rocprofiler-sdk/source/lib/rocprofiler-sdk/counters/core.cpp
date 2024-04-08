@@ -218,7 +218,7 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
         }
     }
 
-    profile->pkt_generator = std::make_unique<rocprofiler::aql::AQLPacketConstruct>(
+    profile->pkt_generator = std::make_unique<rocprofiler::aql::CounterPacketConstruct>(
         agent,
         std::vector<counters::Metric>{profile->reqired_hw_counters.begin(),
                                       profile->reqired_hw_counters.end()});
@@ -288,7 +288,7 @@ queue_cb(const context::context*                                         ctx,
     // Packet generated when no instrumentation is performed. May contain serialization
     // packets/barrier packets (and can be empty).
     auto no_instrumentation = [&]() {
-        auto ret_pkt = std::make_unique<rocprofiler::hsa::AQLPacket>(nullptr);
+        auto ret_pkt = std::make_unique<rocprofiler::hsa::CounterAQLPacket>(nullptr);
         // If we have a counter collection context but it is not enabled, we still might need
         // to add barrier packets to transition from serialized -> unserialized execution. This
         // transition is coordinated by the serializer.

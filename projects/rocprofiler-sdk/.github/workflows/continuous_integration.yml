@@ -200,7 +200,7 @@ jobs:
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig
+        apt-get install -y cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev
         python3 -m pip install -r requirements.txt
         python3 -m pip install pytest pycobertura
 
@@ -388,7 +388,7 @@ jobs:
         python3 -m pip install pytest
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
-        apt-get install -y g++-13
+        apt-get install -y g++-13 libdw-dev
         update-alternatives --install $(which gcc) gcc $(which gcc-13) 100 --slave $(which g++) g++ $(which g++-13)
         realpath $(which gcc)
         realpath $(which g++)

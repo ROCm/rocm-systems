@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
 
 #include <glog/logging.h>
 
@@ -446,6 +447,7 @@ start_context(rocprofiler_context_id_t context_id)
     }
 
     if(cfg->counter_collection) rocprofiler::counters::start_context(cfg);
+    if(cfg->thread_trace) cfg->thread_trace->start_context();
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -472,6 +474,8 @@ stop_context(rocprofiler_context_id_t idx)
 
                 if(_expected->counter_collection)
                     rocprofiler::counters::stop_context(const_cast<context*>(_expected));
+                else if(_expected->thread_trace)
+                    _expected->thread_trace->stop_context();
                 return ROCPROFILER_STATUS_SUCCESS;
             }
         }
