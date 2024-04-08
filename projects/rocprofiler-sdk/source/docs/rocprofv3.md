@@ -132,9 +132,16 @@ Below is the list of `rocprofv3` command-line options. Some options are used for
 |--------|-------------|-----|
 | -d \| --output-directory | Specifies the path for the output files. | Output control |
 | --hip-trace | Collects HIP runtime traces. | Application tracing |
+| --hip-runtime-trace | Collects HIP runtime API traces. | Application tracing |
 | --hip-compiler-trace | Collects HIP compiler generated code traces. | Application tracing |
-| --hsa-trace | Collects HSA API trace. | Application tracing |
+| --scratch-memory-trace | Collects scratch memory operations traces. | Application tracing |
+| --hsa-trace | Collects HSA API traces. | Application tracing |
+| --hsa-core-trace | Collects HSA API traces (core API). | Application tracing |
+| --hsa-amd-trace | Collects HSA API traces (AMD-extension API). | Application tracing |
+| --hsa-image-trace | Collects HSA API Ttaces (Image-extenson API). | Application tracing |
+| --hsa-finalizer-trace | Collects HSA API traces (Finalizer-extension API). | Application tracing |
 | -i | Specifies the input file. | Kernel profiling |
+| -L \| --list-metrics | List metrics for counter collection. | Kernel profiling |
 | --kernel-trace | Collects kernel dispatch traces. | Application tracing |
 | -M \| --mangled-kernels | Overrides the default demangling of kernel names. | Output control |
 | --marker-trace | Collects marker (ROC-TX) traces. | Application tracing |
