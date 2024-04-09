@@ -54,8 +54,6 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
         python3 -m pip install -r requirements.txt
-        python3 -m pip install pytest
-        python3 -m pip install 'cmake>=3.22.0'
 
     - name: List Files
       shell: bash
@@ -202,7 +200,6 @@ jobs:
         apt-get update
         apt-get install -y cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev
         python3 -m pip install -r requirements.txt
-        python3 -m pip install pytest pycobertura
 
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
@@ -385,7 +382,6 @@ jobs:
         apt-get update
         apt-get install -y cmake python3-pip libasan8 libtsan2 software-properties-common
         python3 -m pip install -r requirements.txt
-        python3 -m pip install pytest
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
         apt-get install -y g++-13 libdw-dev

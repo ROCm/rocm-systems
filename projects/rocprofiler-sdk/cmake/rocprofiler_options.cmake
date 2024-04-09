@@ -80,14 +80,14 @@ rocprofiler_add_option(
     "Regenerate the counter parser (requires bison and flex)" OFF ADVANCED)
 
 # In the future, we will do this even with clang-tidy enabled
-if(ROCPROFILER_BUILD_CI AND NOT ROCPROFILER_BUILD_WERROR)
-    message(STATUS "Forcing ROCPROFILER_BUILD_WERROR=ON because ROCPROFILER_BUILD_CI=ON")
-    set(ROCPROFILER_BUILD_WERROR
-        ON
-        CACHE BOOL
-              "Any compiler warnings are errors (forced due ROCPROFILER_BUILD_CI=ON)"
-              FORCE)
-endif()
+foreach(_OPT ROCPROFILER_BUILD_DEVELOPER ROCPROFILER_BUILD_WERROR)
+    if(ROCPROFILER_BUILD_CI AND NOT ${_OPT})
+        message(AUTHOR_WARNING "Forcing ${_OPT}=ON because ROCPROFILER_BUILD_CI=ON")
+        set(${_OPT}
+            ON
+            CACHE BOOL "forced due ROCPROFILER_BUILD_CI=ON" FORCE)
+    endif()
+endforeach()
 
 set(ROCPROFILER_BUILD_TYPES "Release" "RelWithDebInfo" "Debug" "MinSizeRel" "Coverage")
 

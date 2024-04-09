@@ -1,20 +1,15 @@
 #!/bin/bash
 
-sudo apt-get update
-sudo apt-get install -y cmake clang-tidy-15 g++-11 g++-12 python3-pip libdw-dev
-sudo update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-17 10
-sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
-sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
-#python3 -m pip install -r requirements.txt
-python3 -m pip install pytest pandas pyyaml
-python3 -m pip install 'cmake>=3.22.0'
+SCRIPT_PATH=$(cd $(dirname ${BASH_SOURCE[0]}) && pwd)
+ROCPROFILER_SDK_PATH="$(cd ${SCRIPT_PATH}/../.. && pwd)"
 
-ROCPROFILER_SDK_PATH="$(pwd)/$(dirname ${BASH_SOURCE[0]})/../.."
-
-cd ${ROCPROFILER_SDK_PATH}
+${SCRIPT_PATH}/install-deps.sh
 
 echo -e "Redirecting to location: $ROCPROFILER_SDK_PATH"
+cd ${ROCPROFILER_SDK_PATH}
 
-cmake -B build -DROCPROFILER_BUILD_CI=ON -DROCPROFILER_BUILD_TESTS=ON -DROCPROFILER_BUILD_SAMPLES=ON -DROCPROFILER_ENABLE_CLANG_TIDY=ON $*
+echo -e "Configuring rocprofiler-sdk: ${ROCPROFILER_SDK_PATH}/build"
+cmake -B build -DROCPROFILER_BUILD_{CI,TESTS,SAMPLES}=ON -DROCPROFILER_ENABLE_CLANG_TIDY=ON "${@}"
+
+echo -e "Building rocprofiler-sdk: ${ROCPROFILER_SDK_PATH}/build"
 cmake --build build --target all --parallel $(nproc)
-#cd --

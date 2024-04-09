@@ -20,11 +20,6 @@ target_link_libraries(
             rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
             rocprofiler::rocprofiler-common-library)
 
-if(ROCPROFILER_BUILD_CODECOV)
-    target_compile_definitions(rocprofiler-sdk-tool PRIVATE ROCPROFILER_CODECOV=1)
-    target_link_libraries(rocprofiler-sdk-tool PRIVATE gcov)
-endif()
-
 set_target_properties(
     rocprofiler-sdk-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY

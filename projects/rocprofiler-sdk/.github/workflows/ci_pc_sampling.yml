@@ -58,8 +58,6 @@ jobs:
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
         python3 -m pip install -r requirements.txt
-        python3 -m pip install pytest
-        python3 -m pip install 'cmake>=3.22.0'
 
     - name: List Files
       shell: bash

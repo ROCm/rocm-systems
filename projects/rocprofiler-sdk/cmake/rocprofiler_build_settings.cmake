@@ -18,6 +18,10 @@ if(ROCPROFILER_BUILD_CI)
                                            INTERFACE ROCPROFILER_CI)
 endif()
 
+if(ROCPROFILER_BUILD_CODECOV)
+    target_link_libraries(rocprofiler-build-flags INTERFACE gcov)
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # dynamic linking and runtime libraries
 #

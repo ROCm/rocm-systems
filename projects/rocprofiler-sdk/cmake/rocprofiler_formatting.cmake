@@ -13,9 +13,46 @@
 
 include_guard(DIRECTORY)
 
-find_program(ROCPROFILER_CLANG_FORMAT_EXE NAMES clang-format-11 clang-format-mp-11)
-find_program(ROCPROFILER_CMAKE_FORMAT_EXE NAMES cmake-format)
-find_program(ROCPROFILER_BLACK_FORMAT_EXE NAMES black)
+if(ROCPROFILER_BUILD_DEVELOPER)
+    set(_FMT_REQUIRED REQUIRED)
+else()
+    set(_FMT_REQUIRED)
+endif()
+
+if(NOT ROCPROFILE_CLANG_FORMAT_EXE AND EXISTS $ENV{HOME}/.local/bin/clang-format)
+    execute_process(
+        COMMAND $ENV{HOME}/.local/bin/clang-format --version
+        WORKING_DIRECTORY ${PROJECT_BINARY_DIR}
+        OUTPUT_VARIABLE _CLANG_FMT_OUT
+        RESULT_VARIABLE _CLANG_FMT_RET
+        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(_CLANG_FMT_RET EQUAL 0)
+        if("${_CLANG_FMT_OUT}" MATCHES "version 11\\.([0-9]+)\\.([0-9]+)")
+            set(ROCPROFILER_CLANG_FORMAT_EXE
+                "$ENV{HOME}/.local/bin/clang-format"
+                CACHE FILEPATH "clang-format exe")
+        endif()
+    endif()
+endif()
+
+find_program(
+    ROCPROFILER_CLANG_FORMAT_EXE ${_FMT_REQUIRED}
+    NAMES clang-format-11 clang-format-mp-11 clang-format
+    PATHS $ENV{HOME}/.local
+    HINTS $ENV{HOME}/.local
+    PATH_SUFFIXES bin)
+find_program(
+    ROCPROFILER_CMAKE_FORMAT_EXE ${_FMT_REQUIRED}
+    NAMES cmake-format
+    PATHS $ENV{HOME}/.local
+    HINTS $ENV{HOME}/.local
+    PATH_SUFFIXES bin)
+find_program(
+    ROCPROFILER_BLACK_FORMAT_EXE ${_FMT_REQUIRED}
+    NAMES black
+    PATHS $ENV{HOME}/.local
+    HINTS $ENV{HOME}/.local
+    PATH_SUFFIXES bin)
 
 add_custom_target(format-rocprofiler)
 if(NOT TARGET format)

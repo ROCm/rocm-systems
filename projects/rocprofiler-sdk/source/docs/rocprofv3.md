@@ -437,3 +437,9 @@ To run the built samples, `cd` into the `<build directory>` mentioned in the bui
 ```bash
 ctest -V
 ```
+
+**Note:** Running few of these tests will require pandas and pytest to be installed first.
+
+```bash
+/usr/local/bin/python -m pip install -r requirements.txt
+```

@@ -56,7 +56,7 @@
 #include <unordered_set>
 #include <vector>
 
-#if defined(ROCPROFILER_CODECOV) && ROCPROFILER_CODECOV > 0
+#if defined(CODECOV) && CODECOV > 0
 extern "C" {
 extern void
 __gcov_dump(void);
@@ -1731,7 +1731,7 @@ generate_output(buffer_type_t buffer_type)
 }  // namespace
 
 void
-tool_fini(void* tool_data)
+tool_fini(void* /*tool_data*/)
 {
     client_identifier = nullptr;
     client_finalizer  = nullptr;
@@ -1802,8 +1802,7 @@ tool_fini(void* tool_data)
         destructors = nullptr;
     }
 
-    (void) (tool_data);
-#if defined(ROCPROFILER_CODECOV) && ROCPROFILER_CODECOV > 0
+#if defined(CODECOV) && CODECOV > 0
     __gcov_dump();
 #endif
 }

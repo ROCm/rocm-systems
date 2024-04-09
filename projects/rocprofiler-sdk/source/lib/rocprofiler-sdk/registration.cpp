@@ -73,6 +73,11 @@ extern "C" {
 
 extern rocprofiler_tool_configure_result_t*
 rocprofiler_configure(uint32_t, const char*, uint32_t, rocprofiler_client_id_t*);
+
+#if defined(CODECOV) && CODECOV > 0
+extern void
+__gcov_dump(void);
+#endif
 }
 
 namespace rocprofiler
@@ -569,6 +574,10 @@ initialize()
 void
 finalize()
 {
+#if defined(CODECOV) && CODECOV > 0
+    if(get_fini_status() > 0) __gcov_dump();
+#endif
+
     if(get_fini_status() != 0)
     {
         ROCP_INFO << "ignoring finalization request (value=" << get_fini_status() << ")";
@@ -599,6 +608,10 @@ finalize()
         internal_threading::finalize();
         set_fini_status(1);
     });
+
+#if defined(CODECOV) && CODECOV > 0
+    __gcov_dump();
+#endif
 }
 }  // namespace registration
 }  // namespace rocprofiler
