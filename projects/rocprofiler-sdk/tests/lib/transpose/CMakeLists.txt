@@ -54,8 +54,3 @@ if(TRANSPOSE_USE_MPI)
     target_compile_definitions(transpose-shared-library PRIVATE USE_MPI)
     target_link_libraries(transpose-shared-library PRIVATE MPI::MPI_C)
 endif()
-
-install(
-    TARGETS transpose-shared-library
-    DESTINATION lib
-    COMPONENT tests)

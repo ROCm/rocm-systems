@@ -44,8 +44,3 @@ target_link_libraries(simple-transpose PRIVATE Threads::Threads)
 find_package(rocprofiler-sdk-roctx REQUIRED)
 target_link_libraries(simple-transpose
                       PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
-
-install(
-    TARGETS simple-transpose
-    DESTINATION bin
-    COMPONENT tests)

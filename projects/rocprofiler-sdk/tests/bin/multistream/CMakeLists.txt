@@ -39,8 +39,3 @@ target_compile_options(multistream PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow 
 
 find_package(Threads REQUIRED)
 target_link_libraries(multistream PRIVATE Threads::Threads)
-
-install(
-    TARGETS multistream
-    DESTINATION bin
-    COMPONENT tests)

@@ -11,6 +11,24 @@ set(ROCPROFILER_DEFAULT_FAIL_REGEX
     "threw an exception|Permission denied|Could not create logging file"
     CACHE STRING "Default FAIL_REGULAR_EXPRESSION for tests")
 
+set(DEFAULT_GPU_TARGETS
+    "gfx900"
+    "gfx906"
+    "gfx908"
+    "gfx90a"
+    "gfx940"
+    "gfx941"
+    "gfx942"
+    "gfx1030"
+    "gfx1010"
+    "gfx1100"
+    "gfx1101"
+    "gfx1102")
+
+set(GPU_TARGETS
+    "${DEFAULT_GPU_TARGETS}"
+    CACHE STRING "GPU targets to compile for")
+
 # build flags
 add_library(rocprofiler-tests-build-flags INTERFACE)
 add_library(rocprofiler::tests-build-flags ALIAS rocprofiler-tests-build-flags)

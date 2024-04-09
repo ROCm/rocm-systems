@@ -52,8 +52,3 @@ if(REPRODUCIBLE_RUNTIME_USE_MPI)
     target_compile_definitions(reproducible-runtime PRIVATE USE_MPI)
     target_link_libraries(reproducible-runtime PRIVATE MPI::MPI_C)
 endif()
-
-install(
-    TARGETS reproducible-runtime
-    DESTINATION bin
-    COMPONENT tests)

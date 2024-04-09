@@ -9,9 +9,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_LIST, etc. with internal handling in cmake
+  # TODO(jrmadsen): replace LD_RUNPATH_FLAG, GPU_TARGETS, etc. with internal handling in cmake
   ROCM_PATH: "/opt/rocm"
-  GPU_LIST: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
+  GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
   PATH: "/usr/bin:$PATH"
   EXCLUDED_TESTS: ".*pc_sampling.*"
 
@@ -48,7 +48,7 @@ jobs:
         body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -78,7 +78,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
-          --gpu-targets ${{ env.GPU_LIST }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
@@ -147,7 +147,7 @@ jobs:
         body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -177,7 +177,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
-          --gpu-targets ${{ env.GPU_LIST }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
@@ -246,7 +246,7 @@ jobs:
         body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -276,7 +276,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
-          --gpu-targets ${{ env.GPU_LIST }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
@@ -345,7 +345,7 @@ jobs:
         body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -375,7 +375,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
-          --gpu-targets ${{ env.GPU_LIST }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
@@ -444,7 +444,7 @@ jobs:
         body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-    
+
     - uses: actions/checkout@v4
 
     - name: Install requirements
@@ -474,7 +474,7 @@ jobs:
           --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
-          --gpu-targets ${{ env.GPU_LIST }}
+          --gpu-targets ${{ env.GPU_TARGETS }}
           ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON

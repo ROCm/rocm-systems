@@ -1,7 +1,7 @@
 # ROCprofiler-SDK:  Application Profiling, Tracing, and Performance Analysis
 
 ***
-Note: rocprofiler-sdk is currently `not` supported as part of public ROCm software stack and only distributed as a beta  
+Note: rocprofiler-sdk is currently `not` supported as part of public ROCm software stack and only distributed as a beta
 release to customers.
 ***
 
@@ -38,7 +38,7 @@ It can be set by the user in different location if needed.
 ## Build and Installation
 
 ```bash
-git clone https://git@github.com:ROCm/rocprofiler-sdk-internal.git rocprofiler-sdk-source  
+git clone https://git@github.com:ROCm/rocprofiler-sdk-internal.git rocprofiler-sdk-source
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -D ROCPROFILER_BUILD_TESTS=ON           \
@@ -47,7 +47,7 @@ cmake                                         \
       -D CMAKE_INSTALL_PREFIX=/opt/rocm       \
        rocprofiler-sdk-source
 
-cmake --build rocprofiler-sdk-build --target all --parallel 8  
+cmake --build rocprofiler-sdk-build --target all --parallel 8
 ```
 
 To install ROCprofiler, run:

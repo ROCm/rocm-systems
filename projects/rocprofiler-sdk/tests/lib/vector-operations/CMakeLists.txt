@@ -42,8 +42,3 @@ set_target_properties(vector-ops-shared-library PROPERTIES OUTPUT_NAME vector-op
 
 find_package(Threads REQUIRED)
 target_link_libraries(vector-ops-shared-library PRIVATE Threads::Threads)
-
-install(
-    TARGETS vector-ops-shared-library
-    DESTINATION lib
-    COMPONENT tests)

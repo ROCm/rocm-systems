@@ -25,11 +25,6 @@ set_target_properties(
                ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 
-install(
-    TARGETS rocprofiler-sdk-json-tool
-    DESTINATION lib/rocprofiler-sdk
-    COMPONENT tests)
-
 # tool library which just checks that tools can be compiled with C language
 add_library(rocprofiler-sdk-c-tool SHARED)
 target_sources(rocprofiler-sdk-c-tool PRIVATE c-tool.c)

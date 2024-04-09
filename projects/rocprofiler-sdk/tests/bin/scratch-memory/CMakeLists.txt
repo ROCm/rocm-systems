@@ -40,8 +40,3 @@ target_compile_options(scratch-memory PRIVATE -W -Wall -Wextra -Wpedantic -Wshad
 
 find_package(Threads REQUIRED)
 target_link_libraries(scratch-memory PRIVATE Threads::Threads hsa-runtime64)
-
-install(
-    TARGETS scratch-memory
-    DESTINATION bin
-    COMPONENT tests)

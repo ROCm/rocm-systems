@@ -50,8 +50,3 @@ if(TRANSPOSE_USE_MPI)
     target_compile_definitions(transpose PRIVATE USE_MPI)
     target_link_libraries(transpose PRIVATE MPI::MPI_C)
 endif()
-
-install(
-    TARGETS transpose
-    DESTINATION bin
-    COMPONENT tests)

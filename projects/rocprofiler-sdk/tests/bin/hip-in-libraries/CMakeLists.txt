@@ -27,8 +27,3 @@ if(TRANSPOSE_USE_MPI)
     target_compile_definitions(hip-in-libraries PRIVATE USE_MPI)
     target_link_libraries(hip-in-libraries PRIVATE MPI::MPI_C)
 endif()
-
-install(
-    TARGETS hip-in-libraries
-    DESTINATION bin
-    COMPONENT tests)

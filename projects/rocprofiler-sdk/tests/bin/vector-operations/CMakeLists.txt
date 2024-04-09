@@ -39,8 +39,3 @@ target_compile_options(vector-ops PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -
 
 find_package(Threads REQUIRED)
 target_link_libraries(vector-ops PRIVATE Threads::Threads)
-
-install(
-    TARGETS vector-ops
-    DESTINATION bin
-    COMPONENT tests)
