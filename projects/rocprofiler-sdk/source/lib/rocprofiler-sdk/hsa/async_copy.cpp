@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
@@ -39,6 +40,7 @@
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
+#include <chrono>
 #include <cstdlib>
 #include <type_traits>
 
@@ -46,7 +48,10 @@
     auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
     LOG_IF(SEVERITY, ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) != HSA_STATUS_SUCCESS)   \
         << #EXPR << " returned non-zero status code "                                              \
-        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " "
+        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
+        << ::rocprofiler::hsa::get_hsa_status_string(                                              \
+               ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
+        << " "
 
 #if defined(ROCPROFILER_CI)
 #    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
@@ -65,6 +70,21 @@ namespace rocprofiler
 {
 namespace hsa
 {
+namespace
+{
+std::string_view
+get_hsa_status_string(hsa_status_t _status)
+{
+    if(!hsa::get_core_table()->hsa_status_string_fn) return std::string_view{"(unknown HSA error)"};
+    const char* _status_msg = nullptr;
+    return (hsa::get_core_table()->hsa_status_string_fn(_status, &_status_msg) ==
+                HSA_STATUS_SUCCESS &&
+            _status_msg)
+               ? std::string_view{_status_msg}
+               : std::string_view{"(unknown HSA error)"};
+}
+}  // namespace
+
 namespace async_copy
 {
 namespace
@@ -162,57 +182,106 @@ struct async_copy_data
 
 struct active_signals
 {
-    static hsa_signal_t get_signal()
-    {
-        static hsa_signal_t signal = []() {
-            hsa_signal_t _signal;
-            ROCP_HSA_TABLE_CALL(ERROR,
-                                get_core_table()->hsa_signal_create_fn(0, 0, nullptr, &_signal));
-            return _signal;
-        }();
+    active_signals();
+    ~active_signals()                         = default;
+    active_signals(const active_signals&)     = delete;
+    active_signals(active_signals&&) noexcept = delete;
+    active_signals& operator=(const active_signals&) = delete;
+    active_signals& operator=(active_signals&&) noexcept = delete;
 
-        return signal;
-    }
+    void create();          // create hsa signal
+    void destroy();         // destroy hsa signal
+    void sync();            // wait for outstanding signal completion callbacks
+    void fetch_add(int v);  // increment hsa signal value
+    void fetch_sub(int v);  // decrement hsa signal value
 
-    void sync() const
-    {
-        if(_is_set)
-        {
-            ROCP_HSA_TABLE_CALL(
-                ERROR,
-                get_core_table()->hsa_signal_wait_relaxed_fn(
-                    get_signal(), HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_ACTIVE));
-        }
-    }
-
-    void fetch_sub(int v)
-    {
-        _is_set = true;
-        get_core_table()->hsa_signal_subtract_relaxed_fn(get_signal(), v);
-    }
-
-    void fetch_add(int v)
-    {
-        _is_set = true;
-        get_core_table()->hsa_signal_add_relaxed_fn(get_signal(), v);
-    }
-
-    ~active_signals()
-    {
-        if(_is_set)
-        {
-            sync();
-            ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(get_signal()));
-        }
-    }
-
-    std::atomic<bool> _is_set{false};
+private:
+    hsa_signal_t         m_signal = {.handle = 0};
+    std::atomic<int64_t> m_count  = 0;
 };
+
+active_signals::active_signals() { create(); }
+
+void
+active_signals::create()
+{
+    if(m_signal.handle != 0) return;
+
+    // function pointer may be null during unit testing
+    if(get_core_table()->hsa_signal_create_fn)
+    {
+        ROCP_HSA_TABLE_CALL(ERROR,
+                            get_core_table()->hsa_signal_create_fn(0, 0, nullptr, &m_signal));
+    }
+}
+
+void
+active_signals::destroy()
+{
+    if(m_signal.handle == 0) return;
+
+    // function pointer may be null during unit testing
+    if(get_core_table()->hsa_signal_destroy_fn)
+    {
+        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(m_signal));
+        m_signal.handle = 0;
+    }
+}
+
+void
+active_signals::sync()
+{
+    if(m_signal.handle == 0) return;
+
+    // wait a maximum of thirty seconds
+    constexpr auto timeout_sec = std::chrono::seconds{30};
+    constexpr auto timeout =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count();
+
+    if(m_count.load() > 0)
+    {
+        auto _cnt_beg      = m_count.load();
+        auto _signal_value = get_core_table()->hsa_signal_wait_scacquire_fn(
+            m_signal, HSA_SIGNAL_CONDITION_LT, 1, timeout, HSA_WAIT_STATE_ACTIVE);
+        auto _cnt_end = m_count.load();
+        if(_signal_value != 0)
+        {
+            ROCP_CI_LOG_IF(WARNING, _cnt_end > 0)
+                << "rocprofiler-sdk timed out after " << timeout_sec.count()
+                << " seconds waiting for " << _cnt_beg
+                << " completion callbacks from HSA for async memory copy tracing. " << _cnt_end
+                << " completion callbacks were not delivered";
+        }
+    }
+}
+
+void
+active_signals::fetch_add(int v)
+{
+    create();
+    if(m_signal.handle == 0) return;
+
+    m_count.fetch_add(1);
+    get_core_table()->hsa_signal_add_screlease_fn(m_signal, v);
+}
+
+void
+active_signals::fetch_sub(int v)
+{
+    if(m_signal.handle == 0) return;
+
+    auto _cnt = m_count.load();
+    ROCP_CI_LOG_IF(WARNING, _cnt == 0) << "active_signals count (currently = 0) was requested to "
+                                          "decrement more times than it was incremented";
+
+    if(_cnt > 0) m_count.fetch_sub(1);
+    get_core_table()->hsa_signal_subtract_screlease_fn(m_signal, v);
+}
 
 active_signals*
 get_active_signals()
 {
-    static auto* _v = common::static_object<active_signals>::construct();
+    static auto*& _v = common::static_object<active_signals>::construct();
     return _v;
 }
 
@@ -229,6 +298,14 @@ convert_hsa_handle(Up _hsa_object)
 bool
 async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 {
+    // if we have fully finalized, delete the data and return
+    if(registration::get_fini_status() > 0)
+    {
+        auto* _data = static_cast<async_copy_data*>(arg);
+        delete _data;
+        return false;
+    }
+
     static auto sysclock_period = []() -> uint64_t {
         constexpr auto nanosec     = 1000000000UL;
         uint64_t       sysclock_hz = 0;
@@ -298,6 +375,9 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         }
     }
 
+    // decrement the active signals
+    if(get_active_signals()) get_active_signals()->fetch_sub(1);
+
     auto* orig_amd_signal = convert_hsa_handle<amd_signal_t>(_data->orig_signal);
 
     // Original intercepted signal completion
@@ -313,21 +393,17 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
             get_core_table()->hsa_signal_load_relaxed_fn(_data->orig_signal) - 1;
 
         LOG_IF(ERROR, signal_value != new_value) << "bad original signal value in " << __FUNCTION__;
-
+        // Move to ROCP_TRACE when rebasing
+        LOG(INFO) << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_store_screlease_fn(_data->orig_signal, signal_value);
     }
 
-    if(signal_value == 0)
-    {
-        ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
-        delete _data;
-    }
-
-    get_active_signals()->fetch_sub(1);
+    ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal));
+    delete _data;
 
     if(_corr_id) _corr_id->sub_ref_count();
 
-    return (signal_value > 0);
+    return false;
 }
 
 enum async_copy_id
@@ -478,10 +554,11 @@ async_copy_impl(Args... args)
     _data->direction = _direction;
     _data->contexts  = ctxs;  // avoid using move in case code below accidentally uses ctxs
 
-    constexpr auto           completion_signal_idx = arg_indices<OpIdx>::completion_signal_idx;
-    auto&                    _completion_signal    = std::get<completion_signal_idx>(_tied_args);
-    const hsa_signal_value_t _completion_signal_val =
-        get_core_table()->hsa_signal_load_scacquire_fn(_completion_signal);
+    constexpr auto           completion_signal_idx  = arg_indices<OpIdx>::completion_signal_idx;
+    auto&                    _completion_signal     = std::get<completion_signal_idx>(_tied_args);
+    const hsa_signal_value_t _completion_signal_val = 1;
+
+    auto original_value = get_core_table()->hsa_signal_load_scacquire_fn(_completion_signal);
 
     {
         const uint32_t     num_consumers = 0;
@@ -498,10 +575,6 @@ async_copy_impl(Args... args)
                           std::move(_tied_args),
                           std::make_index_sequence<N>{});
         }
-        else
-        {
-            get_active_signals()->fetch_add(1);
-        }
     }
 
     {
@@ -517,8 +590,6 @@ async_copy_impl(Args... args)
 
             ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(_data->rocp_signal))
                 << ":: failed to destroy signal after async handler failed";
-
-            get_active_signals()->fetch_sub(1);
 
             delete _data;
             return invoke(get_next_dispatch<TableIdx, OpIdx>(),
@@ -542,6 +613,10 @@ async_copy_impl(Args... args)
 
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
+    LOG(INFO) << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
+              << ": " << original_value << " | Replacement Signal: " << std::hex
+              << _completion_signal.handle << std::dec << ": 1";
+    CHECK_NOTNULL(get_active_signals())->fetch_add(1);
 
     return invoke(
         get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
@@ -684,7 +759,9 @@ void
 async_copy_fini()
 {
     if(!async_copy::get_active_signals()) return;
+
     async_copy::get_active_signals()->sync();
+    async_copy::get_active_signals()->destroy();
 }
 }  // namespace hsa
 }  // namespace rocprofiler

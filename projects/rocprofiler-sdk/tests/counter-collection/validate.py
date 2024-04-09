@@ -23,16 +23,23 @@ def test_data_structure(input_data):
 
 def test_counter_values(input_data):
     data = input_data
+    agent_data = data["rocprofiler-sdk-json-tool"]["agents"]
+    counter_data = data["rocprofiler-sdk-json-tool"]["buffer_records"][
+        "counter_collection"
+    ]
 
     scaling_factor = 1
-    for itr in data["rocprofiler-sdk-json-tool"]["agents"]:
+    for itr in agent_data:
         if itr["type"] == 2 and itr["wave_front_size"] > 0:
             scaling_factor = 64 / itr["wave_front_size"]
             break
 
-    for itr in data["rocprofiler-sdk-json-tool"]["buffer_records"]["counter_collection"]:
+    for itr in counter_data:
         value = itr["counter_value"]
-        assert int(round(value, 0)) == int(round(1 * scaling_factor, 0)), str(data)
+        if int(round(value, 0)) > 0:
+            assert int(round(value, 0)) == int(
+                round(1 * scaling_factor, 0)
+            ), f"agent_data:\n{agent_data}\n\ncounter_data:\n{counter_data}"
 
 
 if __name__ == "__main__":

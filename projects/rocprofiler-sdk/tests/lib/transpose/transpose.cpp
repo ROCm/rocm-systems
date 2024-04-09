@@ -233,28 +233,5 @@ run_transpose(size_t nthreads, size_t nitr, size_t nsync)
     MPI_Barrier(MPI_COMM_WORLD);
 #endif
 
-    //     for(int i = 0; i < ndevice; ++i)
-    //     {
-    //         HIP_API_CALL(hipSetDevice(i));
-    //         HIP_API_CALL(hipDeviceSynchronize());
-    //     }
-
-    // #if defined(USE_MPI)
-    //     MPI_Barrier(MPI_COMM_WORLD);
-    // #endif
-
-    //     if(rank == 0)
-    //     {
-    //         for(int i = 0; i < ndevice; ++i)
-    //         {
-    //             HIP_API_CALL(hipSetDevice(i));
-    //             HIP_API_CALL(hipDeviceReset());
-    //         }
-    //     }
-
-    // #if defined(USE_MPI)
-    //     MPI_Barrier(MPI_COMM_WORLD);
-    // #endif
-
     roctxRangeStop(range_id);
 }

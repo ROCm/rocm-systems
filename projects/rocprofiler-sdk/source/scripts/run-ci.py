@@ -388,6 +388,12 @@ def parse_cdash_args(args):
         type=str,
         choices=("clang-tidy",),
     )
+    parser.add_argument(
+        "--run-attempt",
+        help="If > 1, will enable verbose logging of tests",
+        default=1,
+        type=int,
+    )
 
     return parser.parse_args(args)
 
@@ -414,6 +420,10 @@ def parse_args(args=None):
             data[index].append(itr)
 
     cdash_args = parse_cdash_args(input_args)
+
+    if cdash_args.run_attempt > 1:
+        os.environ["ROCPROFILER_LOG_LEVEL"] = "info"
+        os.environ["ROCPROF_LOG_LEVEL"] = "info"
 
     if cdash_args.coverage:
         cmake_args += ["-DROCPROFILER_BUILD_CODECOV=ON"]
