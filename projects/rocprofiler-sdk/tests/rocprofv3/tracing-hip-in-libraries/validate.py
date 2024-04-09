@@ -3,7 +3,6 @@
 import re
 import sys
 import pytest
-import subprocess
 
 
 class dim3(object):
@@ -16,7 +15,29 @@ class dim3(object):
         return (self.x, self.y, self.z)
 
 
-def test_api_trace(hsa_input_data, hip_input_data):
+def validate_average(row):
+    avg_ns = float(row["AverageNs"])
+    tot_ns = int(row["TotalDurationNs"])
+    num_cnt = float(row["Calls"])
+    assert abs(avg_ns - (tot_ns / num_cnt)) < 1.0e-3, f"{row}"
+
+
+def validate_stats(row):
+    min_v = int(row["MinNs"])
+    max_v = int(row["MaxNs"])
+    avg_v = float(row["AverageNs"])
+    cnt_v = int(row["Calls"])
+    stddev_v = float(row["StdDev"])
+
+    assert min_v > 0, f"{row}"
+    assert max_v > 0, f"{row}"
+    assert min_v < max_v if cnt_v > 1 else min_v == max_v, f"{row}"
+    assert min_v < avg_v if cnt_v > 1 else min_v == int(avg_v), f"{row}"
+    assert max_v > avg_v if cnt_v > 1 else max_v == int(avg_v), f"{row}"
+    assert stddev_v > 0.0 if cnt_v > 1 else int(stddev_v) == 0, f"{row}"
+
+
+def test_api_trace(hsa_input_data, hip_input_data, hip_stats_data):
     functions = []
     correlation_ids = []
     for row in hsa_input_data:
@@ -77,8 +98,15 @@ def test_api_trace(hsa_input_data, hip_input_data):
         ):
             assert itr in functions
 
+    for row in hip_stats_data:
+        assert int(row["TotalDurationNs"]) > 0
+        assert int(row["Calls"]) > 0
+        validate_average(row)
+        assert float(row["Percentage"]) > 0.0
+        validate_stats(row)
 
-def test_kernel_trace(kernel_input_data):
+
+def test_kernel_trace(kernel_input_data, kernel_stats_data):
     valid_kernel_names = sorted(
         [
             "(anonymous namespace)::transpose(int const*, int*, int, int)",
@@ -125,27 +153,42 @@ def test_kernel_trace(kernel_input_data):
     kernels = sorted(list(set(kernels)))
     assert kernels == valid_kernel_names
 
+    for row in kernel_stats_data:
+        assert int(row["TotalDurationNs"]) > 0
+        assert int(row["Calls"]) > 0
+        validate_average(row)
+        assert float(row["Percentage"]) > 0.0
+        validate_stats(row)
 
-def test_memory_copy_trace(memory_copy_input_data, hsa_input_data):
+
+def test_memory_copy_trace(
+    agent_info_input_data,
+    memory_copy_input_data,
+    hsa_input_data,
+    hsa_stats_data,
+    memory_copy_stats_data,
+):
+    def get_agent(node_id):
+        for row in agent_info_input_data:
+            if row["Logical_Node_Id"] == node_id:
+                return row
+        return None
+
     for row in memory_copy_input_data:
         assert row["Kind"] == "MEMORY_COPY"
         assert row["Direction"] in ("HOST_TO_DEVICE", "DEVICE_TO_HOST")
+
+        src_agent = get_agent(row["Source_Agent_Id"])
+        dst_agent = get_agent(row["Destination_Agent_Id"])
+        assert src_agent is not None and dst_agent is not None, f"{agent_info_input_data}"
+
         if row["Direction"] == "HOST_TO_DEVICE":
-            output = subprocess.check_output(
-                'rocminfo | grep "Node: *'
-                + row["Source_Agent_Id"]
-                + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
-                shell=True,
-            )
-            assert int(str(output).find("CPU")) >= 0
+            assert src_agent["Agent_Type"] == "CPU"
+            assert dst_agent["Agent_Type"] == "GPU"
         elif row["Direction"] == "DEVICE_TO_HOST":
-            output = subprocess.check_output(
-                'rocminfo | grep "Node: *'
-                + row["Destination_Agent_Id"]
-                + '" -A 1 | grep "Device Type" | sed \'s/.*: *//\'',
-                shell=True,
-            )
-            assert int(str(output).find("CPU")) >= 0
+            assert src_agent["Agent_Type"] == "GPU"
+            assert dst_agent["Agent_Type"] == "CPU"
+
         assert int(row["Correlation_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
@@ -154,6 +197,20 @@ def test_memory_copy_trace(memory_copy_input_data, hsa_input_data):
         if re.search(r".*memory_async_copy.*", row["Function"]):
             valid_length += 1
     assert len(memory_copy_input_data) == valid_length
+
+    for row in hsa_stats_data:
+        assert int(row["TotalDurationNs"]) > 0
+        assert int(row["Calls"]) > 0
+        validate_average(row)
+        assert float(row["Percentage"]) > 0.0
+        validate_stats(row)
+
+    for row in memory_copy_stats_data:
+        assert int(row["TotalDurationNs"]) > 0
+        assert int(row["Calls"]) > 0
+        validate_average(row)
+        assert float(row["Percentage"]) > 0.0
+        validate_stats(row)
 
 
 if __name__ == "__main__":

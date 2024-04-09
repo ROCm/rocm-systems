@@ -6,6 +6,11 @@ import pytest
 
 def pytest_addoption(parser):
     parser.addoption(
+        "--agent-input",
+        action="store",
+        help="Path to agent info CSV file.",
+    )
+    parser.addoption(
         "--hsa-input",
         action="store",
         help="Path to HSA API tracing CSV file.",
@@ -30,6 +35,18 @@ def pytest_addoption(parser):
         action="store",
         help="Path to HIP runtime and compiler API tracing CSV file.",
     )
+
+
+@pytest.fixture
+def agent_info_input_data(request):
+    filename = request.config.getoption("--agent-input")
+    data = []
+    with open(filename, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+
+    return data
 
 
 @pytest.fixture

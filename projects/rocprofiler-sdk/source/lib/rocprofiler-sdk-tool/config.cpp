@@ -48,13 +48,13 @@ namespace tool
 {
 namespace
 {
-auto launch_time = std::make_unique<std::time_t>(std::time_t{std::time(nullptr)});
+auto launch_time = new std::time_t{std::time(nullptr)};
 
 std::string
 get_local_datetime(const char* dt_format, std::time_t* dt_curr)
 {
     char mbstr[512];
-    if(!dt_curr) dt_curr = launch_time.get();
+    if(!dt_curr) dt_curr = launch_time;
 
     if(std::strftime(mbstr, sizeof(mbstr), dt_format, std::localtime(dt_curr)) != 0)
         return std::string{mbstr};
@@ -267,7 +267,7 @@ output_keys(std::string _tag)
         }
     }
 
-    auto* _launch_time = launch_time.get();
+    auto* _launch_time = launch_time;
     auto  _time_format = get_env<std::string>("ROCP_TIME_FORMAT", "%F_%H.%M");
 
     auto _mpi_size = get_mpi_size();

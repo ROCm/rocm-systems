@@ -56,13 +56,16 @@ add_test(
         --memory-copy-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
         --marker-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv
+        --agent-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv)
 
 set(VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_hsa_api_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv)
 
 set_tests_properties(
     rocprofv3-test-trace-validate
@@ -111,13 +114,16 @@ add_test(
         --memory-copy-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_memory_copy_trace.csv
         --marker-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv
+        --agent-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv)
 
 set(SYS_VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_hsa_api_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv)
 
 set_tests_properties(
     rocprofv3-test-systrace-validate

@@ -15,7 +15,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-runtime-trace
         --hip-compiler-trace --hsa-core-trace --hsa-amd-trace --hsa-image-trace
-        --hsa-finalizer-trace --kernel-trace --memory-copy-trace -d
+        --hsa-finalizer-trace --kernel-trace --memory-copy-trace --stats -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out $<TARGET_FILE:hip-in-libraries>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
@@ -51,13 +51,26 @@ add_test(
         --kernel-input
         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_trace.csv
         --memory-copy-input
-        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_trace.csv
+        --agent-input
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_agent_info.csv
+        --kernel-stats
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_stats.csv
+        --hip-stats ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_stats.csv
+        --hsa-stats ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_stats.csv
+        --memory-copy-stats
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv)
 
 set(VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_trace.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_stats.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_stats.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_stats.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv)
 
 set_tests_properties(
     rocprofv3-test-trace-hip-in-libraries-validate

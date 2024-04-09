@@ -2,10 +2,15 @@
 # Tool library used by rocprofiler
 #
 
+rocprofiler_activate_clang_tidy()
+
+set(TOOL_HEADERS config.hpp csv.hpp generateCSV.hpp helper.hpp output_file.hpp
+                 statistics.hpp tmp_file.hpp)
+set(TOOL_SOURCES config.cpp generateCSV.cpp helper.cpp output_file.cpp tmp_file.cpp
+                 tool.cpp)
+
 add_library(rocprofiler-sdk-tool SHARED)
-target_sources(
-    rocprofiler-sdk-tool PRIVATE config.hpp config.cpp csv.hpp helper.hpp helper.cpp
-                                 output_file.hpp output_file.cpp tool.cpp)
+target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
 
 add_subdirectory(plugins)
 
@@ -14,6 +19,11 @@ target_link_libraries(
     PRIVATE rocprofiler::rocprofiler-shared-library rocprofiler::rocprofiler-headers
             rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
             rocprofiler::rocprofiler-common-library)
+
+if(ROCPROFILER_BUILD_CODECOV)
+    target_compile_definitions(rocprofiler-sdk-tool PRIVATE ROCPROFILER_CODECOV=1)
+    target_link_libraries(rocprofiler-sdk-tool PRIVATE gcov)
+endif()
 
 set_target_properties(
     rocprofiler-sdk-tool

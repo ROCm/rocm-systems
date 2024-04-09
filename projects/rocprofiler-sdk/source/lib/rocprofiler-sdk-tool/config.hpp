@@ -72,10 +72,13 @@ struct config
     bool        hip_compiler_api_trace      = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
     bool        list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool        list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
+    bool        stats                       = get_env("ROCPROF_STATS", false);
     int         mpi_size                    = get_mpi_size();
     int         mpi_rank                    = get_mpi_rank();
-    std::string output_path = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
-    std::string output_file = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
+    std::string output_path   = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
+    std::string output_file   = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
+    std::string output_format = get_env("ROCPROF_OUTPUT_FORMAT", "CSV");
+    std::string tmp_directory = get_env("ROCPROF_TMPDIR", fs::current_path().string());
     std::vector<std::string> kernel_names = {};
     std::set<std::string>    counters     = {};
 };
@@ -86,14 +89,14 @@ get_config()
 {
     if constexpr(ContextT == config_context::global)
     {
-        static auto _v = config{};
-        return _v;
+        static auto* _v = new config{};
+        return *_v;
     }
     else
     {
         // context specific config copied from global config
-        static auto _v = get_config<config_context::global>();
-        return _v;
+        static auto* _v = new config{get_config<config_context::global>()};
+        return *_v;
     }
 }
 

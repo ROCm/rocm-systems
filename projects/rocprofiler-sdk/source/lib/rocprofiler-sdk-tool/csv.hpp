@@ -26,8 +26,11 @@
 
 #include <array>
 #include <cstddef>
+#include <iomanip>
+#include <ios>
 #include <ostream>
 #include <string_view>
+#include <type_traits>
 
 namespace rocprofiler
 {
@@ -40,10 +43,22 @@ std::ostream&
 write_csv_entry(std::ostream& ofs, TupleT&& _data, std::index_sequence<Idx...>)
 {
     auto _write = [&ofs](size_t idx, auto&& _val) {
+        using value_type = common::mpl::unqualified_type_t<decltype(_val)>;
         if(idx > 0) ofs << ",";
-        if constexpr(rocprofiler::common::mpl::is_string_type<decltype(_val)>::value) ofs << "\"";
-        ofs << _val;
-        if constexpr(rocprofiler::common::mpl::is_string_type<decltype(_val)>::value) ofs << "\"";
+        if constexpr(std::is_floating_point<value_type>::value)
+        {
+            constexpr value_type one = 1;
+            if(_val >= one)
+                ofs << std::setprecision(6) << std::fixed << _val;
+            else
+                ofs << std::setprecision(6) << std::scientific << _val;
+        }
+        else
+        {
+            if constexpr(common::mpl::is_string_type<value_type>::value) ofs << "\"";
+            ofs << _val;
+            if constexpr(common::mpl::is_string_type<value_type>::value) ofs << "\"";
+        }
     };
 
     (_write(Idx, std::get<Idx>(_data)), ...);
@@ -75,6 +90,7 @@ struct csv_encoder
 };
 
 using api_csv_encoder                  = csv_encoder<7>;
+using agent_info_csv_encoder           = csv_encoder<53>;
 using kernel_trace_csv_encoder         = csv_encoder<16>;
 using counter_collection_csv_encoder   = csv_encoder<15>;
 using memory_copy_csv_encoder          = csv_encoder<7>;
@@ -82,6 +98,7 @@ using marker_csv_encoder               = csv_encoder<7>;
 using list_basic_metrics_csv_encoder   = csv_encoder<5>;
 using list_derived_metrics_csv_encoder = csv_encoder<5>;
 using scratch_memory_encoder           = csv_encoder<8>;
+using stats_csv_encoder                = csv_encoder<8>;
 }  // namespace csv
 }  // namespace tool
 }  // namespace rocprofiler

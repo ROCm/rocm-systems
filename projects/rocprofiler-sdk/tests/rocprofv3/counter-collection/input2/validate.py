@@ -31,12 +31,13 @@ def test_validate_counter_collection_pmc2(input_dir: pd.DataFrame):
             file_path = os.path.join(subdirectory_path, file_name)
             assert os.path.isfile(file_path), f"{file_path} is not a file."
 
-            with open(file_path, "r") as file:
-                df = pd.read_csv(file)
-                # check if kernel-name is present
-                assert len(df["Kernel_Name"]) > 0
-                # check if counter value is positive
-                assert len(df["Counter_Value"]) > 0
+            if "agent_info.csv" not in file_path:
+                with open(file_path, "r") as file:
+                    df = pd.read_csv(file)
+                    # check if kernel-name is present
+                    assert len(df["Kernel_Name"]) > 0
+                    # check if counter value is positive
+                    assert len(df["Counter_Value"]) > 0
 
 
 if __name__ == "__main__":

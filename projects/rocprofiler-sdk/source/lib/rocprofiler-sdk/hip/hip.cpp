@@ -253,7 +253,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
 
     if(callback_contexts.empty() && buffered_contexts.empty())
     {
-        auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
+        [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);
         if constexpr(!std::is_void<RetT>::value)
             return _ret;
         else

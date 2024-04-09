@@ -92,7 +92,7 @@ struct ring_buffer
     /// memory is uninitialized. Typically used by allocators. If Tp is a class type,
     /// be sure to use a placement new instead of a memcpy.
     template <typename Tp>
-    Tp* request();
+    Tp* request(bool wrap = true);
 
     /// Read class-type data from buffer (uses placement new).
     template <typename Tp>
@@ -210,11 +210,11 @@ ring_buffer::write(Tp* in, std::enable_if_t<!std::is_class<Tp>::value, int>)
 //
 template <typename Tp>
 Tp*
-ring_buffer::request()
+ring_buffer::request(bool wrap)
 {
     if(m_ptr == nullptr) return nullptr;
 
-    return request(sizeof(Tp));
+    return reinterpret_cast<Tp*>(request(sizeof(Tp), wrap));
 }
 //
 template <typename Tp>
@@ -266,7 +266,7 @@ ring_buffer::retrieve() const
 {
     if(m_ptr == nullptr) return nullptr;
 
-    return retrieve(sizeof(Tp));
+    return reinterpret_cast<Tp*>(retrieve(sizeof(Tp)));
 }
 //
 }  // namespace base
@@ -320,7 +320,7 @@ struct ring_buffer : private base::ring_buffer
     Tp* read(Tp* _dest) const { return base_type::read<Tp>(_dest).second; }
 
     /// Get an uninitialized address at tail of buffer.
-    Tp* request() { return base_type::request<Tp>(); }
+    Tp* request(bool wrap = true) { return base_type::request<Tp>(wrap); }
 
     /// Read data from head of buffer.
     Tp* retrieve() { return base_type::retrieve<Tp>(); }
@@ -336,6 +336,8 @@ struct ring_buffer : private base::ring_buffer
 
     /// Returns if the buffer is full.
     bool is_full() const { return (base_type::free() < sizeof(Tp)); }
+
+    bool clear() { return base_type::clear(); }
 
     template <typename... Args>
     auto emplace(Args&&... args)

@@ -76,7 +76,7 @@ target_compile_options(
     INTERFACE $<$<COMPILE_LANGUAGE:C>:$<$<C_COMPILER_ID:GNU>:-rdynamic>>
               $<$<COMPILE_LANGUAGE:CXX>:$<$<CXX_COMPILER_ID:GNU>:-rdynamic>>)
 
-if(NOT APPLE)
+if(NOT APPLE AND NOT ROCPROFILER_ENABLE_CLANG_TIDY)
     target_link_options(rocprofiler-debug-flags INTERFACE
                         $<$<CXX_COMPILER_ID:GNU>:-rdynamic>)
 endif()
