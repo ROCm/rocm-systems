@@ -50,7 +50,7 @@ jobs:
 
     - name: Create pull request
       if: failure()
-      uses: googleapis/code-suggester@v2
+      uses: googleapis/code-suggester@v4
       with:
         command: review
         pull_number: ${{ github.event.pull_request.number }}
@@ -92,7 +92,7 @@ jobs:
 
     - name: Create pull request
       if: failure()
-      uses: googleapis/code-suggester@v2
+      uses: googleapis/code-suggester@v4
       with:
         command: review
         pull_number: ${{ github.event.pull_request.number }}
@@ -139,7 +139,7 @@ jobs:
 
     - name: Create pull request
       if: failure()
-      uses: googleapis/code-suggester@v2
+      uses: googleapis/code-suggester@v4
       with:
         command: review
         pull_number: ${{ github.event.pull_request.number }}
