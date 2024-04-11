@@ -1389,6 +1389,14 @@ typedef union rocprofiler_hsa_api_args_t
         size_t      threshold;
     } hsa_amd_agent_set_async_scratch_limit;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x02
+    struct
+    {
+        hsa_queue_t*               queue;
+        hsa_queue_info_attribute_t attribute;
+        void*                      value;
+    } hsa_amd_queue_get_info;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

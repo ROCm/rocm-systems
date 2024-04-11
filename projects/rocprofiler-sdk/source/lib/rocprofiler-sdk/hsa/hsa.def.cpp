@@ -407,6 +407,15 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           agent,
                           threshold)
 #        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x02
+HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_get_info,
+                          hsa_amd_queue_get_info,
+                          hsa_amd_queue_get_info_fn,
+                          queue,
+                          attribute,
+                          value)
+#        endif
 #    endif
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \

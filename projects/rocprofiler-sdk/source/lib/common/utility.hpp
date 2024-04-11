@@ -49,6 +49,11 @@ namespace rocprofiler
 {
 namespace common
 {
+template <typename... Tp>
+void
+consume_args(Tp&&...)
+{}
+
 uint64_t
 get_clock_period_ns_impl(clockid_t _clk_id);
 

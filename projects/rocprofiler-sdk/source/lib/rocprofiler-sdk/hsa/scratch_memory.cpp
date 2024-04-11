@@ -484,7 +484,8 @@ impl(Args... args)
 
     const auto tid = common::get_tid();
 
-    const auto get_agent_id = [](const hsa_queue_t* hsa_queue) -> rocprofiler_agent_id_t {
+    [[maybe_unused]] const auto get_agent_id =
+        [](const hsa_queue_t* hsa_queue) -> rocprofiler_agent_id_t {
         rocprofiler_agent_id_t _agent_id{static_cast<uint64_t>(-1)};
         bool                   found_agent{false};
 
@@ -635,6 +636,9 @@ update_table(const context_array_t& ctxs, hsa_amd_tool_table_t* _orig)
 
         _func = get_hsa_amd_tool_api_impl<TableIdx, OpIdx>(_func);
     }
+
+    // suppress unused paramter
+    common::consume_args(ctxs, _orig);
 }
 
 template <size_t TableIdx, size_t... OpIdx>

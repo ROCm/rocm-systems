@@ -23,15 +23,10 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/pc_sampling.h>
 
+#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-namespace
-{
-template <typename... Tp>
-auto
-consume_args(Tp&&...)
-{}
-}  // namespace
+using ::rocprofiler::common::consume_args;
 
 extern "C" {
 rocprofiler_status_t

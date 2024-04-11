@@ -103,6 +103,9 @@ typedef enum  // NOLINT(performance-enum-size)
 #    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x01
     ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_agent_set_async_scratch_limit,
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x02
+    ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_queue_get_info,
+#    endif
 #endif
 
     ROCPROFILER_HSA_AMD_EXT_API_ID_LAST,
