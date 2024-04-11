@@ -3,7 +3,7 @@ name: mi-rhel9
 on:
   push:
     branches:
-      - '2.x'
+      - 'main'
 
   # Allows manual execution
   workflow_dispatch:            
