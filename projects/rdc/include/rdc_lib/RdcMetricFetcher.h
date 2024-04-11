@@ -34,8 +34,8 @@ namespace rdc {
 
 class RdcMetricFetcher {
  public:
-  virtual rdc_status_t acquire_rsmi_handle(RdcFieldKey fk) = 0;
-  virtual rdc_status_t delete_rsmi_handle(RdcFieldKey fk) = 0;
+  virtual rdc_status_t acquire_smi_handle(RdcFieldKey fk) = 0;
+  virtual rdc_status_t delete_smi_handle(RdcFieldKey fk) = 0;
 
   virtual rdc_status_t fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
                                        rdc_field_value* value) = 0;

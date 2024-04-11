@@ -24,9 +24,8 @@ THE SOFTWARE.
 #include <memory>
 #include <string>
 
+#include "amd_smi/amdsmi.h"
 #include "rdc/rdc.h"
-#include "rdc_lib/rdc_common.h"
-#include "rocm_smi/rocm_smi.h"
 
 namespace amd {
 namespace rdc {
@@ -35,23 +34,23 @@ class RdcSmiDiagnosticImpl {
  public:
   RdcSmiDiagnosticImpl();
 
-  rdc_status_t check_rsmi_process_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
-                                       rdc_diag_test_result_t* result);
-  rdc_status_t check_rsmi_topo_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+  rdc_status_t check_smi_process_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+                                      rdc_diag_test_result_t* result);
+  rdc_status_t check_smi_topo_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
+                                   rdc_diag_test_result_t* result);
+  rdc_status_t check_smi_param_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
                                     rdc_diag_test_result_t* result);
-  rdc_status_t check_rsmi_param_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
-                                     rdc_diag_test_result_t* result);
 
  private:
-  rdc_diag_result_t check_temperature_level(uint32_t gpu_index, rsmi_temperature_type_t type,
+  rdc_diag_result_t check_temperature_level(uint32_t gpu_index, amdsmi_temperature_type_t type,
                                             char msg[MAX_DIAG_MSG_LENGTH],
                                             char per_gpu_msg[MAX_DIAG_MSG_LENGTH]);
-  std::string get_temperature_string(rsmi_temperature_type_t type) const;
+  std::string get_temperature_string(amdsmi_temperature_type_t type) const;
 
-  rdc_diag_result_t check_voltage_level(uint32_t gpu_index, rsmi_voltage_type_t type,
+  rdc_diag_result_t check_voltage_level(uint32_t gpu_index, amdsmi_voltage_type_t type,
                                         char msg[MAX_DIAG_MSG_LENGTH],
                                         char per_gpu_msg[MAX_DIAG_MSG_LENGTH]);
-  std::string get_voltage_string(rsmi_voltage_type_t type) const;
+  std::string get_voltage_string(amdsmi_voltage_type_t type) const;
 };
 
 typedef std::shared_ptr<RdcSmiDiagnosticImpl> RdcSmiDiagnosticPtr;

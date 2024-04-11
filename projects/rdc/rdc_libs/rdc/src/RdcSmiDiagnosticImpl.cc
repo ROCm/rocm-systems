@@ -21,21 +21,24 @@ THE SOFTWARE.
 */
 #include "rdc_lib/impl/RdcSmiDiagnosticImpl.h"
 
+#include <amd_smi/amdsmi.h>
+
 #include <map>
 #include <string>
 #include <vector>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/impl/RsmiUtils.h"
+#include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 RdcSmiDiagnosticImpl::RdcSmiDiagnosticImpl() {}
 
-rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                                           uint32_t gpu_count,
-                                                           rdc_diag_test_result_t* result) {
+rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+                                                          uint32_t gpu_count,
+                                                          rdc_diag_test_result_t* result) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -43,14 +46,14 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(uint32_t gpu_index[RD
   result->test_case = RDC_DIAG_COMPUTE_PROCESS;
   result->status = RDC_DIAG_RESULT_SKIP;
   result->per_gpu_result_count = 0;
-  rsmi_status_t err = RSMI_STATUS_SUCCESS;
+  amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   uint32_t num_items = 0;
-  err = rsmi_compute_process_info_get(nullptr, &num_items);
-  if (err != RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_gpu_compute_process_info(nullptr, &num_items);
+  if (err != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_ERROR, "Fail to get process information: " << err);
-    strncpy_with_null(result->info, "Fail to retreive process information from rocm_smi_lib",
+    strncpy_with_null(result->info, "Fail to retreive process information from amd_smi_lib",
                       MAX_DIAG_MSG_LENGTH);
-    return Rsmi2RdcError(err);
+    return Smi2RdcError(err);
   }
 
   // No process found
@@ -63,13 +66,13 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(uint32_t gpu_index[RD
 
   std::string info;
   // Find details of the process running on each GPU
-  std::vector<rsmi_process_info_t> procs(num_items);
-  err =
-      rsmi_compute_process_info_get(reinterpret_cast<rsmi_process_info_t*>(&procs[0]), &num_items);
-  if (err != RSMI_STATUS_SUCCESS) {
+  std::vector<amdsmi_process_info_t> procs(num_items);
+  err = amdsmi_get_gpu_compute_process_info(reinterpret_cast<amdsmi_process_info_t*>(&procs[0]),
+                                            &num_items);
+  if (err != AMDSMI_STATUS_SUCCESS) {
     RDC_LOG(RDC_INFO, "Fail to get process detail information: " << err);
     strncpy_with_null(result->info, info.c_str(), MAX_DIAG_MSG_LENGTH);
-    return Rsmi2RdcError(err);
+    return Smi2RdcError(err);
   }
 
   std::map<uint32_t, std::vector<uint32_t>> pids_per_gpu;
@@ -85,17 +88,18 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(uint32_t gpu_index[RD
 
     // Get the num_devices the process is running
     uint32_t num_devices = 0;
-    err = rsmi_compute_process_gpus_get(procs[i].process_id, nullptr, &num_devices);
-    if (err != RSMI_STATUS_SUCCESS || num_devices == 0) {
+    amdsmi_status_t err;
+    err = amdsmi_get_gpu_compute_process_gpus(procs[i].process_id, nullptr, &num_devices);
+    if (err != AMDSMI_STATUS_SUCCESS || num_devices == 0) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs detail information: " << err);
       continue;
     }
 
     // Get the details of devices
     std::vector<uint32_t> device_details(num_devices);
-    err = rsmi_compute_process_gpus_get(
+    err = amdsmi_get_gpu_compute_process_gpus(
         procs[i].process_id, reinterpret_cast<uint32_t*>(&device_details[0]), &num_devices);
-    if (err != RSMI_STATUS_SUCCESS) {
+    if (err != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_INFO, "Fail to get process GPUs detail information: " << err);
       continue;
     }
@@ -147,22 +151,22 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_process_info(uint32_t gpu_index[RD
   return RDC_ST_OK;
 }
 
-std::string RdcSmiDiagnosticImpl::get_temperature_string(rsmi_temperature_type_t type) const {
+std::string RdcSmiDiagnosticImpl::get_temperature_string(amdsmi_temperature_type_t type) const {
   switch (type) {
-    case RSMI_TEMP_TYPE_EDGE:
+    case TEMPERATURE_TYPE_EDGE:
       return "Edge";
-    case RSMI_TEMP_TYPE_JUNCTION:
+    case TEMPERATURE_TYPE_JUNCTION:
       return "Junction";
-    case RSMI_TEMP_TYPE_MEMORY:
+    case TEMPERATURE_TYPE_VRAM:
       return "Memory";
     default:
       return "Unknown";
   }
 }
 
-std::string RdcSmiDiagnosticImpl::get_voltage_string(rsmi_voltage_type_t type) const {
+std::string RdcSmiDiagnosticImpl::get_voltage_string(amdsmi_voltage_type_t type) const {
   switch (type) {
-    case RSMI_VOLT_TYPE_VDDGFX:
+    case AMDSMI_VOLT_TYPE_VDDGFX:
       return "Vddgfx voltage";
     default:
       return "Unknown";
@@ -170,46 +174,49 @@ std::string RdcSmiDiagnosticImpl::get_voltage_string(rsmi_voltage_type_t type) c
 }
 
 // Show topology type
-rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_topo_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                                        uint32_t gpu_count,
-                                                        rdc_diag_test_result_t* result) {
+rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+                                                       uint32_t gpu_count,
+                                                       rdc_diag_test_result_t* result) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
   *result = {};
   result->test_case = RDC_DIAG_NODE_TOPOLOGY;
 
-  const std::map<RSMI_IO_LINK_TYPE, std::string> link_to_string = {
-      {RSMI_IOLINK_TYPE_UNDEFINED, "Undefined"},
-      {RSMI_IOLINK_TYPE_PCIEXPRESS, "PCI Express"},
-      {RSMI_IOLINK_TYPE_XGMI, "XGMI"},
-      {RSMI_IOLINK_TYPE_NUMIOLINKTYPES, "IO Link"}};
+  const std::map<amdsmi_io_link_type_t, std::string> link_to_string = {
+      {AMDSMI_IOLINK_TYPE_UNDEFINED, "Undefined"},
+      {AMDSMI_IOLINK_TYPE_PCIEXPRESS, "PCI Express"},
+      {AMDSMI_IOLINK_TYPE_XGMI, "XGMI"},
+      {AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES, "IO Link"}};
 
   result->status = RDC_DIAG_RESULT_SKIP;
   result->per_gpu_result_count = 0;
-  rsmi_status_t err = RSMI_STATUS_SUCCESS;
+  amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   std::string info = "";
 
   for (uint32_t i = 0; i < gpu_count; i++) {
     for (uint32_t j = 0; j < gpu_count; j++) {
       if (gpu_index[i] == gpu_index[j]) continue;
+      std::pair<amdsmi_processor_handle, amdsmi_processor_handle> ph;
+      err = get_processor_handle_from_id(gpu_index[i], &ph.first);
+      err = get_processor_handle_from_id(gpu_index[i], &ph.second);
 
       uint64_t weight;
-      err = rsmi_topo_get_link_weight(gpu_index[i], gpu_index[j], &weight);
-      if (err != RSMI_STATUS_SUCCESS) {
+      err = amdsmi_topo_get_link_weight(ph.first, ph.second, &weight);
+      if (err != AMDSMI_STATUS_SUCCESS) {
         result->status = RDC_DIAG_RESULT_FAIL;
         result->details.code = err;
         std::string err_info = "rsmi_topo_get_link_weight(";
-        err_info += std::to_string(gpu_index[i]) + ",";
-        err_info += std::to_string(gpu_index[j]) + ", &weight)";
+        err_info += std::to_string(i) + ",";
+        err_info += std::to_string(j) + ", &weight)";
         err_info += " fail";
         strncpy_with_null(result->details.msg, err_info.c_str(), MAX_DIAG_MSG_LENGTH);
         strncpy_with_null(result->info, err_info.c_str(), MAX_DIAG_MSG_LENGTH);
         return RDC_ST_MSI_ERROR;
       }
 
-      info += std::to_string(gpu_index[i]) + "=>";
-      info += std::to_string(gpu_index[j]) + " weight:";
+      info += std::to_string(i) + "=>";
+      info += std::to_string(j) + " weight:";
       info += std::to_string(weight) + " ";
     }
   }
@@ -223,9 +230,9 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_topo_info(uint32_t gpu_index[RDC_M
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_param_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
-                                                         uint32_t gpu_count,
-                                                         rdc_diag_test_result_t* result) {
+rdc_status_t RdcSmiDiagnosticImpl::check_smi_param_info(uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
+                                                        uint32_t gpu_count,
+                                                        rdc_diag_test_result_t* result) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -237,27 +244,27 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_param_info(uint32_t gpu_index[RDC_
 
   for (uint32_t i = 0; i < gpu_count; i++) {
     // temperature
-    for (rsmi_temperature_type_t sensor_type = RSMI_TEMP_TYPE_FIRST;
-         sensor_type != RSMI_TEMP_TYPE_LAST;) {
+    for (amdsmi_temperature_type_t sensor_type = TEMPERATURE_TYPE_FIRST;
+         sensor_type < TEMPERATURE_TYPE__MAX;) {
       auto status = check_temperature_level(gpu_index[i], sensor_type, result->info,
                                             result->gpu_results[i].gpu_result.msg);
       // Set to higher error level
       if (status > result->status) {
         result->status = status;
       }
-      sensor_type = static_cast<rsmi_temperature_type_t>(sensor_type + 1);
+      sensor_type = static_cast<amdsmi_temperature_type_t>(sensor_type + 1);
     }
 
     // Voltage
-    for (rsmi_voltage_type_t sensor_type = RSMI_VOLT_TYPE_FIRST;
-         sensor_type != RSMI_VOLT_TYPE_LAST;) {
+    for (amdsmi_voltage_type_t sensor_type = AMDSMI_VOLT_TYPE_FIRST;
+         sensor_type < AMDSMI_VOLT_TYPE_LAST;) {
       auto status = check_voltage_level(gpu_index[i], sensor_type, result->info,
                                         result->gpu_results[i].gpu_result.msg);
       // Set to higher error level
       if (status > result->status) {
         result->status = status;
       }
-      sensor_type = static_cast<rsmi_voltage_type_t>(sensor_type + 1);
+      sensor_type = static_cast<amdsmi_voltage_type_t>(sensor_type + 1);
     }
     result->gpu_results->gpu_index = gpu_index[i];
     result->per_gpu_result_count++;
@@ -266,24 +273,25 @@ rdc_status_t RdcSmiDiagnosticImpl::check_rsmi_param_info(uint32_t gpu_index[RDC_
 }
 
 rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
-    uint32_t gpu_index, rsmi_temperature_type_t type, char msg[MAX_DIAG_MSG_LENGTH],
+    uint32_t gpu_index, amdsmi_temperature_type_t type, char msg[MAX_DIAG_MSG_LENGTH],
     char per_gpu_msg[MAX_DIAG_MSG_LENGTH]) {
   rdc_diag_result_t result = RDC_DIAG_RESULT_PASS;
-  rsmi_temperature_metric_t met = RSMI_TEMP_CURRENT;
-  rsmi_status_t err = RSMI_STATUS_SUCCESS;
+  amdsmi_temperature_metric_t met = AMDSMI_TEMP_CURRENT;
+  amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   int64_t current_temp = 0;
   std::string info = msg;
   std::string per_gpu_info = per_gpu_msg;
+  amdsmi_processor_handle processor_handle;
+  get_processor_handle_from_id(gpu_index, &processor_handle);
 
-  err = rsmi_dev_temp_metric_get(gpu_index, type, met, &current_temp);
-
-  if (err != RSMI_STATUS_SUCCESS) return result;
+  err = amdsmi_get_temp_metric(processor_handle, type, met, &current_temp);
+  if (err != AMDSMI_STATUS_SUCCESS) return result;
 
   // Max temperature
-  met = RSMI_TEMP_MAX;
+  met = AMDSMI_TEMP_MAX;
   int64_t max_temp = 0;
-  err = rsmi_dev_temp_metric_get(gpu_index, type, met, &max_temp);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_temp_metric(processor_handle, type, met, &max_temp);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_temp >= max_temp) {
       result = RDC_DIAG_RESULT_WARN;
       per_gpu_info += "Max ";
@@ -305,10 +313,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
     }
   }
 
-  met = RSMI_TEMP_MIN;
+  met = AMDSMI_TEMP_MIN;
   int64_t min_temp = 0;
-  err = rsmi_dev_temp_metric_get(gpu_index, type, met, &min_temp);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_temp_metric(processor_handle, type, met, &min_temp);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_temp <= min_temp) {
       result = RDC_DIAG_RESULT_WARN;
       per_gpu_info += "Min ";
@@ -329,10 +337,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
     }
   }
 
-  met = RSMI_TEMP_CRITICAL;
+  met = AMDSMI_TEMP_CRITICAL;
   int64_t critical_temp = 0;
-  err = rsmi_dev_temp_metric_get(gpu_index, type, met, &critical_temp);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_temp_metric(processor_handle, type, met, &critical_temp);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_temp >= critical_temp) {
       result = RDC_DIAG_RESULT_FAIL;
       per_gpu_info += "Critical ";
@@ -353,10 +361,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
     }
   }
 
-  met = RSMI_TEMP_EMERGENCY;
+  met = AMDSMI_TEMP_EMERGENCY;
   int64_t emergency_temp = 0;
-  err = rsmi_dev_temp_metric_get(gpu_index, type, met, &emergency_temp);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_temp_metric(processor_handle, type, met, &emergency_temp);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_temp >= critical_temp) {
       result = RDC_DIAG_RESULT_FAIL;
       per_gpu_info += "Emergency ";
@@ -377,10 +385,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
     }
   }
 
-  met = RSMI_TEMP_CRIT_MIN;
+  met = AMDSMI_TEMP_CRIT_MIN;
   int64_t critical_min_temp = 0;
-  err = rsmi_dev_temp_metric_get(gpu_index, type, met, &critical_min_temp);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_temp_metric(processor_handle, type, met, &critical_min_temp);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_temp <= critical_min_temp) {
       result = RDC_DIAG_RESULT_FAIL;
       per_gpu_info += "Critical Min ";
@@ -408,24 +416,26 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
 }
 
 rdc_diag_result_t RdcSmiDiagnosticImpl::check_voltage_level(uint32_t gpu_index,
-                                                            rsmi_voltage_type_t type,
+                                                            amdsmi_voltage_type_t type,
                                                             char msg[MAX_DIAG_MSG_LENGTH],
                                                             char per_gpu_msg[MAX_DIAG_MSG_LENGTH]) {
   rdc_diag_result_t result = RDC_DIAG_RESULT_PASS;
-  rsmi_voltage_metric_t met = RSMI_VOLT_CURRENT;
-  rsmi_status_t err = RSMI_STATUS_SUCCESS;
+  amdsmi_voltage_metric_t met = AMDSMI_VOLT_CURRENT;
+  amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   int64_t current_voltage = 0;
   std::string info = msg;
   std::string per_gpu_info = per_gpu_msg;
+  amdsmi_processor_handle processor_handle;
+  get_processor_handle_from_id(gpu_index, &processor_handle);
 
-  err = rsmi_dev_volt_metric_get(gpu_index, type, met, &current_voltage);
-  if (err != RSMI_STATUS_SUCCESS) return result;
+  err = amdsmi_get_gpu_volt_metric(processor_handle, type, met, &current_voltage);
+  if (err != AMDSMI_STATUS_SUCCESS) return result;
 
   // Max voltage
-  met = RSMI_VOLT_MAX;
+  met = AMDSMI_VOLT_MAX;
   int64_t max_volt = 0;
-  err = rsmi_dev_volt_metric_get(gpu_index, type, met, &max_volt);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_gpu_volt_metric(processor_handle, type, met, &max_volt);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_voltage >= max_volt) {
       result = RDC_DIAG_RESULT_WARN;
       per_gpu_info += "Max ";
@@ -448,10 +458,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_voltage_level(uint32_t gpu_index,
   }
 
   // Min voltage
-  met = RSMI_VOLT_MIN;
+  met = AMDSMI_VOLT_MIN;
   int64_t min_volt = 0;
-  err = rsmi_dev_volt_metric_get(gpu_index, type, met, &min_volt);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_gpu_volt_metric(processor_handle, type, met, &min_volt);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_voltage <= min_volt) {
       result = RDC_DIAG_RESULT_WARN;
       per_gpu_info += "Min ";
@@ -474,10 +484,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_voltage_level(uint32_t gpu_index,
   }
 
   // Max Critical voltage
-  met = RSMI_VOLT_MAX_CRIT;
+  met = AMDSMI_VOLT_MAX_CRIT;
   int64_t critical_max_volt = 0;
-  err = rsmi_dev_volt_metric_get(gpu_index, type, met, &critical_max_volt);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_gpu_volt_metric(nullptr, type, met, &critical_max_volt);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_voltage >= critical_max_volt) {
       result = RDC_DIAG_RESULT_FAIL;
       per_gpu_info += "Critical Max ";
@@ -500,10 +510,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_voltage_level(uint32_t gpu_index,
   }
 
   // Min Critical voltage
-  met = RSMI_VOLT_MIN_CRIT;
+  met = AMDSMI_VOLT_MIN_CRIT;
   int64_t critical_min_volt = 0;
-  err = rsmi_dev_volt_metric_get(gpu_index, type, met, &critical_min_volt);
-  if (err == RSMI_STATUS_SUCCESS) {
+  err = amdsmi_get_gpu_volt_metric(nullptr, type, met, &critical_min_volt);
+  if (err == AMDSMI_STATUS_SUCCESS) {
     if (current_voltage <= critical_min_volt) {
       result = RDC_DIAG_RESULT_FAIL;
       per_gpu_info += "Critical Min ";

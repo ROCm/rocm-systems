@@ -26,7 +26,7 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST}
     "${SRC_DIR}/RdcSmiLib.cc"
     "${SRC_DIR}/RdcTelemetryModule.cc"
     "${SRC_DIR}/RdcWatchTableImpl.cc"
-    "${SRC_DIR}/RsmiUtils.cc")
+    "${SRC_DIR}/SmiUtils.cc")
 
 # TODO: remove all headers? Will just dir be ok after install?
 set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST}
@@ -59,16 +59,16 @@ set(RDC_LIB_INC_LIST ${RDC_LIB_INC_LIST}
     "${INC_DIR}/impl/RdcSmiLib.h"
     "${INC_DIR}/impl/RdcTelemetryModule.h"
     "${INC_DIR}/impl/RdcWatchTableImpl.h"
-    "${INC_DIR}/impl/RsmiUtils.h")
+    "${INC_DIR}/impl/SmiUtils.h")
 
 message("RDC_LIB_INC_LIST=${RDC_LIB_INC_LIST}")
 
 add_library(${RDC_LIB} SHARED ${RDC_LIB_SRC_LIST} ${RDC_LIB_INC_LIST})
-target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread rocm_smi64 cap)
+target_link_libraries(${RDC_LIB} ${BOOTSTRAP_LIB} pthread amd_smi cap)
 target_include_directories(${RDC_LIB} PRIVATE
     "${PROJECT_SOURCE_DIR}"
     "${PROJECT_SOURCE_DIR}/include"
-    "${RSMI_INC_DIR}")
+    "${SMI_INC_DIR}")
 
 # Set the VERSION and SOVERSION values
 set_property(TARGET ${RDC_LIB} PROPERTY

@@ -26,9 +26,9 @@ THE SOFTWARE.
 
 // This file is generated on build.
 
-#define rocm_smi_VERSION_MAJOR @rocm_smi_VERSION_MAJOR@
-#define rocm_smi_VERSION_MINOR @rocm_smi_VERSION_MINOR@
-#define rocm_smi_VERSION_PATCH @rocm_smi_VERSION_PATCH@
-#define rocm_smi_VERSION_BUILD "@rocm_smi_VERSION_BUILD@"
+#define amd_smi_VERSION_MAJOR @amd_smi_VERSION_MAJOR@
+#define amd_smi_VERSION_MINOR @amd_smi_VERSION_MINOR@
+#define amd_smi_VERSION_PATCH @amd_smi_VERSION_PATCH@
+#define amd_smi_VERSION_BUILD "@amd_smi_VERSION_BUILD@"
 
 #endif  // INCLUDE_RDC_RDC64CONFIG_H_

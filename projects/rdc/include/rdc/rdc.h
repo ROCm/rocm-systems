@@ -257,7 +257,7 @@ typedef enum {
                              //!< represents 32 bytes
 
   // "Composite" events. These events have additional processing beyond
-  // the value provided by the rocm_smi library.
+  // the value provided by the amd_smi library.
   RDC_EVNT_XGMI_0_THRPUT = 1500,  //!< Transmit throughput to XGMI
                                   //!< neighbor 0 in byes/sec
   RDC_EVNT_XGMI_1_THRPUT,         //!< Transmit throughput to XGMI

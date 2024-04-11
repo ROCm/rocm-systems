@@ -23,8 +23,9 @@ AmbientCapabilities=CAP_DAC_OVERRIDE
 
 # If we need to start anything before rdcd, use this
 # ExecStartPre=
-
-ExecStart=/@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/rdcd
+# update-alternative has been run for rdcd and
+# soft link will be available in usr/bin
+ExecStart=rdcd
 
 # If we need to start anything after rdcd use this
 # ExecStartPost=

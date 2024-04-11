@@ -10,7 +10,7 @@ NOTE: The RDC tool is tested on the following software versions. Earlier version
 
 •        g++ (5.4.0)
 
-•        AMD ROCm, which includes AMD ROCm SMI Library
+•        AMD ROCm, which includes AMD AMDSMI Library
 
 •        gRPC and protoc
 

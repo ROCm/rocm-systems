@@ -29,7 +29,6 @@ THE SOFTWARE.
 
 #include "rdc/rdc_admin_service.h"
 #include "rdc/rdc_api_service.h"
-#include "rdc/rdc_rsmi_service.h"
 
 typedef struct {
   std::string listen_address;
@@ -49,9 +48,6 @@ class RDCServer {
   void Run(void);
   void ShutDown(void);
 
-  bool start_rsmi_service(void) const { return start_rsmi_service_; }
-  void set_start_rsmi_service(bool s) { start_rsmi_service_ = s; }
-
   bool start_rdc_admin_service(void) const { return start_rdc_admin_service_; }
   void set_start_rdc_admin_service(bool s) { start_rdc_admin_service_ = s; }
 
@@ -68,8 +64,6 @@ class RDCServer {
   bool secure_creds_;
   bool use_pinned_certs_;
   bool log_debug_;
-  bool start_rsmi_service_;
-  amd::rdc::RsmiServiceImpl* rsmi_service_;
   RdcdCmdLineOpts* cmd_line_;
 
   bool start_rdc_admin_service_;

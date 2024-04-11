@@ -32,20 +32,18 @@ if(BUILD_RVS)
     find_package(hsa-runtime64 REQUIRED)
     find_package(rvs REQUIRED
         HINTS ${ROCM_DIR}/lib/cmake)
-    find_library(rvslib REQUIRED
-        NAMES rvslib)
 
     ## additional libraries
     set(COMBINED_LIBS rocblas hsakmt hsa-runtime64 hip::amdhip64 yaml-cpp)
 
     set(RDC_LIB_MODULES ${RDC_LIB_MODULES} ${RDC_RVS_LIB} PARENT_SCOPE)
     add_library(${RDC_RVS_LIB} SHARED ${RDC_RVS_LIB_SRC_LIST} ${RDC_RVS_LIB_INC_LIST})
-    target_link_libraries(${RDC_RVS_LIB} PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} ${rvslib} pthread dl ${COMBINED_LIBS})
+    target_link_libraries(${RDC_RVS_LIB} PRIVATE ${RDC_LIB} ${BOOTSTRAP_LIB} ${rvs} pthread dl ${COMBINED_LIBS})
     target_include_directories(${RDC_RVS_LIB} PRIVATE
         "${PROJECT_SOURCE_DIR}"
         "${PROJECT_SOURCE_DIR}/include"
         "${COMMON_DIR}"
-        "${RSMI_INC_DIR}"
+        "${SMI_INC_DIR}"
         "${ROCM_DIR}/include"
         "${ROCM_DIR}/include/hsa"
         "${ROCM_VALIDATION_SUITE_INCLUDE_DIR}")

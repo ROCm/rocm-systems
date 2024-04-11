@@ -1,5 +1,18 @@
 #!/bin/bash
 
+do_update_alternatives(){
+    # skip update if program doesn't exist
+    command -v update-alternatives >/dev/null || return 0
+    binaries=(
+        rdcd
+    )
+
+    for i in "$binaries"
+    do
+        update-alternatives --remove $i @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/$i
+    done
+}
+
 stop_rdc() {
     #stop RDC service if systemd exists and service is running
     if [ -d /run/systemd/system ] && $( systemctl is-active --quiet rdc ); then
@@ -34,6 +47,7 @@ case "$1" in
        rm_rdc_service
        reload_systemd
        rm_pyc
+       do_update_alternatives
    ;;
    purge)
    ;;

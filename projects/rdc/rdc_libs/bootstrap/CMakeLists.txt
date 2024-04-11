@@ -28,7 +28,7 @@ target_include_directories(${BOOTSTRAP_LIB} PRIVATE
     "${PROJECT_SOURCE_DIR}"
     "${PROJECT_SOURCE_DIR}/include"
     "${COMMON_DIR}"
-    "${RSMI_INC_DIR}"
+    "${SMI_INC_DIR}"
     "${ROCM_DIR}/include")
 
 target_include_directories(${BOOTSTRAP_LIB}

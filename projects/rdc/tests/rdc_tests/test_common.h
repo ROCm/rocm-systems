@@ -27,7 +27,7 @@ THE SOFTWARE.
 #include <string>
 #include <vector>
 
-#include "rocm_smi/rocm_smi.h"
+#include "amd_smi/amdsmi.h"
 
 struct RDCTstGlobals {
   uint32_t verbosity;
@@ -45,10 +45,10 @@ struct RDCTstGlobals {
 uint32_t ProcessCmdline(RDCTstGlobals* test, int arg_cnt, char** arg_list);
 
 void PrintTestHeader(uint32_t dv_ind);
-const char* GetBlockNameStr(rsmi_gpu_block_t id);
-const char* GetErrStateNameStr(rsmi_ras_err_state_t st);
+const char* GetBlockNameStr(amdsmi_gpu_block_t id);
+const char* GetErrStateNameStr(amdsmi_ras_err_state_t st);
 // const char *GetGRPCChanStateStr(grpc_connectivity_state st);
-const char* FreqEnumToStr(rsmi_clk_type rsmi_clk);
+const char* FreqEnumToStr(amdsmi_clk_type_t rsmi_clk);
 
 #if ENABLE_SMI
 void DumpMonitorInfo(const TestBase* test);

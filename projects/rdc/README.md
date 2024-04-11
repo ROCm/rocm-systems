@@ -30,7 +30,7 @@ RDC can run on AMD ROCm supported platforms, please refer to the [List of Suppor
         * It is recommended to install the complete AMD ROCm platform.
           For installation instruction see https://rocm.docs.amd.com/projects/install-on-linux/en/latest/tutorial/quick-start.html
         * At the minimum, these two components are required
-            (i)  AMD ROCm SMI Library (https://github.com/ROCm/rocm_smi_lib)
+            (i)  AMDSMI Library (https://github.com/ROCm/amdsmi)
             (ii) AMD ROCk Kernel driver (https://github.com/ROCm/ROCK-Kernel-Driver)
 
 ## Building gRPC and protoc

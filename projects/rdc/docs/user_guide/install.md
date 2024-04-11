@@ -68,7 +68,7 @@ RDC Command Line Tool (rdci)
 
 A command-line tool to invoke all the features of the RDC tool. This CLI can be run locally or remotely.
 
-ROCm-SMI Library
+AMDSMI Library
 
 A stateless system management library that provides low-level interfaces to access GPU information
 

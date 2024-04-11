@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <string.h>
 
+#include "amd_smi/amdsmi.h"
 #include "common/rdc_fields_supported.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/RdcLogger.h"
@@ -35,30 +36,29 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcNotificationImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
-#include "rocm_smi/rocm_smi.h"
 
 namespace {
-// call the rsmi_init when load library
-// and rsmi_shutdown when unload the library.
-class rsmi_initializer {
-  rsmi_initializer() {
-    // Make sure rsmi will not be initialized multiple times
-    rsmi_shut_down();
-    rsmi_status_t rsmi_ret = rsmi_init(0);
-    if (rsmi_ret != RSMI_STATUS_SUCCESS) {
-      throw amd::rdc::RdcException(RDC_ST_FAIL_LOAD_MODULE, "RSMI initialize fail");
+// call the smi_init when load library
+// and smi_shutdown when unload the library.
+class smi_initializer {
+  smi_initializer() {
+    // Make sure smi will not be initialized multiple times
+    amdsmi_shut_down();
+    amdsmi_status_t ret = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      throw amd::rdc::RdcException(RDC_ST_FAIL_LOAD_MODULE, "SMI initialize fail");
     }
   }
-  ~rsmi_initializer() { rsmi_shut_down(); }
+  ~smi_initializer() { amdsmi_shut_down(); }
 
  public:
-  static rsmi_initializer& getInstance() {
-    static rsmi_initializer instance;
+  static smi_initializer& getInstance() {
+    static smi_initializer instance;
     return instance;
   }
 };
 
-static rsmi_initializer& in = rsmi_initializer::getInstance();
+static smi_initializer& in = smi_initializer::getInstance();
 }  // namespace
 
 amd::rdc::RdcHandler* make_handler(rdc_operation_mode_t op_mode) {

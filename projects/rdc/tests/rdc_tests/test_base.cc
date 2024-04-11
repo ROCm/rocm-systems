@@ -24,8 +24,8 @@ THE SOFTWARE.
 #include <assert.h>
 #include <gtest/gtest.h>
 
+#include "amd_smi/amdsmi.h"
 #include "rdc_tests/test_common.h"
-#include "rocm_smi/rocm_smi.h"
 
 static const int kOutputLineLength = 80;
 static const char kLabelDelimiter[] = "####";

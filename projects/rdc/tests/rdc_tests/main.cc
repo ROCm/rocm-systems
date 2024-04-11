@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <string>
 #include <vector>
 
+#include "amd_smi/amdsmi.h"
 #include "functional/rdci_discovery.h"
 #include "functional/rdci_dmon.h"
 #include "functional/rdci_fieldgroup.h"
@@ -37,7 +38,6 @@ THE SOFTWARE.
 #include "rdc/rdc.h"
 #include "rdc_tests/test_base.h"
 #include "rdc_tests/test_common.h"
-#include "rocm_smi/rocm_smi.h"
 
 static RDCTstGlobals* sRDCGlvalues = nullptr;
 

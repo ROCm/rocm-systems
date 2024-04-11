@@ -12,9 +12,9 @@ The RDC includes the following libraries:
 
 •        librdc_client.so: Exposes RDC functionality using gRPC client.
 
-•        librdc.so: RDC API. This depends on librocm_smi.so.
+•        librdc.so: RDC API. This depends on libamd_smi.so.
 
-•        librocm_smi.so: Stateless low overhead access to GPU data.
+•        libamd_smi.so: Stateless low overhead access to GPU data.
 
 ![Libraries](../data/api_libs.png)
 
