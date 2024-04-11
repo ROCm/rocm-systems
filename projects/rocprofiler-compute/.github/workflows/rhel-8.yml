@@ -25,26 +25,24 @@ jobs:
        image: colramos/target-images:rhel8
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
       - name: Install baseline OS dependencies
         run: |
-          # https://github.com/actions/runner/issues/2033
-          chown -R $(id -u):$(id -g) $PWD
-          yum -y update
           yum -y install git
           yum -y install python39
           yum -y install cmake3
           yum -y install which
+          yum -y install glibc-langpack-en
+      - name: Checkout
+        uses: actions/checkout@v4
       - name: Install Python prereqs
         run: |
           python3.9 -m pip install -r requirements.txt
-          python3.9 -m pip install pyinstaller pytest pytest-cov mock pytest-xdist
+          python3.9 -m pip install -r requirements-test.txt
       - name: Configure and install
         run: |
           mkdir build
           cd build
-          cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf ..
+          cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf -DPYTEST_NUMPROCS=4 ..
           make install
       - name: CTest- Analyze Commands
         run: |
