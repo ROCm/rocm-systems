@@ -122,7 +122,7 @@ target_compile_definitions(
      PRIVATE PROF_API_IMPL HIP_PROF_HIP_API_STRING=1 __HIP_PLATFORM_AMD__=1)
 
 target_link_libraries(
-     runUnitTests PRIVATE rocprofiler_tool ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64
+     runUnitTests PRIVATE rocprofiler-v2 ${AQLPROFILE_LIB} hsa-runtime64::hsa-runtime64
                          GTest::gtest GTest::gtest_main stdc++fs ${PCIACCESS_LIBRARIES} ${GDB} dw elf c dl)
 
 add_dependencies(tests runUnitTests)
