@@ -103,7 +103,7 @@ TEST(rocprofiler_lib, api_id_names)
 
     // Code object callback
     EXPECT_EQ(callback_names.operation_names.at(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT).size(),
-              ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST);
+              ROCPROFILER_CODE_OBJECT_LAST);
 
     {
         auto hsa_core_ids     = ::rocprofiler::hsa::get_ids<ROCPROFILER_HSA_TABLE_ID_Core>();

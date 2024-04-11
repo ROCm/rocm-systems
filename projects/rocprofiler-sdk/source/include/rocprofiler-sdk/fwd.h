@@ -183,10 +183,10 @@ typedef enum  // NOLINT(performance-enum-size)
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_NONE = 0,  ///< Unknown code object operation
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD,      ///< Code object containing kernel symbols
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER,  ///< Kernel symbols
-    ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST,
+    ROCPROFILER_CODE_OBJECT_NONE = 0,  ///< Unknown code object operation
+    ROCPROFILER_CODE_OBJECT_LOAD,      ///< Code object containing kernel symbols
+    ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER,  ///< Kernel symbols
+    ROCPROFILER_CODE_OBJECT_LAST,
 } rocprofiler_code_object_operation_t;
 
 /**
@@ -194,12 +194,12 @@ typedef enum  // NOLINT(performance-enum-size)
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_NONE = 0,          ///< Unknown memory copy direction
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_HOST_TO_HOST,      ///< Memory copy from host to host
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_HOST_TO_DEVICE,    ///< Memory copy from host to device
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_DEVICE_TO_HOST,    ///< Memory copy from device to host
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_DEVICE_TO_DEVICE,  ///< Memory copy from device to device
-    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST,
+    ROCPROFILER_MEMORY_COPY_NONE = 0,          ///< Unknown memory copy direction
+    ROCPROFILER_MEMORY_COPY_HOST_TO_HOST,      ///< Memory copy from host to host
+    ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE,    ///< Memory copy from host to device
+    ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST,    ///< Memory copy from device to host
+    ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE,  ///< Memory copy from device to device
+    ROCPROFILER_MEMORY_COPY_LAST,
 } rocprofiler_memory_copy_operation_t;
 
 /**

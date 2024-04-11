@@ -70,11 +70,10 @@ struct code_object_info;
 
 #define SPECIALIZE_CODE_OBJECT_INFO(OPERATION)                                                     \
     template <>                                                                                    \
-    struct code_object_info<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_##OPERATION>                  \
+    struct code_object_info<ROCPROFILER_CODE_OBJECT_##OPERATION>                                   \
     {                                                                                              \
-        static constexpr auto operation_idx =                                                      \
-            ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_##OPERATION;                                  \
-        static constexpr auto name = #OPERATION;                                                   \
+        static constexpr auto operation_idx = ROCPROFILER_CODE_OBJECT_##OPERATION;                 \
+        static constexpr auto name          = #OPERATION;                                          \
     };
 
 SPECIALIZE_CODE_OBJECT_INFO(NONE)
@@ -103,7 +102,7 @@ id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
     if constexpr(sizeof...(IdxTail) > 0)
         return id_by_name(name, std::index_sequence<IdxTail...>{});
     else
-        return ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_NONE;
+        return ROCPROFILER_CODE_OBJECT_NONE;
 }
 
 template <size_t... Idx>
@@ -111,8 +110,7 @@ void
 get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
 {
     auto _emplace = [](auto& _vec, uint32_t _v) {
-        if(_v < static_cast<uint32_t>(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST))
-            _vec.emplace_back(_v);
+        if(_v < static_cast<uint32_t>(ROCPROFILER_CODE_OBJECT_LAST)) _vec.emplace_back(_v);
     };
 
     (_emplace(_id_list, code_object_info<Idx>::operation_idx), ...);
@@ -134,23 +132,21 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id(id,
-                      std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+    return name_by_id(id, std::make_index_sequence<ROCPROFILER_CODE_OBJECT_LAST>{});
 }
 
 uint32_t
 id_by_name(const char* name)
 {
-    return id_by_name(name,
-                      std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+    return id_by_name(name, std::make_index_sequence<ROCPROFILER_CODE_OBJECT_LAST>{});
 }
 
 std::vector<uint32_t>
 get_ids()
 {
     auto _data = std::vector<uint32_t>{};
-    _data.reserve(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST);
-    get_ids(_data, std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+    _data.reserve(ROCPROFILER_CODE_OBJECT_LAST);
+    get_ids(_data, std::make_index_sequence<ROCPROFILER_CODE_OBJECT_LAST>{});
     return _data;
 }
 
@@ -158,8 +154,8 @@ std::vector<const char*>
 get_names()
 {
     auto _data = std::vector<const char*>{};
-    _data.reserve(ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST);
-    get_names(_data, std::make_index_sequence<ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LAST>{});
+    _data.reserve(ROCPROFILER_CODE_OBJECT_LAST);
+    get_names(_data, std::make_index_sequence<ROCPROFILER_CODE_OBJECT_LAST>{});
     return _data;
 }
 }  // namespace code_object
@@ -870,9 +866,9 @@ executable_freeze(hsa_executable_t executable, const char* options)
     });
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD;
+    constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
     constexpr auto CODE_OBJECT_KERNEL_SYMBOL =
-        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+        ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
 
     auto&& context_filter = [](const context_t* ctx) {
         return (ctx->callback_tracer && ctx->callback_tracer->domains(CODE_OBJECT_KIND) &&
@@ -1006,9 +1002,9 @@ shutdown(hsa_executable_t executable)
         executable, code_object_unload_callback, &_unloaded);
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
-    constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD;
+    constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
     constexpr auto CODE_OBJECT_KERNEL_SYMBOL =
-        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
+        ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER;
 
     auto tidx = common::get_tid();
     for(auto& itr : _unloaded)

@@ -662,7 +662,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT)
     {
-        if(record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD)
+        if(record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
         {
             auto data_v =
                 *static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
@@ -671,8 +671,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             auto        _lk    = std::unique_lock<std::mutex>{_mutex};
             code_object_records.emplace_back(code_object_callback_record_t{ts, record, data_v});
         }
-        else if(record.operation ==
-                ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+        else if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
         {
             auto data_v = *static_cast<kernel_symbol_data_t*>(record.payload);
 

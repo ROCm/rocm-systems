@@ -85,7 +85,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
     if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD) return;
 
-    if(record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD)
+    if(record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
     {
         auto* data = static_cast<code_obj_load_data_t*>(record.payload);
 
@@ -98,8 +98,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 registered_kernels.insert({symbol.name, {vaddr, vaddr + symbol.mem_size}});
         }
     }
-    else if(record.operation ==
-            ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    else if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
         std::cout << std::hex;
         auto* data        = static_cast<kernel_symbol_data_t*>(record.payload);

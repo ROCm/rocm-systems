@@ -166,14 +166,14 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
     assert(callback_data && "Shader callback passed null!");
     ToolData& tool = *reinterpret_cast<ToolData*>(callback_data);
 
-    if(record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+    if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
         std::unique_lock<std::shared_mutex> lg(tool.isa_map_mut);
         auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
         tool.kernel_object_to_kernel_name.emplace(data->kernel_object, data->kernel_name);
     }
 
-    if(record.operation != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD) return;
+    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
 
     std::unique_lock<std::shared_mutex> lg(tool.isa_map_mut);
     auto*                               data = static_cast<code_obj_load_data_t*>(record.payload);

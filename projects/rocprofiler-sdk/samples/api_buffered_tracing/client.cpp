@@ -96,7 +96,7 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
                           void*                                 callback_data)
 {
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-       record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD)
+       record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
     {
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
@@ -108,8 +108,7 @@ tool_code_object_callback(rocprofiler_callback_tracing_record_t record,
         }
     }
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-            record.operation ==
-                ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+            record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
         auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)

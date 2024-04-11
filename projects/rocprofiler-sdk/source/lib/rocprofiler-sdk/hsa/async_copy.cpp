@@ -98,9 +98,9 @@ struct async_copy_info;
 
 #define SPECIALIZE_ASYNC_COPY_INFO(DIRECTION)                                                      \
     template <>                                                                                    \
-    struct async_copy_info<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_##DIRECTION>                     \
+    struct async_copy_info<ROCPROFILER_MEMORY_COPY_##DIRECTION>                                    \
     {                                                                                              \
-        static constexpr auto operation_idx = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_##DIRECTION;  \
+        static constexpr auto operation_idx = ROCPROFILER_MEMORY_COPY_##DIRECTION;                 \
         static constexpr auto name          = #DIRECTION;                                          \
     };
 
@@ -169,12 +169,12 @@ constexpr auto null_rocp_agent_id =
 
 struct async_copy_data
 {
-    hsa_signal_t                        orig_signal = {};
-    hsa_signal_t                        rocp_signal = {};
-    rocprofiler_thread_id_t             tid         = common::get_tid();
-    rocprofiler_agent_id_t              dst_agent   = null_rocp_agent_id;
-    rocprofiler_agent_id_t              src_agent   = null_rocp_agent_id;
-    rocprofiler_memory_copy_operation_t direction   = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_NONE;
+    hsa_signal_t                        orig_signal     = {};
+    hsa_signal_t                        rocp_signal     = {};
+    rocprofiler_thread_id_t             tid             = common::get_tid();
+    rocprofiler_agent_id_t              dst_agent       = null_rocp_agent_id;
+    rocprofiler_agent_id_t              src_agent       = null_rocp_agent_id;
+    rocprofiler_memory_copy_operation_t direction       = ROCPROFILER_MEMORY_COPY_NONE;
     context::correlation_id*            correlation_id  = nullptr;
     context::context_array_t            contexts        = {};
     external_corr_id_map_t              extern_corr_ids = {};
@@ -466,7 +466,7 @@ async_copy_impl(Args... args)
     }
 
     // determine the direction of the memory copy
-    auto _direction    = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_NONE;
+    auto _direction    = ROCPROFILER_MEMORY_COPY_NONE;
     auto _src_agent_id = rocprofiler_agent_id_t{};
     auto _dst_agent_id = rocprofiler_agent_id_t{};
     {
@@ -489,9 +489,9 @@ async_copy_impl(Args... args)
             if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
             {
                 if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _direction = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_HOST_TO_HOST;
+                    _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_HOST;
                 else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _direction = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_HOST_TO_DEVICE;
+                    _direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
                 else
                 {
                     ROCP_CI_LOG(WARNING)
@@ -502,9 +502,9 @@ async_copy_impl(Args... args)
             else if(_rocp_src_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
             {
                 if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                    _direction = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_DEVICE_TO_HOST;
+                    _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
                 else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                    _direction = ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_DEVICE_TO_DEVICE;
+                    _direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE;
                 else
                 {
                     ROCP_CI_LOG(WARNING)
@@ -708,22 +708,21 @@ using async_copy_index_seq_t =
 const char*
 name_by_id(uint32_t id)
 {
-    return name_by_id(id, std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+    return name_by_id(id, std::make_index_sequence<ROCPROFILER_MEMORY_COPY_LAST>{});
 }
 
 uint32_t
 id_by_name(const char* name)
 {
-    return id_by_name(name,
-                      std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+    return id_by_name(name, std::make_index_sequence<ROCPROFILER_MEMORY_COPY_LAST>{});
 }
 
 std::vector<uint32_t>
 get_ids()
 {
     auto _data = std::vector<uint32_t>{};
-    _data.reserve(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST);
-    get_ids(_data, std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+    _data.reserve(ROCPROFILER_MEMORY_COPY_LAST);
+    get_ids(_data, std::make_index_sequence<ROCPROFILER_MEMORY_COPY_LAST>{});
     return _data;
 }
 
@@ -731,8 +730,8 @@ std::vector<const char*>
 get_names()
 {
     auto _data = std::vector<const char*>{};
-    _data.reserve(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST);
-    get_names(_data, std::make_index_sequence<ROCPROFILER_BUFFER_TRACING_MEMORY_COPY_LAST>{});
+    _data.reserve(ROCPROFILER_MEMORY_COPY_LAST);
+    get_names(_data, std::make_index_sequence<ROCPROFILER_MEMORY_COPY_LAST>{});
     return _data;
 }
 }  // namespace async_copy

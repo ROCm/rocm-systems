@@ -215,7 +215,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
                       void*                                 callback_data)
 {
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-       record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_LOAD)
+       record.operation == ROCPROFILER_CODE_OBJECT_LOAD)
     {
         auto* data         = static_cast<code_obj_load_data_t*>(record.payload);
         auto* call_stack_v = static_cast<call_stack_t*>(callback_data);
@@ -243,7 +243,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
     }
     if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
-       record.operation == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
+       record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
         auto* data         = static_cast<kernel_symbol_data_t*>(record.payload);
         auto* call_stack_v = static_cast<call_stack_t*>(callback_data);
