@@ -76,7 +76,7 @@ jobs:
           ${{ matrix.ci-flags }}
           --
           -DROCPROFILER_DEP_ROCMCORE=ON
-          -DROCPROFILER_BUILD_DOCS=ON
+          -DROCPROFILER_BUILD_DOCS=OFF
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
           -DCPACK_GENERATOR='DEB;RPM;TGZ'

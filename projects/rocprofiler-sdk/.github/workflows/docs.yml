@@ -41,17 +41,23 @@ jobs:
         with:
             submodules: true
       - name: Install Conda
-        uses: s-weigand/setup-conda@v1
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+            miniconda-version: "latest"
+            auto-activate-base: true
+            activate-environment: ""
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Create Docs Directory
         run:
           mkdir -p docs
       - name: Install Conda environment
+        shell: bash -el {0}
         working-directory: source/docs
         run: |
           conda env create -n rocprofiler-docs -f environment.yml
       - name: Build Docs
+        shell: bash -el {0}
         working-directory: source/docs
         run: |
           source activate
@@ -77,3 +83,38 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  build-docs-from-source:
+    runs-on: rocprofiler-cluster-runner-set
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+            submodules: true
+
+      - name: Install requirements
+        timeout-minutes: 10
+        shell: bash
+        run: |
+          git config --global --add safe.directory '*'
+          apt-get update
+          apt-get install -y cmake gcc g++ libdw-dev
+          python3 -m pip install -r requirements.txt
+
+      - name: Configure, Build, Install, and Package
+        timeout-minutes: 30
+        shell: bash
+        run:
+          export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};
+          cmake -B build
+            -DROCPROFILER_DEP_ROCMCORE=ON
+            -DROCPROFILER_BUILD_DOCS=ON
+            -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-sdk
+            -DCPACK_GENERATOR='DEB;RPM;TGZ'
+            -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
+            -DPython3_EXECUTABLE=$(which python3)
+            . &&
+          cmake --build build --target docs --parallel 4 &&
+          cmake --build build --target all --parallel 12 &&
+          cmake --build build --target install --parallel 12 &&
+          cmake --build build --target package --parallel 12
