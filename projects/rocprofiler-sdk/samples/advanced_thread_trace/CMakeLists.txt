@@ -44,16 +44,11 @@ target_link_libraries(
     advanced-thread-trace PRIVATE advanced-thread-trace-client Threads::Threads
                                   rocprofiler::samples-build-flags)
 
+rocprofiler_samples_get_preload_env(PRELOAD_ENV advanced-thread-trace-client)
+
 add_test(NAME advanced-thread-trace COMMAND $<TARGET_FILE:advanced-thread-trace>)
 
 set_tests_properties(
     advanced-thread-trace
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "samples"
-        ENVIRONMENT
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-        FAIL_REGULAR_EXPRESSION
-        "threw an exception")
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${PRELOAD_ENV}"
+               FAIL_REGULAR_EXPRESSION "threw an exception")

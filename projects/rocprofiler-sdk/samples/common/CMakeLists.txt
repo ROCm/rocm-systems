@@ -40,3 +40,47 @@ if(EXISTS ${EXTERNAL_SUBMODULE_DIR}/filesystem/include/ghc/filesystem.hpp)
         rocprofiler-samples-common-library SYSTEM
         INTERFACE $<BUILD_INTERFACE:${EXTERNAL_SUBMODULE_DIR}/filesystem/include>)
 endif()
+
+# function for getting the LD_PRELOAD environment variable
+function(rocprofiler_samples_get_preload_env _VAR)
+    set(_PRELOAD_ENV_LIBS ${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE} $ENV{LD_PRELOAD})
+
+    foreach(_TARG ${ARGN})
+        if(NOT TARGET ${_TARG})
+            message(
+                FATAL_ERROR
+                    "rocprofiler_samples_get_preload_env: '${_TARG}' is not a valid target"
+                )
+        endif()
+        list(APPEND _PRELOAD_ENV_LIBS $<TARGET_FILE:${_TARG}>)
+    endforeach()
+
+    if(_PRELOAD_ENV_LIBS)
+        string(REPLACE ";" ":" _PRELOAD_ENV "LD_PRELOAD=${_PRELOAD_ENV_LIBS}")
+    endif()
+
+    set(${_VAR}
+        "${_PRELOAD_ENV}"
+        PARENT_SCOPE)
+endfunction()
+
+# function for getting the LD_LIBRARY_PATH environment variable
+function(rocprofiler_samples_get_ld_library_path_env _VAR)
+
+    set(_LDLIB_PATH "LD_LIBRARY_PATH=")
+    foreach(_TARG ${ARGN})
+        if(NOT TARGET ${_TARG})
+            message(
+                FATAL_ERROR
+                    "rocprofiler_samples_get_ld_library_path_env: '${_TARG}' is not a valid target"
+                )
+        endif()
+        string(APPEND _LDLIB_PATH "$<TARGET_FILE_DIR:${_TARG}>:")
+    endforeach()
+    # append the environments current LD_LIBRARY_PATH
+    string(APPEND _LDLIB_PATH "$ENV{LD_LIBRARY_PATH}")
+
+    set(${_VAR}
+        "${_LDLIB_PATH}"
+        PARENT_SCOPE)
+endfunction()

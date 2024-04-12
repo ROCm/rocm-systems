@@ -41,12 +41,6 @@ add_test(NAME code-object-isa-decode COMMAND $<TARGET_FILE:code-object-isa-decod
 
 set_tests_properties(
     code-object-isa-decode
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "samples"
-        ENVIRONMENT
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-        FAIL_REGULAR_EXPRESSION
-        "threw an exception")
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
+               "threw an exception")

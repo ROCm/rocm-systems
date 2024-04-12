@@ -1343,7 +1343,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         }
     }
 
-    push_external_correlation(getpid());
+    push_external_correlation(getppid());
 
     start();
 
@@ -1910,13 +1910,13 @@ pop_external_correlation()
             auto _data = rocprofiler_user_data_t{.value = 0};
             ROCPROFILER_CALL(rocprofiler_pop_external_correlation_id(*itr.second, tid, &_data),
                              "push external correlation");
-            if(_data.value != static_cast<uint64_t>(getpid()))
+            if(_data.value != static_cast<uint64_t>(getppid()))
             {
                 auto _msg = std::stringstream{};
                 _msg << "rocprofiler_pop_external_correlation_id(context.handle="
                      << itr.second->handle << ", tid=" << tid
                      << ", ...) returned external correlation id value of " << _data.value
-                     << ". expected: " << getpid();
+                     << ". expected: " << getppid();
                 throw std::runtime_error{_msg.str()};
             }
         }

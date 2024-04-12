@@ -42,16 +42,14 @@ target_sources(intercept-table PRIVATE main.cpp)
 target_link_libraries(intercept-table PRIVATE intercept-table-client Threads::Threads
                                               rocprofiler::samples-build-flags)
 
+rocprofiler_samples_get_preload_env(PRELOAD_ENV intercept-table-client)
+rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
+
+set(intercept-table-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
+
 add_test(NAME intercept-table COMMAND $<TARGET_FILE:intercept-table>)
 
 set_tests_properties(
     intercept-table
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "samples"
-        ENVIRONMENT
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${intercept-table-env}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

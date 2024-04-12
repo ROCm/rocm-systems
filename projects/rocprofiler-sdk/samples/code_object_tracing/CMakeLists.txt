@@ -47,12 +47,6 @@ add_test(NAME code-object-tracing COMMAND $<TARGET_FILE:code-object-tracing>)
 
 set_tests_properties(
     code-object-tracing
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "samples"
-        ENVIRONMENT
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

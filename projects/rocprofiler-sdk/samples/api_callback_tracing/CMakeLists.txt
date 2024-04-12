@@ -46,13 +46,13 @@ target_link_libraries(
     PRIVATE callback-api-tracing-client Threads::Threads
             rocprofiler-sdk-roctx::rocprofiler-sdk-roctx rocprofiler::samples-build-flags)
 
-add_test(NAME callback-api-tracing COMMAND $<TARGET_FILE:callback-api-tracing>)
+rocprofiler_samples_get_preload_env(PRELOAD_ENV callback-api-tracing-client)
+rocprofiler_samples_get_ld_library_path_env(
+    LIBRARY_PATH_ENV rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library)
 
-set(callback-api-tracing-env
-    ${ROCPROFILER_MEMCHECK_PRELOAD_ENV}
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library>:$ENV{LD_LIBRARY_PATH}"
-    )
+set(callback-api-tracing-env ${PRELOAD_ENV} ${LIBRARY_PATH_ENV})
+
+add_test(NAME callback-api-tracing COMMAND $<TARGET_FILE:callback-api-tracing>)
 
 set_tests_properties(
     callback-api-tracing

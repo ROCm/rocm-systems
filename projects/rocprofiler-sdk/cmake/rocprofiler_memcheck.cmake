@@ -66,11 +66,15 @@ function(rocprofiler_set_memcheck_env _TYPE _LIB_BASE)
         set(ROCPROFILER_MEMCHECK_PRELOAD_ENV
             "LD_PRELOAD=${${_TYPE}_LIBRARY}"
             CACHE INTERNAL "LD_PRELOAD env variable for tests " FORCE)
+        set(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE
+            "${${_TYPE}_LIBRARY}"
+            CACHE INTERNAL "Library to LD_PRELOAD for tests " FORCE)
     endif()
 endfunction()
 
 # always unset so that it doesn't preload if memcheck disabled
 unset(ROCPROFILER_MEMCHECK_PRELOAD_ENV CACHE)
+unset(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE CACHE)
 
 # the soversions below are fallbacks in case deduce-sanitizer-lib.sh fails
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU" AND CMAKE_CXX_COMPILER_VERSION

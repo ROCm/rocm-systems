@@ -17,10 +17,8 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-set(tracing-env
-    "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
-    "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>")
+set(tracing-env "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
+                "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}")
 
 foreach(FILENAME validate.py conftest.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}

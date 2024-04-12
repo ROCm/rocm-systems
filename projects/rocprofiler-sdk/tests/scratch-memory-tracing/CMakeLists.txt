@@ -21,7 +21,6 @@ add_test(NAME test-scratch-memory-tracing-execute COMMAND $<TARGET_FILE:scratch-
 
 set(scratch-memory-tracing-env
     "${PRELOAD_ENV}"
-    "HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
     "ROCPROFILER_TOOL_OUTPUT_FILE=scratch-memory-tracing-test.json"
     "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
