@@ -124,8 +124,8 @@ add_custom_target(link-rocm-smi ALL
 ## Add the install directives for the runtime library.
 install(TARGETS ${ROCM_SMI_TARGET}
           EXPORT rocm_smiTargets
-          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-          COMPONENT dev)
+          LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev
+          ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT dev)
 install(TARGETS ${ROCM_SMI_TARGET}
           LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
           COMPONENT asan)
