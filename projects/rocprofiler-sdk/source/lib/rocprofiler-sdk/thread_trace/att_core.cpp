@@ -169,12 +169,14 @@ ThreadTracer::start_context()
             std::nullopt,
             [=](const hsa::Queue&                                               q,
                 const hsa::rocprofiler_packet&                                  kern_pkt,
-                uint64_t                                                        kernel_id,
+                rocprofiler_kernel_id_t                                         kernel_id,
+                rocprofiler_dispatch_id_t                                       dispatch_id,
                 rocprofiler_user_data_t*                                        user_data,
                 const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
                 const context::correlation_id*                                  corr_id) {
-                (void) user_data;
                 return pre_kernel_call(*this, q, kern_pkt, kernel_id, extern_corr_ids, corr_id);
+                (void) user_data;
+                (void) dispatch_id;
             },
             [=](const hsa::Queue&                       q,
                 hsa::rocprofiler_packet                 kern_pkt,

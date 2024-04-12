@@ -203,6 +203,52 @@ typedef enum  // NOLINT(performance-enum-size)
 } rocprofiler_memory_copy_operation_t;
 
 /**
+ * @brief ROCProfiler Kernel Dispatch Tracing Operation Types.
+ */
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_KERNEL_DISPATCH_NONE    = 0,  ///< Unknown kernel dispatch operation
+    ROCPROFILER_KERNEL_DISPATCH_ENQUEUE = 1,
+    ROCPROFILER_KERNEL_DISPATCH_COMPLETE,
+    ROCPROFILER_KERNEL_DISPATCH_LAST,
+
+    /// @var ROCPROFILER_KERNEL_DISPATCH_ENQUEUE
+    /// @brief Invoke callback prior to a kernel being enqueued and after the kernel has been
+    /// enqueued. When the phase is ::ROCPROFILER_CALLBACK_PHASE_ENTER, this is an opportunity to
+    /// push an external correlation id and/or modify the active contexts before a kernel is
+    /// launched. Any active contexts containing services related to a kernel dispatch (kernel
+    /// tracing, counter collection, etc.) will be captured after this callback and attached to the
+    /// kernel. These captured contexts will be considered "active" when the kernel completes even
+    /// if the context was stopped before the kernel completes -- this contract is designed to
+    /// ensure that tools do not have to delay stopping a context because of an async operation in
+    /// order to get the data they requested when the async operation was started. When the phase is
+    /// ::ROCPROFILER_CALLBACK_PHASE_EXIT, the active contexts for the kernel dispatch have been
+    /// captured and it is safe to disable those contexts without affecting the delivery of the
+    /// requested data when the kernel completes. It is important to note that, even if the context
+    /// associated with the kernel dispatch callback tracing service is disabled in between the
+    /// enter and exit phase, the exit phase callback is still delievered but that context will not
+    /// be captured when the kernel is enqueued and therefore will not provide a
+    /// ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE callback. Furthermore, it should be
+    /// noted that if a tool encodes information into the `::rocprofiler_user_data_t` output
+    /// parameter in ::rocprofiler_callback_tracing_cb_t, that same value will be delivered in the
+    /// exit phase and in the ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE callback. In
+    /// other words, any modifications to that user data value in the exit phase will not be
+    /// reflected in the ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE callback because a
+    /// copy of that user data struct is attached to the kernel, not a reference to the user data
+    /// struct.
+    ///
+    /// @var ROCPROFILER_KERNEL_DISPATCH_COMPLETE
+    /// @brief Invoke callback after a kernel has completed and the HSA runtime has processed the
+    /// signal indicating that the kernel has completed. The latter half of this statement is
+    /// important. There is no guarantee that these callbacks are invoked in any order related to
+    /// when the kernels were dispatched, i.e. even if kernel A is launched and fully executed
+    /// before kernel B is launched, it is entirely possible that the HSA runtime ends up processing
+    /// the signal associated with kernel B before processing the signal associated with kernel A --
+    /// resulting in rocprofiler-sdk invoking this operation callback for kernel B before invoking
+    /// the callback for kernel A.
+} rocprofiler_kernel_dispatch_operation_t;
+
+/**
  * @brief PC Sampling Method.
  */
 typedef enum  // NOLINT(performance-enum-size)
@@ -334,6 +380,12 @@ typedef uint32_t rocprofiler_tracing_operation_t;
  *
  */
 typedef uint64_t rocprofiler_kernel_id_t;
+
+// /**
+//  * @brief Sequence identifier type
+//  *
+//  */
+typedef uint64_t rocprofiler_dispatch_id_t;
 
 // forward declaration of struct
 typedef struct rocprofiler_pc_sampling_configuration_s rocprofiler_pc_sampling_configuration_t;

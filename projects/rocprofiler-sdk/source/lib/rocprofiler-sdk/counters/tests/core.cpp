@@ -365,6 +365,7 @@ struct expected_dispatch
     rocprofiler_queue_id_t           queue_id       = {.handle = 0};
     rocprofiler_agent_id_t           agent_id       = {.handle = 0};
     uint64_t                         kernel_id      = 0;
+    uint64_t                         dispatch_id    = 0;
     rocprofiler_correlation_id_t     correlation_id = {.internal = 0, .external = {.value = 0}};
     rocprofiler_dim3_t               workgroup_size = {0, 0, 0};
     rocprofiler_dim3_t               grid_size      = {0, 0, 0};
@@ -383,9 +384,11 @@ user_dispatch_cb(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     auto queue_id       = dispatch_data.queue_id;
     auto correlation_id = dispatch_data.correlation_id;
     auto kernel_id      = dispatch_data.kernel_id;
+    auto dispatch_id    = dispatch_data.dispatch_id;
 
     EXPECT_EQ(sizeof(rocprofiler_profile_counting_dispatch_data_t), dispatch_data.size);
     EXPECT_EQ(expected.kernel_id, kernel_id);
+    EXPECT_EQ(expected.dispatch_id, dispatch_id);
     EXPECT_EQ(expected.agent_id, agent_id);
     EXPECT_EQ(expected.queue_id.handle, queue_id.handle);
     EXPECT_EQ(expected.correlation_id.internal, correlation_id.internal);
@@ -480,14 +483,22 @@ TEST(core, check_callbacks)
                                   pkt.kernel_dispatch.grid_size_y,
                                   pkt.kernel_dispatch.grid_size_z};
             expected.kernel_id      = count++;
+            expected.dispatch_id    = count++;
             expected.queue_id       = qid;
             expected.agent_id       = fq.get_agent().get_rocp_agent()->id;
 
             hsa::Queue::queue_info_session_t::external_corr_id_map_t extern_ids = {};
 
             auto user_data = rocprofiler_user_data_t{.value = corr_id.internal};
-            auto ret_pkt   = counters::queue_cb(
-                &ctx, cb_info, fq, pkt, expected.kernel_id, &user_data, extern_ids, &corr_id);
+            auto ret_pkt   = counters::queue_cb(&ctx,
+                                              cb_info,
+                                              fq,
+                                              pkt,
+                                              expected.kernel_id,
+                                              expected.dispatch_id,
+                                              &user_data,
+                                              extern_ids,
+                                              &corr_id);
 
             ASSERT_TRUE(ret_pkt) << fmt::format("Expected a packet to be generated for - {}",
                                                 metric.name());

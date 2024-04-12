@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <cstdint>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -124,6 +125,9 @@ struct hsa_api_impl
     template <typename RetT, typename... Args>
     static RetT functor(Args... args);
 };
+
+std::string_view
+get_hsa_status_string(hsa_status_t _status);
 
 template <size_t TableIdx>
 const char*

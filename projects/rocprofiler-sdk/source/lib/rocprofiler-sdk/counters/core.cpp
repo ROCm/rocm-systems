@@ -266,7 +266,8 @@ queue_cb(const context::context*                                         ctx,
          const std::shared_ptr<counter_callback_info>&                   info,
          const hsa::Queue&                                               queue,
          const hsa::rocprofiler_packet&                                  pkt,
-         uint64_t                                                        kernel_id,
+         rocprofiler_kernel_id_t                                         kernel_id,
+         rocprofiler_dispatch_id_t                                       dispatch_id,
          rocprofiler_user_data_t*                                        user_data,
          const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
          const context::correlation_id*                                  correlation_id)
@@ -326,6 +327,7 @@ queue_cb(const context::context*                                         ctx,
         common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
 
     dispatch_data.kernel_id            = kernel_id;
+    dispatch_data.dispatch_id          = dispatch_id;
     dispatch_data.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
     dispatch_data.queue_id             = queue.get_id();
     dispatch_data.correlation_id       = _corr_id_v;
@@ -375,7 +377,7 @@ queue_cb(const context::context*                                         ctx,
 void
 completed_cb(const context::context*                       ctx,
              const std::shared_ptr<counter_callback_info>& info,
-             const hsa::Queue&                             queue,
+             const hsa::Queue& /*queue*/,
              hsa::rocprofiler_packet,
              const hsa::Queue::queue_info_session_t& session,
              inst_pkt_t&                             pkts)
@@ -432,8 +434,8 @@ completed_cb(const context::context*                       ctx,
     if(const auto* _corr_id = session.correlation_id)
     {
         _corr_id_v.internal = _corr_id->internal;
-        if(const auto* external =
-               rocprofiler::common::get_val(session.extern_corr_ids, info->internal_context))
+        if(const auto* external = rocprofiler::common::get_val(
+               session.tracing_data.external_correlation_ids, info->internal_context))
         {
             _corr_id_v.external = *external;
         }
@@ -463,20 +465,15 @@ completed_cb(const context::context*                       ctx,
         auto dispatch_data =
             common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
 
-        const auto& kernel_dispatch_pkt = session.kernel_pkt.kernel_dispatch;
-
-        dispatch_data.kernel_id            = session.kernel_id;
-        dispatch_data.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
-        dispatch_data.queue_id             = queue.get_id();
+        dispatch_data.kernel_id            = session.callback_record.kernel_id;
+        dispatch_data.dispatch_id          = session.callback_record.dispatch_id;
+        dispatch_data.agent_id             = session.callback_record.agent_id;
+        dispatch_data.queue_id             = session.callback_record.queue_id;
         dispatch_data.correlation_id       = _corr_id_v;
-        dispatch_data.private_segment_size = kernel_dispatch_pkt.private_segment_size;
-        dispatch_data.group_segment_size   = kernel_dispatch_pkt.group_segment_size;
-        dispatch_data.workgroup_size       = {kernel_dispatch_pkt.workgroup_size_x,
-                                        kernel_dispatch_pkt.workgroup_size_y,
-                                        kernel_dispatch_pkt.workgroup_size_z};
-        dispatch_data.grid_size            = {kernel_dispatch_pkt.grid_size_x,
-                                   kernel_dispatch_pkt.grid_size_y,
-                                   kernel_dispatch_pkt.grid_size_z};
+        dispatch_data.private_segment_size = session.callback_record.private_segment_size;
+        dispatch_data.group_segment_size   = session.callback_record.group_segment_size;
+        dispatch_data.workgroup_size       = session.callback_record.workgroup_size;
+        dispatch_data.grid_size            = session.callback_record.grid_size;
 
         info->record_callback(
             dispatch_data, out.data(), out.size(), session.user_data, info->record_callback_args);
@@ -509,7 +506,8 @@ start_context(const context::context* ctx)
                 std::nullopt,
                 [=](const hsa::Queue&                                               q,
                     const hsa::rocprofiler_packet&                                  kern_pkt,
-                    uint64_t                                                        kernel_id,
+                    rocprofiler_kernel_id_t                                         kernel_id,
+                    rocprofiler_dispatch_id_t                                       dispatch_id,
                     rocprofiler_user_data_t*                                        user_data,
                     const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
                     const context::correlation_id* correlation_id) {
@@ -518,6 +516,7 @@ start_context(const context::context* ctx)
                                     q,
                                     kern_pkt,
                                     kernel_id,
+                                    dispatch_id,
                                     user_data,
                                     extern_corr_ids,
                                     correlation_id);

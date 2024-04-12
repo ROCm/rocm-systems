@@ -4,11 +4,11 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     aql_packet.cpp
     async_copy.cpp
     code_object.cpp
+    hsa_barrier.cpp
     hsa.cpp
+    profile_serializer.cpp
     queue_controller.cpp
     queue.cpp
-    hsa_barrier.cpp
-    profile_serializer.cpp
     scratch_memory.cpp)
 
 set(ROCPROFILER_LIB_HSA_HEADERS
@@ -22,6 +22,8 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     profile_serializer.hpp
     queue_controller.hpp
     queue.hpp
+    queue_info_session.hpp
+    rocprofiler_packet.hpp
     scratch_memory.hpp
     types.hpp
     utils.hpp)

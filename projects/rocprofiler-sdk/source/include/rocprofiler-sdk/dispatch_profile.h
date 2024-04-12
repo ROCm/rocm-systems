@@ -44,14 +44,15 @@ ROCPROFILER_EXTERN_C_INIT
 typedef struct rocprofiler_profile_counting_dispatch_data_t
 {
     uint64_t                     size;            ///< Size of this struct
-    rocprofiler_kernel_id_t      kernel_id;       ///< Kernel identifier
     rocprofiler_agent_id_t       agent_id;        ///< Agent ID where kernel is launched
     rocprofiler_queue_id_t       queue_id;        ///< Queue ID where kernel packet is enqueued
+    rocprofiler_kernel_id_t      kernel_id;       ///< Kernel identifier
+    rocprofiler_dispatch_id_t    dispatch_id;     ///< unique id for each dispatch
     rocprofiler_correlation_id_t correlation_id;  ///< Correlation ID for this dispatch
-    uint32_t                     private_segment_size;  /// runtime private memory segment size
-    uint32_t                     group_segment_size;    /// runtime group memory segment size
-    rocprofiler_dim3_t           workgroup_size;        /// runtime workgroup size (grid * threads)
-    rocprofiler_dim3_t           grid_size;             /// runtime grid size
+    uint32_t                     private_segment_size;  ///< runtime private memory segment size
+    uint32_t                     group_segment_size;    ///< runtime group memory segment size
+    rocprofiler_dim3_t           workgroup_size;        ///< runtime workgroup size (grid * threads)
+    rocprofiler_dim3_t           grid_size;             ///< runtime grid size
 } rocprofiler_profile_counting_dispatch_data_t;
 
 /**

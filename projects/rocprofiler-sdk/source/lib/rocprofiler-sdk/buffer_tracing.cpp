@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -227,6 +228,10 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
+        {
+            val = rocprofiler::kernel_dispatch::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
         {
@@ -330,6 +335,10 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH:
+        {
+            ops = rocprofiler::kernel_dispatch::get_ids();
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
         {

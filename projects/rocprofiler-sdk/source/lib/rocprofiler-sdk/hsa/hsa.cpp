@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/hsa/types.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -258,65 +259,17 @@ hsa_api_impl<TableIdx, OpIdx>::exec(FuncT&& _func, Args&&... args)
         return return_type{HSA_STATUS_ERROR};
 }
 
-namespace
-{
-using correlation_service     = context::correlation_tracing_service;
-using buffer_hsa_api_record_t = rocprofiler_buffer_tracing_hsa_api_record_t;
-using callback_hsa_api_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
-
-struct callback_context_data
-{
-    const context::context*               ctx       = nullptr;
-    rocprofiler_callback_tracing_record_t record    = {};
-    rocprofiler_user_data_t               user_data = {.value = 0};
-};
-
-struct buffered_context_data
-{
-    const context::context* ctx                  = nullptr;
-    rocprofiler_user_data_t external_correlation = {};
-};
-
-constexpr auto empty_user_data = rocprofiler_user_data_t{.value = 0};
-
-void
-populate_contexts(rocprofiler_callback_tracing_kind_t callback_domain_idx,
-                  rocprofiler_buffer_tracing_kind_t   buffered_domain_idx,
-                  int                                 operation_idx,
-                  std::vector<callback_context_data>& callback_contexts,
-                  std::vector<buffered_context_data>& buffered_contexts)
-{
-    auto active_contexts = context::context_array_t{};
-    auto thr_id          = common::get_tid();
-    for(const auto* itr : context::get_active_contexts(active_contexts))
-    {
-        if(!itr) continue;
-
-        if(itr->callback_tracer)
-        {
-            // if the given domain + op is not enabled, skip this context
-            if(itr->callback_tracer->domains(callback_domain_idx, operation_idx))
-                callback_contexts.emplace_back(
-                    callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-        }
-
-        if(itr->buffered_tracer)
-        {
-            // if the given domain + op is not enabled, skip this context
-            if(itr->buffered_tracer->domains(buffered_domain_idx, operation_idx))
-                buffered_contexts.emplace_back(buffered_context_data{
-                    itr, itr->correlation_tracer.external_correlator.get(thr_id)});
-        }
-    }
-}
-}  // namespace
-
 template <size_t TableIdx, size_t OpIdx>
 template <typename RetT, typename... Args>
 RetT
 hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
 {
-    using info_type = hsa_api_info<TableIdx, OpIdx>;
+    using buffer_hsa_api_record_t = rocprofiler_buffer_tracing_hsa_api_record_t;
+    using callback_hsa_api_data_t = rocprofiler_callback_tracing_hsa_api_data_t;
+    using info_type               = hsa_api_info<TableIdx, OpIdx>;
+
+    constexpr auto external_corr_id_domain_idx =
+        hsa_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
     LOG_IF(INFO, registration::get_fini_status() != 0) << "Executing " << info_type::name;
 
@@ -329,15 +282,18 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
             return;
     }
 
-    auto thr_id            = common::get_tid();
-    auto callback_contexts = std::vector<callback_context_data>{};
-    auto buffered_contexts = std::vector<buffered_context_data>{};
+    constexpr auto ref_count         = 2;
+    auto           thr_id            = common::get_tid();
+    auto           callback_contexts = tracing::callback_context_data_vec_t{};
+    auto           buffered_contexts = tracing::buffered_context_data_vec_t{};
+    auto           external_corr_ids = tracing::external_correlation_id_map_t{};
 
-    populate_contexts(info_type::callback_domain_idx,
-                      info_type::buffered_domain_idx,
-                      info_type::operation_idx,
-                      callback_contexts,
-                      buffered_contexts);
+    tracing::populate_contexts(info_type::callback_domain_idx,
+                               info_type::buffered_domain_idx,
+                               info_type::operation_idx,
+                               callback_contexts,
+                               buffered_contexts,
+                               external_corr_ids);
 
     if(callback_contexts.empty() && buffered_contexts.empty())
     {
@@ -348,68 +304,41 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
             return;
     }
 
-    constexpr auto ref_count        = 2;
-    auto           buffer_record    = common::init_public_api_struct(buffer_hsa_api_record_t{});
-    auto           tracer_data      = common::init_public_api_struct(callback_hsa_api_data_t{});
-    auto*          corr_id          = correlation_service::construct(ref_count);
-    auto           internal_corr_id = corr_id->internal;
+    LOG_IF(FATAL, external_corr_ids.size() < (callback_contexts.size() + buffered_contexts.size()))
+        << "missing external correlation ids";
 
-    // construct the buffered info before the callback so the callbacks are as closely wrapped
-    // around the function call as possible
-    if(!buffered_contexts.empty())
-    {
-        buffer_record.kind = info_type::buffered_domain_idx;
-        // external correlation will be updated right before record is placed in buffer
-        buffer_record.correlation_id =
-            rocprofiler_correlation_id_t{internal_corr_id, empty_user_data};
-        buffer_record.operation = info_type::operation_idx;
-        buffer_record.thread_id = thr_id;
-    }
+    auto  buffer_record    = common::init_public_api_struct(buffer_hsa_api_record_t{});
+    auto  tracer_data      = common::init_public_api_struct(callback_hsa_api_data_t{});
+    auto* corr_id          = tracing::correlation_service::construct(ref_count);
+    auto  internal_corr_id = corr_id->internal;
 
-    tracer_data.size = sizeof(rocprofiler_callback_tracing_hsa_api_data_t);
-    set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
+    tracing::populate_external_correlation_ids(external_corr_ids,
+                                               thr_id,
+                                               external_corr_id_domain_idx,
+                                               info_type::operation_idx,
+                                               internal_corr_id);
 
     // invoke the callbacks
     if(!callback_contexts.empty())
     {
         set_data_args(info_type::get_api_data_args(tracer_data.args), std::forward<Args>(args)...);
 
-        for(auto& itr : callback_contexts)
-        {
-            auto& ctx       = itr.ctx;
-            auto& record    = itr.record;
-            auto& user_data = itr.user_data;
-
-            auto extern_corr_id_v = ctx->correlation_tracer.external_correlator.get(thr_id);
-
-            auto corr_id_v = rocprofiler_correlation_id_t{internal_corr_id, extern_corr_id_v};
-            record =
-                rocprofiler_callback_tracing_record_t{rocprofiler_context_id_t{ctx->context_idx},
-                                                      thr_id,
-                                                      corr_id_v,
-                                                      info_type::callback_domain_idx,
-                                                      info_type::operation_idx,
-                                                      ROCPROFILER_CALLBACK_PHASE_ENTER,
-                                                      static_cast<void*>(&tracer_data)};
-
-            auto& callback_info =
-                ctx->callback_tracer->callback_data.at(info_type::callback_domain_idx);
-            callback_info.callback(record, &user_data, callback_info.data);
-
-            // enter callback may update the external correlation id field
-            record.correlation_id.external =
-                ctx->correlation_tracer.external_correlator.get(thr_id);
-        }
+        tracing::execute_phase_enter_callbacks(callback_contexts,
+                                               thr_id,
+                                               internal_corr_id,
+                                               external_corr_ids,
+                                               info_type::callback_domain_idx,
+                                               info_type::operation_idx,
+                                               tracer_data);
     }
+
+    // enter callback may update the external correlation id field
+    tracing::update_external_correlation_ids(
+        external_corr_ids, thr_id, external_corr_id_domain_idx);
 
     // record the start timestamp as close to the function call as possible
     if(!buffered_contexts.empty())
     {
-        for(auto& itr : buffered_contexts)
-        {
-            itr.external_correlation = itr.ctx->correlation_tracer.external_correlator.get(thr_id);
-        }
-
         buffer_record.start_timestamp = common::timestamp_ns();
     }
 
@@ -428,41 +357,22 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
     {
         set_data_retval(tracer_data.retval, _ret);
 
-        for(auto& itr : callback_contexts)
-        {
-            auto& ctx       = itr.ctx;
-            auto& record    = itr.record;
-            auto& user_data = itr.user_data;
-
-            record.phase   = ROCPROFILER_CALLBACK_PHASE_EXIT;
-            record.payload = static_cast<void*>(&tracer_data);
-
-            auto& callback_info =
-                ctx->callback_tracer->callback_data.at(info_type::callback_domain_idx);
-            callback_info.callback(record, &user_data, callback_info.data);
-        }
+        tracing::execute_phase_exit_callbacks(callback_contexts,
+                                              external_corr_ids,
+                                              info_type::callback_domain_idx,
+                                              info_type::operation_idx,
+                                              tracer_data);
     }
 
     if(!buffered_contexts.empty())
     {
-        for(auto& itr : buffered_contexts)
-        {
-            assert(itr.ctx->buffered_tracer);
-            auto buffer_id =
-                itr.ctx->buffered_tracer->buffer_data.at(info_type::buffered_domain_idx);
-            auto buffer_v = buffer::get_buffer(buffer_id);
-            if(buffer_v && buffer_v->context_id == itr.ctx->context_idx &&
-               buffer_v->buffer_id == buffer_id.handle)
-            {
-                // make copy of record
-                auto record_v = buffer_record;
-                // update the record with the correlation
-                record_v.correlation_id.external = itr.external_correlation;
-
-                buffer_v->emplace(
-                    ROCPROFILER_BUFFER_CATEGORY_TRACING, info_type::buffered_domain_idx, record_v);
-            }
-        }
+        tracing::execute_buffer_record_emplace(buffered_contexts,
+                                               thr_id,
+                                               internal_corr_id,
+                                               external_corr_ids,
+                                               info_type::buffered_domain_idx,
+                                               info_type::operation_idx,
+                                               buffer_record);
     }
 
     // decrement the reference count after usage in the callback/buffers
@@ -691,6 +601,17 @@ update_table(const context::context_array_t& _contexts,
         update_table<TableIdx>(_contexts, _orig, std::index_sequence<OpIdxTail...>{});
 }
 }  // namespace
+
+std::string_view
+get_hsa_status_string(hsa_status_t _status)
+{
+    const char* _status_msg = nullptr;
+    return (hsa::get_core_table()->hsa_status_string_fn(_status, &_status_msg) ==
+                HSA_STATUS_SUCCESS &&
+            _status_msg)
+               ? std::string_view{_status_msg}
+               : std::string_view{"(unknown HSA error)"};
+}
 
 // check out the assembly here... this compiles to a switch statement
 template <size_t TableIdx>

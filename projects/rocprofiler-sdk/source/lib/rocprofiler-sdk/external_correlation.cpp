@@ -77,6 +77,32 @@ external_correlation::get(rocprofiler_thread_id_t tid) const
         tid);
 }
 
+rocprofiler_user_data_t
+external_correlation::get(rocprofiler_thread_id_t tid,
+                          const context::context* ctx,
+                          request_kind_t          kind,
+                          uint32_t                op,
+                          uint64_t                internal_corr_id) const
+{
+    if(requires_request(kind))
+    {
+        auto opt_data = invoke_callback(tid, ctx, kind, op, internal_corr_id);
+        if(opt_data) return *opt_data;
+    }
+
+    return get(tid);
+}
+
+rocprofiler_user_data_t&
+external_correlation::update(rocprofiler_user_data_t& value,
+                             rocprofiler_thread_id_t  thr_id,
+                             request_kind_t           kind) const
+{
+    // if requires request is true, do not update, otherwise, get the latest pushed external
+    // correlation id
+    return (requires_request(kind)) ? value : (value = get(thr_id));
+}
+
 void
 external_correlation::push(rocprofiler_thread_id_t tid, rocprofiler_user_data_t user_data)
 {
@@ -139,10 +165,90 @@ external_correlation::pop(rocprofiler_thread_id_t tid)
         },
         tid);
 }
+
+rocprofiler_status_t
+external_correlation::configure_request(request_cb_t                       callback_v,
+                                        void*                              callback_data_v,
+                                        const std::vector<request_kind_t>& kinds_v)
+{
+    if(!callback_v)
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    else if(callback || callback_data || request.any())
+        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+
+    callback      = callback_v;
+    callback_data = callback_data_v;
+
+    if(kinds_v.empty())
+    {
+        request.flip();
+    }
+    else
+    {
+        for(auto itr : kinds_v)
+        {
+            if(itr <= ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_NONE ||
+               itr >= ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_LAST)
+                return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;
+
+            request.set(itr - 1, true);
+        }
+    }
+
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+bool
+external_correlation::requires_request(request_kind_t kind) const
+{
+    return request.test(kind - 1);
+}
+
+std::optional<rocprofiler_user_data_t>
+external_correlation::invoke_callback(rocprofiler_thread_id_t thr_id,
+                                      const context::context* ctx,
+                                      request_kind_t          kind,
+                                      uint32_t                op,
+                                      uint64_t                internal_corr_id) const
+{
+    auto value  = rocprofiler_user_data_t{.value = 0};
+    auto ctx_id = rocprofiler_context_id_t{ctx->context_idx};
+
+    if(callback(thr_id, ctx_id, kind, op, internal_corr_id, &value, callback_data) == 0)
+        return value;
+
+    return std::nullopt;
+}
 }  // namespace external_correlation
 }  // namespace rocprofiler
 
 extern "C" {
+rocprofiler_status_t
+rocprofiler_configure_external_correlation_id_request_service(
+    rocprofiler_context_id_t                            context_id,
+    rocprofiler_external_correlation_id_request_kind_t* kinds,
+    size_t                                              kinds_count,
+    rocprofiler_external_correlation_id_request_cb_t    callback,
+    void*                                               callback_args)
+{
+    auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
+    if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
+
+    auto kinds_v = std::vector<rocprofiler_external_correlation_id_request_kind_t>{};
+    if(kinds)
+    {
+        kinds_v.reserve(kinds_count);
+
+        if(kinds_count < 1) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+        for(size_t i = 0; i < kinds_count; ++i)
+            kinds_v.emplace_back(kinds[i]);
+    }
+
+    return ctx->correlation_tracer.external_correlator.configure_request(
+        callback, callback_args, kinds_v);
+}
+
 rocprofiler_status_t
 rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
                                          rocprofiler_thread_id_t  tid,

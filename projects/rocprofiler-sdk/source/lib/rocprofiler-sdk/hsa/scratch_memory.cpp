@@ -28,8 +28,10 @@
 #include "lib/rocprofiler-sdk/hsa/defines.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
@@ -214,6 +216,8 @@ struct scratch_op_info<hsa_amd_tool_id_none>
         using end_fn_t   = scratch_op_info<hsa_amd_tool_id_##ENDPHASE>::function_t;                 \
         static constexpr auto operation_idx = ROCPROFILER_##TOOL_OP;                                \
         static constexpr auto name          = #TOOL_OP;                                             \
+        static constexpr auto external_correlation_id_domain_idx =                                  \
+            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_SCRATCH_MEMORY;                                \
     }
 
 SPECIALIZE_AMD_TOOL(SCRATCH_MEMORY_ALLOC, scratch_event_alloc_start, scratch_event_alloc_end);
@@ -324,51 +328,6 @@ copy_table(hsa_amd_tool_table_t* _orig, uint64_t _tbl_instance)
         }
     }
 }
-
-struct buffered_context_data
-{
-    const context::context* ctx = nullptr;
-};
-
-struct callback_context_data
-{
-    const context::context*               ctx       = nullptr;
-    rocprofiler_callback_tracing_record_t record    = {};
-    rocprofiler_user_data_t               user_data = {.value = 0};
-};
-
-void
-populate_contexts(int                                 operation_idx,
-                  std::vector<callback_context_data>& callback_contexts,
-                  std::vector<buffered_context_data>& buffered_contexts)
-{
-    callback_contexts.clear();
-    buffered_contexts.clear();
-
-    auto active_contexts = context::context_array_t{};
-    for(const auto* itr : context::get_active_contexts(active_contexts))
-    {
-        if(!itr) continue;
-
-        if(itr->callback_tracer)
-        {
-            // if the given domain + op is not enabled, skip this context
-            if(itr->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
-                                             operation_idx))
-                callback_contexts.emplace_back(
-                    callback_context_data{itr, rocprofiler_callback_tracing_record_t{}});
-        }
-
-        if(itr->buffered_tracer)
-        {
-            // if the given domain + op is not enabled, skip this context
-            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-                                             operation_idx))
-                buffered_contexts.emplace_back(buffered_context_data{itr});
-        }
-    }
-}
-
 }  // namespace
 
 static_assert(ROCPROFILER_SCRATCH_MEMORY_ALLOC ==
@@ -442,8 +401,9 @@ get_tls_pair(rocprofiler_callback_phase_t phase)
     {
         callback_data_t callback_data = common::init_public_api_struct(callback_data_t{});
         buffered_data_t buffered_data = common::init_public_api_struct(buffered_data_t{});
-        std::vector<callback_context_data> callback_ctxs = {};
-        std::vector<buffered_context_data> buffered_ctxs = {};
+        tracing::callback_context_data_vec_t   callback_contexts = {};
+        tracing::buffered_context_data_vec_t   buffered_contexts = {};
+        tracing::external_correlation_id_map_t external_corr_ids = {};
     };
 
     static thread_local auto tls  = tls_data{};
@@ -451,9 +411,19 @@ get_tls_pair(rocprofiler_callback_phase_t phase)
 
     if(phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
+        // since the context data structures are TLS, we need to clear the contexts first to prevent
+        // duplicate entries
+        using clear_containers = std::true_type;
+
         LOG_IF(FATAL, held) << "Overwriting scratch memory TLS data";
         held = true;
-        populate_contexts(OpIdx, tls.callback_ctxs, tls.buffered_ctxs);
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                   ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                   OpIdx,
+                                   tls.callback_contexts,
+                                   tls.buffered_contexts,
+                                   tls.external_corr_ids,
+                                   clear_containers{});
     }
     else
     {
@@ -473,6 +443,8 @@ impl(Args... args)
 
     constexpr auto OpIdx   = scratch_op_info<ScratchOpIdx>::operation;
     constexpr auto OpPhase = scratch_op_info<ScratchOpIdx>::phase;
+    constexpr auto external_corr_id_domain_idx =
+        amd_tool_api_info<OpIdx>::external_correlation_id_domain_idx;
 
     auto&& _tied_args = std::tie(args...);
     auto&  event_data = std::get<0>(_tied_args);
@@ -480,9 +452,11 @@ impl(Args... args)
     // this lets start and end of the same type have the same thread local storage
     auto& tls = get_tls_pair<OpIdx>(OpPhase);
 
-    if(tls.callback_ctxs.empty() && tls.buffered_ctxs.empty()) return HSA_STATUS_SUCCESS;
+    if(tls.callback_contexts.empty() && tls.buffered_contexts.empty()) return HSA_STATUS_SUCCESS;
 
-    const auto tid = common::get_tid();
+    const auto thr_id           = common::get_tid();
+    auto*      corr_id          = context::get_latest_correlation_id();
+    auto       internal_corr_id = (corr_id) ? corr_id->internal : 0;
 
     [[maybe_unused]] const auto get_agent_id =
         [](const hsa_queue_t* hsa_queue) -> rocprofiler_agent_id_t {
@@ -503,37 +477,9 @@ impl(Args... args)
         return _agent_id;
     };
 
-    auto*      corr_id          = context::get_latest_correlation_id();
-    const auto invoke_callbacks = [&](const rocprofiler_callback_phase_t _phase) {
-        for(auto& itr : tls.callback_ctxs)
-        {
-            auto corr_id_v = rocprofiler_correlation_id_t{};
-            if(corr_id)
-            {
-                corr_id_v.internal = corr_id->internal;
-                corr_id_v.external = itr.ctx->correlation_tracer.external_correlator.get(tid);
-            }
-
-            auto record = rocprofiler_callback_tracing_record_t{
-                .context_id     = rocprofiler_context_id_t{itr.ctx->context_idx},
-                .thread_id      = tid,
-                .correlation_id = corr_id_v,
-                .kind           = ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
-                .operation      = OpIdx,
-                .phase          = _phase,
-                .payload        = static_cast<void*>(&tls.callback_data),
-            };
-
-            auto& cb_info = itr.ctx->callback_tracer->callback_data.at(
-                ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY);
-
-            cb_info.callback(record, &itr.user_data, &cb_info.data);
-        }
-    };
-
     if constexpr(OpPhase == ROCPROFILER_CALLBACK_PHASE_ENTER)
     {
-        if(!tls.callback_ctxs.empty())
+        if(!tls.callback_contexts.empty())
         {
             tls.callback_data.agent_id  = get_agent_id(event_data.scratch_alloc_start->queue);
             tls.callback_data.queue_id  = {event_data.scratch_alloc_start->queue->id};
@@ -546,28 +492,44 @@ impl(Args... args)
                     event_data.scratch_alloc_start->dispatch_id;
             }
 
-            invoke_callbacks(OpPhase);  // NOLINT readability-misleading-indentation
+            tracing::populate_external_correlation_ids(tls.external_corr_ids,
+                                                       thr_id,
+                                                       external_corr_id_domain_idx,
+                                                       OpIdx,
+                                                       internal_corr_id);
+
+            tracing::execute_phase_enter_callbacks(tls.callback_contexts,
+                                                   thr_id,
+                                                   internal_corr_id,
+                                                   tls.external_corr_ids,
+                                                   ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                                   OpIdx,
+                                                   tls.callback_data);
+
+            // enter callback may update the external correlation id field
+            tracing::update_external_correlation_ids(
+                tls.external_corr_ids, thr_id, external_corr_id_domain_idx);
         }
 
-        if(!tls.buffered_ctxs.empty())
+        if(!tls.buffered_contexts.empty())
         {
             tls.buffered_data.kind            = ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY;
             tls.buffered_data.operation       = OpIdx;
             tls.buffered_data.agent_id        = get_agent_id(event_data.scratch_alloc_start->queue);
             tls.buffered_data.queue_id        = {event_data.scratch_alloc_start->queue->id};
-            tls.buffered_data.thread_id       = tid;
+            tls.buffered_data.thread_id       = thr_id;
             tls.buffered_data.start_timestamp = common::timestamp_ns();
         }
     }
     else if constexpr(OpPhase == ROCPROFILER_CALLBACK_PHASE_EXIT)
     {
-        if(!tls.buffered_ctxs.empty())
+        if(!tls.buffered_contexts.empty())
         {
             tls.buffered_data.flags         = get_flags(event_data);
             tls.buffered_data.end_timestamp = common::timestamp_ns();
         }
 
-        if(!tls.callback_ctxs.empty())
+        if(!tls.callback_contexts.empty())
         {
             tls.callback_data.flags     = get_flags(event_data);
             tls.callback_data.args_kind = event_data.none->kind;
@@ -579,31 +541,23 @@ impl(Args... args)
                 data_args.num_slots   = event_data.scratch_alloc_end->num_slots;
             }
 
-            invoke_callbacks(OpPhase);  // NOLINT readability-misleading-indentation
+            tracing::execute_phase_exit_callbacks(tls.callback_contexts,
+                                                  tls.external_corr_ids,
+                                                  ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
+                                                  OpIdx,
+                                                  tls.callback_data);
         }
 
-        if(!tls.buffered_ctxs.empty())
+        if(!tls.buffered_contexts.empty())
         {
-            for(const auto& itr : tls.buffered_ctxs)
-            {
-                auto* _buffer = buffer::get_buffer(itr.ctx->buffered_tracer->buffer_data.at(
-                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY));
-
-                auto corr_id_v = rocprofiler_correlation_id_t{};
-                if(corr_id)
-                {
-                    // TODO(mkuriche) should the id be generated at entry?
-                    corr_id_v.internal = corr_id->internal;
-                    corr_id_v.external = itr.ctx->correlation_tracer.external_correlator.get(tid);
-                }
-
-                auto _record           = tls.buffered_data;
-                _record.correlation_id = corr_id_v;
-
-                CHECK_NOTNULL(_buffer)->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                                                ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-                                                _record);
-            }
+            auto _buffered_data = tls.buffered_data;
+            tracing::execute_buffer_record_emplace(tls.buffered_contexts,
+                                                   thr_id,
+                                                   internal_corr_id,
+                                                   tls.external_corr_ids,
+                                                   ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+                                                   OpIdx,
+                                                   std::move(_buffered_data));
         }
     }
 

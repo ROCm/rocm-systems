@@ -24,6 +24,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
+#include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
 #include "lib/common/container/small_vector.hpp"
@@ -31,6 +32,8 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
+#include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 
 #include <hsa/amd_hsa_kernel_code.h>
 #include <hsa/hsa.h>
@@ -40,6 +43,7 @@
 #include <hsa/hsa_ven_amd_loader.h>
 
 #include <atomic>
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <memory>
@@ -56,44 +60,6 @@ struct correlation_id;
 }  // namespace context
 namespace hsa
 {
-using ClientID = int64_t;
-using inst_pkt_t =
-    common::container::small_vector<std::pair<std::unique_ptr<AQLPacket>, ClientID>, 4>;
-
-union rocprofiler_packet
-{
-    hsa_ext_amd_aql_pm4_packet_t ext_amd_aql_pm4;
-    hsa_kernel_dispatch_packet_t kernel_dispatch;
-    hsa_barrier_and_packet_t     barrier_and;
-    hsa_barrier_or_packet_t      barrier_or;
-
-    rocprofiler_packet()
-    : ext_amd_aql_pm4{null_amd_aql_pm4_packet}
-    {}
-
-    rocprofiler_packet(hsa_ext_amd_aql_pm4_packet_t val)
-    : ext_amd_aql_pm4{val}
-    {}
-
-    rocprofiler_packet(hsa_kernel_dispatch_packet_t val)
-    : kernel_dispatch{val}
-    {}
-
-    rocprofiler_packet(hsa_barrier_and_packet_t val)
-    : barrier_and{val}
-    {}
-
-    rocprofiler_packet(hsa_barrier_or_packet_t val)
-    : barrier_or{val}
-    {}
-
-    ~rocprofiler_packet()                             = default;
-    rocprofiler_packet(const rocprofiler_packet&)     = default;
-    rocprofiler_packet(rocprofiler_packet&&) noexcept = default;
-
-    rocprofiler_packet& operator=(const rocprofiler_packet&) = default;
-    rocprofiler_packet& operator=(rocprofiler_packet&&) noexcept = default;
-};
 enum class queue_state
 {
     normal       = 0,
@@ -105,31 +71,10 @@ enum class queue_state
 class Queue
 {
 public:
-    using context_t       = context::context;
-    using context_array_t = common::container::small_vector<const context_t*>;
-    using callback_t      = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
-
-    // Internal session information that is used by write interceptor
-    // to track state of the intercepted kernel.
-    struct queue_info_session_t
-    {
-        using external_corr_id_map_t =
-            std::unordered_map<const context_t*, rocprofiler_user_data_t>;
-
-        Queue&                     queue;
-        inst_pkt_t                 inst_pkt         = {};
-        hsa_signal_t               interrupt_signal = {};
-        rocprofiler_thread_id_t    tid              = common::get_tid();
-        rocprofiler_kernel_id_t    kernel_id        = 0;
-        rocprofiler_queue_id_t     queue_id         = {};
-        rocprofiler_user_data_t    user_data        = {.value = 0};
-        hsa_agent_t                hsa_agent        = {};
-        const rocprofiler_agent_t* rocp_agent       = nullptr;
-        context::correlation_id*   correlation_id   = nullptr;
-        rocprofiler_packet         kernel_pkt       = {};
-        context_array_t            contexts         = {};
-        external_corr_id_map_t     extern_corr_ids  = {};
-    };
+    using context_t            = context::context;
+    using context_array_t      = common::container::small_vector<const context_t*>;
+    using callback_t           = void (*)(hsa_status_t status, hsa_queue_t* source, void* data);
+    using queue_info_session_t = queue_info_session;
 
     // Function prototype used to notify consumers that a kernel has been
     // enqueued. An AQL packet can be returned that will be injected into
@@ -137,7 +82,8 @@ public:
     using queue_cb_t = std::function<std::unique_ptr<AQLPacket>(
         const Queue&,
         const rocprofiler_packet&,
-        uint64_t,
+        rocprofiler_kernel_id_t,
+        rocprofiler_dispatch_id_t,
         rocprofiler_user_data_t*,
         const queue_info_session_t::external_corr_id_map_t&,
         const context::correlation_id*)>;
@@ -234,6 +180,5 @@ Queue::lock_queue(FuncT&& func)
     std::unique_lock<std::mutex> lock(_lock_queue);
     func();
 }
-
 }  // namespace hsa
 }  // namespace rocprofiler

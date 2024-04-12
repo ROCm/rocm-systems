@@ -52,22 +52,14 @@
 #include <unordered_map>
 #include <vector>
 
-namespace fs = rocprofiler::common::filesystem;
-
-#if defined(ROCPROFILER_CI)
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
-#else
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
-#endif
-
 namespace rocprofiler
 {
 namespace agent
 {
 namespace
 {
+namespace fs = ::rocprofiler::common::filesystem;
+
 using name_array_t = std::vector<std::pair<size_t, std::unique_ptr<std::string>>>;
 
 name_array_t*
@@ -813,7 +805,7 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
-    ROCP_ERROR << "# agent node maps: " << hsa_agent_node_map.size();
+    ROCP_INFO << "# agent node maps: " << hsa_agent_node_map.size();
 
     LOG_IF(FATAL, agent_map.size() != hsa_agents.size())
         << "rocprofiler was only able to map " << agent_map.size()
@@ -905,10 +897,8 @@ construct_agent_cache(::HsaApiTable* table)
 std::optional<hsa_agent_t>
 get_hsa_agent(const rocprofiler_agent_t* agent)
 {
-    ROCP_ERROR << "# of agent mappings: " << get_agent_mapping().size();
     for(const auto& itr : get_agent_mapping())
     {
-        ROCP_ERROR << "checking " << itr.rocp_agent->id.handle << " vs. " << agent->id.handle;
         if(itr.rocp_agent->id.handle == agent->id.handle) return itr.hsa_agent;
     }
 

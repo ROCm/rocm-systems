@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/marker/defines.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 
+#include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/marker/table_id.h>
 
 namespace rocprofiler
@@ -42,33 +43,39 @@ template <>
 struct roctx_domain_info<ROCPROFILER_MARKER_TABLE_ID_RoctxCore>
 : roctx_domain_info<ROCPROFILER_MARKER_TABLE_ID_LAST>
 {
+    using enum_type                           = rocprofiler_marker_core_api_id_t;
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API;
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API;
     static constexpr auto none                = ROCPROFILER_MARKER_CORE_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_MARKER_CORE_API_ID_LAST;
-    using enum_type                           = rocprofiler_marker_core_api_id_t;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_CORE_API;
 };
 
 template <>
 struct roctx_domain_info<ROCPROFILER_MARKER_TABLE_ID_RoctxControl>
 : roctx_domain_info<ROCPROFILER_MARKER_TABLE_ID_LAST>
 {
+    using enum_type                           = rocprofiler_marker_control_api_id_t;
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API;
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API;
     static constexpr auto none                = ROCPROFILER_MARKER_CONTROL_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_MARKER_CONTROL_API_ID_LAST;
-    using enum_type                           = rocprofiler_marker_control_api_id_t;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_CONTROL_API;
 };
 
 template <>
 struct roctx_domain_info<ROCPROFILER_MARKER_TABLE_ID_RoctxName>
 : roctx_domain_info<ROCPROFILER_MARKER_TABLE_ID_LAST>
 {
+    using enum_type                           = rocprofiler_marker_name_api_id_t;
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API;
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API;
     static constexpr auto none                = ROCPROFILER_MARKER_NAME_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_MARKER_NAME_API_ID_LAST;
-    using enum_type                           = rocprofiler_marker_name_api_id_t;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_NAME_API;
 };
 }  // namespace marker
 }  // namespace rocprofiler

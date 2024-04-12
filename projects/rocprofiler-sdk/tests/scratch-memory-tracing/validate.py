@@ -76,13 +76,21 @@ def test_timestamps(input_data):
 
     for titr in ["kernel_dispatches", "memory_copies"]:
         for itr in sdk_data["buffer_records"][titr]:
-            assert itr["start_timestamp"] < itr["end_timestamp"]
-            assert itr["correlation_id"]["internal"] > 0
-            assert itr["correlation_id"]["external"] > 0
-            assert sdk_data["metadata"]["init_time"] < itr["start_timestamp"]
-            assert sdk_data["metadata"]["init_time"] < itr["end_timestamp"]
-            assert sdk_data["metadata"]["fini_time"] > itr["start_timestamp"]
-            assert sdk_data["metadata"]["fini_time"] > itr["end_timestamp"]
+            assert itr["start_timestamp"] < itr["end_timestamp"], f"[{titr}] {itr}"
+            assert itr["correlation_id"]["internal"] > 0, f"[{titr}] {itr}"
+            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
+            assert (
+                sdk_data["metadata"]["init_time"] < itr["start_timestamp"]
+            ), f"[{titr}] {itr}"
+            assert (
+                sdk_data["metadata"]["init_time"] < itr["end_timestamp"]
+            ), f"[{titr}] {itr}"
+            assert (
+                sdk_data["metadata"]["fini_time"] > itr["start_timestamp"]
+            ), f"[{titr}] {itr}"
+            assert (
+                sdk_data["metadata"]["fini_time"] > itr["end_timestamp"]
+            ), f"[{titr}] {itr}"
 
             # TODO(Is this check applicable for scratch, which doesn't use any correlation id?)
             # api_start = cb_start[itr["correlation_id"]["internal"]]
@@ -133,22 +141,20 @@ def test_external_correlation_ids(input_data):
     extern_corr_ids = list(set(sorted(extern_corr_ids)))
     for titr in ["hsa_api_traces", "hip_api_traces"]:
         for itr in sdk_data["buffer_records"][titr]:
-            assert itr["correlation_id"]["external"] > 0
-            assert itr["thread_id"] == itr["correlation_id"]["external"]
-            assert itr["thread_id"] in extern_corr_ids
-            assert itr["correlation_id"]["external"] in extern_corr_ids
+            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
+            assert (
+                itr["thread_id"] == itr["correlation_id"]["external"]
+            ), f"[{titr}] {itr}"
+            assert itr["thread_id"] in extern_corr_ids, f"[{titr}] {itr}"
+            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
 
-    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
-        assert itr["correlation_id"]["external"] > 0
-        assert itr["correlation_id"]["external"] in extern_corr_ids
-
-    for itr in sdk_data["buffer_records"]["memory_copies"]:
-        assert itr["correlation_id"]["external"] > 0
-        assert itr["correlation_id"]["external"] in extern_corr_ids
+    for titr in ["kernel_dispatches", "memory_copies"]:
+        for itr in sdk_data["buffer_records"][titr]:
+            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
+            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
 
 
 def op_name(op_name, record):
-    found_op = False
     op_key = None
 
     for kind_node in record["names"]["kind_names"]:
@@ -159,6 +165,8 @@ def op_name(op_name, record):
         if op_node["key"] == op_key:
             return op_node
 
+    return None
+
 
 # Tests above are identical to async-copy. Update as needed
 
@@ -168,8 +176,10 @@ def test_scratch_memory_tracking(input_data):
     callback_records = sdk_data["callback_records"]
     buffer_records = sdk_data["buffer_records"]
 
-    scratch_callback_data = sdk_data["callback_records"]["scratch_memory_traces"]
-    scratch_buffer_data = sdk_data["buffer_records"]["scratch_memory_traces"]
+    scratch_callback_data = callback_records["scratch_memory_traces"]
+    scratch_buffer_data = buffer_records["scratch_memory_traces"]
+
+    assert len(scratch_callback_data) == 2 * len(scratch_buffer_data)
 
     cb_op_names = op_name("SCRATCH_MEMORY", callback_records)["value"]
     bf_op_names = op_name("SCRATCH_MEMORY", buffer_records)["value"]
@@ -226,14 +236,23 @@ def test_scratch_memory_tracking(input_data):
     for thread_id, nodes in cb_threads.items():
         assert thread_id > 0
 
+        # sort based on timestamp
+        nodes = sorted(nodes, key=lambda x: x["timestamp"])
+
         # start must be followed by end
         for inx in range(0, len(nodes), 2):
             this_node = nodes[inx]
             next_node = nodes[inx + 1]
 
-            assert rc(this_node)["phase"] + 1 == rc(next_node)["phase"]
-            assert rc(this_node)["thread_id"] == rc(next_node)["thread_id"]
-            assert this_node["timestamp"] < next_node["timestamp"]
+            assert (
+                rc(this_node)["phase"] + 1 == rc(next_node)["phase"]
+            ), f"this:\n{this_node}\n\nnext:\n{next_node}"
+            assert (
+                rc(this_node)["thread_id"] == rc(next_node)["thread_id"]
+            ), f"this:\n{this_node}\n\nnext:\n{next_node}"
+            assert (
+                this_node["timestamp"] < next_node["timestamp"]
+            ), f"this:\n{this_node}\n\nnext:\n{next_node}"
 
             # alloc has more data vs free and async reclaim
             scratch_alloc_node = (

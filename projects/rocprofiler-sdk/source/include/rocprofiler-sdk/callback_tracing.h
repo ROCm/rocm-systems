@@ -157,9 +157,37 @@ typedef struct
 } rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
 /**
+ * @brief ROCProfiler Kernel Dispatch Callback Tracer Record.
+ *
+ */
+typedef struct rocprofiler_callback_tracing_kernel_dispatch_data_t
+{
+    uint64_t                  size;             ///< size of this struct
+    rocprofiler_timestamp_t   start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t   end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_agent_id_t    agent_id;         ///< agent kernel was dispatched on
+    rocprofiler_queue_id_t    queue_id;         ///< queue kernel was dispatched on
+    rocprofiler_kernel_id_t   kernel_id;        ///< identifier for kernel
+    rocprofiler_dispatch_id_t dispatch_id;      ///< unique id for each dispatch
+    uint32_t                  private_segment_size;
+    uint32_t                  group_segment_size;
+    rocprofiler_dim3_t        workgroup_size;
+    rocprofiler_dim3_t        grid_size;
+
+    /// @var private_segment_size
+    /// @brief runtime private memory segment size
+    /// @var group_segment_size
+    /// @brief runtime group memory segment size
+    /// @var workgroup_size
+    /// @brief runtime workgroup size (grid * threads)
+    /// @var grid_size
+    /// @brief runtime grid size
+} rocprofiler_callback_tracing_kernel_dispatch_data_t;
+
+/**
  * @brief ROCProfiler Scratch Memory Callback Data.
  */
-typedef struct
+typedef struct rocprofiler_callback_tracing_scratch_memory_data_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_agent_id_t            agent_id;

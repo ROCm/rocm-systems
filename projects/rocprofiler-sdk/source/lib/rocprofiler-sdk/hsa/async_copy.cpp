@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/common/defines.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -70,21 +71,6 @@ namespace rocprofiler
 {
 namespace hsa
 {
-namespace
-{
-std::string_view
-get_hsa_status_string(hsa_status_t _status)
-{
-    if(!hsa::get_core_table()->hsa_status_string_fn) return std::string_view{"(unknown HSA error)"};
-    const char* _status_msg = nullptr;
-    return (hsa::get_core_table()->hsa_status_string_fn(_status, &_status_msg) ==
-                HSA_STATUS_SUCCESS &&
-            _status_msg)
-               ? std::string_view{_status_msg}
-               : std::string_view{"(unknown HSA error)"};
-}
-}  // namespace
-
 namespace async_copy
 {
 namespace
@@ -598,18 +584,39 @@ async_copy_impl(Args... args)
         }
     }
 
-    _data->correlation_id = context::get_latest_correlation_id();
-    auto& extern_corr_ids = _data->extern_corr_ids;
+    _data->correlation_id                 = context::get_latest_correlation_id();
+    context::correlation_id* _corr_id_pop = nullptr;
+
+    if(!_data->correlation_id)
+    {
+        constexpr auto ref_count = 1;
+        _data->correlation_id    = context::correlation_tracing_service::construct(ref_count);
+        _corr_id_pop             = _data->correlation_id;
+    }
 
     // increase the reference count to denote that this correlation id is being used in a kernel
-    if(_data->correlation_id)
-    {
-        extern_corr_ids.reserve(_data->contexts.size());  // reserve for performance
-        for(const auto* ctx : _data->contexts)
-            extern_corr_ids.emplace(ctx,
-                                    ctx->correlation_tracer.external_correlator.get(_data->tid));
-        _data->correlation_id->add_ref_count();
-    }
+    _data->correlation_id->add_ref_count();
+
+    // if we constructed a correlation id, this decrements the reference count after the underlying
+    // function returns
+    auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop]() {
+        if(_corr_id_pop)
+        {
+            context::pop_latest_correlation_id(_corr_id_pop);
+            _corr_id_pop->sub_ref_count();
+        }
+    }};
+
+    auto& extern_corr_ids = _data->extern_corr_ids;
+    extern_corr_ids.reserve(_data->contexts.size());  // reserve for performance
+    for(const auto* ctx : _data->contexts)
+        extern_corr_ids.emplace(ctx,
+                                ctx->correlation_tracer.external_correlator.get(
+                                    _data->tid,
+                                    ctx,
+                                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+                                    _direction,
+                                    _data->correlation_id->internal));
 
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;

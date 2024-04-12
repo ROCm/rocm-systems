@@ -131,7 +131,11 @@ get_unique_internal_id()
 uint32_t
 correlation_id::add_ref_count()
 {
-    return m_ref_count.fetch_add(1);
+    auto _ret = m_ref_count.fetch_add(1);
+
+    LOG_IF(FATAL, _ret == 0) << "correlation id already retired";
+
+    return _ret;
 }
 
 uint32_t
@@ -190,6 +194,8 @@ correlation_id::sub_kern_count()
 correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
+    LOG_IF(FATAL, _init_ref_count == 0) << "must have reference count > 0";
+
     auto  _internal_id = get_unique_internal_id();
     auto* corr_id_map  = get_correlation_id_map();
     if(!corr_id_map) return nullptr;

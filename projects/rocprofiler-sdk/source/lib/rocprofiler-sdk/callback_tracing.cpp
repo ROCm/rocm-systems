@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hip/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
@@ -32,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -102,10 +104,6 @@ rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t         
 {
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
-
-    static auto unsupported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
-        ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH};
-    if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
 
@@ -219,7 +217,7 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         }
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         {
-            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+            val = rocprofiler::kernel_dispatch::name_by_id(operation);
         }
     };
 
@@ -322,7 +320,8 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         }
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         {
-            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+            ops = rocprofiler::kernel_dispatch::get_ids();
+            break;
         }
     };
 

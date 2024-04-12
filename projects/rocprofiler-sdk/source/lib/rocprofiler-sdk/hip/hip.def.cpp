@@ -23,6 +23,7 @@
 #if defined(ROCPROFILER_LIB_ROCPROFILER_HIP_HIP_CPP_IMPL) &&                                       \
     ROCPROFILER_LIB_ROCPROFILER_HIP_HIP_CPP_IMPL == 1
 
+#    include <rocprofiler-sdk/external_correlation.h>
 #    include <rocprofiler-sdk/hip.h>
 
 #    include "defines.hpp"
@@ -49,6 +50,8 @@ struct hip_domain_info<ROCPROFILER_HIP_TABLE_ID_Runtime>
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API;
     static constexpr auto none                = ROCPROFILER_HIP_RUNTIME_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HIP_RUNTIME_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API;
 };
 
 template <>
@@ -59,6 +62,8 @@ struct hip_domain_info<ROCPROFILER_HIP_TABLE_ID_Compiler>
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API;
     static constexpr auto none                = ROCPROFILER_HIP_COMPILER_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HIP_COMPILER_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_COMPILER_API;
 };
 }  // namespace hip
 }  // namespace rocprofiler

@@ -35,6 +35,99 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
+ * @brief ROCProfiler External Correlation ID Operations.
+ *
+ * These kinds correspond to callback and buffered tracing kinds (@see
+ * ::rocprofiler_callback_tracing_kind_t and ::rocprofiler_buffer_tracing_kind_t) which generate
+ * correlation IDs. Typically, rocprofiler-sdk uses the most recent external correlation ID on the
+ * current thread set via ::rocprofiler_push_external_correlation_id; however, this approach can be
+ * problematic if a new external correlation ID should be set before the
+ * ::ROCPROFILER_CALLBACK_PHASE_ENTER callback or if relevant external correlation IDs are desired
+ * when the buffered tracing is used. Thus, rocprofiler-sdk provides a way for tools to get a
+ * callback whenever an external correlation ID is needed. However, this can add significant
+ * overhead for those who only need these callbacks for, say, kernel dispatches while the HSA API is
+ * being traced (i.e. lots of callbacks for HSA API functions). The enumeration below is provided to
+ * ensure that tools can default to using the external correlation IDs set via the push/pop methods
+ * where the external correlation ID value is not important while also getting a request for an
+ * external correlation ID for other tracing kinds.
+ */
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_NONE = 0,              ///< Unknown kind
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_CORE_API,          ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_AMD_EXT_API,       ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_IMAGE_EXT_API,     ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_FINALIZE_EXT_API,  ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_RUNTIME_API,       ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HIP_COMPILER_API,      ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_CORE_API,       ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_CONTROL_API,    ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MARKER_NAME_API,       ///<
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_SCRATCH_MEMORY,
+    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_LAST,
+} rocprofiler_external_correlation_id_request_kind_t;
+
+/**
+ * @brief Callback requesting a value for the external correlation id.
+ *
+ * @param [in] thread_id Id of the thread making the request
+ * @param [in] context_id Id of the context making the request
+ * @param [in] kind Origin of the external correlation id request
+ * @param [in] operation Regardless of whether callback or buffer tracing is being used, the
+ * operation value will be the same, i.e., regardless of whether callback kind is
+ * ::ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API or the buffer record kind is
+ * ::ROCPROFILER_BUFFER_TRACING_HSA_CORE_API, the data/record for `hsa_init` will have an operation
+ * value of ::ROCPROFILER_HSA_CORE_API_ID_hsa_init.
+ * @param [in] internal_corr_id_value Current internal correlation ID value for the request
+ * @param [out] external_corr_id_value Set this value to the desired external correlation ID value
+ * @param [in] data The `callback_args` value passed to
+ * ::rocprofiler_configure_external_correlation_id_request_service.
+ * @returns int
+ * @retval 0 Used to indicate the tool had zero issues setting the external correlation ID field
+ * @retval 1 (or any other non-zero number) Used to indicate the callback did not set an external
+ * correlation ID value and the thread-local value for the most recently pushed external correlation
+ * ID should be used instead
+ */
+typedef int (*rocprofiler_external_correlation_id_request_cb_t)(
+    rocprofiler_thread_id_t                            thread_id,
+    rocprofiler_context_id_t                           context_id,
+    rocprofiler_external_correlation_id_request_kind_t kind,
+    uint32_t                                           operation,
+    uint64_t                                           internal_corr_id_value,
+    rocprofiler_user_data_t*                           external_corr_id_value,
+    void*                                              data);
+
+/**
+ * @brief Configure External Correlation ID Request Service.
+ *
+ * @param [in] context_id Context to associate the service with
+ * @param [in] kinds Array of ::rocprofiler_external_correlation_id_request_kind_t values. If
+ * this parameter is null, all tracing operations will invoke the callback to request an external
+ * correlation ID.
+ * @param [in] kinds_count If the kinds array is non-null, set this to the size of the
+ * array.
+ * @param [in] callback The function to invoke for an external correlation ID request
+ * @param [in] callback_args Data provided to every invocation of the callback function
+ * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED Invoked outside of the initialization
+ * function in @ref rocprofiler_tool_configure_result_t provided to rocprofiler via @ref
+ * rocprofiler_configure function
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND The provided context is not valid/registered
+ * @retval ::ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED if the same @ref
+ * rocprofiler_callback_tracing_kind_t value is provided more than once (per context) -- in
+ * other words, we do not support overriding or combining the kinds in separate function calls.
+ */
+rocprofiler_status_t
+rocprofiler_configure_external_correlation_id_request_service(
+    rocprofiler_context_id_t                            context_id,
+    rocprofiler_external_correlation_id_request_kind_t* kinds,
+    size_t                                              kinds_count,
+    rocprofiler_external_correlation_id_request_cb_t    callback,
+    void* callback_args) ROCPROFILER_API ROCPROFILER_NONNULL(4);
+
+/**
  * @brief Push default value for `external` field in @ref rocprofiler_correlation_id_t onto stack.
  *
  * External correlation ids are thread-local values. However, if rocprofiler internally requests an
@@ -52,10 +145,11 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND Context does not exist
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Thread id is not valid
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
                                          rocprofiler_thread_id_t  tid,
-                                         rocprofiler_user_data_t  external_correlation_id);
+                                         rocprofiler_user_data_t  external_correlation_id)
+    ROCPROFILER_API;
 
 /**
  * @brief Pop default value for `external` field in @ref rocprofiler_correlation_id_t off of stack
@@ -67,10 +161,11 @@ rocprofiler_push_external_correlation_id(rocprofiler_context_id_t context,
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND Context does not exist
  * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Thread id is not valid
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_pop_external_correlation_id(rocprofiler_context_id_t context,
                                         rocprofiler_thread_id_t  tid,
-                                        rocprofiler_user_data_t* external_correlation_id);
+                                        rocprofiler_user_data_t* external_correlation_id)
+    ROCPROFILER_API;
 
 /** @} */
 

@@ -26,7 +26,7 @@
 #endif
 
 /**
- * @file samples/c_tool/client.cpp
+ * @file tests/tools/c-tool.c
  *
  * @brief Example rocprofiler client (tool) written in C
  */

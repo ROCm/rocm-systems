@@ -24,6 +24,7 @@
 #include "lib/rocprofiler-sdk/hsa/defines.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
+#include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
@@ -58,6 +59,8 @@ struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_Core>
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_CORE_API;
     static constexpr auto none                = ROCPROFILER_HSA_CORE_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_CORE_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_CORE_API;
 };
 
 template <>
@@ -69,6 +72,8 @@ struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_AmdExt>
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API;
     static constexpr auto none                = ROCPROFILER_HSA_AMD_EXT_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_AMD_EXT_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_AMD_EXT_API;
 };
 
 template <>
@@ -80,6 +85,8 @@ struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_ImageExt>
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API;
     static constexpr auto none                = ROCPROFILER_HSA_IMAGE_EXT_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_IMAGE_EXT_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_IMAGE_EXT_API;
 };
 
 template <>
@@ -91,6 +98,8 @@ struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API;
     static constexpr auto none                = ROCPROFILER_HSA_FINALIZE_EXT_API_ID_NONE;
     static constexpr auto last                = ROCPROFILER_HSA_FINALIZE_EXT_API_ID_LAST;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_HSA_FINALIZE_EXT_API;
 };
 
 template <>
@@ -101,6 +110,8 @@ struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_AmdTool>
     static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_NONE;
     static constexpr auto none                = 0;
     static constexpr auto last                = 0;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_NONE;
 };
 }  // namespace hsa
 }  // namespace rocprofiler

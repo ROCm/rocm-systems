@@ -29,13 +29,19 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 
+#include <bitset>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 namespace rocprofiler
 {
+namespace context
+{
+struct context;
+}
 namespace external_correlation
 {
 static constexpr bool enable_const_wlock_v = true;
@@ -50,12 +56,43 @@ using external_correlation_map_t =
 
 struct external_correlation
 {
-    rocprofiler_user_data_t get(rocprofiler_thread_id_t) const;
+    using request_cb_t   = rocprofiler_external_correlation_id_request_cb_t;
+    using request_kind_t = rocprofiler_external_correlation_id_request_kind_t;
+
+    static constexpr size_t request_kind_size = ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_LAST - 1;
+
+    rocprofiler_user_data_t  get(rocprofiler_thread_id_t thr_id,
+                                 const context::context* ctx,
+                                 request_kind_t          kind,
+                                 uint32_t                op,
+                                 uint64_t                internal_corr_id) const;
+    rocprofiler_user_data_t& update(rocprofiler_user_data_t& data,
+                                    rocprofiler_thread_id_t  thr_id,
+                                    request_kind_t           kind) const;
+
     void                    push(rocprofiler_thread_id_t, rocprofiler_user_data_t);
     rocprofiler_user_data_t pop(rocprofiler_thread_id_t);
 
+    rocprofiler_status_t configure_request(request_cb_t                       callback_v,
+                                           void*                              callback_data_v,
+                                           const std::vector<request_kind_t>& kinds_v);
+
+    bool requires_request(request_kind_t kind) const;
+
 private:
-    common::Synchronized<external_correlation_map_t> data = {};
+    rocprofiler_user_data_t get(rocprofiler_thread_id_t thr_id) const;
+
+    std::optional<rocprofiler_user_data_t> invoke_callback(
+        rocprofiler_thread_id_t                            thr_id,
+        const context::context*                            ctx,
+        rocprofiler_external_correlation_id_request_kind_t kind,
+        uint32_t                                           op,
+        uint64_t                                           internal_corr_id) const;
+
+    request_cb_t                                     callback      = nullptr;
+    void*                                            callback_data = nullptr;
+    std::bitset<request_kind_size>                   request       = 0;
+    common::Synchronized<external_correlation_map_t> data          = {};
 };
 }  // namespace external_correlation
 }  // namespace rocprofiler
