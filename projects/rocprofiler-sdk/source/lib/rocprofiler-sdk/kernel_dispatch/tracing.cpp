@@ -66,9 +66,9 @@ dispatch_complete(queue_info_session_t& session)
     // only do the following work if there are contexts that require this info
     auto&       callback_record  = session.callback_record;
     const auto& _extern_corr_ids = session.tracing_data.external_correlation_ids;
-    const auto* _rocp_agent      = agent::get_agent(callback_record.agent_id);
+    const auto* _rocp_agent      = agent::get_agent(callback_record.dispatch_info.agent_id);
     auto        _hsa_agent       = agent::get_hsa_agent(_rocp_agent);
-    auto        _kern_id         = callback_record.kernel_id;
+    auto        _kern_id         = callback_record.dispatch_info.kernel_id;
     auto        _signal          = session.kernel_pkt.kernel_dispatch.completion_signal;
     auto        _tid             = session.tid;
 
@@ -122,14 +122,7 @@ dispatch_complete(queue_info_session_t& session)
                                                    _tid,
                                                    callback_record.start_timestamp,
                                                    callback_record.end_timestamp,
-                                                   callback_record.agent_id,
-                                                   callback_record.queue_id,
-                                                   callback_record.kernel_id,
-                                                   callback_record.dispatch_id,
-                                                   callback_record.private_segment_size,
-                                                   callback_record.group_segment_size,
-                                                   callback_record.workgroup_size,
-                                                   callback_record.grid_size};
+                                                   callback_record.dispatch_info};
 
             tracing::execute_buffer_record_emplace(tracing_data_v.buffered_contexts,
                                                    _tid,

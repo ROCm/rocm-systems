@@ -180,7 +180,8 @@ buffered_callback(rocprofiler_context_id_t,
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
-        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+           header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             // Print the returned counter data.
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
@@ -380,11 +381,11 @@ user_dispatch_cb(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
 {
     expected_dispatch& expected = *static_cast<expected_dispatch*>(callback_data_args);
 
-    auto agent_id       = dispatch_data.agent_id;
-    auto queue_id       = dispatch_data.queue_id;
+    auto agent_id       = dispatch_data.dispatch_info.agent_id;
+    auto queue_id       = dispatch_data.dispatch_info.queue_id;
     auto correlation_id = dispatch_data.correlation_id;
-    auto kernel_id      = dispatch_data.kernel_id;
-    auto dispatch_id    = dispatch_data.dispatch_id;
+    auto kernel_id      = dispatch_data.dispatch_info.kernel_id;
+    auto dispatch_id    = dispatch_data.dispatch_info.dispatch_id;
 
     EXPECT_EQ(sizeof(rocprofiler_profile_counting_dispatch_data_t), dispatch_data.size);
     EXPECT_EQ(expected.kernel_id, kernel_id);
@@ -394,8 +395,8 @@ user_dispatch_cb(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     EXPECT_EQ(expected.correlation_id.internal, correlation_id.internal);
     EXPECT_EQ(expected.correlation_id.external.ptr, correlation_id.external.ptr);
     EXPECT_EQ(expected.correlation_id.external.value, correlation_id.external.value);
-    EXPECT_EQ(expected.workgroup_size, dispatch_data.workgroup_size);
-    EXPECT_EQ(expected.grid_size, dispatch_data.grid_size);
+    EXPECT_EQ(expected.workgroup_size, dispatch_data.dispatch_info.workgroup_size);
+    EXPECT_EQ(expected.grid_size, dispatch_data.dispatch_info.grid_size);
 
     ASSERT_NE(config, nullptr);
     config->handle = expected.id.handle;

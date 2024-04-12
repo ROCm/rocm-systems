@@ -1246,8 +1246,8 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
                   rocprofiler_user_data_t*                     user_data,
                   void* /*callback_data_args*/)
 {
-    auto kernel_id = dispatch_data.kernel_id;
-    auto agent_id  = dispatch_data.agent_id;
+    auto kernel_id = dispatch_data.dispatch_info.kernel_id;
+    auto agent_id  = dispatch_data.dispatch_info.agent_id;
 
     if(!is_targeted_kernel(kernel_id))
     {
@@ -1283,7 +1283,7 @@ counter_record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_da
                         rocprofiler_user_data_t                      user_data,
                         void* /*callback_data_args*/)
 {
-    auto        kernel_id           = dispatch_data.kernel_id;
+    auto        kernel_id           = dispatch_data.dispatch_info.kernel_id;
     const auto* cnt_dispatch_data_v = static_cast<counter_dispatch_data*>(user_data.ptr);
 
     rocprofiler_tool_counter_collection_record_t counter_record;

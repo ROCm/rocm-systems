@@ -51,7 +51,7 @@ extern "C" {
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter not found
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Version is not supported
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                                rocprofiler_counter_info_version_id_t version,
                                void*                                 info)
@@ -64,6 +64,8 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
     if(const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle))
     {
+        out_struct.id          = counter_id;
+        out_struct.is_constant = (metric_ptr->special().empty()) ? 0 : 1;
         out_struct.is_derived  = (metric_ptr->expression().empty()) ? 0 : 1;
         out_struct.name        = metric_ptr->name().c_str();
         out_struct.description = metric_ptr->description().c_str();

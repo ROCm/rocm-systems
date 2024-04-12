@@ -22,24 +22,50 @@ def test_data_structure(input_data):
 
 
 def test_counter_values(input_data):
-    data = input_data
-    agent_data = data["rocprofiler-sdk-json-tool"]["agents"]
-    counter_data = data["rocprofiler-sdk-json-tool"]["buffer_records"][
-        "counter_collection"
-    ]
+    data = input_data["rocprofiler-sdk-json-tool"]
+    agent_data = data["agents"]
+    counter_info = data["counter_info"]
+    counter_data = data["buffer_records"]["counter_collection"]
 
-    scaling_factor = 1
-    for itr in agent_data:
-        if itr["type"] == 2 and itr["wave_front_size"] > 0:
-            scaling_factor = 64 / itr["wave_front_size"]
-            break
+    for itr in counter_info:
+        if itr["is_constant"] == 1 and itr["name"] == "size":
+            continue
+        assert itr["id"]["handle"] > 0, f"{itr}"
+        assert itr["is_constant"] in (0, 1), f"{itr}"
+        assert itr["is_derived"] in (0, 1), f"{itr}"
+        assert len(itr["name"]) >= 4, f"{itr}"
+        assert len(itr["description"]) >= 4, f"{itr}"
+        if itr["is_constant"] == 0:
+            if itr["is_derived"] == 0:
+                assert len(itr["block"]) > 0, f"{itr}"
+            if itr["is_derived"] == 1:
+                assert len(itr["expression"]) > 0, f"{itr}"
+
+    def get_agent(agent_id):
+        for itr in agent_data:
+            if itr["id"]["handle"] == agent_id["handle"]:
+                return itr
+        return None
+
+    def get_scaling_factor(agent_id):
+        agent = get_agent(agent_id)
+        assert agent is not None, f"id={agent_id}"
+        if agent["type"] == 2 and agent["wave_front_size"] > 0:
+            return 64 / agent["wave_front_size"]
+        return 0
 
     for itr in counter_data:
-        value = itr["counter_value"]
-        if int(round(value, 0)) > 0:
-            assert int(round(value, 0)) == int(
-                round(1 * scaling_factor, 0)
-            ), f"agent_data:\n{agent_data}\n\ncounter_data:\n{counter_data}"
+        assert itr["num_records"] == len(itr["records"]), f"itr={itr}"
+        agent_id = itr["dispatch_info"]["agent_id"]
+        agent = get_agent(agent_id)
+        scaling_factor = get_scaling_factor(agent_id)
+        assert agent is not None, f"itr={itr}\nagent={agent}"
+        for ritr in itr["records"]:
+            value = ritr["counter_value"]
+            if int(round(value, 0)) > 0:
+                assert int(round(value, 0)) == int(
+                    round(1 * scaling_factor, 0)
+                ), f"itr={itr}\nagent={agent}"
 
 
 if __name__ == "__main__":

@@ -39,10 +39,10 @@
  */
 
 /**
- * @brief The function was introduced in version 10.0 of the interface and has the
- * symbol version string of ``"ROCPROFILER_10.0"``.
+ * @brief The function was introduced in version 0.0 of the interface and has the
+ * symbol version string of ``"ROCPROFILER_SDK_0.0"``.
  */
-#define ROCPROFILER_VERSION_10_0
+#define ROCPROFILER_SDK_VERSION_0_0
 
 /** @} */
 
@@ -123,7 +123,9 @@
 #ifdef __cplusplus
 #    define ROCPROFILER_EXTERN_C_INIT extern "C" {
 #    define ROCPROFILER_EXTERN_C_FINI }
+#    define ROCPROFILER_CXX_CODE(...) __VA_ARGS__
 #else
 #    define ROCPROFILER_EXTERN_C_INIT
 #    define ROCPROFILER_EXTERN_C_FINI
+#    define ROCPROFILER_CXX_CODE(...)
 #endif

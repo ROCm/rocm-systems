@@ -99,8 +99,9 @@ typedef struct
     /// ::ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API, or
     /// ::ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API
     /// @var operation
-    /// @brief ::rocprofiler_hsa_core_api_id_t, ::rocprofiler_hsa_amd_ext_api_id_t,
-    /// ::rocprofiler_hsa_image_ext_api_id_t, or ::rocprofiler_hsa_finalize_ext_api_id_t
+    /// @brief Specification of the API function, e.g., ::rocprofiler_hsa_core_api_id_t,
+    /// ::rocprofiler_hsa_amd_ext_api_id_t, ::rocprofiler_hsa_image_ext_api_id_t, or
+    /// ::rocprofiler_hsa_finalize_ext_api_id_t
 } rocprofiler_buffer_tracing_hsa_api_record_t;
 
 /**
@@ -120,7 +121,8 @@ typedef struct
     /// @brief ::ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API or
     /// ::ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API
     /// @var operation
-    /// @brief ::rocprofiler_hip_runtime_api_id_t or ::rocprofiler_hip_compiler_api_id_t
+    /// @brief Specification of the API function, e.g., ::rocprofiler_hip_runtime_api_id_t or
+    /// ::rocprofiler_hip_compiler_api_id_t
 } rocprofiler_buffer_tracing_hip_api_record_t;
 
 /**
@@ -140,7 +142,8 @@ typedef struct
     /// @brief ::ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
     /// ::ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API, or
     /// ::ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API
-    /// @brief ::rocprofiler_marker_core_api_id_t, ::rocprofiler_marker_control_api_id_t, or
+    /// @brief Specification of the API function, e.g., ::rocprofiler_marker_core_api_id_t,
+    /// ::rocprofiler_marker_control_api_id_t, or
     /// ::rocprofiler_marker_name_api_id_t
 } rocprofiler_buffer_tracing_marker_api_record_t;
 
@@ -161,7 +164,8 @@ typedef struct
     /// @var kind
     /// @brief ::ROCPROFILER_BUFFER_TRACING_MEMORY_COPY
     /// @var operation
-    /// @brief memory copy direction (::rocprofiler_memory_copy_operation_t)
+    /// @brief Specification of the memory copy direction (@see
+    /// ::rocprofiler_memory_copy_operation_t)
 } rocprofiler_buffer_tracing_memory_copy_record_t;
 
 /**
@@ -171,28 +175,17 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
 {
     uint64_t                                size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t       kind;  ///< ::ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH
-    rocprofiler_kernel_dispatch_operation_t operation;       ///<
+    rocprofiler_kernel_dispatch_operation_t operation;
     rocprofiler_correlation_id_t            correlation_id;  ///< correlation ids for record
     rocprofiler_thread_id_t                 thread_id;       ///< id for thread that launched kernel
     rocprofiler_timestamp_t                 start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t                 end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_agent_id_t                  agent_id;         ///< agent kernel was dispatched on
-    rocprofiler_queue_id_t                  queue_id;         ///< queue kernel was dispatched on
-    rocprofiler_kernel_id_t                 kernel_id;        ///< identifier for kernel
-    rocprofiler_dispatch_id_t               dispatch_id;      ///< unique id for each dispatch
-    uint32_t                                private_segment_size;
-    uint32_t                                group_segment_size;
-    rocprofiler_dim3_t                      workgroup_size;
-    rocprofiler_dim3_t                      grid_size;
+    rocprofiler_kernel_dispatch_info_t      dispatch_info;    ///< Dispatch info
 
-    /// @var private_segment_size
-    /// @brief runtime private memory segment size
-    /// @var group_segment_size
-    /// @brief runtime group memory segment size
-    /// @var workgroup_size
-    /// @brief runtime workgroup size (grid * threads)
-    /// @var grid_size
-    /// @brief runtime grid size
+    /// @var operation
+    /// @brief Kernel dispatch buffer records only report the ::ROCPROFILER_KERNEL_DISPATCH_COMPLETE
+    /// operation because there are no "real" wrapper around the enqueuing of an individual kernel
+    /// dispatch
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
 typedef struct
@@ -232,7 +225,7 @@ typedef struct
 /**
  * @brief ROCProfiler Buffer Page Migration Tracer Record
  */
-typedef struct
+typedef struct rocprofiler_buffer_tracing_page_migration_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;  ///< ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION
@@ -259,17 +252,16 @@ typedef struct
  */
 typedef struct
 {
-    uint64_t                          size;  ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;  ///< ::ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY
-    rocprofiler_scratch_memory_operation_t
-                                     operation;  ///< @see rocprofiler_scratch_memory_operation_t
-    rocprofiler_agent_id_t           agent_id;   ///< agent kernel was dispatched on
-    rocprofiler_queue_id_t           queue_id;   ///< queue kernel was dispatched on
-    rocprofiler_thread_id_t          thread_id;  ///< id for thread generating this record
-    rocprofiler_timestamp_t          start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t          end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_correlation_id_t     correlation_id;   ///< correlation ids for record
-    rocprofiler_scratch_alloc_flag_t flags;
+    uint64_t                               size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t      kind;  ///< ::ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY
+    rocprofiler_scratch_memory_operation_t operation;  ///< specification of the kind
+    rocprofiler_agent_id_t                 agent_id;   ///< agent kernel was dispatched on
+    rocprofiler_queue_id_t                 queue_id;   ///< queue kernel was dispatched on
+    rocprofiler_thread_id_t                thread_id;  ///< id for thread generating this record
+    rocprofiler_timestamp_t                start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t                end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_correlation_id_t           correlation_id;   ///< correlation ids for record
+    rocprofiler_scratch_alloc_flag_t       flags;
 } rocprofiler_buffer_tracing_scratch_memory_record_t;
 
 /**
@@ -286,7 +278,9 @@ typedef struct
     /// @brief ::ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT
     /// @var timestamp
     /// @brief Timestamp (in nanosec) of when rocprofiler detected the correlation ID could be
-    /// retired
+    /// retired. Due to clock skew between the CPU and GPU, this may at times, *appear* to be before
+    /// the kernel or memory copy completed but the reality is that if this ever occurred, the API
+    /// would report a FATAL error
     /// @var internal_correlation_id
     /// @brief Only internal correlation ID is provided
 } rocprofiler_buffer_tracing_correlation_id_retirement_record_t;

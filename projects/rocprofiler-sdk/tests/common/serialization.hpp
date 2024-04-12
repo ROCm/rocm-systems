@@ -99,6 +99,13 @@ save(ArchiveT& ar, rocprofiler_queue_id_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_counter_id_t data)
+{
+    SAVE_DATA_FIELD(handle);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_correlation_id_t data)
 {
     SAVE_DATA_FIELD(internal);
@@ -270,11 +277,9 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_scratch_memory_data_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_callback_tracing_kernel_dispatch_data_t data)
+save(ArchiveT& ar, rocprofiler_kernel_dispatch_info_t data)
 {
     SAVE_DATA_FIELD(size);
-    SAVE_DATA_FIELD(start_timestamp);
-    SAVE_DATA_FIELD(end_timestamp);
     SAVE_DATA_FIELD(agent_id);
     SAVE_DATA_FIELD(queue_id);
     SAVE_DATA_FIELD(kernel_id);
@@ -287,18 +292,31 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_kernel_dispatch_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_callback_tracing_kernel_dispatch_data_t data)
+{
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(start_timestamp);
+    SAVE_DATA_FIELD(end_timestamp);
+    SAVE_DATA_FIELD(dispatch_info);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_data_t data)
 {
     SAVE_DATA_FIELD(size);
-    SAVE_DATA_FIELD(agent_id);
-    SAVE_DATA_FIELD(queue_id);
-    SAVE_DATA_FIELD(kernel_id);
-    SAVE_DATA_FIELD(dispatch_id);
     SAVE_DATA_FIELD(correlation_id);
-    SAVE_DATA_FIELD(private_segment_size);
-    SAVE_DATA_FIELD(group_segment_size);
-    SAVE_DATA_FIELD(workgroup_size);
-    SAVE_DATA_FIELD(grid_size);
+    SAVE_DATA_FIELD(dispatch_info);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_record_t data)
+{
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(num_records);
+    SAVE_DATA_FIELD(correlation_id);
+    SAVE_DATA_FIELD(dispatch_info);
 }
 
 template <typename ArchiveT>
@@ -339,7 +357,7 @@ save(ArchiveT& ar, rocprofiler_record_counter_t data)
 {
     SAVE_DATA_FIELD(id);
     SAVE_DATA_FIELD(counter_value);
-    SAVE_DATA_FIELD(correlation_id);
+    SAVE_DATA_FIELD(dispatch_id);
 }
 
 template <typename ArchiveT>
@@ -367,14 +385,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_kernel_dispatch_record_t data)
     SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(start_timestamp);
     SAVE_DATA_FIELD(end_timestamp);
-    SAVE_DATA_FIELD(agent_id);
-    SAVE_DATA_FIELD(queue_id);
-    SAVE_DATA_FIELD(kernel_id);
-    SAVE_DATA_FIELD(dispatch_id);
-    SAVE_DATA_FIELD(private_segment_size);
-    SAVE_DATA_FIELD(group_segment_size);
-    SAVE_DATA_FIELD(workgroup_size);
-    SAVE_DATA_FIELD(grid_size);
+    SAVE_DATA_FIELD(dispatch_info);
 }
 
 template <typename ArchiveT>
@@ -704,6 +715,19 @@ save(ArchiveT& ar, const rocprofiler_agent_t& data)
     generate("mem_banks", data.mem_banks, data.mem_banks_count);
     generate("caches", data.caches, data.caches_count);
     generate("io_links", data.io_links, data.io_links_count);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_counter_info_v0_t data)
+{
+    SAVE_DATA_FIELD(id);
+    SAVE_DATA_BITFIELD("is_constant", is_constant);
+    SAVE_DATA_BITFIELD("is_derived", is_derived);
+    SAVE_DATA_CSTR(name);
+    SAVE_DATA_CSTR(description);
+    SAVE_DATA_CSTR(block);
+    SAVE_DATA_CSTR(expression);
 }
 }  // namespace cereal
 

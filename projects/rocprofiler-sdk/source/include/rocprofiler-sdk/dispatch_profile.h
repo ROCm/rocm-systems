@@ -38,22 +38,28 @@ ROCPROFILER_EXTERN_C_INIT
  */
 
 /**
- * @brief Kernel dispatch data for profile counting callbacks
+ * @brief Kernel dispatch data for profile counting callbacks.
  *
  */
 typedef struct rocprofiler_profile_counting_dispatch_data_t
 {
-    uint64_t                     size;            ///< Size of this struct
-    rocprofiler_agent_id_t       agent_id;        ///< Agent ID where kernel is launched
-    rocprofiler_queue_id_t       queue_id;        ///< Queue ID where kernel packet is enqueued
-    rocprofiler_kernel_id_t      kernel_id;       ///< Kernel identifier
-    rocprofiler_dispatch_id_t    dispatch_id;     ///< unique id for each dispatch
-    rocprofiler_correlation_id_t correlation_id;  ///< Correlation ID for this dispatch
-    uint32_t                     private_segment_size;  ///< runtime private memory segment size
-    uint32_t                     group_segment_size;    ///< runtime group memory segment size
-    rocprofiler_dim3_t           workgroup_size;        ///< runtime workgroup size (grid * threads)
-    rocprofiler_dim3_t           grid_size;             ///< runtime grid size
+    uint64_t                           size;            ///< Size of this struct
+    rocprofiler_correlation_id_t       correlation_id;  ///< Correlation ID for this dispatch
+    rocprofiler_kernel_dispatch_info_t dispatch_info;   ///< Dispatch info
 } rocprofiler_profile_counting_dispatch_data_t;
+
+/**
+ * @brief ROCProfiler Profile Counting Counter Record Header Information
+ *
+ * This is buffer equivalent of ::rocprofiler_profile_counting_dispatch_data_t
+ */
+typedef struct rocprofiler_profile_counting_dispatch_record_t
+{
+    uint64_t                     size;         ///< Size of this struct
+    uint64_t                     num_records;  ///< number of ::rocprofiler_record_counter_t records
+    rocprofiler_correlation_id_t correlation_id;       ///< Correlation ID for this dispatch
+    rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Contains the `dispatch_id`
+} rocprofiler_profile_counting_dispatch_record_t;
 
 /**
  * @brief Kernel Dispatch Callback. This is a callback that is invoked before the kernel

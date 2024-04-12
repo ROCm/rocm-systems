@@ -364,6 +364,22 @@ typedef enum
     ROCPROFILER_COUNTER_INFO_VERSION_LAST,
 } rocprofiler_counter_info_version_id_t;
 
+/**
+ * @brief Enumeration for distinguishing different buffer record kinds within the
+ * ::ROCPROFILER_BUFFER_CATEGORY_COUNTERS category
+ */
+typedef enum
+{
+    ROCPROFILER_COUNTER_RECORD_NONE = 0,
+    ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,  ///< ::rocprofiler_profile_counting_dispatch_record_t
+    ROCPROFILER_COUNTER_RECORD_VALUE,
+    ROCPROFILER_COUNTER_RECORD_LAST,
+
+    /// @var ROCPROFILER_COUNTER_RECORD_KIND_DISPATCH_PROFILE_HEADER
+    /// @brief Indicates the payload type is of type
+    /// ::rocprofiler_profile_counting_dispatch_record_t
+} rocprofiler_counter_record_kind_t;
+
 //--------------------------------------------------------------------------------------//
 //
 //                                      ALIASES
@@ -592,6 +608,24 @@ rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
 }
 
 /**
+ * @brief ROCProfiler kernel dispatch information
+ *
+ */
+typedef struct rocprofiler_kernel_dispatch_info_t
+{
+    uint64_t                  size;                  ///< Size of this struct
+    rocprofiler_agent_id_t    agent_id;              ///< Agent ID where kernel is launched
+    rocprofiler_queue_id_t    queue_id;              ///< Queue ID where kernel packet is enqueued
+    rocprofiler_kernel_id_t   kernel_id;             ///< Kernel identifier
+    rocprofiler_dispatch_id_t dispatch_id;           ///< unique id for each dispatch
+    uint32_t                  private_segment_size;  ///< runtime private memory segment size
+    uint32_t                  group_segment_size;    ///< runtime group memory segment size
+    rocprofiler_dim3_t        workgroup_size;        ///< runtime workgroup size (grid * threads)
+    rocprofiler_dim3_t        grid_size;             ///< runtime grid size
+    uint8_t                   reserved_padding[56];  // reserved for extensions w/o ABI break
+} rocprofiler_kernel_dispatch_info_t;
+
+/**
  * @brief Details for the dimension, including its size, for a counter record.
  */
 typedef struct
@@ -611,10 +645,17 @@ typedef struct
 {
     rocprofiler_counter_instance_id_t id;             ///< counter identifier
     double                            counter_value;  ///< counter value
-    rocprofiler_correlation_id_t      correlation_id;
+    rocprofiler_dispatch_id_t         dispatch_id;
 
-    /// @var correlation_id
-    /// @brief Used to correlate the kernel data to an API call
+    /// @var dispatch_id
+    /// @brief A value greater than zero indicates that this counter record is associated with a
+    /// specific dispatch.
+    ///
+    /// This value can be mapped to a dispatch via the `dispatch_info` field (@see
+    /// ::rocprofiler_kernel_dispatch_info_t) of a ::rocprofiler_profile_counting_dispatch_data_t
+    /// instance (provided during callback for profile config) or a
+    /// ::rocprofiler_profile_counting_dispatch_record_t records (which will be insert into the
+    /// buffer prior to the associated ::rocprofiler_record_counter_t records).
 } rocprofiler_record_counter_t;
 
 /**
@@ -622,11 +663,13 @@ typedef struct
  */
 typedef struct
 {
-    int         is_derived;   ///< If this counter is a derived counter
-    const char* name;         ///< Name of the counter
-    const char* description;  ///< Description of the counter
-    const char* block;        ///< Block of the counter (non-derived only)
-    const char* expression;   ///< Counter expression (derived counters only)
+    rocprofiler_counter_id_t id;               ///< Id of this counter
+    const char*              name;             ///< Name of the counter
+    const char*              description;      ///< Description of the counter
+    const char*              block;            ///< Block of the counter (non-derived only)
+    const char*              expression;       ///< Counter expression (derived counters only)
+    uint8_t                  is_constant : 1;  ///< If this counter is HW constant
+    uint8_t                  is_derived  : 1;  ///< If this counter is a derived counter
 } rocprofiler_counter_info_v0_t;
 
 /**
@@ -646,3 +689,7 @@ typedef struct
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI
+
+ROCPROFILER_CXX_CODE(
+    static_assert(sizeof(rocprofiler_kernel_dispatch_info_t) == 128,
+                  "Increasing the size of the kernel dispatch info is not permitted");)

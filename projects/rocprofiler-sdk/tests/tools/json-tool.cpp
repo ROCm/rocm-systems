@@ -40,6 +40,8 @@
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/counters.h>
+#include <rocprofiler-sdk/dispatch_profile.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
@@ -62,6 +64,7 @@
 #include <map>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -549,11 +552,59 @@ struct scratch_memory_callback_record_t
     }
 };
 
+struct profile_counting_record
+{
+    profile_counting_record(rocprofiler_profile_counting_dispatch_record_t hdr)
+    : header{hdr}
+    {}
+
+    rocprofiler_profile_counting_dispatch_record_t header = {};
+    std::vector<rocprofiler_record_counter_t>      data   = {};
+
+    profile_counting_record()                                   = default;
+    ~profile_counting_record()                                  = default;
+    profile_counting_record(const profile_counting_record&)     = default;
+    profile_counting_record(profile_counting_record&&) noexcept = default;
+    profile_counting_record& operator=(const profile_counting_record&) = default;
+    profile_counting_record& operator=(profile_counting_record&&) noexcept = default;
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        cereal::save(ar, header);
+        auto _data = data;
+        for(auto& itr : _data)
+        {
+            auto _counter_id = rocprofiler_counter_id_t{};
+            ROCPROFILER_CALL(rocprofiler_query_record_counter_id(itr.id, &_counter_id),
+                             "failed to query counter id");
+            itr.id = _counter_id.handle;
+        }
+
+        ar(cereal::make_nvp("records", _data));
+    }
+
+    void emplace_back(rocprofiler_record_counter_t val)
+    {
+        if(*this != val)
+            throw std::runtime_error{"invalid profile_counting_record::emplace_back(...)"};
+        data.emplace_back(val);
+    }
+
+    bool operator==(rocprofiler_record_counter_t rhs) const
+    {
+        return (header.dispatch_info.dispatch_id == rhs.dispatch_id);
+    }
+
+    bool operator!=(rocprofiler_record_counter_t rhs) const { return !(*this == rhs); }
+};
+
+auto counter_info                  = std::deque<rocprofiler_counter_info_v0_t>{};
 auto code_object_records           = std::deque<code_object_callback_record_t>{};
 auto kernel_symbol_records         = std::deque<kernel_symbol_callback_record_t>{};
 auto hsa_api_cb_records            = std::deque<hsa_api_callback_record_t>{};
 auto marker_api_cb_records         = std::deque<marker_api_callback_record_t>{};
-auto counter_collection_bf_records = std::deque<rocprofiler_record_counter_t>{};
+auto counter_collection_bf_records = std::deque<profile_counting_record>{};
 auto hip_api_cb_records            = std::deque<hip_api_callback_record_t>{};
 auto scratch_memory_cb_records     = std::deque<scratch_memory_callback_record_t>{};
 auto kernel_dispatch_cb_records    = std::deque<kernel_dispatch_callback_record_t>{};
@@ -583,7 +634,8 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
 
     auto search_cache = [&]() {
-        if(auto pos = profile_cache.find(dispatch_data.agent_id.handle); pos != profile_cache.end())
+        if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
+           pos != profile_cache.end())
         {
             *config = pos->second;
             return true;
@@ -610,7 +662,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
 
     // Iterate through the agents and get the counters available on that agent
     ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-                         dispatch_data.agent_id,
+                         dispatch_data.dispatch_info.agent_id,
                          []([[maybe_unused]] rocprofiler_agent_id_t id,
                             rocprofiler_counter_id_t*               counters,
                             size_t                                  num_counters,
@@ -626,18 +678,30 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
                          static_cast<void*>(&gpu_counters)),
                      "Could not fetch supported counters");
 
+    for(auto& counter : gpu_counters)
+    {
+        auto info = rocprofiler_counter_info_v0_t{};
+
+        ROCPROFILER_CALL(
+            rocprofiler_query_counter_info(
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
+            "Could not query counter_id");
+
+        counter_info.emplace_back(info);
+    }
+
     std::vector<rocprofiler_counter_id_t> collect_counters;
     // Look for the counters contained in counters_to_collect in gpu_counters
     for(auto& counter : gpu_counters)
     {
-        rocprofiler_counter_info_v0_t version;
+        rocprofiler_counter_info_v0_t info;
 
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
-                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&version)),
+                counter, ROCPROFILER_COUNTER_INFO_VERSION_0, static_cast<void*>(&info)),
             "Could not query counter_id");
 
-        if(counters_to_collect.count(std::string(version.name)) > 0)
+        if(counters_to_collect.count(std::string(info.name)) > 0)
         {
             collect_counters.push_back(counter);
         }
@@ -645,12 +709,13 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
 
     // Create a colleciton profile for the counters
     rocprofiler_profile_config_id_t profile;
-    ROCPROFILER_CALL(
-        rocprofiler_create_profile_config(
-            dispatch_data.agent_id, collect_counters.data(), collect_counters.size(), &profile),
-        "Could not construct profile cfg");
+    ROCPROFILER_CALL(rocprofiler_create_profile_config(dispatch_data.dispatch_info.agent_id,
+                                                       collect_counters.data(),
+                                                       collect_counters.size(),
+                                                       &profile),
+                     "Could not construct profile cfg");
 
-    profile_cache.emplace(dispatch_data.agent_id.handle, profile);
+    profile_cache.emplace(dispatch_data.dispatch_info.agent_id.handle, profile);
     // Return the profile to collect those counters for this dispatch
     *config = profile;
 }
@@ -865,10 +930,21 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     "unexpected rocprofiler_record_header_t tracing category kind"};
             }
         }
-        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+                header->kind == ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
+        {
+            auto* profiler_record =
+                static_cast<rocprofiler_profile_counting_dispatch_record_t*>(header->payload);
+            counter_collection_bf_records.emplace_back(*profiler_record);
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+                header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
-            counter_collection_bf_records.emplace_back(*profiler_record);
+            if(counter_collection_bf_records.empty())
+                throw std::runtime_error{
+                    "missing rocprofiler_profile_counting_dispatch_record_t (header)"};
+            counter_collection_bf_records.back().emplace_back(*profiler_record);
         }
         else
         {
@@ -1427,7 +1503,8 @@ tool_fini(void* tool_data)
               << ", hip_api_bf_records=" << hip_api_bf_records.size()
               << ", marker_api_bf_records=" << marker_api_bf_records.size()
               << ", corr_id_retire_records=" << corr_id_retire_records.size()
-              << ", counter_collection_records=" << counter_collection_bf_records.size() << "...\n"
+              << ", counter_collection_value_records=" << counter_collection_bf_records.size()
+              << "...\n"
               << std::flush;
 
     auto* _call_stack = static_cast<call_stack_t*>(tool_data);
@@ -1501,6 +1578,7 @@ write_json(call_stack_t* _call_stack)
         json_ar.finishNode();
 
         json_ar(cereal::make_nvp("agents", agents));
+        json_ar(cereal::make_nvp("counter_info", counter_info));
         if(_call_stack) json_ar(cereal::make_nvp("call_stack", *_call_stack));
 
         json_ar.setNextName("callback_records");
@@ -1611,7 +1689,8 @@ write_perfetto()
         }
 
         for(auto itr : kernel_dispatch_bf_records)
-            agent_queue_ids[itr.agent_id.handle].emplace(itr.queue_id.handle);
+            agent_queue_ids[itr.dispatch_info.agent_id.handle].emplace(
+                itr.dispatch_info.queue_id.handle);
     }
 
     auto thread_tracks = std::unordered_map<rocprofiler_thread_id_t, ::perfetto::Track>{};
@@ -1804,10 +1883,11 @@ write_perfetto()
         auto demangled = std::unordered_map<std::string_view, std::string>{};
         for(auto itr : kernel_dispatch_bf_records)
         {
-            const kernel_symbol_callback_record_t* sym = nullptr;
+            const auto&                            info = itr.dispatch_info;
+            const kernel_symbol_callback_record_t* sym  = nullptr;
             for(const auto& kitr : kernel_symbol_records)
             {
-                if(kitr.payload.kernel_id == itr.kernel_id)
+                if(kitr.payload.kernel_id == info.kernel_id)
                 {
                     sym = &kitr;
                     break;
@@ -1815,7 +1895,7 @@ write_perfetto()
             }
 
             auto  name  = std::string_view{sym->payload.kernel_name};
-            auto& track = agent_queue_tracks.at(itr.agent_id.handle).at(itr.queue_id.handle);
+            auto& track = agent_queue_tracks.at(info.agent_id.handle).at(info.queue_id.handle);
 
             if(demangled.find(name) == demangled.end())
             {
@@ -1833,21 +1913,21 @@ write_perfetto()
                 "kind",
                 itr.kind,
                 "agent",
-                itr.agent_id.handle,
+                info.agent_id.handle,
                 "corr_id",
                 itr.correlation_id.internal,
                 "queue",
-                itr.queue_id.handle,
+                info.queue_id.handle,
                 "kernel_id",
-                itr.kernel_id,
+                info.kernel_id,
                 "private_segment_size",
-                itr.private_segment_size,
+                info.private_segment_size,
                 "group_segment_size",
-                itr.group_segment_size,
+                info.group_segment_size,
                 "workgroup_size",
-                itr.workgroup_size.x * itr.workgroup_size.y * itr.workgroup_size.z,
+                info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
                 "grid_size",
-                itr.grid_size.x * itr.grid_size.y * itr.grid_size.z);
+                info.grid_size.x * info.grid_size.y * info.grid_size.z);
 
             TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::kernel_dispatch>::value,
                             track,

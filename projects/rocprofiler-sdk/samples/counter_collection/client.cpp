@@ -95,12 +95,23 @@ buffered_callback(rocprofiler_context_id_t,
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
-        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+           header->kind == ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
+        {
+            // Print the returned counter data.
+            auto* record =
+                static_cast<rocprofiler_profile_counting_dispatch_record_t*>(header->payload);
+            ss << "[Dispatch_Id: " << record->dispatch_info.dispatch_id
+               << " Kernel_ID: " << record->dispatch_info.kernel_id
+               << " Corr_Id: " << record->correlation_id.internal << ")]\n";
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+                header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             // Print the returned counter data.
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
-            ss << "(Id: " << record->id << " Value [D]: " << record->counter_value
-               << " Corr_Id: " << record->correlation_id.internal << "),";
+            ss << "  (Dispatch_Id: " << record->dispatch_id << " Id: " << record->id
+               << " Value [D]: " << record->counter_value << "),";
         }
     }
 
@@ -133,7 +144,8 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
 
     auto search_cache = [&]() {
-        if(auto pos = profile_cache.find(dispatch_data.agent_id.handle); pos != profile_cache.end())
+        if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
+           pos != profile_cache.end())
         {
             *config = pos->second;
             return true;
@@ -156,7 +168,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
 
     // Iterate through the agents and get the counters available on that agent
     ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-                         dispatch_data.agent_id,
+                         dispatch_data.dispatch_info.agent_id,
                          [](rocprofiler_agent_id_t,
                             rocprofiler_counter_id_t* counters,
                             size_t                    num_counters,
@@ -190,12 +202,13 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
 
     // Create a colleciton profile for the counters
     rocprofiler_profile_config_id_t profile;
-    ROCPROFILER_CALL(
-        rocprofiler_create_profile_config(
-            dispatch_data.agent_id, collect_counters.data(), collect_counters.size(), &profile),
-        "Could not construct profile cfg");
+    ROCPROFILER_CALL(rocprofiler_create_profile_config(dispatch_data.dispatch_info.agent_id,
+                                                       collect_counters.data(),
+                                                       collect_counters.size(),
+                                                       &profile),
+                     "Could not construct profile cfg");
 
-    profile_cache.emplace(dispatch_data.agent_id.handle, profile);
+    profile_cache.emplace(dispatch_data.dispatch_info.agent_id.handle, profile);
     // Return the profile to collect those counters for this dispatch
     *config = profile;
 }

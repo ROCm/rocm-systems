@@ -170,7 +170,8 @@ buffered_callback(rocprofiler_context_id_t,
     for(size_t i = 0; i < num_headers; ++i)
     {
         auto* header = headers[i];
-        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS && header->kind == 0)
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
+           header->kind == ROCPROFILER_COUNTER_RECORD_VALUE)
         {
             // Record the counters we have in the buffer and the number of instances of
             // the counter we have seen.
@@ -242,7 +243,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     {
         std::vector<rocprofiler_counter_id_t> counters_needed;
         ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-                             dispatch_data.agent_id,
+                             dispatch_data.dispatch_info.agent_id,
                              [](rocprofiler_agent_id_t,
                                 rocprofiler_counter_id_t* counters,
                                 size_t                    num_counters,
@@ -269,7 +270,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
             cap.expected_counter_names.emplace(found_counter.handle, std::string(version.name));
             size_t expected = 0;
             ROCPROFILER_CALL(rocprofiler_query_counter_instance_count(
-                                 dispatch_data.agent_id, found_counter, &expected),
+                                 dispatch_data.dispatch_info.agent_id, found_counter, &expected),
                              "COULD NOT QUERY INSTANCES");
             cap.remaining.push_back(found_counter);
             cap.expected.emplace(found_counter.handle, expected);
@@ -297,8 +298,9 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
         }
         if(cap.expected.empty())
         {
-            std::clog << "No counters found for agent " << dispatch_data.agent_id.handle << " ("
-                      << agents.at(dispatch_data.agent_id.handle)->name << ")";
+            std::clog << "No counters found for agent "
+                      << dispatch_data.dispatch_info.agent_id.handle << " ("
+                      << agents.at(dispatch_data.dispatch_info.agent_id.handle)->name << ")";
         }
     }
     if(cap.remaining.empty()) return;
@@ -306,9 +308,10 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     rocprofiler_profile_config_id_t profile;
 
     // Select the next counter to collect.
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(
-                         dispatch_data.agent_id, &(cap.remaining.back()), 1, &profile),
-                     "Could not construct profile cfg");
+    ROCPROFILER_CALL(
+        rocprofiler_create_profile_config(
+            dispatch_data.dispatch_info.agent_id, &(cap.remaining.back()), 1, &profile),
+        "Could not construct profile cfg");
 
     cap.remaining.pop_back();
     *config = profile;

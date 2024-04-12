@@ -154,25 +154,26 @@ generate_csv(tool_table* tool_functions, std::vector<kernel_dispatch_ring_buffer
             auto kernel_trace_ss                                        = std::stringstream{};
             rocprofiler_buffer_tracing_kernel_dispatch_record_t* record = buf.retrieve();
             if(record == nullptr) break;
-            auto kernel_name = tool_functions->tool_get_kernel_name_fn(record->kernel_id);
+            auto kernel_name =
+                tool_functions->tool_get_kernel_name_fn(record->dispatch_info.kernel_id);
             rocprofiler::tool::csv::kernel_trace_csv_encoder::write_row(
                 kernel_trace_ss,
                 tool_functions->tool_get_domain_name_fn(record->kind),
-                tool_functions->tool_get_agent_node_id_fn(record->agent_id),
-                record->queue_id.handle,
-                record->kernel_id,
+                tool_functions->tool_get_agent_node_id_fn(record->dispatch_info.agent_id),
+                record->dispatch_info.queue_id.handle,
+                record->dispatch_info.kernel_id,
                 kernel_name,
                 record->correlation_id.internal,
                 record->start_timestamp,
                 record->end_timestamp,
-                record->private_segment_size,
-                record->group_segment_size,
-                record->workgroup_size.x,
-                record->workgroup_size.y,
-                record->workgroup_size.z,
-                record->grid_size.x,
-                record->grid_size.y,
-                record->grid_size.z);
+                record->dispatch_info.private_segment_size,
+                record->dispatch_info.group_segment_size,
+                record->dispatch_info.workgroup_size.x,
+                record->dispatch_info.workgroup_size.y,
+                record->dispatch_info.workgroup_size.z,
+                record->dispatch_info.grid_size.x,
+                record->dispatch_info.grid_size.y,
+                record->dispatch_info.grid_size.z);
 
             if(tool::get_config().stats)
                 kernel_stats[kernel_name] += (record->end_timestamp - record->start_timestamp);
@@ -355,7 +356,7 @@ generate_csv(tool_table* tool_functions, std::vector<counter_collection_ring_buf
         {
             rocprofiler_tool_counter_collection_record_t* record = buf.retrieve();
             if(record == nullptr) break;
-            auto kernel_id          = record->dispatch_data.kernel_id;
+            auto kernel_id          = record->dispatch_data.dispatch_info.kernel_id;
             auto counter_name_value = std::map<std::string, uint64_t>{};
             for(const auto& count : record->profiler_record)
             {
@@ -379,13 +380,14 @@ generate_csv(tool_table* tool_functions, std::vector<counter_collection_ring_buf
                     counter_collection_ss,
                     correlation_id.internal,
                     record->dispatch_index,
-                    tool_functions->tool_get_agent_node_id_fn(record->dispatch_data.agent_id),
-                    record->dispatch_data.queue_id.handle,
+                    tool_functions->tool_get_agent_node_id_fn(
+                        record->dispatch_data.dispatch_info.agent_id),
+                    record->dispatch_data.dispatch_info.queue_id.handle,
                     record->pid,
                     record->thread_id,
-                    magnitude(record->dispatch_data.grid_size),
+                    magnitude(record->dispatch_data.dispatch_info.grid_size),
                     tool_functions->tool_get_kernel_name_fn(kernel_id),
-                    magnitude(record->dispatch_data.workgroup_size),
+                    magnitude(record->dispatch_data.dispatch_info.workgroup_size),
                     record->lds_block_size_v,
                     record->private_segment_size,
                     record->arch_vgpr_count,

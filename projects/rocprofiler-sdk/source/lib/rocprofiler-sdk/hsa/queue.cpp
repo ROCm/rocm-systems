@@ -275,23 +275,32 @@ WriteInterceptor(const void* packets,
             corr_id->add_kern_count();
         }
 
-        auto dispatch_id = ++sequence_counter;
-        auto callback_record =
-            callback_record_t{sizeof(callback_record_t),
-                              rocprofiler_timestamp_t{0},
-                              rocprofiler_timestamp_t{0},
-                              queue.get_agent().get_rocp_agent()->id,
-                              queue.get_id(),
-                              kernel_id,
-                              dispatch_id,
-                              kernel_pkt.kernel_dispatch.private_segment_size,
-                              kernel_pkt.kernel_dispatch.group_segment_size,
-                              rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.workgroup_size_x,
-                                                 kernel_pkt.kernel_dispatch.workgroup_size_y,
-                                                 kernel_pkt.kernel_dispatch.workgroup_size_z},
-                              rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.grid_size_x,
-                                                 kernel_pkt.kernel_dispatch.grid_size_y,
-                                                 kernel_pkt.kernel_dispatch.grid_size_z}};
+        // computes the "size" based on the offset of reserved_padding field
+        constexpr auto kernel_dispatch_info_rt_size =
+            common::compute_runtime_sizeof<rocprofiler_kernel_dispatch_info_t>();
+
+        static_assert(kernel_dispatch_info_rt_size < sizeof(rocprofiler_kernel_dispatch_info_t),
+                      "failed to compute size field based on offset of reserved_padding field");
+
+        auto dispatch_id     = ++sequence_counter;
+        auto callback_record = callback_record_t{
+            sizeof(callback_record_t),
+            rocprofiler_timestamp_t{0},
+            rocprofiler_timestamp_t{0},
+            rocprofiler_kernel_dispatch_info_t{
+                .size                 = kernel_dispatch_info_rt_size,
+                .agent_id             = queue.get_agent().get_rocp_agent()->id,
+                .queue_id             = queue.get_id(),
+                .kernel_id            = kernel_id,
+                .dispatch_id          = dispatch_id,
+                .private_segment_size = kernel_pkt.kernel_dispatch.private_segment_size,
+                .group_segment_size   = kernel_pkt.kernel_dispatch.group_segment_size,
+                .workgroup_size = rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.workgroup_size_x,
+                                                     kernel_pkt.kernel_dispatch.workgroup_size_y,
+                                                     kernel_pkt.kernel_dispatch.workgroup_size_z},
+                .grid_size      = rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.grid_size_x,
+                                                kernel_pkt.kernel_dispatch.grid_size_y,
+                                                kernel_pkt.kernel_dispatch.grid_size_z}}};
 
         {
             auto tracer_data = callback_record;

@@ -209,7 +209,10 @@ def test_kernel_ids(input_data):
             assert payload["kernel_name"] == symbol_info[kern_id]["kernel_name"]
 
     for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
-        assert itr["kernel_id"] in symbol_info.keys()
+        assert itr["dispatch_info"]["kernel_id"] in symbol_info.keys()
+
+    for itr in sdk_data["callback_records"]["kernel_dispatches"]:
+        assert itr["payload"]["dispatch_info"]["kernel_id"] in symbol_info.keys()
 
 
 def test_retired_correlation_ids(input_data):

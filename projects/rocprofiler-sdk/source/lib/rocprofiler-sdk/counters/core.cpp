@@ -326,19 +326,23 @@ queue_cb(const context::context*                                         ctx,
     auto dispatch_data =
         common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
 
-    dispatch_data.kernel_id            = kernel_id;
-    dispatch_data.dispatch_id          = dispatch_id;
-    dispatch_data.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
-    dispatch_data.queue_id             = queue.get_id();
-    dispatch_data.correlation_id       = _corr_id_v;
-    dispatch_data.private_segment_size = pkt.kernel_dispatch.private_segment_size;
-    dispatch_data.group_segment_size   = pkt.kernel_dispatch.group_segment_size;
-    dispatch_data.workgroup_size       = {pkt.kernel_dispatch.workgroup_size_x,
-                                    pkt.kernel_dispatch.workgroup_size_y,
-                                    pkt.kernel_dispatch.workgroup_size_z};
-    dispatch_data.grid_size            = {pkt.kernel_dispatch.grid_size_x,
-                               pkt.kernel_dispatch.grid_size_y,
-                               pkt.kernel_dispatch.grid_size_z};
+    dispatch_data.correlation_id = _corr_id_v;
+    {
+        auto dispatch_info = common::init_public_api_struct(rocprofiler_kernel_dispatch_info_t{});
+        dispatch_info.kernel_id            = kernel_id;
+        dispatch_info.dispatch_id          = dispatch_id;
+        dispatch_info.agent_id             = CHECK_NOTNULL(queue.get_agent().get_rocp_agent())->id;
+        dispatch_info.queue_id             = queue.get_id();
+        dispatch_info.private_segment_size = pkt.kernel_dispatch.private_segment_size;
+        dispatch_info.group_segment_size   = pkt.kernel_dispatch.group_segment_size;
+        dispatch_info.workgroup_size       = {pkt.kernel_dispatch.workgroup_size_x,
+                                        pkt.kernel_dispatch.workgroup_size_y,
+                                        pkt.kernel_dispatch.workgroup_size_z};
+        dispatch_info.grid_size            = {pkt.kernel_dispatch.grid_size_x,
+                                   pkt.kernel_dispatch.grid_size_y,
+                                   pkt.kernel_dispatch.grid_size_z};
+        dispatch_data.dispatch_info        = dispatch_info;
+    }
 
     info->user_cb(dispatch_data, &req_profile, user_data, info->callback_args);
 
@@ -441,6 +445,7 @@ completed_cb(const context::context*                       ctx,
         }
     }
 
+    auto _dispatch_id = session.callback_record.dispatch_info.dispatch_id;
     for(auto& ast : prof_config->asts)
     {
         std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
@@ -448,35 +453,47 @@ completed_cb(const context::context*                       ctx,
         CHECK(ret);
         ast.set_out_id(*ret);
 
+        out.reserve(out.size() + ret->size());
         for(auto& val : *ret)
         {
-            val.correlation_id = _corr_id_v;
-            if(buf)
-                buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS, 0, val);
-            else
-                out.push_back(val);
+            val.dispatch_id = _dispatch_id;
+            out.emplace_back(val);
         }
     }
 
     if(!out.empty())
     {
-        CHECK(info->record_callback);
+        if(buf)
+        {
+            auto _header =
+                common::init_public_api_struct(rocprofiler_profile_counting_dispatch_record_t{});
+            _header.num_records    = out.size();
+            _header.correlation_id = _corr_id_v;
+            _header.dispatch_info  = session.callback_record.dispatch_info;
+            buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS,
+                         ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,
+                         _header);
 
-        auto dispatch_data =
-            common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
+            for(auto itr : out)
+                buf->emplace(
+                    ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, itr);
+        }
+        else
+        {
+            CHECK(info->record_callback);
 
-        dispatch_data.kernel_id            = session.callback_record.kernel_id;
-        dispatch_data.dispatch_id          = session.callback_record.dispatch_id;
-        dispatch_data.agent_id             = session.callback_record.agent_id;
-        dispatch_data.queue_id             = session.callback_record.queue_id;
-        dispatch_data.correlation_id       = _corr_id_v;
-        dispatch_data.private_segment_size = session.callback_record.private_segment_size;
-        dispatch_data.group_segment_size   = session.callback_record.group_segment_size;
-        dispatch_data.workgroup_size       = session.callback_record.workgroup_size;
-        dispatch_data.grid_size            = session.callback_record.grid_size;
+            auto dispatch_data =
+                common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
 
-        info->record_callback(
-            dispatch_data, out.data(), out.size(), session.user_data, info->record_callback_args);
+            dispatch_data.dispatch_info  = session.callback_record.dispatch_info;
+            dispatch_data.correlation_id = _corr_id_v;
+
+            info->record_callback(dispatch_data,
+                                  out.data(),
+                                  out.size(),
+                                  session.user_data,
+                                  info->record_callback_args);
+        }
     }
 }
 

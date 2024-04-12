@@ -60,6 +60,7 @@
 #include <iostream>
 #include <map>
 #include <mutex>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -222,19 +223,22 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 
             auto info = std::stringstream{};
 
-            info << "agent_id=" << record->agent_id.handle
-                 << ", queue_id=" << record->queue_id.handle << ", kernel_id=" << record->kernel_id
-                 << ", kernel=" << client_kernels.at(record->kernel_id).kernel_name
+            info << "agent_id=" << record->dispatch_info.agent_id.handle
+                 << ", queue_id=" << record->dispatch_info.queue_id.handle
+                 << ", kernel_id=" << record->dispatch_info.kernel_id
+                 << ", kernel=" << client_kernels.at(record->dispatch_info.kernel_id).kernel_name
                  << ", context=" << context.handle << ", buffer_id=" << buffer_id.handle
                  << ", cid=" << record->correlation_id.internal
                  << ", extern_cid=" << record->correlation_id.external.value
                  << ", kind=" << record->kind << ", start=" << record->start_timestamp
                  << ", stop=" << record->end_timestamp
-                 << ", private_segment_size=" << record->private_segment_size
-                 << ", group_segment_size=" << record->group_segment_size << ", workgroup_size=("
-                 << record->workgroup_size.x << "," << record->workgroup_size.y << ","
-                 << record->workgroup_size.z << "), grid_size=(" << record->grid_size.x << ","
-                 << record->grid_size.y << "," << record->grid_size.z << ")";
+                 << ", private_segment_size=" << record->dispatch_info.private_segment_size
+                 << ", group_segment_size=" << record->dispatch_info.group_segment_size
+                 << ", workgroup_size=(" << record->dispatch_info.workgroup_size.x << ","
+                 << record->dispatch_info.workgroup_size.y << ","
+                 << record->dispatch_info.workgroup_size.z << "), grid_size=("
+                 << record->dispatch_info.grid_size.x << "," << record->dispatch_info.grid_size.y
+                 << "," << record->dispatch_info.grid_size.z << ")";
 
             if(record->start_timestamp > record->end_timestamp)
                 throw std::runtime_error("kernel dispatch: start > end");
@@ -267,7 +271,10 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
         }
         else
         {
-            throw std::runtime_error{"unexpected rocprofiler_record_header_t category + kind"};
+            auto _msg = std::stringstream{};
+            _msg << "unexpected rocprofiler_record_header_t category + kind: (" << header->category
+                 << " + " << header->kind << ")";
+            throw std::runtime_error{_msg.str()};
         }
     }
 }
