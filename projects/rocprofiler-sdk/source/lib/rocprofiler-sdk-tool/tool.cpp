@@ -52,6 +52,7 @@
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -629,38 +630,33 @@ flush()
 std::string
 get_file_name(buffer_type_t buffer_type)
 {
-    std::string filename;
     switch(buffer_type)
     {
-        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_HSA: filename = "hsa_trace"; break;
-        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_HIP: filename = "hip_trace"; break;
-        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_MARKER_API: filename = "marker_trace"; break;
-        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_MEMORY_COPY: filename = "memory_copy"; break;
+        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_HSA: return "hsa_trace"; break;
+        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_HIP: return "hip_trace"; break;
+        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_MARKER_API: return "marker_trace"; break;
+        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_MEMORY_COPY: return "memory_copy"; break;
         case buffer_type_t::ROCPROFILER_TOOL_BUFFER_COUNTER_COLLECTION:
-            filename = "counter_collection";
+            return "counter_collection";
             break;
         case buffer_type_t::ROCPROFILER_TOOL_BUFFER_KERNEL_DISPATCH:
-            filename = "kernel_dispatch";
+            return "kernel_dispatch";
             break;
-        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_SCRATCH_MEMORY:
-            filename = "scratch_memory";
-            break;
-        default: LOG_IF(FATAL, "buffer tpe invalid");
+        case buffer_type_t::ROCPROFILER_TOOL_BUFFER_SCRATCH_MEMORY: return "scratch_memory"; break;
     }
-    return filename;
+
+    LOG(FATAL) << "buffer type " << static_cast<std::underlying_type_t<buffer_type_t>>(buffer_type)
+               << " not supported";
+    return std::string{};
 }
 
 std::string
 compose_tmp_file_name(buffer_type_t buffer_type)
 {
-    static std::mutex            _mutex{};
-    std::unique_lock<std::mutex> _lk{_mutex};
-    std::string                  ext           = ".dat";
-    std::string                  explicit_path = rocprofiler::tool::get_config().tmp_directory;
-    std::string subdirectory = rocprofiler::tool::format(explicit_path + '/' + "%ppid%_");
-    std::string fname        = get_file_name(buffer_type);
-    std::string filename     = subdirectory + fname + ext;
-    return filename;
+    return rocprofiler::tool::format(fmt::format("{}/.rocprofv3/{}-{}.dat",
+                                                 rocprofiler::tool::get_config().tmp_directory,
+                                                 "%ppid%-%pid%",
+                                                 get_file_name(buffer_type)));
 }
 
 template <typename Tp>
@@ -680,12 +676,12 @@ offload_buffer(buffer_type_t type)
     tmp_file* _tmp_file                   = nullptr;
     std::tie(_tmp_buf, _tmp_file)         = get_tmp_file_buffer<Tp>(type);
     auto                         _lk      = std::lock_guard<std::mutex>(_tmp_file->file_mutex);
-    auto&                        _fs      = _tmp_file->stream;
     [[maybe_unused]] static auto _success = _tmp_file->open();
+    auto&                        _fs      = _tmp_file->stream;
     _tmp_file->file_pos.emplace(_fs.tellg());
     _tmp_buf->save(_fs);
     _tmp_buf->clear();
-    assert(_tmp_buf->is_empty() == true);
+    CHECK(_tmp_buf->is_empty() == true);
 }
 
 template <typename Tp, typename Tb>
@@ -700,7 +696,7 @@ write_ring_buffer(Tb* _v, buffer_type_t type)
     {
         offload_buffer<Tp>(type);
         ptr = _tmp_buf->request(false);
-        assert(ptr != nullptr);
+        CHECK(ptr != nullptr);
     }
     *ptr = std::move(*reinterpret_cast<Tb*>(_v));
 }

@@ -30,6 +30,9 @@ namespace fs = ::rocprofiler::common::filesystem;
 bool
 tmp_file::fopen(const char* _mode)
 {
+    auto fpath = fs::path{filename}.parent_path();
+    if(!fs::exists(fpath)) fs::create_directories(fpath);
+
     if(!fs::exists(filename))
     {
         // if the filepath does not exist, open in out mode to create it
@@ -101,6 +104,9 @@ tmp_file::close()
 bool
 tmp_file::open(std::ios::openmode _mode)
 {
+    auto fpath = fs::path{filename}.parent_path();
+    if(!fs::exists(fpath)) fs::create_directories(fpath);
+
     if(!fs::exists(filename))
     {
         // if the filepath does not exist, open in out mode to create it

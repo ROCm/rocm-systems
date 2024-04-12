@@ -78,7 +78,7 @@ struct config
     std::string output_path   = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
     std::string output_file   = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
     std::string output_format = get_env("ROCPROF_OUTPUT_FORMAT", "CSV");
-    std::string tmp_directory = get_env("ROCPROF_TMPDIR", fs::current_path().string());
+    std::string tmp_directory = get_env("ROCPROF_TMPDIR", output_path);
     std::vector<std::string> kernel_names = {};
     std::set<std::string>    counters     = {};
 };

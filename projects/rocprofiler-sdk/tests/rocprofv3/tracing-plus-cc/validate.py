@@ -29,6 +29,9 @@ def test_validate_counter_collection_plus_tracing(input_dir: pd.DataFrame):
         # Check if each file in the subdirectory has some data
         for file_name in os.listdir(subdirectory_path):
             file_path = os.path.join(subdirectory_path, file_name)
+            # ignore hidden folders
+            if os.path.isdir(file_path) and os.path.basename(file_path).startswith("."):
+                continue
             assert os.path.isfile(file_path), f"{file_path} is not a file."
 
             if "agent_info.csv" not in file_path:

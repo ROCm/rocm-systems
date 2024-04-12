@@ -48,7 +48,10 @@ namespace tool
 {
 namespace
 {
-auto launch_time = new std::time_t{std::time(nullptr)};
+const auto launch_time = new std::time_t{std::time(nullptr)};
+const auto env_regexes =
+    new std::array<std::regex, 2>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
+                                  std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"}};
 
 std::string
 get_local_datetime(const char* dt_format, std::time_t* dt_curr)
@@ -362,25 +365,15 @@ format(std::string _fpath, const std::string& _tag)
     // environment and configuration variables
     try
     {
-        for(const auto& _expr : {std::string{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
-                                 std::string{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"}})
+        for(const auto& _re : *env_regexes)
         {
-            std::regex  _re{_expr};
-            std::string _cbeg   = (_expr.find("(.*)%") == 0) ? "%" : "$";
-            std::string _cend   = (_expr.find("(.*)%") == 0) ? "}%" : "}";
-            bool        _is_env = (_expr.find("(env|ENV)") != std::string::npos);
-            _cbeg += (_is_env) ? "env{" : "cfg{";
             while(std::regex_search(_fpath, _re))
             {
                 auto        _var = std::regex_replace(_fpath, _re, "$3");
-                std::string _val = {};
-                if(_is_env)
-                {
-                    _val = get_env<std::string>(_var, "");
-                }
-                auto _beg = std::regex_replace(_fpath, _re, "$1");
-                auto _end = std::regex_replace(_fpath, _re, "$4");
-                _fpath    = fmt::format("{}{}{}", _beg, _val, _end);
+                std::string _val = get_env<std::string>(_var, "");
+                auto        _beg = std::regex_replace(_fpath, _re, "$1");
+                auto        _end = std::regex_replace(_fpath, _re, "$4");
+                _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
             }
         }
     } catch(std::exception& _e)
