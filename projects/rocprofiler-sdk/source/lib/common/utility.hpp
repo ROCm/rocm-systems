@@ -145,6 +145,31 @@ assert_public_api_struct_properties()
                   "public API struct size field should be 64 bits");
 }
 
+// used to set the "size" field to the offset of the "reserved_padding" field.
+// The reserved_padding field is extra unused bytes added to the a struct to
+// avoid an ABI break if/when new fields are added. This is only done
+// for fields which are regularly passed by value
+template <typename Tp, typename Up = Tp>
+constexpr auto
+compute_runtime_sizeof(int) -> decltype(std::declval<Up>().reserved_padding, size_t{})
+{
+    return offsetof(Tp, reserved_padding);
+}
+
+template <typename Tp, typename Up = Tp>
+constexpr auto
+compute_runtime_sizeof(long)
+{
+    return sizeof(Tp);
+}
+
+template <typename Tp>
+constexpr auto
+compute_runtime_sizeof()
+{
+    return compute_runtime_sizeof<Tp>(0);
+}
+
 template <typename Tp>
 decltype(auto)
 init_public_api_struct(Tp&& val)
@@ -152,7 +177,7 @@ init_public_api_struct(Tp&& val)
     assert_public_api_struct_properties<Tp>();
 
     ::memset(&val, 0, sizeof(Tp));
-    val.size = sizeof(Tp);
+    val.size = compute_runtime_sizeof<Tp>();
     return std::forward<Tp>(val);
 }
 
@@ -163,7 +188,7 @@ init_public_api_struct(Tp& val)
     assert_public_api_struct_properties<Tp>();
 
     ::memset(&val, 0, sizeof(Tp));
-    val.size = sizeof(Tp);
+    val.size = compute_runtime_sizeof<Tp>();
     return val;
 }
 

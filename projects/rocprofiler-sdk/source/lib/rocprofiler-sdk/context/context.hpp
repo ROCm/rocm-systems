@@ -30,6 +30,7 @@
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/allocator.hpp"
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
@@ -48,64 +49,6 @@ namespace context
 using external_cid_cb_t = uint64_t (*)(rocprofiler_callback_tracing_kind_t, uint32_t, uint64_t);
 
 constexpr auto null_user_data = rocprofiler_user_data_t{.value = 0};
-struct correlation_id
-{
-    // reference count starts at 5:
-    // - decrement after begin callback/buffer API
-    // - decrement after end callback/buffer API
-    // - decrement after kernel dispatch/HW counters
-    // - if PC sampling is not enabled, we can "retire" correlation id at ref count at 2
-    // - if PC sampling is enabled, we decrement after each HSA buffer flush once ref count hits 2
-    //   - after the kernel dispatch completes, we know no more PC samples will be generated and
-    //     thus, after two HSA buffer flushes, we will have received all the PC samples for
-    //     the
-    correlation_id(uint32_t _cnt, rocprofiler_thread_id_t _tid, uint64_t _internal) noexcept
-    : thread_idx{_tid}
-    , internal{_internal}
-    , m_ref_count{_cnt}
-    {}
-
-    correlation_id()                              = default;
-    ~correlation_id()                             = default;
-    correlation_id(correlation_id&& val) noexcept = delete;
-    correlation_id(const correlation_id&)         = delete;
-
-    correlation_id& operator=(const correlation_id&) = delete;
-    correlation_id& operator=(correlation_id&&) noexcept = delete;
-
-    rocprofiler_thread_id_t thread_idx = 0;
-    uint64_t                internal   = 0;
-
-    uint32_t get_ref_count() const { return m_ref_count.load(); }
-    uint32_t add_ref_count();
-    uint32_t sub_ref_count();
-
-    uint32_t get_kern_count() const { return m_kern_count.load(); }
-    uint32_t add_kern_count();
-    uint32_t sub_kern_count();
-
-private:
-    std::atomic<uint32_t> m_kern_count = {0};
-    std::atomic<uint32_t> m_ref_count  = {0};
-};
-
-correlation_id*
-get_correlation_id(rocprofiler_thread_id_t tid, uint64_t internal_id);
-
-// latest correlation id for thread
-correlation_id*
-get_latest_correlation_id();
-
-const correlation_id*
-pop_latest_correlation_id(correlation_id*);
-
-/// permits tools opportunity to modify the correlation id based on the domain, op, and
-/// the rocprofiler generated correlation id
-struct correlation_tracing_service
-{
-    external_correlation::external_correlation external_correlator = {};
-    static correlation_id*                     construct(uint32_t init_ref_count);
-};
 
 struct callback_tracing_service
 {
@@ -154,7 +97,7 @@ struct context
     std::unique_ptr<callback_tracing_service>   callback_tracer    = {};
     std::unique_ptr<buffer_tracing_service>     buffered_tracer    = {};
     std::unique_ptr<counter_collection_service> counter_collection = {};
-    std::shared_ptr<rocprofiler::ThreadTracer>  thread_trace       = {};
+    std::shared_ptr<ThreadTracer>               thread_trace       = {};
 };
 
 // set the client index needs to be called before allocate_context()

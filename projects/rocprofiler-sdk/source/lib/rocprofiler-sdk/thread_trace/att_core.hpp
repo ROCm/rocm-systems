@@ -22,9 +22,18 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+
 #include <rocprofiler-sdk/intercept_table.h>
+#include <rocprofiler-sdk/thread_trace.h>
+
+#include <cstdint>
+#include <memory>
+#include <mutex>
+#include <string>
 #include <tuple>
-#include "include/rocprofiler-sdk/thread_trace.h"
+#include <unordered_map>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -66,8 +75,8 @@ public:
     virtual void resource_deinit(const hsa::AgentCache&);
     virtual ~ThreadTracer() = default;
 
-    std::shared_ptr<thread_trace_parameters>                      params;
     std::mutex                                                    trace_resources_mut;
+    std::shared_ptr<thread_trace_parameters>                      params;
     std::unordered_map<uint64_t, std::unique_ptr<hsa::AQLPacket>> resources;
     std::unordered_map<uint64_t, std::atomic<int>>                agent_active_queues;
 };  // namespace thread_trace
