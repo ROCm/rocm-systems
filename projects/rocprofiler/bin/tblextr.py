@@ -971,11 +971,13 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
                     gpu_id = int(rec_vals[2])
                     if gpu_id > max_gpu_id:
                         max_gpu_id = gpu_id
-                    sect_id = GPU_BASE_PID + int(gpu_id)
 
                     if ptrn_barrier.search(name):
                         name = '"<barrier packet>"'
                         is_barrier = 1
+                        sect_id = GPU_BASE_PID + int(gpu_id) + 512
+                    else:
+                        sect_id = GPU_BASE_PID + int(gpu_id)
 
                 thread_id = 0
                 stream_id = 0
@@ -1151,6 +1153,7 @@ else:
     if any_trace_found and max_gpu_id >= 0:
         for ind in range(0, int(max_gpu_id) + 1):
             db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
+            db.label_json(int(ind) + int(GPU_BASE_PID) + 512 , "GPU Barriers" + str(ind), jsonfile)
 
     if ext_trace_found:
         dform.gen_ext_json_trace(db, "rocTX", START_NS, jsonfile)
