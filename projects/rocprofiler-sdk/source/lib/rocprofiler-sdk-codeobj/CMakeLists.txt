@@ -17,7 +17,6 @@
 # ##############################################################################
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "codeobj")
-find_package(amd_comgr REQUIRED)
 
 set(LIB_CODEOBJ_PARSER_SOURCES code_object_track.cpp code_printing.cpp disassembly.cpp)
 set(LIB_CODEOBJ_PARSER_HEADERS code_object_track.hpp code_printing.hpp disassembly.hpp
@@ -27,28 +26,21 @@ add_library(rocprofiler-sdk-codeobj STATIC)
 target_sources(rocprofiler-sdk-codeobj PRIVATE ${LIB_CODEOBJ_PARSER_SOURCES})
 target_link_libraries(
     rocprofiler-sdk-codeobj
-    PRIVATE amd_comgr dw elf rocprofiler::rocprofiler-build-flags
+    PRIVATE rocprofiler::rocprofiler-amd-comgr rocprofiler::rocprofiler-dw
+            rocprofiler::rocprofiler-elf rocprofiler::rocprofiler-build-flags
             rocprofiler::rocprofiler-memcheck rocprofiler::rocprofiler-common-library)
 
-target_include_directories(rocprofiler-sdk-codeobj PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
-
-if(ROCPROFILER_BUILD_CODECOV)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -coverage")
-    target_link_libraries(rocprofiler-sdk-codeobj PUBLIC gcov)
-endif()
+target_include_directories(rocprofiler-sdk-codeobj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 set_target_properties(
     rocprofiler-sdk-codeobj
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk-codeobj
-               SOVERSION ${PROJECT_VERSION_MAJOR}
-               VERSION ${PROJECT_VERSION}
-               BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
-               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
+               POSITION_INDEPENDENT_CODE ON)
 
 install(
     TARGETS rocprofiler-sdk-codeobj
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk-codeobj
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
     COMPONENT tools
     EXPORT rocprofiler-sdk-codeobj-targets)
 

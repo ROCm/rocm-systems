@@ -49,6 +49,8 @@ rocprofiler_add_interface_library(rocprofiler-fmt "C++ format string library" IN
 rocprofiler_add_interface_library(rocprofiler-cxx-filesystem "C++ filesystem library"
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-ptl "Parallel Tasking Library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-elf "ElfUtils elf library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-dw "ElfUtils dw library" INTERNAL)
 
 #
 # interface for libraries (ROCm-specific)

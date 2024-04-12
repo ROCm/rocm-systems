@@ -1,6 +1,7 @@
 #
 # ROCTx Marker Library
 #
+set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "roctx")
 
 find_package(rocprofiler-register REQUIRED)
 
