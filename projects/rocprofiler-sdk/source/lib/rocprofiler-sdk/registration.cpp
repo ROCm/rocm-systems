@@ -38,6 +38,7 @@
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
+#include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -600,6 +601,7 @@ finalize()
         set_fini_status(-1);
         hsa::async_copy_fini();
         hsa::queue_controller_fini();
+        page_migration::finalize();
         hsa::code_object_shutdown();
         if(get_init_status() > 0)
         {

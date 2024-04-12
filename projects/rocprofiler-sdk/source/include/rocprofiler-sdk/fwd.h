@@ -89,6 +89,10 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED,      ///< AST could not be generated correctly
     ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND,              ///< AST was not found
     ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD,  ///< Event coordinate was not found by AQL profile
+    ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL,  ///< A service depends on a newer version of KFD
+                                                   ///< (amdgpu kernel driver). Check logs for
+                                                   ///< service that report incompatibility
+
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
@@ -201,6 +205,21 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE,  ///< Memory copy from device to device
     ROCPROFILER_MEMORY_COPY_LAST,
 } rocprofiler_memory_copy_operation_t;
+
+/**
+ * @brief Page migration event.
+ */
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_PAGE_MIGRATION_NONE = 0,  ///< Unknown event
+    ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE,
+    ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT,
+    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND,
+    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU,
+    // Any and all events, from all processes. Requires superuser
+    // ROCPROFILER_PAGE_MIGRATION_ANY_ALL_PROCESSES,
+    ROCPROFILER_PAGE_MIGRATION_LAST,
+} rocprofiler_page_migration_operation_t;
 
 /**
  * @brief ROCProfiler Kernel Dispatch Tracing Operation Types.

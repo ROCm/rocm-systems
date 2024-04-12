@@ -34,12 +34,15 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
+#include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <glog/logging.h>
 
 #include <atomic>
 #include <limits>
+#include <stdexcept>
+#include <string_view>
 #include <vector>
 
 #define RETURN_STATUS_ON_FAIL(...)                                                                 \
@@ -105,8 +108,7 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          c
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    static auto unsupported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION};
+    static auto unsupported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
     if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
@@ -136,6 +138,9 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          c
         RETURN_STATUS_ON_FAIL(rocprofiler::context::add_domain_op(
             ctx->buffered_tracer->domains, kind, operations[i]));
     }
+
+    if(kind == ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION)
+        RETURN_STATUS_ON_FAIL(rocprofiler::page_migration::init());
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -233,6 +238,10 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
+        {
+            val = rocprofiler::page_migration::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
@@ -340,6 +349,10 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
+        {
+            ops = rocprofiler::page_migration::get_ids();
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;

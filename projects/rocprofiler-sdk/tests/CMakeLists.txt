@@ -51,6 +51,7 @@ add_subdirectory(kernel-tracing)
 add_subdirectory(async-copy-tracing)
 add_subdirectory(scratch-memory-tracing)
 add_subdirectory(c-tool)
+add_subdirectory(page-migration)
 
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)

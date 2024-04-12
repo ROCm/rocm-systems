@@ -1,0 +1,65 @@
+#
+#
+#
+cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
+
+project(
+    rocprofiler-tests-page-migration
+    LANGUAGES CXX
+    VERSION 0.0.0)
+
+find_package(rocprofiler-sdk REQUIRED)
+
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
+    set(PRELOAD_ENV
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:rocprofiler-sdk-json-tool>")
+else()
+    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
+endif()
+
+add_test(NAME test-page-migration-execute COMMAND $<TARGET_FILE:page-migration>)
+
+set(page-migration-env
+    "${PRELOAD_ENV}"
+    "ROCPROFILER_TOOL_OUTPUT_FILE=page-migration-test.json"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+set_tests_properties(
+    test-page-migration-execute
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${page-migration-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               SKIP_REGULAR_EXPRESSION
+               "KFD does not support SVM event reporting"
+               WORKING_DIRECTORY
+               ${CMAKE_CURRENT_BINARY_DIR})
+
+foreach(FILENAME validate.py pytest.ini conftest.py)
+    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
+                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
+endforeach()
+
+add_test(NAME test-page-migration-validate
+         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
+                 ${CMAKE_CURRENT_BINARY_DIR}/page-migration-test.json)
+
+set_tests_properties(
+    test-page-migration-validate
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               test-page-migration-execute
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               SKIP_REGULAR_EXPRESSION
+               "KFD does not support SVM event reporting"
+               WORKING_DIRECTORY
+               ${CMAKE_CURRENT_BINARY_DIR})

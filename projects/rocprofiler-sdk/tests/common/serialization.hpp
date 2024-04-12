@@ -393,6 +393,90 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_copy_record_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, const rocprofiler_buffer_tracing_page_migration_record_t& data)
+{
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(kind);
+    SAVE_DATA_FIELD(operation);
+    SAVE_DATA_FIELD(start_timestamp);
+    SAVE_DATA_FIELD(end_timestamp);
+    SAVE_DATA_FIELD(pid);
+
+    switch(data.operation)
+    {
+        case ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT:
+        {
+            ar(make_nvp("page_fault", data.page_fault));
+            break;
+        }
+        case ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE:
+        {
+            ar(make_nvp("page_migrate", data.page_migrate));
+            break;
+        }
+        case ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND:
+        {
+            ar(make_nvp("queue_suspend", data.queue_suspend));
+            break;
+        }
+        case ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU:
+        {
+            ar(make_nvp("unmap_from_gpu", data.unmap_from_gpu));
+            break;
+        }
+        case ROCPROFILER_PAGE_MIGRATION_NONE:
+        case ROCPROFILER_PAGE_MIGRATION_LAST:
+        {
+            throw std::runtime_error{"unsupported page migration operation type"};
+            break;
+        }
+    }
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const rocprofiler_buffer_tracing_page_migration_page_fault_record_t& data)
+{
+    SAVE_DATA_FIELD(node_id);
+    SAVE_DATA_FIELD(address);
+    SAVE_DATA_FIELD(read_fault);
+    SAVE_DATA_FIELD(migrated);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const rocprofiler_buffer_tracing_page_migration_page_migrate_record_t& data)
+{
+    SAVE_DATA_FIELD(start_addr);
+    SAVE_DATA_FIELD(end_addr);
+    SAVE_DATA_FIELD(from_node);
+    SAVE_DATA_FIELD(to_node);
+    SAVE_DATA_FIELD(prefetch_node);
+    SAVE_DATA_FIELD(preferred_node);
+    SAVE_DATA_FIELD(trigger);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const rocprofiler_buffer_tracing_page_migration_queue_suspend_record_t& data)
+{
+    SAVE_DATA_FIELD(node_id);
+    SAVE_DATA_FIELD(trigger);
+    SAVE_DATA_FIELD(rescheduled);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const rocprofiler_buffer_tracing_page_migration_unmap_from_gpu_record_t& data)
+{
+    SAVE_DATA_FIELD(node_id);
+    SAVE_DATA_FIELD(start_addr);
+    SAVE_DATA_FIELD(end_addr);
+    SAVE_DATA_FIELD(trigger);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_scratch_memory_record_t data)
 {
     SAVE_DATA_FIELD(size);

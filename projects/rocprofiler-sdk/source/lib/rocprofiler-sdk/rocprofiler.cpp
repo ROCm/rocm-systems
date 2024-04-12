@@ -87,6 +87,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AST_NOT_FOUND, "AST was not f
 ROCPROFILER_STATUS_STRING(
     ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD,
     "AQL Profiler was not able to find event coordinates for defined counters")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL,
+                          "A service depends on a newer version of KFD (amdgpu kernel driver)")
 template <size_t Idx, size_t... Tail>
 const char*
 get_status_name(rocprofiler_status_t status, std::index_sequence<Idx, Tail...>)

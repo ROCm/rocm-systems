@@ -312,6 +312,7 @@ get_buffer_tracing_names()
         ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,
         ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
         ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
+        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
     };
 
     auto cb_name_info = buffer_name_info{};
@@ -758,6 +759,7 @@ auto hip_api_bf_records         = std::deque<rocprofiler_buffer_tracing_hip_api_
 auto kernel_dispatch_bf_records = std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>{};
 auto memory_copy_records        = std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>{};
 auto scratch_memory_records     = std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>{};
+auto page_migration_records     = std::deque<rocprofiler_buffer_tracing_page_migration_record_t>{};
 auto corr_id_retire_records =
     std::deque<rocprofiler_buffer_tracing_correlation_id_retirement_record_t>{};
 
@@ -841,6 +843,13 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     header->payload);
 
                 scratch_memory_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_page_migration_record_t*>(
+                    header->payload);
+
+                page_migration_records.emplace_back(*record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT)
             {
@@ -927,12 +936,14 @@ rocprofiler_context_id_t scratch_memory_ctx           = {};
 rocprofiler_context_id_t corr_id_retire_ctx           = {};
 rocprofiler_context_id_t kernel_dispatch_callback_ctx = {};
 rocprofiler_context_id_t kernel_dispatch_buffered_ctx = {};
+rocprofiler_context_id_t page_migration_ctx           = {};
 // buffers
 rocprofiler_buffer_id_t hsa_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t hip_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t marker_api_buffered_buffer = {};
 rocprofiler_buffer_id_t kernel_dispatch_buffer     = {};
 rocprofiler_buffer_id_t memory_copy_buffer         = {};
+rocprofiler_buffer_id_t page_migration_buffer      = {};
 rocprofiler_buffer_id_t counter_collection_buffer  = {};
 rocprofiler_buffer_id_t scratch_memory_buffer      = {};
 rocprofiler_buffer_id_t corr_id_retire_buffer      = {};
@@ -948,25 +959,28 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"MARKER_API_BUFFERED", &marker_api_buffered_ctx},
     {"KERNEL_DISPATCH_BUFFERED", &kernel_dispatch_buffered_ctx},
     {"MEMORY_COPY", &memory_copy_ctx},
+    {"PAGE_MIGRATION", &page_migration_ctx},
     {"COUNTER_COLLECTION", &counter_collection_ctx},
     {"SCRATCH_MEMORY", &scratch_memory_ctx},
     {"CORRELATION_ID_RETIREMENT", &corr_id_retire_ctx},
 };
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 8>{&hsa_api_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 9>{&hsa_api_buffered_buffer,
                                                        &hip_api_buffered_buffer,
                                                        &marker_api_buffered_buffer,
                                                        &kernel_dispatch_buffer,
                                                        &memory_copy_buffer,
                                                        &scratch_memory_buffer,
+                                                       &page_migration_buffer,
                                                        &counter_collection_buffer,
                                                        &corr_id_retire_buffer};
 
 auto agents = std::vector<rocprofiler_agent_t>{};
 
-rocprofiler_timestamp_t init_time = 0;
-rocprofiler_timestamp_t fini_time = 0;
-rocprofiler_thread_id_t main_tid  = 0;
+rocprofiler_timestamp_t init_time             = 0;
+rocprofiler_timestamp_t fini_time             = 0;
+rocprofiler_thread_id_t main_tid              = 0;
+auto                    page_migration_status = ROCPROFILER_STATUS_SUCCESS;
 
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
@@ -1142,6 +1156,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                &scratch_memory_buffer),
                      "buffer creation");
 
+    ROCPROFILER_CALL(rocprofiler_create_buffer(page_migration_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &page_migration_buffer),
+                     "buffer creation");
+
     ROCPROFILER_CALL(rocprofiler_create_buffer(corr_id_retire_ctx,
                                                buffer_size,
                                                watermark,
@@ -1225,6 +1248,23 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                      0,
                                                      scratch_memory_buffer),
         "buffer tracing service for scratch memory configure");
+
+    {
+        page_migration_status =
+            rocprofiler_configure_buffer_tracing_service(page_migration_ctx,
+                                                         ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
+                                                         nullptr,
+                                                         0,
+                                                         page_migration_buffer);
+
+        constexpr auto message = "page migration service for memory copy configure";
+        if(page_migration_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
+            std::cerr << message
+                      << " failed: " << rocprofiler_get_status_string(page_migration_status)
+                      << std::endl;
+        else
+            ROCPROFILER_CALL(page_migration_status, message);
+    }
 
     ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                          corr_id_retire_ctx,
@@ -1382,6 +1422,7 @@ tool_fini(void* tool_data)
               << ", kernel_dispatch_bf_records=" << kernel_dispatch_bf_records.size()
               << ", memory_copy_records=" << memory_copy_records.size()
               << ", scratch_memory_records=" << scratch_memory_records.size()
+              << ", page_migration=" << page_migration_records.size()
               << ", hsa_api_bf_records=" << hsa_api_bf_records.size()
               << ", hip_api_bf_records=" << hip_api_bf_records.size()
               << ", marker_api_bf_records=" << marker_api_bf_records.size()
@@ -1444,6 +1485,8 @@ write_json(call_stack_t* _call_stack)
         auto           json_ar            = JSONOutputArchive{*ofs, json_opts};
         auto           buffer_name_info   = get_buffer_tracing_names();
         auto           callback_name_info = get_callback_tracing_names();
+        auto           validate_page_migration =
+            (page_migration_status != ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL);
 
         json_ar.setNextName("rocprofiler-sdk-json-tool");
         json_ar.startNode();
@@ -1454,6 +1497,7 @@ write_json(call_stack_t* _call_stack)
         json_ar(cereal::make_nvp("main_tid", main_tid));
         json_ar(cereal::make_nvp("init_time", init_time));
         json_ar(cereal::make_nvp("fini_time", fini_time));
+        json_ar(cereal::make_nvp("validate_page_migration", validate_page_migration));
         json_ar.finishNode();
 
         json_ar(cereal::make_nvp("agents", agents));
@@ -1487,6 +1531,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("kernel_dispatches", kernel_dispatch_bf_records));
             json_ar(cereal::make_nvp("memory_copies", memory_copy_records));
             json_ar(cereal::make_nvp("scratch_memory_traces", scratch_memory_records));
+            json_ar(cereal::make_nvp("page_migration", page_migration_records));
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_bf_records));
             json_ar(cereal::make_nvp("hip_api_traces", hip_api_bf_records));
             json_ar(cereal::make_nvp("marker_api_traces", marker_api_bf_records));

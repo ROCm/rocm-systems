@@ -45,6 +45,7 @@ add_subdirectory(marker)
 add_subdirectory(thread_trace)
 add_subdirectory(tracing)
 add_subdirectory(kernel_dispatch)
+add_subdirectory(page_migration)
 
 target_link_libraries(
     rocprofiler-object-library

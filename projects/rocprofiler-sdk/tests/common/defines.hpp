@@ -33,8 +33,8 @@
                       << " failed with error code " << status_name << " (" << CHECKSTATUS          \
                       << "): " << status_msg << std::endl;                                         \
             std::stringstream errmsg{};                                                            \
-            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
-                   << status_name << ": " << status_msg << ")";                                    \
+            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg               \
+                   << " failure (" << status_name << ": " << status_msg << ")";                    \
             throw std::runtime_error(errmsg.str());                                                \
         }                                                                                          \
     }
