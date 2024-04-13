@@ -251,12 +251,12 @@ TEST(dimension, block_dim_test)
             }
             else
             {
-                aql::CounterPacketConstruct pkt_gen(agent, {metric});
+                aql::CounterPacketConstruct pkt_gen(agent.get_rocp_agent()->id, {metric});
                 const auto&                 events = pkt_gen.get_counter_events(metric);
                 for(const auto& event : events)
                 {
                     std::map<int, uint64_t> dims;
-                    auto status = aql::get_dim_info(agent.get_hsa_agent(), event, 0, dims);
+                    auto status = aql::get_dim_info(agent.get_rocp_agent()->id, event, 0, dims);
                     CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS)
                         << rocprofiler_get_status_string(status);
                     for(const auto& [id, extent] : dims)

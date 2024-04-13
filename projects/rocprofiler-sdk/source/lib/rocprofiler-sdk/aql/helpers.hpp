@@ -30,6 +30,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
 namespace rocprofiler
@@ -38,18 +39,18 @@ namespace aql
 {
 // Query HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID from aqlprofile
 hsa_ven_amd_aqlprofile_id_query_t
-get_query_info(hsa_agent_t agent, const counters::Metric& metric);
+get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric);
 
 // Query HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS from aqlprofiler
 uint32_t
-get_block_counters(hsa_agent_t agent, const hsa_ven_amd_aqlprofile_event_t& event);
+get_block_counters(rocprofiler_agent_id_t agent, const aqlprofile_pmc_event_t& event);
 
 // Query dimimension ids for counter event. Returns AQLProfiler ID -> extent
 rocprofiler_status_t
-get_dim_info(hsa_agent_t                    agent,
-             hsa_ven_amd_aqlprofile_event_t event,
-             uint32_t                       sample_id,
-             std::map<int, uint64_t>&       dims);
+get_dim_info(rocprofiler_agent_id_t   agent,
+             aqlprofile_pmc_event_t   event,
+             uint32_t                 sample_id,
+             std::map<int, uint64_t>& dims);
 
 // Set dimension ids into id for sample
 rocprofiler_status_t

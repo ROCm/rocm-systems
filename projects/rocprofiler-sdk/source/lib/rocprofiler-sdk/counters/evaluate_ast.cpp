@@ -456,11 +456,15 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
     {
         std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>* data;
         const aql::CounterPacketConstruct*                                       pkt_gen;
+        hsa_agent_t                                                              agent;
     };
 
+    auto agent = CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(
+                                   CHECK_NOTNULL(rocprofiler::agent::get_agent(pkt_gen->agent()))))
+                     ->get_hsa_agent();
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> ret;
-    if(pkt.isEmpty()) return ret;
-    it_data aql_data{.data = &ret, .pkt_gen = pkt_gen};
+    if(pkt.empty) return ret;
+    it_data aql_data{.data = &ret, .pkt_gen = pkt_gen, .agent = agent};
     ;
     hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(
         &pkt.profile,
@@ -477,10 +481,8 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
             auto& next_rec = vec.emplace_back();
             set_counter_in_rec(next_rec.id, {.handle = metric->id()});
             // Actual dimension info needs to be used here in the future
-            auto aql_status = aql::set_dim_id_from_sample(next_rec.id,
-                                                          it.pkt_gen->hsa_agent(),
-                                                          info_data->pmc_data.event,
-                                                          info_data->sample_id);
+            auto aql_status = aql::set_dim_id_from_sample(
+                next_rec.id, it.agent, info_data->pmc_data.event, info_data->sample_id);
             CHECK_EQ(aql_status, ROCPROFILER_STATUS_SUCCESS)
                 << rocprofiler_get_status_string(aql_status);
 

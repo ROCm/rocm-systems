@@ -122,7 +122,7 @@ TEST(aql_profile, construct_packets)
         LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
         auto metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
         ASSERT_EQ(metrics.size(), 1);
-        CounterPacketConstruct(agent, metrics);
+        CounterPacketConstruct(agent.get_rocp_agent()->id, metrics);
     }
     hsa_shut_down();
 }
@@ -142,7 +142,7 @@ TEST(aql_profile, too_many_counters)
             {
                 try
                 {
-                    CounterPacketConstruct(agent, metrics);
+                    CounterPacketConstruct(agent.get_rocp_agent()->id, metrics);
                 } catch(const std::exception& e)
                 {
                     EXPECT_NE(e.what(), nullptr) << e.what();
@@ -164,7 +164,7 @@ TEST(aql_profile, packet_generation_single)
     for(const auto& [_, agent] : agents)
     {
         auto                   metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
-        CounterPacketConstruct pkt(agent, metrics);
+        CounterPacketConstruct pkt(agent.get_rocp_agent()->id, metrics);
         auto                   test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
         EXPECT_TRUE(test_pkt);
     }
@@ -183,7 +183,7 @@ TEST(aql_profile, packet_generation_multi)
     {
         auto metrics =
             rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES", "TA_FLAT_READ_WAVEFRONTS"});
-        CounterPacketConstruct pkt(agent, metrics);
+        CounterPacketConstruct pkt(agent.get_rocp_agent()->id, metrics);
         auto                   test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
         EXPECT_TRUE(test_pkt);
     }

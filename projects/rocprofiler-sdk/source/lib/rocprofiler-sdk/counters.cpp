@@ -79,11 +79,6 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
 /**
  * @brief This call returns the number of instances specific counter contains.
- *        WARNING: There is a restriction on this call in the alpha/beta release
- *        of rocprof. This call will not return correct instance information in
- *        tool_init and must be called as part of the dispatch callback for accurate
- *        instance counting information. The reason for this restriction is that HSA
- *        is not yet loaded on tool_init.
  *
  * @param [in] agent rocprofiler agent
  * @param [in] counter_id counter id (obtained from iterate_agent_supported_counters)
@@ -96,11 +91,6 @@ rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t,
                                          size_t*                  instance_count)
 {
     *instance_count = 0;
-
-    if(rocprofiler::counters::get_dimension_cache().empty())
-    {
-        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
-    }
 
     const auto* dims = rocprofiler::common::get_val(rocprofiler::counters::get_dimension_cache(),
                                                     counter_id.handle);
@@ -174,11 +164,6 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
                                        rocprofiler_available_dimensions_cb_t info_cb,
                                        void*                                 user_data)
 {
-    if(rocprofiler::counters::get_dimension_cache().empty())
-    {
-        return ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED;
-    }
-
     const auto* dims =
         rocprofiler::common::get_val(rocprofiler::counters::get_dimension_cache(), id.handle);
     if(!dims) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;

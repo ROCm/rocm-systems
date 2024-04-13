@@ -2,7 +2,7 @@ rocprofiler_deactivate_clang_tidy()
 
 include(GoogleTest)
 
-set(ROCPROFILER_LIB_AQL_TEST_SOURCES "aql_test.cpp")
+set(ROCPROFILER_LIB_AQL_TEST_SOURCES "aql_test.cpp" "helpers.cpp")
 
 add_executable(aql-test)
 

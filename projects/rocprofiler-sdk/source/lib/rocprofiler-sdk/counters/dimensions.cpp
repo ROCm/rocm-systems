@@ -56,18 +56,17 @@ getBlockDimensions(std::string_view agent, const Metric& metric)
 
     std::vector<MetricDimension> ret;
 
-    for(const auto& [_, maybe_agent] :
-        CHECK_NOTNULL(hsa::get_queue_controller())->get_supported_agents())
+    for(const auto* maybe_agent : rocprofiler::agent::get_agents())
     {
-        if(maybe_agent.name() == agent)
+        if(std::string(maybe_agent->name) == agent)
         {
-            aql::CounterPacketConstruct pkt_gen(maybe_agent, {metric});
+            aql::CounterPacketConstruct pkt_gen(maybe_agent->id, {metric});
             const auto&                 events = pkt_gen.get_counter_events(metric);
 
             for(const auto& event : events)
             {
                 std::map<int, uint64_t> dims;
-                auto status = aql::get_dim_info(maybe_agent.get_hsa_agent(), event, 0, dims);
+                auto                    status = aql::get_dim_info(maybe_agent->id, event, 0, dims);
                 CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS)
                     << rocprofiler_get_status_string(status);
 
@@ -103,16 +102,6 @@ get_dimension_cache()
         common::static_object<std::unordered_map<uint64_t, std::vector<MetricDimension>>>::
             construct([]() -> std::unordered_map<uint64_t, std::vector<MetricDimension>> {
                 std::unordered_map<uint64_t, std::vector<MetricDimension>> dims;
-                /**
-                 * Fails if HSA is not loaded by retruning nothing. This should not remain after
-                 * AQL is transistioned away from HSA.
-                 */
-                if(CHECK_NOTNULL(rocprofiler::hsa::get_queue_controller())
-                       ->get_supported_agents()
-                       .empty())
-                {
-                    return {};
-                }
 
                 const auto& asts = counters::get_ast_map();
                 for(const auto& [gfx, metrics] : asts)

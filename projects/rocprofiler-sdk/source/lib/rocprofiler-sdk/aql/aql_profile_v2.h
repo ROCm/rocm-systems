@@ -1,34 +1,11 @@
-// MIT License
-//
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
-//
-// Permission is hereby granted, free of charge, to any person obtaining a copy
-// of this software and associated documentation files (the "Software"), to deal
-// in the Software without restriction, including without limitation the rights
-// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-// copies of the Software, and to permit persons to whom the Software is
-// furnished to do so, subject to the following conditions:
-//
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
-//
-// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
-
 #pragma once
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+#define PUBLIC_API
 
+extern "C" {
 typedef struct
 {
     uint64_t handle;
@@ -149,7 +126,7 @@ typedef struct
  * @retval HSA_STATUS_SUCCESS registration ok
  * @retval HSA_STATUS_ERROR registration failed
  */
-hsa_status_t
+PUBLIC_API hsa_status_t
 aqlprofile_register_agent(aqlprofile_agent_handle_t*     agent_id,
                           const aqlprofile_agent_info_t* agent_info);
 
@@ -179,7 +156,7 @@ typedef enum
                                               // counters disable command buffer
 } aqlprofile_pmc_info_type_t;
 
-hsa_status_t
+PUBLIC_API hsa_status_t
 aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
                         aqlprofile_pmc_info_type_t      attribute,
                         void*                           value);
@@ -244,7 +221,7 @@ typedef hsa_status_t (*aqlprofile_memory_copy_t)(void*       dst,
  * @retval HSA_STATUS_SUCCESS if the event was validated.
  * @retval HSA_STATUS_ERROR if the event was not validated.
  */
-hsa_status_t
+PUBLIC_API hsa_status_t
 aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
                               const aqlprofile_pmc_event_t* event,
                               bool*                         result);
@@ -258,7 +235,7 @@ aqlprofile_validate_pmc_event(aqlprofile_agent_handle_t     agent,
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
-hsa_status_t
+PUBLIC_API hsa_status_t
 aqlprofile_pmc_iterate_data(aqlprofile_handle_t            handle,
                             aqlprofile_pmc_data_callback_t callback,
                             void*                          userdata);
@@ -282,7 +259,7 @@ typedef struct
  * @param[in] dealloc_cb Function to free memory allocated by alloc_cb
  * @param[in] userdata Data passed back to user via memory alloc callback
  */
-hsa_status_t
+PUBLIC_API hsa_status_t
 aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 handle,
                               aqlprofile_pmc_aql_packets_t*        packets,
                               aqlprofile_pmc_profile_t             profile,
@@ -295,7 +272,7 @@ aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 handle,
  * @brief Function to delete AQL packets after creation by aqlprofile_pmc_create_packets
  * @param[in] handle Returned by aqlprofile_pmc_create_packets()
  */
-void
+PUBLIC_API void
 aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
 
 /**
@@ -307,7 +284,7 @@ aqlprofile_pmc_delete_packets(aqlprofile_handle_t handle);
  * @retval HSA_STATUS_ERROR if some callback returns an error
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT if invalid handle is given
  */
-hsa_status_t
+PUBLIC_API hsa_status_t
 aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
                             aqlprofile_att_data_callback_t callback,
                             void*                          userdata);
@@ -330,7 +307,7 @@ typedef struct
  * @retval HSA_STATUS_SUCCESS if all packets created succesfully
  * @retval HSA_STATUS_ERROR otherwise
  */
-hsa_status_t
+PUBLIC_API hsa_status_t
 aqlprofile_att_create_packets(aqlprofile_handle_t*                  handle,
                               aqlprofile_att_control_aql_packets_t* packets,
                               aqlprofile_att_profile_t              profile,
@@ -339,7 +316,7 @@ aqlprofile_att_create_packets(aqlprofile_handle_t*                  handle,
                               aqlprofile_memory_copy_t              memcpy_cb,
                               void*                                 userdata);
 
-void
+PUBLIC_API void
 aqlprofile_att_delete_packets(aqlprofile_handle_t handle);
 
 /**
@@ -476,21 +453,20 @@ enum WaveTrapStatus
     TRAP_STANDBY  = 2
 };
 
-typedef struct
+struct __attribute__((packed)) pcinfo_t
 {
     size_t addr;
-    size_t marker_id;
-} pcinfo_t;
+    int    marker_id;
+};
 
 typedef struct __attribute__((packed))
 {
-    uint64_t category : 8;
-    uint64_t hitcount : 56;
-    uint64_t latency;
     pcinfo_t pc;
+    int      hitcount;
+    size_t   latency;
 } att_trace_event_t;
 
-typedef struct
+struct wave_data_t
 {
     uint8_t simd;
     uint8_t wave_id;
@@ -498,42 +474,65 @@ typedef struct
     uint8_t reserved;
 
     // VMEM Pipeline: instrs and stalls
-    int num_vmem_instrs;
-    int num_vmem_stalls;
+    int num_vmem_instrs = 0;
+    int num_vmem_stalls = 0;
     // FLAT instrs and stalls
-    int num_flat_instrs;
-    int num_flat_stalls;
+    int num_flat_instrs = 0;
+    int num_flat_stalls = 0;
 
     // LDS instr and stalls
-    int num_lds_instrs;
-    int num_lds_stalls;
+    int num_lds_instrs = 0;
+    int num_lds_stalls = 0;
 
     // SCA instrs stalls
-    int num_salu_instrs;
-    int num_smem_instrs;
-    int num_salu_stalls;
-    int num_smem_stalls;
+    int num_salu_instrs = 0;
+    int num_smem_instrs = 0;
+    int num_salu_stalls = 0;
+    int num_smem_stalls = 0;
 
     // Branch
-    int num_branch_instrs;
-    int num_branch_taken_instrs;
-    int num_branch_stalls;
+    int num_branch_instrs       = 0;
+    int num_branch_taken_instrs = 0;
+    int num_branch_stalls       = 0;
 
     // total VMEM/FLAT/LDS/SMEM instructions issued
-    int    num_mem_instrs;  // total issued memory instructions
-    int    num_valu_stalls;
-    size_t num_valu_instrs;
-    size_t num_issued_instrs;  // total issued instructions (compute + memory)
+    int    num_mem_instrs    = 0;  // total issued memory instructions
+    int    num_valu_stalls   = 0;
+    size_t num_valu_instrs   = 0;
+    size_t num_issued_instrs = 0;  // total issued instructions (compute + memory)
 
-    int64_t begin_time;  // Begin and end cycle
-    int64_t end_time;
-    int64_t traceID;
+    int64_t begin_time = 0;  // Begin and end cycle
+    int64_t end_time   = 0;
+    int64_t traceID    = -1;
 
-    size_t              timeline_size;
-    size_t              instructions_size;
+    size_t              timeline_size     = 0;
+    size_t              instructions_size = 0;
     wave_state_t*       timeline_array;
     wave_instruction_t* instructions_array;
-} wave_data_t;
+};
+
+/**
+ * @brief Callback for iteration of all possible event coordinate IDs and coordinate names.
+ * @param [in] id Integer identifying type ID.
+ * @param [in] name Name of the trace type.
+ * @param [in] userdata User data supplied to back caller
+ * @retval HSA_STATUS_SUCCESS Continues iteration
+ * @retval OTHERS Any other HSA return values stops iteration, passing back this value through
+ *         @ref aqlprofile_iterate_trace_type_ids
+ */
+typedef hsa_status_t (*aqlprofile_att_tracename_callback_t)(int id, const char* name, void* data);
+
+/**
+ * @brief Iterate over all possible event coordinate IDs and their names.
+ * @param [in] callback Callback to use for iteration of trace types
+ * @param [in] userdata Data to supply to callback @ref aqlprofile_tracename_callback_t
+ * @retval HSA_STATUS_SUCCESS if successful
+ * @retval HSA_STATUS_ERROR if error on interation
+ * @retval OTHERS If @ref aqlprofile_eventname_callback_t returns non-HSA_STATUS_SUCCESS,
+ *         that value is returned.
+ */
+PUBLIC_API hsa_status_t
+aqlprofile_att_iterate_trace_type_ids(aqlprofile_att_tracename_callback_t callback, void* userdata);
 
 /**
  * @brief Callback for rocprofiler to return ISA to aqlprofile ATT parser.
@@ -561,7 +560,7 @@ typedef hsa_status_t (*aqlprofile_att_isa_callback_t)(char*     isa_instruction,
                                                       uint64_t* isa_memory_size,
                                                       uint64_t* isa_size,
                                                       uint64_t* source_size,
-                                                      uint64_t  marker_id,
+                                                      uint32_t  marker_id,
                                                       uint64_t  offset,
                                                       void*     userdata);
 
@@ -604,11 +603,11 @@ typedef uint64_t (*aqlprofile_att_se_data_callback_t)(int*      shader_engine_id
 /**
  * @brief Callback returning from aqlprofile_att_parser_iterate_event_list
  * @param[in] trace_event_id ID of the event.
- * @param[in] trace_event_metadata Null-terminated string, entries separated by ';'
+ * @param[in] trace_event_name Event name.
  * @param[in] userdata userdata.
  */
 typedef void (*aqlprofile_att_parser_iterate_event_cb_t)(int         trace_event_id,
-                                                         const char* trace_event_metadata,
+                                                         const char* trace_event_name,
                                                          void*       userdata);
 
 /**
@@ -616,7 +615,7 @@ typedef void (*aqlprofile_att_parser_iterate_event_cb_t)(int         trace_event
  * @param[in] callback Callback where events are returned to.
  * @param[in] userdata userdata.
  */
-void
+hsa_status_t
 aqlprofile_att_parser_iterate_event_list(aqlprofile_att_parser_iterate_event_cb_t callback,
                                          void*                                    userdata);
 
@@ -635,17 +634,17 @@ aqlprofile_att_parse_data(aqlprofile_att_se_data_callback_t se_data_callback,
                           void*                             userdata);
 
 /**
- * @brief Contains flags for how code objects are interpreted
+ * @brief Contains information of code objects. IDs can be reused for different load addresses.
  */
 typedef union
 {
+    uint32_t raw;
     struct
     {
         uint32_t isUnload   : 1;   // 0 if code object is being loaded, 1 for unload
         uint32_t bFromStart : 1;   // Has this code object been loaded before thread trace started?
-        uint32_t legacy_id  : 30;  // Legacy code object ID, if it fits in 30 bits.
+        uint32_t id         : 30;  // To be passed back to isa_string_callback in marker_id
     };
-    uint32_t raw;
 } aqlprofile_att_header_marker_t;
 
 /**
@@ -653,7 +652,6 @@ typedef union
  * @param[out] packets Returned packet
  * @param[in] handle The handle created from aqlprofile_att_create_packets()
  * @param[in] header Header containing code object information created from profiler
- * @param[in] id To be passed back to isa_string_callback in marker_id
  * @param[in] addr Code object loaded address.
  * @param[in] size Code object loaded size.
  */
@@ -661,10 +659,6 @@ hsa_status_t
 aqlprofile_att_codeobj_load_marker(hsa_ext_amd_aql_pm4_packet_t*  packets,
                                    aqlprofile_handle_t            handle,
                                    aqlprofile_att_header_marker_t header,
-                                   uint64_t                       id,
                                    uint64_t                       addr,
                                    uint64_t                       size);
-
-#ifdef __cplusplus
 }
-#endif

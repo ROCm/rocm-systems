@@ -52,19 +52,17 @@ namespace aql
 class CounterPacketConstruct
 {
 public:
-    CounterPacketConstruct(const hsa::AgentCache&               agent,
+    CounterPacketConstruct(rocprofiler_agent_id_t               agent,
                            const std::vector<counters::Metric>& metrics);
     std::unique_ptr<hsa::CounterAQLPacket> construct_packet(const AmdExtTable&);
 
     const counters::Metric* event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const;
     std::vector<hsa_ven_amd_aqlprofile_event_t> get_all_events() const;
-    hsa_agent_t                                 hsa_agent() const { return _agent.get_hsa_agent(); }
+    const std::vector<aqlprofile_pmc_event_t>&  get_counter_events(const counters::Metric&) const;
 
-    const std::vector<hsa_ven_amd_aqlprofile_event_t>& get_counter_events(
-        const counters::Metric&) const;
+    rocprofiler_agent_id_t agent() const { return _agent; }
 
 private:
-    const hsa::AgentCache&  _agent;
     static constexpr size_t MEM_PAGE_ALIGN = 0x1000;
     static constexpr size_t MEM_PAGE_MASK  = MEM_PAGE_ALIGN - 1;
     static size_t getPageAligned(size_t p) { return (p + MEM_PAGE_MASK) & ~MEM_PAGE_MASK; }
@@ -74,10 +72,12 @@ protected:
     {
         counters::Metric                            metric;
         std::vector<hsa_ven_amd_aqlprofile_event_t> instances;
+        std::vector<aqlprofile_pmc_event_t>         events;
     };
 
     void can_collect();
 
+    rocprofiler_agent_id_t                      _agent;
     std::vector<AQLProfileMetric>               _metrics;
     std::vector<hsa_ven_amd_aqlprofile_event_t> _events;
     std::map<std::tuple<hsa_ven_amd_aqlprofile_block_name_t, uint32_t, uint32_t>, counters::Metric>

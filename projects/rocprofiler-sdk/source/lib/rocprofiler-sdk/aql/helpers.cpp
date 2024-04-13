@@ -36,12 +36,12 @@ namespace rocprofiler
 namespace aql
 {
 hsa_ven_amd_aqlprofile_id_query_t
-get_query_info(hsa_agent_t agent, const counters::Metric& metric)
+get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
 {
-    hsa_ven_amd_aqlprofile_profile_t  profile{.agent = agent};
+    auto                     aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
+    aqlprofile_pmc_profile_t profile{.agent = aql_agent};
     hsa_ven_amd_aqlprofile_id_query_t query = {metric.block().c_str(), 0, 0};
-    if(hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query) !=
-       HSA_STATUS_SUCCESS)
+    if(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_BLOCK_ID, &query) != HSA_STATUS_SUCCESS)
     {
         ROCP_DFATAL << fmt::format("AQL failed to query info for counter {}", metric);
         throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", metric));
@@ -50,16 +50,13 @@ get_query_info(hsa_agent_t agent, const counters::Metric& metric)
 }
 
 uint32_t
-get_block_counters(hsa_agent_t agent, const hsa_ven_amd_aqlprofile_event_t& event)
+get_block_counters(rocprofiler_agent_id_t agent, const aqlprofile_pmc_event_t& event)
 {
-    hsa_ven_amd_aqlprofile_profile_t query              = {.agent       = agent,
-                                              .type        = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
-                                              .events      = &event,
-                                              .event_count = 1};
-    uint32_t                         max_block_counters = 0;
-    if(hsa_ven_amd_aqlprofile_get_info(&query,
-                                       HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS,
-                                       &max_block_counters) != HSA_STATUS_SUCCESS)
+    auto                     aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
+    aqlprofile_pmc_profile_t query     = {.agent = aql_agent, .events = &event, .event_count = 1};
+    uint32_t                 max_block_counters = 0;
+    if(aqlprofile_get_pmc_info(&query, AQLPROFILE_INFO_BLOCK_COUNTERS, &max_block_counters) !=
+       HSA_STATUS_SUCCESS)
     {
         throw std::runtime_error(fmt::format("AQL failed to max block info for counter {}",
                                              static_cast<int64_t>(event.block_name)));
@@ -94,10 +91,10 @@ set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
 }
 
 rocprofiler_status_t
-get_dim_info(hsa_agent_t                    agent,
-             hsa_ven_amd_aqlprofile_event_t event,
-             uint32_t                       sample_id,
-             std::map<int, uint64_t>&       dims)
+get_dim_info(rocprofiler_agent_id_t   agent,
+             aqlprofile_pmc_event_t   event,
+             uint32_t                 sample_id,
+             std::map<int, uint64_t>& dims)
 {
     auto callback = [](int, int id, int extent, int, const char*, void* userdata) -> hsa_status_t {
         auto& map = *static_cast<std::map<int, uint64_t>*>(userdata);
@@ -105,8 +102,10 @@ get_dim_info(hsa_agent_t                    agent,
         return HSA_STATUS_SUCCESS;
     };
 
-    if(hsa_ven_amd_aqlprofile_iterate_event_coord(
-           agent, event, sample_id, callback, static_cast<void*>(&dims)) != HSA_STATUS_SUCCESS)
+    auto aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
+
+    if(aqlprofile_iterate_event_coord(
+           aql_agent, event, sample_id, callback, static_cast<void*>(&dims)) != HSA_STATUS_SUCCESS)
     {
         return ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD;
     }

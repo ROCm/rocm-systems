@@ -121,6 +121,12 @@ buffered_callback(rocprofiler_context_id_t,
     *output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
 }
 
+std::unordered_map<uint64_t, rocprofiler_profile_config_id_t>&
+get_profile_cache()
+{
+    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache;
+    return profile_cache;
+}
 /**
  * Callback from rocprofiler when an kernel dispatch is enqueued into the HSA queue.
  * rocprofiler_profile_config_id_t* is a return to specify what counters to collect
@@ -140,12 +146,9 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
      * set for the agent. If we have, return it. Otherwise, construct a new profile counter
      * set.
      */
-    static std::shared_mutex                                             m_mutex       = {};
-    static std::unordered_map<uint64_t, rocprofiler_profile_config_id_t> profile_cache = {};
-
     auto search_cache = [&]() {
-        if(auto pos = profile_cache.find(dispatch_data.dispatch_info.agent_id.handle);
-           pos != profile_cache.end())
+        if(auto pos = get_profile_cache().find(dispatch_data.dispatch_info.agent_id.handle);
+           pos != get_profile_cache().end())
         {
             *config = pos->second;
             return true;
@@ -153,22 +156,21 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
         return false;
     };
 
+    if(!search_cache())
     {
-        auto rlock = std::shared_lock{m_mutex};
-        if(search_cache()) return;
+        std::cerr << "No profile for agent found in cache\n";
+        exit(-1);
     }
+}
 
-    auto wlock = std::unique_lock{m_mutex};
-    if(search_cache()) return;
-
-    // Counters we want to collect (here its SQ_WAVES)
-    std::set<std::string> counters_to_collect = {"SQ_WAVES"};
-    // GPU Counter IDs
+rocprofiler_profile_config_id_t
+build_profile_for_agent(rocprofiler_agent_id_t agent)
+{
+    std::set<std::string>                 counters_to_collect = {"SQ_WAVES"};
     std::vector<rocprofiler_counter_id_t> gpu_counters;
 
-    // Iterate through the agents and get the counters available on that agent
     ROCPROFILER_CALL(rocprofiler_iterate_agent_supported_counters(
-                         dispatch_data.dispatch_info.agent_id,
+                         agent,
                          [](rocprofiler_agent_id_t,
                             rocprofiler_counter_id_t* counters,
                             size_t                    num_counters,
@@ -185,7 +187,6 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
                      "Could not fetch supported counters");
 
     std::vector<rocprofiler_counter_id_t> collect_counters;
-    // Look for the counters contained in counters_to_collect in gpu_counters
     for(auto& counter : gpu_counters)
     {
         rocprofiler_counter_info_v0_t version;
@@ -200,17 +201,12 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
         }
     }
 
-    // Create a colleciton profile for the counters
     rocprofiler_profile_config_id_t profile;
-    ROCPROFILER_CALL(rocprofiler_create_profile_config(dispatch_data.dispatch_info.agent_id,
-                                                       collect_counters.data(),
-                                                       collect_counters.size(),
-                                                       &profile),
+    ROCPROFILER_CALL(rocprofiler_create_profile_config(
+                         agent, collect_counters.data(), collect_counters.size(), &profile),
                      "Could not construct profile cfg");
 
-    profile_cache.emplace(dispatch_data.dispatch_info.agent_id.handle, profile);
-    // Return the profile to collect those counters for this dispatch
-    *config = profile;
+    return profile;
 }
 
 int
@@ -226,6 +222,41 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                user_data,
                                                &get_buffer()),
                      "buffer creation failed");
+
+    std::vector<rocprofiler_agent_v0_t>     agents;
+    rocprofiler_query_available_agents_cb_t iterate_cb = [](rocprofiler_agent_version_t agents_ver,
+                                                            const void**                agents_arr,
+                                                            size_t                      num_agents,
+                                                            void*                       udata) {
+        if(agents_ver != ROCPROFILER_AGENT_INFO_VERSION_0)
+            throw std::runtime_error{"unexpected rocprofiler agent version"};
+        auto* agents_v = static_cast<std::vector<rocprofiler_agent_v0_t>*>(udata);
+        for(size_t i = 0; i < num_agents; ++i)
+            agents_v->emplace_back(*static_cast<const rocprofiler_agent_v0_t*>(agents_arr[i]));
+        return ROCPROFILER_STATUS_SUCCESS;
+    };
+
+    ROCPROFILER_CALL(
+        rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                           iterate_cb,
+                                           sizeof(rocprofiler_agent_t),
+                                           const_cast<void*>(static_cast<const void*>(&agents))),
+        "query available agents");
+
+    // Construct the profiles in advance for each agent that is a GPU
+    for(const auto& agent : agents)
+    {
+        if(agent.type == ROCPROFILER_AGENT_TYPE_GPU)
+        {
+            get_profile_cache().emplace(agent.id.handle, build_profile_for_agent(agent.id));
+        }
+    }
+
+    if(agents.empty())
+    {
+        std::cerr << "No agents found" << std::endl;
+        return 1;
+    }
 
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),

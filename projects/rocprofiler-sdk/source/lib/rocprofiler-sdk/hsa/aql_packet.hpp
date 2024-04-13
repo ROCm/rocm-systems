@@ -62,16 +62,20 @@ public:
     AQLPacket(const AQLPacket&) = delete;
     AQLPacket& operator=(const AQLPacket&) = delete;
 
+    aqlprofile_handle_t          pkt_handle = {.handle = 0};
+    aqlprofile_pmc_aql_packets_t pkts       = {.start_packet = null_amd_aql_pm4_packet,
+                                         .stop_packet  = null_amd_aql_pm4_packet,
+                                         .read_packet  = null_amd_aql_pm4_packet};
+
+    bool                             empty   = {true};
     hsa_ven_amd_aqlprofile_profile_t profile = {};
     hsa_ext_amd_aql_pm4_packet_t     start   = null_amd_aql_pm4_packet;
     hsa_ext_amd_aql_pm4_packet_t     stop    = null_amd_aql_pm4_packet;
     hsa_ext_amd_aql_pm4_packet_t     read    = null_amd_aql_pm4_packet;
-
     common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt = {};
     common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt  = {};
 
     bool isEmpty() const { return empty; }
-    bool empty = true;
 };
 
 class CounterAQLPacket : public AQLPacket

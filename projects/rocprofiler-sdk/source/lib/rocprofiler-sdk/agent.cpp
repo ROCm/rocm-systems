@@ -697,6 +697,47 @@ get_agent(rocprofiler_agent_id_t id)
     return nullptr;
 }
 
+const std::vector<aqlprofile_agent_handle_t>&
+get_aql_handles()
+{
+    static std::vector<aqlprofile_agent_handle_t> _v = []() {
+        std::vector<aqlprofile_agent_handle_t> agent_handles;
+        for(auto& agent : get_agents())
+        {
+            aqlprofile_agent_info_t agent_info = {
+                .agent_gfxip          = agent->name,
+                .xcc_num              = agent->num_xcc,
+                .se_num               = agent->num_shader_banks,
+                .cu_num               = agent->cu_count,
+                .shader_arrays_per_se = agent->simd_arrays_per_engine};
+            aqlprofile_agent_handle_t handle = {.handle = 0};
+            if(aqlprofile_register_agent(&handle, &agent_info) != HSA_STATUS_SUCCESS)
+            {
+                ROCP_WARNING << "Failed to register agent " << agent->name;
+            }
+            agent_handles.push_back(handle);
+        }
+        return agent_handles;
+    }();
+
+    return _v;
+}
+
+const aqlprofile_agent_handle_t*
+get_aql_agent(rocprofiler_agent_id_t id)
+{
+    size_t pos = 0;
+    for(const auto& itr : get_agents())
+    {
+        if(itr && itr->id.handle == id.handle)
+        {
+            return &get_aql_handles().at(pos);
+        }
+        pos++;
+    }
+    return nullptr;
+}
+
 void
 construct_agent_cache(::HsaApiTable* table)
 {
@@ -916,15 +957,15 @@ get_rocprofiler_agent(hsa_agent_t agent)
     return nullptr;
 }
 
-std::optional<hsa::AgentCache>
+const hsa::AgentCache*
 get_agent_cache(const rocprofiler_agent_t* agent)
 {
     for(const auto& itr : get_agent_caches())
     {
-        if(itr == agent) return itr;
+        if(itr == agent) return &itr;
     }
 
-    return std::nullopt;
+    return nullptr;
 }
 
 std::optional<hsa::AgentCache>

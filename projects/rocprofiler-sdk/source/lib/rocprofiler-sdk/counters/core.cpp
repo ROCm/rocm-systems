@@ -219,7 +219,7 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
     }
 
     profile->pkt_generator = std::make_unique<rocprofiler::aql::CounterPacketConstruct>(
-        agent,
+        agent.get_rocp_agent()->id,
         std::vector<counters::Metric>{profile->reqired_hw_counters.begin(),
                                       profile->reqired_hw_counters.end()});
     return ROCPROFILER_STATUS_SUCCESS;

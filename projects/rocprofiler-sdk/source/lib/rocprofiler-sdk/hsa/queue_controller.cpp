@@ -191,7 +191,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     // Generate supported agents
     for(const auto* itr : agents)
     {
-        auto cached_agent = agent::get_agent_cache(itr);
+        const auto* cached_agent = agent::get_agent_cache(itr);
         if(cached_agent && cached_agent->get_rocp_agent()->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             get_supported_agents().emplace(cached_agent->index(), *cached_agent);

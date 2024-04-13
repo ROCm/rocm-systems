@@ -24,6 +24,7 @@
 
 #include <rocprofiler-sdk/agent.h>
 
+#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 #include <hsa/hsa_api_trace.h>
@@ -51,7 +52,7 @@ get_hsa_agent(const rocprofiler_agent_t* agent);
 const rocprofiler_agent_t*
 get_rocprofiler_agent(hsa_agent_t agent);
 
-std::optional<hsa::AgentCache>
+const hsa::AgentCache*
 get_agent_cache(const rocprofiler_agent_t* agent);
 
 std::optional<hsa::AgentCache>
@@ -65,6 +66,9 @@ get_agent_cache(hsa_agent_t agent);
  */
 std::unordered_set<std::string>&
 get_agent_available_properties();
+
+const aqlprofile_agent_handle_t*
+get_aql_agent(rocprofiler_agent_id_t id);
 
 void
 construct_agent_cache(::HsaApiTable* table);
