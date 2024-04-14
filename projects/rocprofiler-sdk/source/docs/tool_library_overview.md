@@ -10,18 +10,18 @@
 
 The ROCm runtimes are now designed to directly communicate with a new library called rocprofiler-register during their initialization. This library does cursory checks
 for whether any tools have indicated they want rocprofiler support via detection of one or more instances of a symbol named `rocprofiler_configure` (which is provided by
-the tool libraries) and/or the `ROCP_TOOL_LIBRARIES` environment variable. This design dramatically improves upon previous designs which relied solely on
-a tool racing to set runtime-specific environment variables (e.g. `HSA_TOOLS_LIB`) before the runtime initialization.
+the tool libraries) and/or the `ROCP_TOOL_LIBRARIES` environment variable. This design dramatically improves upon previous designs, which relied solely on
+a tool racing to set runtime-specific environment variables (e.g., `HSA_TOOLS_LIB`) before the runtime initialization.
 
 ## Tool Library Design
 
 When a tool has `rocprofiler_configure` visible in its symbol table, rocprofiler will invoke this function and provide information regarding
-the version of rocprofiler which invoking the function, how many tools have already been invoked, and a unique idenitifier for the tool. The tool
+the version of rocprofiler, which invokes the function, how many tools have already been invoked, and a unique identifier for the tool. The tool
 returns a pointer to a `rocprofiler_tool_configure_result_t` struct, which, if non-null, can provide rocprofiler with the function it should
-call for tool initialization (i.e. the opportunity for context creation), a function is should call when rocprofiler is finalized, and a pointer
-to any data that rocprofiler should provide back to the tool when it calls the initialization and finalization functions.
+call for tool initialization (i.e., the opportunity for context creation), and a function should call when rocprofiler is finalized, and a pointer
+to any data that the rocprofiler should provide back to the tool when it calls the initialization and finalization functions.
 
-Rocprofiler provides a `rocprofiler/registration.h` header file which forward declares the `rocprofiler_configure` function with the necessary
+Rocprofiler provides a `rocprofiler/registration.h` header file, which forward declares the `rocprofiler_configure` function with the necessary
 compiler function attributes to ensure that the symbol is publicly visible.
 
 ```cpp
@@ -56,10 +56,10 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* client_id)
 {
-    // if not first tool to register, indicate tool doesn't want to do anything
+    //If not the first tool to register, indicate that the tool doesn't want to do anything
     if(priority > 0) return nullptr;
 
-    // (optional) provide a name for this tool to rocprofiler
+    // (optional) Provide a name for this tool to rocprofiler
     client_id->name = "ExampleTool";
 
     // (optional) create configure data
@@ -81,10 +81,10 @@ rocprofiler_configure(uint32_t                 version,
 
 ## Tool Initialization
 
-> ***NOTE: rocprofiler does NOT support calls to any of the runtime functions (HSA, HIP, etc.) during tool initialization.***
+> ***NOTE: rocprofiler does NOT support calls to any runtime function (HSA, HIP, etc.) during tool initialization.***
 > ***Invoking any functions from the runtimes will result in a deadlock.***
 
-For each tool which contains a `rocprofiler_configure` function and returns a non-null pointer to a `rocprofiler_tool_configure_result_t` struct,
+For each tool that contains a `rocprofiler_configure` function and returns a non-null pointer to a `rocprofiler_tool_configure_result_t` struct,
 rocprofiler will invoke the `initialize` callback after completing the scan for all `rocprofiler_configure` symbols. In other words, rocprofiler
 collects all of the `rocprofiler_tool_configure_result_t` instances before invoking the `initialize` member of any of these instances.
 When rocprofiler invokes this function in a tool, this is the opportunity to create contexts:
@@ -116,7 +116,7 @@ Although not strictly necessary, it is recommended that tools store the context 
 
 ## Tool Finalization
 
-In the invocation of the user-provided `initialize` callback, rocprofiler will provide a function pointer of type `rocprofiler_client_finalize_t`.
+When the user-provided `initialize` callback is invoked, rocprofiler will provide a function pointer of type `rocprofiler_client_finalize_t`.
 This function pointer can be invoked by the tool to explicitly invoke the `finalize` callback from the `rocprofiler_tool_configure_result_t` instance:
 
 ```cpp
@@ -130,7 +130,7 @@ tool_init(rocprofiler_client_finalize_t fini_func,
 {
     // ... see initialization section ...
 
-    // function which finalizes tool after 10 seconds
+    // function, which finalizes the tool after 10 seconds
     auto explicit_finalize = [](rocprofiler_client_finalize_t finalizer,
                                 rocprofiler_client_id_t* client_id)
     {
@@ -149,7 +149,7 @@ tool_init(rocprofiler_client_finalize_t fini_func,
 }
 ```
 
-Otherwise, rocprofiler will invoke the `finalize` callback via an `atexit` handler.
+Otherwise, the rocprofiler will invoke the `finalize` callback via an `atexit` handler.
 
 ## Agent Information
 
@@ -159,7 +159,7 @@ Otherwise, rocprofiler will invoke the `finalize` callback via an `atexit` handl
 
 ## Synchronous Callbacks
 
-## Asychronous Callbacks for Buffers
+## Asynchronous Callbacks for Buffers
 
 ## Recommendations
 
@@ -193,14 +193,14 @@ tool_init(rocprofiler_client_finalize_t fini_func,
 {
     rocp_tool_data* tool_data = static_cast<rocp_tool_data*>(tool_data_v);
 
-    // save the finalizer function
+    // Save the finalizer function
     tool_data->finalizer = fini_func;
 
     // create a context
     auto ctx = rocprofiler_context_id_t{};
     rocprofiler_create_context(&ctx);
 
-    // save your contexts
+    // Save your contexts
     tool_data->contexts.emplace_back(ctx);
 
     // associate code object tracing with this context
@@ -229,10 +229,10 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* client_id)
 {
-    // if not first tool to register, indicate tool doesn't want to do anything
+    // If not first tool to register, indicate that the tool doesn't want to do anything
     if(priority > 0) return nullptr;
 
-    // (optional) provide a name for this tool to rocprofiler
+    // (optional) Provide a name for this tool to rocprofiler
     client_id->name = "ExampleTool";
 
     // info provided back to tool_init and tool_fini

@@ -28,7 +28,7 @@ project(
     LANGUAGES C CXX
     VERSION ${ROCPROFILER_VERSION}
     DESCRIPTION "ROCm GPU performance analysis SDK"
-    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-sdk-internal")
+    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-sdk")
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 set(PACKAGE_NAME ${PROJECT_NAME}-sdk)

@@ -1,14 +1,14 @@
 # rocprofv3 user guide
 
-ROCProfiler SDK is a tooling infrastructure designed for profiling general-purpose GPU compute applications running on the ROCm platform. It supports application tracing to provide a big picture of the GPU application execution and kernel profiling to provide low-level hardware details from the performance counters.
+ROCProfiler SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm platform. It supports application tracing to provide a big picture of the GPU application execution and kernel profiling to provide low-level hardware details from the performance counters.
 
-The ROCProfiler SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging. You can utilize these APIs to develop a tracing tool or to implement tracing in the application.
+The ROCProfiler SDK library provides runtime-independent APIs for tracing runtime calls and asynchronous activities such as GPU kernel dispatches and memory moves. The tracing includes callback APIs for runtime API tracing and activity APIs for asynchronous activity records logging. You can use these APIs to develop a tracing tool or implement tracing in the application.
 
-In this document, we discuss the command-line tool `rocprofv3` in detail, which is based on the APIs from the ROCProfiler SDK library.
+This document discusses the command-line tool `rocprofv3` in detail. It is based on the APIs from the ROCProfiler SDK library.
 
 ## Installation
 
-To install ROCProfiler SDK from source, follow the instructions provided in the sections below:
+To install ROCProfiler SDK from the source, follow the instructions provided in the sections below:
 
 ### Prerequisites
 
@@ -45,7 +45,7 @@ To install ROCProfiler SDK from source, follow the instructions provided in the 
 To build ROCProfiler SDK, use:
 
 ```bash
-git clone https://git@github.com:ROCm/rocprofiler-sdk-internal.git rocprofiler-sdk-source
+git clone https://git@github.com:ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
 ```
 
 ```bash
@@ -106,9 +106,9 @@ ctest -R
 
 ## Usage
 
-`rocprofv3` is a CLI tool that helps you to quickly optimize the applications and understand the low-level kernel details without requiring any modification in the source code. `rocprofv3` is being developed to be backward compatible with its predecessor `rocprof` along with providing more features to help users profile their applications with better accuracy. 
+`rocprofv3` is a CLI tool that helps you quickly optimize applications and understand the low-level kernel details without requiring any modification in the source code. It is being developed to be backward compatible with its predecessor, `rocprof`, and to provide more features to help users profile their applications with better accuracy. 
 
-The usage of `rocprofv3` for application tracing and kernel profiling using various command-line options is demonstrated in the following sections.
+The following sections demonstrate the use of `rocprofv3` for application tracing and kernel profiling using various command-line options.
 
 `rocprofv3` is installed with ROCm under `/opt/rocm/bin`. To use the tool from anywhere in the system, export `PATH` variable:
 
@@ -133,12 +133,12 @@ Below is the list of `rocprofv3` command-line options. Some options are used for
 | -d \| --output-directory | Specifies the path for the output files. | Output control |
 | --hip-trace | Collects HIP runtime traces. | Application tracing |
 | --hip-runtime-trace | Collects HIP runtime API traces. | Application tracing |
-| --hip-compiler-trace | Collects HIP compiler generated code traces. | Application tracing |
+| --hip-compiler-trace | Collects HIP compiler-generated code traces. | Application tracing |
 | --scratch-memory-trace | Collects scratch memory operations traces. | Application tracing |
 | --hsa-trace | Collects HSA API traces. | Application tracing |
 | --hsa-core-trace | Collects HSA API traces (core API). | Application tracing |
 | --hsa-amd-trace | Collects HSA API traces (AMD-extension API). | Application tracing |
-| --hsa-image-trace | Collects HSA API Ttaces (Image-extenson API). | Application tracing |
+| --hsa-image-trace | Collects HSA API Ttaces (Image-extension API). | Application tracing |
 | --hsa-finalizer-trace | Collects HSA API traces (Finalizer-extension API). | Application tracing |
 | -i | Specifies the input file. | Kernel profiling |
 | -L \| --list-metrics | List metrics for counter collection. | Kernel profiling |
@@ -146,7 +146,7 @@ Below is the list of `rocprofv3` command-line options. Some options are used for
 | -M \| --mangled-kernels | Overrides the default demangling of kernel names. | Output control |
 | --marker-trace | Collects marker (ROC-TX) traces. | Application tracing |
 | --memory-copy-trace | Collects memory copy traces. | Application tracing |
-| -o \| --output-file | Specifies the name of the output file. Note that this name is appended to the default names (_api_trace or counter_collection.csv) of the generated files. | Output control |
+| -o \| --output-file | Specifies the name of the output file. Note that this name is appended to the default names (_api_trace or counter_collection.csv) of the generated files'. | Output control |
 | --sys-trace | Collects HIP, HSA, memory copy, marker, and kernel dispatch traces. | Application Tracing |
 | -T \| --truncate-kernels | Truncates the demangled kernel names for improved readability. | Output control |
 
@@ -168,7 +168,7 @@ rocprofv3 <tracing_option> <app_relative_path>
 
 #### HIP trace
 
-HIP trace comprises of execution traces for the entire application at the HIP level. This includes HIP API functions and their asynchronous activities at the runtime level. In general, HIP APIs directly interact with the user program. It is easier to analyze HIP traces as you can directly map the traces to the program.
+HIP trace comprises execution traces for the entire application at the HIP level. This includes HIP API functions and their asynchronous activities at the runtime level. In general, HIP APIs directly interact with the user program. It is easier to analyze HIP traces as you can directly map them to the program.
 
 To trace HIP runtime APIs, use:
 
@@ -176,7 +176,7 @@ To trace HIP runtime APIs, use:
 rocprofv3 --hip-trace < app_relative_path >
 ```
 
-Running the above command generates a `hip_api_trace.csv` file prefixed with the process Id.
+The above command generates a `hip_api_trace.csv` file prefixed with the process ID.
 
 ```bash
 $ cat 238_hip_api_trace.csv
@@ -198,7 +198,7 @@ To trace HIP compile time APIs, use:
 rocprofv3 --hip-compiler-trace < app_relative_path >
 ```
 
-Running the above command generates a `hip_api_trace.csv` file prefixed with the process Id.
+The above command generates a `hip_api_trace.csv` file prefixed with the process ID.
 
 ```bash
 $ cat 208_hip_api_trace.csv
@@ -210,11 +210,11 @@ $ cat 208_hip_api_trace.csv
 "HIP_COMPILER_API","__hipPopCallConfiguration",208,208,4,1508780613901714,1508780613902200 
 ```
 
-For the description of the fields in the output file, see [Output file fields](#output-file-fields).
+To describe the fields in the output file, see [Output file fields](#output-file-fields).
 
 #### HSA trace
 
-The HIP runtime library is implemented with the low-level HSA runtime. HSA API tracing is more suited for advanced users who want to understand the application behavior at the lower level. In general, tracing at the HIP-level is recommended for most users. You are advised to use HSA trace only if you are familiar with HSA runtime. 
+The HIP runtime library is implemented with the low-level HSA runtime. HSA API tracing is more suited for advanced users who want to understand the application behavior at the lower level. In general, tracing at the HIP level is recommended for most users. You should use HSA trace only if you are familiar with HSA runtime. 
 
 HSA trace contains the start and end time of HSA runtime API calls and their asynchronous activities.
 
@@ -222,7 +222,8 @@ HSA trace contains the start and end time of HSA runtime API calls and their asy
 rocprofv3 --hsa-trace < app_relative_path >
 ```
 
-Running the above command generates `hsa_api_trace.csv` file prefixed with process Id. Note that the contents of this file have been truncated for demonstration purposes.
+The above command generates a `hsa_api_trace.csv` file prefixed with process ID.
+Note: the contents of this file have been truncated for demonstration purposes.
 
 ```bash
 $ cat 197_hsa_api_trace.csv
@@ -240,18 +241,18 @@ $ cat 197_hsa_api_trace.csv
 "HSA_CORE_API","hsa_agent_get_info",197,197,11,1507843974771091,1507843974771537
 ```
 
-For the description of the fields in the output file, see [Output file fields](#output-file-fields).
+To describe the fields in the output file, see [Output file fields](#output-file-fields).
 
 #### Marker trace
 
-In certain situations, such as debugging performance issues in large-scale GPU programs, API-level tracing may be too fine-grained to provide a big picture of the program execution. In such cases, it is helpful to define specific tasks to be traced.
+In certain situations, such as debugging performance issues in large-scale GPU programs, API-level tracing may be too fine-grained to provide a big picture of the program execution. In such cases, defining specific tasks to be traced is helpful.
 
-To specify the tasks for tracing, enclose the respective source code with the API calls provided by `ROC-TX` library. This process is also known as instrumentation. As the scope of code for instrumentation is defined using the enclosing API calls, it is called a range. A range is a programmer-defined task that has a well-defined start and end code scope. You can also fine grain the scope specified within a range using further nested ranges. The `rocprofv3` tool also reports the timelines for these nested ranges.
+To specify the tasks for tracing, enclose the respective source code with the API calls provided by the ROCTX library. This process is also known as instrumentation. As the scope of code for instrumentation is defined using the enclosing API calls, it is called a range. A range is a programmer-defined task that has a well-defined start and end code scope. You can also fine-grained the scope specified within a range using further nested ranges. The `rocprofv3` tool also reports the timelines for these nested ranges.
 
 Here is a list of useful APIs for code instrumentation.
 
 - `roctxMark`: Inserts a marker in the code with a message. Creating marks can help you see when a line of code is executed.
-- `roctxRangeStart`: Starts a range. Ranges can be started by different threads.
+- `roctxRangeStart`: Starts a range. Different threads can start ranges.
 - `roctxRangePush`: Starts a new nested range.
 - `roctxRangePop`: Stops the current nested range.
 - `roctxRangeStop`: Stops the given range.
@@ -263,7 +264,7 @@ roctxMark("before hipLaunchKernel");
 int rangeId = roctxRangeStart("hipLaunchKernel range");
 roctxRangePush("hipLaunchKernel");
 
-// Lauching kernel from host
+// Launching kernel from host
 hipLaunchKernelGGL(matrixTranspose, dim3(WIDTH/THREADS_PER_BLOCK_X, WIDTH/THREADS_PER_BLOCK_Y), dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y), 0,0,gpuTransposeMatrix,gpuMatrix, WIDTH);
 
 roctxMark("after hipLaunchKernel");
@@ -284,7 +285,7 @@ To trace the API calls enclosed within the range, use:
 rocprofv3 --marker-trace < app_relative_path >
 ```
 
-Running the above command generates `marker_api_trace.csv` file prefixed with the process Id.
+Running the above command generates a `marker_api_trace.csv` file prefixed with the process ID.
 
 ```bash
 $ cat 210_marker_api_trace.csv
@@ -307,7 +308,7 @@ To trace kernel dispatch traces, use:
 rocprofv3 --kernel-trace < app_relative_path >
 ```
 
-Running the above command generates `kernel_trace.csv` file prefixed with the process Id.
+The above command generates a `kernel_trace.csv` file prefixed with the process ID.
 
 ```bash
 $ cat 199_kernel_trace.csv
@@ -316,7 +317,7 @@ $ cat 199_kernel_trace.csv
 "KERNEL_DISPATCH",1,139690710949888,15,"matrixTranspose(float*, float*, int)",0,671599758568,671599825328,0,0,4,4,1,1024,1024,1
 ```
 
-For the description of the fields in the output file, see [Output file fields](#output-file-fields).
+To describe the fields in the output file, see [Output file fields](#output-file-fields).
 
 #### Memory copy trace
 
@@ -326,7 +327,7 @@ To trace memory moves across the application, use:
 rocprofv3 –-memory-copy-trace < app_relative_path >
 ```
 
-Running the above command generates `memory_copy_trace.csv` file prefixed with the process Id.
+The above command generates a `memory_copy_trace.csv` file prefixed with the process ID.
 
 ```bash
 $ cat 197_memory_copy_trace.csv
@@ -336,7 +337,7 @@ $ cat 197_memory_copy_trace.csv
 "MEMORY_COPY","DEVICE_TO_HOST",1,0,0,14955952733485,14955953315285
 ```
 
-For the description of the fields in the output file, see [Output file fields](#output-file-fields).
+To describe the fields in the output file, see [Output file fields](#output-file-fields).
 
 #### Sys trace
 
@@ -356,7 +357,7 @@ For more information on counters available on MI200, refer to the [MI200 Perform
 
 #### Input file
 
-To collect the desired basic counters or derived metrics, mention them in an input file as shown below. The line consisting of the counter or metric names must begin with `pmc`.
+To collect the desired basic counters or derived metrics, you can just mention them in an input file below. The line consisting of the counter or metric names must begin with `pmc`.
 
 ```bash
 $ cat input.txt
@@ -365,7 +366,7 @@ pmc: GPUBusy SQ_WAVES
 pmc: GRBM_GUI_ACTIVE
 ```
 
-The number of basic counters or derived metrics that can be collected in one run of profiling is limited by the GPU hardware resources. If too many counters or metrics are selected, the kernels need to be executed multiple times to collect the counters or metrics. For multi-pass execution, include multiple rows of `pmc` in the input file. Counters or metrics in each `pmc` row can be collected in each run of the kernel.
+The GPU hardware resources limit the number of basic counters or derived metrics that can be collected in one run of profiling. If too many counters or metrics are selected, the kernels need to be executed multiple times to collect them. For multi-pass execution, include multiple `pmc` rows in the input file. Counters or metrics in each `pmc` row can be collected in each kernel run.
 
 #### Kernel profiling output
 
@@ -375,7 +376,7 @@ To supply the input file for kernel profiling, use:
 rocprofv3 -i input.txt <app_relative_path>
 ```
 
-Running the above command generates `./pmc_n/counter_collection.csv` file prefixed with the process Id. For each `pmc` row, a directory `pmc_n` containing a `counter_collection.csv` file is generated where n = 1 for the first row and so on.
+Running the above command generates a `./pmc_n/counter_collection.csv` file prefixed with the process ID. For each `pmc` row, a directory `pmc_n` containing a `counter_collection.csv` file is generated, where n = 1 for the first row and so on.
 
 Each row of the CSV file is an instance of kernel execution. Here is a truncated version of the output file from `pmc_1`.
 
@@ -397,8 +398,8 @@ The various fields or the columns in the output CSV files generated for applicat
 | Start_Timestamp | Begin time in nanoseconds (`ns`) when the kernel begins execution. |
 | End_Timestamp | End time in ns when the kernel finishes execution. |
 | Queue_Id | ROCm queue unique identifier to which the kernel was submitted. |
-| Private_Segment_Size | The amount of memory required for the combined private, spill and arg segments for a work-item in bytes. |
-| Group_Segment_Size | The amount of group segment memory required by a workgroup in bytes. This does not include any dynamically allocated group segment memory that may be added when the kernel is dispatched. |
+| Private_Segment_Size | The amount of memory required for the combined private, spill, and arg segments for a work item in bytes. |
+| Group_Segment_Size | The group segment memory required by a workgroup in bytes. This does not include any dynamically allocated group segment memory that may be added when the kernel is dispatched. |
 | Workgroup_Size | Size of the workgroup as declared by the compute shader. |
 | Workgroup_Size_n | Size of the workgroup in the nth dimension as declared by the compute shader, where n = X, Y, or Z. |
 | Grid_Size | Number of thread blocks required to launch the kernel. |
@@ -424,7 +425,7 @@ After the ROCm build is installed:
     /opt/rocm/bin
     ```
 
-To build samples from any directory, run:
+To build samples from any directory, run the following:
 
 ```bash
 cmake -B <build directory> /opt/rocm/share/rocprofiler-sdk/samples -DCMAKE_PREFIX_PATH=/opt/rocm
@@ -438,7 +439,7 @@ To run the built samples, `cd` into the `<build directory>` mentioned in the bui
 ctest -V
 ```
 
-**Note:** Running few of these tests will require pandas and pytest to be installed first.
+**Note:** Running a few of these tests will require pandas and pytest to be installed first.
 
 ```bash
 /usr/local/bin/python -m pip install -r requirements.txt

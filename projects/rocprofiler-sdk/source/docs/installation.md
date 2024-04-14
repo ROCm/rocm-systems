@@ -15,7 +15,7 @@ ROCprofiler is only supported on Linux. The following distributions are tested:
 - OpenSUSE 15.4
 - RedHat 8.8
 
-Other OS distributions may be supported but are not tested.
+Other OS distributions may be supported but have yet to be tested.
 
 ### Identifying the Operating System
 
@@ -32,7 +32,7 @@ VERSION_ID="20.04"
 ...
 ```
 
-The relevent fields are `ID` and the `VERSION_ID`.
+The relevant fields are `ID` and the `VERSION_ID`.
 
 ## Installing ROCprofiler from source
 
@@ -40,17 +40,17 @@ The relevent fields are `ID` and the `VERSION_ID`.
 
 ROCprofiler needs a CMake (https://cmake.org/) version 3.21 or higher.
 
-***If the system installed cmake is too old, installing a new version of cmake can be done through several methods. One of the easiest options is to use PyPi (i.e. python’s pip):***
+***If the system installed 'CMake' is too old, installing a new version can be done through several methods. One of the easiest options is to use PyPi (i.e., python’s pip):***
 
 ```bash
-pip install --user 'cmake==3.21.0'
+pip install --user 'cmake==3.22.0'
 export PATH=${HOME}/.local/bin:${PATH}
 ```
 
 ### Building ROCprofiler
 
 ```bash
-git clone https://git@github.com:ROCm/rocprofiler-sdk-internal.git rocprofiler-sdk-source  
+git clone https://git@github.com:ROCm/rocprofiler-sdk.git rocprofiler-sdk-source  
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -D ROCPROFILER_BUILD_TESTS=ON           \
