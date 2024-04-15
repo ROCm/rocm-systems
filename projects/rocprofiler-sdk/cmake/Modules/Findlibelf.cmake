@@ -25,9 +25,12 @@
 find_package(PkgConfig)
 
 if(PkgConfig_FOUND)
+    set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
     pkg_check_modules(ELF libelf)
 
-    if(ELF_FOUND)
+    if(ELF_FOUND
+       AND ELF_INCLUDE_DIRS
+       AND ELF_LIBRARIES)
         set(libelf_INCLUDE_DIR
             "${ELF_INCLUDE_DIRS}"
             CACHE FILEPATH "libelf include directory")
@@ -37,10 +40,10 @@ if(PkgConfig_FOUND)
     endif()
 endif()
 
-if(NOT PkgConfig_FOUND OR NOT ELF_FOUND)
+if(NOT libelf_INCLUDE_DIR OR NOT libelf_LIBRARY)
     find_path(
         libelf_ROOT_DIR
-        NAMES include/gelf.h include/elf.h
+        NAMES include/elf.h
         HINTS ${libelf_ROOT}
         PATHS ${libelf_ROOT})
 
@@ -48,7 +51,7 @@ if(NOT PkgConfig_FOUND OR NOT ELF_FOUND)
 
     find_path(
         libelf_INCLUDE_DIR
-        NAMES gelf.h elf.h
+        NAMES elf.h
         HINTS ${libelf_ROOT}
         PATHS ${libelf_ROOT}
         PATH_SUFFIXES include)

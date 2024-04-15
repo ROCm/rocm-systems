@@ -25,8 +25,12 @@
 find_package(PkgConfig)
 
 if(PkgConfig_FOUND)
+    set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
     pkg_check_modules(DW libdw)
-    if(DW_FOUND)
+
+    if(DW_FOUND
+       AND DW_INCLUDE_DIRS
+       AND DW_LIBRARIES)
         set(libdw_INCLUDE_DIR
             "${DW_INCLUDE_DIRS}"
             CACHE FILEPATH "libdw include directory")
@@ -36,7 +40,7 @@ if(PkgConfig_FOUND)
     endif()
 endif()
 
-if(NOT PkgConfig_FOUND OR NOT DW_FOUND)
+if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
     find_path(
         libdw_ROOT_DIR
         NAMES include/elfutils/libdw.h
