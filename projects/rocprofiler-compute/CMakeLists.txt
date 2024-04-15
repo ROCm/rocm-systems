@@ -299,7 +299,8 @@ install(
 install(
     DIRECTORY src/utils
     TYPE BIN
-    PATTERN "rooflines*" EXCLUDE)
+    PATTERN "rooflines*" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE)
 # src/utils/rooflines
 file(GLOB rooflinebins src/utils/rooflines/roofline-*)
 install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
@@ -315,11 +316,9 @@ install(
     PATTERN "__pycache__" EXCLUDE)
 # samples
 install(DIRECTORY sample TYPE DATA)
-# modulefile
-install(
-    FILES
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
-    DESTINATION ${MOD_INSTALL_PATH}/${PROJECT_NAME})
+# modulefile install( FILES
+# ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
+# DESTINATION ${MOD_INSTALL_PATH}/${PROJECT_NAME})
 
 # License header update(s)
 add_custom_target(
@@ -333,15 +332,16 @@ add_custom_target(
         "src/omniperf,cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/omniperf_analyze/convertor/mongodb/convert"
     )
 
-# Source tarball
-set(CPACK_SOURCE_GENERATOR "TGZ")
-set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
-set(CPACK_SOURCE_IGNORE_FILES
-    ".*~$"
-    \.git/
-    \.github
-    \.gitmodules
-    \.gitignore
-    /tests
-    /build)
+# Packaging
 include(CPack)
+set(CPACK_GENERATOR "DEB" "RPM" "TGZ")
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
+set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
+set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
+set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+
+# # Source tarball set(CPACK_SOURCE_GENERATOR "TGZ") set(CPACK_SOURCE_PACKAGE_FILE_NAME
+# ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING}) set(CPACK_SOURCE_IGNORE_FILES
+# ".*~$"
+# \.git/ \.github \.gitmodules \.gitignore /tests /build) include(CPack)
