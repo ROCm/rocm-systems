@@ -43,8 +43,6 @@ PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
     auto parseSample_func = &PCSamplingParserContext::_parse<GFX9>;
     if(gfxip_major == 11)
         parseSample_func = &PCSamplingParserContext::_parse<GFX11>;
-    else if(gfxip_major == 0)
-        parseSample_func = &PCSamplingParserContext::_parse<gfx_unknown>;
     else if(gfxip_major != 9)
         return PCSAMPLE_STATUS_INVALID_GFXIP;
 

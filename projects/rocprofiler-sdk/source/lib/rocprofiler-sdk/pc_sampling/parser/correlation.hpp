@@ -299,8 +299,6 @@ pcsample_status_t inline parse_buffer(generic_sample_t* buffer,
         parseSample_func = _parse_buffer<GFX9>;
     else if(gfxip_major == 11)
         parseSample_func = _parse_buffer<GFX11>;
-    else if(gfxip_major == 0)
-        parseSample_func = _parse_buffer<gfx_unknown>;
     else
         return PCSAMPLE_STATUS_INVALID_GFXIP;
 

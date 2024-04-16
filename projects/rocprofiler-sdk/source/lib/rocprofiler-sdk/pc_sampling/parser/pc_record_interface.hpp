@@ -60,7 +60,7 @@ public:
      * As an intermediate step, "midway_signal" signals when it's safe to reuse/delete "data".
      * @param[in] upcoming Metadata of upcoming samples
      * @param[in] data Pointer containing the raw hardware samples. Must match upcoming.num_samples.
-     * @param[in] gfxip_major GFXIP of these samples (GFX9==9/GFX11==11/gfx_unknown==12).
+     * @param[in] gfxip_major GFXIP of these samples (GFX9==9/GFX11==11).
      * @param[in] midway_signal notifies_all when the samples have been processed.
      * @param[in] bFlushCorrelationIds Set to true if this is the last batch from a ROCr buffer.
      * @returns PCSAMPLE_STATUS_SUCCESS on success.

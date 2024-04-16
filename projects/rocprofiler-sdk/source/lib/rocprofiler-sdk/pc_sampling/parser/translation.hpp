@@ -27,7 +27,6 @@
 #include <cstring>
 
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx11.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/gfx_unknown.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/gfx9.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.h"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/rocr.h"
@@ -105,30 +104,6 @@ copyStochasticSample<GFX11>(const perf_sample_snapshot_v1& sample)
     ret.snapshot.arb_state_stall   = (sample.perf_snapshot_data >> 16) & 0x7F;
     ret.snapshot.dual_issue_valu   = false;
     ret.memory_counters.raw        = 0;
-    return ret;
-}
-
-template <>
-inline pcsample_v1_t
-copyStochasticSample<gfx_unknown>(const perf_sample_snapshot_v1& sample)
-{
-    pcsample_v1_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
-    ret.flags.valid   = sample.perf_snapshot_data & 0x1;
-    // Check wave_id matches snapshot_wave_id
-
-    ret.flags.has_wave_cnt     = true;
-    ret.flags.has_stall_reason = true;
-
-    ret.wave_issued                = sample.perf_snapshot_data >> 1;
-    ret.snapshot.inst_type         = sample.perf_snapshot_data >> 2;
-    ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 6) & 0x7;
-
-    ret.wave_count               = sample.perf_snapshot_data1 & 0x3F;
-    ret.snapshot.arb_state_issue = (sample.perf_snapshot_data1 >> 6) & 0xFF;
-    ret.snapshot.arb_state_stall = (sample.perf_snapshot_data1 >> 14) & 0xFF;
-
-    ret.flags.has_memory_counter = true;
-    ret.memory_counters.raw      = sample.perf_snapshot_data2;
     return ret;
 }
 
