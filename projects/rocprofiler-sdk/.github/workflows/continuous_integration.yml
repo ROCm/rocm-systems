@@ -59,9 +59,8 @@ jobs:
       shell: bash
       run: |
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python python3 git cmake ctest; do which-realpath $i; done
+        for i in python3 git cmake ctest; do which-realpath $i; done
         ls -la
-        cat /sys/class/kfd/kfd/topology/nodes/*/gpu_id || true; /opt/rocm/bin/rocminfo | grep gfx
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
@@ -161,7 +160,6 @@ jobs:
         add-apt-repository -y ppa:git-core/ppa
         apt-get update
         apt-get install -y git
-        cat /sys/class/kfd/kfd/topology/nodes/*/gpu_id || true; /opt/rocm/bin/rocminfo | grep gfx
 
     - uses: actions/checkout@v4
 
@@ -185,15 +183,6 @@ jobs:
         echo "${PATH}:/usr/local/bin:${HOME}/.local/bin" >> $GITHUB_PATH
         echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/lib:${HOME}/.local/lib" >> $GITHUB_ENV
 
-    - name: List Files
-      shell: bash
-      run: |
-        echo "PATH: ${PATH}"
-        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
-        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python python3 git cmake ctest; do which-realpath $i; done
-        ls -la
-
     - name: Install requirements
       shell: bash
       run: |
@@ -201,6 +190,15 @@ jobs:
         apt-get update
         apt-get install -y cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev
         python3 -m pip install -r requirements.txt
+
+    - name: List Files
+      shell: bash
+      run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest; do which-realpath $i; done
+        ls -la
 
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
@@ -371,14 +369,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
-    - name: List Files
-      shell: bash
-      run: |
-        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python python3 git cmake ctest; do which-realpath $i; done
-        ls -la
-        cat /sys/class/kfd/kfd/topology/nodes/*/gpu_id || true; /opt/rocm/bin/rocminfo | grep gfx
-
     - name: Install requirements
       shell: bash
       run: |
@@ -394,6 +384,13 @@ jobs:
         realpath $(which g++)
         gcc --version
         g++ --version
+
+    - name: List Files
+      shell: bash
+      run: |
+        which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
+        for i in python3 git cmake ctest; do which-realpath $i; done
+        ls -la
 
     - name: Configure, Build, and Test
       timeout-minutes: 45

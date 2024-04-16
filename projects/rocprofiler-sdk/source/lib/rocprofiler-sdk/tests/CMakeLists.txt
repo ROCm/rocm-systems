@@ -47,6 +47,7 @@ target_link_libraries(
     PRIVATE rocprofiler::rocprofiler-shared-library
             rocprofiler::rocprofiler-common-library
             rocprofiler::rocprofiler-hsa-runtime
+            rocprofiler::rocprofiler-drm
             rocprofiler::rocprofiler-sdk-roctx-shared-library
             GTest::gtest
             GTest::gtest_main)
