@@ -281,44 +281,58 @@ add_test(
 # Install
 # ---------
 
-# top-level driver and associated .py files
-install(PROGRAMS src/omniperf TYPE BIN)
-install(FILES src/argparser.py TYPE BIN)
-install(FILES src/config.py TYPE BIN)
-install(FILES src/omniperf_base.py TYPE BIN)
-install(FILES src/roofline.py TYPE BIN)
-
-install(FILES VERSION VERSION.sha DESTINATION ${CMAKE_INSTALL_PREFIX})
+# top-level omniperf utility
+install(PROGRAMS src/omniperf DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+# support files and version info
+install(FILES src/argparser.py src/config.py src/omniperf_base.py src/roofline.py VERSION
+              VERSION.sha DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
 # src/omniperf_analyze
 install(
     DIRECTORY src/omniperf_analyze
-    TYPE BIN
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     PATTERN src/omniperf_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils
 install(
     DIRECTORY src/utils
-    TYPE BIN
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils/rooflines
 file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR}/utils/rooflines)
+install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR})
 # src/omniperf_soc
 install(
     DIRECTORY src/omniperf_soc
-    TYPE BIN
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     PATTERN "__pycache__" EXCLUDE)
 # src/omniperf_profile
 install(
     DIRECTORY src/omniperf_profile
-    TYPE BIN
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     PATTERN "__pycache__" EXCLUDE)
 # samples
-install(DIRECTORY sample TYPE DATA)
-# modulefile install( FILES
-# ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
-# DESTINATION ${MOD_INSTALL_PATH}/${PROJECT_NAME})
+install(
+    DIRECTORY sample
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+    FILES_MATCHING
+    PATTERN "*.hip"
+    PATTERN "*.h"
+    PATTERN "*.cpp"
+    PATTERN "workloads" EXCLUDE)
+# modulefile
+install(
+    FILES
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
+    DESTINATION ${MOD_INSTALL_PATH}/${PROJECT_NAME})
+
+# top-level symlink for bin/omniperf
+install(
+    CODE "execute_process(
+    COMMAND bash -c \"set -e
+    cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
+    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/omniperf ${CMAKE_INSTALL_BINDIR}/omniperf
+    \")")
 
 # License header update(s)
 add_custom_target(
@@ -332,15 +346,32 @@ add_custom_target(
         "src/omniperf,cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/omniperf_analyze/convertor/mongodb/convert"
     )
 
+# ----------
 # Packaging
-include(CPack)
-set(CPACK_GENERATOR "DEB" "RPM" "TGZ")
+# ----------
+
+message(STATUS "Packaging config...")
+set(CPACK_GENERATOR "DEB" "RPM")
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/omniperf")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Omniperf: tool for GPU performance profiling")
+set(CPACK_RPM_PACKAGE_DESCRIPTION "Omniperf is a performance analysis tool for profiling
+machine learning/HPC workloads running on AMD GPUs.")
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+set(CPACK_RPM_PACKAGE_PROVIDES "${PROJECT_NAME}")
 
+# dependencies
+set(PACKAGE_REQUIRES
+    "rocprofiler"
+    CACHE STRING "Package dependencies")
+message(STATUS "  package dependencies: ${PACKAGE_REQUIRES}")
+set(CPACK_RPM_PACKAGE_REQUIRES ${PACKAGE_REQUIRES})
+
+include(CPack)
 # # Source tarball set(CPACK_SOURCE_GENERATOR "TGZ") set(CPACK_SOURCE_PACKAGE_FILE_NAME
 # ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING}) set(CPACK_SOURCE_IGNORE_FILES
 # ".*~$"
