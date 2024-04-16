@@ -89,13 +89,25 @@ def trace_logger(message, *args, **kwargs):
 
 def get_version(omniperf_home) -> dict:
     """Return Omniperf versioning info"""
-    # symantic version info
-    version = os.path.join(omniperf_home.parent, "VERSION")
-    try:
-        with open(version, "r") as file:
-            VER = file.read().replace("\n", "")
-    except EnvironmentError:
-        logging.critical("ERROR: Cannot find VERSION file at {}".format(version))
+
+    # symantic version info - note that version file(s) can reside in
+    # two locations depending on development vs formal install
+    searchDirs = [omniperf_home, omniperf_home.parent]
+    found = False
+    versionDir = None
+
+    for dir in searchDirs:
+        version = os.path.join(dir, "VERSION")
+        try:
+            with open(version, "r") as file:
+                VER = file.read().replace("\n", "")
+                found = True
+                versionDir = dir
+                break
+        except:
+            pass
+    if not found:
+        logging.error("Cannot find VERSION file at {}".format(searchDirs))
         sys.exit(1)
 
     # git version info
@@ -113,7 +125,7 @@ def get_version(omniperf_home) -> dict:
             SHA = gitQuery.stdout.decode("utf-8")
             MODE = "dev"
     else:
-        shaFile = os.path.join(omniperf_home.parent, "VERSION.sha")
+        shaFile = os.path.join(versionDir, "VERSION.sha")
         try:
             with open(shaFile, "r") as file:
                 SHA = file.read().replace("\n", "")
