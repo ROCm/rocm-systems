@@ -50,7 +50,7 @@ endif()
 set(CMAKE_BUILD_TYPE "Release")
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
     set(CMAKE_INSTALL_PREFIX
-        "/opt/apps/omniperf"
+        "/opt/rocm"
         CACHE PATH "default install path" FORCE)
 endif()
 message(STATUS "Installation path: ${CMAKE_INSTALL_PREFIX}")
