@@ -170,7 +170,7 @@ class att_plugin_t {
                     << '\n';
 
     // iterate over each shader engine att trace
-    header.navi = !att_tracer_record->intercept_list.userdata & 0x1;
+    header.navi = !(att_tracer_record->intercept_list.userdata & 0x1);
     int se_num = att_tracer_record->shader_engine_data_count;
     for (int i = 0; i < se_num; i++)
     {
@@ -188,7 +188,7 @@ class att_plugin_t {
         std::cerr << "ATT Failed to open file: " << outfilepath << "_se" << i << ".att\n";
         return ROCPROFILER_STATUS_ERROR;
       }
-      if (header.enable)
+      if (header.enable && !header.navi)
         out.write((const char*)&header, sizeof(header.raw));
       out.write(data_buffer_ptr, se_att_trace->buffer_size);
     }

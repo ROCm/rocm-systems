@@ -62,6 +62,16 @@
     }                                                                                              \
   } while (0)
 
+typedef void(*aqlprofile_att_parser_iterate_event_cb_t)(
+    int trace_event_id,
+    const char* trace_event_metadata,
+    void* userdata
+);
+extern "C" void aqlprofile_att_parser_iterate_event_list(
+    aqlprofile_att_parser_iterate_event_cb_t callback,
+    void* userdata
+);
+
 namespace Packet {
 static const size_t MEM_PAGE_BYTES = 0x1000;
 static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
@@ -529,6 +539,12 @@ uint8_t* AllocateLocalMemory(size_t size, hsa_amd_memory_pool_t* gpu_pool) {
   return ptr;
 }
 
+void check_wave_event(int, const char* event_name, void* userdata)
+{
+  if (std::string_view(event_name).find("waves") == 0)
+    *reinterpret_cast<bool*>(userdata) = true;
+}
+
 hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* profile,
                       size_t att_buffer_size) {
   rocprofiler::HSAAgentInfo& agentInfo =
@@ -536,6 +552,10 @@ hsa_status_t Allocate(hsa_agent_t gpu_agent, hsa_ven_amd_aqlprofile_profile_t* p
   profile->command_buffer.ptr =
       AllocateSysMemory(gpu_agent, profile->command_buffer.size, &agentInfo.cpu_pool_);
   profile->output_buffer.size = att_buffer_size;
+
+  g_output_buffer_local = false;
+  aqlprofile_att_parser_iterate_event_list(check_wave_event, &g_output_buffer_local);
+
   profile->output_buffer.ptr = (g_output_buffer_local)
       ? AllocateLocalMemory(profile->output_buffer.size, &agentInfo.gpu_pool_)
       : AllocateSysMemory(gpu_agent, profile->output_buffer.size, &agentInfo.cpu_pool_);
