@@ -30,6 +30,7 @@ jobs:
       matrix:
         runner: [ubuntu-latest]
 
+    if: ${{ !contains(github.ref_name, 'amd-npi') }}
     runs-on: ${{ matrix.runner }}
     env:
       KEYWORDS: ${{ vars.KEYWORDS }}
@@ -49,7 +50,6 @@ jobs:
         ci-flags: ['--linter clang-tidy']
         name-tag: ['']
 
-    if: ${{ !contains(github.ref_name, 'amd-npi') }}
     runs-on: ${{ matrix.runner }}
 
     # define this for containers
