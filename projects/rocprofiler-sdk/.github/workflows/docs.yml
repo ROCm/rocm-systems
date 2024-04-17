@@ -12,7 +12,6 @@ on:
       - 'source/include/rocprofiler-sdk/**'
       - '.github/workflows/docs.yml'
   pull_request:
-    branches: [ amd-staging, amd-mainline ]
     paths:
       - '*.md'
       - 'VERSION'
