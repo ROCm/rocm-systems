@@ -221,6 +221,14 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
                 break;
             }
         }
+        else if(itr->callback_tracer)
+        {
+            if(itr->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
+            {
+                enable_intercepter = true;
+                break;
+            }
+        }
         else if(itr->thread_trace)
         {
             enable_intercepter                             = true;
