@@ -73,7 +73,7 @@ jobs:
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-pc-sampling-${{ matrix.os }}${{ matrix.name-tag }}
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_TARGETS }}
