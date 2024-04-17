@@ -86,9 +86,9 @@ typedef union
     {
         uint8_t valid : 1;
         uint8_t type  : 4;  // 0=reserved, 1=hosttrap, 2=stochastic, 3=perfcounter, >=4 possible v2?
-        uint8_t has_stall_reason   : 1;
-        uint8_t has_wave_cnt       : 1;
-        uint8_t has_memory_counter : 1;
+        uint8_t has_stall_reason : 1;
+        uint8_t has_wave_cnt     : 1;
+        uint8_t reserved         : 1;
     };
     uint8_t raw;
 } pcsample_header_v1_t;

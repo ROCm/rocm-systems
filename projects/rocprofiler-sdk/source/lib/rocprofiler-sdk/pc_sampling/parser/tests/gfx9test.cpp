@@ -343,7 +343,7 @@ class WaveOtherFieldsTest : public WaveSnapTest
         {
             assert(parsed[0][i].flags.has_stall_reason == true);
             assert(parsed[0][i].flags.has_wave_cnt == true);
-            assert(parsed[0][i].flags.has_memory_counter == false);
+            assert(parsed[0][i].flags.reserved == false);
 
             assert(compare[i].exec_mask == parsed[0][i].exec_mask);
             assert(compare[i].workgroup_id_x == parsed[0][i].workgroup_id_x);
