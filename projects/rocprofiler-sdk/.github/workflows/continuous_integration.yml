@@ -24,21 +24,6 @@ env:
   EXCLUDED_TESTS: ".*pc_sampling.*"
 
 jobs:
-  keyword-search:
-    strategy:
-      fail-fast: true
-      matrix:
-        runner: [ubuntu-latest]
-
-    if: ${{ !contains(github.ref_name, 'amd-npi') }}
-    runs-on: ${{ matrix.runner }}
-    env:
-      KEYWORDS: ${{ vars.KEYWORDS }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: find-keywords
-        shell: bash
-        run: ./source/scripts/scan-script.sh
   core:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
