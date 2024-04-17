@@ -172,7 +172,8 @@ TEST(metrics, check_agent_valid)
             for(const auto& metric : other_counters)
             {
                 if(common_metrics.count(metric.id())) continue;
-                EXPECT_EQ(counters::checkValidMetric(gfx, metric), false);
+                EXPECT_EQ(counters::checkValidMetric(gfx, metric), false)
+                    << fmt::format("GFX {} has Metric {} but shouldn't", gfx, metric);
             }
         }
     }
