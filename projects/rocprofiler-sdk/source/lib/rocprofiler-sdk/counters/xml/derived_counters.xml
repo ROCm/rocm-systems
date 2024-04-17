@@ -507,28 +507,12 @@
 <gfx1102 base="gfx11">
 </gfx1102>
 
-<gfx8 base="gfx8"></gfx8>
-<gfx9 base="gfx9"></gfx9>
-<gfx10 base="gfx10"></gfx10>
 <gfx11 base="gfx11"></gfx11>
-# Vega20
-<gfx906 base="gfx906"></gfx906>
-# Arcturus
-<gfx908 base="gfx908"></gfx908>
-# Aldebaran
-<gfx90a base="gfx90a"></gfx90a>
 #Mi300
-<gfx940 base="gfx940"></gfx940>
 <gfx941 base="gfx940"></gfx941>
 <gfx942 base="gfx940"></gfx942>
 #Navi21
-<gfx1030 base="gfx1030"></gfx1030>
-<gfx1031 base="gfx1031"></gfx1031>
 <gfx1032 base="gfx1032"></gfx1032>
-#Navi31
-<gfx1100 base="gfx1100"></gfx1100>
-<gfx1101 base="gfx1101"></gfx1101>
-<gfx1102 base="gfx1102"></gfx1102>
 
 
 <global>
