@@ -185,17 +185,16 @@ rocprofiler_query_pc_sampling_agent_configurations(
  * @var rocprofiler_pc_sampling_header_v1_t::has_wave_cnt
  * whether the @ref rocprofiler_pc_sampling_record_s::wave_count contains
  * meaningful value
- * @var rocprofiler_pc_sampling_header_v1_t::has_memory_counter
- * whether the content of the @ref
- * rocprofiler_pc_sampling_memorycounters_v1_t is meaningful
+ * @var rocprofiler_pc_sampling_header_v1_t::reserved
+ * for future use
  */
 typedef struct
 {
-    uint8_t valid : 1;
-    uint8_t type  : 4;  // 0=reserved, 1=hosttrap, 2=stochastic, 3=perfcounter, >=4 possible v2?
-    uint8_t has_stall_reason   : 1;
-    uint8_t has_wave_cnt       : 1;
-    uint8_t has_memory_counter : 1;
+    uint8_t valid            : 1;
+    uint8_t type             : 4;  // 0=reserved, 1=hosttrap, 2=stochastic
+    uint8_t has_stall_reason : 1;
+    uint8_t has_wave_cnt     : 1;
+    uint8_t reserved         : 1;
 } rocprofiler_pc_sampling_header_v1_t;
 
 /**
@@ -209,23 +208,6 @@ typedef struct
     uint32_t arb_state_issue   : 10;
     uint32_t arb_state_stall   : 10;
 } rocprofiler_pc_sampling_snapshot_v1_t;
-
-/**
- * @brief TODO: provide the description
- */
-typedef union
-{
-    struct
-    {
-        uint32_t load_cnt   : 6;
-        uint32_t store_cnt  : 6;
-        uint32_t bvh_cnt    : 3;
-        uint32_t sample_cnt : 6;
-        uint32_t ds_cnt     : 6;
-        uint32_t km_cnt     : 5;
-    };
-    uint32_t raw;
-} rocprofiler_pc_sampling_memorycounters_v1_t;
 
 // TODO: The definition of this structure might change over time
 // to reduce the space needed to represent a single sample.
@@ -267,27 +249,27 @@ typedef union
  * initiated kernel laucnh. The interrupted wave is executed as part of the kernel.
  * @var rocprofiler_pc_sampling_record_s::snapshot
  * TODO:
- * @var rocprofiler_pc_sampling_record_s::memory_counters
- * TODO:
+ * @var rocprofiler_pc_sampling_record_s::reserved2
+ * for future use
  */
 struct rocprofiler_pc_sampling_record_s
 {
-    rocprofiler_pc_sampling_header_v1_t         flags;
-    uint8_t                                     chiplet;
-    uint8_t                                     wave_id;
-    uint8_t                                     wave_issued : 1;
-    uint8_t                                     reserved    : 7;
-    uint32_t                                    hw_id;
-    uint64_t                                    pc;
-    uint64_t                                    exec_mask;
-    uint32_t                                    workgroup_id_x;
-    uint32_t                                    workgroup_id_y;
-    uint32_t                                    workgroup_id_z;
-    uint32_t                                    wave_count;
-    uint64_t                                    timestamp;
-    rocprofiler_correlation_id_t                correlation_id;
-    rocprofiler_pc_sampling_snapshot_v1_t       snapshot;
-    rocprofiler_pc_sampling_memorycounters_v1_t memory_counters;
+    rocprofiler_pc_sampling_header_v1_t   flags;
+    uint8_t                               chiplet;
+    uint8_t                               wave_id;
+    uint8_t                               wave_issued : 1;
+    uint8_t                               reserved    : 7;
+    uint32_t                              hw_id;
+    uint64_t                              pc;
+    uint64_t                              exec_mask;
+    uint32_t                              workgroup_id_x;
+    uint32_t                              workgroup_id_y;
+    uint32_t                              workgroup_id_z;
+    uint32_t                              wave_count;
+    uint64_t                              timestamp;
+    rocprofiler_correlation_id_t          correlation_id;
+    rocprofiler_pc_sampling_snapshot_v1_t snapshot;
+    uint32_t                              reserved2;
 };
 
 /** @} */
