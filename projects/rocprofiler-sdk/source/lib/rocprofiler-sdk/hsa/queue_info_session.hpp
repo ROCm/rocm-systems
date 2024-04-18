@@ -56,6 +56,7 @@ struct queue_info_session
     inst_pkt_t               inst_pkt         = {};
     hsa_signal_t             interrupt_signal = {};
     rocprofiler_thread_id_t  tid              = common::get_tid();
+    rocprofiler_timestamp_t  enqueue_ts       = 0;
     rocprofiler_user_data_t  user_data        = {.value = 0};
     context::correlation_id* correlation_id   = nullptr;
     rocprofiler_packet       kernel_pkt       = {};

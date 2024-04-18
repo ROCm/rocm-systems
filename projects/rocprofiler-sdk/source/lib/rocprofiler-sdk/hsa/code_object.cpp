@@ -505,25 +505,27 @@ shutdown(hsa_executable_t executable);
 
 bool is_shutdown = false;
 
-auto&
+auto*
 get_executables()
 {
-    static auto _v = common::Synchronized<executable_array_t>{};
+    static auto*& _v = common::static_object<common::Synchronized<executable_array_t>>::construct();
     return _v;
 }
 
-auto&
+auto*
 get_code_objects()
 {
-    static auto _v    = common::Synchronized<code_object_array_t>{};
+    static auto*& _v =
+        common::static_object<common::Synchronized<code_object_array_t>>::construct();
     static auto _dtor = common::scope_destructor{[]() { code_object_shutdown(); }};
     return _v;
 }
 
-auto&
+auto*
 get_kernel_object_map()
 {
-    static auto _v = common::Synchronized<kernel_object_map_t>{};
+    static auto*& _v =
+        common::static_object<common::Synchronized<kernel_object_map_t>>::construct();
     return _v;
 }
 
@@ -616,12 +618,13 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
     // generate a unique kernel symbol id
     data.kernel_id = ++get_kernel_symbol_id();
 
-    get_kernel_object_map().wlock(
-        [](kernel_object_map_t& object_map, uint64_t _kern_obj, uint64_t _kern_id) {
-            object_map[_kern_obj] = _kern_id;
-        },
-        data.kernel_object,
-        data.kernel_id);
+    CHECK_NOTNULL(get_kernel_object_map())
+        ->wlock(
+            [](kernel_object_map_t& object_map, uint64_t _kern_obj, uint64_t _kern_id) {
+                object_map[_kern_obj] = _kern_id;
+            },
+            data.kernel_object,
+            data.kernel_id);
 
     code_obj_v->symbols.emplace_back(std::make_unique<kernel_symbol>(std::move(symbol_v)));
 
@@ -809,11 +812,11 @@ code_object_unload_callback(hsa_executable_t         executable,
 
     CHECK_NOTNULL(code_obj_arr);
 
-    // auto _size = get_code_objects().rlock([](const auto& data) { return data.size(); });
-    // ROCP_INFO << "[inp] executable=" << executable.handle
+    // auto _size = CHECK_NOTNULL(get_code_objects())->rlock([](const auto& data) { return
+    // data.size(); }); ROCP_INFO << "[inp] executable=" << executable.handle
     //            << ", code_object=" << loaded_code_object.handle << " vs. " << _size;
 
-    get_code_objects().rlock([&](const code_object_array_t& arr) {
+    CHECK_NOTNULL(get_code_objects())->rlock([&](const code_object_array_t& arr) {
         for(const auto& itr : arr)
         {
             // ROCP_INFO << "[cmp] executable=" << itr->hsa_executable.handle
@@ -856,11 +859,12 @@ executable_freeze(hsa_executable_t executable, const char* options)
 
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
 
-    get_executables().wlock(
-        [executable](executable_array_t& data) { data.emplace_back(executable); });
+    CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
+        data.emplace_back(executable);
+    });
 
-    auto& code_obj_vec = get_code_objects();
-    code_obj_vec.wlock([executable](code_object_array_t& _vec) {
+    auto* code_obj_vec = get_code_objects();
+    CHECK_NOTNULL(code_obj_vec)->wlock([executable](code_object_array_t& _vec) {
         hsa::get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
             executable, code_object_load_callback, &_vec);
     });
@@ -881,7 +885,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
 
     if(!ctxs.empty())
     {
-        code_obj_vec.rlock([](const code_object_array_t& data) {
+        code_obj_vec->rlock([](const code_object_array_t& data) {
             auto tidx = common::get_tid();
             // set the contexts for each code object
             for(const auto& ditr : data)
@@ -960,34 +964,43 @@ executable_destroy(hsa_executable_t executable)
 
     auto _unloaded = shutdown(executable);
 
-    get_kernel_object_map().wlock([_unloaded](kernel_object_map_t& data) {
-        for(const auto& uitr : _unloaded)
-        {
-            for(const auto& sitr : uitr.symbols)
+    if(get_kernel_object_map())
+    {
+        CHECK_NOTNULL(get_kernel_object_map())->wlock([_unloaded](kernel_object_map_t& data) {
+            for(const auto& uitr : _unloaded)
             {
-                data.erase(sitr->rocp_data.kernel_id);
+                for(const auto& sitr : uitr.symbols)
+                {
+                    data.erase(sitr->rocp_data.kernel_id);
+                }
             }
-        }
-    });
+        });
+    }
 
-    get_code_objects().wlock([executable](code_object_array_t& data) {
-        for(auto& itr : data)
-        {
-            if(itr->hsa_executable.handle == executable.handle) itr.reset();
-        }
-        data.erase(
-            std::remove_if(data.begin(), data.end(), [](auto& itr) { return (itr == nullptr); }),
-            data.end());
-    });
+    if(get_code_objects())
+    {
+        CHECK_NOTNULL(get_code_objects())->wlock([executable](code_object_array_t& data) {
+            for(auto& itr : data)
+            {
+                if(itr->hsa_executable.handle == executable.handle) itr.reset();
+            }
+            data.erase(std::remove_if(
+                           data.begin(), data.end(), [](auto& itr) { return (itr == nullptr); }),
+                       data.end());
+        });
+    }
 
-    get_executables().wlock([executable](executable_array_t& data) {
-        data.erase(std::remove_if(data.begin(),
-                                  data.end(),
-                                  [executable](hsa_executable_t itr) {
-                                      return (itr.handle == executable.handle);
-                                  }),
-                   data.end());
-    });
+    if(get_executables())
+    {
+        CHECK_NOTNULL(get_executables())->wlock([executable](executable_array_t& data) {
+            data.erase(std::remove_if(data.begin(),
+                                      data.end(),
+                                      [executable](hsa_executable_t itr) {
+                                          return (itr.handle == executable.handle);
+                                      }),
+                       data.end());
+        });
+    }
 
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
@@ -1100,27 +1113,28 @@ code_object_init(HsaApiTable* table)
 uint64_t
 get_kernel_id(uint64_t kernel_object)
 {
-    return get_kernel_object_map().rlock(
-        [](const kernel_object_map_t& object_map, uint64_t _kern_obj) -> uint64_t {
-            auto itr = object_map.find(_kern_obj);
-            return (itr == object_map.end()) ? 0 : itr->second;
-        },
-        kernel_object);
+    return CHECK_NOTNULL(get_kernel_object_map())
+        ->rlock(
+            [](const kernel_object_map_t& object_map, uint64_t _kern_obj) -> uint64_t {
+                auto itr = object_map.find(_kern_obj);
+                return (itr == object_map.end()) ? 0 : itr->second;
+            },
+            kernel_object);
 }
 
 void
 code_object_shutdown()
 {
-    if(is_shutdown) return;
+    if(is_shutdown || !get_executables() || !get_code_objects()) return;
 
-    get_executables().rlock([](const executable_array_t& edata) {
+    CHECK_NOTNULL(get_executables())->rlock([](const executable_array_t& edata) {
         auto tmp = edata;
         std::reverse(tmp.begin(), tmp.end());
         for(auto itr : tmp)
             shutdown(itr);
     });
 
-    get_code_objects().wlock([](code_object_array_t& data) { data.clear(); });
+    CHECK_NOTNULL(get_code_objects())->wlock([](code_object_array_t& data) { data.clear(); });
 
     is_shutdown = true;
 }

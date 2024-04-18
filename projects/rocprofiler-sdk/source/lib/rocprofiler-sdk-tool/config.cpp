@@ -48,20 +48,27 @@ namespace tool
 {
 namespace
 {
-const auto launch_time = new std::time_t{std::time(nullptr)};
-const auto env_regexes =
+std::string*
+get_local_datetime(const std::string& dt_format);
+
+const auto* launch_datetime = get_local_datetime(get_env("ROCP_TIME_FORMAT", "%F_%H.%M"));
+const auto  env_regexes =
     new std::array<std::regex, 2>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
                                   std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"}};
 
-std::string
-get_local_datetime(const char* dt_format, std::time_t* dt_curr)
+std::string*
+get_local_datetime(const std::string& dt_format)
 {
-    char mbstr[512];
-    if(!dt_curr) dt_curr = launch_time;
+    constexpr auto strsize = 512;
+    auto           dt_curr = std::time_t{std::time(nullptr)};
 
-    if(std::strftime(mbstr, sizeof(mbstr), dt_format, std::localtime(dt_curr)) != 0)
-        return std::string{mbstr};
-    return std::string{};
+    char mbstr[strsize];
+    memset(mbstr, '\0', sizeof(mbstr) * sizeof(char));
+
+    if(std::strftime(mbstr, sizeof(mbstr) - 1, dt_format.c_str(), std::localtime(&dt_curr)) != 0)
+        return new std::string{mbstr};
+
+    return nullptr;
 }
 
 inline bool
@@ -270,9 +277,6 @@ output_keys(std::string _tag)
         }
     }
 
-    auto* _launch_time = launch_time;
-    auto  _time_format = get_env<std::string>("ROCP_TIME_FORMAT", "%F_%H.%M");
-
     auto _mpi_size = get_mpi_size();
     auto _mpi_rank = get_mpi_rank();
 
@@ -286,7 +290,6 @@ output_keys(std::string _tag)
     auto _pwd_string    = get_env<std::string>("PWD", ".");
     auto _slurm_job_id  = get_env<std::string>("SLURM_JOB_ID", "0");
     auto _slurm_proc_id = get_env("SLURM_PROCID", _dmp_rank);
-    auto _launch_string = get_local_datetime(_time_format.c_str(), _launch_time);
 
     auto _uniq_id = _proc_id;
     if(get_env<int32_t>("SLURM_PROCID", -1) >= 0)
@@ -318,6 +321,8 @@ output_keys(std::string _tag)
         }
     }
 
+    auto _launch_time = (launch_datetime) ? *launch_datetime : std::string{".UNKNOWN_LAUNCH_TIME."};
+
     for(auto&& itr : std::initializer_list<output_key>{
             {"%pid%", _proc_id, "Process identifier"},
             {"%ppid%", _parent_id, "Parent process identifier"},
@@ -328,7 +333,7 @@ output_keys(std::string _tag)
             {"%rank%", _slurm_proc_id, "MPI/UPC++ rank"},
             {"%size%", _dmp_size, "MPI/UPC++ size"},
             {"%nid%", _uniq_id, "%rank% if possible, otherwise %pid%"},
-            {"%launch_time%", _launch_string, "Data and/or time of run according to time format"},
+            {"%launch_time%", _launch_time, "Data and/or time of run according to time format"},
         })
     {
         _options.emplace_back(itr);

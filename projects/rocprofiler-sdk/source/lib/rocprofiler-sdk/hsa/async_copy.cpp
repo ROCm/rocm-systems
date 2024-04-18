@@ -175,6 +175,7 @@ struct async_copy_data
     rocprofiler_agent_id_t              src_agent      = null_rocp_agent_id;
     rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;
     uint64_t                            bytes_copied   = 0;
+    uint64_t                            start_ts       = 0;
     context::correlation_id*            correlation_id = nullptr;
     tracing::tracing_data               tracing_data   = {};
 
@@ -331,6 +332,22 @@ convert_hsa_handle(Up _hsa_object)
     return reinterpret_cast<Tp*>(_hsa_object.handle);
 }
 
+hsa_amd_profiling_async_copy_time_t&
+operator+=(hsa_amd_profiling_async_copy_time_t& lhs, uint64_t rhs)
+{
+    lhs.start += rhs;
+    lhs.end += rhs;
+    return lhs;
+}
+
+hsa_amd_profiling_async_copy_time_t&
+operator*=(hsa_amd_profiling_async_copy_time_t& lhs, uint64_t rhs)
+{
+    lhs.start *= rhs;
+    lhs.end *= rhs;
+    return lhs;
+}
+
 bool
 async_copy_handler(hsa_signal_value_t signal_value, void* arg)
 {
@@ -351,14 +368,23 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         return (nanosec / sysclock_hz);
     }();
 
+    auto  ts               = common::timestamp_ns();
     auto* _data            = static_cast<async_copy_data*>(arg);
     auto  copy_time        = hsa_amd_profiling_async_copy_time_t{};
     auto  copy_time_status = get_amd_ext_table()->hsa_amd_profiling_get_async_copy_time_fn(
         _data->rocp_signal, &copy_time);
 
     // normalize
-    copy_time.start *= sysclock_period;
-    copy_time.end *= sysclock_period;
+    copy_time *= sysclock_period;
+
+    // below is a hack for clock skew issues:
+    // the timestamp of the function call triggering the copy will always be before when the copy
+    // started
+    if(copy_time.start < _data->start_ts) copy_time += (_data->start_ts - copy_time.start);
+
+    // below is a hack for clock skew issues:
+    // the timestamp of this handler for the copy will always be after when the copy ended
+    if(copy_time.end < ts) copy_time += (ts - copy_time.end);
 
     // if we encounter this in CI, it will cause test to fail
     ROCP_CI_LOG_IF(ERROR, copy_time_status == HSA_STATUS_SUCCESS && copy_time.end < copy_time.start)
@@ -650,12 +676,13 @@ async_copy_impl(Args... args)
 
     // if we constructed a correlation id, this decrements the reference count after the underlying
     // function returns
-    auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop]() {
+    auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop, _data]() {
         if(_corr_id_pop)
         {
             context::pop_latest_correlation_id(_corr_id_pop);
             _corr_id_pop->sub_ref_count();
         }
+        _data->start_ts = common::timestamp_ns();
     }};
 
     auto thr_id = _data->correlation_id->thread_idx;

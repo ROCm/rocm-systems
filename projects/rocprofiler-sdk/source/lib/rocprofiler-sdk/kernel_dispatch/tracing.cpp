@@ -43,6 +43,15 @@
 #    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
 #endif
 
+#define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
+    auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
+    LOG_IF(SEVERITY, ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) != HSA_STATUS_SUCCESS)   \
+        << #EXPR << " returned non-zero status code "                                              \
+        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
+        << ::rocprofiler::hsa::get_hsa_status_string(                                              \
+               ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
+        << " "
+
 namespace rocprofiler
 {
 namespace kernel_dispatch
@@ -51,11 +60,38 @@ namespace
 {
 using queue_info_session_t     = hsa::queue_info_session;
 using kernel_dispatch_record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
+
+hsa_amd_profiling_dispatch_time_t&
+operator+=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
+{
+    lhs.start += rhs;
+    lhs.end += rhs;
+    return lhs;
+}
+
+hsa_amd_profiling_dispatch_time_t&
+operator*=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
+{
+    lhs.start *= rhs;
+    lhs.end *= rhs;
+    return lhs;
+}
 }  // namespace
 
 void
 dispatch_complete(queue_info_session_t& session)
 {
+    auto ts = common::timestamp_ns();
+
+    static auto sysclock_period = []() -> uint64_t {
+        constexpr auto nanosec     = 1000000000UL;
+        uint64_t       sysclock_hz = 0;
+        ROCP_HSA_TABLE_CALL(ERROR,
+                            hsa::get_core_table()->hsa_system_get_info_fn(
+                                HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz));
+        return (nanosec / sysclock_hz);
+    }();
+
     // get the contexts that were active when the signal was created
     auto& tracing_data_v = session.tracing_data;
     if(tracing_data_v.callback_contexts.empty() && tracing_data_v.buffered_contexts.empty()) return;
@@ -80,6 +116,20 @@ dispatch_complete(queue_info_session_t& session)
 
     if(dispatch_time_status == HSA_STATUS_SUCCESS)
     {
+        // normalize
+        dispatch_time *= sysclock_period;
+
+        // below is a hack for clock skew issues:
+        // the timestamp of the packet rewriter for the kernel packet will always be before when the
+        // kernel started
+        if(dispatch_time.start < session.enqueue_ts)
+            dispatch_time += (session.enqueue_ts - dispatch_time.start);
+
+        // below is a hack for clock skew issues:
+        // the timestamp of this handler for the kernel dispatch will always be after when the
+        // kernel completed
+        if(dispatch_time.end < ts) dispatch_time += (ts - dispatch_time.end);
+
         callback_record.start_timestamp = dispatch_time.start;
         callback_record.end_timestamp   = dispatch_time.end;
     }

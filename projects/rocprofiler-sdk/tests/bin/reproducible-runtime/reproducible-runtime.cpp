@@ -58,7 +58,7 @@ namespace
 using auto_lock_t   = std::unique_lock<std::mutex>;
 auto     print_lock = std::mutex{};
 double   nruntime   = 500.0;  // ms
-uint32_t nspin      = 1000000;
+uint32_t nspin      = 256 * 10000;
 size_t   nthreads   = 2;
 
 void
@@ -81,17 +81,17 @@ main(int argc, char** argv)
         {
             fprintf(stderr,
                     "usage: reproducible-runtime [KERNEL RUNTIME PER THREAD (default: %f msec)] "
-                    "[SPIN CYCLES PER KERNEL LAUNCH (default: %u)] [NUM_THREADS (default: %zu)]\n",
+                    "[NUM_THREADS (default: %zu)] [SPIN CYCLES PER KERNEL LAUNCH (default: %u)]\n",
                     nruntime,
-                    nspin,
-                    nthreads);
+                    nthreads,
+                    nspin);
             exit(EXIT_SUCCESS);
         }
     }
 
     if(argc > 1) nruntime = std::stod(argv[1]);
-    if(argc > 2) nspin = std::stoll(argv[2]);
-    if(argc > 3) nthreads = std::stoll(argv[3]);
+    if(argc > 2) nthreads = std::stoll(argv[2]);
+    if(argc > 3) nspin = std::stoll(argv[3]);
 
     printf("[reproducible-runtime] Kernel runtime per thread: %.3f msec\n", nruntime);
     printf("[reproducible-runtime] Spin time per kernel: %u cycles\n", nspin);
@@ -115,11 +115,11 @@ main(int argc, char** argv)
 __global__ void
 reproducible_runtime(uint32_t nspin_v)
 {
-    for(uint32_t i = 0; i < nspin_v / 2048; i++)
-        asm volatile("s_sleep 32");  // ~2048 cycles -> ~1us
-    uint32_t remainder = nspin_v % 2048;
-    for(uint32_t i = 0; i < remainder / 64; i++)
+    for(uint32_t i = 0; i < nspin_v / 64; i++)
         asm volatile("s_sleep 1");
+    if(nspin_v > 64)
+        for(uint32_t i = 0; i < nspin_v % 64; i++)
+            asm volatile("s_sleep 1");
 }
 
 void
@@ -130,10 +130,11 @@ run(int tid, int devid)
     constexpr int min_avail_simd = 128;
     dim3          grid(min_avail_simd);
     dim3          block(32);
-    double        time   = 0.0;
-    hipStream_t   stream = {};
-    hipEvent_t    start  = {};
-    hipEvent_t    stop   = {};
+    double        time    = 0.0;
+    hipStream_t   stream  = {};
+    hipEvent_t    start   = {};
+    hipEvent_t    stop    = {};
+    uint64_t      nlaunch = 0;
 
     HIP_API_CALL(hipSetDevice(devid));
     HIP_API_CALL(hipStreamCreate(&stream));
@@ -152,6 +153,7 @@ run(int tid, int devid)
         float elapsed = 0.0f;
         HIP_API_CALL(hipEventElapsedTime(&elapsed, start, stop));
         time += static_cast<double>(elapsed);
+        ++nlaunch;
     } while(time < nruntime);
 
     HIP_API_CALL(hipStreamSynchronize(stream));
@@ -162,7 +164,7 @@ run(int tid, int devid)
         auto _msg = std::stringstream{};
         _msg << '[' << getpid() << "][" << tid << "] Runtime of reproducible-runtime is "
              << std::setprecision(2) << std::fixed << time << " ms (" << std::setprecision(3)
-             << (time / 1000.0f) << " sec)\n";
+             << (time / 1000.0f) << " sec). Kernels dispatched: " << nlaunch << "\n";
         auto_lock_t _lk{print_lock};
         std::cout << _msg.str() << std::flush;
     }
@@ -171,6 +173,15 @@ run(int tid, int devid)
     HIP_API_CALL(hipStreamDestroy(stream));
 
     roctxRangeStop(roctx_range_id);
+
+    constexpr auto scale = 1.1;
+    if(time > scale * nruntime)
+    {
+        auto _msg = std::stringstream{};
+        _msg << "total kernel runtime exceeded (" << scale << " * " << nruntime << " = "
+             << (scale * nruntime) << ") :: " << time << " ms";
+        throw std::runtime_error{_msg.str()};
+    }
 }
 
 namespace
