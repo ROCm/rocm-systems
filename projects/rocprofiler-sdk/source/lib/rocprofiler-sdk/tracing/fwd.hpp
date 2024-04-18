@@ -69,6 +69,8 @@ struct tracing_data
     callback_context_data_vec_t   callback_contexts        = {};
     buffered_context_data_vec_t   buffered_contexts        = {};
     external_correlation_id_map_t external_correlation_ids = {};
+
+    bool empty() const { return (callback_contexts.empty() && buffered_contexts.empty()); }
 };
 }  // namespace tracing
 }  // namespace rocprofiler

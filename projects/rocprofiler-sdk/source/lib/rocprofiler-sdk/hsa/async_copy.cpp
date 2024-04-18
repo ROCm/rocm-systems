@@ -32,7 +32,11 @@
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/tracing/fwd.hpp"
+#include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
@@ -146,8 +150,13 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
 bool
 context_filter(const context::context* ctx)
 {
-    return (ctx->buffered_tracer &&
-            (ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)));
+    auto has_buffered = (ctx->buffered_tracer &&
+                         (ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)));
+
+    auto has_callback = (ctx->callback_tracer &&
+                         (ctx->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY)));
+
+    return (has_buffered || has_callback);
 }
 
 constexpr auto null_rocp_agent_id =
@@ -155,16 +164,57 @@ constexpr auto null_rocp_agent_id =
 
 struct async_copy_data
 {
-    hsa_signal_t                        orig_signal     = {};
-    hsa_signal_t                        rocp_signal     = {};
-    rocprofiler_thread_id_t             tid             = common::get_tid();
-    rocprofiler_agent_id_t              dst_agent       = null_rocp_agent_id;
-    rocprofiler_agent_id_t              src_agent       = null_rocp_agent_id;
-    rocprofiler_memory_copy_operation_t direction       = ROCPROFILER_MEMORY_COPY_NONE;
-    context::correlation_id*            correlation_id  = nullptr;
-    context::context_array_t            contexts        = {};
-    external_corr_id_map_t              extern_corr_ids = {};
+    using timestamp_t     = rocprofiler_timestamp_t;
+    using callback_data_t = rocprofiler_callback_tracing_memory_copy_data_t;
+    using buffered_data_t = rocprofiler_buffer_tracing_memory_copy_record_t;
+
+    hsa_signal_t                        orig_signal    = {};
+    hsa_signal_t                        rocp_signal    = {};
+    rocprofiler_thread_id_t             tid            = common::get_tid();
+    rocprofiler_agent_id_t              dst_agent      = null_rocp_agent_id;
+    rocprofiler_agent_id_t              src_agent      = null_rocp_agent_id;
+    rocprofiler_memory_copy_operation_t direction      = ROCPROFILER_MEMORY_COPY_NONE;
+    uint64_t                            bytes_copied   = 0;
+    context::correlation_id*            correlation_id = nullptr;
+    tracing::tracing_data               tracing_data   = {};
+
+    callback_data_t get_callback_data(timestamp_t _beg = 0, timestamp_t _end = 0) const;
+    buffered_data_t get_buffered_record(const context_t* _ctx,
+                                        timestamp_t      _beg = 0,
+                                        timestamp_t      _end = 0) const;
 };
+
+async_copy_data::callback_data_t
+async_copy_data::get_callback_data(timestamp_t _beg, timestamp_t _end) const
+{
+    LOG_IF(FATAL, direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
+
+    return common::init_public_api_struct(
+        callback_data_t{}, _beg, _end, dst_agent, src_agent, bytes_copied);
+}
+
+async_copy_data::buffered_data_t
+async_copy_data::get_buffered_record(const context_t* _ctx,
+                                     timestamp_t      _beg,
+                                     timestamp_t      _end) const
+{
+    LOG_IF(FATAL, direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
+
+    auto _external_corr_id =
+        (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
+    auto _corr_id = rocprofiler_correlation_id_t{correlation_id->internal, _external_corr_id};
+
+    return common::init_public_api_struct(buffered_data_t{},
+                                          ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                          direction,
+                                          _corr_id,
+                                          correlation_id->thread_idx,
+                                          _beg,
+                                          _end,
+                                          dst_agent,
+                                          src_agent,
+                                          bytes_copied);
+}
 
 struct active_signals
 {
@@ -316,48 +366,34 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         << copy_time.end << ") was less than the start time (" << copy_time.start << ")";
 
     // get the contexts that were active when the signal was created
-    const auto& ctxs = _data->contexts;
+    const auto& tracing_data = _data->tracing_data;
     // we need to decrement this reference count at the end of the functions
     auto* _corr_id = _data->correlation_id;
 
-    if(copy_time_status == HSA_STATUS_SUCCESS && !ctxs.empty())
+    if(copy_time_status == HSA_STATUS_SUCCESS && !tracing_data.empty())
     {
-        const auto& _extern_corr_ids = _data->extern_corr_ids;
-
-        for(const auto* itr : ctxs)
+        if(!_data->tracing_data.callback_contexts.empty())
         {
-            auto* _buffer = buffer::get_buffer(
-                itr->buffered_tracer->buffer_data.at(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY));
+            auto _tracer_data = _data->get_callback_data(copy_time.start, copy_time.end);
 
-            // go ahead and create the correlation id value since we expect at least one of these
-            // domains will require it
-            auto _corr_id_v =
-                rocprofiler_correlation_id_t{.internal = 0, .external = context::null_user_data};
-            if(_corr_id)
-            {
-                _corr_id_v.internal = _corr_id->internal;
-                _corr_id_v.external = _extern_corr_ids.at(itr);
-            }
+            tracing::execute_phase_exit_callbacks(_data->tracing_data.callback_contexts,
+                                                  _data->tracing_data.external_correlation_ids,
+                                                  ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                                  _data->direction,
+                                                  _tracer_data);
+        }
 
-            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_MEMORY_COPY))
-            {
-                if(copy_time_status == HSA_STATUS_SUCCESS)
-                {
-                    auto record = rocprofiler_buffer_tracing_memory_copy_record_t{
-                        sizeof(rocprofiler_buffer_tracing_memory_copy_record_t),
-                        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                        _data->direction,
-                        _corr_id_v,
-                        copy_time.start * sysclock_period,
-                        copy_time.end * sysclock_period,
-                        _data->dst_agent,
-                        _data->src_agent};
+        if(!_data->tracing_data.buffered_contexts.empty())
+        {
+            auto record = _data->get_buffered_record(nullptr, copy_time.start, copy_time.end);
 
-                    CHECK_NOTNULL(_buffer)->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-                                                    record);
-                }
-            }
+            tracing::execute_buffer_record_emplace(_data->tracing_data.buffered_contexts,
+                                                   _data->tid,
+                                                   _data->correlation_id->internal,
+                                                   _data->tracing_data.external_correlation_ids,
+                                                   ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                                   _data->direction,
+                                                   record);
         }
     }
 
@@ -412,18 +448,19 @@ template <size_t Idx>
 struct arg_indices;
 
 #define HSA_ASYNC_COPY_DEFINE_ARG_INDICES(                                                         \
-    ENUM_ID, DST_AGENT_IDX, SRC_AGENT_IDX, COMPLETION_SIGNAL_IDX)                                  \
+    ENUM_ID, DST_AGENT_IDX, SRC_AGENT_IDX, COMPLETION_SIGNAL_IDX, COPY_SIZE_IDX)                   \
     template <>                                                                                    \
     struct arg_indices<ENUM_ID>                                                                    \
     {                                                                                              \
         static constexpr auto dst_agent_idx         = DST_AGENT_IDX;                               \
         static constexpr auto src_agent_idx         = SRC_AGENT_IDX;                               \
         static constexpr auto completion_signal_idx = COMPLETION_SIGNAL_IDX;                       \
+        static constexpr auto copy_size_idx         = COPY_SIZE_IDX;                               \
     };
 
-HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_id, 1, 3, 7)
-HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_on_engine_id, 1, 3, 7)
-HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_rect_id, 5, 5, 9)
+HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_id, 1, 3, 7, 4)
+HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_on_engine_id, 1, 3, 7, 4)
+HSA_ASYNC_COPY_DEFINE_ARG_INDICES(async_copy_rect_id, 5, 5, 9, 4)
 
 template <typename FuncT, typename ArgsT, size_t... Idx>
 decltype(auto)
@@ -432,24 +469,33 @@ invoke(FuncT&& _func, ArgsT&& _args, std::index_sequence<Idx...>)
     return std::forward<FuncT>(_func)(std::get<Idx>(_args)...);
 }
 
+template <typename Tp>
+uint64_t compute_copy_bytes(Tp);
+
+template <>
+uint64_t
+compute_copy_bytes(size_t val)
+{
+    return val;
+}
+
+template <>
+uint64_t
+compute_copy_bytes(const hsa_dim3_t* val)
+{
+    return (val) ? (val->x * val->y * val->z) : 0;
+}
+
 template <size_t TableIdx, size_t OpIdx, typename... Args>
 hsa_status_t
 async_copy_impl(Args... args)
 {
     using meta_type = hsa_api_meta<TableIdx, OpIdx>;
 
-    constexpr auto N = sizeof...(Args);
+    constexpr auto N             = sizeof...(Args);
+    constexpr auto copy_size_idx = arg_indices<OpIdx>::copy_size_idx;
 
     auto&& _tied_args = std::tie(args...);
-    auto   ctxs       = context::get_active_contexts(context_filter);
-
-    // no active contexts so just execute original
-    if(ctxs.empty())
-    {
-        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
-                      std::move(_tied_args),
-                      std::make_index_sequence<N>{});
-    }
 
     // determine the direction of the memory copy
     auto _direction    = ROCPROFILER_MEMORY_COPY_NONE;
@@ -515,30 +561,35 @@ async_copy_impl(Args... args)
         }
     }
 
-    // remove any contexts which do not wish to trace this memory copy direction
-    ctxs.erase(std::remove_if(ctxs.begin(),
-                              ctxs.end(),
-                              [_direction](const context_t* ctx) {
-                                  return !ctx->buffered_tracer->domains(
-                                      ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, _direction);
-                              }),
-               ctxs.end());
+    async_copy_data* _data = nullptr;
 
-    // if no contexts remain, execute as usual
-    if(ctxs.empty())
     {
-        return invoke(get_next_dispatch<TableIdx, OpIdx>(),
-                      std::move(_tied_args),
-                      std::make_index_sequence<N>{});
+        auto tracing_data = tracing::tracing_data{};
+
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                   ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
+                                   _direction,
+                                   tracing_data);
+        // if no contexts are tracing memory copies for this direction, execute as usual
+        if(tracing_data.empty())
+        {
+            return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                          std::move(_tied_args),
+                          std::make_index_sequence<N>{});
+        }
+
+        _data               = new async_copy_data{};
+        _data->tracing_data = std::move(tracing_data);
     }
 
+    auto& tracing_data = _data->tracing_data;
+
     // at this point, we want to install our own signal handler
-    auto* _data      = new async_copy_data{};
-    _data->tid       = common::get_tid();
-    _data->dst_agent = _dst_agent_id;
-    _data->src_agent = _src_agent_id;
-    _data->direction = _direction;
-    _data->contexts  = ctxs;  // avoid using move in case code below accidentally uses ctxs
+    _data->tid          = common::get_tid();
+    _data->dst_agent    = _dst_agent_id;
+    _data->src_agent    = _src_agent_id;
+    _data->direction    = _direction;
+    _data->bytes_copied = compute_copy_bytes(std::get<copy_size_idx>(_tied_args));
 
     constexpr auto           completion_signal_idx  = arg_indices<OpIdx>::completion_signal_idx;
     auto&                    _completion_signal     = std::get<completion_signal_idx>(_tied_args);
@@ -607,22 +658,33 @@ async_copy_impl(Args... args)
         }
     }};
 
-    auto& extern_corr_ids = _data->extern_corr_ids;
-    extern_corr_ids.reserve(_data->contexts.size());  // reserve for performance
-    for(const auto* ctx : _data->contexts)
-        extern_corr_ids.emplace(ctx,
-                                ctx->correlation_tracer.external_correlator.get(
-                                    _data->tid,
-                                    ctx,
-                                    ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
-                                    _direction,
-                                    _data->correlation_id->internal));
+    auto thr_id = _data->correlation_id->thread_idx;
+    tracing::populate_external_correlation_ids(tracing_data.external_correlation_ids,
+                                               thr_id,
+                                               ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_COPY,
+                                               _direction,
+                                               _data->correlation_id->internal);
+
+    if(!tracing_data.callback_contexts.empty())
+    {
+        auto _tracer_data = _data->get_callback_data();
+
+        tracing::execute_phase_enter_callbacks(tracing_data.callback_contexts,
+                                               thr_id,
+                                               _data->correlation_id->internal,
+                                               tracing_data.external_correlation_ids,
+                                               ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,
+                                               _direction,
+                                               _tracer_data);
+    }
 
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
+
     LOG(INFO) << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
               << ": " << original_value << " | Replacement Signal: " << std::hex
               << _completion_signal.handle << std::dec << ": 1";
+
     CHECK_NOTNULL(get_active_signals())->fetch_add(1);
 
     return invoke(

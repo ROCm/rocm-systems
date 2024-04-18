@@ -302,6 +302,18 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_kernel_dispatch_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_callback_tracing_memory_copy_data_t data)
+{
+    SAVE_DATA_FIELD(size);
+    SAVE_DATA_FIELD(start_timestamp);
+    SAVE_DATA_FIELD(end_timestamp);
+    SAVE_DATA_FIELD(dst_agent_id);
+    SAVE_DATA_FIELD(src_agent_id);
+    SAVE_DATA_FIELD(bytes);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_data_t data)
 {
     SAVE_DATA_FIELD(size);
@@ -395,11 +407,13 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_copy_record_t data)
     SAVE_DATA_FIELD(size);
     SAVE_DATA_FIELD(kind);
     SAVE_DATA_FIELD(operation);
+    SAVE_DATA_FIELD(thread_id);
     SAVE_DATA_FIELD(correlation_id);
     SAVE_DATA_FIELD(start_timestamp);
     SAVE_DATA_FIELD(end_timestamp);
     SAVE_DATA_FIELD(dst_agent_id);
     SAVE_DATA_FIELD(src_agent_id);
+    SAVE_DATA_FIELD(bytes);
 }
 
 template <typename ArchiveT>

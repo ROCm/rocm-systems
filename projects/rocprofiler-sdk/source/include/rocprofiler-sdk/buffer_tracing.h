@@ -156,10 +156,12 @@ typedef struct
     rocprofiler_buffer_tracing_kind_t   kind;
     rocprofiler_memory_copy_operation_t operation;
     rocprofiler_correlation_id_t        correlation_id;   ///< correlation ids for record
+    rocprofiler_thread_id_t             thread_id;        ///< id for thread that triggered copy
     rocprofiler_timestamp_t             start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t             end_timestamp;    ///< end time in nanoseconds
     rocprofiler_agent_id_t              dst_agent_id;     ///< destination agent of copy
     rocprofiler_agent_id_t              src_agent_id;     ///< source agent of copy
+    uint64_t                            bytes;            ///< bytes copied
 
     /// @var kind
     /// @brief ::ROCPROFILER_BUFFER_TRACING_MEMORY_COPY

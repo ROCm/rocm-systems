@@ -170,25 +170,35 @@ compute_runtime_sizeof()
     return compute_runtime_sizeof<Tp>(0);
 }
 
-template <typename Tp>
+template <typename Tp, typename... Args>
 decltype(auto)
-init_public_api_struct(Tp&& val)
+init_public_api_struct(Tp&& val, Args&&... args)
 {
     assert_public_api_struct_properties<Tp>();
 
     ::memset(&val, 0, sizeof(Tp));
-    val.size = compute_runtime_sizeof<Tp>();
+
+    if constexpr(sizeof...(Args) == 0)
+        val.size = compute_runtime_sizeof<Tp>();
+    else
+        val = {compute_runtime_sizeof<Tp>(), std::forward<Args>(args)...};
+
     return std::forward<Tp>(val);
 }
 
-template <typename Tp>
+template <typename Tp, typename... Args>
 Tp&
-init_public_api_struct(Tp& val)
+init_public_api_struct(Tp& val, Args&&... args)
 {
     assert_public_api_struct_properties<Tp>();
 
     ::memset(&val, 0, sizeof(Tp));
-    val.size = compute_runtime_sizeof<Tp>();
+
+    if constexpr(sizeof...(Args) == 0)
+        val.size = compute_runtime_sizeof<Tp>();
+    else
+        val = {compute_runtime_sizeof<Tp>(), std::forward<Args>(args)...};
+
     return val;
 }
 

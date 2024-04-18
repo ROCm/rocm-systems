@@ -155,6 +155,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,     ///< @see ::rocprofiler_code_object_operation_t
     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,  ///< @see ::rocprofiler_scratch_memory_operation_t
     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
+    ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,      ///< @see ::rocprofiler_memory_copy_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -613,11 +614,11 @@ rocprofiler_record_header_compute_hash(uint32_t category, uint32_t kind)
  */
 typedef struct rocprofiler_kernel_dispatch_info_t
 {
-    uint64_t                  size;                  ///< Size of this struct
-    rocprofiler_agent_id_t    agent_id;              ///< Agent ID where kernel is launched
-    rocprofiler_queue_id_t    queue_id;              ///< Queue ID where kernel packet is enqueued
-    rocprofiler_kernel_id_t   kernel_id;             ///< Kernel identifier
-    rocprofiler_dispatch_id_t dispatch_id;           ///< unique id for each dispatch
+    uint64_t                  size;         ///< Size of this struct (minus reserved padding)
+    rocprofiler_agent_id_t    agent_id;     ///< Agent ID where kernel is launched
+    rocprofiler_queue_id_t    queue_id;     ///< Queue ID where kernel packet is enqueued
+    rocprofiler_kernel_id_t   kernel_id;    ///< Kernel identifier
+    rocprofiler_dispatch_id_t dispatch_id;  ///< unique id for each dispatch
     uint32_t                  private_segment_size;  ///< runtime private memory segment size
     uint32_t                  group_segment_size;    ///< runtime group memory segment size
     rocprofiler_dim3_t        workgroup_size;        ///< runtime workgroup size (grid * threads)

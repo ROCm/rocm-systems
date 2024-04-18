@@ -3,6 +3,8 @@
 import json
 import pytest
 
+from rocprofiler_sdk.pytest_utils.dotdict import dotdict
+
 
 def pytest_addoption(parser):
     parser.addoption(
@@ -17,4 +19,4 @@ def pytest_addoption(parser):
 def input_data(request):
     filename = request.config.getoption("--input")
     with open(filename, "r") as inp:
-        return json.load(inp)
+        return dotdict(json.load(inp))

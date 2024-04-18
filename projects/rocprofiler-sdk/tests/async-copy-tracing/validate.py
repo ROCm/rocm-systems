@@ -9,7 +9,7 @@ def node_exists(name, data, min_len=1):
     assert name in data
     assert data[name] is not None
     if isinstance(data[name], (list, tuple, dict, set)):
-        assert len(data[name]) >= min_len
+        assert len(data[name]) >= min_len, f"{name}:\n{data}"
 
 
 def test_data_structure(input_data):
@@ -38,10 +38,11 @@ def test_data_structure(input_data):
     node_exists("hip_api_traces", sdk_data["callback_records"], 0)
     node_exists("marker_api_traces", sdk_data["callback_records"])
     node_exists("kernel_dispatches", sdk_data["callback_records"])
+    node_exists("memory_copies", sdk_data["callback_records"], 24)
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatches", sdk_data["buffer_records"])
-    node_exists("memory_copies", sdk_data["buffer_records"], 4)
+    node_exists("memory_copies", sdk_data["buffer_records"], 12)
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
     node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
     node_exists("marker_api_traces", sdk_data["buffer_records"])
@@ -171,6 +172,10 @@ def test_external_correlation_ids(input_data):
             assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
             assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
 
+        for itr in sdk_data["callback_records"][titr]:
+            assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
+            assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
+
 
 def test_kernel_ids(input_data):
     data = input_data
@@ -205,7 +210,7 @@ def test_kernel_dispatch_ids(input_data):
     num_dispatches = len(sdk_data["buffer_records"]["kernel_dispatches"])
     num_cb_dispatches = len(sdk_data["callback_records"]["kernel_dispatches"])
 
-    assert num_cb_dispatches == (2 * num_dispatches)
+    assert num_cb_dispatches == (3 * num_dispatches)
 
     bf_seq_ids = []
     for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
@@ -218,7 +223,7 @@ def test_kernel_dispatch_ids(input_data):
     bf_seq_ids = sorted(bf_seq_ids)
     cb_seq_ids = sorted(cb_seq_ids)
 
-    assert (2 * len(bf_seq_ids)) == len(cb_seq_ids)
+    assert (3 * len(bf_seq_ids)) == len(cb_seq_ids)
 
     assert bf_seq_ids[0] == cb_seq_ids[0]
     assert bf_seq_ids[-1] == cb_seq_ids[-1]
@@ -230,7 +235,7 @@ def test_kernel_dispatch_ids(input_data):
     cb_seq_ids_uniq = get_uniq(cb_seq_ids)
 
     assert bf_seq_ids == bf_seq_ids_uniq
-    assert len(cb_seq_ids) == (2 * len(cb_seq_ids_uniq))
+    assert len(cb_seq_ids) == (3 * len(cb_seq_ids_uniq))
     assert len(bf_seq_ids) == num_dispatches
     assert len(bf_seq_ids_uniq) == num_dispatches
     assert len(cb_seq_ids_uniq) == num_dispatches
@@ -249,17 +254,39 @@ def test_async_copy_direction(input_data):
     async_dir_cnt = dict([(idx, 0) for idx in range(0, 5)])
     for itr in sdk_data["buffer_records"]["memory_copies"]:
         op_id = itr["operation"]
-        assert op_id > 1
-        assert op_id < 4
+        assert op_id > 1, f"{itr}"
+        assert op_id < 4, f"{itr}"
         async_dir_cnt[op_id] += 1
+
+    for itr in sdk_data["callback_records"]["memory_copies"]:
+        op_id = itr.operation
+        assert op_id > 1, f"{itr}"
+        assert op_id < 4, f"{itr}"
+        async_dir_cnt[op_id] += 1
+
+        phase = itr.phase
+        pitr = itr.payload
+
+        assert phase is not None, f"{itr}"
+        assert pitr is not None, f"{itr}"
+
+        if phase == 1:
+            assert pitr.start_timestamp == 0, f"{itr}"
+            assert pitr.end_timestamp == 0, f"{itr}"
+        elif phase == 2:
+            assert pitr.start_timestamp > 0, f"{itr}"
+            assert pitr.end_timestamp > 0, f"{itr}"
+            assert pitr.end_timestamp >= pitr.start_timestamp, f"{itr}"
+        else:
+            assert phase == 1 or phase == 2, f"{itr}"
 
     # in the transpose test which generates the input file,
     # two threads and the main thread (so three threads total)
     # each perform one H2D + one D2H memory copy
     assert async_dir_cnt[0] == 0
     assert async_dir_cnt[1] == 0
-    assert async_dir_cnt[2] == 6
-    assert async_dir_cnt[3] == 6
+    assert async_dir_cnt[2] == 6 * 3
+    assert async_dir_cnt[3] == 6 * 3
     assert async_dir_cnt[4] == 0
 
 

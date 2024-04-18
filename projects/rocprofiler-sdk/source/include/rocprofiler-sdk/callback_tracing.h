@@ -169,6 +169,22 @@ typedef struct rocprofiler_callback_tracing_kernel_dispatch_data_t
 } rocprofiler_callback_tracing_kernel_dispatch_data_t;
 
 /**
+ * @brief ROCProfiler Memory Copy Callback Tracer Record.
+ *
+ * The timestamps in this record will only be non-zero in the ::ROCPROFILER_CALLBACK_PHASE_EXIT
+ * callback
+ */
+typedef struct
+{
+    uint64_t                size;             ///< size of this struct
+    rocprofiler_timestamp_t start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_agent_id_t  dst_agent_id;     ///< destination agent of copy
+    rocprofiler_agent_id_t  src_agent_id;     ///< source agent of copy
+    uint64_t                bytes;            ///< bytes copied
+} rocprofiler_callback_tracing_memory_copy_data_t;
+
+/**
  * @brief ROCProfiler Scratch Memory Callback Data.
  */
 typedef struct rocprofiler_callback_tracing_scratch_memory_data_t

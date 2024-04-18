@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
+#include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
@@ -79,6 +80,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MARKER_NAME_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(CODE_OBJECT)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_DISPATCH)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_COPY)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -218,6 +220,12 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         {
             val = rocprofiler::kernel_dispatch::name_by_id(operation);
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+        {
+            val = rocprofiler::hsa::async_copy::name_by_id(operation);
+            break;
         }
     };
 
@@ -321,6 +329,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         {
             ops = rocprofiler::kernel_dispatch::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+        {
+            ops = rocprofiler::hsa::async_copy::get_ids();
             break;
         }
     };
@@ -451,6 +464,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

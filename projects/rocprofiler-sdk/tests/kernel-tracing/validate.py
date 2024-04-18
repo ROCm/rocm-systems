@@ -265,7 +265,7 @@ def test_kernel_dispatch_ids(input_data):
     num_dispatches = len(sdk_data["buffer_records"]["kernel_dispatches"])
     num_cb_dispatches = len(sdk_data["callback_records"]["kernel_dispatches"])
 
-    assert num_cb_dispatches == (2 * num_dispatches)
+    assert num_cb_dispatches == (3 * num_dispatches)
 
     bf_seq_ids = []
     for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
@@ -278,7 +278,7 @@ def test_kernel_dispatch_ids(input_data):
     bf_seq_ids = sorted(bf_seq_ids)
     cb_seq_ids = sorted(cb_seq_ids)
 
-    assert (2 * len(bf_seq_ids)) == len(cb_seq_ids)
+    assert (3 * len(bf_seq_ids)) == len(cb_seq_ids)
 
     assert bf_seq_ids[0] == cb_seq_ids[0]
     assert bf_seq_ids[-1] == cb_seq_ids[-1]
@@ -290,7 +290,7 @@ def test_kernel_dispatch_ids(input_data):
     cb_seq_ids_uniq = get_uniq(cb_seq_ids)
 
     assert bf_seq_ids == bf_seq_ids_uniq
-    assert len(cb_seq_ids) == (2 * len(cb_seq_ids_uniq))
+    assert len(cb_seq_ids) == (3 * len(cb_seq_ids_uniq))
     assert len(bf_seq_ids) == num_dispatches
     assert len(bf_seq_ids_uniq) == num_dispatches
     assert len(cb_seq_ids_uniq) == num_dispatches
