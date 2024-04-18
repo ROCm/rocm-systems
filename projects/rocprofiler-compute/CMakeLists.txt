@@ -329,6 +329,21 @@ add_custom_target(
         "src/omniperf,cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/omniperf_analyze/convertor/mongodb/convert"
     )
 
+option(INSTALL_TESTS "Build test suite" OFF)
+if(INSTALL_TESTS)
+    set(TESTS_COMPONENT "tests")
+    install(
+        DIRECTORY tests
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        FILES_MATCHING
+        PATTERN "*.py"
+        PATTERN "__pycache__" EXCLUDE)
+
+    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
+            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+endif()
+message(STATUS "Install tests: ${INSTALL_TESTS}")
+
 # ----------
 # Packaging
 # ----------
