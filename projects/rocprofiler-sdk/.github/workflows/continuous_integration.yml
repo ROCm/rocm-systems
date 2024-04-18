@@ -29,7 +29,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi3', 'vega20']
+        runner: ['navi3', 'vega20', 'mi200', 'mi300']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -373,7 +373,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20']
+        runner: ['mi200']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
