@@ -40,18 +40,18 @@ namespace
 {
 #define ROCPROFILER_KERNEL_DISPATCH_INFO(CODE)                                                     \
     template <>                                                                                    \
-    struct kernel_dispatch_info<ROCPROFILER_KERNEL_DISPATCH_##CODE>                                \
+    struct kernel_dispatch_info<ROCPROFILER_##CODE>                                                \
     {                                                                                              \
-        static constexpr auto operation_idx = ROCPROFILER_KERNEL_DISPATCH_##CODE;                  \
+        static constexpr auto operation_idx = ROCPROFILER_##CODE;                                  \
         static constexpr auto name          = #CODE;                                               \
     };
 
 template <size_t Idx>
 struct kernel_dispatch_info;
 
-ROCPROFILER_KERNEL_DISPATCH_INFO(NONE)
-ROCPROFILER_KERNEL_DISPATCH_INFO(ENQUEUE)
-ROCPROFILER_KERNEL_DISPATCH_INFO(COMPLETE)
+ROCPROFILER_KERNEL_DISPATCH_INFO(KERNEL_DISPATCH_NONE)
+ROCPROFILER_KERNEL_DISPATCH_INFO(KERNEL_DISPATCH_ENQUEUE)
+ROCPROFILER_KERNEL_DISPATCH_INFO(KERNEL_DISPATCH_COMPLETE)
 
 template <size_t Idx, size_t... IdxTail>
 const char*
