@@ -21,36 +21,36 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
   PATH: "/usr/bin:$PATH"
-  EXCLUDED_TESTS: ".*pc_sampling.*"
+  PC_SAMPLING_TESTS_REGEX: ".*pc_sampling.*"
 
 jobs:
   core:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        runner: [rocprofiler-runner-set-multi-gpus]
-        os: [ubuntu-22.04]
-        build-type: [RelWithDebInfo]
+        runner: ['navi3', 'vega20']
+        os: ['ubuntu-22.04']
+        build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
-        name-tag: ['']
 
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}-runner-set
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      CORE_EXT_RUNNER: navi3
 
     steps:
     - uses: actions/checkout@v4
 
     - name: Install requirements
+      timeout-minutes: 10
       shell: bash
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y cmake clang-tidy-15 g++-11 g++-12 python3-pip libdw-dev
-        update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-15 10
+        apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
         update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
         python3 -m pip install -r requirements.txt
@@ -58,16 +58,24 @@ jobs:
     - name: List Files
       shell: bash
       run: |
+        echo "PATH: ${PATH}"
+        echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest; do which-realpath $i; done
         ls -la
+
+    - name: Exclude PC Sampling Tests
+      if: ${{ !contains(matrix.runner, 'mi200') && !contains(matrix.runner, 'mi300') }}
+      shell: bash
+      run: |
+          echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}${{ matrix.name-tag }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-core
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_TARGETS }}
@@ -82,19 +90,22 @@ jobs:
           -DCPACK_PACKAGING_INSTALL_PREFIX="$(realpath /opt/rocm)"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE "${EXCLUDED_TESTS}"
 
     - name: Install
+      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       run:
         cmake --build build --target install --parallel 16
 
     - name: Build Packaging
+      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       run:
         cmake --build build --target package --parallel 16
 
     - name: Test Install Build
+      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 10
       shell: bash
       run: |
@@ -103,10 +114,11 @@ jobs:
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
-        ctest --test-dir build-tests -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
+        ctest --test-dir build-samples -LE "${EXCLUDED_TESTS}" --output-on-failure
+        ctest --test-dir build-tests -LE "${EXCLUDED_TESTS}" --output-on-failure
 
     - name: Install Packages
+      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 5
       shell: bash
       run: |
@@ -116,6 +128,7 @@ jobs:
         for i in $(ls -S ./build/rocprofiler-sdk*.deb); do dpkg -i ${i}; done;
 
     - name: Test Installed Packages
+      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       timeout-minutes: 20
       shell: bash
       run: |
@@ -123,10 +136,11 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
-        ctest --test-dir build-tests-deb -LE ${{ env.EXCLUDED_TESTS }} --output-on-failure
+        ctest --test-dir build-samples-deb -LE "${EXCLUDED_TESTS}" --output-on-failure
+        ctest --test-dir build-tests-deb -LE "${EXCLUDED_TESTS}" --output-on-failure
 
     - name: Archive production artifacts
+      if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
       uses: actions/upload-artifact@v4
       with:
         name: installers
@@ -137,15 +151,14 @@ jobs:
 
   code-coverage:
     strategy:
-      fail-fast: true
+      fail-fast: false
       matrix:
-        include:
-            - os: 'ubuntu-22.04'
-              runner: 'rocprofiler-cluster-runner-set'
-              build-type: 'Release'
+        runner: ['navi3']
+        os: ['ubuntu-22.04']
+        build-type: ['Release']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}-runner-set
 
     # define this for containers
     env:
@@ -184,11 +197,12 @@ jobs:
         echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/lib:${HOME}/.local/lib" >> $GITHUB_ENV
 
     - name: Install requirements
+      timeout-minutes: 10
       shell: bash
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev
+        apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev
         python3 -m pip install -r requirements.txt
 
     - name: List Files
@@ -200,12 +214,18 @@ jobs:
         for i in python3 git cmake ctest; do which-realpath $i; done
         ls -la
 
+    - name: Exclude PC Sampling Tests
+      if: ${{ !contains(matrix.runner, 'mi200') && !contains(matrix.runner, 'mi300') }}
+      shell: bash
+      run: |
+          echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
+
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-codecov
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_TARGETS }}
@@ -215,7 +235,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE "${EXCLUDED_TESTS}"
 
     - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
@@ -223,7 +243,7 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-codecov-tests
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-tests
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_TARGETS }}
@@ -233,7 +253,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE "${EXCLUDED_TESTS}"
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
@@ -241,7 +261,7 @@ jobs:
       run:
         find build -type f | egrep '\.gcda$' | xargs rm &&
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-codecov-samples
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-codecov-samples
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_TARGETS }}
@@ -251,7 +271,7 @@ jobs:
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE "${EXCLUDED_TESTS}"
 
     - name: Save XML Code Coverage
       id: save-coverage
@@ -328,15 +348,15 @@ jobs:
         #   - unittests
         #   - integration-tests
         #
-        ctest -N -LE 'samples|tests|${{ env.EXCLUDED_TESTS }}' -O ctest.mislabeled.log
+        ctest -N -LE 'samples|tests' -O ctest.mislabeled.log
         grep 'Total Tests: 0' ctest.mislabeled.log
         #
         # if following fails, then there is overlap between the labels.
         # A test cannot both be a sample and (unit/integration) test.
         #
-        ctest -LE ${{ env.EXCLUDED_TESTS }} -N -O ctest.all.log
-        ctest -LE ${{ env.EXCLUDED_TESTS }} -N -O ctest.samples.log -L samples
-        ctest -LE ${{ env.EXCLUDED_TESTS }} -N -O ctest.tests.log -L tests
+        ctest -N -O ctest.all.log
+        ctest -N -O ctest.samples.log -L samples
+        ctest -N -O ctest.tests.log -L tests
         NUM_ALL=$(grep 'Total Tests:' ctest.all.log | awk '{print $NF}')
         NUM_SAMPLE=$(grep 'Total Tests:' ctest.samples.log | awk '{print $NF}')
         NUM_TEST=$(grep 'Total Tests:' ctest.tests.log | awk '{print $NF}')
@@ -353,51 +373,55 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ['ubuntu-22.04']
-        runner: ['rocprofiler-cluster-runner-set']
-        build-type: ['RelWithDebInfo']
+        runner: ['vega20']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer']
+        os: ['ubuntu-22.04']
+        build-type: ['RelWithDebInfo']
         ci-flags: ['']
 
     if: ${{ contains(github.event_name, 'pull_request') }}
-    runs-on: ${{ matrix.runner }}
+    runs-on: ${{ matrix.runner }}-runner-set
 
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GCC_COMPILER_VERSION: 13
 
     steps:
     - uses: actions/checkout@v4
 
     - name: Install requirements
+      timeout-minutes: 10
       shell: bash
       run: |
         git config --global --add safe.directory '*'
         apt-get update
-        apt-get install -y cmake python3-pip libasan8 libtsan2 software-properties-common
-        python3 -m pip install -r requirements.txt
+        apt-get install -y build-essential cmake python3-pip libasan8 libtsan2 software-properties-common
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
-        apt-get install -y g++-13 libdw-dev
-        update-alternatives --install $(which gcc) gcc $(which gcc-13) 100 --slave $(which g++) g++ $(which g++-13)
-        realpath $(which gcc)
-        realpath $(which g++)
-        gcc --version
-        g++ --version
+        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} libdw-dev
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }}
+        python3 -m pip install -r requirements.txt
 
     - name: List Files
       shell: bash
       run: |
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python3 git cmake ctest; do which-realpath $i; done
+        for i in python3 git cmake ctest gcc g++; do which-realpath $i; done
         ls -la
+
+    - name: Exclude PC Sampling Tests
+      if: ${{ !contains(matrix.runner, 'mi200') && !contains(matrix.runner, 'mi300') }}
+      shell: bash
+      run: |
+          echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 45
       shell: bash
       run:
         python3 ./source/scripts/run-ci.py -B build
-          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.sanitizer }}
+          --name ${{ github.repository }}-${{ github.ref_name }}-${{ matrix.os }}-${{ matrix.runner }}-${{ matrix.sanitizer }}
           --build-jobs 16
           --site $(echo $RUNNER_HOSTNAME)-$(/opt/rocm/bin/rocm_agent_enumerator | sed -n '2 p')
           --gpu-targets ${{ env.GPU_TARGETS }}
@@ -409,4 +433,4 @@ jobs:
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"
           -DPython3_EXECUTABLE=$(which python3)
           --
-          -LE ${{ env.EXCLUDED_TESTS }}
+          -LE "${EXCLUDED_TESTS}"
