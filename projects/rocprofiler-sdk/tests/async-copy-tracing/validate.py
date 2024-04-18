@@ -82,8 +82,8 @@ def test_timestamps(input_data):
     cb_end = {}
     for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
-            cid = itr["record"]["correlation_id"]["internal"]
-            phase = itr["record"]["phase"]
+            cid = itr["correlation_id"]["internal"]
+            phase = itr["phase"]
             if phase == 1:
                 cb_start[cid] = itr["timestamp"]
             elif phase == 2:
@@ -126,7 +126,7 @@ def test_internal_correlation_ids(input_data):
     api_corr_ids = []
     for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
-            api_corr_ids.append(itr["record"]["correlation_id"]["internal"])
+            api_corr_ids.append(itr["correlation_id"]["internal"])
 
         for itr in sdk_data["buffer_records"][titr]:
             api_corr_ids.append(itr["correlation_id"]["internal"])
@@ -152,11 +152,9 @@ def test_external_correlation_ids(input_data):
     extern_corr_ids = []
     for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
-            assert itr["record"]["correlation_id"]["external"] > 0
-            assert (
-                itr["record"]["thread_id"] == itr["record"]["correlation_id"]["external"]
-            )
-            extern_corr_ids.append(itr["record"]["correlation_id"]["external"])
+            assert itr["correlation_id"]["external"] > 0
+            assert itr["thread_id"] == itr["correlation_id"]["external"]
+            extern_corr_ids.append(itr["correlation_id"]["external"])
 
     extern_corr_ids = list(set(sorted(extern_corr_ids)))
     for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
@@ -180,7 +178,7 @@ def test_kernel_ids(input_data):
 
     symbol_info = {}
     for itr in sdk_data["callback_records"]["kernel_symbols"]:
-        phase = itr["record"]["phase"]
+        phase = itr["phase"]
         payload = itr["payload"]
         kern_id = payload["kernel_id"]
 

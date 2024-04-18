@@ -431,7 +431,7 @@ struct code_object_callback_record_t
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("record", record));
+        cereal::save(ar, record);
         ar(cereal::make_nvp("payload", payload));
     }
 };
@@ -446,7 +446,7 @@ struct kernel_symbol_callback_record_t
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("record", record));
+        cereal::save(ar, record);
         ar(cereal::make_nvp("payload", payload));
     }
 };
@@ -462,7 +462,7 @@ struct hsa_api_callback_record_t
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("record", record));
+        cereal::save(ar, record);
         ar(cereal::make_nvp("payload", payload));
         serialize_args(ar, args);
     }
@@ -479,7 +479,7 @@ struct hip_api_callback_record_t
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("record", record));
+        cereal::save(ar, record);
         ar(cereal::make_nvp("payload", payload));
         serialize_args(ar, args);
     }
@@ -496,7 +496,7 @@ struct marker_api_callback_record_t
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("record", record));
+        cereal::save(ar, record);
         ar(cereal::make_nvp("payload", payload));
         serialize_args(ar, args);
     }
@@ -512,7 +512,7 @@ struct kernel_dispatch_callback_record_t
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("record", record));
+        cereal::save(ar, record);
         ar(cereal::make_nvp("payload", payload));
     }
 };
@@ -527,7 +527,7 @@ struct scratch_memory_callback_record_t
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("timestamp", timestamp));
-        ar(cereal::make_nvp("record", record));
+        cereal::save(ar, record);
         ar(cereal::make_nvp("payload", payload));
 
         if constexpr(std::is_same<ArchiveT, cereal::BinaryOutputArchive>::value ||

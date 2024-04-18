@@ -61,8 +61,8 @@ def test_timestamps(input_data):
     cb_end = {}
     for titr in ["hsa_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
-            cid = itr["record"]["correlation_id"]["internal"]
-            phase = itr["record"]["phase"]
+            cid = itr["correlation_id"]["internal"]
+            phase = itr["phase"]
             if phase == 1:
                 cb_start[cid] = itr["timestamp"]
             elif phase == 2:
@@ -106,7 +106,7 @@ def test_internal_correlation_ids(input_data):
     api_corr_ids = []
     for titr in ["hsa_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
-            api_corr_ids.append(itr["record"]["correlation_id"]["internal"])
+            api_corr_ids.append(itr["correlation_id"]["internal"])
 
         for itr in sdk_data["buffer_records"][titr]:
             api_corr_ids.append(itr["correlation_id"]["internal"])
@@ -132,11 +132,9 @@ def test_external_correlation_ids(input_data):
     extern_corr_ids = []
     for titr in ["hsa_api_traces", "hip_api_traces"]:
         for itr in sdk_data["callback_records"][titr]:
-            assert itr["record"]["correlation_id"]["external"] > 0
-            assert (
-                itr["record"]["thread_id"] == itr["record"]["correlation_id"]["external"]
-            )
-            extern_corr_ids.append(itr["record"]["correlation_id"]["external"])
+            assert itr["correlation_id"]["external"] > 0
+            assert itr["thread_id"] == itr["correlation_id"]["external"]
+            extern_corr_ids.append(itr["correlation_id"]["external"])
 
     extern_corr_ids = list(set(sorted(extern_corr_ids)))
     for titr in ["hsa_api_traces", "hip_api_traces"]:
@@ -224,8 +222,8 @@ def test_scratch_memory_tracking(input_data):
 
     # fetch node["payload"]
     pl = lambda x: x["payload"]
-    # fetch node["record"]
-    rc = lambda x: x["record"]
+    # fetch node
+    rc = lambda x: x
 
     for node in scratch_callback_data:
         cb_threads[rc(node)["thread_id"]].append(node)
@@ -256,8 +254,7 @@ def test_scratch_memory_tracking(input_data):
 
             # alloc has more data vs free and async reclaim
             scratch_alloc_node = (
-                this_node["record"]["operation"]
-                == scratch_cb_op_map["SCRATCH_MEMORY_ALLOC"]
+                this_node["operation"] == scratch_cb_op_map["SCRATCH_MEMORY_ALLOC"]
             )
             if scratch_alloc_node:
                 assert (
