@@ -442,26 +442,40 @@ def mibench(args, mspec):
         "22.04": "ubuntu22_04",
     }
 
+    binary_paths = []
+
     target_binary = detect_roofline(mspec)
     if target_binary["rocm_ver"] == "override":
-        path_to_binary = target_binary["path"]
+        binary_paths.append(target_binary["path"])
     else:
-        path_to_binary = (
-            str(config.omniperf_home)
-            + "/utils/rooflines/roofline"
-            + "-"
-            + distro_map[target_binary["distro"]]
-            + "-"
-            + mspec.gpu_model.lower()
-            + "-rocm"
-            + target_binary["rocm_ver"]
-        )
+        # check two potential locations for roofline binaries due to differences in
+        # development usage vs formal install
+        potential_paths = [
+            "%s/utils/rooflines/roofline" % config.omniperf_home,
+            "%s/bin/roofline" % config.omniperf_home.parent.parent,
+        ]
+
+        for dir in potential_paths:
+            path_to_binary = (
+                dir
+                + "-"
+                + distro_map[target_binary["distro"]]
+                + "-"
+                + mspec.gpu_model.lower()
+                + "-rocm"
+                + target_binary["rocm_ver"]
+            )
+            binary_paths.append(path_to_binary)
 
     # Distro is valid but cant find rocm ver
-    if not os.path.exists(path_to_binary):
-        console_error(
-            "roofline", "Unable to locate expected binary (%s)." % path_to_binary
-        )
+    found = False
+    for path in binary_paths:
+        if os.path.exists(path):
+            found = True
+            break
+
+    if not found:
+        console_error("roofline", "Unable to locate expected binary (%s)." % binary_paths)
 
     subprocess.run(
         [
