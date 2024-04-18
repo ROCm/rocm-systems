@@ -77,7 +77,7 @@ launchKernels()
     }
 
     const int NElems = 512 * 512;
-    const int Nbytes = NElems * 2;
+    const int Nbytes = NElems * sizeof(int);
     int *     A_d, *C_d;
     int       A_h[NElems], C_h[NElems];
 
