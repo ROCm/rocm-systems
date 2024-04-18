@@ -39,7 +39,7 @@
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
 
-#include <hsa/hsa_api_trace.h>
+#include <hip/amd_detail/hip_api_trace.hpp>
 
 #include <cassert>
 #include <chrono>
@@ -78,6 +78,7 @@ using wrap_count_t = std::pair<source_location, size_t>;
 
 rocprofiler_client_id_t* client_id        = nullptr;
 auto*                    client_wrap_data = new std::map<size_t, wrap_count_t>{};
+size_t                   func_width       = 0;
 
 void
 print_call_stack(const call_stack_t& _call_stack)
@@ -107,13 +108,14 @@ print_call_stack(const call_stack_t& _call_stack)
 
     std::cout << "Outputting collected data to " << ofname << "...\n" << std::flush;
 
-    size_t n = 0;
+    const size_t _func_width = std::min<size_t>(func_width, 60);
+    size_t       n           = 0;
     *ofs << std::left;
     for(const auto& itr : _call_stack)
     {
         *ofs << std::left << std::setw(2) << ++n << "/" << std::setw(2) << _call_stack.size()
              << " [" << common::fs::path{itr.file}.filename() << ":" << itr.line << "] "
-             << std::setw(41) << itr.function;
+             << std::setw(_func_width) << itr.function;
         if(!itr.context.empty()) *ofs << " :: " << itr.context;
         *ofs << "\n";
     }
@@ -134,7 +136,7 @@ tool_fini(void* tool_data)
     for(const auto& itr : *client_wrap_data)
     {
         auto src_loc = itr.second.first;
-        src_loc.context += "call_count=" + std::to_string(itr.second.second);
+        src_loc.context += "call_count = " + std::to_string(itr.second.second);
         _call_stack->emplace_back(std::move(src_loc));
         wrapped_count += itr.second.second;
     }
@@ -148,7 +150,7 @@ tool_fini(void* tool_data)
 
     if(wrapped_count == 0)
     {
-        throw std::runtime_error{"intercept_table sample did not wrap HSA API table"};
+        throw std::runtime_error{"intercept_table sample did not wrap HIP runtime API table"};
     }
 }
 
@@ -159,12 +161,16 @@ template <size_t Idx, typename RetT, typename... Args>
 RetT
 get_wrapper_function(Args... args)
 {
-    if(client_wrap_data->at(Idx).second == 0)
-        std::clog << "First invocation of wrapped function: '"
-                  << client_wrap_data->at(Idx).first.function << "'...\n"
-                  << std::flush;
+    if(client_wrap_data)
+    {
+        if(client_wrap_data->at(Idx).second == 0)
+            std::clog << "First invocation of wrapped function: '"
+                      << client_wrap_data->at(Idx).first.function << "'...\n"
+                      << std::flush;
 
-    client_wrap_data->at(Idx).second += 1;
+        client_wrap_data->at(Idx).second += 1;
+    }
+
     if(underlying_function<Idx, RetT, Args...>)
         return underlying_function<Idx, RetT, Args...>(args...);
     if constexpr(!std::is_void<RetT>::value) return RetT{};
@@ -172,16 +178,17 @@ get_wrapper_function(Args... args)
 
 template <size_t Idx, typename RetT, typename... Args>
 auto
-generate_wrapper(const char* name, RetT (*func)(Args...))
+generate_wrapper(const char* name, uint32_t line, RetT (*func)(Args...))
 {
-    client_wrap_data->emplace(Idx, wrap_count_t{source_location{name, __FILE__, __LINE__, ""}, 0});
+    func_width = std::max(func_width, std::string_view{name}.length());
+    client_wrap_data->emplace(Idx, wrap_count_t{source_location{name, __FILE__, line, ""}, 0});
 
     underlying_function<Idx, RetT, Args...> = func;
     return &get_wrapper_function<Idx, RetT, Args...>;
 }
 
 #define GENERATE_WRAPPER(TABLE, FUNC)                                                              \
-    TABLE->FUNC##_fn = generate_wrapper<__COUNTER__>(#FUNC, TABLE->FUNC##_fn)
+    TABLE->FUNC##_fn = generate_wrapper<__COUNTER__>(#FUNC, __LINE__, TABLE->FUNC##_fn)
 
 void
 api_registration_callback(rocprofiler_intercept_table_t type,
@@ -191,11 +198,12 @@ api_registration_callback(rocprofiler_intercept_table_t type,
                           uint64_t                      num_tables,
                           void*                         user_data)
 {
-    if(type != ROCPROFILER_HSA_TABLE)
+    if(type != ROCPROFILER_HIP_RUNTIME_TABLE)
         throw std::runtime_error{"unexpected library type: " +
                                  std::to_string(static_cast<int>(type))};
-    if(lib_instance != 0) throw std::runtime_error{"multiple instances of HSA runtime library"};
-    if(num_tables != 1) throw std::runtime_error{"expected only one table of type HsaApiTable"};
+    if(lib_instance != 0) throw std::runtime_error{"multiple instances of HIP runtime library"};
+    if(num_tables != 1)
+        throw std::runtime_error{"expected only one table of type HipDispatchTable"};
 
     auto* call_stack = static_cast<std::vector<client::source_location>*>(user_data);
 
@@ -204,36 +212,42 @@ api_registration_callback(rocprofiler_intercept_table_t type,
     uint32_t patch = lib_version % 100;
 
     auto info = std::stringstream{};
-    info << client_id->name << " is using HSA runtime v" << major << "." << minor << "." << patch;
+    info << client_id->name << " is using HIP runtime v" << major << "." << minor << "." << patch;
 
     std::clog << info.str() << "\n" << std::flush;
 
     call_stack->emplace_back(client::source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
 
-    auto* hsa_api_table = static_cast<HsaApiTable*>(tables[0]);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_agent_get_info);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_agent_iterate_isas);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_code_object_reader_create_from_memory);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_executable_create_alt);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_executable_freeze);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_executable_get_symbol_by_name);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_executable_iterate_symbols);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_executable_load_agent_code_object);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_executable_symbol_get_info);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_isa_get_info_alt);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_iterate_agents);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_queue_add_write_index_screlease);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_queue_create);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_queue_load_read_index_relaxed);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_queue_load_read_index_scacquire);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_signal_create);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_signal_destroy);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_signal_load_relaxed);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_signal_silent_store_relaxed);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_signal_store_screlease);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_signal_wait_scacquire);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_system_get_info);
-    GENERATE_WRAPPER(hsa_api_table->core_, hsa_system_get_major_extension_table);
+    auto* hip_api_table = static_cast<HipDispatchTable*>(tables[0]);
+
+    // common API functions
+    GENERATE_WRAPPER(hip_api_table, hipGetDeviceCount);
+    GENERATE_WRAPPER(hip_api_table, hipSetDevice);
+    GENERATE_WRAPPER(hip_api_table, hipStreamCreate);
+    GENERATE_WRAPPER(hip_api_table, hipStreamDestroy);
+    GENERATE_WRAPPER(hip_api_table, hipStreamSynchronize);
+    GENERATE_WRAPPER(hip_api_table, hipDeviceSynchronize);
+    GENERATE_WRAPPER(hip_api_table, hipDeviceReset);
+    GENERATE_WRAPPER(hip_api_table, hipGetErrorString);
+    // kernel launch
+    GENERATE_WRAPPER(hip_api_table, hipExtLaunchKernel);
+    GENERATE_WRAPPER(hip_api_table, hipExtLaunchMultiKernelMultiDevice);
+    GENERATE_WRAPPER(hip_api_table, hipGraphLaunch);
+    GENERATE_WRAPPER(hip_api_table, hipLaunchByPtr);
+    GENERATE_WRAPPER(hip_api_table, hipLaunchCooperativeKernel);
+    GENERATE_WRAPPER(hip_api_table, hipLaunchCooperativeKernelMultiDevice);
+    GENERATE_WRAPPER(hip_api_table, hipLaunchHostFunc);
+    GENERATE_WRAPPER(hip_api_table, hipLaunchKernel);
+    GENERATE_WRAPPER(hip_api_table, hipModuleLaunchCooperativeKernel);
+    GENERATE_WRAPPER(hip_api_table, hipModuleLaunchCooperativeKernelMultiDevice);
+    GENERATE_WRAPPER(hip_api_table, hipModuleLaunchKernel);
+    GENERATE_WRAPPER(hip_api_table, hipExtModuleLaunchKernel);
+    GENERATE_WRAPPER(hip_api_table, hipHccModuleLaunchKernel);
+    // memcpy + memset
+    GENERATE_WRAPPER(hip_api_table, hipMemcpy);
+    GENERATE_WRAPPER(hip_api_table, hipMemcpyAsync);
+    GENERATE_WRAPPER(hip_api_table, hipMemset);
+    GENERATE_WRAPPER(hip_api_table, hipMemsetAsync);
 }
 }  // namespace
 
@@ -295,7 +309,7 @@ rocprofiler_configure(uint32_t                 version,
 
     ROCPROFILER_CALL(
         rocprofiler_at_intercept_table_registration(client::api_registration_callback,
-                                                    ROCPROFILER_HSA_TABLE,
+                                                    ROCPROFILER_HIP_RUNTIME_TABLE,
                                                     static_cast<void*>(client_tool_data)),
         "runtime api registration");
 
