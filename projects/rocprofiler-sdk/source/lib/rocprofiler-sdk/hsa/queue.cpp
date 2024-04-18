@@ -200,6 +200,12 @@ WriteInterceptor(const void* packets,
                  void*                                 data,
                  hsa_amd_queue_intercept_packet_writer writer)
 {
+    if(registration::get_fini_status() > 0)
+    {
+        writer(packets, pkt_count);
+        return;
+    }
+
     using callback_record_t = Queue::queue_info_session_t::callback_record_t;
 
     // unique sequence id for the dispatch
