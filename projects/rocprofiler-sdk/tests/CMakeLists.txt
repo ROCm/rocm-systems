@@ -10,6 +10,8 @@ endif()
 project(rocprofiler-tests LANGUAGES C CXX)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tests")
+set(ROCPROFILER_SDK_TESTS_SOURCE_DIR "${PROJECT_SOURCE_DIR}")
+set(ROCPROFILER_SDK_TESTS_BINARY_DIR "${PROJECT_BINARY_DIR}")
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE
@@ -33,6 +35,9 @@ set(CMAKE_INSTALL_LIBDIR "lib")
 
 # needed for validation
 find_package(Python3 REQUIRED)
+
+# configure python module <BINARY_DIR>/rocprofiler_sdk/pytest_utils
+add_subdirectory(pytest-packages)
 
 # common utilities
 add_subdirectory(common)

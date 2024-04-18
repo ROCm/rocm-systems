@@ -40,10 +40,8 @@ set_tests_properties(
                WORKING_DIRECTORY
                ${CMAKE_CURRENT_BINARY_DIR})
 
-foreach(FILENAME validate.py pytest.ini conftest.py)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
-endforeach()
+# copy to binary directory
+rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
 
 add_test(NAME test-page-migration-validate
          COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input

@@ -10,10 +10,9 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-foreach(FILENAME validate.py conftest.py pytest.ini input.txt)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
-endforeach()
+# copy to binary directory
+rocprofiler_configure_pytest_files(COPY validate.py conftest.py input.txt
+                                   CONFIG pytest.ini)
 
 # pmc3
 add_test(

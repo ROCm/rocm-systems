@@ -3,6 +3,7 @@
 #
 
 include(FetchContent)
+include(CMakeParseArguments)
 
 set(FETCHCONTENT_BASE_DIR ${PROJECT_BINARY_DIR}/external)
 
@@ -131,3 +132,21 @@ if(EXISTS ${EXTERNAL_SUBMODULE_DIR}/filesystem/include/ghc/filesystem.hpp)
         rocprofiler-tests-common-library SYSTEM
         INTERFACE $<BUILD_INTERFACE:${EXTERNAL_SUBMODULE_DIR}/filesystem/include>)
 endif()
+
+function(rocprofiler_configure_pytest_files)
+    cmake_parse_arguments(RCPF "" "OUTPUT_DIRECTORY" "COPY;CONFIG" ${ARGN})
+
+    if(NOT RCPF_OUTPUT_DIRECTORY)
+        set(RCPF_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+    endif()
+
+    foreach(FILENAME ${RCPF_COPY})
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
+                       ${RCPF_OUTPUT_DIRECTORY}/${FILENAME} COPYONLY)
+    endforeach()
+
+    foreach(FILENAME ${RCPF_CONFIG})
+        configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
+                       ${RCPF_OUTPUT_DIRECTORY}/${FILENAME} @ONLY)
+    endforeach()
+endfunction()

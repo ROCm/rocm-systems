@@ -240,6 +240,11 @@ parse:
         PERFETTO_METRIC: '*'
         TIMEMORY_FILE: '*'
         TIMEMORY_METRIC: '*'
+    rocprofiler_configure_pytest_files:
+      kwargs:
+        COPY: '*'
+        CONFIG: '*'
+        OUTPUT_DIRECTORY: '*'
   override_spec: {}
   vartags: []
   proptags: []
