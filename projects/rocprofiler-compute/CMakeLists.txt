@@ -126,7 +126,7 @@ endif()
 # ----------------------
 
 set(MOD_INSTALL_PATH
-    "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles"
+    "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles"
     CACHE STRING "Install path for modulefile")
 message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
 
@@ -134,30 +134,15 @@ set(moduleFileTemplate "omniperf.lua.in")
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
-    @ONLY)
-
-# Crusher mods
-if(LOCALHOST MATCHES ".*\.crusher\.olcf\.ornl\.gov")
-    list(APPEND CMAKE_MESSAGE_INDENT "  ")
-    message(STATUS "Using crusher-specific modulefile modification")
-    file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.crusher.mod mod_additions)
-    file(
-        APPEND
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
-        ${mod_additions})
-    list(POP_BACK CMAKE_MESSAGE_INDENT)
-endif()
+    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua @ONLY)
 
 # Thera mods
 if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
     message(STATUS "Using thera-specific modulefile modification")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
-    file(
-        APPEND
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
-        ${mod_additions})
+    file(APPEND ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua
+         ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
 
@@ -321,10 +306,8 @@ install(
     PATTERN "*.cpp"
     PATTERN "workloads" EXCLUDE)
 # modulefile
-install(
-    FILES
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}/${OMNIPERF_FULL_VERSION}.lua
-    DESTINATION ${MOD_INSTALL_PATH}/${PROJECT_NAME})
+install(FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua
+        DESTINATION ${MOD_INSTALL_PATH})
 
 # top-level symlink for bin/omniperf
 install(
