@@ -38,7 +38,7 @@ struct PCSamplingData
     : samples(size){};
     PCSamplingData& operator=(PCSamplingData&) = delete;
 
-    std::vector<pcsample_v1_t> samples;
+    std::vector<rocprofiler_pc_sampling_record_s> samples;
 };
 
 class PCSamplingParserContext
@@ -52,7 +52,7 @@ public:
      * @param[in] size Number of samples requested.
      * @returns Number of samples actually allocated on *buffer.
      */
-    uint64_t alloc(pcsample_v1_t** buffer, uint64_t size);
+    uint64_t alloc(rocprofiler_pc_sampling_record_s** buffer, uint64_t size);
 
     /**
      * @brief Parses a chunk of samples.
@@ -112,8 +112,8 @@ protected:
 
         while(pkt_counter > 0)
         {
-            pcsample_v1_t* samples = nullptr;
-            uint64_t       memsize = alloc(&samples, pkt_counter);
+            rocprofiler_pc_sampling_record_s* samples = nullptr;
+            uint64_t                          memsize = alloc(&samples, pkt_counter);
 
             if(memsize == 0 || memsize > pkt_counter) return PCSAMPLE_STATUS_CALLBACK_ERROR;
 
@@ -137,7 +137,8 @@ protected:
      */
     pcsample_status_t flushForgetList();
     static void       generate_id_completion_record(const dispatch_pkt_id_t& pkt) { (void) pkt; };
-    static void       generate_upcoming_pc_record(const pcsample_v1_t* samples, size_t num_samples)
+    static void       generate_upcoming_pc_record(const rocprofiler_pc_sampling_record_s* samples,
+                                                  size_t                                  num_samples)
     {
         (void) samples;
         (void) num_samples;

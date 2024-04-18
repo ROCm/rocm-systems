@@ -23,6 +23,7 @@
 #pragma once
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/pc_sampling.h>
 
 /**
  * ######## Parser Definitions ########
@@ -80,68 +81,13 @@ enum pcsample_arb_issue_state
 };
 };  // namespace PCSAMPLE
 
-typedef union
+union pcsample_header_v1_t
 {
-    struct
-    {
-        uint8_t valid : 1;
-        uint8_t type  : 4;  // 0=reserved, 1=hosttrap, 2=stochastic, 3=perfcounter, >=4 possible v2?
-        uint8_t has_stall_reason : 1;
-        uint8_t has_wave_cnt     : 1;
-        uint8_t reserved         : 1;
-    };
-    uint8_t raw;
-} pcsample_header_v1_t;
+    rocprofiler_pc_sampling_header_v1_t flags;
+    uint8_t                             raw;
+};
 
-typedef struct
-{
-    uint32_t dual_issue_valu : 1;
-    uint32_t inst_type       : 4;
-
-    uint32_t reason_not_issued : 7;
-    uint32_t arb_state_issue   : 10;
-    uint32_t arb_state_stall   : 10;
-} pcsample_snapshot_v1_t;
-
-typedef union
-{
-    struct
-    {
-        uint32_t load_cnt   : 6;
-        uint32_t store_cnt  : 6;
-        uint32_t bvh_cnt    : 3;
-        uint32_t sample_cnt : 6;
-        uint32_t ds_cnt     : 6;
-        uint32_t km_cnt     : 5;
-    };
-    uint32_t raw;
-} pcsample_memorycounters_v1_t;
-
-typedef struct
-{
-    pcsample_header_v1_t flags;
-    uint8_t              chiplet;
-    uint8_t              wave_id;
-    uint8_t              wave_issued : 1;
-    uint8_t              reserved    : 7;
-    uint32_t             hw_id;
-
-    uint64_t pc;
-    uint64_t exec_mask;
-    uint32_t workgroup_id_x;
-    uint32_t workgroup_id_y;
-    uint32_t workgroup_id_z;
-
-    uint32_t                     wave_count;
-    uint64_t                     timestamp;
-    rocprofiler_correlation_id_t correlation_id;
-
-    pcsample_snapshot_v1_t snapshot;
-
-    pcsample_memorycounters_v1_t memory_counters;
-} pcsample_v1_t;
-
-typedef uint64_t (*user_callback_t)(pcsample_v1_t**, uint64_t, void*);
+typedef uint64_t (*user_callback_t)(rocprofiler_pc_sampling_record_s**, uint64_t, void*);
 
 /**
  * The types of errors to be returned by parse_buffer.

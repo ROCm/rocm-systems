@@ -33,13 +33,15 @@ std::mt19937 rdgen(1);
 /**
  * Sample user memory allocation callback.
  * It expects userdata to be cast-able to a pointer to
- * std::vector<std::pair<pcsample_v1_t*, uint64_t>>
+ * std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>>
  */
 static uint64_t
-alloc_callback(pcsample_v1_t** buffer, uint64_t size, void* userdata)
+alloc_callback(rocprofiler_pc_sampling_record_s** buffer, uint64_t size, void* userdata)
 {
-    *buffer      = new pcsample_v1_t[size];
-    auto& vector = *reinterpret_cast<std::vector<std::pair<pcsample_v1_t*, uint64_t>>*>(userdata);
+    *buffer = new rocprofiler_pc_sampling_record_s[size];
+    auto& vector =
+        *reinterpret_cast<std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>>*>(
+            userdata);
     vector.push_back({*buffer, size});
     return size;
 }
@@ -49,7 +51,7 @@ alloc_callback(pcsample_v1_t** buffer, uint64_t size, void* userdata)
  * the reconstructed correlation_id.
  */
 static bool
-check_samples(pcsample_v1_t* samples, uint64_t size)
+check_samples(rocprofiler_pc_sampling_record_s* samples, uint64_t size)
 {
     for(size_t i = 0; i < size; i++)
         if(samples[i].correlation_id.internal != samples[i].pc) return false;
@@ -69,7 +71,7 @@ TEST(pcs_parser, hello_world)
     MockWave(dispatch).genPCSample();
     MockWave(dispatch).genPCSample();
 
-    std::vector<std::pair<pcsample_v1_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
@@ -112,7 +114,7 @@ TEST(pcs_parser, reverse_wave_order)
     for(auto it = dispatches.begin(); it != dispatches.end(); it++)
         MockWave(*it).genPCSample();
 
-    std::vector<std::pair<pcsample_v1_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
@@ -148,7 +150,7 @@ TEST(pcs_parser, dispatch_wrapping)
         MockWave(dispatch).genPCSample();
     }
 
-    std::vector<std::pair<pcsample_v1_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
@@ -195,7 +197,7 @@ TEST(pcs_parser, random_samples)
     for(int i = 0; i < num_samples; i++)
         MockWave(dispatches[rdgen() % dispatches.size()]).genPCSample();
 
-    std::vector<std::pair<pcsample_v1_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
@@ -288,7 +290,7 @@ TEST(pcs_parser, queue_hammer)
               << std::endl;
     std::cout << "Max queue occupancy: " << max_q_occupancy << "\n\n" << std::endl;
 
-    std::vector<std::pair<pcsample_v1_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
@@ -300,8 +302,8 @@ TEST(pcs_parser, queue_hammer)
               NUM_ACTIONS);  // QueueHammer test: Incorrect number of callbacks
     for(auto sb = 0ul; sb < all_allocations.size(); sb++)
     {
-        pcsample_v1_t* samples     = all_allocations[sb].first;
-        size_t         num_samples = all_allocations[sb].second;
+        rocprofiler_pc_sampling_record_s* samples     = all_allocations[sb].first;
+        size_t                            num_samples = all_allocations[sb].second;
 
         EXPECT_EQ(num_samples, NUM_QUEUES);  // QueueHammer: Incorrect number of samples
         EXPECT_EQ(check_samples(samples, num_samples),
@@ -327,7 +329,7 @@ TEST(pcs_parser, multi_buffer)
     const auto&                        packets      = firstBuffer->packets;
     secondBuffer->packets = std::vector<packet_union_t>(packets.begin() + 2, packets.end());
 
-    std::vector<std::pair<pcsample_v1_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<rocprofiler_pc_sampling_record_s*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) firstBuffer->packets.data(),
                               firstBuffer->packets.size(),

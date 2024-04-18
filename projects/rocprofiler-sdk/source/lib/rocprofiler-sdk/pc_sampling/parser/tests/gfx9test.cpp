@@ -34,11 +34,11 @@
 #define GFXIP_MAJOR 9
 
 #define TYPECHECK(x)                                                                               \
-    snapshots.push_back(pcsample_snapshot_v1_t{.dual_issue_valu   = 0,                             \
-                                               .inst_type         = ::PCSAMPLE::x,                 \
-                                               .reason_not_issued = 0,                             \
-                                               .arb_state_issue   = 0,                             \
-                                               .arb_state_stall   = 0});
+    snapshots.push_back(rocprofiler_pc_sampling_snapshot_v1_t{.dual_issue_valu   = 0,              \
+                                                              .inst_type         = ::PCSAMPLE::x,  \
+                                                              .reason_not_issued = 0,              \
+                                                              .arb_state_issue   = 0,              \
+                                                              .arb_state_stall   = 0});
 #define UNROLL_TYPECHECK()                                                                         \
     TYPECHECK(TYPE_VALU);                                                                          \
     TYPECHECK(TYPE_MATRIX);                                                                        \
@@ -56,11 +56,11 @@
     TYPECHECK(TYPE_NO_INST);
 
 #define REASONCHECK(x)                                                                             \
-    snapshots.push_back(pcsample_snapshot_v1_t{.dual_issue_valu   = 0,                             \
-                                               .inst_type         = 0,                             \
-                                               .reason_not_issued = ::PCSAMPLE::x,                 \
-                                               .arb_state_issue   = 0,                             \
-                                               .arb_state_stall   = 0});
+    snapshots.push_back(rocprofiler_pc_sampling_snapshot_v1_t{.dual_issue_valu   = 0,              \
+                                                              .inst_type         = 0,              \
+                                                              .reason_not_issued = ::PCSAMPLE::x,  \
+                                                              .arb_state_issue   = 0,              \
+                                                              .arb_state_stall   = 0});
 #define UNROLL_REASONCHECK(x)                                                                      \
     REASONCHECK(REASON_NOT_AVAILABLE);                                                             \
     REASONCHECK(REASON_ALU);                                                                       \
@@ -72,11 +72,12 @@
     REASONCHECK(REASON_OTHER_WAIT);
 
 #define ARBCHECK1(x, y)                                                                            \
-    snapshots.push_back(pcsample_snapshot_v1_t{.dual_issue_valu   = 0,                             \
-                                               .inst_type         = 0,                             \
-                                               .reason_not_issued = 0,                             \
-                                               .arb_state_issue   = 1 << ::PCSAMPLE::x,            \
-                                               .arb_state_stall   = 1 << ::PCSAMPLE::y});
+    snapshots.push_back(                                                                           \
+        rocprofiler_pc_sampling_snapshot_v1_t{.dual_issue_valu   = 0,                              \
+                                              .inst_type         = 0,                              \
+                                              .reason_not_issued = 0,                              \
+                                              .arb_state_issue   = 1 << ::PCSAMPLE::x,             \
+                                              .arb_state_stall   = 1 << ::PCSAMPLE::y});
 #define ARBCHECK2(x)                                                                               \
     ARBCHECK1(x, ISSUE_VALU);                                                                      \
     ARBCHECK1(x, ISSUE_MATRIX);                                                                    \
@@ -163,8 +164,8 @@ public:
             assert(parsed[0][i].wave_count == i);
     }
 
-    const size_t                        max_wave_number = 64;
-    std::vector<pcsample_snapshot_v1_t> snapshots;
+    const size_t                                       max_wave_number = 64;
+    std::vector<rocprofiler_pc_sampling_snapshot_v1_t> snapshots;
 };
 
 class InstTypeTest : public WaveSnapTest
@@ -190,7 +191,7 @@ public:
             assert(snapshots[i].inst_type == parsed[0][i].snapshot.inst_type);
     }
 
-    std::vector<pcsample_snapshot_v1_t> snapshots;
+    std::vector<rocprofiler_pc_sampling_snapshot_v1_t> snapshots;
 };
 
 class StallReasonTest : public WaveSnapTest
@@ -216,7 +217,7 @@ public:
             assert(snapshots[i].reason_not_issued == parsed[0][i].snapshot.reason_not_issued);
     }
 
-    std::vector<pcsample_snapshot_v1_t> snapshots;
+    std::vector<rocprofiler_pc_sampling_snapshot_v1_t> snapshots;
 };
 
 class ArbStateTest : public WaveSnapTest
@@ -247,7 +248,7 @@ public:
         }
     }
 
-    std::vector<pcsample_snapshot_v1_t> snapshots;
+    std::vector<rocprofiler_pc_sampling_snapshot_v1_t> snapshots;
 };
 
 class WaveIssueAndErrorTest : public WaveSnapTest
@@ -294,7 +295,7 @@ class WaveIssueAndErrorTest : public WaveSnapTest
 
     void genPCSample(bool valid, bool issued, bool dual, bool error)
     {
-        pcsample_v1_t sample;
+        rocprofiler_pc_sampling_record_s sample;
         ::memset(&sample, 0, sizeof(sample));
         sample.pc                      = dispatch->unique_id;
         sample.correlation_id.internal = dispatch->getMockId().raw;
@@ -319,7 +320,7 @@ class WaveIssueAndErrorTest : public WaveSnapTest
         dispatch->submit(std::move(pss));
     };
 
-    std::vector<pcsample_v1_t> compare;
+    std::vector<rocprofiler_pc_sampling_record_s> compare;
 };
 
 class WaveOtherFieldsTest : public WaveSnapTest
@@ -359,7 +360,7 @@ class WaveOtherFieldsTest : public WaveSnapTest
 
     void genPCSample(int pc, int exec, int blkx, int blky, int blkz, int chip, int wave, int hwid)
     {
-        pcsample_v1_t sample;
+        rocprofiler_pc_sampling_record_s sample;
         ::memset(&sample, 0, sizeof(sample));
 
         sample.exec_mask      = exec;
@@ -391,7 +392,7 @@ class WaveOtherFieldsTest : public WaveSnapTest
         (void) pc;
     };
 
-    std::vector<pcsample_v1_t> compare;
+    std::vector<rocprofiler_pc_sampling_record_s> compare;
 };
 
 TEST(pcs_parser, gfx9_test)

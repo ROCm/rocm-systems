@@ -181,11 +181,11 @@ private:
 
 template <bool bHostTrap, typename GFXIP>
 inline pcsample_status_t
-add_upcoming_samples(const device_handle     device,
-                     const generic_sample_t* buffer,
-                     const size_t            available_samples,
-                     Parser::CorrelationMap* corr_map,
-                     pcsample_v1_t*          samples)
+add_upcoming_samples(const device_handle               device,
+                     const generic_sample_t*           buffer,
+                     const size_t                      available_samples,
+                     Parser::CorrelationMap*           corr_map,
+                     rocprofiler_pc_sampling_record_s* samples)
 {
     pcsample_status_t status = PCSAMPLE_STATUS_SUCCESS;
     for(uint64_t p = 0; p < available_samples; p++)
@@ -241,8 +241,8 @@ _parse_buffer(generic_sample_t*       buffer,
 
                 while(pkt_counter > 0)
                 {
-                    pcsample_v1_t* samples           = nullptr;
-                    uint64_t       available_samples = callback(&samples, pkt_counter, userdata);
+                    rocprofiler_pc_sampling_record_s* samples = nullptr;
+                    uint64_t available_samples = callback(&samples, pkt_counter, userdata);
 
                     if(available_samples == 0 || available_samples > pkt_counter)
                         return PCSAMPLE_STATUS_CALLBACK_ERROR;

@@ -56,22 +56,23 @@ Benchmark(bool bWarmup)
             for(size_t i = 0; i < SAMPLE_PER_DISPATCH; i++)
                 MockWave(dispatch).genPCSample();
 
-    std::pair<pcsample_v1_t*, size_t> userdata;
-    userdata.first  = new pcsample_v1_t[TOTAL_NUM_SAMPLES];
+    std::pair<rocprofiler_pc_sampling_record_s*, size_t> userdata;
+    userdata.first  = new rocprofiler_pc_sampling_record_s[TOTAL_NUM_SAMPLES];
     userdata.second = TOTAL_NUM_SAMPLES;
 
     auto t0 = std::chrono::system_clock::now();
-    CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
-                              buffer->packets.size(),
-                              GFXIP_MAJOR,
-                              [](pcsample_v1_t** sample, uint64_t size, void* userdata_) {
-                                  auto* pair = reinterpret_cast<std::pair<pcsample_v1_t*, size_t>*>(
-                                      userdata_);
-                                  assert(TOTAL_NUM_SAMPLES == pair->second);
-                                  *sample = pair->first;
-                                  return size;
-                              },
-                              &userdata));
+    CHECK_PARSER(parse_buffer(
+        (generic_sample_t*) buffer->packets.data(),
+        buffer->packets.size(),
+        GFXIP_MAJOR,
+        [](rocprofiler_pc_sampling_record_s** sample, uint64_t size, void* userdata_) {
+            auto* pair =
+                reinterpret_cast<std::pair<rocprofiler_pc_sampling_record_s*, size_t>*>(userdata_);
+            assert(TOTAL_NUM_SAMPLES == pair->second);
+            *sample = pair->first;
+            return size;
+        },
+        &userdata));
     auto  t1             = std::chrono::system_clock::now();
     float samples_per_us = float(TOTAL_NUM_SAMPLES) / (t1 - t0).count() * 1E3f;
 
@@ -79,7 +80,8 @@ Benchmark(bool bWarmup)
     {
         std::cout << "Benchmark: Parsed " << int(samples_per_us * 1E3f + 0.5f) * 1E-3f
                   << " Msample/s (";
-        std::cout << int(sizeof(pcsample_v1_t) * samples_per_us) << " MB/s)" << std::endl;
+        std::cout << int(sizeof(rocprofiler_pc_sampling_record_s) * samples_per_us) << " MB/s)"
+                  << std::endl;
     }
 
     delete[] userdata.first;

@@ -32,11 +32,11 @@
 #include "lib/rocprofiler-sdk/pc_sampling/parser/rocr.h"
 
 template <typename SType>
-inline pcsample_v1_t
+inline rocprofiler_pc_sampling_record_s
 copySampleHeader(const SType& sample)
 {
-    pcsample_v1_t ret;
-    ret.flags.raw  = 0;
+    rocprofiler_pc_sampling_record_s ret;
+    ret.flags      = pcsample_header_v1_t{.raw = 0}.flags;
     ret.flags.type = AMD_SNAPSHOT_V1;
 
     ret.pc             = sample.pc;
@@ -52,24 +52,24 @@ copySampleHeader(const SType& sample)
     return ret;
 }
 
-inline pcsample_v1_t
+inline rocprofiler_pc_sampling_record_s
 copyHostTrapSample(const perf_sample_host_trap_v1& sample)
 {
-    pcsample_v1_t ret = copySampleHeader<perf_sample_host_trap_v1>(sample);
-    ret.flags.type    = AMD_HOST_TRAP_V1;
+    rocprofiler_pc_sampling_record_s ret = copySampleHeader<perf_sample_host_trap_v1>(sample);
+    ret.flags.type                       = AMD_HOST_TRAP_V1;
     return ret;
 }
 
 template <typename gfx>
-inline pcsample_v1_t
+inline rocprofiler_pc_sampling_record_s
 copyStochasticSample(const perf_sample_snapshot_v1& sample);
 
 template <>
-inline pcsample_v1_t
+inline rocprofiler_pc_sampling_record_s
 copyStochasticSample<GFX9>(const perf_sample_snapshot_v1& sample)
 {
-    pcsample_v1_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
-    ret.flags.valid   = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 26) & 0x1;
+    rocprofiler_pc_sampling_record_s ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
+    ret.flags.valid = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 26) & 0x1;
     // Check wave_id matches snapshot_wave_id
 
     ret.flags.has_wave_cnt     = true;
@@ -83,16 +83,16 @@ copyStochasticSample<GFX9>(const perf_sample_snapshot_v1& sample)
     ret.snapshot.reason_not_issued = (sample.perf_snapshot_data >> 7) & 0x7;
     ret.snapshot.arb_state_issue   = (sample.perf_snapshot_data >> 10) & 0xFF;
     ret.snapshot.arb_state_stall   = (sample.perf_snapshot_data >> 18) & 0xFF;
-    ret.memory_counters.raw        = 0;
+    ret.reserved                   = 0;
     return ret;
 }
 
 template <>
-inline pcsample_v1_t
+inline rocprofiler_pc_sampling_record_s
 copyStochasticSample<GFX11>(const perf_sample_snapshot_v1& sample)
 {
-    pcsample_v1_t ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
-    ret.flags.valid   = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 23) & 0x1;
+    rocprofiler_pc_sampling_record_s ret = copySampleHeader<perf_sample_snapshot_v1>(sample);
+    ret.flags.valid = sample.perf_snapshot_data & (~sample.perf_snapshot_data >> 23) & 0x1;
     // Check wave_id matches snapshot_wave_id
 
     ret.flags.has_stall_reason = true;
@@ -103,7 +103,7 @@ copyStochasticSample<GFX11>(const perf_sample_snapshot_v1& sample)
     ret.snapshot.arb_state_issue   = (sample.perf_snapshot_data >> 9) & 0x7F;
     ret.snapshot.arb_state_stall   = (sample.perf_snapshot_data >> 16) & 0x7F;
     ret.snapshot.dual_issue_valu   = false;
-    ret.memory_counters.raw        = 0;
+    ret.reserved                   = 0;
     return ret;
 }
 
@@ -195,12 +195,13 @@ translate_inst(int in)
 #undef LUTOVERLOAD
 
 template <bool HostTrap, typename GFX>
-inline pcsample_v1_t
+inline rocprofiler_pc_sampling_record_s
 copySample(const void* sample)
 {
     if(HostTrap) return copyHostTrapSample(*(const perf_sample_host_trap_v1*) sample);
 
-    pcsample_v1_t ret = copyStochasticSample<GFX>(*(const perf_sample_snapshot_v1*) sample);
+    rocprofiler_pc_sampling_record_s ret =
+        copyStochasticSample<GFX>(*(const perf_sample_snapshot_v1*) sample);
 
     ret.snapshot.inst_type         = translate_inst<GFX>(ret.snapshot.inst_type);
     ret.snapshot.arb_state_issue   = translate_arb<GFX>(ret.snapshot.arb_state_issue);

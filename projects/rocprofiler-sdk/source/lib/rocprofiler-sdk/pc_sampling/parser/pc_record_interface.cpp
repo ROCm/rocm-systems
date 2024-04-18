@@ -23,7 +23,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 
 uint64_t
-PCSamplingParserContext::alloc(pcsample_v1_t** buffer, uint64_t size)
+PCSamplingParserContext::alloc(rocprofiler_pc_sampling_record_s** buffer, uint64_t size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
     assert(buffer != nullptr);
