@@ -901,7 +901,7 @@ struct poll_kfd_t
         active = true;
     }
 
-    inline static auto get_event_id(const std::string_view& strn)
+    static auto get_event_id(const std::string_view& strn)
     {
         uint32_t event_id{std::numeric_limits<uint32_t>::max()};
         std::sscanf(strn.data(), "%x ", &event_id);

@@ -50,12 +50,12 @@ public:
     static_assert(std::is_arithmetic<Tp>::value, "only supports arithmetic types");
 
 public:
-    inline statistics()                      = default;
-    inline ~statistics()                     = default;
-    inline statistics(const statistics&)     = default;
-    inline statistics(statistics&&) noexcept = default;
-    inline statistics& operator=(const statistics&) = default;
-    inline statistics& operator=(statistics&&) noexcept = default;
+    statistics()                      = default;
+    ~statistics()                     = default;
+    statistics(const statistics&)     = default;
+    statistics(statistics&&) noexcept = default;
+    statistics& operator=(const statistics&) = default;
+    statistics& operator=(statistics&&) noexcept = default;
 
     explicit statistics(value_type val)
     : m_cnt(1)
@@ -77,13 +77,13 @@ public:
 
 public:
     // Accumulated values
-    inline int64_t    get_count() const { return m_cnt; }
-    inline value_type get_min() const { return m_min; }
-    inline value_type get_max() const { return m_max; }
-    inline value_type get_sum() const { return m_sum; }
-    inline value_type get_sqr() const { return m_sqr; }
-    inline float_type get_mean() const { return static_cast<float_type>(m_sum) / m_cnt; }
-    inline float_type get_variance() const
+    int64_t    get_count() const { return m_cnt; }
+    value_type get_min() const { return m_min; }
+    value_type get_max() const { return m_max; }
+    value_type get_sum() const { return m_sum; }
+    value_type get_sqr() const { return m_sqr; }
+    float_type get_mean() const { return static_cast<float_type>(m_sum) / m_cnt; }
+    float_type get_variance() const
     {
         if(m_cnt < 2) return (m_sum - m_sum);
 
@@ -92,10 +92,10 @@ public:
         return (_sum_of_squared_samples - _sum_squared_mean) / static_cast<float_type>(m_cnt - 1);
     }
 
-    inline float_type get_stddev() const { return ::std::sqrt(::std::abs(get_variance())); }
+    float_type get_stddev() const { return ::std::sqrt(::std::abs(get_variance())); }
 
     // Modifications
-    inline void reset()
+    void reset()
     {
         m_cnt = 0;
         m_sum = value_type{};
@@ -106,7 +106,7 @@ public:
 
 public:
     // Operators (value_type)
-    inline statistics& operator+=(value_type val)
+    statistics& operator+=(value_type val)
     {
         if(m_cnt == 0)
         {
@@ -127,7 +127,7 @@ public:
         return *this;
     }
 
-    inline statistics& operator-=(value_type val)
+    statistics& operator-=(value_type val)
     {
         if(m_cnt > 1) --m_cnt;
         m_sum -= val;
@@ -137,7 +137,7 @@ public:
         return *this;
     }
 
-    inline statistics& operator*=(value_type val)
+    statistics& operator*=(value_type val)
     {
         m_sum *= val;
         m_sqr *= (val * val);
@@ -146,7 +146,7 @@ public:
         return *this;
     }
 
-    inline statistics& operator/=(value_type val)
+    statistics& operator/=(value_type val)
     {
         m_sum /= val;
         m_sqr /= (val * val);
@@ -157,7 +157,7 @@ public:
 
 public:
     // Operators (this_type)
-    inline statistics& operator+=(const statistics& rhs)
+    statistics& operator+=(const statistics& rhs)
     {
         if(m_cnt == 0)
         {
@@ -178,7 +178,7 @@ public:
     }
 
     // Operators (this_type)
-    inline statistics& operator-=(const statistics& rhs)
+    statistics& operator-=(const statistics& rhs)
     {
         if(m_cnt > 0)
         {

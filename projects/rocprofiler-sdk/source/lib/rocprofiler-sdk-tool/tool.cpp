@@ -698,7 +698,7 @@ write_ring_buffer(Tb* _v, buffer_type_t type)
         ptr = _tmp_buf->request(false);
         CHECK(ptr != nullptr);
     }
-    *ptr = std::move(*reinterpret_cast<Tb*>(_v));
+    *ptr = std::move(*_v);
 }
 
 template <typename Tp>
