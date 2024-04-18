@@ -238,11 +238,6 @@ add_test(
             ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
-# add_test( NAME test_analyze_commands_serial COMMAND pytest -m "serial"
-# --junitxml=tests/test_analyze_commands_serial.xml ${COV_OPTION}
-# ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py WORKING_DIRECTORY
-# ${PROJECT_SOURCE_DIR})
-
 # ---------------------------
 # analyze workloads tests
 # ---------------------------
