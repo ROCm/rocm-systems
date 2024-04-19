@@ -129,7 +129,7 @@ endif()
 # ----------------------
 
 set(MOD_INSTALL_PATH
-    "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles"
+    "${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/modulefiles/${PROJECT_NAME}"
     CACHE STRING "Install path for modulefile")
 message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
 
