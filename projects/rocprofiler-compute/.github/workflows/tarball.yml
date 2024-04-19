@@ -83,12 +83,16 @@ jobs:
           make install
       - name: Verify expected paths
         run: |
-          test -d $INSTALL_DIR/omniperf
-          test -s $INSTALL_DIR/omniperf/VERSION
-          test -s $INSTALL_DIR/omniperf/VERSION.sha
-          test -d $INSTALL_DIR/omniperf/bin
-          test -x $INSTALL_DIR/omniperf/bin/omniperf
-          test -d $INSTALL_DIR/modulefiles/omniperf
+          test -d $INSTALL_DIR
+          test -x $INSTALL_DIR/bin/omniperf
+          test -s $INSTALL_DIR/libexec/omniperf/VERSION
+          test -s $INSTALL_DIR/libexec/omniperf/VERSION.sha
+          test -d $INSTALL_DIR/libexec/omniperf/omniperf_analyze
+          test -d $INSTALL_DIR/libexec/omniperf/omniperf_profile
+          test -d $INSTALL_DIR/libexec/omniperf/omniperf_soc
+          test -d $INSTALL_DIR/libexec/omniperf/utils
+          test -s $INSTALL_DIR/share/omniperf/sample/vcopy.cpp
+          test -d $INSTALL_DIR/share/omniperf/modulefiles
       - name: Query version (setting PYTHONPATH by hand)
         run: |
           export PYTHONPATH=${INSTALL_DIR}/python-libs:$PYTHONPATH
@@ -98,7 +102,7 @@ jobs:
       - name: Access omniperf using modulefile
         run: |
           . /etc/profile.d/lmod.sh 
-          module use $INSTALL_DIR/modulefiles
+          module use $INSTALL_DIR/share/omniperf/modulefiles
           module load omniperf
           module list
           omniperf --version
