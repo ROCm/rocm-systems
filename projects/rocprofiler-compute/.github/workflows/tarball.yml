@@ -74,8 +74,7 @@ jobs:
           mkdir build
           cd build
           cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/omniperf \
-            -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
-            -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles ..
+            -DPYTHON_DEPS=${INSTALL_DIR}/python-libs ..
       - name: Install
         run:  |
           cd omniperf-*
@@ -93,7 +92,7 @@ jobs:
           test -d $INSTALL_DIR/omniperf/libexec/omniperf/omniperf_soc
           test -d $INSTALL_DIR/omniperf/libexec/omniperf/utils
           test -s $INSTALL_DIR/omniperf/share/omniperf/sample/vcopy.cpp
-          ## test -d $INSTALL_DIR/omniperf/share/omniperf/modulefiles
+          test -d $INSTALL_DIR/omniperf/share/omniperf/modulefiles
       - name: Query version (setting PYTHONPATH by hand)
         run: |
           export PYTHONPATH=${INSTALL_DIR}/python-libs:$PYTHONPATH
