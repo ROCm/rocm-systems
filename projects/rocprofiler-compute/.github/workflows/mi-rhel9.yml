@@ -114,6 +114,6 @@ jobs:
         with:
           coverage-files: tests/coverage.info
           minimum-coverage: 35
-          artifact-name: code-coverage-report
+          artifact-name: code-coverage-report-rocm${{ matrix.version }}-${{ matrix.hardware }}-${{ matrix.profiler }}
           github-token: ${{ secrets.GITHUB_TOKEN }}
           update-comment: true
