@@ -406,4 +406,17 @@ if(INSTALL_TESTS)
     set(CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_PACKAGE_NAME})
 endif()
 
+# Source tarball
+set(CPACK_SOURCE_GENERATOR "TGZ")
+set(CPACK_SOURCE_PACKAGE_FILE_NAME ${CMAKE_PROJECT_NAME}-${FULL_VERSION_STRING})
+set(CPACK_SOURCE_IGNORE_FILES
+    ".*~$"
+    \.git/
+    \.github
+    \.gitmodules
+    \.gitignore
+    /tests
+    /build)
+include(CPack)
+
 include(CPack)
