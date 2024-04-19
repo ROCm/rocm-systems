@@ -265,47 +265,68 @@ add_test(
 # ---------
 
 # top-level omniperf utility
-install(PROGRAMS src/omniperf DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+install(
+    PROGRAMS src/omniperf
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main)
+# python dependency requirements
+install(
+    FILES requirements.txt
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main)
 # support files and version info
-install(FILES src/argparser.py src/config.py src/omniperf_base.py src/roofline.py VERSION
-              VERSION.sha DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+install(
+    FILES src/argparser.py src/config.py src/omniperf_base.py src/roofline.py VERSION
+          VERSION.sha
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main)
 # src/omniperf_analyze
 install(
     DIRECTORY src/omniperf_analyze
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
     PATTERN src/omniperf_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils
 install(
     DIRECTORY src/utils
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
     PATTERN "rooflines*" EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils/rooflines
 file(GLOB rooflinebins src/utils/rooflines/roofline-*)
-install(PROGRAMS ${rooflinebins} DESTINATION ${CMAKE_INSTALL_BINDIR})
+install(
+    PROGRAMS ${rooflinebins}
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT main)
 # src/omniperf_soc
 install(
     DIRECTORY src/omniperf_soc
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
     PATTERN "__pycache__" EXCLUDE)
 # src/omniperf_profile
 install(
     DIRECTORY src/omniperf_profile
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
     PATTERN "__pycache__" EXCLUDE)
 # samples
 install(
     DIRECTORY sample
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+    COMPONENT main
     FILES_MATCHING
     PATTERN "*.hip"
     PATTERN "*.h"
     PATTERN "*.cpp"
     PATTERN "workloads" EXCLUDE)
 # modulefile
-install(FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua
-        DESTINATION ${MOD_INSTALL_PATH})
+install(
+    FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua
+    DESTINATION ${MOD_INSTALL_PATH}
+    COMPONENT main)
 
 # top-level symlink for bin/omniperf
 install(
@@ -313,7 +334,8 @@ install(
     COMMAND bash -c \"set -e
     cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
     ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/omniperf ${CMAKE_INSTALL_BINDIR}/omniperf
-    \")")
+    \")"
+    COMPONENT main)
 
 # License header update(s)
 add_custom_target(
@@ -327,18 +349,24 @@ add_custom_target(
         "src/omniperf,cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/omniperf_analyze/convertor/mongodb/convert"
     )
 
+# TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)
-    set(TESTS_COMPONENT "tests")
     install(
         DIRECTORY tests
         DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests
         FILES_MATCHING
         PATTERN "*.py"
         PATTERN "__pycache__" EXCLUDE)
-
-    install(FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
-            DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
+    install(
+        FILES requirements-test.txt
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+        COMPONENT tests)
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/CTestTestfile.cmake
+        COMPONENT tests
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME})
 endif()
 message(STATUS "Install tests: ${INSTALL_TESTS}")
 
@@ -348,7 +376,9 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 
 message(STATUS "Packaging config...")
 set(CPACK_GENERATOR "DEB" "RPM")
-set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+set(CPACK_PACKAGE_NAME
+    "${PROJECT_NAME}"
+    CACHE STRING "")
 set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/omniperf")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Omniperf: tool for GPU performance profiling")
 set(CPACK_RPM_PACKAGE_DESCRIPTION "Omniperf is a performance analysis tool for profiling
@@ -358,7 +388,12 @@ set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
-set(CPACK_RPM_PACKAGE_PROVIDES "${PROJECT_NAME}")
+set(CPACK_RPM_PACKAGE_PROVIDES "${CPACK_PACKAGE_NAME}")
+set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_RPM_MAIN_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_TESTS_FILE_NAME "RPM-DEFAULT")
+set(CPACK_DEBIAN_MAIN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
+set(CPACK_RPM_MAIN_PACKAGE_NAME "${CPACK_PACKAGE_NAME}")
 
 # dependencies
 set(PACKAGE_REQUIRES
@@ -366,5 +401,9 @@ set(PACKAGE_REQUIRES
     CACHE STRING "Package dependencies")
 message(STATUS "  package dependencies: ${PACKAGE_REQUIRES}")
 set(CPACK_RPM_PACKAGE_REQUIRES ${PACKAGE_REQUIRES})
+
+if(INSTALL_TESTS)
+    set(CPACK_RPM_TESTS_PACKAGE_REQUIRES ${CPACK_PACKAGE_NAME})
+endif()
 
 include(CPack)
