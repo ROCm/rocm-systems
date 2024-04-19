@@ -64,12 +64,14 @@ main()
         printf("Test kernel A not found.\n");
         abort();
     }
+
     MQDependencyTest::Kernel copyB;
     if(!obj.get_kernel(code_object, "copyB", obj.gpu[0].agent, copyB))
     {
         printf("Test kernel B not found.\n");
         abort();
     }
+
     MQDependencyTest::Kernel copyC;
     if(!obj.get_kernel(code_object, "copyC", obj.gpu[0].agent, copyC))
     {
@@ -79,14 +81,13 @@ main()
 
     struct args_t
     {
-        uint32_t*                       a;
-        uint32_t*                       b;
-        MQDependencyTest::OCLHiddenArgs hidden;
+        uint32_t*                       a      = nullptr;
+        uint32_t*                       b      = nullptr;
+        MQDependencyTest::OCLHiddenArgs hidden = {};
     };
 
-    args_t* args;
-    args = static_cast<args_t*>(obj.hsa_malloc(sizeof(args_t), obj.kernarg));
-    memset(args, 0, sizeof(args_t));
+    args_t* args = static_cast<args_t*>(obj.hsa_malloc(sizeof(args_t), obj.kernarg));
+    *args        = {};
 
     uint32_t* a = static_cast<uint32_t*>(obj.hsa_malloc(64 * sizeof(uint32_t), obj.kernarg));
     uint32_t* b = static_cast<uint32_t*>(obj.hsa_malloc(64 * sizeof(uint32_t), obj.kernarg));
@@ -95,15 +96,21 @@ main()
     memset(b, 1, 64 * sizeof(uint32_t));
 
     // Create queue in gpu agent and prepare a kernel dispatch packet
-    hsa_queue_t* queue1;
-    status = hsa_queue_create(
-        obj.gpu[0].agent, 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue1);
+    hsa_queue_t* queue1 = nullptr;
+    status              = hsa_queue_create(obj.gpu[0].agent,
+                              1024,
+                              HSA_QUEUE_TYPE_SINGLE,
+                              nullptr,
+                              nullptr,
+                              UINT32_MAX,
+                              UINT32_MAX,
+                              &queue1);
     RET_IF_HSA_ERR(status)
 
     // Create a signal with a value of 1 and attach it to the first kernel
     // dispatch packet
-    hsa_signal_t completion_signal_1;
-    status = hsa_signal_create(1, 0, NULL, &completion_signal_1);
+    hsa_signal_t completion_signal_1 = {};
+    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_1);
     RET_IF_HSA_ERR(status)
 
     // First dispath packet on queue 1, Kernel A
@@ -137,12 +144,12 @@ main()
 
     // Create a signal with a value of 1 and attach it to the second kernel
     // dispatch packet
-    hsa_signal_t completion_signal_2;
-    status = hsa_signal_create(1, 0, NULL, &completion_signal_2);
+    hsa_signal_t completion_signal_2 = {};
+    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_2);
     RET_IF_HSA_ERR(status)
 
-    hsa_signal_t completion_signal_3;
-    status = hsa_signal_create(1, 0, NULL, &completion_signal_3);
+    hsa_signal_t completion_signal_3 = {};
+    status                           = hsa_signal_create(1, 0, nullptr, &completion_signal_3);
     RET_IF_HSA_ERR(status)
 
     // Create barrier-AND packet that is enqueued in queue 1
@@ -186,9 +193,15 @@ main()
     }
 
     // Create queue 2
-    hsa_queue_t* queue2;
-    status = hsa_queue_create(
-        obj.gpu[0].agent, 1024, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX, UINT32_MAX, &queue2);
+    hsa_queue_t* queue2 = nullptr;
+    status              = hsa_queue_create(obj.gpu[0].agent,
+                              1024,
+                              HSA_QUEUE_TYPE_SINGLE,
+                              nullptr,
+                              nullptr,
+                              UINT32_MAX,
+                              UINT32_MAX,
+                              &queue2);
     RET_IF_HSA_ERR(status)
 
     // Create barrier-AND packet that is enqueued in queue 2
@@ -277,6 +290,7 @@ main()
 
     status = hsa_memory_free(a);
     RET_IF_HSA_ERR(status)
+
     status = hsa_memory_free(b);
     RET_IF_HSA_ERR(status)
 
@@ -285,5 +299,6 @@ main()
 
     status = hsa_code_object_reader_destroy(code_object.code_obj_rdr);
     RET_IF_HSA_ERR(status)
+
     close(code_object.file);
 }

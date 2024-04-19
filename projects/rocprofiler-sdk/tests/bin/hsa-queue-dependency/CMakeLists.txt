@@ -43,7 +43,7 @@ foreach(target_id ${GPU_TARGETS})
     # generate kernel bitcodes
     generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/copy.cl
                    ${target_id}_copy.hsaco)
-endforeach(target_id)
+endforeach()
 
 add_custom_target(generate_hsaco_targets DEPENDS ${HSACO_TARGET_LIST})
 
@@ -70,8 +70,6 @@ target_link_libraries(multiqueue_testapp PRIVATE amd_comgr)
 find_package(rocprofiler-sdk REQUIRED)
 target_link_libraries(multiqueue_testapp PRIVATE rocprofiler::rocprofiler
                                                  rocprofiler::tests-common-library)
-
-target_compile_definitions(multiqueue_testapp PUBLIC AMD_INTERNAL_BUILD=1)
 
 find_package(
     hsa-runtime64

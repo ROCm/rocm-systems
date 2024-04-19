@@ -88,18 +88,18 @@ public:
 
     struct CodeObject
     {
-        hsa_file_t               file;
-        hsa_code_object_reader_t code_obj_rdr;
-        hsa_executable_t         executable;
+        hsa_file_t               file         = 0;
+        hsa_code_object_reader_t code_obj_rdr = {};
+        hsa_executable_t         executable   = {};
     };
 
     struct Kernel
     {
-        uint64_t handle;
-        uint32_t scratch;
-        uint32_t group;
-        uint32_t kernarg_size;
-        uint32_t kernarg_align;
+        uint64_t handle        = 0;
+        uint32_t scratch       = 0;
+        uint32_t group         = 0;
+        uint32_t kernarg_size  = 0;
+        uint32_t kernarg_align = 0;
     };
 
     union AqlHeader
@@ -112,23 +112,23 @@ public:
             uint16_t release  : 2;
             uint16_t reserved : 3;
         };
-        uint16_t raw;
+        uint16_t raw = 0;
     };
 
     struct BarrierValue
     {
-        AqlHeader          header;
-        uint8_t            AmdFormat;
-        uint8_t            reserved;
-        uint32_t           reserved1;
-        hsa_signal_t       signal;
-        hsa_signal_value_t value;
-        hsa_signal_value_t mask;
-        uint32_t           cond;
-        uint32_t           reserved2;
-        uint64_t           reserved3;
-        uint64_t           reserved4;
-        hsa_signal_t       completion_signal;
+        AqlHeader          header            = {};
+        uint8_t            AmdFormat         = 0;
+        uint8_t            reserved          = 0;
+        uint32_t           reserved1         = 0;
+        hsa_signal_t       signal            = {};
+        hsa_signal_value_t value             = 0;
+        hsa_signal_value_t mask              = 0;
+        uint32_t           cond              = 0;
+        uint32_t           reserved2         = 0;
+        uint64_t           reserved3         = 0;
+        uint64_t           reserved4         = 0;
+        hsa_signal_t       completion_signal = {};
     };
 
     union Aql
@@ -137,21 +137,23 @@ public:
         hsa_kernel_dispatch_packet_t dispatch;
         hsa_barrier_and_packet_t     barrier_and;
         hsa_barrier_or_packet_t      barrier_or;
-        BarrierValue                 barrier_value;
+        BarrierValue                 barrier_value = {};
     };
 
     struct OCLHiddenArgs
     {
-        uint64_t offset_x;
-        uint64_t offset_y;
-        uint64_t offset_z;
-        void*    printf_buffer;
-        void*    enqueue;
-        void*    enqueue2;
-        void*    multi_grid;
+        uint64_t offset_x      = 0;
+        uint64_t offset_y      = 0;
+        uint64_t offset_z      = 0;
+        void*    printf_buffer = nullptr;
+        void*    enqueue       = nullptr;
+        void*    enqueue2      = nullptr;
+        void*    multi_grid    = nullptr;
     };
 
-    bool load_code_object(std::string filename, hsa_agent_t agent, CodeObject& code_object)
+    static bool load_code_object(const std::string& filename,
+                                 hsa_agent_t        agent,
+                                 CodeObject&        code_object)
     {
         hsa_status_t err;
         code_object.file = open(filename.c_str(), O_RDONLY);
@@ -181,10 +183,10 @@ public:
         return true;
     }
 
-    bool get_kernel(const CodeObject& code_object,
-                    std::string       kernel,
-                    hsa_agent_t       agent,
-                    Kernel&           kern)
+    static bool get_kernel(const CodeObject&  code_object,
+                           const std::string& kernel,
+                           hsa_agent_t        agent,
+                           Kernel&            kern)
     {
         hsa_executable_symbol_t symbol;
         hsa_status_t            err = hsa_executable_get_symbol_by_name(
@@ -207,7 +209,7 @@ public:
     }
 
     // Not for parallel insertion.
-    bool submit_packet(hsa_queue_t* queue, Aql& pkt)
+    static bool submit_packet(hsa_queue_t* queue, Aql& pkt)
     {
         size_t mask = queue->size - 1;
         Aql*   ring = static_cast<Aql*>(queue->base_address);
@@ -230,26 +232,26 @@ public:
         return true;
     }
 
-    void* hsa_malloc(size_t size, const Device::Memory& mem)
+    static void* hsa_malloc(size_t size, const Device::Memory& mem)
     {
         void*        ret;
         hsa_status_t err = hsa_amd_memory_pool_allocate(mem.pool, size, 0, &ret);
         RET_IF_HSA_ERR(err);
 
         err = hsa_amd_agents_allow_access(
-            Device::all_devices.size(), &Device::all_devices[0], nullptr, ret);
+            Device::all_devices.size(), Device::all_devices.data(), nullptr, ret);
         RET_IF_HSA_ERR(err);
         return ret;
     }
 
-    void* hsa_malloc(size_t size, const Device& dev, bool fine)
+    static void* hsa_malloc(size_t size, const Device& dev, bool fine)
     {
         uint32_t index = fine ? dev.fine : dev.coarse;
         assert(index != -1u && "Memory type unavailable.");
         return hsa_malloc(size, dev.pools[index]);
     }
 
-    bool device_discovery()
+    static bool device_discovery()
     {
         hsa_status_t err;
 
@@ -273,9 +275,14 @@ public:
                 error = hsa_amd_agent_iterate_memory_pools(
                     agent,
                     [](hsa_amd_memory_pool_t pool, void* data) {
-                        std::vector<Device::Memory>& pools =
-                            *reinterpret_cast<std::vector<Device::Memory>*>(data);
+                        auto&        pools = *reinterpret_cast<std::vector<Device::Memory>*>(data);
                         hsa_status_t status;
+
+                        bool allowed = false;
+                        status       = hsa_amd_memory_pool_get_info(
+                            pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_ALLOWED, &allowed);
+
+                        if(!allowed) return HSA_STATUS_SUCCESS;
 
                         hsa_amd_segment_t segment;
                         status = hsa_amd_memory_pool_get_info(
@@ -290,9 +297,10 @@ public:
                         RET_IF_HSA_ERR(status)
 
                         Device::Memory mem;
-                        mem.pool    = pool;
-                        mem.fine    = (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED);
-                        mem.kernarg = (flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT);
+                        mem.pool = pool;
+                        mem.fine = ((flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED) != 0u);
+                        mem.kernarg =
+                            ((flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) != 0u);
 
                         status = hsa_amd_memory_pool_get_info(
                             pool, HSA_AMD_MEMORY_POOL_INFO_SIZE, &mem.size);

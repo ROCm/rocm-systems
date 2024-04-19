@@ -195,6 +195,8 @@ def generate_dashboard_script(args):
         MEMCHECK = 0
 
     _script = f"""
+        cmake_minimum_required(VERSION 3.21 FATAL_ERROR)
+
         macro(dashboard_submit)
             if("{SUBMIT}" GREATER 0)
                 ctest_submit({ARGN})
@@ -214,7 +216,10 @@ def generate_dashboard_script(args):
         endmacro()
         """
 
+    STAGES = ";".join([itr.upper() for itr in args.stages])
+
     _script += f"""
+        set(STAGES "{STAGES}")
         ctest_start({DASHBOARD_MODE})
         ctest_update(SOURCE "{SOURCE_DIR}" RETURN_VALUE _update_ret
                      CAPTURE_CMAKE_ERROR _update_err)
@@ -227,20 +232,24 @@ def generate_dashboard_script(args):
 
         handle_error("Configure" _configure_ret)
 
-        ctest_build(BUILD "{BINARY_DIR}" RETURN_VALUE _build_ret)
-        dashboard_submit(PARTS Build RETURN_VALUE _submit_ret)
+        if("BUILD" IN_LIST STAGES)
+            ctest_build(BUILD "{BINARY_DIR}" RETURN_VALUE _build_ret)
+            dashboard_submit(PARTS Build RETURN_VALUE _submit_ret)
 
-        handle_error("Build" _build_ret)
-
-        if("{MEMCHECK}" GREATER 0)
-            ctest_memcheck(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
-            dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
-        else()
-            ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
-            dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
+            handle_error("Build" _build_ret)
         endif()
 
-        if("{CODECOV}" GREATER 0)
+        if("TEST" IN_LIST STAGES)
+            if("{MEMCHECK}" GREATER 0)
+                ctest_memcheck(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+                dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
+            else()
+                ctest_test(BUILD "{BINARY_DIR}" RETURN_VALUE _test_ret)
+                dashboard_submit(PARTS Test RETURN_VALUE _submit_ret)
+            endif()
+        endif()
+
+        if("{CODECOV}" GREATER 0 AND "COVERAGE" IN_LIST STAGES)
             ctest_coverage(
                 BUILD "{BINARY_DIR}"
                 RETURN_VALUE _coverage_ret
@@ -493,20 +502,39 @@ if __name__ == "__main__":
         dashboard_args.append(f"{args.mode}{itr}")
 
     try:
+        verbose_options = (
+            "--progress",
+            "-V",
+            "-VV",
+            "--debug",
+            "--output-on-failure",
+            "-Q",
+            "--quiet",
+        )
         if not args.quiet and len(ctest_args) == 0:
             ctest_args = ["--output-on-failure", "-V"]
+        elif not args.quiet:
+            opts_union = [x for x in ctest_args if x in verbose_options]
+            if len(opts_union) == 0:
+                ctest_args += ["--progress", "--output-on-failure", "-V"]
 
         # always fail if no tests exist
         ctest_args += ["--no-tests=error"]
 
-        run(
+        run_args = (
             [CTEST_CMD]
             + dashboard_args
             + [
                 "-S",
                 os.path.join(args.binary_dir, "dashboard.cmake"),
             ]
-            + ctest_args,
+            + ctest_args
+        )
+
+        print("CTest command: {}".format(" ".join(run_args)))
+
+        run(
+            run_args,
             check=True,
         )
     finally:
@@ -522,7 +550,9 @@ if __name__ == "__main__":
             ):
                 if not os.path.isfile(file):
                     continue
-                if "CoverageLog-" in os.path.basename(file):
+                elif "CoverageLog-" in os.path.basename(file):
+                    continue
+                elif "Test.xml" in os.path.basename(file):
                     continue
                 print(f"\n\n###### Reading {file}... ######\n\n")
                 with open(file, "r") as inpf:
