@@ -417,6 +417,5 @@ set(CPACK_SOURCE_IGNORE_FILES
     \.gitignore
     /tests
     /build)
-include(CPack)
 
 include(CPack)
