@@ -102,7 +102,7 @@ jobs:
       - name: Access omniperf using modulefile
         run: |
           . /etc/profile.d/lmod.sh 
-          module use $INSTALL_DIR/share/omniperf/modulefiles
+          module use $INSTALL_DIR/omniperf/share/omniperf/modulefiles
           module load omniperf
           module list
           omniperf --version
