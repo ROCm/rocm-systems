@@ -375,7 +375,9 @@ message(STATUS "Install tests: ${INSTALL_TESTS}")
 # ----------
 
 message(STATUS "Packaging config...")
-set(CPACK_GENERATOR "DEB" "RPM")
+set(CPACK_GENERATOR
+    "DEB" "RPM"
+    CACHE STRING "")
 set(CPACK_PACKAGE_NAME
     "${PROJECT_NAME}"
     CACHE STRING "")
