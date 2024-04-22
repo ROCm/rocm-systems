@@ -40,7 +40,7 @@ class TraceData(ctypes.Structure):
     ]
 
 class TraceDataTranslated:
-    def __init__(self, inst) -> None:
+    def __init__(self, inst):
         self.type = inst.type
         self.num_waves = inst.hitcount
         self.cycles = inst.latency
