@@ -67,7 +67,11 @@ option(BUILD_TESTS "Build test suite" OFF)
 option(BUILD_SHARED_LIBS "Build shared library (.so) or not." ON)
 
 # Enable address sanitizer
-option(ADDRESS_SANITIZER "Enable address sanitizer" OFF)
+set(ADDRESS_SANITIZER_DEFAULT OFF)
+if(DEFINED ENV{ADDRESS_SANITIZER})
+    set(ADDRESS_SANITIZER_DEFAULT $ENV{ADDRESS_SANITIZER})
+endif()
+option(ADDRESS_SANITIZER "Enable address sanitizer" ${ADDRESS_SANITIZER_DEFAULT})
 
 # File reorganization enable/disable
 option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
