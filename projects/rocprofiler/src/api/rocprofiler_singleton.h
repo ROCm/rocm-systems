@@ -112,7 +112,7 @@ class ROCProfiler_Singleton {
   rocprofiler_session_id_t current_session_id_{0};
   std::mutex session_map_lock_;
   std::map<uint64_t, Session*> sessions_;
-  std::atomic<uint64_t> records_counter_{1};
+  std::atomic<uint64_t> records_counter_{0};
   std::mutex device_profiling_session_map_lock_;
   std::map<uint64_t, DeviceProfileSession*> dev_profiling_sessions_;
   std::mutex agent_device_map_mutex_;

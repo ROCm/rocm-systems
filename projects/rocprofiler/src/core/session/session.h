@@ -119,7 +119,7 @@ class Session {
   std::atomic<uint64_t> buffers_counter_{1};
   std::mutex buffers_lock_;
   std::map<uint64_t, Memory::GenericBuffer*>* buffers_ = nullptr;
-  std::atomic<uint64_t> records_counter_{1};
+  std::atomic<uint64_t> records_counter_{0};
 
 
   std::mutex range_labels_lock_;
