@@ -472,6 +472,7 @@ def mibench(args, mspec):
     for path in binary_paths:
         if os.path.exists(path):
             found = True
+            path_to_binary = path
             break
 
     if not found:
