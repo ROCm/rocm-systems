@@ -84,7 +84,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
   build-docs-from-source:
-    runs-on: rocprofiler-cluster-runner-set
+    runs-on: gpuless-runner-set
     steps:
       - name: Checkout
         uses: actions/checkout@v4
