@@ -68,7 +68,7 @@ jobs:
           path: ./docs
 
   deploy-docs:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/amd-mainline'
     runs-on: ubuntu-latest
     needs: build-docs
     permissions:
