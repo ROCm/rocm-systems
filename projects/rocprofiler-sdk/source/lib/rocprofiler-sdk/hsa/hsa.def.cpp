@@ -37,6 +37,12 @@ HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_ImageExt, ::ImageExtTab
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_FinalizeExt, ::FinalizerExtTable, fini_ext)
 HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdTool, ::ToolsApiTable, amd_tool)
 
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+HSA_API_TABLE_LOOKUP_DEFINITION(ROCPROFILER_HSA_TABLE_ID_PcSamplingExt,
+                                ::PcSamplingExtTable,
+                                pc_sampling_ext)
+#endif
+
 namespace rocprofiler
 {
 namespace hsa
@@ -104,6 +110,18 @@ struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_FinalizeExt>
 
 template <>
 struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_AmdTool>
+: hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
+{
+    static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_NONE;
+    static constexpr auto buffered_domain_idx = ROCPROFILER_BUFFER_TRACING_NONE;
+    static constexpr auto none                = 0;
+    static constexpr auto last                = 0;
+    static constexpr auto external_correlation_id_domain_idx =
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_NONE;
+};
+
+template <>
+struct hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_PcSamplingExt>
 : hsa_domain_info<ROCPROFILER_HSA_TABLE_ID_LAST>
 {
     static constexpr auto callback_domain_idx = ROCPROFILER_CALLBACK_TRACING_NONE;

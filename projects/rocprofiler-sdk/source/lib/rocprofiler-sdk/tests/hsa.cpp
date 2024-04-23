@@ -39,6 +39,11 @@ TEST(hsa, tables)
     auto* amd_ext  = hsa::get_amd_ext_table();
     auto* fini_ext = hsa::get_fini_ext_table();
     auto* img_ext  = hsa::get_img_ext_table();
+    auto* amd_tool = hsa::get_amd_tool_table();
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    auto* pcs_ext = hsa::get_pc_sampling_ext_table();
+#endif
 
     // HsaApiTable instance
     auto table = hsa::get_table();
@@ -71,6 +76,18 @@ TEST(hsa, tables)
     EXPECT_EQ(img_ext->version.major_id, HSA_IMAGE_API_TABLE_MAJOR_VERSION);
     EXPECT_EQ(img_ext->version.minor_id, sizeof(hsa::hsa_img_ext_table_t));
     EXPECT_EQ(img_ext->version.step_id, HSA_IMAGE_API_TABLE_STEP_VERSION);
+
+    // make sure the version matches values from HSA header
+    EXPECT_EQ(amd_tool->version.major_id, HSA_TOOLS_API_TABLE_MAJOR_VERSION);
+    EXPECT_EQ(amd_tool->version.minor_id, sizeof(hsa::hsa_amd_tool_table_t));
+    EXPECT_EQ(amd_tool->version.step_id, HSA_TOOLS_API_TABLE_STEP_VERSION);
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    // make sure the version matches values from HSA header
+    EXPECT_EQ(pcs_ext->version.major_id, HSA_PC_SAMPLING_API_TABLE_MAJOR_VERSION);
+    EXPECT_EQ(pcs_ext->version.minor_id, sizeof(hsa::hsa_pc_sampling_ext_table_t));
+    EXPECT_EQ(pcs_ext->version.step_id, HSA_PC_SAMPLING_API_TABLE_STEP_VERSION);
+#endif
 
     //------------------------------------------------------------------------//
     //  checks between instances

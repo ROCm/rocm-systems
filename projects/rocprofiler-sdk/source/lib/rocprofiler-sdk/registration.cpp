@@ -742,6 +742,9 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::copy_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::copy_table(hsa_api_table->finalizer_ext_, lib_instance);
         rocprofiler::hsa::copy_table(hsa_api_table->tools_, lib_instance);
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
+#endif
 
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);

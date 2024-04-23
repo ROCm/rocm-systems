@@ -22,12 +22,35 @@
 
 #pragma once
 
-#include <hsa/hsa_api_trace.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+
+#include <hsa/hsa_api_trace.h>
 
 #include <cstdint>
 #include <string_view>
 #include <vector>
+
+#if defined(HSA_PC_SAMPLING_API_TABLE_MAJOR_VERSION) &&                                            \
+    HSA_PC_SAMPLING_API_TABLE_MAJOR_VERSION > 0x0
+#    define ROCPROFILER_SDK_HSA_PC_SAMPLING 1
+#else
+#    define ROCPROFILER_SDK_HSA_PC_SAMPLING 0
+#endif
+
+// redundant check based on whether the pc sampling API header was found
+#if defined __has_include
+#    if __has_include(<hsa/hsa_ven_amd_pc_sampling.h>)
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING == 0
+#            error                                                                                 \
+                "rocprofiler-sdk disabled the HSA PC sampling table even though the hsa_ven_amd_pc_sampling.h was found"
+#        endif
+#    else
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING == 1
+#            error                                                                                 \
+                "rocprofiler-sdk enabled the HSA PC sampling table even though the hsa_ven_amd_pc_sampling.h was not found"
+#        endif
+#    endif
+#endif
 
 namespace rocprofiler
 {
@@ -46,6 +69,9 @@ using hsa_amd_ext_table_t  = ::AmdExtTable;
 using hsa_fini_ext_table_t = ::FinalizerExtTable;
 using hsa_img_ext_table_t  = ::ImageExtTable;
 using hsa_amd_tool_table_t = ::ToolsApiTable;
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+using hsa_pc_sampling_ext_table_t = ::PcSamplingExtTable;
+#endif
 
 hsa_api_table_t&
 get_table();
@@ -68,6 +94,11 @@ get_img_ext_table();
 hsa_amd_tool_table_t*
 get_amd_tool_table();
 
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+hsa_pc_sampling_ext_table_t*
+get_pc_sampling_ext_table();
+#endif
+
 hsa_core_table_t*
 get_tracing_core_table();
 
@@ -82,6 +113,11 @@ get_tracing_img_ext_table();
 
 hsa_amd_tool_table_t*
 get_tracing_amd_tool_table();
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+hsa_pc_sampling_ext_table_t*
+get_tracing_pc_sampling_ext_table();
+#endif
 
 template <size_t Idx>
 struct hsa_table_lookup;

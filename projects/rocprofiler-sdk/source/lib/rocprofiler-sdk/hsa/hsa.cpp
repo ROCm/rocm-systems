@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
+#include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/hsa/types.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
@@ -108,6 +109,10 @@ DEFINE_TABLE_VERSION(fini_ext, FINALIZER_API)
 DEFINE_TABLE_VERSION(img_ext, IMAGE_API)
 DEFINE_TABLE_VERSION(amd_tool, TOOLS_API)
 
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+DEFINE_TABLE_VERSION(pc_sampling_ext, PC_SAMPLING_API)
+#endif
+
 #undef DEFINE_TABLE_VERSION
 #undef DEFINE_TABLE_VERSION_IMPL
 
@@ -163,6 +168,17 @@ get_tracing_amd_tool_table()  // table is never traced
     return val;
 }
 
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+hsa_pc_sampling_ext_table_t*
+get_tracing_pc_sampling_ext_table()  // table is never traced
+{
+    static auto*& val = GET_TABLE_IMPL(pc_sampling_ext, tracing_table);
+    return val;
+}
+
+#endif
+
 hsa_table_version_t
 get_table_version()
 {
@@ -204,17 +220,38 @@ get_amd_tool_table()
     return val;
 }
 
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+hsa_pc_sampling_ext_table_t*
+get_pc_sampling_ext_table()
+{
+    static auto*& val = GET_TABLE_IMPL(pc_sampling_ext, internal_table);
+    return val;
+}
+
+#endif
+
 #undef GET_TABLE_IMPL
 
 hsa_api_table_t&
 get_table()
 {
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    static auto tbl = hsa_api_table_t{.version          = hsa_api_table_version,
+                                      .core_            = get_core_table(),
+                                      .amd_ext_         = get_amd_ext_table(),
+                                      .finalizer_ext_   = get_fini_ext_table(),
+                                      .image_ext_       = get_img_ext_table(),
+                                      .tools_           = get_amd_tool_table(),
+                                      .pc_sampling_ext_ = get_pc_sampling_ext_table()};
+#else
     static auto tbl = hsa_api_table_t{.version        = hsa_api_table_version,
                                       .core_          = get_core_table(),
                                       .amd_ext_       = get_amd_ext_table(),
                                       .finalizer_ext_ = get_fini_ext_table(),
                                       .image_ext_     = get_img_ext_table(),
                                       .tools_         = get_amd_tool_table()};
+#endif
     return tbl;
 }
 
@@ -725,6 +762,16 @@ update_table<hsa_amd_tool_table_t>(hsa_amd_tool_table_t* _tbl, uint64_t _instv)
     scratch_memory::update_table(_tbl, _instv);
 }
 
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+template <>
+void
+copy_table<hsa_pc_sampling_ext_table_t>(hsa_pc_sampling_ext_table_t* _tbl, uint64_t _instv)
+{
+    pc_sampling::copy_table(_tbl, _instv);
+}
+
+#endif
 #undef INSTANTIATE_HSA_TABLE_FUNC
 }  // namespace hsa
 }  // namespace rocprofiler

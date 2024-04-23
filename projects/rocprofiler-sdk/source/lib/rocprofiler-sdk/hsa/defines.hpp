@@ -39,6 +39,11 @@
         using this_type     = hsa_api_meta<table_idx, operation_idx>;                              \
         using function_type = hsa_api_func<decltype(::HSA_FUNC)*>::function_type;                  \
                                                                                                    \
+        static constexpr auto offset()                                                             \
+        {                                                                                          \
+            return offsetof(hsa_table_lookup<table_idx>::type, HSA_FUNC_PTR);                      \
+        }                                                                                          \
+                                                                                                   \
         template <typename TableT>                                                                 \
         static auto& get_table(TableT& _v)                                                         \
         {                                                                                          \

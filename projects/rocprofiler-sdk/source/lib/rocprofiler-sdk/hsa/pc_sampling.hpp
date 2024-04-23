@@ -22,15 +22,34 @@
 
 #pragma once
 
-// NOLINTNEXTLINE(performance-enum-size)
-typedef enum
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+
+#include <rocprofiler-sdk/rocprofiler.h>
+
+#include <cstdint>
+#include <vector>
+
+namespace rocprofiler
 {
-    ROCPROFILER_HSA_TABLE_ID_NONE = -1,
-    ROCPROFILER_HSA_TABLE_ID_Core = 0,
-    ROCPROFILER_HSA_TABLE_ID_AmdExt,
-    ROCPROFILER_HSA_TABLE_ID_ImageExt,
-    ROCPROFILER_HSA_TABLE_ID_FinalizeExt,
-    ROCPROFILER_HSA_TABLE_ID_AmdTool,
-    ROCPROFILER_HSA_TABLE_ID_PcSamplingExt,
-    ROCPROFILER_HSA_TABLE_ID_LAST,
-} rocprofiler_hsa_table_id_t;
+namespace hsa
+{
+namespace pc_sampling
+{
+const char*
+name_by_id(uint32_t id);
+
+std::vector<uint32_t>
+get_ids();
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+void
+copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
+
+void
+update_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
+
+#endif
+}  // namespace pc_sampling
+}  // namespace hsa
+}  // namespace rocprofiler
