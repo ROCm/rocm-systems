@@ -301,12 +301,13 @@ WriteInterceptor(const void* packets,
                 .dispatch_id          = dispatch_id,
                 .private_segment_size = kernel_pkt.kernel_dispatch.private_segment_size,
                 .group_segment_size   = kernel_pkt.kernel_dispatch.group_segment_size,
-                .workgroup_size = rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.workgroup_size_x,
+                .workgroup_size   = rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.workgroup_size_x,
                                                      kernel_pkt.kernel_dispatch.workgroup_size_y,
                                                      kernel_pkt.kernel_dispatch.workgroup_size_z},
-                .grid_size      = rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.grid_size_x,
+                .grid_size        = rocprofiler_dim3_t{kernel_pkt.kernel_dispatch.grid_size_x,
                                                 kernel_pkt.kernel_dispatch.grid_size_y,
-                                                kernel_pkt.kernel_dispatch.grid_size_z}}};
+                                                kernel_pkt.kernel_dispatch.grid_size_z},
+                .reserved_padding = {0}}};
 
         {
             auto tracer_data = callback_record;

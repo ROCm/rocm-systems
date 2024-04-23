@@ -103,7 +103,14 @@ findDeviceMetrics(const rocprofiler_agent_t& agent, const std::unordered_set<std
 hsa_ven_amd_aqlprofile_id_query_t
 v1_get_query_info(hsa_agent_t agent, const counters::Metric& metric)
 {
-    hsa_ven_amd_aqlprofile_profile_t  profile = {.agent = agent};
+    hsa_ven_amd_aqlprofile_profile_t  profile = {.agent  = agent,
+                                                .type   = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
+                                                .events = nullptr,
+                                                .event_count     = 0,
+                                                .parameters      = nullptr,
+                                                .parameter_count = 0,
+                                                .output_buffer   = {nullptr, 0},
+                                                .command_buffer  = {nullptr, 0}};
     hsa_ven_amd_aqlprofile_id_query_t query   = {metric.block().c_str(), 0, 0};
     if(hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query) !=
        HSA_STATUS_SUCCESS)
@@ -120,7 +127,11 @@ v1_get_block_counters(hsa_agent_t agent, const hsa_ven_amd_aqlprofile_event_t& e
     hsa_ven_amd_aqlprofile_profile_t query              = {.agent       = agent,
                                               .type        = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
                                               .events      = &event,
-                                              .event_count = 1};
+                                              .event_count = 1,
+                                              .parameters  = nullptr,
+                                              .parameter_count = 0,
+                                              .output_buffer   = {nullptr, 0},
+                                              .command_buffer  = {nullptr, 0}};
     uint32_t                         max_block_counters = 0;
     if(hsa_ven_amd_aqlprofile_get_info(&query,
                                        HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_COUNTERS,

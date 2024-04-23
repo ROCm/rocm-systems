@@ -848,9 +848,8 @@ struct poll_kfd_t
 
         // Create fd for notifying thread when we want to wake it up, and an eventfd for any events
         // to this thread
-        file_handles.emplace_back(pollfd{
-            .fd = eventfd(0, DEFAULT_FLAGS),
-        });
+        file_handles.emplace_back(
+            pollfd{.fd = eventfd(0, DEFAULT_FLAGS), .events = 0, .revents = 0});
 
         fd_t thread_pipes[2]{};
 

@@ -63,9 +63,8 @@ target_link_libraries(rocprofiler-build-flags INTERFACE rocprofiler::rocprofiler
 # ----------------------------------------------------------------------------------------#
 # set the compiler flags
 #
-rocprofiler_target_compile_options(
-    rocprofiler-build-flags INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas"
-                                      "-Wno-missing-field-initializers")
+rocprofiler_target_compile_options(rocprofiler-build-flags
+                                   INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas")
 
 # ----------------------------------------------------------------------------------------#
 # extra flags for debug information in debug or optimized binaries

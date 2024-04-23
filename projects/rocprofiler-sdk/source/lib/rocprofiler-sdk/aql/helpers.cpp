@@ -39,7 +39,7 @@ hsa_ven_amd_aqlprofile_id_query_t
 get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric)
 {
     auto                     aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(agent));
-    aqlprofile_pmc_profile_t profile   = {.agent = aql_agent};
+    aqlprofile_pmc_profile_t profile   = {.agent = aql_agent, .events = nullptr, .event_count = 0};
     hsa_ven_amd_aqlprofile_id_query_t query = {metric.block().c_str(), 0, 0};
     if(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_BLOCK_ID, &query) != HSA_STATUS_SUCCESS)
     {
