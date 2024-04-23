@@ -125,7 +125,7 @@ omnitrace_add_feature(OMNITRACE_PACKAGE_FILE_NAME "CPack filename")
 #
 # -------------------------------------------------------------------------------------- #
 
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/AMDResearch/omnitrace")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/omnitrace")
 set(CPACK_DEBIAN_PACKAGE_RELEASE
     "${OMNITRACE_CPACK_SYSTEM_NAME}${OMNITRACE_CPACK_PACKAGE_SUFFIX}")
 string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_DEBIAN_PACKAGE_RELEASE

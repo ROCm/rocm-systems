@@ -55,7 +55,7 @@ $ omnitrace-instrument -- ./foo
 
 ## Metadata
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) will output a metadata.json file. This metadata file will contain
+[OmniTrace](https://github.com/ROCm/omnitrace) will output a metadata.json file. This metadata file will contain
 information about the settings, environment variables, output files, and info about the system and the run:
 
 - Hardware cache sizes

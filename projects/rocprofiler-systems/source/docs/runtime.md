@@ -49,7 +49,7 @@ match to nearly all common expressions for boolean logic: ON, OFF, YES, NO, TRUE
 
 ### Exploring Components
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) uses [timemory](https://github.com/NERSC/timemory) extensively to provide various capabilities and manage
+[OmniTrace](https://github.com/ROCm/omnitrace) uses [timemory](https://github.com/NERSC/timemory) extensively to provide various capabilities and manage
 data and resources. By default, when `OMNITRACE_PROFILE=ON`, omnitrace will only collect wall-clock
 timing values; however, by modifying the `OMNITRACE_TIMEMORY_COMPONENTS` setting, omnitrace can be configured to
 collect hardware counters, CPU-clock timers, memory usage, context-switches, page-faults, network statistics,
@@ -72,7 +72,7 @@ omnitrace-avail --components --available --string --brief
 
 ### Exploring Hardware Counters
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) supports collecting hardware counters via PAPI and ROCm.
+[OmniTrace](https://github.com/ROCm/omnitrace) supports collecting hardware counters via PAPI and ROCm.
 Generally, PAPI is used to collect CPU-based hardware counters and ROCm is used to collect GPU-based hardware
 counters; although it is possible to install PAPI with ROCm support and collect GPU-based hardware counters
 via PAPI but this is not recommended because CPU hardware counters via PAPI cannot be collected simultaneously.
@@ -1161,7 +1161,7 @@ $ omnitrace-avail -H -bd
 
 ## Creating a Configuration File
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) supports 3 configuration file formats: JSON, XML, and plain text.
+[OmniTrace](https://github.com/ROCm/omnitrace) supports 3 configuration file formats: JSON, XML, and plain text.
 Use `omnitrace-avail -G <filename> -F txt json xml` to generate default configuration files of each format and, optionally,
 include the `--all` flag for descriptions, etc.
 Configuration files are specified via the `OMNITRACE_CONFIG_FILE` environment variable

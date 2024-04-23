@@ -512,7 +512,7 @@ results in under development but until this is available, visit [plasma-umass.or
 This section is intended for readers who are familiar with the [Coz profiler](https://github.com/plasma-umass/coz).
 OmniTrace provides several additional features and utilities for causal profiling:
 
-|                      |             [Coz](https://github.com/plasma-umass/coz)              |   [OmniTrace](https://github.com/AMDResearch/omnitrace)    | Notes                         |
+|                      |             [Coz](https://github.com/plasma-umass/coz)              |   [OmniTrace](https://github.com/ROCm/omnitrace)    | Notes                         |
 |----------------------|:-------------------------------------------------------------------:|:----------------------------------------------------------:|-------------------------------|
 | Debug info           |        requires debug info in DWARF v3 format (`-gdwarf-3`)         |        optional, supports any DWARF format version         | See Note #1 below             |
 | Experiment selection |                           `<file>:<line>`                           |              `<function>` or `<file>:<line>`               | See Note #2 below             |

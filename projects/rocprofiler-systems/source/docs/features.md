@@ -8,7 +8,7 @@
 
 ## Overview
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) is designed to be highly extensible. Internally, it leverages the
+[OmniTrace](https://github.com/ROCm/omnitrace) is designed to be highly extensible. Internally, it leverages the
 [timemory performance analysis toolkit](https://github.com/NERSC/timemory) to
 manage extensions, resources, data, etc.
 

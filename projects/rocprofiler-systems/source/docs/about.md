@@ -8,11 +8,11 @@
 
 ## Overview
 
-> ***[OmniTrace](https://github.com/AMDResearch/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
+> ***[OmniTrace](https://github.com/ROCm/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
 
-[Browse OmniTrace source code on Github](https://github.com/AMDResearch/omnitrace)
+[Browse OmniTrace source code on Github](https://github.com/ROCm/omnitrace)
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) is designed for both high-level profiling and
+[OmniTrace](https://github.com/ROCm/omnitrace) is designed for both high-level profiling and
 comprehensive tracing of applications running on the CPU or the CPU+GPU via dynamic binary instrumentation,
 call-stack sampling, and various other means for determining currently executing function and line information.
 
@@ -24,7 +24,7 @@ The JSON output files are compatible with the python package [hatchet](https://g
 the performance data into pandas dataframes and facilitate multi-run comparisons, filtering, visualization in Jupyter notebooks,
 and much more.
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) has two distinct configuration steps when instrumenting:
+[OmniTrace](https://github.com/ROCm/omnitrace) has two distinct configuration steps when instrumenting:
 
 1. Configuring which functions and modules are instrumented in the target binaries (i.e. executable and/or libraries)
    - [Instrumenting with OmniTrace](instrumenting.md)

@@ -14,7 +14,7 @@ If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major ver
 is the ROCm minor version, e.g. `--rocm 5.4`.
 
 ```console
-wget https://github.com/AMDResearch/omnitrace/releases/latest/download/omnitrace-install.py
+wget https://github.com/ROCm/omnitrace/releases/latest/download/omnitrace-install.py
 python3 ./omnitrace-install.py --prefix /opt/omnitrace --rocm 5.4
 ```
 
@@ -87,7 +87,7 @@ self-contained support for these packages.
 ### Download the appropriate binary distribution
 
 ```shell
-wget https://github.com/AMDResearch/omnitrace/releases/download/v<VERSION>/<SCRIPT>
+wget https://github.com/ROCm/omnitrace/releases/download/v<VERSION>/<SCRIPT>
 ```
 
 ### Create the target installation directory
@@ -111,7 +111,7 @@ The Clang compiler may be used in lieu of the GCC compiler if Dyninst is already
 
 - GCC compiler v7+
   - Older GCC compilers may be supported but are not tested
-  - Clang compilers are generally supported for [OmniTrace](https://github.com/AMDResearch/omnitrace) but not Dyninst
+  - Clang compilers are generally supported for [OmniTrace](https://github.com/ROCm/omnitrace) but not Dyninst
 - [CMake](https://cmake.org/) v3.16+
 
 > ***If the system installed cmake is too old, installing a new version of cmake can be done through several methods.***
@@ -177,7 +177,7 @@ versions of Dyninst's Boost, TBB, and LibIberty dependencies (i.e. `apt-get inst
 it's dependencies via `DYNINST_BUILD_<DEP>=ON`, e.g.:
 
 ```shell
-git clone https://github.com/AMDResearch/omnitrace.git omnitrace-source
+git clone https://github.com/ROCm/omnitrace.git omnitrace-source
 cmake -B omnitrace-build -DOMNITRACE_BUILD_DYNINST=ON -DDYNINST_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON omnitrace-source
 ```
 
@@ -207,7 +207,7 @@ into omnitrace's perfetto support, e.g. `OMNITRACE_USE_PAPI=<VAL>` forces `TIMEM
 is passed along to perfetto and will be displayed when the `.proto` file is visualized in [ui.perfetto.dev](https://ui.perfetto.dev).
 
 ```shell
-git clone https://github.com/AMDResearch/omnitrace.git omnitrace-source
+git clone https://github.com/ROCm/omnitrace.git omnitrace-source
 cmake                                       \
     -B omnitrace-build                      \
     -D CMAKE_INSTALL_PREFIX=/opt/omnitrace  \
@@ -232,7 +232,7 @@ source /opt/omnitrace/share/omnitrace/setup-env.sh
 
 #### MPI Support within OmniTrace
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) can have full (`OMNITRACE_USE_MPI=ON`) or partial (`OMNITRACE_USE_MPI_HEADERS=ON`) MPI support.
+[OmniTrace](https://github.com/ROCm/omnitrace) can have full (`OMNITRACE_USE_MPI=ON`) or partial (`OMNITRACE_USE_MPI_HEADERS=ON`) MPI support.
 The only difference between these two modes is whether or not the results collected via timemory and/or perfetto can be aggregated into a single
 output file during finalization. When full MPI support is enabled, combining the timemory results always occurs whereas combining the perfetto
 results is configurable via the `OMNITRACE_PERFETTO_COMBINE_TRACES` setting.

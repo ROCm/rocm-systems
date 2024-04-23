@@ -345,7 +345,7 @@ experiment::stop()
             "Warning! causal experimentation hasn't seen at least 5 progress points "
             "in the last %li experiments. Progress points are necessary for measuring "
             "the effect of the virtual speed-up. Please visit "
-            "https://amdresearch.github.io/omnitrace/ for documentation on progress "
+            "https://rocm.github.io/omnitrace/ for documentation on progress "
             "points and how to add them\n",
             global_scaling_increments);
     }

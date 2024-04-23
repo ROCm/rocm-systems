@@ -1,4 +1,4 @@
-# Welcome to the [OmniTrace](https://github.com/AMDResearch/omnitrace) Documentation!
+# Welcome to the [OmniTrace](https://github.com/ROCm/omnitrace) Documentation!
 
 ```eval_rst
 .. toctree::

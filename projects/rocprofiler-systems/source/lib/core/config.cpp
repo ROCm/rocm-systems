@@ -767,7 +767,7 @@ configure_settings(bool _init)
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_CAUSAL_BACKEND",
         "Backend for call-stack sampling. See "
-        "https://amdresearch.github.io/omnitrace/causal_profiling.html#backends for more "
+        "https://rocm.github.io/omnitrace/causal_profiling.html#backends for more "
         "info. If set to \"auto\", omnitrace will attempt to use the perf backend and "
         "fallback on the timer backend if unavailable",
         std::string{ "auto" }, "causal", "analysis")

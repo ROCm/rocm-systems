@@ -7,7 +7,7 @@
 
 ## Executables
 
-### omnitrace-avail: [source/bin/omnitrace-avail](https://github.com/AMDResearch/omnitrace/tree/main/source/bin/omnitrace-avail)
+### omnitrace-avail: [source/bin/omnitrace-avail](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-avail)
 
 The main of `omnitrace-avail` has three important sections:
 
@@ -15,7 +15,7 @@ The main of `omnitrace-avail` has three important sections:
 2. Printing options
 3. Printing hardware counters
 
-### omnitrace-sample: [source/bin/omnitrace-sample](https://github.com/AMDResearch/omnitrace/tree/main/source/bin/omnitrace-sample)
+### omnitrace-sample: [source/bin/omnitrace-sample](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-sample)
 
 General design:
 
@@ -24,7 +24,7 @@ General design:
 - Adds `libomnitrace-dl.so` to `LD_PRELOAD`
 - Application is launched via `execvpe` with `<command> <command-args>` and modified environment
 
-### omnitrace-casual: [source/bin/omnitrace-causal](https://github.com/AMDResearch/omnitrace/tree/main/source/bin/omnitrace-causal)
+### omnitrace-casual: [source/bin/omnitrace-causal](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-causal)
 
 Nearly identical design to [omnitrace-sample](#omnitrace-sample-sourcebinomnitrace-sample) when
 there is exactly one causal profiling configuration variant (this enables debugging).
@@ -36,7 +36,7 @@ for each variant:
 - child process launches `<command> <command-args>` via `execvpe` which modified environment for variant
 - parent process waits for child process to finish
 
-### omnitrace-instrument: [source/bin/omnitrace-instrument](https://github.com/AMDResearch/omnitrace/tree/main/source/bin/omnitrace-instrument)
+### omnitrace-instrument: [source/bin/omnitrace-instrument](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-instrument)
 
 - Requires a command-line format of `omnitrace-instrument <options> -- <command> <command-args>`
 - User specifies in options whether they want to do runtime instrumentation, binary rewrite, or attach to process
@@ -50,30 +50,30 @@ for each variant:
   - For a binary rewrite: outputs new instrumented binary and exits
   - For runtime instrumentation or attaching to a process: instructs the application to resume executing and then waits for the application to exit
 
-### omnitrace-critical-trace: [source/bin/omnitrace-critical-trace](https://github.com/AMDResearch/omnitrace/tree/main/source/bin/omnitrace-critical-trace)
+### omnitrace-critical-trace: [source/bin/omnitrace-critical-trace](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-critical-trace)
 
 Post-processing tool for critical-trace data output by omnitrace.
 
 ## Libraries
 
-### Common Library: [source/lib/common](https://github.com/AMDResearch/omnitrace/tree/main/source/lib/common)
+### Common Library: [source/lib/common](https://github.com/ROCm/omnitrace/tree/main/source/lib/common)
 
 General header-only functionality used in multiple executables and/or libraries. Not installed or exported outside of the build tree.
 
-### Core Library: [source/lib/core](https://github.com/AMDResearch/omnitrace/tree/main/source/lib/core)
+### Core Library: [source/lib/core](https://github.com/ROCm/omnitrace/tree/main/source/lib/core)
 
 Static PIC library with functionality that does not depend on any components. Not installed or exported outside of the build tree.
 
-### Binary Library: [source/lib/binary](https://github.com/AMDResearch/omnitrace/tree/main/source/lib/binary)
+### Binary Library: [source/lib/binary](https://github.com/ROCm/omnitrace/tree/main/source/lib/binary)
 
 Static PIC library with functionality for reading/analyzing binary info. Mostly used by the causal profiling sections
 of [libomnitrace](#libomnitrace-sourcelibomnitrace). Not installed or exported outside of the build tree.
 
-### libomnitrace: [source/lib/omnitrace](https://github.com/AMDResearch/omnitrace/tree/main/source/lib/omnitrace)
+### libomnitrace: [source/lib/omnitrace](https://github.com/ROCm/omnitrace/tree/main/source/lib/omnitrace)
 
 This is the main library encapsulating all the capabilities.
 
-### libomnitrace-dl: [source/lib/omnitrace-dl](https://github.com/AMDResearch/omnitrace/tree/main/source/lib/omnitrace-dl)
+### libomnitrace-dl: [source/lib/omnitrace-dl](https://github.com/ROCm/omnitrace/tree/main/source/lib/omnitrace-dl)
 
 Lightweight, front-end library for [libomnitrace](#libomnitrace-sourcelibomnitrace) which serves 3 primary purposes:
 
@@ -81,7 +81,7 @@ Lightweight, front-end library for [libomnitrace](#libomnitrace-sourcelibomnitra
 2. Prevents re-entry if [libomnitrace](#libomnitrace-sourcelibomnitrace) calls an instrumentated function internally)
 3. Coordinates communication between [libomnitrace-user](#libomnitrace-user-sourcelibomnitrace-user) and [libomnitrace](#libomnitrace-sourcelibomnitrace)
 
-### libomnitrace-user: [source/lib/omnitrace-user](https://github.com/AMDResearch/omnitrace/tree/main/source/lib/omnitrace-user)
+### libomnitrace-user: [source/lib/omnitrace-user](https://github.com/ROCm/omnitrace/tree/main/source/lib/omnitrace-user)
 
 Provides a set of functions and types for the users to add to their code, e.g. disabling data collection globally or on a specific thread,
 user-defined regions, etc. If [libomnitrace-dl](#libomnitrace-dl-sourcelibomnitrace-dl) is not loaded, the user API is effectively no-op
@@ -284,13 +284,13 @@ the realtime sampler. For example, `OMNITRACE_SAMPLING_FREQ=500` initially sets 
 (based on their clock). Settings `OMNITRACE_SAMPLING_REALTIME_FREQ=10` will lower the sampling frequency for the realtime sampler
 to 10 interrupts per second of realtime.
 
-The omnitrace-specific implementation can be found in [source/lib/omnitrace/library/sampling.cpp](https://github.com/AMDResearch/omnitrace/blob/main/source/lib/omnitrace/library/sampling.cpp).
-Within [sampling.cpp](https://github.com/AMDResearch/omnitrace/blob/main/source/lib/omnitrace/library/sampling.cpp), you will a bundle of 3 sampling components:
+The omnitrace-specific implementation can be found in [source/lib/omnitrace/library/sampling.cpp](https://github.com/ROCm/omnitrace/blob/main/source/lib/omnitrace/library/sampling.cpp).
+Within [sampling.cpp](https://github.com/ROCm/omnitrace/blob/main/source/lib/omnitrace/library/sampling.cpp), you will a bundle of 3 sampling components:
 `backtrace_timestamp`, `backtrace`, and `backtrace_metrics`.
-The first component [backtrace_timestamp](https://github.com/AMDResearch/omnitrace/blob/main/source/lib/omnitrace/library/components/backtrace_timestamp.hpp) simply
+The first component [backtrace_timestamp](https://github.com/ROCm/omnitrace/blob/main/source/lib/omnitrace/library/components/backtrace_timestamp.hpp) simply
 records the wall-clock time of the sample.
-The second component [backtrace](https://github.com/AMDResearch/omnitrace/blob/main/source/lib/omnitrace/library/components/backtrace.hpp) records the call-stack via libunwind.
-The last component [backtrace_metrics](https://github.com/AMDResearch/omnitrace/blob/main/source/lib/omnitrace/library/components/backtrace_metrics.hpp) is responsible for recording the
+The second component [backtrace](https://github.com/ROCm/omnitrace/blob/main/source/lib/omnitrace/library/components/backtrace.hpp) records the call-stack via libunwind.
+The last component [backtrace_metrics](https://github.com/ROCm/omnitrace/blob/main/source/lib/omnitrace/library/components/backtrace_metrics.hpp) is responsible for recording the
 metrics for that sample, e.g. peak RSS, HW counters, etc. These 3 components are bundled together in a tuple-like struct (e.g. `tuple<backtrace_timestamp, backtrace, backtrace_metrics>`)
 a buffer of at least 1024 instances of this tuple are mmap'ed per-thread. When this buffer is full, before taking the next sample, the sampler will hand the buffer
 off to it's allocator thread and mmap a new buffer. The allocator thread takes this data and either dynamically stores it in memory or writes it to a file depending on the value of `OMNITRACE_USE_TEMPORARY_FILES`.
@@ -300,7 +300,7 @@ a new internal thread is created to handle the new samplers.
 
 ## Time-Window Constraint Model
 
-Recently with the introduction of tracing delay/duration/etc., the [constraint namespace](https://github.com/AMDResearch/omnitrace/blob/main/source/lib/core/constraint.hpp)
+Recently with the introduction of tracing delay/duration/etc., the [constraint namespace](https://github.com/ROCm/omnitrace/blob/main/source/lib/core/constraint.hpp)
 was introduced to improve the management of delays and/or duration limits of data collection. The `spec` class takes a clock identifier, a delay value, a duration value, and an
 integer indicating how many times to repeat the delay + duration. Thus, it is possible to perform tasks such as periodically enabling tracing for brief periods
 of time in between long periods without data collection during the application, e.g. `OMNITRACE_TRACE_PERIODS = realtime:10:1:5 process_cputime:10:2:20` would enable

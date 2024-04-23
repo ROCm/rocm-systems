@@ -25,7 +25,7 @@ env:
 
 jobs:
   installers:
-    if: github.repository == 'AMDResearch/omnitrace'
+    if: github.repository == 'ROCm/omnitrace'
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
@@ -267,7 +267,7 @@ jobs:
 
       - name: Upload STGZ Release Assets
         uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'AMDResearch/omnitrace'
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'ROCm/omnitrace'
         with:
           fail_on_unmatched_files: True
           files: |

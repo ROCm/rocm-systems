@@ -15,7 +15,7 @@ env:
 
 jobs:
   release:
-    if: github.repository == 'AMDResearch/omnitrace'
+    if: github.repository == 'ROCm/omnitrace'
     runs-on: ubuntu-20.04
     permissions:
       contents: write

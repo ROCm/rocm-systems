@@ -54,7 +54,7 @@ jobs:
           path: ./docs
 
   deploy-docs:
-    if: github.repository == 'AMDResearch/omnitrace' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/gh-pages')
+    if: github.repository == 'ROCm/omnitrace' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/gh-pages')
     runs-on: ubuntu-20.04
     needs: build-docs
     permissions:

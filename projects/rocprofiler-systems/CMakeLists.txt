@@ -25,7 +25,7 @@ project(
     LANGUAGES C CXX
     VERSION ${OMNITRACE_VERSION}
     DESCRIPTION "CPU/GPU Application tracing with static/dynamic binary instrumentation"
-    HOMEPAGE_URL "https://github.com/AMDResearch/omnitrace")
+    HOMEPAGE_URL "https://github.com/ROCm/omnitrace")
 
 find_package(Git)
 

@@ -232,7 +232,7 @@ if __name__ == "__main__":
         )
 
     script = f"omnitrace-{omnitrace_version}-{os_distrib}-{os_version}{rocm_version}{extensions}.sh"
-    url = f"https://github.com/AMDResearch/omnitrace/releases/download/v{omnitrace_version}/{script}"
+    url = f"https://github.com/ROCm/omnitrace/releases/download/v{omnitrace_version}/{script}"
     download_dir = (
         tempfile.mkdtemp(prefix="omnitrace-install-")
         if args.download_path is None

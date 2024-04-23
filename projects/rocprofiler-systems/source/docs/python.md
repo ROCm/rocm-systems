@@ -6,7 +6,7 @@
    :maxdepth: 3
 ```
 
-[OmniTrace](https://github.com/AMDResearch/omnitrace) supports profiling Python code at the source-level and/or the script-level.
+[OmniTrace](https://github.com/ROCm/omnitrace) supports profiling Python code at the source-level and/or the script-level.
 Python support is enabled via the `OMNITRACE_USE_PYTHON` and the `OMNITRACE_PYTHON_VERSIONS="<MAJOR>.<MINOR>` CMake options.
 Alternatively, to build multiple python versions, use `OMNITRACE_PYTHON_VERSIONS="<MAJOR>.<MINOR>;[<MAJOR>.<MINOR>]"`,
 and `OMNITRACE_PYTHON_ROOT_DIRS="/path/to/version;[/path/to/version]"` instead of `OMNITRACE_PYTHON_VERSION`.

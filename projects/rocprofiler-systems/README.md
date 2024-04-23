@@ -1,14 +1,14 @@
 # Omnitrace: Application Profiling, Tracing, and Analysis
 
-[![Ubuntu 18.04 with GCC and MPICH](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-bionic.yml)
-[![Ubuntu 20.04 with GCC, ROCm, and MPI](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-focal.yml)
-[![Ubuntu 22.04 (GCC, Python, ROCm)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/ubuntu-jammy.yml)
-[![OpenSUSE 15.x with GCC](https://github.com/AMDResearch/omnitrace/actions/workflows/opensuse.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/opensuse.yml)
-[![RedHat Linux (GCC, Python, ROCm)](https://github.com/AMDResearch/omnitrace/actions/workflows/redhat.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/redhat.yml)
-[![Installer Packaging (CPack)](https://github.com/AMDResearch/omnitrace/actions/workflows/cpack.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/cpack.yml)
-[![Documentation](https://github.com/AMDResearch/omnitrace/actions/workflows/docs.yml/badge.svg)](https://github.com/AMDResearch/omnitrace/actions/workflows/docs.yml)
+[![Ubuntu 18.04 with GCC and MPICH](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-bionic.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-bionic.yml)
+[![Ubuntu 20.04 with GCC, ROCm, and MPI](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-focal.yml)
+[![Ubuntu 22.04 (GCC, Python, ROCm)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-jammy.yml)
+[![OpenSUSE 15.x with GCC](https://github.com/ROCm/omnitrace/actions/workflows/opensuse.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/opensuse.yml)
+[![RedHat Linux (GCC, Python, ROCm)](https://github.com/ROCm/omnitrace/actions/workflows/redhat.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/redhat.yml)
+[![Installer Packaging (CPack)](https://github.com/ROCm/omnitrace/actions/workflows/cpack.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/cpack.yml)
+[![Documentation](https://github.com/ROCm/omnitrace/actions/workflows/docs.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/docs.yml)
 
-> ***[Omnitrace](https://github.com/AMDResearch/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
+> ***[Omnitrace](https://github.com/ROCm/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
 
 ## Overview
 
@@ -89,14 +89,14 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
 
 ## Documentation
 
-The full documentation for [omnitrace](https://github.com/AMDResearch/omnitrace) is available at [amdresearch.github.io/omnitrace](https://amdresearch.github.io/omnitrace/).
-See the [Getting Started documentation](https://amdresearch.github.io/omnitrace/getting_started) for general tips and a detailed discussion about sampling vs. binary instrumentation.
+The full documentation for [omnitrace](https://github.com/ROCm/omnitrace) is available at [rocm.github.io/omnitrace](https://rocm.github.io/omnitrace/).
+See the [Getting Started documentation](https://rocm.github.io/omnitrace/getting_started) for general tips and a detailed discussion about sampling vs. binary instrumentation.
 
 ## Quick Start
 
 ### Installation
 
-- Visit [Releases](https://github.com/AMDResearch/omnitrace/releases) page
+- Visit [Releases](https://github.com/ROCm/omnitrace/releases) page
 - Select appropriate installer (recommendation: `.sh` scripts do not require super-user priviledges unlike the DEB/RPM installers)
   - If targeting a ROCm application, find the installer script with the matching ROCm version
   - If you are unsure about your Linux distro, check `/etc/os-release` or use the `omnitrace-install.py` script
@@ -107,11 +107,11 @@ If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major ver
 is the ROCm minor version, e.g. `--rocm 5.4`.
 
 ```console
-wget https://github.com/AMDResearch/omnitrace/releases/latest/download/omnitrace-install.py
+wget https://github.com/ROCm/omnitrace/releases/latest/download/omnitrace-install.py
 python3 ./omnitrace-install.py --prefix /opt/omnitrace/rocm-5.4 --rocm 5.4
 ```
 
-See the [Installation Documentation](https://amdresearch.github.io/omnitrace/installation) for detailed information.
+See the [Installation Documentation](https://rocm.github.io/omnitrace/installation) for detailed information.
 
 ### Setup
 
