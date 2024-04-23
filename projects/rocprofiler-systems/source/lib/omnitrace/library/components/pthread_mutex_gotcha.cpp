@@ -25,7 +25,6 @@
 #include "core/debug.hpp"
 #include "core/utility.hpp"
 #include "library/components/category_region.hpp"
-#include "library/critical_trace.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
@@ -41,9 +40,6 @@ namespace omnitrace
 {
 namespace component
 {
-using Device = critical_trace::Device;
-using Phase  = critical_trace::Phase;
-
 pthread_mutex_gotcha::hash_array_t&
 pthread_mutex_gotcha::get_hashes()
 {
@@ -76,7 +72,7 @@ pthread_mutex_gotcha::get_hashes()
         {
             auto&& _id = _data.at(i).tool_id;
             if(!_id.empty())
-                _init.at(i) = critical_trace::add_hash_id(_id.c_str());
+                _init.at(i) = tim::add_hash_id(_id.c_str());
             else
             {
                 if(_skip.count(i) > 0) continue;
@@ -176,7 +172,7 @@ pthread_mutex_gotcha::pthread_mutex_gotcha(const gotcha_data_t& _data)
 
 template <typename... Args>
 auto
-pthread_mutex_gotcha::operator()(uintptr_t&& _id, int (*_callee)(Args...),
+pthread_mutex_gotcha::operator()(uintptr_t&&, int (*_callee)(Args...),
                                  Args... _args) const
 {
     using bundle_t = category_region<category::pthread>;
@@ -203,30 +199,10 @@ pthread_mutex_gotcha::operator()(uintptr_t&& _id, int (*_callee)(Args...),
         bool& _protect;
     } _dtor{ m_protect = true };
 
-    uint64_t _cid        = 0;
-    uint64_t _parent_cid = 0;
-    uint32_t _depth      = 0;
-    int64_t  _ts         = 0;
-
-    if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
-    {
-        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-        std::tie(_cid, _parent_cid, _depth) = create_cpu_cid_entry();
-        _ts                                 = comp::wall_clock::record();
-    }
-
     bundle_t::audit(std::string_view{ m_data->tool_id }, audit::incoming{}, _args...);
     auto _ret = (*_callee)(_args...);
     bundle_t::audit(std::string_view{ m_data->tool_id }, audit::outgoing{}, _ret);
 
-    if(_id < std::numeric_limits<uintptr_t>::max() && get_use_critical_trace())
-    {
-        OMNITRACE_SCOPED_THREAD_STATE(ThreadState::Internal);
-        add_critical_trace<Device::CPU, Phase::DELTA>(
-            threading::get_id(), _cid, 0, _parent_cid, _ts, comp::wall_clock::record(), 0,
-            _id, get_hashes().at(m_data->index), _depth);
-    }
-    tim::consume_parameters(_id, _cid, _parent_cid, _depth, _ts);
     return _ret;
 }
 

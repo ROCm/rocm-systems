@@ -191,13 +191,7 @@ OMNITRACE_USE_PID                                  = true
 OMNITRACE_OUTPUT_PATH                              = omnitrace-%tag%-output
 OMNITRACE_OUTPUT_PREFIX                            =
 OMNITRACE_CI                                       = false
-OMNITRACE_CRITICAL_TRACE                           = false
-OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT              = 2000
-OMNITRACE_CRITICAL_TRACE_COUNT                     = 0
-OMNITRACE_CRITICAL_TRACE_DEBUG                     = false
 OMNITRACE_THREAD_POOL_SIZE                         = 8
-OMNITRACE_CRITICAL_TRACE_PER_ROW                   = 0
-OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES           = false
 OMNITRACE_DEBUG                                    = false
 OMNITRACE_DL_VERBOSE                               = 0
 OMNITRACE_INSTRUMENTATION_INTERVAL                 = 1
@@ -283,13 +277,7 @@ $ omnitrace-avail -S -bd
 | OMNITRACE_CONFIG_FILE                   | Configuration file for omnitrace        |
 | OMNITRACE_COUT_OUTPUT                   | Write output to stdout                  |
 | OMNITRACE_CPU_AFFINITY                  | Enable pinning threads to CPUs (Linu... |
-| OMNITRACE_CRITICAL_TRACE                | Enable generation of the critical trace |
-| OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT   | Number of critical trace records to ... |
-| OMNITRACE_CRITICAL_TRACE_COUNT          | Number of critical trace to export (... |
-| OMNITRACE_CRITICAL_TRACE_DEBUG          | Enable debugging for critical trace     |
 | OMNITRACE_THREAD_POOL_SIZE              | Number of threads to use when genera... |
-| OMNITRACE_CRITICAL_TRACE_PER_ROW        | How many critical traces per row in ... |
-| OMNITRACE_CRITICAL_TRACE_SERIALIZE_N... | Include names in serialization of cr... |
 | OMNITRACE_DEBUG                         | Enable debug output                     |
 | OMNITRACE_DIFF_OUTPUT                   | Generate a difference output vs. a p... |
 | OMNITRACE_DL_VERBOSE                    | Verbosity within the omnitrace-dl li... |

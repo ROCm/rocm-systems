@@ -80,7 +80,6 @@ set(_lock_environment
     "OMNITRACE_USE_SAMPLING=ON"
     "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
     "OMNITRACE_SAMPLING_FREQ=750"
-    "OMNITRACE_CRITICAL_TRACE=ON"
     "OMNITRACE_COLLAPSE_THREADS=ON"
     "OMNITRACE_TRACE_THREAD_LOCKS=ON"
     "OMNITRACE_TRACE_THREAD_SPIN_LOCKS=ON"
@@ -91,26 +90,11 @@ set(_lock_environment
     "OMNITRACE_VERBOSE=2"
     "${_test_library_path}")
 
-set(_critical_trace_environment
-    "OMNITRACE_VERBOSE=2"
-    "OMNITRACE_USE_SAMPLING=OFF"
-    "OMNITRACE_USE_PROCESS_SAMPLING=OFF"
-    "OMNITRACE_CRITICAL_TRACE=ON"
-    "OMNITRACE_CRITICAL_TRACE_DEBUG=ON"
-    "OMNITRACE_TRACE_THREAD_LOCKS=ON"
-    "OMNITRACE_TRACE_THREAD_SPIN_LOCKS=ON"
-    "OMNITRACE_TRACE_THREAD_RW_LOCKS=ON"
-    "OMNITRACE_COUT_OUTPUT=ON"
-    "OMNITRACE_TIME_OUTPUT=OFF"
-    "OMNITRACE_TIMELINE_PROFILE=OFF"
-    "${_test_library_path}")
-
 set(_ompt_environment
     "OMNITRACE_TRACE=ON"
     "OMNITRACE_PROFILE=ON"
     "OMNITRACE_TIME_OUTPUT=OFF"
     "OMNITRACE_USE_OMPT=ON"
-    "OMNITRACE_CRITICAL_TRACE=OFF"
     "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,trip_count,peak_rss"
     "${_test_openmp_env}"
     "${_test_library_path}")
@@ -136,7 +120,7 @@ set(_timemory_environment
     "${_test_openmp_env}"
     "${_test_library_path}")
 
-set(_test_environment ${_base_environment} "OMNITRACE_CRITICAL_TRACE=OFF")
+set(_test_environment ${_base_environment})
 
 set(_causal_environment
     "${_test_openmp_env}" "${_test_library_path}" "OMNITRACE_TIME_OUTPUT=OFF"
@@ -159,7 +143,6 @@ set(_attach_environment
     "OMNITRACE_PROFILE=ON"
     "OMNITRACE_USE_SAMPLING=OFF"
     "OMNITRACE_USE_PROCESS_SAMPLING=ON"
-    "OMNITRACE_USE_CRITICAL_TRACE=OFF"
     "OMNITRACE_USE_OMPT=ON"
     "OMNITRACE_USE_KOKKOSP=ON"
     "OMNITRACE_TIME_OUTPUT=OFF"

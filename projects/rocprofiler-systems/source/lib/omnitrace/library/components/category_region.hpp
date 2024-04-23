@@ -27,7 +27,6 @@
 #include "core/state.hpp"
 #include "core/timemory.hpp"
 #include "library/causal/data.hpp"
-#include "library/critical_trace.hpp"
 #include "library/runtime.hpp"
 #include "library/tracing.hpp"
 #include "library/tracing/annotation.hpp"
@@ -67,12 +66,6 @@ using tim::type_list;
 using tracing_count_categories_t =
     type_list<category::host, category::mpi, category::pthread, category::rocm_hip,
               category::rocm_hsa, category::rocm_rccl>;
-
-// these categories are added to the critical trace
-using critical_trace_categories_t =
-    type_list<category::host, category::mpi, category::pthread, category::rocm_hip,
-              category::rocm_hsa, category::rocm_rccl, category::device_hip,
-              category::device_hsa, category::numa, category::python>;
 
 // convert these categories to throughput points
 using causal_throughput_categories_t =
@@ -195,24 +188,6 @@ category_region<CategoryT>::start(std::string_view name, Args&&... args)
             tracing::push_perfetto(CategoryT{}, name.data(), std::forward<Args>(args)...);
         }
     }
-
-    if constexpr(is_one_of<CategoryT, critical_trace_categories_t>::value)
-    {
-        using Device = critical_trace::Device;
-        using Phase  = critical_trace::Phase;
-
-        if(get_use_critical_trace())
-        {
-            uint64_t _cid                       = 0;
-            uint64_t _parent_cid                = 0;
-            uint32_t _depth                     = 0;
-            std::tie(_cid, _parent_cid, _depth) = create_cpu_cid_entry();
-            auto _ts                            = comp::wall_clock::record();
-            add_critical_trace<Device::CPU, Phase::BEGIN>(
-                threading::get_id(), _cid, 0, _parent_cid, _ts, 0, 0, 0,
-                critical_trace::add_hash_id(name.data()), _depth);
-        }
-    }
 }
 
 template <typename CategoryT>
@@ -276,30 +251,6 @@ category_region<CategoryT>::stop(std::string_view name, Args&&... args)
             else
             {
                 if(get_use_causal()) causal::pop_progress_point(name);
-            }
-        }
-
-        if constexpr(is_one_of<CategoryT, critical_trace_categories_t>::value)
-        {
-            using Device = critical_trace::Device;
-            using Phase  = critical_trace::Phase;
-
-            if(get_use_critical_trace())
-            {
-                if(get_cpu_cid_stack() && !get_cpu_cid_stack()->empty())
-                {
-                    auto _cid = get_cpu_cid_stack()->back();
-                    if(get_cpu_cid_parents()->find(_cid) != get_cpu_cid_parents()->end())
-                    {
-                        uint64_t _parent_cid          = 0;
-                        uint32_t _depth               = 0;
-                        auto     _ts                  = comp::wall_clock::record();
-                        std::tie(_parent_cid, _depth) = get_cpu_cid_parents()->at(_cid);
-                        add_critical_trace<Device::CPU, Phase::END>(
-                            threading::get_id(), _cid, 0, _parent_cid, _ts, _ts, 0, 0,
-                            critical_trace::add_hash_id(name.data()), _depth);
-                    }
-                }
             }
         }
     }

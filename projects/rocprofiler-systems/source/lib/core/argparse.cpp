@@ -1225,7 +1225,6 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
     add_group_arguments(_parser, "perfetto", _data, true);
     add_group_arguments(_parser, "timemory", _data, true);
     add_group_arguments(_parser, "rocm", _data, true);
-    add_group_arguments(_parser, "critical_trace", _data, true);
 
     _parser.start_group("MISCELLANEOUS OPTIONS", "");
 

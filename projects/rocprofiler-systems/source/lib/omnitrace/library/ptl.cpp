@@ -129,19 +129,6 @@ get_thread_pool_state()
 }  // namespace
 }  // namespace roctracer
 
-namespace critical_trace
-{
-namespace
-{
-auto&
-get_thread_pool_state()
-{
-    static auto _v = State::PreInit;
-    return _v;
-}
-}  // namespace
-}  // namespace critical_trace
-
 void
 setup()
 {
@@ -162,17 +149,6 @@ join()
     else
     {
         OMNITRACE_DEBUG_F("roctracer thread-pool is not active...\n");
-    }
-
-    if(critical_trace::get_thread_pool_state() == State::Active)
-    {
-        OMNITRACE_DEBUG_F("waiting for all critical trace tasks to complete...\n");
-        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
-            critical_trace::get_task_group(i).join();
-    }
-    else
-    {
-        OMNITRACE_DEBUG_F("critical-trace thread-pool is not active...\n");
     }
 
     if(general::get_thread_pool_state() == State::Active)
@@ -200,22 +176,6 @@ shutdown()
     else
     {
         OMNITRACE_DEBUG_F("roctracer thread-pool is not active...\n");
-    }
-
-    if(critical_trace::get_thread_pool_state() == State::Active)
-    {
-        OMNITRACE_DEBUG_F("Waiting on completion of critical trace tasks...\n");
-        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
-        {
-            critical_trace::get_task_group(i).join();
-            critical_trace::get_task_group(i).clear();
-            critical_trace::get_task_group(i).set_pool(nullptr);
-        }
-        critical_trace::get_thread_pool_state() = State::Finalized;
-    }
-    else
-    {
-        OMNITRACE_DEBUG_F("critical-trace thread-pool is not active...\n");
     }
 
     if(general::get_thread_pool_state() == State::Active)
@@ -268,19 +228,6 @@ roctracer::get_task_group(int64_t _tid)
     static thread_local auto& _v = (roctracer::get_thread_pool_state() = State::Active,
                                     thread_data_t::instance(construct_on_thread{ _tid },
                                                             &tasking::get_thread_pool()));
-    return *_v;
-}
-
-PTL::TaskGroup<void>&
-critical_trace::get_task_group(int64_t _tid)
-{
-    struct local
-    {};
-    using thread_data_t = thread_data<PTL::TaskGroup<void>, local>;
-    static thread_local auto& _v =
-        (critical_trace::get_thread_pool_state() = State::Active,
-         thread_data_t::instance(construct_on_thread{ _tid },
-                                 &tasking::get_thread_pool()));
     return *_v;
 }
 }  // namespace tasking

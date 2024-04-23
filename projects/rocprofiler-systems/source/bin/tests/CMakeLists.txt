@@ -301,7 +301,6 @@ omnitrace_add_bin_test(
     ARGS -R
          omnitrace
          ~timemory
-         ~critical_trace
          -r
          _P
          ~PERFETTO

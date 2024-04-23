@@ -200,7 +200,6 @@ get_initial_environment()
     update_env(_env, "OMNITRACE_TRACE", false);
     update_env(_env, "OMNITRACE_PROFILE", false);
     update_env(_env, "OMNITRACE_USE_PROCESS_SAMPLING", false);
-    update_env(_env, "OMNITRACE_CRITICAL_TRACE", false);
     update_env(_env, "OMNITRACE_THREAD_POOL_SIZE",
                get_env<int>("OMNITRACE_THREAD_POOL_SIZE", 0));
     update_env(_env, "OMNITRACE_LAUNCHER", "omnitrace-causal");

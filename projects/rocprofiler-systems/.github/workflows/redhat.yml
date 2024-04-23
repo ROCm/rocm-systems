@@ -125,7 +125,7 @@ jobs:
       run: |
         set -v
         source /opt/omnitrace/share/omnitrace/setup-env.sh
-        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,rewrite,runtime,critical-trace,python}=1
+        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,rewrite,runtime,python}=1
 
     - name: Test User API
       timeout-minutes: 10

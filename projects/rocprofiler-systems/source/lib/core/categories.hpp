@@ -110,9 +110,6 @@ OMNITRACE_DEFINE_CATEGORY(category, mpi, OMNITRACE_CATEGORY_MPI, "mpi", "MPI reg
 OMNITRACE_DEFINE_CATEGORY(category, ompt, OMNITRACE_CATEGORY_OMPT, "ompt", "OpenMP tools regions")
 OMNITRACE_DEFINE_CATEGORY(category, process_sampling, OMNITRACE_CATEGORY_PROCESS_SAMPLING, "process_sampling", "Process-level data")
 OMNITRACE_DEFINE_CATEGORY(category, comm_data, OMNITRACE_CATEGORY_COMM_DATA, "comm_data", "MPI/RCCL counters for tracking amount of data sent or received")
-OMNITRACE_DEFINE_CATEGORY(category, critical_trace, OMNITRACE_CATEGORY_CRITICAL_TRACE, "critical-trace", "Critical trace data")
-OMNITRACE_DEFINE_CATEGORY(category, host_critical_trace, OMNITRACE_CATEGORY_HOST_CRITICAL_TRACE, "host-critical-trace", "Host-side critical trace data")
-OMNITRACE_DEFINE_CATEGORY(category, device_critical_trace, OMNITRACE_CATEGORY_DEVICE_CRITICAL_TRACE, "device-critical-trace", "Device-side critical trace data")
 OMNITRACE_DEFINE_CATEGORY(category, causal, OMNITRACE_CATEGORY_CAUSAL, "causal", "Causal profiling data")
 OMNITRACE_DEFINE_CATEGORY(category, cpu_freq, OMNITRACE_CATEGORY_CPU_FREQ, "cpu_frequency", "CPU frequency (collected in background thread)")
 OMNITRACE_DEFINE_CATEGORY(category, process_page, OMNITRACE_CATEGORY_PROCESS_PAGE, "process_page_fault", "Memory page faults in process (collected in background thread)")
@@ -174,9 +171,6 @@ using name = perfetto_category<Tp...>;
         OMNITRACE_PERFETTO_CATEGORY(category::sampling),                                 \
         OMNITRACE_PERFETTO_CATEGORY(category::process_sampling),                         \
         OMNITRACE_PERFETTO_CATEGORY(category::comm_data),                                \
-        OMNITRACE_PERFETTO_CATEGORY(category::critical_trace),                           \
-        OMNITRACE_PERFETTO_CATEGORY(category::host_critical_trace),                      \
-        OMNITRACE_PERFETTO_CATEGORY(category::device_critical_trace),                    \
         OMNITRACE_PERFETTO_CATEGORY(category::causal),                                   \
         OMNITRACE_PERFETTO_CATEGORY(category::cpu_freq),                                 \
         OMNITRACE_PERFETTO_CATEGORY(category::process_page),                             \

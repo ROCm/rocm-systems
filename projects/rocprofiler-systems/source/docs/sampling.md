@@ -209,7 +209,6 @@ $ omnitrace-sample -- ./parallel-overhead-locks 30 4 100
 HSA_TOOLS_LIB=/opt/omnitrace/lib/libomnitrace-dl.so.1.7.1
 HSA_TOOLS_REPORT_LOAD_FAILURE=1
 LD_PRELOAD=/opt/omnitrace/lib/libomnitrace-dl.so.1.7.1
-OMNITRACE_CRITICAL_TRACE=false
 OMNITRACE_USE_PROCESS_SAMPLING=false
 OMNITRACE_USE_SAMPLING=true
 OMP_TOOL_LIBRARIES=/opt/omnitrace/lib/libomnitrace-dl.so.1.7.1
@@ -228,7 +227,6 @@ HSA_TOOLS_REPORT_LOAD_FAILURE=1
 KOKKOS_PROFILE_LIBRARY=/opt/omnitrace/lib/libomnitrace.so.1.7.1
 LD_PRELOAD=/opt/omnitrace/lib/libomnitrace-dl.so.1.7.1
 OMNITRACE_CPU_FREQ_ENABLED=true
-OMNITRACE_CRITICAL_TRACE=false
 OMNITRACE_TRACE_THREAD_LOCKS=true
 OMNITRACE_TRACE_THREAD_RW_LOCKS=true
 OMNITRACE_TRACE_THREAD_SPIN_LOCKS=true
@@ -258,7 +256,6 @@ $ omnitrace-sample -PTDH -E all -o omnitrace-output %tag% -- ./parallel-overhead
 
 LD_PRELOAD=/opt/omnitrace/lib/libomnitrace-dl.so.1.7.1
 OMNITRACE_CPU_FREQ_ENABLED=true
-OMNITRACE_CRITICAL_TRACE=false
 OMNITRACE_OUTPUT_PATH=omnitrace-output
 OMNITRACE_OUTPUT_PREFIX=%tag%
 OMNITRACE_TRACE_THREAD_LOCKS=false
@@ -288,7 +285,6 @@ $ omnitrace-sample -PTDH -E all -o omnitrace-output %tag% -c -- ./parallel-overh
 LD_PRELOAD=/opt/omnitrace/lib/libomnitrace-dl.so.1.7.1
 OMNITRACE_CONFIG_FILE=
 OMNITRACE_CPU_FREQ_ENABLED=true
-OMNITRACE_CRITICAL_TRACE=false
 OMNITRACE_OUTPUT_PATH=omnitrace-output
 OMNITRACE_OUTPUT_PREFIX=%tag%
 OMNITRACE_TRACE_THREAD_LOCKS=false

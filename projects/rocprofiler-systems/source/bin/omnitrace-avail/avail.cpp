@@ -41,6 +41,8 @@
 #include <timemory/components/placeholder.hpp>
 #include <timemory/components/properties.hpp>
 #include <timemory/components/skeletons.hpp>
+#include <timemory/hash/types.hpp>
+#include <timemory/manager/manager.hpp>
 #include <timemory/mpl/types.hpp>
 #include <timemory/timemory.hpp>
 #include <timemory/unwind/bfd.hpp>
@@ -118,6 +120,11 @@ namespace
 {
 // initialize HIP before main so that libomnitrace is not HSA_TOOLS_LIB
 int gpu_count = omnitrace::gpu::hip_device_count();
+
+// statically allocated shared_ptrs to prevent use after free errors
+auto timemory_manager      = tim::manager::master_instance();
+auto timemory_hash_ids     = tim::hash::get_main_hash_ids();
+auto timemory_hash_aliases = tim::hash::get_main_hash_aliases();
 }  // namespace
 
 //--------------------------------------------------------------------------------------//
@@ -125,6 +132,10 @@ int gpu_count = omnitrace::gpu::hip_device_count();
 int
 main(int argc, char** argv)
 {
+    (void) timemory_manager;       // suppress unused variables
+    (void) timemory_hash_ids;      //
+    (void) timemory_hash_aliases;  //
+
     tim::unwind::set_bfd_verbose(3);
     tim::set_env("OMNITRACE_INIT_TOOLING", "OFF", 1);
     omnitrace_init_library();

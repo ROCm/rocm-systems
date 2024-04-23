@@ -138,8 +138,6 @@ jobs:
         ldd $(which omnitrace-avail)
         omnitrace-avail --help
         omnitrace-avail -a
-        which omnitrace-critical-trace
-        ldd $(which omnitrace-critical-trace)
         which omnitrace
         ldd $(which omnitrace)
         omnitrace-instrument --help

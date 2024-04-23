@@ -218,9 +218,6 @@ get_use_pid();
 bool&
 get_use_mpip();
 
-bool&
-get_use_critical_trace() OMNITRACE_HOT;
-
 bool
 get_use_kokkosp();
 
@@ -251,12 +248,6 @@ get_trace_hsa_api();
 bool
 get_trace_hsa_activity();
 
-bool
-get_critical_trace_debug();
-
-bool
-get_critical_trace_serialize_names();
-
 size_t
 get_perfetto_shmem_size_hint();
 
@@ -279,9 +270,6 @@ bool
 get_perfetto_annotations() OMNITRACE_HOT;
 
 uint64_t
-get_critical_trace_update_freq();
-
-uint64_t
 get_thread_pool_size();
 
 std::string
@@ -296,9 +284,6 @@ get_perfetto_output_filename();
 
 bool
 get_perfetto_roctracer_per_stream() OMNITRACE_HOT;
-
-int64_t
-get_critical_trace_count();
 
 double
 get_trace_delay();
@@ -359,9 +344,6 @@ get_process_sampling_duration();
 
 std::string
 get_sampling_gpus();
-
-int64_t
-get_critical_trace_per_row();
 
 bool
 get_trace_thread_locks();

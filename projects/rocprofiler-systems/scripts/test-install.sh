@@ -42,7 +42,6 @@ fi
 : ${ENABLE_OMNITRACE_PYTHON:=0}
 : ${ENABLE_OMNITRACE_REWRITE:=1}
 : ${ENABLE_OMNITRACE_RUNTIME:=1}
-: ${ENABLE_OMNITRACE_CRITICAL_TRACE:=1}
 
 usage()
 {
@@ -55,7 +54,6 @@ usage()
     print_option test-omnitrace-python "0|1" "Enable testing omnitrace-python" "${ENABLE_OMNITRACE_PYTHON}"
     print_option test-omnitrace-rewrite "0|1" "Enable testing omnitrace-instrument binary rewrite" "${ENABLE_OMNITRACE_REWRITE}"
     print_option test-omnitrace-runtime "0|1" "Enable testing omnitrace-instrument runtime instrumentation" "${ENABLE_OMNITRACE_RUNTIME}"
-    print_option test-omnitrace-critial-trace "0|1" "Enable testing omnitrace-instrument critical trace" "${ENABLE_OMNITRACE_CRITICAL_TRACE}"
 }
 
 cat << EOF > ${CONFIG_DIR}/omnitrace.cfg
@@ -124,10 +122,6 @@ do
             ;;
         --test-omnitrace-runtime)
             ENABLE_OMNITRACE_RUNTIME=${VAL}
-            continue
-            ;;
-        --test-omnitrace-critical-trace)
-            ENABLE_OMNITRACE_CRITICAL_TRACE=${VAL}
             continue
             ;;
         --source-dir)
@@ -204,16 +198,9 @@ test-omnitrace-runtime()
     verbose-run omnitrace-instrument -e -v 1 -- ${LS_NAME} ${LS_ARGS}
 }
 
-test-omnitrace-critical-trace()
-{
-    which omnitrace-critical-trace
-    ldd $(which omnitrace-critical-trace)
-}
-
 if [ "${ENABLE_OMNITRACE_INSTRUMENT}" -ne 0 ]; then verbose-run test-omnitrace; fi
 if [ "${ENABLE_OMNITRACE_AVAIL}" -ne 0 ]; then verbose-run test-omnitrace-avail; fi
 if [ "${ENABLE_OMNITRACE_SAMPLE}" -ne 0 ]; then verbose-run test-omnitrace-sample; fi
 if [ "${ENABLE_OMNITRACE_PYTHON}" -ne 0 ]; then verbose-run test-omnitrace-python; fi
 if [ "${ENABLE_OMNITRACE_REWRITE}" -ne 0 ]; then verbose-run test-omnitrace-rewrite; fi
 if [ "${ENABLE_OMNITRACE_RUNTIME}" -ne 0 ]; then verbose-run test-omnitrace-runtime; fi
-if [ "${ENABLE_OMNITRACE_CRITICAL_TRACE}" -ne 0 ]; then verbose-run test-omnitrace-critical-trace; fi

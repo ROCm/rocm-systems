@@ -15,7 +15,6 @@ endif()
 
 # executables
 add_subdirectory(omnitrace-avail)
-add_subdirectory(omnitrace-critical-trace)
 add_subdirectory(omnitrace-causal)
 add_subdirectory(omnitrace-sample)
 add_subdirectory(omnitrace-instrument)

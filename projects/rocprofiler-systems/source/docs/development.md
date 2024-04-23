@@ -50,10 +50,6 @@ for each variant:
   - For a binary rewrite: outputs new instrumented binary and exits
   - For runtime instrumentation or attaching to a process: instructs the application to resume executing and then waits for the application to exit
 
-### omnitrace-critical-trace: [source/bin/omnitrace-critical-trace](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-critical-trace)
-
-Post-processing tool for critical-trace data output by omnitrace.
-
 ## Libraries
 
 ### Common Library: [source/lib/common](https://github.com/ROCm/omnitrace/tree/main/source/lib/common)

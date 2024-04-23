@@ -67,17 +67,5 @@ namespace roctracer
 PTL::TaskGroup<void>&
 get_task_group(int64_t _tid = utility::get_thread_index());
 }  // namespace roctracer
-
-//--------------------------------------------------------------------------------------//
-//
-//      critical trace
-//
-//--------------------------------------------------------------------------------------//
-
-namespace critical_trace
-{
-PTL::TaskGroup<void>&
-get_task_group(int64_t _tid = utility::get_thread_index());
-}  // namespace critical_trace
 }  // namespace tasking
 }  // namespace omnitrace

@@ -216,7 +216,7 @@ jobs:
         module use /opt/omnitrace/share/modulefiles
         module avail
         module load omnitrace
-        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,python,rewrite,runtime,critical-trace}=1
+        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,python,rewrite,runtime}=1
 
     - name: Test User API
       timeout-minutes: 10

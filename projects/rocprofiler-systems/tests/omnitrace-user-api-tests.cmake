@@ -23,7 +23,7 @@ omnitrace_add_test(
         return
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
-    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF"
+    ENVIRONMENT "${_base_environment}"
     REWRITE_RUN_PASS_REGEX "Pushing custom region :: run.10. x 1000"
     RUNTIME_PASS_REGEX "Pushing custom region :: run.10. x 1000"
     SAMPLING_PASS_REGEX "Pushing custom region :: run.10. x 1000"

@@ -67,9 +67,6 @@ get_debug_tid() OMNITRACE_HOT;
 
 bool
 get_debug_pid() OMNITRACE_HOT;
-
-bool
-get_critical_trace_debug() OMNITRACE_HOT;
 }  // namespace config
 
 namespace debug
@@ -559,12 +556,6 @@ as_hex<void*>(void*, size_t);
 
 #define OMNITRACE_BASIC_DEBUG_F(...)                                                     \
     OMNITRACE_CONDITIONAL_BASIC_PRINT_F(::omnitrace::get_debug_env(), __VA_ARGS__)
-
-#define OMNITRACE_CT_DEBUG(...)                                                          \
-    OMNITRACE_CONDITIONAL_PRINT(::omnitrace::get_critical_trace_debug(), __VA_ARGS__)
-
-#define OMNITRACE_CT_DEBUG_F(...)                                                        \
-    OMNITRACE_CONDITIONAL_PRINT_F(::omnitrace::get_critical_trace_debug(), __VA_ARGS__)
 
 //--------------------------------------------------------------------------------------//
 //

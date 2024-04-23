@@ -10,7 +10,7 @@ omnitrace_add_test(
     REWRITE_ARGS -e -v 2 --print-instrumented modules -i 16
     RUNTIME_ARGS -e -v 1 --label file -i 16
     ENVIRONMENT
-        "${_base_environment};OMNITRACE_CRITICAL_TRACE=ON;OMNITRACE_SAMPLING_FREQ=250;OMNITRACE_SAMPLING_REALTIME=ON"
+        "${_base_environment};OMNITRACE_SAMPLING_FREQ=250;OMNITRACE_SAMPLING_REALTIME=ON"
     SAMPLING_PASS_REGEX "fork.. called on PID"
     RUNTIME_PASS_REGEX "fork.. called on PID"
     REWRITE_RUN_PASS_REGEX "fork.. called on PID"

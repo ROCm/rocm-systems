@@ -38,7 +38,6 @@
 #include "core/gpu.hpp"
 #include "core/perfetto.hpp"
 #include "core/state.hpp"
-#include "library/critical_trace.hpp"
 #include "library/runtime.hpp"
 #include "library/thread_info.hpp"
 
@@ -326,55 +325,6 @@ data::post_process(uint32_t _dev_id)
     };
 
     if(get_use_perfetto()) _process_perfetto();
-
-    if(!get_use_timemory()) return;
-
-#if !defined(TIMEMORY_USE_MPI)
-    // timemory + MPI here causes hangs for some reason. it is unclear why
-    using samp_bundle_t = tim::lightweight_tuple<sampling_gpu_busy, sampling_gpu_temp,
-                                                 sampling_gpu_power, sampling_gpu_memory>;
-
-    trait::runtime_enabled<sampling_gpu_busy>::set(_settings.busy);
-    trait::runtime_enabled<sampling_gpu_temp>::set(_settings.temp);
-    trait::runtime_enabled<sampling_gpu_power>::set(_settings.power);
-    trait::runtime_enabled<sampling_gpu_memory>::set(_settings.mem_usage);
-
-    using entry_t     = critical_trace::entry;
-    auto _gpu_entries = critical_trace::get_entries(
-        [](const entry_t& _e) { return (_e.device == critical_trace::Device::GPU); });
-
-    for(auto& itr : _rocm_smi)
-    {
-        auto _ts = itr.m_ts;
-        if(!_thread_info->is_valid_time(_ts)) continue;
-
-        auto _entries = std::vector<std::pair<std::string_view, const entry_t*>>{};
-        for(const auto& eitr : _gpu_entries)
-        {
-            if(_ts >= eitr.second.begin_ns && _ts <= eitr.second.end_ns)
-                _entries.emplace_back(std::string_view{ eitr.first }, &eitr.second);
-        }
-
-        std::vector<samp_bundle_t> _tc{};
-        _tc.reserve(_entries.size());
-        for(auto& eitr : _entries)
-        {
-            auto& _v = _tc.emplace_back(eitr.first);
-            _v.push();
-            _v.start();
-            _v.stop();
-
-            GPU_METRIC(sampling_gpu_busy, m_busy_perc)
-            GPU_METRIC(sampling_gpu_temp, m_temp / 1.0e3)  // provided in milli-degree C
-            GPU_METRIC(sampling_gpu_power,
-                       m_power * units::microwatt / static_cast<double>(units::watt))
-            GPU_METRIC(sampling_gpu_memory,
-                       m_mem_usage / static_cast<double>(units::megabyte))
-
-            _v.pop();
-        }
-    }
-#endif
 }
 
 //--------------------------------------------------------------------------------------//

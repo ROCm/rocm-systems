@@ -40,7 +40,7 @@ omnitrace_add_test(
         return
         args
     RUN_ARGS 10 ${NUM_THREADS} 1000
-    ENVIRONMENT "${_base_environment};OMNITRACE_CRITICAL_TRACE=OFF")
+    ENVIRONMENT "${_base_environment}")
 
 omnitrace_add_test(
     SKIP_BASELINE SKIP_RUNTIME

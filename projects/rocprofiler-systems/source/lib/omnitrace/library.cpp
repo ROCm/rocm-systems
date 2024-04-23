@@ -48,7 +48,6 @@
 #include "library/components/pthread_gotcha.hpp"
 #include "library/components/rocprofiler.hpp"
 #include "library/coverage.hpp"
-#include "library/critical_trace.hpp"
 #include "library/ompt.hpp"
 #include "library/process_sampler.hpp"
 #include "library/ptl.hpp"
@@ -202,9 +201,6 @@ ensure_finalization(bool _static_init = false)
 
     return scope::destructor{ []() { omnitrace_finalize_hidden(); } };
 }
-
-using Device = critical_trace::Device;
-using Phase  = critical_trace::Phase;
 
 template <typename... Tp>
 struct fini_bundle
@@ -401,11 +397,6 @@ omnitrace_init_library_hidden()
     scope::destructor _debug_dtor{ [_debug_value, _debug_init]() {
         if(_debug_init) config::set_setting_value("OMNITRACE_DEBUG", _debug_value);
     } };
-
-    // below will effectively do:
-    //      get_cpu_cid_stack(0)->emplace_back(-1);
-    // plus query some env variables
-    add_critical_trace<Device::CPU, Phase::NONE>(0, -1, 0, 0, 0, 0, 0, 0, 0, -1, 0);
 
     tim::trait::runtime_enabled<comp::roctracer>::set(get_use_roctracer());
     tim::trait::runtime_enabled<comp::roctracer_data>::set(get_use_roctracer() &&
@@ -920,53 +911,10 @@ omnitrace_finalize_hidden(void)
         causal::finish_experimenting();
     }
 
-    if(get_use_critical_trace() || (get_use_rocm_smi() && get_use_roctracer()))
-    {
-        OMNITRACE_VERBOSE_F(1, "Generating the critical trace...\n");
-        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
-        {
-            using critical_trace_hash_data =
-                thread_data<critical_trace::hash_ids, critical_trace::id>;
-
-            if(i < critical_trace_hash_data::get()->size() &&
-               critical_trace_hash_data::get()->at(i))
-            {
-                OMNITRACE_DEBUG_F("Copying the hash id data for thread %zu...\n", i);
-                critical_trace::add_hash_id(*critical_trace_hash_data::get()->at(i));
-            }
-        }
-
-        for(size_t i = 0; i < thread_info::get_peak_num_threads(); ++i)
-        {
-            using critical_trace_chain_data = thread_data<critical_trace::call_chain>;
-
-            if(i < critical_trace_chain_data::get()->size() &&
-               critical_trace_chain_data::get()->at(i))
-            {
-                OMNITRACE_DEBUG_F(
-                    "Updating the critical trace call-chains for thread %zu...\n", i);
-                critical_trace::update(i);  // launch update task
-            }
-        }
-
-        OMNITRACE_VERBOSE_F(1, "Waiting on critical trace updates...\n");
-        tasking::join();
-    }
-
     if(get_use_process_sampling())
     {
         OMNITRACE_VERBOSE_F(1, "Post-processing the system-level samples...\n");
         process_sampler::post_process();
-    }
-
-    if(get_use_critical_trace())
-    {
-        // launch compute task
-        OMNITRACE_VERBOSE_F(1, "Launching critical trace compute task...\n");
-        critical_trace::compute();
-
-        OMNITRACE_VERBOSE_F(1, "Waiting on critical trace computation...\n");
-        tasking::join();
     }
 
     // shutdown tasking before timemory is finalized, especially the roctracer thread-pool

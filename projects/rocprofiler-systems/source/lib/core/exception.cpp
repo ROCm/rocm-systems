@@ -50,6 +50,7 @@ template <typename... Args>
 auto
 get_backtrace(Args... _arg)
 {
+    consume_args(_arg...);
     auto _bt = std::stringstream{};
     if constexpr(sizeof...(Args) > 0)
     {
@@ -57,7 +58,6 @@ get_backtrace(Args... _arg)
     }
     tim::unwind::detailed_backtrace<2>(_bt, true);
     return strdup(_bt.str().c_str());
-    consume_args(_arg...);
 }
 }  // namespace
 

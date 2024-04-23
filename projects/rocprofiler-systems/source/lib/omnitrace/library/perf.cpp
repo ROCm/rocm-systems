@@ -633,6 +633,11 @@ perf_event::record::locate_field() const
     if constexpr(SampleT == sample::last) return reinterpret_cast<Tp>(p);
 
     OMNITRACE_FATAL << "Unsupported sample field requested!";
+
+    if constexpr(std::is_pointer<Tp>::value)
+        return nullptr;
+    else
+        return Tp{};
 }
 
 namespace

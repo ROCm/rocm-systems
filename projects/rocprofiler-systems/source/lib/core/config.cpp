@@ -520,10 +520,6 @@ configure_settings(bool _init)
                              _backend, "perfetto")
         ->set_choices({ "inprocess", "system", "all" });
 
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CRITICAL_TRACE",
-                             "Enable generation of the critical trace", false, "backend",
-                             "critical_trace");
-
     OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_TRACE_THREAD_LOCKS",
                              "Enable tracing calls to pthread_mutex_lock, "
                              "pthread_mutex_unlock, pthread_mutex_trylock",
@@ -652,15 +648,6 @@ configure_settings(bool _init)
                              "busy,temp,power,mem_usage", "backend", "rocm_smi", "rocm",
                              "process_sampling", "advanced");
 
-    OMNITRACE_CONFIG_SETTING(bool, "OMNITRACE_CRITICAL_TRACE_DEBUG",
-                             "Enable debugging for critical trace", _omnitrace_debug,
-                             "debugging", "critical_trace", "advanced");
-
-    OMNITRACE_CONFIG_SETTING(
-        bool, "OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES",
-        "Include names in serialization of critical trace (mainly for debugging)",
-        _omnitrace_debug, "debugging", "critical_trace", "advanced");
-
     OMNITRACE_CONFIG_SETTING(size_t, "OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB",
                              "Hint for shared-memory buffer size in perfetto (in KB)",
                              size_t{ 4096 }, "perfetto", "data", "advanced");
@@ -725,21 +712,6 @@ configure_settings(bool _init)
         std::max<uint64_t>(std::min<uint64_t>(4, std::thread::hardware_concurrency() / 2),
                            1),
         "parallelism", "advanced");
-
-    OMNITRACE_CONFIG_EXT_SETTING(int64_t, "OMNITRACE_CRITICAL_TRACE_COUNT",
-                                 "Number of critical trace to export (0 == all)",
-                                 int64_t{ 0 }, "critical_trace",
-                                 "omnitrace-critical-trace", "advanced");
-
-    OMNITRACE_CONFIG_SETTING(uint64_t, "OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT",
-                             "Number of critical trace records to store in thread-local "
-                             "memory before submitting to shared buffer",
-                             uint64_t{ 2000 }, "critical_trace", "advanced");
-
-    OMNITRACE_CONFIG_EXT_SETTING(
-        int64_t, "OMNITRACE_CRITICAL_TRACE_PER_ROW",
-        "How many critical traces per row in perfetto (0 == all in one row)",
-        int64_t{ 0 }, "critical_trace", "omnitrace-critical-trace", "advanced");
 
     OMNITRACE_CONFIG_SETTING(
         std::string, "OMNITRACE_TIMEMORY_COMPONENTS",
@@ -1162,14 +1134,12 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("OMNITRACE_USE_OMPT", false);
         _set("OMNITRACE_USE_SAMPLING", false);
         _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
-        _set("OMNITRACE_CRITICAL_TRACE", false);
     }
     else if(get_mode() == Mode::Causal)
     {
         _set("OMNITRACE_USE_CAUSAL", true);
         _set("OMNITRACE_TRACE", false);
         _set("OMNITRACE_PROFILE", false);
-        _set("OMNITRACE_CRITICAL_TRACE", false);
         _set("OMNITRACE_USE_SAMPLING", false);
         _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
     }
@@ -1228,7 +1198,6 @@ configure_mode_settings(const std::shared_ptr<settings>& _config)
         _set("OMNITRACE_USE_SAMPLING", false);
         _set("OMNITRACE_USE_PROCESS_SAMPLING", false);
         _set("OMNITRACE_USE_CODE_COVERAGE", false);
-        _set("OMNITRACE_CRITICAL_TRACE", false);
         set_setting_value("OMNITRACE_TIMEMORY_COMPONENTS", std::string{});
         set_setting_value("OMNITRACE_PAPI_EVENTS", std::string{});
     }
@@ -1409,7 +1378,6 @@ configure_disabled_settings(const std::shared_ptr<settings>& _config)
     _handle_use_option("OMNITRACE_USE_ROCM_SMI", "rocm_smi");
     _handle_use_option("OMNITRACE_USE_ROCTRACER", "roctracer");
     _handle_use_option("OMNITRACE_USE_ROCPROFILER", "rocprofiler");
-    _handle_use_option("OMNITRACE_CRITICAL_TRACE", "critical_trace");
 
 #if !defined(OMNITRACE_USE_ROCTRACER) || OMNITRACE_USE_ROCTRACER == 0
     _config->find("OMNITRACE_USE_ROCTRACER")->second->set_hidden(true);
@@ -1976,13 +1944,6 @@ get_use_mpip()
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
-bool&
-get_use_critical_trace()
-{
-    static auto _v = get_config()->find("OMNITRACE_CRITICAL_TRACE");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
 bool
 get_use_kokkosp()
 {
@@ -2027,20 +1988,6 @@ get_num_threads_hint()
 {
     static auto _v = get_config()->find("OMNITRACE_NUM_THREADS_HINT");
     return static_cast<tim::tsettings<size_t>&>(*_v->second).get();
-}
-
-bool
-get_critical_trace_debug()
-{
-    static auto _v = get_config()->find("OMNITRACE_CRITICAL_TRACE_DEBUG");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-bool
-get_critical_trace_serialize_names()
-{
-    static auto _v = get_config()->find("OMNITRACE_CRITICAL_TRACE_SERIALIZE_NAMES");
-    return static_cast<tim::tsettings<bool>&>(*_v->second).get();
 }
 
 bool
@@ -2097,13 +2044,6 @@ get_trace_hsa_activity()
 {
     static auto _v = get_config()->find("OMNITRACE_ROCTRACER_HSA_ACTIVITY");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-int64_t
-get_critical_trace_per_row()
-{
-    static auto _v = get_config()->find("OMNITRACE_CRITICAL_TRACE_PER_ROW");
-    return static_cast<tim::tsettings<int64_t>&>(*_v->second).get();
 }
 
 size_t
@@ -2213,14 +2153,6 @@ get_perfetto_annotations()
 {
     static auto _v = get_config()->find("OMNITRACE_PERFETTO_ANNOTATIONS");
     return static_cast<tim::tsettings<bool>&>(*_v->second).get();
-}
-
-uint64_t
-get_critical_trace_update_freq()
-{
-    static uint64_t _v =
-        get_config()->get<uint64_t>("OMNITRACE_CRITICAL_TRACE_BUFFER_COUNT");
-    return _v;
 }
 
 uint64_t
@@ -2392,13 +2324,6 @@ get_sampling_allocator_size()
 {
     static auto _v = get_config()->find("OMNITRACE_SAMPLING_ALLOCATOR_SIZE");
     return std::max<size_t>(static_cast<tim::tsettings<size_t>&>(*_v->second).get(), 1);
-}
-
-int64_t
-get_critical_trace_count()
-{
-    static auto _v = get_config()->find("OMNITRACE_CRITICAL_TRACE_COUNT");
-    return static_cast<tim::tsettings<int64_t>&>(*_v->second).get();
 }
 
 double
