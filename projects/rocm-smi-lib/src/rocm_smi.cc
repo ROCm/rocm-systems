@@ -1265,6 +1265,7 @@ an additional value followed by * at index 1 and max value at index 2.
 constexpr uint32_t kOD_SCLK_label_array_index = 0;
 constexpr uint32_t kOD_MCLK_label_array_index =
                                             kOD_SCLK_label_array_index + 3;
+
 constexpr uint32_t kOD_VDDC_CURVE_label_array_index =
                                             kOD_MCLK_label_array_index + 2;
 constexpr uint32_t kOD_OD_RANGE_label_array_index =
@@ -1273,6 +1274,7 @@ constexpr uint32_t kOD_VDDC_CURVE_start_index =
                                            kOD_OD_RANGE_label_array_index + 3;
 // constexpr uint32_t kOD_VDDC_CURVE_num_lines =
 //                                             kOD_VDDC_CURVE_start_index + 4;
+constexpr uint32_t kMIN_VALID_LINES = 2;
 
 static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
                                                   rsmi_od_volt_freq_data_t *p) {
@@ -1292,7 +1294,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
 
   // This is a work-around to handle systems where kDevPowerODVoltage is not
   // fully supported yet.
-  if (val_vec.size() < 2) {
+  if (val_vec.size() < kMIN_VALID_LINES) {
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
@@ -1302,6 +1304,7 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
                             (val_vec[kOD_SCLK_label_array_index] != "GFXCLK:")) {
     return RSMI_STATUS_UNEXPECTED_DATA;
   }
+
 
   // find last_item but skip empty lines
   int last_item = val_vec.size()-1;
@@ -1348,39 +1351,9 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   if (val_vec.size() < kOD_VDDC_CURVE_label_array_index) {
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
-  assert(val_vec[kOD_VDDC_CURVE_label_array_index] == "OD_VDDC_CURVE:");
-  if (val_vec[kOD_VDDC_CURVE_label_array_index] != "OD_VDDC_CURVE:") {
-    return RSMI_STATUS_UNEXPECTED_DATA;
-  }
-
-  uint32_t tmp = kOD_VDDC_CURVE_label_array_index + 1;
-  if (val_vec.size() < (tmp + RSMI_NUM_VOLTAGE_CURVE_POINTS)) {
-    return RSMI_STATUS_UNEXPECTED_SIZE;
-  }
-  for (uint32_t i = 0; i < RSMI_NUM_VOLTAGE_CURVE_POINTS; ++i) {
-    freq_volt_string_to_point(val_vec[tmp + i], &(p->curve.vc_points[i]));
-  }
-
-  if (val_vec.size() < (kOD_OD_RANGE_label_array_index + 2)) {
-    return RSMI_STATUS_UNEXPECTED_SIZE;
-  }
-  assert(val_vec[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
-  if (val_vec[kOD_OD_RANGE_label_array_index] != "OD_RANGE:") {
-    return RSMI_STATUS_UNEXPECTED_DATA;
-  }
-
-  od_value_pair_str_to_range(val_vec[kOD_OD_RANGE_label_array_index + 1],
-                                                      &(p->sclk_freq_limits));
-  od_value_pair_str_to_range(val_vec[kOD_OD_RANGE_label_array_index + 2],
-                                                      &(p->mclk_freq_limits));
-
-  assert((val_vec.size() - kOD_VDDC_CURVE_start_index)%2 == 0);
-  if ((val_vec.size() - kOD_VDDC_CURVE_start_index)%2 != 0) {
-    return RSMI_STATUS_UNEXPECTED_SIZE;
-  }
 
   p->num_regions =
-     static_cast<uint32_t>((val_vec.size() - kOD_VDDC_CURVE_start_index) / 2);
+     static_cast<uint32_t>((val_vec.size()) / 2);
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -1653,28 +1626,13 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
 
   uint32_t val_vec_size = static_cast<uint32_t>(val_vec.size());
   assert((val_vec_size - kOD_VDDC_CURVE_start_index) > 0);
-  assert((val_vec_size - kOD_VDDC_CURVE_start_index)%2 == 0);
 
   ss << __PRETTY_FUNCTION__
      << " | val_vec_size = " << std::dec
      << val_vec_size
      << " | kOD_VDDC_CURVE_start_index = " << kOD_VDDC_CURVE_start_index;
   LOG_DEBUG(ss);
-  if (((val_vec_size - kOD_VDDC_CURVE_start_index) <= 0)  ||
-      (((val_vec_size - kOD_VDDC_CURVE_start_index)%2 != 0))) {
-    ss << __PRETTY_FUNCTION__ << " | Issue: od vdd curve returned unexpected "
-       << "data" << "; returning "
-       << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_SIZE);
-    LOG_ERROR(ss);
-    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_SIZE, __FUNCTION__);
-  }
-
-  *num_regions = std::min((val_vec_size - kOD_VDDC_CURVE_start_index) / 2,
-                                                                *num_regions);
-
-  for (uint32_t i=0; i < *num_regions; ++i) {
-    get_vc_region(kOD_VDDC_CURVE_start_index + i*2, &val_vec, p + i);
-  }
+  *num_regions = std::min((val_vec_size) / 2, *num_regions);
 
   return RSMI_STATUS_SUCCESS;
   CATCH

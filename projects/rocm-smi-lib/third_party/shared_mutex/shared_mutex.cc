@@ -41,6 +41,22 @@ THE SOFTWARE.
 #include <vector>
 
 #include "rocm_smi/rocm_smi_exception.h"
+#include "rocm_smi/rocm_smi_main.h"
+
+#define THREAD_ONLY_ENV_VAR "RSMI_MUTEX_THREAD_ONLY"
+#define MUTEX_TIME_OUT_ENV_VAR "RSMI_MUTEX_TIMEOUT"
+#define DEFAULT_MUTEX_TIMEOUT_SECONDS 5
+
+static int GetEnvVarUInteger(const char *ev_str) {
+  ev_str = getenv(ev_str);
+
+  if (ev_str) {
+    const int ret = atoi(ev_str);
+    return ret;
+  }
+
+  return -1;
+}
 
 // find which processes are using the file by searching /proc/*/fd
 static std::vector<std::string> lsof(const char* filename) {
@@ -81,9 +97,53 @@ static std::vector<std::string> lsof(const char* filename) {
   return matched_process;
 }
 
-shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
-  shared_mutex_t mutex = {NULL, 0, NULL, 0};
+// RSMI_MUTEX_THREAD_ONLY = 1 to enable thread safe mutex
+shared_mutex_t init_thread_safe_only(const char *name) {
+  shared_mutex_t mutex = {nullptr, 0, nullptr, 0};
   errno = 0;
+  mutex.shm_fd = -1;
+  mutex.created = 0;
+  pthread_mutex_t *mutex_ptr =  new pthread_mutex_t();
+
+  pthread_mutexattr_t attr;
+  if (pthread_mutexattr_init(&attr)) {
+    perror("pthread_mutexattr_init");
+    return mutex;
+  }
+  if (pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED)) {
+    perror("pthread_mutexattr_setpshared");
+    return mutex;
+  }
+
+  if (pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_RECURSIVE)) {
+    perror("pthread_mutexattr_settype");
+    return mutex;
+  }
+  if (pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST)) {
+    perror("pthread_mutexattr_setrobust");
+    return mutex;
+  }
+  if (pthread_mutex_init(mutex_ptr, &attr)) {
+    perror("pthread_mutex_init");
+    return mutex;
+  }
+
+  mutex.ptr = mutex_ptr;
+  mutex.name = reinterpret_cast<char *>(malloc(NAME_MAX+1));
+  (void)snprintf(mutex.name, NAME_MAX + 1, "%s", name);
+  return mutex;
+}
+
+shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
+  shared_mutex_t mutex = {nullptr, 0, nullptr, 0};
+  errno = 0;
+
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+
+  if (GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 || smi.is_thread_only_mutex()) {
+    fprintf(stderr, "rocm-smi: using thread safe only mutex\n");
+    return init_thread_safe_only(name);
+  }
 
   // Open existing shared memory object, or create one.
   // Two separate calls are needed here, to mark fact of creation
@@ -112,7 +172,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
 
   // Map pthread mutex into the shared memory.
   void *addr = mmap(
-    NULL,
+    nullptr,
     sizeof(pthread_mutex_t),
     PROT_READ|PROT_WRITE,
     MAP_SHARED,
@@ -130,67 +190,12 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
   // acquire it in 5 sec., re-do everything.
   struct timespec expireTime;
   clock_gettime(CLOCK_REALTIME, &expireTime);
-  expireTime.tv_sec += 5;
+  int time_out = GetEnvVarUInteger(MUTEX_TIME_OUT_ENV_VAR);
+  time_out = time_out < DEFAULT_MUTEX_TIMEOUT_SECONDS ? DEFAULT_MUTEX_TIMEOUT_SECONDS: time_out;
+  expireTime.tv_sec += time_out;
 
-  int ret;
-
-  ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
   pid_t cur_pid = getpid();
-
-  if (ret == EOWNERDEAD) {
-    ret = pthread_mutex_consistent(mutex_ptr);
-    // This function should not fail unless mutex_ptr is not robust
-    // or mutex_ptr is not in an inconsistent state. Neither scenario
-    // should ever be true at this point in the code.
-    assert(!ret);
-
-    // ...but if there are undocumented failure cases for
-    // pthread_mutex_consistent() handle them for release builds.
-    if (ret) {
-      fprintf(stderr, "pthread_mutex_consistent() returned %d\n", ret);
-      free(mutex.name);
-
-      throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
-      return mutex;
-    }
-
-    fprintf(stderr, "%s: %d detected dead process, and make mutex consistent.\n", name, cur_pid);
-    // The mutex is locked even if EOWNERDEAD was returned,and need to unlock it.
-    if (pthread_mutex_unlock(mutex_ptr)) {
-      perror("pthread_mutex_unlock");
-    }
-  } else if (ret || (mutex.created == 0 &&
-                     reinterpret_cast<shared_mutex_t *>(addr)->ptr == NULL)) {
-    // Something is out of sync.
-
-    // When process crash before unlock the mutex, the mutex is in bad status.
-    // reset the mutex if no process is using it, and then retry lock
-    if (!retried) {
-      std::vector<std::string> ids = lsof(name);
-      if (ids.size() == 0) {  // no process is using it
-        fprintf(stderr, "%s: %d re-init the mutex since no one use it.\n", name, cur_pid);
-        memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
-        // Set mutex.created == 1 so that it can be initialized latter.
-        mutex.created = 1;
-        free(mutex.name);
-        return shared_mutex_init(name, mode, true);
-      }
-    }
-
-    fprintf(stderr, "pthread_mutex_timedlock() returned %d\n", ret);
-    perror("Failed to initialize RSMI device mutex after 5 seconds. Previous "
-     "execution may not have shutdown cleanly. To fix problem, stop all "
-     "rocm_smi programs, and then delete the rocm_smi* shared memory files in"
-                                                                " /dev/shm.");
-    free(mutex.name);
-
-    throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
-    return mutex;
-  } else {
-    if (pthread_mutex_unlock(mutex_ptr)) {
-      perror("pthread_mutex_unlock");
-    }
-  }
+  int ret;
 
   // also need to set the attribute when retried as the mutex is re-initialized.
   if (mutex.created || retried) {
@@ -218,6 +223,70 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
     }
   }
 
+  ret = pthread_mutex_timedlock(mutex_ptr, &expireTime);
+
+
+  if (ret == EOWNERDEAD) {
+    ret = pthread_mutex_consistent(mutex_ptr);
+    // This function should not fail unless mutex_ptr is not robust
+    // or mutex_ptr is not in an inconsistent state. Neither scenario
+    // should ever be true at this point in the code.
+    assert(!ret);
+
+    // ...but if there are undocumented failure cases for
+    // pthread_mutex_consistent() handle them for release builds.
+    if (ret) {
+      fprintf(stderr, "pthread_mutex_consistent() returned %d\n", ret);
+      free(mutex.name);
+
+      throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
+      return mutex;
+    }
+
+    fprintf(stderr, "%d detected dead process, and making mutex %s consistent.\n",
+              cur_pid, name);
+    // The mutex is locked even if EOWNERDEAD was returned,and need to unlock it.
+    if (pthread_mutex_unlock(mutex_ptr)) {
+      perror("pthread_mutex_unlock");
+    }
+  } else if (ret || (mutex.created == 0 &&
+                     reinterpret_cast<shared_mutex_t *>(addr)->ptr == nullptr)) {
+    // Something is out of sync.
+
+    // When process crash before unlock the mutex, the mutex is in bad status.
+    // reset the mutex if no process is using it, and then retry lock
+    if (!retried) {
+      std::vector<std::string> ids = lsof(name);
+      if (ids.size() == 0) {  // no process is using it
+        fprintf(stderr, "%d re-init the mutex %s since no one use it. ret:%d ptr:%p\n",
+              cur_pid, name, ret, reinterpret_cast<shared_mutex_t *>(addr)->ptr);
+        memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
+        // Set mutex.created == 1 so that it can be initialized latter.
+        mutex.created = 1;
+        free(mutex.name);
+        return shared_mutex_init(name, mode, true);
+      }
+    }
+
+    fprintf(stderr, "pthread_mutex_timedlock() returned %d\n", ret);
+    perror("Failed to initialize RSMI device mutex after 5 seconds. Previous "
+     "execution may not have shutdown cleanly. To fix problem, stop all "
+     "rocm_smi programs, and then delete the rocm_smi* shared memory files in"
+                                                                " /dev/shm.");
+    free(mutex.name);
+
+    throw amd::smi::rsmi_exception(RSMI_STATUS_BUSY, __FUNCTION__);
+    return mutex;
+  } else {
+    const int ret = pthread_mutex_unlock(mutex_ptr);
+    if (ret) {
+      perror("pthread_mutex_unlock");
+      fprintf(stderr, "%d init_mutex %s: unlock timed lock, ret: %d\n", cur_pid, name, ret);
+    }
+  }
+
+
+
   mutex.ptr = mutex_ptr;
   mutex.name = reinterpret_cast<char *>(malloc(NAME_MAX+1));
   (void)snprintf(mutex.name, NAME_MAX + 1, "%s", name);
@@ -225,12 +294,17 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
 }
 
 int shared_mutex_close(shared_mutex_t mutex) {
-  if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  const bool is_thread_only = GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 ||
+          smi.is_thread_only_mutex();
+  if (is_thread_only) {
+    delete mutex.ptr;
+  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
     perror("munmap");
     return -1;
   }
-  mutex.ptr = NULL;
-  if (close(mutex.shm_fd)) {
+  mutex.ptr = nullptr;
+  if (!is_thread_only && close(mutex.shm_fd)) {
     perror("close");
     return -1;
   }
@@ -241,21 +315,26 @@ int shared_mutex_close(shared_mutex_t mutex) {
 }
 
 int shared_mutex_destroy(shared_mutex_t mutex) {
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  const bool is_thread_only = GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 ||
+          smi.is_thread_only_mutex();
   if ((errno = pthread_mutex_destroy(mutex.ptr))) {
     perror("pthread_mutex_destroy");
     return -1;
   }
-  if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
+  if (is_thread_only) {
+    delete mutex.ptr;
+  } else if (munmap(reinterpret_cast<void *>(mutex.ptr), sizeof(pthread_mutex_t))) {
     perror("munmap");
     return -1;
   }
-  mutex.ptr = NULL;
-  if (close(mutex.shm_fd)) {
+  mutex.ptr = nullptr;
+  if (!is_thread_only && close(mutex.shm_fd)) {
     perror("close");
     return -1;
   }
   mutex.shm_fd = 0;
-  if (shm_unlink(mutex.name)) {
+  if (!is_thread_only && shm_unlink(mutex.name)) {
     perror("shm_unlink");
     return -1;
   }
