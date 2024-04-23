@@ -122,6 +122,12 @@ foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
     endforeach()
 endforeach()
 
+# Install license file
+install(
+    FILES ${CPACK_RESOURCE_FILE_LICENSE}
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT core)
+
 # -------------------------------------------------------------------------------------- #
 #
 # Debian package specific variables
@@ -190,6 +196,7 @@ if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_PACKAGE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 
 # -------------------------------------------------------------------------------------- #
 #
