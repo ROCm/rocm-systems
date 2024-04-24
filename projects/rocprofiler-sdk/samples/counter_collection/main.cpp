@@ -60,20 +60,22 @@ kernelC(T* C_d, const T* A_d, size_t N)
 }
 
 void
-launchKernels()
+launchKernels(const long NUM_LAUNCH, const long SYNC_INTERVAL, const int DEV_ID)
 {
-    const int NUM_LAUNCH = 20000;
     // Normal HIP Calls
-    int*                             gpuMem;
+    HIP_CALL(hipSetDevice(DEV_ID));
     [[maybe_unused]] hipDeviceProp_t devProp;
-    HIP_CALL(hipGetDeviceProperties(&devProp, 0));
+    HIP_CALL(hipGetDeviceProperties(&devProp, DEV_ID));
+
+    int* gpuMem = nullptr;
     HIP_CALL(hipMalloc((void**) &gpuMem, 1 * sizeof(int)));
 
-    for(int i = 0; i < NUM_LAUNCH; i++)
+    for(long i = 0; i < NUM_LAUNCH; i++)
     {
         // KernelA and KernelB to be profiled as part of the session
         hipLaunchKernelGGL(kernelA, dim3(1), dim3(1), 0, 0, 1, 2);
         hipLaunchKernelGGL(kernelB, dim3(1), dim3(1), 0, 0, 1, 2);
+        if(i % SYNC_INTERVAL == (SYNC_INTERVAL - 1)) HIP_CALL(hipDeviceSynchronize());
     }
 
     const int NElems = 512 * 512;
@@ -94,21 +96,61 @@ launchKernels()
     HIP_CALL(hipDeviceSynchronize());
     const unsigned blocks          = 512;
     const unsigned threadsPerBlock = 256;
-    for(int i = 0; i < NUM_LAUNCH; i++)
+    for(long i = 0; i < NUM_LAUNCH; i++)
     {
         hipLaunchKernelGGL(kernelC, dim3(blocks), dim3(threadsPerBlock), 0, 0, C_d, A_d, NElems);
+        if(i % SYNC_INTERVAL == (SYNC_INTERVAL - 1)) HIP_CALL(hipDeviceSynchronize());
     }
     HIP_CALL(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
     HIP_CALL(hipDeviceSynchronize());
     HIP_CALL(hipFree(gpuMem));
     HIP_CALL(hipFree(A_d));
     HIP_CALL(hipFree(C_d));
-    std::cerr << "Run complete\n";
 }
 
 int
-main()
+main(int argc, char** argv)
 {
+    auto* exe_name = ::basename(argv[0]);
+
+    int ntotdevice = 0;
+    HIP_CALL(hipGetDeviceCount(&ntotdevice));
+
+    long nitr    = 5000;
+    long nsync   = 500;
+    long ndevice = 0;
+
+    for(int i = 1; i < argc; ++i)
+    {
+        auto _arg = std::string{argv[i]};
+        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            fprintf(stderr,
+                    "usage: %s [NUM_ITERATION (%li)] [SYNC_EVERY_N_ITERATIONS (%li)] "
+                    "[NUMBER_OF_DEVICES (%li)]\n\n\tBy default, 0 for the number of devices means "
+                    "use all device available",
+                    exe_name,
+                    nitr,
+                    nsync,
+                    ndevice);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    if(argc > 1) nitr = atol(argv[1]);
+    if(argc > 2) nsync = atoll(argv[2]);
+    if(argc > 3) ndevice = atol(argv[3]);
+
+    if(ndevice > ntotdevice) ndevice = ntotdevice;
+    if(ndevice < 1) ndevice = ntotdevice;
+
+    printf("[%s] Number of devices used: %li\n", exe_name, ndevice);
+    printf("[%s] Number of iterations: %li\n", exe_name, nitr);
+    printf("[%s] Syncing every %li iterations\n", exe_name, nsync);
+
     start();
-    launchKernels();
+    for(long devid = 0; devid < ndevice; ++devid)
+        launchKernels(nitr, nsync, devid);
+
+    std::cerr << "Run complete\n";
 }
