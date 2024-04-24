@@ -91,8 +91,13 @@ static const std::map<amdsmi_gpu_block_t, const char *> kBlockNameMap = {
     {AMDSMI_GPU_BLOCK_MP0, "MP0"},
     {AMDSMI_GPU_BLOCK_MP1, "MP1"},
     {AMDSMI_GPU_BLOCK_FUSE, "FUSE"},
+    {AMDSMI_GPU_BLOCK_MCA, "MCA"},
+    {AMDSMI_GPU_BLOCK_VCN, "VCN"},
+    {AMDSMI_GPU_BLOCK_JPEG, "JPEG"},
+    {AMDSMI_GPU_BLOCK_IH, "IH"},
+    {AMDSMI_GPU_BLOCK_MPIO, "MPIO"},
 };
-static_assert(AMDSMI_GPU_BLOCK_LAST == AMDSMI_GPU_BLOCK_FUSE,
+static_assert(AMDSMI_GPU_BLOCK_LAST == AMDSMI_GPU_BLOCK_MPIO,
                                          "kBlockNameMap needs to be updated");
 
 static const char * kRasErrStateStrings[] = {

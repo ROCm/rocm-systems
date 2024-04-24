@@ -12,7 +12,47 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/](
 
 ### Changed
 
-- **Updated metrics --clocks**
+- **Updated `amd-smi metric --ecc-blocks` output**  
+The ecc blocks arguement was outputing blocks without counters available, updated the filtering show blocks that counters are available for:
+
+``` shell
+$ amd-smi metric --ecc-block
+GPU: 0
+    ECC_BLOCKS:
+        UMC:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        SDMA:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        GFX:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        MMHUB:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        PCIE_BIF:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        HDP:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+        XGMI_WAFL:
+            CORRECTABLE_COUNT: 0
+            UNCORRECTABLE_COUNT: 0
+            DEFERRED_COUNT: 0
+```
+
+- **Removed `amdsmi_get_gpu_process_info` from python library**  
+amdsmi_get_gpu_process_info was removed from the C library in an earlier build, but the API was still in the python interface
+
+- **Updated metrics --clocks**  
 Output for `amd-smi metric --clock` is updated to reflect each engine and bug fixes for the clock lock status and deep sleep status.
 
 ``` shell

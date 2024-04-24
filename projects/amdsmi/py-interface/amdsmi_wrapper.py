@@ -748,6 +748,19 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('reserved', ctypes.c_uint64 * 10),
+]
+
 class struct_pcie_metric_(Structure):
     pass
 
@@ -764,19 +777,6 @@ struct_pcie_metric_._fields_ = [
     ('pcie_nak_sent_count', ctypes.c_uint64),
     ('pcie_nak_received_count', ctypes.c_uint64),
     ('reserved', ctypes.c_uint64 * 13),
-]
-
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1300,7 +1300,12 @@ amdsmi_gpu_block_t__enumvalues = {
     2048: 'AMDSMI_GPU_BLOCK_MP0',
     4096: 'AMDSMI_GPU_BLOCK_MP1',
     8192: 'AMDSMI_GPU_BLOCK_FUSE',
-    8192: 'AMDSMI_GPU_BLOCK_LAST',
+    16384: 'AMDSMI_GPU_BLOCK_MCA',
+    32768: 'AMDSMI_GPU_BLOCK_VCN',
+    65536: 'AMDSMI_GPU_BLOCK_JPEG',
+    131072: 'AMDSMI_GPU_BLOCK_IH',
+    262144: 'AMDSMI_GPU_BLOCK_MPIO',
+    262144: 'AMDSMI_GPU_BLOCK_LAST',
     9223372036854775808: 'AMDSMI_GPU_BLOCK_RESERVED',
 }
 AMDSMI_GPU_BLOCK_INVALID = 0
@@ -1319,7 +1324,12 @@ AMDSMI_GPU_BLOCK_SEM = 1024
 AMDSMI_GPU_BLOCK_MP0 = 2048
 AMDSMI_GPU_BLOCK_MP1 = 4096
 AMDSMI_GPU_BLOCK_FUSE = 8192
-AMDSMI_GPU_BLOCK_LAST = 8192
+AMDSMI_GPU_BLOCK_MCA = 16384
+AMDSMI_GPU_BLOCK_VCN = 32768
+AMDSMI_GPU_BLOCK_JPEG = 65536
+AMDSMI_GPU_BLOCK_IH = 131072
+AMDSMI_GPU_BLOCK_MPIO = 262144
+AMDSMI_GPU_BLOCK_LAST = 262144
 AMDSMI_GPU_BLOCK_RESERVED = 9223372036854775808
 amdsmi_gpu_block_t = ctypes.c_uint64 # enum
 
@@ -2380,17 +2390,19 @@ __all__ = \
     'AMDSMI_GPU_BLOCK_ATHUB', 'AMDSMI_GPU_BLOCK_DF',
     'AMDSMI_GPU_BLOCK_FIRST', 'AMDSMI_GPU_BLOCK_FUSE',
     'AMDSMI_GPU_BLOCK_GFX', 'AMDSMI_GPU_BLOCK_HDP',
-    'AMDSMI_GPU_BLOCK_INVALID', 'AMDSMI_GPU_BLOCK_LAST',
-    'AMDSMI_GPU_BLOCK_MMHUB', 'AMDSMI_GPU_BLOCK_MP0',
-    'AMDSMI_GPU_BLOCK_MP1', 'AMDSMI_GPU_BLOCK_PCIE_BIF',
+    'AMDSMI_GPU_BLOCK_IH', 'AMDSMI_GPU_BLOCK_INVALID',
+    'AMDSMI_GPU_BLOCK_JPEG', 'AMDSMI_GPU_BLOCK_LAST',
+    'AMDSMI_GPU_BLOCK_MCA', 'AMDSMI_GPU_BLOCK_MMHUB',
+    'AMDSMI_GPU_BLOCK_MP0', 'AMDSMI_GPU_BLOCK_MP1',
+    'AMDSMI_GPU_BLOCK_MPIO', 'AMDSMI_GPU_BLOCK_PCIE_BIF',
     'AMDSMI_GPU_BLOCK_RESERVED', 'AMDSMI_GPU_BLOCK_SDMA',
     'AMDSMI_GPU_BLOCK_SEM', 'AMDSMI_GPU_BLOCK_SMN',
-    'AMDSMI_GPU_BLOCK_UMC', 'AMDSMI_GPU_BLOCK_XGMI_WAFL',
-    'AMDSMI_HSMP_TIMEOUT', 'AMDSMI_INIT_ALL_PROCESSORS',
-    'AMDSMI_INIT_AMD_APUS', 'AMDSMI_INIT_AMD_CPUS',
-    'AMDSMI_INIT_AMD_GPUS', 'AMDSMI_INIT_NON_AMD_CPUS',
-    'AMDSMI_INIT_NON_AMD_GPUS', 'AMDSMI_INVALID_POWER',
-    'AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES',
+    'AMDSMI_GPU_BLOCK_UMC', 'AMDSMI_GPU_BLOCK_VCN',
+    'AMDSMI_GPU_BLOCK_XGMI_WAFL', 'AMDSMI_HSMP_TIMEOUT',
+    'AMDSMI_INIT_ALL_PROCESSORS', 'AMDSMI_INIT_AMD_APUS',
+    'AMDSMI_INIT_AMD_CPUS', 'AMDSMI_INIT_AMD_GPUS',
+    'AMDSMI_INIT_NON_AMD_CPUS', 'AMDSMI_INIT_NON_AMD_GPUS',
+    'AMDSMI_INVALID_POWER', 'AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES',
     'AMDSMI_IOLINK_TYPE_PCIEXPRESS', 'AMDSMI_IOLINK_TYPE_SIZE',
     'AMDSMI_IOLINK_TYPE_UNDEFINED', 'AMDSMI_IOLINK_TYPE_XGMI',
     'AMDSMI_LINK_TYPE_NOT_APPLICABLE', 'AMDSMI_LINK_TYPE_PCIE',

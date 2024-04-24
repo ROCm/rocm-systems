@@ -17,10 +17,10 @@ subtrees:
         title: Python CLI Tool
       - file: amdsmi_release_notes_link
         title: Python CLI Release Notes
-  - caption: Libraries
+  - caption: Changelog
     entries:
-      - file: esmi_lib_readme_link
-        title: ESMI Library
+      - file: amdsmi_changelog_link
+        title: AMD-SMI Changelog
   - caption: About
     entries:
       - file: license

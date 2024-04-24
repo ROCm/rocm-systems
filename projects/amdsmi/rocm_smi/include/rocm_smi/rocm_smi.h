@@ -608,8 +608,13 @@ typedef enum {
   RSMI_GPU_BLOCK_MP0 =       0x0000000000000800,  //!< MP0 block
   RSMI_GPU_BLOCK_MP1 =       0x0000000000001000,  //!< MP1 block
   RSMI_GPU_BLOCK_FUSE =      0x0000000000002000,  //!< Fuse block
+  RSMI_GPU_BLOCK_MCA =       0x0000000000004000,  //!< MCA block
+  RSMI_GPU_BLOCK_VCN =       0x0000000000008000,  //!< VCN block
+  RSMI_GPU_BLOCK_JPEG =      0x0000000000010000,  //!< JPEG block
+  RSMI_GPU_BLOCK_IH =        0x0000000000020000,  //!< IH block
+  RSMI_GPU_BLOCK_MPIO =      0x0000000000040000,  //!< MPIO block
 
-  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_FUSE,       //!< The highest bit position
+  RSMI_GPU_BLOCK_LAST = RSMI_GPU_BLOCK_MPIO,       //!< The highest bit position
                                                   //!< for supported blocks
   RSMI_GPU_BLOCK_RESERVED =  0x8000000000000000
 } rsmi_gpu_block_t;

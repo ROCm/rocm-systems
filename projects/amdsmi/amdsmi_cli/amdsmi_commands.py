@@ -1692,14 +1692,15 @@ class AMDSMICommands():
         if "ecc_blocks" in current_platform_args:
             if args.ecc_blocks:
                 ecc_dict = {}
-                uncountable_blocks = ["ATHUB", "DF", "SMN", "SEM", "FUSE"]
+                sysfs_blocks = ["UMC", "SDMA", "GFX", "MMHUB", "PCIE_BIF", "HDP", "XGMI_WAFL"]
                 try:
                     ras_states = amdsmi_interface.amdsmi_get_gpu_ras_block_features_enabled(args.gpu)
                     for state in ras_states:
+                        # Only add enabled blocks that are also in sysfs
                         if state['status'] == amdsmi_interface.AmdSmiRasErrState.ENABLED.name:
                             gpu_block = amdsmi_interface.AmdSmiGpuBlock[state['block']]
                             # if the blocks are uncountable do not add them at all.
-                            if gpu_block.name not in uncountable_blocks:
+                            if gpu_block.name in sysfs_blocks:
                                 try:
                                     ecc_count = amdsmi_interface.amdsmi_get_gpu_ecc_count(args.gpu, gpu_block)
                                     ecc_dict[state['block']] = {'correctable_count' : ecc_count['correctable_count'],
@@ -2576,28 +2577,38 @@ class AMDSMICommands():
             raise e
 
         filtered_process_values = []
-        for process in process_list:
-            try:
-                process_info = amdsmi_interface.amdsmi_get_gpu_process_info(args.gpu, process)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                process_info = "N/A"
-                logging.debug("Failed to get process info for process %s on gpu %s | %s", process, gpu_id, e.get_error_info())
-                filtered_process_values.append({'process_info': process_info})
-                continue
-
+        for process_info in process_list:
             process_info['mem_usage'] = process_info.pop('mem')
             process_info['usage'] = process_info.pop('engine_usage')
+
+            engine_usage_unit = "ns"
+            memory_usage_unit = "B"
 
             if self.logger.is_human_readable_format():
                 process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
 
-                engine_usage_unit = "ns"
                 for usage_metric in process_info['usage']:
                     process_info['usage'][usage_metric] = f"{process_info['usage'][usage_metric]} {engine_usage_unit}"
 
                 for usage_metric in process_info['memory_usage']:
                     process_info['memory_usage'][usage_metric] = self.helpers.convert_bytes_to_readable(process_info['memory_usage'][usage_metric])
+            elif self.logger.is_json_format():
+                process_info['mem_usage'] = {"value" : process_info['mem_usage'],
+                                             "unit" : memory_usage_unit}
 
+                for usage_metric in process_info['usage']:
+                    process_info['usage'][usage_metric] = {"value" : process_info['usage'][usage_metric],
+                                                           "unit" : engine_usage_unit}
+
+                for usage_metric in process_info['memory_usage']:
+                    process_info['memory_usage'][usage_metric] = {"value" : process_info['memory_usage'][usage_metric],
+                                                                  "unit" : memory_usage_unit}
+
+            filtered_process_values.append({'process_info': process_info})
+
+        if not filtered_process_values:
+            process_info = "N/A"
+            logging.debug("Failed to detect any process on gpu %s", gpu_id)
             filtered_process_values.append({'process_info': process_info})
 
         # Arguments will filter the populated processes
@@ -2641,7 +2652,7 @@ class AMDSMICommands():
         # Convert and store output by pid for csv format
         if self.logger.is_csv_format():
             # Check for empty list first
-            if filtered_process_values == []:
+            if not filtered_process_values:
                 self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
             else:
                 for process_info in filtered_process_values:
@@ -2660,7 +2671,7 @@ class AMDSMICommands():
                 self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
 
             # Store values in logger.output
-            if filtered_process_values == []:
+            if not filtered_process_values:
                 self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
             else:
                 for process_info in filtered_process_values:

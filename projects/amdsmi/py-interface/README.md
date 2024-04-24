@@ -88,7 +88,7 @@ Initialize GPUs only example:
 ```python
 try:
     # by default we initalize with AmdSmiInitFlags.INIT_AMD_GPUS
-    init_flag = amdsmi_init()
+    ret = amdsmi_init()
     # continue with amdsmi
 except AmdSmiException as e:
     print("Init GPUs failed")
@@ -99,7 +99,7 @@ Initialize CPUs only example:
 
 ```python
 try:
-    init_flag = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_CPUS)
     # continue with amdsmi
 except AmdSmiException as e:
     print("Init CPUs failed")
@@ -110,7 +110,7 @@ Initialize both GPUs and CPUs example:
 
 ```python
 try:
-    init_flag = amdsmi_init(AmdSmiInitFlags.INIT_AMD_APUS)
+    ret = amdsmi_init(AmdSmiInitFlags.INIT_AMD_APUS)
     # continue with amdsmi
 except AmdSmiException as e:
     print("Init both GPUs & CPUs failed")
@@ -882,13 +882,21 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_process_list
 
-Description: Returns the list of processes running on the target GPU.
+Description: Returns the list of processes running on the target GPU; May require root level access
 
 Input parameters:
 
 * `processor_handle` device which to query
 
-Output: List of `amdsmi_proc_info_t` process objects running on the target GPU; can be empty
+Output: List of Dictionaries with the corresponding fields; empty list if no running process are detected
+
+Field | Description
+---|---
+`name` | Name of process
+`pid` | Process ID
+`mem` | Process memory usage
+`engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
+`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage</td></tr><tr><td>`vram_mem`</td><td>VRAM memory usage</td></tr> </tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
@@ -910,50 +918,7 @@ try:
                 print("No processes running on this GPU")
             else:
                 for process in processes:
-                    print(amdsmi_get_gpu_process_info(device, process))
-except AmdSmiException as e:
-    print(e)
-```
-
-### amdsmi_get_gpu_process_info
-
-Description: Returns info about process given the target GPU and the corresponding `amdsmi_proc_info_t` object
-
-Input parameters:
-
-* `processor_handle` device which to query
-
-Output: Dictionary with fields
-
-Field | Description
----|---
-`name` | Name of process
-`pid` | Process ID
-`mem` | Process memory usage
-`engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
-`memory_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gtt_mem`</td><td>GTT memory usage</td></tr><tr><td>`cpu_mem`</td><td>CPU memory usage</td></tr><tr><td>`vram_mem`</td><td>VRAM memory usage</td></tr> </tbody></table
-
-Exceptions that can be thrown by `amdsmi_get_gpu_process_info` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-* `AmdSmiParameterException`
-
-Example:
-
-```python
-try:
-    devices = amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            processes = amdsmi_get_gpu_process_list(device)
-            if len(processes) == 0:
-                print("No processes running on this GPU")
-            else:
-                for process in processes:
-                    print(amdsmi_get_gpu_process_info(device, process))
+                    print(process)
 except AmdSmiException as e:
     print(e)
 ```

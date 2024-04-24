@@ -964,10 +964,10 @@ typedef enum {
  */
 typedef enum {
   AMDSMI_GPU_BLOCK_INVALID =   0x0000000000000000,  //!< Used to indicate an
-                                                  //!< invalid block
+                                                    //!< invalid block
   AMDSMI_GPU_BLOCK_FIRST =     0x0000000000000001,
 
-  AMDSMI_GPU_BLOCK_UMC = AMDSMI_GPU_BLOCK_FIRST,      //!< UMC block
+  AMDSMI_GPU_BLOCK_UMC = AMDSMI_GPU_BLOCK_FIRST,    //!< UMC block
   AMDSMI_GPU_BLOCK_SDMA =      0x0000000000000002,  //!< SDMA block
   AMDSMI_GPU_BLOCK_GFX =       0x0000000000000004,  //!< GFX block
   AMDSMI_GPU_BLOCK_MMHUB =     0x0000000000000008,  //!< MMHUB block
@@ -981,9 +981,14 @@ typedef enum {
   AMDSMI_GPU_BLOCK_MP0 =       0x0000000000000800,  //!< MP0 block
   AMDSMI_GPU_BLOCK_MP1 =       0x0000000000001000,  //!< MP1 block
   AMDSMI_GPU_BLOCK_FUSE =      0x0000000000002000,  //!< Fuse block
+  AMDSMI_GPU_BLOCK_MCA =       0x0000000000004000,  //!< MCA block
+  AMDSMI_GPU_BLOCK_VCN =       0x0000000000008000,  //!< VCN block
+  AMDSMI_GPU_BLOCK_JPEG =      0x0000000000010000,  //!< JPEG block
+  AMDSMI_GPU_BLOCK_IH =        0x0000000000020000,  //!< IH block
+  AMDSMI_GPU_BLOCK_MPIO =      0x0000000000040000,  //!< MPIO block
 
-  AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_FUSE,       //!< The highest bit position
-                                                  //!< for supported blocks
+  AMDSMI_GPU_BLOCK_LAST = AMDSMI_GPU_BLOCK_MPIO,    //!< The highest bit position
+                                                    //!< for supported blocks
   AMDSMI_GPU_BLOCK_RESERVED =  0x8000000000000000
 } amdsmi_gpu_block_t;
 

@@ -108,7 +108,6 @@ from .amdsmi_interface import amdsmi_get_gpu_bad_page_info
 
 # # Process Information
 from .amdsmi_interface import amdsmi_get_gpu_process_list
-from .amdsmi_interface import amdsmi_get_gpu_process_info
 
 # # ECC Error Information
 from .amdsmi_interface import amdsmi_get_gpu_total_ecc_count

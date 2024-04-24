@@ -300,6 +300,11 @@ class AmdSmiGpuBlock(IntEnum):
     MP0 = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MP0
     MP1 = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MP1
     FUSE = amdsmi_wrapper.AMDSMI_GPU_BLOCK_FUSE
+    MCA = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MCA
+    VCN = amdsmi_wrapper.AMDSMI_GPU_BLOCK_VCN
+    JPEG = amdsmi_wrapper.AMDSMI_GPU_BLOCK_JPEG
+    IH = amdsmi_wrapper.AMDSMI_GPU_BLOCK_IH
+    MPIO = amdsmi_wrapper.AMDSMI_GPU_BLOCK_MPIO
     RESERVED = amdsmi_wrapper.AMDSMI_GPU_BLOCK_RESERVED
 
 
@@ -1799,12 +1804,15 @@ def amdsmi_get_gpu_bad_page_info(
     num_pages = ctypes.c_uint32()
     retired_page_record = ctypes.POINTER(
         amdsmi_wrapper.amdsmi_retired_page_record_t)()
+
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_bad_page_info(
             processor_handle, ctypes.byref(num_pages), retired_page_record
         )
     )
+
     table_records = _format_bad_page_info(retired_page_record, num_pages)
+
     if num_pages.value == 0:
         return "No bad pages found."
     else:
@@ -1903,7 +1911,7 @@ def amdsmi_get_gpu_ras_block_features_enabled(
         if gpu_block.name == "RESERVED" or gpu_block.name == "INVALID":
             continue
         if gpu_block.name == "LAST":
-            gpu_block.name = "FUSE"
+            gpu_block.name = "MPIO"
         _check_res(
             amdsmi_wrapper.amdsmi_get_gpu_ras_block_features_enabled(
                 processor_handle,
@@ -1942,37 +1950,22 @@ def amdsmi_get_gpu_process_list(
 
     result = []
     for index in range(max_processes.value):
-        result.append(process_list[index])
+        result.append({
+            "name": process_list[index].name.decode("utf-8"),
+            "pid": process_list[index].pid,
+            "mem": process_list[index].mem,
+            "engine_usage": {
+                "gfx": process_list[index].engine_usage.gfx,
+                "enc": process_list[index].engine_usage.enc
+            },
+            "memory_usage": {
+                "gtt_mem": process_list[index].memory_usage.gtt_mem,
+                "cpu_mem": process_list[index].memory_usage.cpu_mem,
+                "vram_mem": process_list[index].memory_usage.vram_mem,
+            },
+        })
+
     return result
-
-
-def amdsmi_get_gpu_process_info(
-    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-    process: amdsmi_wrapper.amdsmi_proc_info_t,
-) -> Dict[str, Any]:
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(
-            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
-        )
-
-    if not isinstance(process, amdsmi_wrapper.amdsmi_proc_info_t):
-        raise AmdSmiParameterException(
-            process, amdsmi_wrapper.amdsmi_proc_info_t)
-
-    return {
-        "name": process.name.decode("utf-8"),
-        "pid": process.pid,
-        "mem": process.mem,
-        "engine_usage": {
-            "gfx": process.engine_usage.gfx,
-            "enc": process.engine_usage.enc
-        },
-        "memory_usage": {
-            "gtt_mem": process.memory_usage.gtt_mem,
-            "cpu_mem": process.memory_usage.cpu_mem,
-            "vram_mem": process.memory_usage.vram_mem,
-        },
-    }
 
 
 def amdsmi_get_gpu_device_uuid(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
