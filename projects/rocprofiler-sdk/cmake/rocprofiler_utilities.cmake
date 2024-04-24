@@ -998,4 +998,51 @@ function(rocprofiler_parse_hsa_api_table_versions _TARGET)
     endif()
 endfunction()
 
+# ----------------------------------------------------------------------------
+# Configures and installs the setup-env.sh and modulefile
+#
+function(rocprofiler_install_env_setup_files)
+    # parse args
+    cmake_parse_arguments(
+        RIEF "" "NAME;VERSION;SOURCE_DIR;BINARY_DIR;INSTALL_DIR;COMPONENT" "" ${ARGN})
+
+    if(NOT RIEF_NAME OR NOT RIEF_INSTALL_DIR)
+        message(SEND_ERROR "Missing NAME / INSTALL_DIR arguments")
+        return()
+    endif()
+
+    set(PACKAGE_NAME "${RIEF_NAME}")
+    string(REPLACE "-" "_" PACKAGE_NAME_UNDERSCORED "${RIEF_NAME}")
+
+    foreach(_TYPE VERSION SOURCE_DIR BINARY_DIR)
+        if(NOT RIEF_${_TYPE})
+            set(RIEF_${_TYPE} "${PROJECT_${_TYPE}}")
+        endif()
+    endforeach()
+
+    if(NOT RIEF_COMPONENT)
+        set(RIEF_COMPONENT ${CMAKE_INSTALL_DEFAULT_COMPONENT_NAME})
+    endif()
+
+    configure_file(
+        ${RIEF_SOURCE_DIR}/cmake/Templates/setup-env.sh.in
+        ${RIEF_BINARY_DIR}/${RIEF_INSTALL_DIR}/${PACKAGE_NAME}/setup-env.sh @ONLY)
+
+    configure_file(
+        ${RIEF_SOURCE_DIR}/cmake/Templates/modulefile.in
+        ${RIEF_BINARY_DIR}/${RIEF_INSTALL_DIR}/modulefiles/${PACKAGE_NAME}/${RIEF_VERSION}
+        @ONLY)
+
+    install(
+        FILES ${RIEF_BINARY_DIR}/${RIEF_INSTALL_DIR}/${PACKAGE_NAME}/setup-env.sh
+        DESTINATION ${RIEF_INSTALL_DIR}/${PACKAGE_NAME}
+        COMPONENT ${RIEF_COMPONENT})
+
+    install(
+        FILES
+            ${RIEF_BINARY_DIR}/${RIEF_INSTALL_DIR}/modulefiles/${PACKAGE_NAME}/${RIEF_VERSION}
+        DESTINATION ${RIEF_INSTALL_DIR}/modulefiles/${PACKAGE_NAME}
+        COMPONENT ${RIEF_COMPONENT})
+endfunction()
+
 cmake_policy(POP)

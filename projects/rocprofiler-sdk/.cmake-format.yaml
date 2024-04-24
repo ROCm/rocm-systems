@@ -245,6 +245,14 @@ parse:
         COPY: '*'
         CONFIG: '*'
         OUTPUT_DIRECTORY: '*'
+    rocprofiler_install_env_setup_files:
+      kwargs:
+        NAME: '*'
+        VERSION: '*'
+        SOURCE_DIR: '*'
+        BINARY_DIR: '*'
+        INSTALL_DIR: '*'
+        COMPONENT: '*'
   override_spec: {}
   vartags: []
   proptags: []

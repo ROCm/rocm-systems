@@ -10,7 +10,13 @@ install(
     EXPORT ${PACKAGE_NAME}-targets
     FILE ${PACKAGE_NAME}-targets.cmake
     NAMESPACE ${PACKAGE_NAME}::
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
+    COMPONENT roctx)
+
+rocprofiler_install_env_setup_files(
+    NAME ${PACKAGE_NAME}
+    VERSION ${PROJECT_VERSION}
+    INSTALL_DIR ${CMAKE_INSTALL_DATAROOTDIR}
     COMPONENT roctx)
 
 # ------------------------------------------------------------------------------#
@@ -24,21 +30,21 @@ set(PROJECT_EXTRA_DIRS "${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME}-sdk-roctx")
 
 configure_package_config_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/config.cmake.in
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
     INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX}
     PATH_VARS PROJECT_INSTALL_DIR INCLUDE_INSTALL_DIR LIB_INSTALL_DIR)
 
 write_basic_package_version_file(
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
     VERSION ${PROJECT_VERSION}
     COMPATIBILITY SameMinorVersion)
 
 install(
     FILES
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
-        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config.cmake
+        ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-config-version.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
     COMPONENT roctx)
 
 export(PACKAGE ${PACKAGE_NAME})
@@ -57,14 +63,14 @@ set(PROJECT_BUILD_TREE_TARGETS
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/build-config.cmake.in
-    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-build-config.cmake
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/${PACKAGE_NAME}-build-config.cmake
     @ONLY)
 
 file(RELATIVE_PATH rocp_bin2src_rel_path ${PROJECT_BINARY_DIR} ${PROJECT_SOURCE_DIR})
 string(REPLACE "//" "/" rocp_inc_rel_path "${rocp_bin2src_rel_path}/source/include")
 
 set(_BUILDTREE_EXPORT_DIR
-    "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_DATAROOTDIR}/cmake/${PACKAGE_NAME}")
+    "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}")
 
 execute_process(
     COMMAND ${CMAKE_COMMAND} -E create_symlink ${rocp_inc_rel_path}
