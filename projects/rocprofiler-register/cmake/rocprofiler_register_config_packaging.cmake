@@ -75,14 +75,6 @@ else()
     set(CPACK_RPM_PACKAGE_REQUIRES "")
 endif()
 
-set(CPACK_RPM_PACKAGE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
-
-# Install license file
-install(
-    FILES ${CPACK_RESOURCE_FILE_LICENSE}
-    DESTINATION ${CMAKE_INSTALL_DOCDIR}
-    COMPONENT core)
-
 foreach(COMPONENT_GROUP ${ROCPROFILER_REGISTER_COMPONENT_GROUPS})
     set(_SEP "${COMPONENT_SEP_${COMPONENT_GROUP}}")
     set(_DEP "${COMPONENT_DEP_${COMPONENT_GROUP}}")
@@ -188,6 +180,7 @@ if(CPACK_RPM_PACKAGE_RELEASE)
     set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 # -------------------------------------------------------------------------------------- #
 #

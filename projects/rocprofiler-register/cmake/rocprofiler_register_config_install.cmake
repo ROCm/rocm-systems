@@ -4,6 +4,11 @@ include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
 install(
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT core)
+
+install(
     EXPORT rocprofiler-register-library-targets
     FILE rocprofiler-register-library-targets.cmake
     NAMESPACE rocprofiler-register::
