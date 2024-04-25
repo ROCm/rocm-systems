@@ -266,8 +266,8 @@
   </gfx90a>
 
   <gfx940>
-    <metric name="MeanOccupancyPerCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM" descr="Mean occupancy per compute unit."></metric>
-    <metric name="MeanOccupancyPerActiveCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM" descr="Mean occupancy per active compute unit."></metric>
+    <metric name="MeanOccupancyPerCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*XCC_NUM/GRBM_GUI_ACTIVE/CU_NUM" descr="Mean occupancy per compute unit."></metric>
+    <metric name="MeanOccupancyPerActiveCU" expr="SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4*XCC_NUM/SQ_BUSY_CYCLES/CU_NUM" descr="Mean occupancy per active compute unit."></metric>
 
     <metric name="GPUBusy" expr="100*GRBM_GUI_ACTIVE/GRBM_COUNT" descr="The percentage of time GPU was busy."></metric>
     <metric name="Wavefronts" expr="SQ_WAVES" descr="Total wavefronts."></metric>

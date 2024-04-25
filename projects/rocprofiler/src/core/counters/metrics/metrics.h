@@ -211,8 +211,9 @@ class MetricsDict {
     }
     xml_ = xml::Xml::Create(xml_name);
     if (xml_ == NULL) EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
-    xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->GetDeviceInfo().getMaxQueueSize());
+    xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->GetDeviceInfo().getMaxWaveSize());
     xml_->AddConst("top.const.metric", "CU_NUM", agent_info->GetDeviceInfo().getCUCount());
+    xml_->AddConst("top.const.metric", "XCC_NUM", agent_info->GetDeviceInfo().getXccCount());
     xml_->AddConst("top.const.metric", "SIMD_NUM",
                    agent_info->GetDeviceInfo().getSimdCountPerCU() * agent_info->GetDeviceInfo().getCUCount());
     xml_->AddConst("top.const.metric", "SE_NUM", agent_info->GetDeviceInfo().getShaderEngineCount());

@@ -198,6 +198,7 @@ class MetricsDict {
         EXC_RAISING(HSA_STATUS_ERROR, "metrics .xml open error '" << xml_name << "'");
       xml_->AddConst("top.const.metric", "MAX_WAVE_SIZE", agent_info->max_wave_size);
       xml_->AddConst("top.const.metric", "CU_NUM", agent_info->cu_num);
+      xml_->AddConst("top.const.metric", "XCC_NUM", agent_info->xcc_num);
       xml_->AddConst("top.const.metric", "SIMD_NUM", agent_info->simds_per_cu * agent_info->cu_num);
       xml_->AddConst("top.const.metric", "SE_NUM", agent_info->se_num);
       ImportMetrics(agent_info, "const");
