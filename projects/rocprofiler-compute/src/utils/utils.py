@@ -107,8 +107,7 @@ def get_version(omniperf_home) -> dict:
         except:
             pass
     if not found:
-        logging.error("Cannot find VERSION file at {}".format(searchDirs))
-        sys.exit(1)
+        console_error("Cannot find VERSION file at {}".format(searchDirs))
 
     # git version info
     gitDir = os.path.join(omniperf_home.parent, ".git")
@@ -380,7 +379,7 @@ def detect_roofline(mspec):
     if "ROOFLINE_BIN" in os.environ.keys():
         rooflineBinary = os.environ["ROOFLINE_BIN"]
         if os.path.exists(rooflineBinary):
-            logging._SysExcInfoType("Detected user-supplied binary")
+            console_warning("roofline", "Detected user-supplied binary")
             return {"rocm_ver": "override", "distro": "override", "path": rooflineBinary}
         else:
             msg = "user-supplied path to binary not accessible"
