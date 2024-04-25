@@ -341,6 +341,14 @@ operator+=(hsa_amd_profiling_async_copy_time_t& lhs, uint64_t rhs)
 }
 
 hsa_amd_profiling_async_copy_time_t&
+operator-=(hsa_amd_profiling_async_copy_time_t& lhs, uint64_t rhs)
+{
+    lhs.start -= rhs;
+    lhs.end -= rhs;
+    return lhs;
+}
+
+hsa_amd_profiling_async_copy_time_t&
 operator*=(hsa_amd_profiling_async_copy_time_t& lhs, uint64_t rhs)
 {
     lhs.start *= rhs;
@@ -378,13 +386,13 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     copy_time *= sysclock_period;
 
     // below is a hack for clock skew issues:
+    // the timestamp of this handler for the copy will always be after when the copy ended
+    if(ts < copy_time.end) copy_time -= (copy_time.end - ts);
+
+    // below is a hack for clock skew issues:
     // the timestamp of the function call triggering the copy will always be before when the copy
     // started
     if(copy_time.start < _data->start_ts) copy_time += (_data->start_ts - copy_time.start);
-
-    // below is a hack for clock skew issues:
-    // the timestamp of this handler for the copy will always be after when the copy ended
-    if(copy_time.end < ts) copy_time += (ts - copy_time.end);
 
     // if we encounter this in CI, it will cause test to fail
     ROCP_CI_LOG_IF(ERROR, copy_time_status == HSA_STATUS_SUCCESS && copy_time.end < copy_time.start)

@@ -70,6 +70,14 @@ operator+=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
 }
 
 hsa_amd_profiling_dispatch_time_t&
+operator-=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
+{
+    lhs.start -= rhs;
+    lhs.end -= rhs;
+    return lhs;
+}
+
+hsa_amd_profiling_dispatch_time_t&
 operator*=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
 {
     lhs.start *= rhs;
@@ -120,15 +128,15 @@ dispatch_complete(queue_info_session_t& session)
         dispatch_time *= sysclock_period;
 
         // below is a hack for clock skew issues:
+        // the timestamp of this handler for the kernel dispatch will always be after when the
+        // kernel completed
+        if(ts < dispatch_time.end) dispatch_time -= (dispatch_time.end - ts);
+
+        // below is a hack for clock skew issues:
         // the timestamp of the packet rewriter for the kernel packet will always be before when the
         // kernel started
         if(dispatch_time.start < session.enqueue_ts)
             dispatch_time += (session.enqueue_ts - dispatch_time.start);
-
-        // below is a hack for clock skew issues:
-        // the timestamp of this handler for the kernel dispatch will always be after when the
-        // kernel completed
-        if(dispatch_time.end < ts) dispatch_time += (ts - dispatch_time.end);
 
         callback_record.start_timestamp = dispatch_time.start;
         callback_record.end_timestamp   = dispatch_time.end;
