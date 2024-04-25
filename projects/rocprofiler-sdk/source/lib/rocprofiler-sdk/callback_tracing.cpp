@@ -27,11 +27,11 @@
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
-#include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
@@ -214,7 +214,7 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
         }
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         {
-            val = rocprofiler::hsa::code_object::name_by_id(operation);
+            val = rocprofiler::code_object::name_by_id(operation);
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
@@ -323,7 +323,7 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         }
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         {
-            ops = rocprofiler::hsa::code_object::get_ids();
+            ops = rocprofiler::code_object::get_ids();
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:

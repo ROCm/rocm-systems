@@ -3,7 +3,6 @@ set(ROCPROFILER_LIB_HSA_SOURCES
     agent_cache.cpp
     aql_packet.cpp
     async_copy.cpp
-    code_object.cpp
     hsa_barrier.cpp
     hsa.cpp
     pc_sampling.hpp
@@ -16,7 +15,6 @@ set(ROCPROFILER_LIB_HSA_HEADERS
     agent_cache.hpp
     aql_packet.hpp
     async_copy.hpp
-    code_object.hpp
     defines.hpp
     hsa_barrier.hpp
     hsa.hpp

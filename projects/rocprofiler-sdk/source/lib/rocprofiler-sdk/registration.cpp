@@ -27,10 +27,10 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
-#include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -602,7 +602,7 @@ finalize()
         hsa::async_copy_fini();
         hsa::queue_controller_fini();
         page_migration::finalize();
-        hsa::code_object_shutdown();
+        code_object::finalize();
         if(get_init_status() > 0)
         {
             invoke_client_finalizers();
@@ -749,8 +749,8 @@ rocprofiler_set_api_table(const char* name,
         // need to construct agent mappings before initializing the queue controller
         rocprofiler::agent::construct_agent_cache(hsa_api_table);
         rocprofiler::hsa::queue_controller_init(hsa_api_table);
-        rocprofiler::hsa::code_object_init(hsa_api_table);
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
+        rocprofiler::code_object::initialize(hsa_api_table);
 
         // install rocprofiler API wrappers
         rocprofiler::hsa::update_table(hsa_api_table->core_, lib_instance);

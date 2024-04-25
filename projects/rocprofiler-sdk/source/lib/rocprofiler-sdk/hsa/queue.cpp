@@ -24,8 +24,8 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hsa/code_object.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
@@ -270,7 +270,7 @@ WriteInterceptor(const void* packets,
         queue.async_started();
         // Copy kernel pkt, copy is to allow for signal to be modified
         rocprofiler_packet kernel_pkt = packets_arr[i];
-        uint64_t           kernel_id  = get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
+        uint64_t kernel_id = code_object::get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
         queue.create_signal(HSA_AMD_SIGNAL_AMD_GPU_ONLY,
                             &kernel_pkt.ext_amd_aql_pm4.completion_signal);
 

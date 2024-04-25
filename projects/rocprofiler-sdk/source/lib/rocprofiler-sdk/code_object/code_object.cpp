@@ -20,21 +20,23 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/rocprofiler-sdk/hsa/code_object.hpp"
+#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
+#include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include <hsa/hsa.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
 #include <glog/logging.h>
+#include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
 
@@ -43,6 +45,7 @@
 #include <cstdlib>
 #include <regex>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #if defined(ROCPROFILER_CI)
@@ -54,8 +57,6 @@
 #endif
 
 namespace rocprofiler
-{
-namespace hsa
 {
 namespace code_object
 {
@@ -158,7 +159,6 @@ get_names()
     get_names(_data, std::make_index_sequence<ROCPROFILER_CODE_OBJECT_LAST>{});
     return _data;
 }
-}  // namespace code_object
 
 namespace
 {
@@ -370,117 +370,6 @@ get_kernel_descriptor(uint64_t kernel_object)
     return reinterpret_cast<kernel_descriptor_t*>(kernel_object);
 }
 
-struct kernel_symbol
-{
-    using kernel_symbol_data_t =
-        rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
-
-    kernel_symbol()  = default;
-    ~kernel_symbol() = default;
-
-    kernel_symbol(const kernel_symbol&) = delete;
-    kernel_symbol(kernel_symbol&&) noexcept;
-
-    kernel_symbol& operator=(const kernel_symbol&) = delete;
-    kernel_symbol& operator                        =(kernel_symbol&&) noexcept;
-
-    bool                    beg_notified   = false;
-    bool                    end_notified   = false;
-    std::string*            name           = {};
-    hsa_executable_t        hsa_executable = {};
-    hsa_agent_t             hsa_agent      = {};
-    hsa_executable_symbol_t hsa_symbol     = {};
-    kernel_symbol_data_t    rocp_data      = common::init_public_api_struct(kernel_symbol_data_t{});
-    context_user_data_map_t user_data      = {};
-};
-
-kernel_symbol::kernel_symbol(kernel_symbol&& rhs) noexcept { operator=(std::move(rhs)); }
-
-kernel_symbol&
-kernel_symbol::operator=(kernel_symbol&& rhs) noexcept
-{
-    if(this != &rhs)
-    {
-        beg_notified          = rhs.beg_notified;
-        end_notified          = rhs.end_notified;
-        name                  = rhs.name;
-        hsa_executable        = rhs.hsa_executable;
-        hsa_agent             = rhs.hsa_agent;
-        hsa_symbol            = rhs.hsa_symbol;
-        rocp_data             = rhs.rocp_data;
-        user_data             = std::move(rhs.user_data);
-        rocp_data.kernel_name = (name) ? name->c_str() : nullptr;
-    }
-
-    return *this;
-}
-
-bool
-operator==(const kernel_symbol& lhs, const kernel_symbol& rhs)
-{
-    return std::tie(lhs.hsa_executable.handle, lhs.hsa_agent.handle, lhs.hsa_symbol.handle) ==
-           std::tie(rhs.hsa_executable.handle, rhs.hsa_agent.handle, rhs.hsa_symbol.handle);
-}
-
-struct code_object
-{
-    using code_object_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
-    using symbol_array_t     = std::vector<std::unique_ptr<kernel_symbol>>;
-
-    code_object()  = default;
-    ~code_object() = default;
-
-    code_object(const code_object&) = delete;
-    code_object(code_object&&) noexcept;
-
-    code_object& operator=(const code_object&) = delete;
-    code_object& operator                      =(code_object&&) noexcept;
-
-    bool                     beg_notified    = false;
-    bool                     end_notified    = false;
-    std::string*             uri             = {};
-    hsa_executable_t         hsa_executable  = {};
-    hsa_loaded_code_object_t hsa_code_object = {};
-    code_object_data_t       rocp_data       = common::init_public_api_struct(code_object_data_t{});
-    symbol_array_t           symbols         = {};
-    context_array_t          contexts        = {};
-    context_user_data_map_t  user_data       = {};
-};
-
-code_object::code_object(code_object&& rhs) noexcept { operator=(std::move(rhs)); }
-
-code_object&
-code_object::operator=(code_object&& rhs) noexcept
-{
-    if(this != &rhs)
-    {
-        beg_notified    = rhs.beg_notified;
-        end_notified    = rhs.end_notified;
-        uri             = rhs.uri;
-        hsa_executable  = rhs.hsa_executable;
-        hsa_code_object = rhs.hsa_code_object;
-        rocp_data       = rhs.rocp_data;
-        user_data       = std::move(rhs.user_data);
-        rocp_data.uri   = (uri) ? uri->c_str() : nullptr;
-        symbols         = std::move(rhs.symbols);
-    }
-
-    return *this;
-}
-
-bool
-operator==(const code_object& lhs, const code_object& rhs)
-{
-    return std::tie(lhs.hsa_executable.handle, lhs.hsa_code_object.handle) ==
-           std::tie(rhs.hsa_executable.handle, rhs.hsa_code_object.handle);
-}
-
-struct code_object_unload
-{
-    code_object*                object  = nullptr;
-    std::vector<kernel_symbol*> symbols = {};
-};
-
 auto&
 get_code_object_id()
 {
@@ -495,12 +384,11 @@ get_kernel_symbol_id()
     return _v;
 }
 
-using code_object_array_t        = std::vector<std::unique_ptr<code_object>>;
 using kernel_object_map_t        = std::unordered_map<uint64_t, uint64_t>;
 using executable_array_t         = std::vector<hsa_executable_t>;
-using code_object_unload_array_t = std::vector<code_object_unload>;
+using code_object_unload_array_t = std::vector<hsa::code_object_unload>;
 
-std::vector<code_object_unload>
+std::vector<hsa::code_object_unload>
 shutdown(hsa_executable_t executable);
 
 bool is_shutdown = false;
@@ -517,7 +405,7 @@ get_code_objects()
 {
     static auto*& _v =
         common::static_object<common::Synchronized<code_object_array_t>>::construct();
-    static auto _dtor = common::scope_destructor{[]() { code_object_shutdown(); }};
+    static auto _dtor = common::scope_destructor{[]() { finalize(); }};
     return _v;
 }
 
@@ -544,9 +432,9 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
         if(_status != HSA_STATUS_SUCCESS) return _status;                                          \
     }
 
-    auto& core_table = *get_table().core_;
-    auto* code_obj_v = static_cast<code_object*>(args);
-    auto  symbol_v   = kernel_symbol{};
+    auto& core_table = *::rocprofiler::hsa::get_core_table();
+    auto* code_obj_v = static_cast<hsa::code_object*>(args);
+    auto  symbol_v   = hsa::kernel_symbol{};
     auto& data       = symbol_v.rocp_data;
 
     symbol_v.hsa_executable = executable;
@@ -626,7 +514,7 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
             data.kernel_object,
             data.kernel_id);
 
-    code_obj_v->symbols.emplace_back(std::make_unique<kernel_symbol>(std::move(symbol_v)));
+    code_obj_v->symbols.emplace_back(std::make_unique<hsa::kernel_symbol>(std::move(symbol_v)));
 
     return HSA_STATUS_SUCCESS;
 
@@ -639,12 +527,12 @@ executable_iterate_agent_symbols_unload_callback(hsa_executable_t        executa
                                                  hsa_executable_symbol_t symbol,
                                                  void*                   args)
 {
-    auto symbol_v           = kernel_symbol{};
+    auto symbol_v           = hsa::kernel_symbol{};
     symbol_v.hsa_executable = executable;
     symbol_v.hsa_agent      = agent;
     symbol_v.hsa_symbol     = symbol;
 
-    auto* code_obj_v = static_cast<code_object_unload*>(args);
+    auto* code_obj_v = static_cast<hsa::code_object_unload*>(args);
     CHECK_NOTNULL(code_obj_v);
     CHECK_NOTNULL(code_obj_v->object);
 
@@ -672,7 +560,7 @@ code_object_load_callback(hsa_executable_t         executable,
     }
 
     auto&    loader_table  = get_loader_table();
-    auto     code_obj_v    = code_object{};
+    auto     code_obj_v    = hsa::code_object{};
     auto&    data          = code_obj_v.rocp_data;
     uint32_t _storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE;
 
@@ -695,7 +583,7 @@ code_object_load_callback(hsa_executable_t         executable,
         {
             if(itr && *itr == code_obj_v)
             {
-                get_table().core_->hsa_executable_iterate_agent_symbols_fn(
+                ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
                     executable,
                     data.hsa_agent,
                     executable_iterate_agent_symbols_load_callback,
@@ -782,12 +670,12 @@ code_object_load_callback(hsa_executable_t         executable,
     // generate a unique code object id
     data.code_object_id = ++get_code_object_id();
 
-    auto _status = get_table().core_->hsa_executable_iterate_agent_symbols_fn(
+    auto _status = ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
         executable, data.hsa_agent, executable_iterate_agent_symbols_load_callback, &code_obj_v);
 
     if(_status == HSA_STATUS_SUCCESS)
     {
-        code_obj_vec->emplace_back(std::make_unique<code_object>(std::move(code_obj_v)));
+        code_obj_vec->emplace_back(std::make_unique<hsa::code_object>(std::move(code_obj_v)));
     }
     else
     {
@@ -804,7 +692,7 @@ code_object_unload_callback(hsa_executable_t         executable,
                             hsa_loaded_code_object_t loaded_code_object,
                             void*                    args)
 {
-    auto code_obj_v            = code_object{};
+    auto code_obj_v            = hsa::code_object{};
     code_obj_v.hsa_executable  = executable;
     code_obj_v.hsa_code_object = loaded_code_object;
 
@@ -825,16 +713,29 @@ code_object_unload_callback(hsa_executable_t         executable,
                itr->hsa_code_object.handle == loaded_code_object.handle)
             // if(itr && *itr == code_obj_v)
             {
-                auto& _last = code_obj_arr->emplace_back(code_object_unload{.object = itr.get()});
+                auto& _last =
+                    code_obj_arr->emplace_back(hsa::code_object_unload{.object = itr.get()});
 
                 auto agent = itr->rocp_data.hsa_agent;
-                get_table().core_->hsa_executable_iterate_agent_symbols_fn(
+                ::rocprofiler::hsa::get_core_table()->hsa_executable_iterate_agent_symbols_fn(
                     executable, agent, executable_iterate_agent_symbols_unload_callback, &_last);
             }
         }
     });
 
     return HSA_STATUS_SUCCESS;
+}
+
+std::vector<hsa::code_object_unload>
+get_unloaded_code_objects(hsa_executable_t executable)
+{
+    auto _unloaded = std::vector<hsa::code_object_unload>{};
+
+    if(!is_shutdown && get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects)
+        get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+            executable, code_object_unload_callback, &_unloaded);
+
+    return _unloaded;
 }
 
 auto&
@@ -865,7 +766,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
 
     auto* code_obj_vec = get_code_objects();
     CHECK_NOTNULL(code_obj_vec)->wlock([executable](code_object_array_t& _vec) {
-        hsa::get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
+        get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
             executable, code_object_load_callback, &_vec);
     });
 
@@ -1005,14 +906,12 @@ executable_destroy(hsa_executable_t executable)
     return CHECK_NOTNULL(get_destroy_function())(executable);
 }
 
-std::vector<code_object_unload>
+std::vector<hsa::code_object_unload>
 shutdown(hsa_executable_t executable)
 {
     ROCP_INFO << "running " << __FUNCTION__ << " (executable=" << executable.handle << ")...";
 
-    auto _unloaded = std::vector<code_object_unload>{};
-    hsa::get_loader_table().hsa_ven_amd_loader_executable_iterate_loaded_code_objects(
-        executable, code_object_unload_callback, &_unloaded);
+    auto _unloaded = code_object::get_unloaded_code_objects(executable);
 
     constexpr auto CODE_OBJECT_KIND = ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT;
     constexpr auto CODE_OBJECT_LOAD = ROCPROFILER_CODE_OBJECT_LOAD;
@@ -1085,7 +984,7 @@ shutdown(hsa_executable_t executable)
 }  // namespace
 
 void
-code_object_init(HsaApiTable* table)
+initialize(HsaApiTable* table)
 {
     auto& core_table = *table->core_;
 
@@ -1123,7 +1022,7 @@ get_kernel_id(uint64_t kernel_object)
 }
 
 void
-code_object_shutdown()
+finalize()
 {
     if(is_shutdown || !get_executables() || !get_code_objects()) return;
 
@@ -1138,5 +1037,21 @@ code_object_shutdown()
 
     is_shutdown = true;
 }
-}  // namespace hsa
+
+void
+iterate_loaded_code_objects(code_object_iterator_t&& func)
+{
+    if(is_shutdown || !get_executables() || !get_code_objects()) return;
+
+    CHECK_NOTNULL(get_code_objects())
+        ->rlock(
+            [](const code_object_array_t& data, code_object_iterator_t&& func_v) {
+                for(const auto& itr : data)
+                {
+                    if(itr) func_v(*itr);
+                }
+            },
+            std::move(func));
+}
+}  // namespace code_object
 }  // namespace rocprofiler

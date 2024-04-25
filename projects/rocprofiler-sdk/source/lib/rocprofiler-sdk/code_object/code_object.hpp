@@ -22,17 +22,22 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/code_object/hsa/code_object.hpp"
+#include "lib/rocprofiler-sdk/code_object/hsa/kernel_symbol.hpp"
+
 #include <hsa/hsa_api_trace.h>
 
 #include <cstdint>
+#include <functional>
 #include <vector>
 
 namespace rocprofiler
 {
-namespace hsa
-{
 namespace code_object
 {
+using code_object_array_t    = std::vector<std::unique_ptr<hsa::code_object>>;
+using code_object_iterator_t = std::function<void(const hsa::code_object&)>;
+
 const char*
 name_by_id(uint32_t id);
 
@@ -44,15 +49,17 @@ get_names();
 
 std::vector<uint32_t>
 get_ids();
-}  // namespace code_object
-
-void
-code_object_init(HsaApiTable* table);
 
 uint64_t
 get_kernel_id(uint64_t kernel_object);
 
 void
-code_object_shutdown();
-}  // namespace hsa
+iterate_loaded_code_objects(code_object_iterator_t&& func);
+
+void
+initialize(HsaApiTable* table);
+
+void
+finalize();
+}  // namespace code_object
 }  // namespace rocprofiler

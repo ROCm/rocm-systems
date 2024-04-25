@@ -37,6 +37,7 @@ target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
 
 add_subdirectory(hsa)
 add_subdirectory(hip)
+add_subdirectory(code_object)
 add_subdirectory(context)
 add_subdirectory(counters)
 add_subdirectory(aql)
