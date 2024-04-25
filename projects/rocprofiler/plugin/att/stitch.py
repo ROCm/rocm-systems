@@ -249,13 +249,19 @@ class PCTranslator:
         pass
     def swappc(self, line, line_num, inst_index):
         try:
-            return self.getcode(self.insts[inst_index+1].cycles)[0][-3]
+            inst_pos = inst_index+1
+            while self.insts[inst_pos].type != PCINFO:
+                inst_pos += 1
+            return self.getcode(self.insts[inst_pos].cycles)[0][-3]
         except:
             print('SWAPPC warning: Could not find addr', hex(self.insts[inst_index+1].cycles), 'for', inst_index, line)
             return -1
     def setpc(self, line, inst_index):
         try:
-            return self.getcode(self.insts[inst_index+1].cycles)[0][-3]
+            inst_pos = inst_index+1
+            while self.insts[inst_pos].type != PCINFO:
+                inst_pos += 1
+            return self.getcode(self.insts[inst_pos].cycles)[0][-3]
         except:
             print('SETPC warning: Could not find addr', hex(self.insts[inst_index+1].cycles), 'for', inst_index, line)
             return -1
@@ -438,7 +444,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 if "flat_" in as_line[0]:
                     inc_ordering = True
 
-                if not "_inv" in as_line[0] and not "_wb" in as_line[0]:
+                if not "buffer_" in as_line[0] or not ("_inv" in as_line[0] or "_wb" in as_line[0]):
                     if not bGFX9 and "store" in as_line[0]:
                         VSMEM_INST.append([reverse_map[line], num_inflight])
                         NUM_VSMEM += 1
@@ -455,8 +461,8 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 vsmem_ordering = 1
                 FLAT_INST.append([reverse_map[line], num_inflight])
                 NUM_FLAT += 1
-            elif inst.type == IMMED and "s_waitcnt" in as_line[0]:
-                if "lgkmcnt" in as_line[0]:
+            elif inst.type == IMMED and "s_wait" in as_line[0]:
+                if "lgkmcnt" in as_line[0] or "dscnt" in as_line[0] or "kmcnt" in as_line[0]:
                     try:
                         wait_N = int(as_line[0].split("lgkmcnt(")[1].split(")")[0])
                     except:
@@ -478,7 +484,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                         NUM_FLAT = min(max(wait_N - NUM_SMEM, 0), NUM_FLAT)
                     num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
 
-                if "vmcnt" in as_line[0]:
+                if "vmcnt" in as_line[0] or "loadcnt" in as_line[0]:
                     try:
                         wait_N = int(as_line[0].split("vmcnt(")[1].split(")")[0])
                     except:
@@ -500,7 +506,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                         NUM_FLAT = min(max(wait_N - NUM_VLMEM, 0), NUM_FLAT)
                     num_inflight = NUM_FLAT + NUM_SMEM + NUM_VLMEM + NUM_VSMEM
 
-                if "vscnt" in as_line[0] or (bGFX9 and "vmcnt" in as_line[0]):
+                if "vscnt" in as_line[0] or (bGFX9 and "vmcnt" in as_line[0]) or "storecnt" in as_line[0]:
                     try:
                         wait_N = int(as_line[0].split('vscnt(')[1].split(')')[0])
                     except:
@@ -539,8 +545,8 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 insts[i] = insts[i + 1]
                 insts[i + 1] = temp
                 next = line
-            elif "s_waitcnt" in as_line[0] or "_load_" in as_line[0]:
-                if skipped_immed > 0 and "s_waitcnt" in as_line[0]:
+            elif "s_wait" in as_line[0] or "_load_" in as_line[0]:
+                if skipped_immed > 0 and "s_wait" in as_line[0]:
                     matched = True
                     skipped_immed -= 1
                 elif 'scratch_' not in as_line[0]:
