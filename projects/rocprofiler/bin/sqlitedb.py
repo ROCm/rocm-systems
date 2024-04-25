@@ -261,6 +261,8 @@ class SQLiteDB:
                     if label != '"Index"':
                         if label == '"dur"' and value == 0:
                             vals_list.append('%s:"%s"' % (label, "1"))
+                        elif label == '"pid"' or label == '"tid"':
+                            vals_list.append('%s:%d' % (label, value))
                         else:
                             vals_list.append('%s:"%s"' % (label, value))
 
