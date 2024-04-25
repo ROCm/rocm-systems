@@ -97,6 +97,8 @@ foreach(COMPONENT_GROUP ${ROCPROFILER_REGISTER_COMPONENT_GROUPS})
     if(ROCM_DEP_ROCMCORE OR ROCPROFILER_REGISTER_DEP_ROCMCORE)
         list(INSERT _DEP 0 "rocm-core")
     endif()
+    # Dependency list should be separated by comma
+    string(REPLACE ";" ", " _DEP "${_DEP}")
 
     string(TOUPPER "${COMPONENT_GROUP}" UCOMPONENT)
     set(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_NAME "${PROJECT_NAME}${_SEP}${_NAME}")
