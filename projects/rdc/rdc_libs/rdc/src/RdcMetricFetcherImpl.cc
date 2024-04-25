@@ -359,6 +359,50 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     value->type = INTEGER;
   };
 
+  auto read_gpu_metrics_uint64_t = [&](void) {
+    amdsmi_gpu_metrics_t gpu_metrics;
+    value->status = amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
+    RDC_LOG(RDC_DEBUG, "Read the gpu metrics:" << value->status);
+    if (value->status != AMDSMI_STATUS_SUCCESS) {
+      return;
+    }
+
+    const std::unordered_map<rdc_field_t, uint64_t> rdc_field_to_gpu_metrics = {
+      {RDC_FI_XGMI_0_READ_KB, gpu_metrics.xgmi_read_data_acc[0]},
+      {RDC_FI_XGMI_1_READ_KB, gpu_metrics.xgmi_read_data_acc[1]},
+      {RDC_FI_XGMI_2_READ_KB, gpu_metrics.xgmi_read_data_acc[2]},
+      {RDC_FI_XGMI_3_READ_KB, gpu_metrics.xgmi_read_data_acc[3]},
+      {RDC_FI_XGMI_4_READ_KB, gpu_metrics.xgmi_read_data_acc[4]},
+      {RDC_FI_XGMI_5_READ_KB, gpu_metrics.xgmi_read_data_acc[5]},
+      {RDC_FI_XGMI_6_READ_KB, gpu_metrics.xgmi_read_data_acc[6]},
+      {RDC_FI_XGMI_7_READ_KB, gpu_metrics.xgmi_read_data_acc[7]},
+      {RDC_FI_XGMI_0_WRITE_KB, gpu_metrics.xgmi_write_data_acc[0]},
+      {RDC_FI_XGMI_1_WRITE_KB, gpu_metrics.xgmi_write_data_acc[1]},
+      {RDC_FI_XGMI_2_WRITE_KB, gpu_metrics.xgmi_write_data_acc[2]},
+      {RDC_FI_XGMI_3_WRITE_KB, gpu_metrics.xgmi_write_data_acc[3]},
+      {RDC_FI_XGMI_4_WRITE_KB, gpu_metrics.xgmi_write_data_acc[4]},
+      {RDC_FI_XGMI_5_WRITE_KB, gpu_metrics.xgmi_write_data_acc[5]},
+      {RDC_FI_XGMI_6_WRITE_KB, gpu_metrics.xgmi_write_data_acc[6]},
+      {RDC_FI_XGMI_7_WRITE_KB, gpu_metrics.xgmi_write_data_acc[7]},
+      {RDC_FI_PCIE_BANDWIDTH, gpu_metrics.pcie_bandwidth_inst},
+    };
+
+    // In gpu_metrics,the max value means not supported
+    const auto not_supported_metrics_data = std::numeric_limits<uint64_t>::max();
+    auto gpu_metrics_value_ite = rdc_field_to_gpu_metrics.find(field_id);
+    if (gpu_metrics_value_ite != rdc_field_to_gpu_metrics.end()) {
+      if (gpu_metrics_value_ite->second != not_supported_metrics_data) {
+        value->value.l_int = gpu_metrics_value_ite->second;
+        value->type = INTEGER;
+        return;
+      } else {
+        RDC_LOG(RDC_DEBUG, "The gpu metrics return max value which indicate not supported:"
+                  << gpu_metrics_value_ite->second);
+      }
+    }
+    value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+  };
+
   switch (field_id) {
     case RDC_FI_GPU_MEMORY_USAGE: {
       uint64_t u64 = 0;
@@ -495,6 +539,25 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     }
+    case RDC_FI_XGMI_0_READ_KB:
+    case RDC_FI_XGMI_1_READ_KB:
+    case RDC_FI_XGMI_2_READ_KB:
+    case RDC_FI_XGMI_3_READ_KB:
+    case RDC_FI_XGMI_4_READ_KB:
+    case RDC_FI_XGMI_5_READ_KB:
+    case RDC_FI_XGMI_6_READ_KB:
+    case RDC_FI_XGMI_7_READ_KB:
+    case RDC_FI_XGMI_0_WRITE_KB:
+    case RDC_FI_XGMI_1_WRITE_KB:
+    case RDC_FI_XGMI_2_WRITE_KB:
+    case RDC_FI_XGMI_3_WRITE_KB:
+    case RDC_FI_XGMI_4_WRITE_KB:
+    case RDC_FI_XGMI_5_WRITE_KB:
+    case RDC_FI_XGMI_6_WRITE_KB:
+    case RDC_FI_XGMI_7_WRITE_KB:
+    case RDC_FI_PCIE_BANDWIDTH:
+      read_gpu_metrics_uint64_t();
+      break;
 
     default:
       break;
