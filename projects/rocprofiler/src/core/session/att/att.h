@@ -201,7 +201,7 @@ private:
   rocprofiler_buffer_id_t buffer_id_;
   rocprofiler_filter_id_t filter_id_;
   rocprofiler_session_id_t session_id_;
-  std::atomic<uint32_t> WRITER_ID{1};
+  std::atomic<uint32_t> WRITER_ID{0};
 
   std::vector<std::string> kernel_profile_names;
   std::vector<std::pair<uint64_t,uint64_t>> kernel_profile_dispatch_ids;
