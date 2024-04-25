@@ -534,7 +534,7 @@ def test_kernel_names():
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "MI200":
         assert sorted(list(file_dict.keys())) == [
-            "empirRoof_gpu-0_fp32.pdf",
+            "empirRoof_gpu-0_fp32_fp64.pdf",
             "empirRoof_gpu-0_int8_fp16.pdf",
             "kernelName_legend.pdf",
             "pmc_perf.csv",
