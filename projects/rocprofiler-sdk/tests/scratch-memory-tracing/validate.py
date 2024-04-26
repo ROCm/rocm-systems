@@ -152,16 +152,15 @@ def test_external_correlation_ids(input_data):
             assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
 
 
-def op_name(op_name, record):
-    op_key = None
-
-    for kind_node in record["names"]["kind_names"]:
-        if kind_node["value"] == op_name:
-            op_key = kind_node["key"]
-
-    for op_node in record["names"]["operation_names"]:
-        if op_node["key"] == op_key:
-            return op_node
+def get_operation(record, kind_name, op_name=None):
+    for idx, itr in enumerate(record["names"]):
+        if kind_name == itr["kind"]:
+            if op_name is None:
+                return idx, itr["operations"]
+            else:
+                for oidx, oname in enumerate(itr["operations"]):
+                    if op_name == oname:
+                        return oidx
 
     return None
 
@@ -179,16 +178,14 @@ def test_scratch_memory_tracking(input_data):
 
     assert len(scratch_callback_data) == 2 * len(scratch_buffer_data)
 
-    cb_op_names = op_name("SCRATCH_MEMORY", callback_records)["value"]
-    bf_op_names = op_name("SCRATCH_MEMORY", buffer_records)["value"]
+    _, cb_op_names = get_operation(callback_records, "SCRATCH_MEMORY")
+    _, bf_op_names = get_operation(buffer_records, "SCRATCH_MEMORY")
 
     assert len(cb_op_names) == 4
     assert len(bf_op_names) == 4
 
     # op name -> enum value
-    scratch_cb_op_map = {node["value"]: node["key"] for node in cb_op_names}
-    scratch_bf_op_map = {node["value"]: node["key"] for node in bf_op_names}
-    assert scratch_cb_op_map == scratch_bf_op_map
+    assert cb_op_names == bf_op_names
 
     scratch_reported_agent_ids = set()
     detected_agents_ids = set(
@@ -253,10 +250,8 @@ def test_scratch_memory_tracking(input_data):
             ), f"this:\n{this_node}\n\nnext:\n{next_node}"
 
             # alloc has more data vs free and async reclaim
-            scratch_alloc_node = (
-                this_node["operation"] == scratch_cb_op_map["SCRATCH_MEMORY_ALLOC"]
-            )
-            if scratch_alloc_node:
+            scratch_alloc_node = cb_op_names[this_node["operation"]]
+            if scratch_alloc_node == "SCRATCH_MEMORY_ALLOC":
                 assert (
                     pl(this_node)["queue_id"]["handle"]
                     == pl(next_node)["queue_id"]["handle"]

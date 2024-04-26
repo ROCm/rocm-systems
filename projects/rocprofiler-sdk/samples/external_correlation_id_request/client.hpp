@@ -20,43 +20,30 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// undefine NDEBUG so asserts are implemented
-#ifdef NDEBUG
-#    undef NDEBUG
+#pragma once
+
+#ifdef buffered_api_tracing_client_EXPORTS
+#    define CLIENT_API __attribute__((visibility("default")))
+#else
+#    define CLIENT_API
 #endif
 
-/**
- * @file tests/tools/c-tool.c
- *
- * @brief Example rocprofiler client (tool) written in C
- */
+#include <cstdint>
 
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
-rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t                 version,
-                      const char*              runtime_version,
-                      uint32_t                 priority,
-                      rocprofiler_client_id_t* id)
+namespace client
 {
-    // set the client name
-    id->name = "Test C tool";
+void
+setup() CLIENT_API;
 
-    // compute major/minor/patch version info
-    uint32_t major = version / 10000;
-    uint32_t minor = (version % 10000) / 100;
-    uint32_t patch = version % 100;
+void
+shutdown() CLIENT_API;
 
-    // generate info string
-    printf("%s (priority=%u) is using rocprofiler-sdk v%i.%i.%i (%s)\n",
-           id->name,
-           priority,
-           major,
-           minor,
-           patch,
-           runtime_version);
+void
+start() CLIENT_API;
 
-    // return pointer to configure data
-    return NULL;
-}
+void
+stop() CLIENT_API;
+
+void
+identify(uint64_t corr_id) CLIENT_API;
+}  // namespace client

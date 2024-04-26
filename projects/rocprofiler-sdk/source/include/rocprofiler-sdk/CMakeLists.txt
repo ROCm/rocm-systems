@@ -41,3 +41,4 @@ install(
 add_subdirectory(hip)
 add_subdirectory(hsa)
 add_subdirectory(marker)
+add_subdirectory(cxx)

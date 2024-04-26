@@ -191,25 +191,25 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     callback_name_info name_info = common::get_callback_id_names();
 
-    for(const auto& itr : name_info.operation_names)
+    for(const auto& itr : name_info)
     {
         auto name_idx = std::stringstream{};
-        name_idx << " [" << std::setw(3) << static_cast<int32_t>(itr.first) << "]";
+        name_idx << " [" << std::setw(3) << itr.value << "]";
         call_stack_v->emplace_back(
             source_location{"rocprofiler_callback_tracing_kind_names          " + name_idx.str(),
                             __FILE__,
                             __LINE__,
-                            name_info.kind_names.at(itr.first)});
+                            std::string{itr.name}});
 
-        for(const auto& ditr : itr.second)
+        for(auto [didx, ditr] : itr.items())
         {
             auto operation_idx = std::stringstream{};
-            operation_idx << " [" << std::setw(3) << static_cast<int32_t>(ditr.first) << "]";
+            operation_idx << " [" << std::setw(3) << didx << "]";
             call_stack_v->emplace_back(source_location{
                 "rocprofiler_callback_tracing_kind_operation_names" + operation_idx.str(),
                 __FILE__,
                 __LINE__,
-                std::string{"- "} + std::string{ditr.second}});
+                std::string{"- "} + std::string{*ditr}});
         }
     }
 
@@ -322,9 +322,6 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
-    // only activate if main tool
-    if(priority > 0) return nullptr;
-
     // set the client name
     id->name = "ExampleTool";
 
@@ -338,8 +335,8 @@ rocprofiler_configure(uint32_t                 version,
 
     // generate info string
     auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
-         << " (" << runtime_version << ")";
+    info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
+         << minor << "." << patch << " (" << runtime_version << ")";
 
     std::clog << info.str() << std::endl;
 

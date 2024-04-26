@@ -229,9 +229,6 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* client_id)
 {
-    // If not first tool to register, indicate that the tool doesn't want to do anything
-    if(priority > 0) return nullptr;
-
     // (optional) Provide a name for this tool to rocprofiler
     client_id->name = "ExampleTool";
 

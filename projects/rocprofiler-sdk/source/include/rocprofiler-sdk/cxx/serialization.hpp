@@ -19,44 +19,40 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+//
 
-// undefine NDEBUG so asserts are implemented
-#ifdef NDEBUG
-#    undef NDEBUG
-#endif
+#pragma once
 
-/**
- * @file tests/tools/c-tool.c
- *
- * @brief Example rocprofiler client (tool) written in C
- */
+#include <rocprofiler-sdk/cxx/name_info.hpp>
 
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
+#include <cereal/cereal.hpp>
 
-rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t                 version,
-                      const char*              runtime_version,
-                      uint32_t                 priority,
-                      rocprofiler_client_id_t* id)
+#include <string>
+#include <string_view>
+#include <vector>
+
+namespace cereal
 {
-    // set the client name
-    id->name = "Test C tool";
-
-    // compute major/minor/patch version info
-    uint32_t major = version / 10000;
-    uint32_t minor = (version % 10000) / 100;
-    uint32_t patch = version % 100;
-
-    // generate info string
-    printf("%s (priority=%u) is using rocprofiler-sdk v%i.%i.%i (%s)\n",
-           id->name,
-           priority,
-           major,
-           minor,
-           patch,
-           runtime_version);
-
-    // return pointer to configure data
-    return NULL;
+template <typename ArchiveT, typename EnumT, typename ValueT>
+void
+save(ArchiveT& ar, const rocprofiler::sdk::utility::name_info<EnumT, ValueT>& data)
+{
+    ar.makeArray();
+    for(const auto& itr : data)
+        ar(cereal::make_nvp("entry", itr));
 }
+
+template <typename ArchiveT, typename EnumT, typename ValueT>
+void
+save(ArchiveT& ar, const rocprofiler::sdk::utility::name_info_impl<EnumT, ValueT>& data)
+{
+    auto _name = std::string{data.name};
+    auto _ops  = std::vector<std::string>{};
+    _ops.reserve(data.operations.size());
+
+    ar(cereal::make_nvp("kind", _name));
+    for(auto itr : data.operations)
+        _ops.emplace_back(itr);
+    ar(cereal::make_nvp("operations", _ops));
+}
+}  // namespace cereal

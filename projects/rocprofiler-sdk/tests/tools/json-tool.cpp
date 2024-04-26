@@ -34,6 +34,7 @@
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
 #include "common/hash.hpp"
+#include "common/name_info.hpp"
 #include "common/perfetto.hpp"
 #include "common/serialization.hpp"
 
@@ -197,145 +198,13 @@ make_array(Tp&& arg, Args&&... args)
     return std::array<Tp, N>{std::forward<Tp>(arg), std::forward<Args>(args)...};
 }
 
-using call_stack_t        = std::vector<source_location>;
-using buffer_kind_names_t = std::map<rocprofiler_buffer_tracing_kind_t, std::string>;
-using buffer_kind_operation_names_t =
-    std::map<rocprofiler_buffer_tracing_kind_t, std::map<uint32_t, std::string>>;
-
-using callback_kind_names_t = std::map<rocprofiler_callback_tracing_kind_t, std::string>;
-using callback_kind_operation_names_t =
-    std::map<rocprofiler_callback_tracing_kind_t, std::map<uint32_t, std::string>>;
+using call_stack_t = std::vector<source_location>;
 
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data_t>;
 
-struct callback_name_info
-{
-    callback_kind_names_t           kind_names      = {};
-    callback_kind_operation_names_t operation_names = {};
-
-    template <typename ArchiveT>
-    void save(ArchiveT& ar) const
-    {
-        ar(cereal::make_nvp("kind_names", kind_names));
-        ar(cereal::make_nvp("operation_names", operation_names));
-    }
-};
-
-struct buffer_name_info
-{
-    buffer_kind_names_t           kind_names      = {};
-    buffer_kind_operation_names_t operation_names = {};
-
-    template <typename ArchiveT>
-    void save(ArchiveT& ar) const
-    {
-        ar(cereal::make_nvp("kind_names", kind_names));
-        ar(cereal::make_nvp("operation_names", operation_names));
-    }
-};
-
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
-
-callback_name_info
-get_callback_tracing_names()
-{
-    auto cb_name_info = callback_name_info{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<callback_name_info*>(data_v);
-
-            const char* name = nullptr;
-            ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
-                                 kindv, operation, &name, nullptr),
-                             "query buffer tracing kind operation name");
-            if(name) name_info_v->operation_names[kindv][operation] = name;
-            return 0;
-        };
-
-    //
-    //  callback for each buffer kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_callback_tracing_kind_t kind, void* data) {
-        //  store the buffer kind name
-        auto*       name_info_v = static_cast<callback_name_info*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_name(kind, &name, nullptr),
-                         "query buffer tracing kind operation name");
-        if(name) name_info_v->kind_names[kind] = name;
-
-        rocprofiler_iterate_callback_tracing_kind_operations(
-            kind, tracing_kind_operation_cb, static_cast<void*>(data));
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kinds(tracing_kind_cb,
-                                                                static_cast<void*>(&cb_name_info)),
-                     "iterating buffer tracing kinds");
-
-    return cb_name_info;
-}
-
-buffer_name_info
-get_buffer_tracing_names()
-{
-    static const auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
-        ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-        ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
-        ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
-        ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
-        ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,
-        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-        ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-    };
-
-    auto cb_name_info = buffer_name_info{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<buffer_name_info*>(data_v);
-
-            const char* name = nullptr;
-            ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
-                                 kindv, operation, &name, nullptr),
-                             "query buffer tracing kind operation name");
-            if(name) name_info_v->operation_names[kindv][operation] = name;
-            return 0;
-        };
-
-    //
-    //  callback for each buffer kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_buffer_tracing_kind_t kind, void* data) {
-        //  store the buffer kind name
-        auto*       name_info_v = static_cast<buffer_name_info*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_name(kind, &name, nullptr),
-                         "query buffer tracing kind operation name");
-        if(name) name_info_v->kind_names[kind] = name;
-
-        rocprofiler_iterate_buffer_tracing_kind_operations(
-            kind, tracing_kind_operation_cb, static_cast<void*>(data));
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kinds(tracing_kind_cb,
-                                                              static_cast<void*>(&cb_name_info)),
-                     "iterating buffer tracing kinds");
-
-    return cb_name_info;
-}
 
 using callback_payload_t =
     std::variant<rocprofiler_callback_tracing_code_object_load_data_t,
@@ -1569,12 +1438,12 @@ write_json(call_stack_t* _call_stack)
     {
         using JSONOutputArchive = cereal::MinimalJSONOutputArchive;
 
-        constexpr auto json_prec          = 32;
-        constexpr auto json_indent        = JSONOutputArchive::Options::IndentChar::space;
-        auto           json_opts          = JSONOutputArchive::Options{json_prec, json_indent, 1};
-        auto           json_ar            = JSONOutputArchive{*ofs, json_opts};
-        auto           buffer_name_info   = get_buffer_tracing_names();
-        auto           callback_name_info = get_callback_tracing_names();
+        constexpr auto json_prec    = 32;
+        constexpr auto json_indent  = JSONOutputArchive::Options::IndentChar::space;
+        auto           json_opts    = JSONOutputArchive::Options{json_prec, json_indent, 1};
+        auto           json_ar      = JSONOutputArchive{*ofs, json_opts};
+        auto           buffer_names = rocprofiler::sdk::get_buffer_tracing_names();
+        auto           callbk_names = rocprofiler::sdk::get_callback_tracing_names();
         auto           validate_page_migration =
             (page_migration_status != ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL);
 
@@ -1598,7 +1467,7 @@ write_json(call_stack_t* _call_stack)
         json_ar.startNode();
         try
         {
-            json_ar(cereal::make_nvp("names", callback_name_info));
+            json_ar(cereal::make_nvp("names", callbk_names));
             json_ar(cereal::make_nvp("code_objects", code_object_records));
             json_ar(cereal::make_nvp("kernel_symbols", kernel_symbol_records));
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_cb_records));
@@ -1619,7 +1488,7 @@ write_json(call_stack_t* _call_stack)
         json_ar.startNode();
         try
         {
-            json_ar(cereal::make_nvp("names", buffer_name_info));
+            json_ar(cereal::make_nvp("names", buffer_names));
             json_ar(cereal::make_nvp("kernel_dispatches", kernel_dispatch_bf_records));
             json_ar(cereal::make_nvp("memory_copies", memory_copy_bf_records));
             json_ar(cereal::make_nvp("scratch_memory_traces", scratch_memory_records));
@@ -1786,12 +1655,12 @@ write_perfetto()
     }
 
     {
-        auto buffer_name_info = get_buffer_tracing_names();
-        auto callbk_name_info = get_callback_tracing_names();
+        auto buffer_names     = rocprofiler::sdk::get_buffer_tracing_names();
+        auto callbk_name_info = rocprofiler::sdk::get_callback_tracing_names();
 
         for(auto itr : hsa_api_bf_records)
         {
-            auto& name  = buffer_name_info.operation_names.at(itr.kind).at(itr.operation);
+            auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
@@ -1803,7 +1672,7 @@ write_perfetto()
             if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
 
             TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::hsa_api>::value,
-                              ::perfetto::StaticString(name.c_str()),
+                              ::perfetto::StaticString(name.data()),
                               track,
                               itr.start_timestamp,
                               ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
@@ -1830,7 +1699,7 @@ write_perfetto()
 
         for(auto itr : hip_api_bf_records)
         {
-            auto& name  = buffer_name_info.operation_names.at(itr.kind).at(itr.operation);
+            auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = thread_tracks.at(itr.thread_id);
 
             auto _args = callback_arg_array_t{};
@@ -1842,7 +1711,7 @@ write_perfetto()
             if(ritr != hip_api_cb_records.end()) _args = ritr->args;
 
             TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::hip_api>::value,
-                              ::perfetto::StaticString(name.c_str()),
+                              ::perfetto::StaticString(name.data()),
                               track,
                               itr.start_timestamp,
                               ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
@@ -1869,11 +1738,11 @@ write_perfetto()
 
         for(auto itr : memory_copy_bf_records)
         {
-            auto& name  = buffer_name_info.operation_names.at(itr.kind).at(itr.operation);
+            auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = agent_tracks.at(itr.dst_agent_id.handle);
 
             TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::memory_copy>::value,
-                              ::perfetto::StaticString(name.c_str()),
+                              ::perfetto::StaticString(name.data()),
                               track,
                               itr.start_timestamp,
                               ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
@@ -1886,7 +1755,9 @@ write_perfetto()
                               "src_agent",
                               agents_map.at(itr.src_agent_id).logical_node_id,
                               "dst_agent",
-                              agents_map.at(itr.dst_agent_id).logical_node_id);
+                              agents_map.at(itr.dst_agent_id).logical_node_id,
+                              "copy_bytes",
+                              itr.bytes);
             TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::memory_copy>::value,
                             track,
                             itr.end_timestamp,
@@ -2070,9 +1941,6 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
-    // only activate if main tool
-    if(priority > 0) return nullptr;
-
     // set the client name
     id->name = "rocprofiler-sdk-json-tool";
 
@@ -2086,8 +1954,8 @@ rocprofiler_configure(uint32_t                 version,
 
     // generate info string
     auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
-         << " (" << runtime_version << ")";
+    info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
+         << minor << "." << patch << " (" << runtime_version << ")";
 
     std::clog << info.str() << std::endl;
 

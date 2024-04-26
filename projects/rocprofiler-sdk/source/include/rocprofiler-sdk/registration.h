@@ -204,7 +204,8 @@ rocprofiler_is_finalized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);
  *      uint32_t patch = version % 100;
  *
  *      // print info
- *      printf("Configuring rocprofiler (v%u.%u.%u) [%s]\n", major, minor, patch, runtime_version);
+ *      printf("Configuring %s with rocprofiler-sdk (v%u.%u.%u) [%s]\n",
+ *             client_id->name, major, minor, patch, runtime_version);
  *
  *      // create configure data
  *      static auto cfg = rocprofiler_tool_configure_result_t{ &my_init_func,

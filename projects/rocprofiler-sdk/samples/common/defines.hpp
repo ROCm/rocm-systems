@@ -22,6 +22,31 @@
 
 #pragma once
 
+#define ROCPROFILER_WARN(result)                                                                   \
+    {                                                                                              \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        {                                                                                          \
+            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::cerr << "[" << __FILE__ << ":" << __LINE__ << "] " << #result                     \
+                      << " returned error code " << CHECKSTATUS << ": " << status_msg              \
+                      << ". This is just a warning!" << std::endl;                                 \
+        }                                                                                          \
+    }
+
+#define ROCPROFILER_CHECK(result)                                                                  \
+    {                                                                                              \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        {                                                                                          \
+            std::string       status_msg = rocprofiler_get_status_string(CHECKSTATUS);             \
+            std::stringstream errmsg{};                                                            \
+            errmsg << "[" << __FILE__ << ":" << __LINE__ << "] " << #result                        \
+                   << " failed with error code " << CHECKSTATUS << " :: " << status_msg;           \
+            throw std::runtime_error(errmsg.str());                                                \
+        }                                                                                          \
+    }
+
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
         rocprofiler_status_t CHECKSTATUS = result;                                                 \

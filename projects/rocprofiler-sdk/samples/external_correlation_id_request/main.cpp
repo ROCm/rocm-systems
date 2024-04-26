@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "client.hpp"
-
 #include "hip/hip_runtime.h"
 
 #include <chrono>
@@ -82,10 +80,6 @@ run_scratch(int rank, int tid, hipStream_t stream, int argc, char** argv);
 int
 main(int argc, char** argv)
 {
-    client::setup();  // forces rocprofiler to configure/initialize
-    client::start();  // starts context before any API tables are available
-    client::identify(1);
-
     auto* exe_name = ::basename(argv[0]);
 
     int rank = 0;
@@ -129,9 +123,6 @@ main(int argc, char** argv)
 
     HIP_API_CALL(hipDeviceSynchronize());
     HIP_API_CALL(hipDeviceReset());
-
-    client::stop();
-    client::shutdown();
 
     return 0;
 }
@@ -206,8 +197,6 @@ test_kern_small(uint64_t* output)
 void
 run(int rank, int tid, int devid, int argc, char** argv)
 {
-    client::identify(tid + 1);
-
     auto* stream = hipStream_t{};
     HIP_API_CALL(hipSetDevice(devid));
     HIP_API_CALL(hipStreamCreate(&stream));

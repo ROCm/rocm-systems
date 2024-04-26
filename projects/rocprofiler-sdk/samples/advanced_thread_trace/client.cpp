@@ -543,9 +543,6 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
-    // only activate if main tool
-    if(priority > 0) return nullptr;
-
     // set the client name
     id->name = "Adv_Thread_Trace_Sample";
 
@@ -559,8 +556,8 @@ rocprofiler_configure(uint32_t                 version,
 
     // generate info string
     auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
-         << " (" << runtime_version << ")";
+    info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
+         << minor << "." << patch << " (" << runtime_version << ")";
 
     std::clog << info.str() << std::endl;
 

@@ -69,7 +69,7 @@
     struct page_migration_info<ROCPROFILER_PAGE_MIGRATION_##TYPE>                                  \
     {                                                                                              \
         static constexpr auto   operation_idx = ROCPROFILER_PAGE_MIGRATION_##TYPE;                 \
-        static constexpr auto   name          = #TYPE;                                             \
+        static constexpr auto   name          = "PAGE_MIGRATION_" #TYPE;                           \
         static constexpr size_t uvm_bitmask =                                                      \
             bitmask(std::index_sequence<GET_UVM_ENUMS(__VA_ARGS__)>());                            \
         static constexpr size_t kfd_bitmask =                                                      \

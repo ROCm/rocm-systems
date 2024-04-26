@@ -21,6 +21,7 @@
  THE SOFTWARE. */
 
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -156,8 +157,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         LOG_IF(FATAL, _corr_id->get_ref_count() == 0)
             << "reference counter for correlation id " << _corr_id->internal << " from thread "
             << _corr_id->thread_idx << " has no reference count";
-        _corr_id->sub_ref_count();
         _corr_id->sub_kern_count();
+        _corr_id->sub_ref_count();
     }
 
     queue_info_session.queue.async_complete();
@@ -239,18 +240,6 @@ WriteInterceptor(const void* packets,
                                ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH,
                                tracing_data_v);
 
-    auto* corr_id          = context::get_latest_correlation_id();
-    auto  thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
-    auto  user_data        = rocprofiler_user_data_t{.value = 0};
-    auto  internal_corr_id = (corr_id) ? corr_id->internal : 0;
-
-    tracing::populate_external_correlation_ids(
-        tracing_data_v.external_correlation_ids,
-        thr_id,
-        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
-        ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
-        internal_corr_id);
-
     const auto* packets_arr         = static_cast<const rocprofiler_packet*>(packets);
     auto        transformed_packets = std::vector<rocprofiler_packet>{};
 
@@ -267,19 +256,47 @@ WriteInterceptor(const void* packets,
             continue;
         }
 
+        auto*                    corr_id      = context::get_latest_correlation_id();
+        context::correlation_id* _corr_id_pop = nullptr;
+
+        if(!corr_id)
+        {
+            constexpr auto ref_count = 1;
+            corr_id                  = context::correlation_tracing_service::construct(ref_count);
+            _corr_id_pop             = corr_id;
+        }
+
+        // increase the reference count to denote that this correlation id is being used in a kernel
+        corr_id->add_ref_count();
+        corr_id->add_kern_count();
+
+        auto thr_id           = (corr_id) ? corr_id->thread_idx : common::get_tid();
+        auto user_data        = rocprofiler_user_data_t{.value = 0};
+        auto internal_corr_id = (corr_id) ? corr_id->internal : 0;
+
+        // if we constructed a correlation id, this decrements the reference count after the
+        // underlying function returns
+        auto _corr_id_dtor = common::scope_destructor{[_corr_id_pop]() {
+            if(_corr_id_pop)
+            {
+                context::pop_latest_correlation_id(_corr_id_pop);
+                _corr_id_pop->sub_ref_count();
+            }
+        }};
+
+        tracing::populate_external_correlation_ids(
+            tracing_data_v.external_correlation_ids,
+            thr_id,
+            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH,
+            ROCPROFILER_KERNEL_DISPATCH_ENQUEUE,
+            internal_corr_id);
+
         queue.async_started();
         // Copy kernel pkt, copy is to allow for signal to be modified
         rocprofiler_packet kernel_pkt = packets_arr[i];
         uint64_t kernel_id = code_object::get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
         queue.create_signal(HSA_AMD_SIGNAL_AMD_GPU_ONLY,
                             &kernel_pkt.ext_amd_aql_pm4.completion_signal);
-
-        // increase the reference count to denote that this correlation id is being used in a kernel
-        if(corr_id)
-        {
-            corr_id->add_ref_count();
-            corr_id->add_kern_count();
-        }
 
         // computes the "size" based on the offset of reserved_padding field
         constexpr auto kernel_dispatch_info_rt_size =

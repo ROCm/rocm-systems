@@ -26,13 +26,14 @@ set(c-tool-env
 
 set_tests_properties(
     test-c-tool-execute
-    PROPERTIES TIMEOUT
-               45
-               LABELS
-               "integration-tests"
-               ENVIRONMENT
-               "${c-tool-env}"
-               PASS_REGULAR_EXPRESSION
-               "Test C tool is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
-               FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES
+        TIMEOUT
+        45
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${c-tool-env}"
+        PASS_REGULAR_EXPRESSION
+        "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

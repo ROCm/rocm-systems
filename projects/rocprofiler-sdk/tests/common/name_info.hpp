@@ -19,44 +19,9 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+//
 
-// undefine NDEBUG so asserts are implemented
-#ifdef NDEBUG
-#    undef NDEBUG
-#endif
+#pragma once
 
-/**
- * @file tests/tools/c-tool.c
- *
- * @brief Example rocprofiler client (tool) written in C
- */
-
-#include <rocprofiler-sdk/registration.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
-rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t                 version,
-                      const char*              runtime_version,
-                      uint32_t                 priority,
-                      rocprofiler_client_id_t* id)
-{
-    // set the client name
-    id->name = "Test C tool";
-
-    // compute major/minor/patch version info
-    uint32_t major = version / 10000;
-    uint32_t minor = (version % 10000) / 100;
-    uint32_t patch = version % 100;
-
-    // generate info string
-    printf("%s (priority=%u) is using rocprofiler-sdk v%i.%i.%i (%s)\n",
-           id->name,
-           priority,
-           major,
-           minor,
-           patch,
-           runtime_version);
-
-    // return pointer to configure data
-    return NULL;
-}
+#include <rocprofiler-sdk/cxx/name_info.hpp>
+#include <rocprofiler-sdk/cxx/serialization.hpp>

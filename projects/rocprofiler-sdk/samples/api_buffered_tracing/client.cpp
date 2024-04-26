@@ -50,6 +50,7 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -148,21 +149,29 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
     {
         auto* header = headers[i];
 
-        if(header == nullptr)
+        auto kind_name = std::string{};
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING)
         {
-            throw std::runtime_error{
-                "rocprofiler provided a null pointer to header. this should never happen"};
+            const char* _name = nullptr;
+            auto        _kind = static_cast<rocprofiler_buffer_tracing_kind_t>(header->kind);
+            ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_name(_kind, &_name, nullptr),
+                             "query buffer tracing kind name");
+            if(_name)
+            {
+                static size_t len = 15;
+
+                kind_name = std::string{_name};
+                len       = std::max(len, kind_name.length());
+                kind_name.resize(len, ' ');
+                kind_name += " :: ";
+            }
         }
-        else if(header->hash !=
-                rocprofiler_record_header_compute_hash(header->category, header->kind))
-        {
-            throw std::runtime_error{"rocprofiler_record_header_t (category | kind) != hash"};
-        }
-        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
-                (header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
-                 header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
-                 header->kind == ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API ||
-                 header->kind == ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API))
+
+        if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+           (header->kind == ROCPROFILER_BUFFER_TRACING_HSA_CORE_API ||
+            header->kind == ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API ||
+            header->kind == ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API ||
+            header->kind == ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API))
         {
             auto* record =
                 static_cast<rocprofiler_buffer_tracing_hsa_api_record_t*>(header->payload);
@@ -173,7 +182,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                  << ", extern_cid=" << record->correlation_id.external.value
                  << ", kind=" << record->kind << ", operation=" << record->operation
                  << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp
-                 << ", name=" << client_name_info.operation_names[record->kind][record->operation];
+                 << ", name=" << client_name_info.at(record->kind, record->operation);
 
             if(record->start_timestamp > record->end_timestamp)
             {
@@ -186,7 +195,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             }
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
-                source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+                source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
                 header->kind == ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API)
@@ -200,7 +209,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                  << ", extern_cid=" << record->correlation_id.external.value
                  << ", kind=" << record->kind << ", operation=" << record->operation
                  << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp
-                 << ", name=" << client_name_info.operation_names[record->kind][record->operation];
+                 << ", name=" << client_name_info[record->kind][record->operation];
 
             if(record->start_timestamp > record->end_timestamp)
             {
@@ -213,7 +222,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
             }
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
-                source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+                source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
                 header->kind == ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH)
@@ -223,15 +232,16 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 
             auto info = std::stringstream{};
 
-            info << "agent_id=" << record->dispatch_info.agent_id.handle
+            info << "tid=" << record->thread_id << ", context=" << context.handle
+                 << ", buffer_id=" << buffer_id.handle
+                 << ", cid=" << record->correlation_id.internal
+                 << ", extern_cid=" << record->correlation_id.external.value
+                 << ", kind=" << record->kind << ", operation=" << record->operation
+                 << ", agent_id=" << record->dispatch_info.agent_id.handle
                  << ", queue_id=" << record->dispatch_info.queue_id.handle
                  << ", kernel_id=" << record->dispatch_info.kernel_id
                  << ", kernel=" << client_kernels.at(record->dispatch_info.kernel_id).kernel_name
-                 << ", context=" << context.handle << ", buffer_id=" << buffer_id.handle
-                 << ", cid=" << record->correlation_id.internal
-                 << ", extern_cid=" << record->correlation_id.external.value
-                 << ", kind=" << record->kind << ", start=" << record->start_timestamp
-                 << ", stop=" << record->end_timestamp
+                 << ", start=" << record->start_timestamp << ", stop=" << record->end_timestamp
                  << ", private_segment_size=" << record->dispatch_info.private_segment_size
                  << ", group_segment_size=" << record->dispatch_info.group_segment_size
                  << ", workgroup_size=(" << record->dispatch_info.workgroup_size.x << ","
@@ -244,7 +254,7 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                 throw std::runtime_error("kernel dispatch: start > end");
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
-                source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+                source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
                 header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_COPY)
@@ -254,20 +264,111 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
 
             auto info = std::stringstream{};
 
-            info << "src_agent_id=" << record->src_agent_id.handle
-                 << ", dst_agent_id=" << record->dst_agent_id.handle
-                 << ", direction=" << record->operation << ", context=" << context.handle
+            info << "tid=" << record->thread_id << ", context=" << context.handle
                  << ", buffer_id=" << buffer_id.handle
                  << ", cid=" << record->correlation_id.internal
                  << ", extern_cid=" << record->correlation_id.external.value
-                 << ", kind=" << record->kind << ", start=" << record->start_timestamp
-                 << ", stop=" << record->end_timestamp;
+                 << ", kind=" << record->kind << ", operation=" << record->operation
+                 << ", src_agent_id=" << record->src_agent_id.handle
+                 << ", dst_agent_id=" << record->dst_agent_id.handle
+                 << ", direction=" << record->operation << ", start=" << record->start_timestamp
+                 << ", stop=" << record->end_timestamp
+                 << ", name=" << client_name_info.at(record->kind, record->operation);
 
             if(record->start_timestamp > record->end_timestamp)
                 throw std::runtime_error("memory copy: start > end");
 
             static_cast<call_stack_t*>(user_data)->emplace_back(
-                source_location{__FUNCTION__, __FILE__, __LINE__, info.str()});
+                source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+                header->kind == ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION)
+        {
+            auto* record =
+                static_cast<rocprofiler_buffer_tracing_page_migration_record_t*>(header->payload);
+
+            auto info = std::stringstream{};
+
+            info << "kind=" << record->kind << ", operation=" << record->operation
+                 << ", pid=" << record->pid << ", start=" << record->start_timestamp
+                 << ", stop=" << record->end_timestamp
+                 << ", name=" << client_name_info.at(record->kind, record->operation);
+
+            switch(record->operation)
+            {
+                case ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE:
+                {
+                    info << ", page_fault=(" << record->page_fault.read_fault << ", "
+                         << record->page_fault.migrated << ", " << record->page_fault.node_id
+                         << ", " << std::hex << "0x" << record->page_fault.address << ")";
+                    break;
+                }
+                case ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT:
+                {
+                    info << ", page_migrate=(" << std::hex << "0x"
+                         << record->page_migrate.start_addr << ", 0x"
+                         << record->page_migrate.end_addr << ", " << std::dec
+                         << record->page_migrate.from_node << ", " << record->page_migrate.to_node
+                         << ", " << record->page_migrate.prefetch_node << ", "
+                         << record->page_migrate.preferred_node << ", "
+                         << record->page_migrate.trigger << ")";
+                    break;
+                }
+                case ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND:
+                {
+                    info << ", queue_suspend=(" << record->queue_suspend.rescheduled << ", "
+                         << record->queue_suspend.node_id << ", " << record->queue_suspend.trigger
+                         << ")";
+                    break;
+                }
+                case ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU:
+                {
+                    info << ", unmap_from_gpu=(" << record->unmap_from_gpu.node_id << std::hex
+                         << ", 0x" << record->unmap_from_gpu.start_addr << ", 0x"
+                         << record->unmap_from_gpu.end_addr << ", " << std::dec
+                         << record->unmap_from_gpu.trigger << ")";
+                    break;
+                }
+                case ROCPROFILER_PAGE_MIGRATION_NONE:
+                case ROCPROFILER_PAGE_MIGRATION_LAST:
+                {
+                    throw std::runtime_error{"unexpected page migration value"};
+                    break;
+                }
+            }
+
+            if(record->start_timestamp > record->end_timestamp)
+                throw std::runtime_error("page migration: start > end");
+
+            static_cast<call_stack_t*>(user_data)->emplace_back(
+                source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
+        }
+        else if(header->category == ROCPROFILER_BUFFER_CATEGORY_TRACING &&
+                header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
+        {
+            auto* record =
+                static_cast<rocprofiler_buffer_tracing_scratch_memory_record_t*>(header->payload);
+
+            auto info = std::stringstream{};
+
+            auto _elapsed =
+                std::chrono::duration_cast<std::chrono::duration<double, std::micro>>(
+                    std::chrono::nanoseconds{record->end_timestamp - record->start_timestamp})
+                    .count();
+
+            info << "tid=" << record->thread_id << ", context=" << context.handle
+                 << ", buffer_id=" << buffer_id.handle
+                 << ", cid=" << record->correlation_id.internal
+                 << ", extern_cid=" << record->correlation_id.external.value
+                 << ", kind=" << record->kind << ", operation=" << record->operation
+                 << ", agent_id=" << record->agent_id.handle
+                 << ", queue_id=" << record->queue_id.handle << ", thread_id=" << record->thread_id
+                 << ", elapsed=" << std::setprecision(3) << std::fixed << _elapsed
+                 << " usec, flags=" << record->flags
+                 << ", name=" << client_name_info.at(record->kind, record->operation);
+
+            static_cast<call_stack_t*>(user_data)->emplace_back(
+                source_location{__FUNCTION__, __FILE__, __LINE__, kind_name + info.str()});
         }
         else
         {
@@ -312,25 +413,25 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_name_info = common::get_buffer_tracing_names();
 
-    for(const auto& itr : client_name_info.operation_names)
+    for(const auto& itr : client_name_info)
     {
         auto name_idx = std::stringstream{};
-        name_idx << " [" << std::setw(3) << static_cast<int32_t>(itr.first) << "]";
+        name_idx << " [" << std::setw(3) << itr.value << "]";
         call_stack_v->emplace_back(
             source_location{"rocprofiler_buffer_tracing_kind_names          " + name_idx.str(),
                             __FILE__,
                             __LINE__,
-                            client_name_info.kind_names.at(itr.first)});
+                            std::string{itr.name}});
 
-        for(const auto& ditr : itr.second)
+        for(auto [didx, ditr] : itr.items())
         {
             auto operation_idx = std::stringstream{};
-            operation_idx << " [" << std::setw(3) << static_cast<int32_t>(ditr.first) << "]";
+            operation_idx << " [" << std::setw(3) << didx << "]";
             call_stack_v->emplace_back(source_location{
                 "rocprofiler_buffer_tracing_kind_operation_names" + operation_idx.str(),
                 __FILE__,
                 __LINE__,
-                std::string{"- "} + std::string{ditr.second}});
+                std::string{"- "} + std::string{*ditr}});
         }
     }
 
@@ -338,28 +439,32 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
 
+    auto code_object_ops = std::vector<rocprofiler_tracing_operation_t>{
+        ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER};
+
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(client_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-                                                       nullptr,
-                                                       0,
+                                                       code_object_ops.data(),
+                                                       code_object_ops.size(),
                                                        tool_code_object_callback,
                                                        nullptr),
         "code object tracing service configure");
 
+    constexpr auto buffer_size_bytes      = 4096;
+    constexpr auto buffer_watermark_bytes = buffer_size_bytes - (buffer_size_bytes / 8);
+
     ROCPROFILER_CALL(rocprofiler_create_buffer(client_ctx,
-                                               4096,
-                                               2048,
+                                               buffer_size_bytes,
+                                               buffer_watermark_bytes,
                                                ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                tool_tracing_callback,
                                                tool_data,
                                                &client_buffer),
                      "buffer creation");
 
-    for(auto itr : {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
-                    ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-                    ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
-                    ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API})
+    for(auto itr :
+        {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API, ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API})
     {
         ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
                              client_ctx, itr, nullptr, 0, client_buffer),
@@ -380,6 +485,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         rocprofiler_configure_buffer_tracing_service(
             client_ctx, ROCPROFILER_BUFFER_TRACING_MEMORY_COPY, nullptr, 0, client_buffer),
         "buffer tracing service for memory copy configure");
+
+    // May have incompatible kernel so only emit a warning here
+    ROCPROFILER_WARN(rocprofiler_configure_buffer_tracing_service(
+        client_ctx, ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION, nullptr, 0, client_buffer));
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(
+            client_ctx, ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY, nullptr, 0, client_buffer),
+        "buffer tracing service for page migration configure");
 
     auto client_thread = rocprofiler_callback_thread_t{};
     ROCPROFILER_CALL(rocprofiler_create_callback_thread(&client_thread),
@@ -469,9 +583,6 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
-    // only activate if main tool
-    if(priority > 0) return nullptr;
-
     // set the client name
     id->name = "ExampleTool";
 
@@ -485,8 +596,8 @@ rocprofiler_configure(uint32_t                 version,
 
     // generate info string
     auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
-         << " (" << runtime_version << ")";
+    info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
+         << minor << "." << patch << " (" << runtime_version << ")";
 
     std::clog << info.str() << std::endl;
 

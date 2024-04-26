@@ -207,9 +207,9 @@ tool_fini(void* user_data)
 }  // namespace
 
 extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t    version,
-                      const char* runtime_version,
-                      uint32_t,
+rocprofiler_configure(uint32_t                 version,
+                      const char*              runtime_version,
+                      uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
     // set the client name
@@ -222,8 +222,8 @@ rocprofiler_configure(uint32_t    version,
 
     // generate info string
     auto info = std::stringstream{};
-    info << id->name << " is using rocprofiler-sdk v" << major << "." << minor << "." << patch
-         << " (" << runtime_version << ")";
+    info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
+         << minor << "." << patch << " (" << runtime_version << ")";
 
     std::clog << info.str() << std::endl;
 

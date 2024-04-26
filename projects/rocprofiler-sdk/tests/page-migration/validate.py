@@ -21,17 +21,17 @@ def to_dict(key_values):
     return a
 
 
-def op_name(op_name, record):
-    found_op = False
-    op_key = None
+def get_operation(record, kind_name, op_name=None):
+    for idx, itr in enumerate(record["names"]):
+        if kind_name == itr["kind"]:
+            if op_name is None:
+                return idx, itr["operations"]
+            else:
+                for oidx, oname in enumerate(itr["operations"]):
+                    if op_name == oname:
+                        return oidx
 
-    for kind_node in record["names"]["kind_names"]:
-        if kind_node["value"] == op_name:
-            op_key = kind_node["key"]
-
-    for op_node in record["names"]["operation_names"]:
-        if op_node["key"] == op_key:
-            return op_key, to_dict(op_node["value"])
+    return None
 
 
 def dict_from_value_key(d):
@@ -259,18 +259,17 @@ def test_retired_correlation_ids(input_data):
 
 def get_allocated_pages(callback_records):
     # Get how many pages we allocated
-    hip_api_traces = callback_records["hip_api_traces"]
-    _, op_dict = op_name("HIP_RUNTIME_API", callback_records)
-    op_key = [k for k, v in op_dict.items() if v == "hipHostRegister"][0]
+    op_idx = get_operation(callback_records, "HIP_RUNTIME_API", "hipHostRegister")
+    rt_idx, rt_data = get_operation(callback_records, "HIP_RUNTIME_API")
+
+    assert op_idx is not None, f"{rt_idx}:\n{rt_data}"
 
     host_register_record = []
-    for r in hip_api_traces:
-        if (
-            r["operation"] == op_key
-            and "sizeBytes" in r["args"]
-            and "hostPtr" in r["args"]
-        ):
-            host_register_record.append(r)
+    for itr in callback_records["hip_api_traces"]:
+        if itr["kind"] == rt_idx and itr["operation"] == op_idx and itr["phase"] == 2:
+            assert "sizeBytes" in itr["args"].keys(), f"{itr}"
+            assert "hostPtr" in itr["args"].keys(), f"{itr}"
+            host_register_record.append(itr)
 
     assert len(host_register_record) == 1
     alloc_size = int(host_register_record[0]["args"]["sizeBytes"], 10)
@@ -285,11 +284,11 @@ def test_page_migration_data(input_data):
     sdk_data = data["rocprofiler-sdk-json-tool"]
     buffer_records = sdk_data["buffer_records"]
     callback_records = sdk_data["callback_records"]
-    page_migtation_buffers = buffer_records["page_migration"]
+    page_migration_buffers = buffer_records["page_migration"]
 
-    bf_op_id, bf_op_names = op_name("PAGE_MIGRATION", buffer_records)
-    assert bf_op_names[0] == "NONE"
-    assert "PAGE_MIGRATE" in str(bf_op_names)
+    _, bf_op_names = get_operation(buffer_records, "PAGE_MIGRATION")
+    assert bf_op_names[0] == "PAGE_MIGRATION_NONE"
+    assert "PAGE_MIGRATION_PAGE_MIGRATE" in bf_op_names
     assert len(bf_op_names) == 5
 
     node_ids = set(x["gpu_id"] for x in sdk_data["agents"])
@@ -299,15 +298,14 @@ def test_page_migration_data(input_data):
     assert int(alloc_size) == 16 * 4096  # We allocated 16 pages in the test
 
     # PID must be same
-    assert len(set(r["pid"] for r in page_migtation_buffers)) == 1
+    assert len(set(r["pid"] for r in page_migration_buffers)) == 1
 
-    for r in page_migtation_buffers:
+    for r in page_migration_buffers:
         op = r["operation"]
 
         assert r["size"] == 136
-        assert r["kind"] == bf_op_id
-        assert op != 0 and bf_op_names[op] != "NONE"
-        assert bf_op_names[op].lower() in r
+        assert op != 0 and bf_op_names[op] != "PAGE_MIGRATION_NONE"
+        assert bf_op_names[op].lower().replace("page_migration_", "") in r.keys()
 
         if "page_migrate" in r:
             assert r["page_migrate"]["from_node"] in node_ids
@@ -328,7 +326,7 @@ def test_page_migration_data(input_data):
             assert 0 < r["start_timestamp"] < r["end_timestamp"]
 
     # Check for events with our page
-    for r in page_migtation_buffers:
+    for r in page_migration_buffers:
 
         if "page_migrate" in r and r["page_migrate"]["start_addr"] == start_addr:
             assert end_addr == r["page_migrate"]["end_addr"]
