@@ -399,7 +399,12 @@ set(CPACK_PACKAGE_VERSION
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 set(CPACK_RPM_PACKAGE_PROVIDES "${CPACK_PACKAGE_NAME}")
 set(CPACK_RPM_COMPONENT_INSTALL ON)
+set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+
+if(DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
+    set(CPACK_RPM_EXCLUDE_FROM_AUTO_FILELIST_ADDITION "${CPACK_PACKAGING_INSTALL_PREFIX}")
+endif()
 
 # Debian package specific variables
 set(CPACK_DEBIAN_PACKAGE_LICENSE "MIT")
@@ -436,11 +441,14 @@ else()
 endif()
 
 # Log package info
-message(STATUS "Package Version: ${CPACK_PACKAGE_VERSION}")
-message(STATUS "RPM Package Release: ${CPACK_RPM_PACKAGE_RELEASE}")
-message(STATUS "Debian Package Release: ${CPACK_DEBIAN_PACKAGE_RELEASE}")
-message(STATUS "Install Tests: ${INSTALL_TESTS}")
-message(STATUS "Package Dependencies: ${PACKAGE_REQUIRES}")
+message(STATUS "  Package Name: ${CPACK_PACKAGE_NAME}")
+message(STATUS "  Package Version: ${CPACK_PACKAGE_VERSION}")
+message(STATUS "  RPM Package Release: ${CPACK_RPM_PACKAGE_RELEASE}")
+message(STATUS "  Debian Package Release: ${CPACK_DEBIAN_PACKAGE_RELEASE}")
+message(STATUS "  Packaging Install Prefix: ${CPACK_PACKAGING_INSTALL_PREFIX}")
+message(STATUS "  Install Tests: ${INSTALL_TESTS}")
+message(STATUS "  Package Dependencies: ${PACKAGE_REQUIRES}")
+message(STATUS "  CPack Generator: ${CPACK_GENERATOR}")
 
 # Source tarball
 set(CPACK_SOURCE_GENERATOR "TGZ")
