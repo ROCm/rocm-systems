@@ -22,7 +22,6 @@
 
 #pragma once
 
-#include <map>
 #include <unordered_map>
 
 #include <rocprofiler-sdk/fwd.h>

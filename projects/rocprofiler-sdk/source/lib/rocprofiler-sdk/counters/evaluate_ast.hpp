@@ -22,12 +22,9 @@
 
 #pragma once
 
-#include <exception>
-#include <iostream>
 #include <set>
 #include <unordered_map>
 
-#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"

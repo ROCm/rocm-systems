@@ -24,13 +24,8 @@
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
-#    include "lib/common/defines.hpp"
-#    include "lib/common/utility.hpp"
-#    include "lib/rocprofiler-sdk/buffer.hpp"
-#    include "lib/rocprofiler-sdk/context/context.hpp"
 #    include "lib/rocprofiler-sdk/hsa/defines.hpp"
 #    include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#    include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
 #    include <rocprofiler-sdk/agent.h>
 #    include <rocprofiler-sdk/fwd.h>
@@ -46,7 +41,6 @@
 #    include <cstddef>
 #    include <cstdint>
 #    include <cstdlib>
-#    include <tuple>
 #    include <type_traits>
 #    include <utility>
 

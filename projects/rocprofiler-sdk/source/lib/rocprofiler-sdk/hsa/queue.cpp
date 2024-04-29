@@ -23,8 +23,6 @@
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
@@ -43,8 +41,6 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
-#include <chrono>
-#include <thread>
 
 // static assert for rocprofiler_packet ABI compatibility
 static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_kernel_dispatch_packet_t),

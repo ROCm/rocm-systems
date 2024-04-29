@@ -27,8 +27,8 @@
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 
-#include "evaluate_ast_test.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
 
 namespace

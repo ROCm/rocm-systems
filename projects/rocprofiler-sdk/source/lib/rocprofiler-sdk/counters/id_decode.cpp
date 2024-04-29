@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
 #include <hsa/hsa_ven_amd_aqlprofile.h>
-#include <string>
 #include <unordered_map>
 
 #include "lib/common/static_object.hpp"

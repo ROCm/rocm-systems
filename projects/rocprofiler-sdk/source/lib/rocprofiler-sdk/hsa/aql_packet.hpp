@@ -27,7 +27,6 @@
 
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
-#include <deque>
 
 namespace rocprofiler
 {

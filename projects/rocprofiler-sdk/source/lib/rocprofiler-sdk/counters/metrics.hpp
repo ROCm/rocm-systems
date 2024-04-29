@@ -23,15 +23,13 @@
 #pragma once
 
 #include <cstdint>
-#include <iostream>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#include <fmt/core.h>
+#include <fmt/ranges.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
-
-#include "fmt/core.h"
-#include "fmt/ranges.h"
 
 namespace rocprofiler
 {

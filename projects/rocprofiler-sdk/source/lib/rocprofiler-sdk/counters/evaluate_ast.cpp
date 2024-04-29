@@ -31,7 +31,6 @@
 #include <fmt/ranges.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/reader.hpp"

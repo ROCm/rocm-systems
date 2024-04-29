@@ -27,9 +27,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/container/small_vector.hpp"
-#include "lib/common/container/stable_vector.hpp"
 #include "lib/common/synchronized.hpp"
-#include "lib/rocprofiler-sdk/allocator.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
@@ -37,7 +35,6 @@
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
 
 #include <array>
-#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -74,7 +71,7 @@ struct buffer_tracing_service
     buffer_array_t           buffer_data = {};
 };
 
-struct counter_collection_service
+struct dispatch_counter_collection_service
 {
     // Contains a vector of counter collection instances associated with this context.
     // Each instance is assocated with an agent and a counter collection profile.
@@ -90,14 +87,14 @@ struct counter_collection_service
 struct context
 {
     // size is used to ensure that we never read past the end of the version
-    size_t                                      size               = 0;
-    uint64_t                                    context_idx        = 0;  // context id
-    uint32_t                                    client_idx         = 0;  // tool id
-    correlation_tracing_service                 correlation_tracer = {};
-    std::unique_ptr<callback_tracing_service>   callback_tracer    = {};
-    std::unique_ptr<buffer_tracing_service>     buffered_tracer    = {};
-    std::unique_ptr<counter_collection_service> counter_collection = {};
-    std::shared_ptr<ThreadTracer>               thread_trace       = {};
+    size_t                                               size               = 0;
+    uint64_t                                             context_idx        = 0;  // context id
+    uint32_t                                             client_idx         = 0;  // tool id
+    correlation_tracing_service                          correlation_tracer = {};
+    std::unique_ptr<callback_tracing_service>            callback_tracer    = {};
+    std::unique_ptr<buffer_tracing_service>              buffered_tracer    = {};
+    std::unique_ptr<dispatch_counter_collection_service> counter_collection = {};
+    std::shared_ptr<ThreadTracer>                        thread_trace       = {};
 };
 
 // set the client index needs to be called before allocate_context()

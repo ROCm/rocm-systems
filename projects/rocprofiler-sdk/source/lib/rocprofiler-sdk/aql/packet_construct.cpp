@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 
 #include <fmt/core.h>
@@ -32,7 +33,7 @@
         auto status = (fn);                                                                        \
         if(status != HSA_STATUS_SUCCESS)                                                           \
         {                                                                                          \
-            std::cerr << "HSA Err: " << status << "\n";                                            \
+            ROCP_FATAL << "HSA Err: " << status << "\n";                                           \
             exit(1);                                                                               \
         }                                                                                          \
     }

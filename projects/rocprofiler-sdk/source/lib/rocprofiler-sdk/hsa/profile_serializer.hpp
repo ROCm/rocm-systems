@@ -28,11 +28,8 @@
 #include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 
-#include <cstdint>
-#include <functional>
-#include <optional>
+#include <deque>
 #include <unordered_map>
-#include <vector>
 
 namespace rocprofiler
 {

@@ -21,12 +21,10 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -44,7 +42,6 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <sstream>
 #include <tuple>
@@ -427,7 +424,8 @@ TEST(core, check_callbacks)
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
     context::context ctx;
-    ctx.counter_collection = std::make_unique<rocprofiler::context::counter_collection_service>();
+    ctx.counter_collection =
+        std::make_unique<rocprofiler::context::dispatch_counter_collection_service>();
     ctx.counter_collection->enabled.wlock([](auto& data) { data = true; });
 
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);

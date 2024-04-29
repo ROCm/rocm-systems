@@ -25,12 +25,12 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/dispatch_profile.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <optional>
 
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
-#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
-#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
-#include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 
 namespace rocprofiler
 {
@@ -40,32 +40,6 @@ struct context;
 }
 namespace counters
 {
-// Stores counter profiling information such as the agent
-// to collect counters on, the metrics to collect, the hw
-// counters needed to evaluate the metrics, and the ASTs.
-// This profile can be shared among many rocprof contexts.
-struct profile_config
-{
-    const rocprofiler_agent_t*    agent = nullptr;
-    std::vector<counters::Metric> metrics{};
-    // HW counters that must be collected to compute the above
-    // metrics (derived metrics are broken down into hw counters
-    // in this vector).
-    std::set<counters::Metric> reqired_hw_counters{};
-    // Counters that are not hardware based but based on either a
-    // static value (such as those in agent)
-    std::set<counters::Metric> required_special_counters{};
-    // ASTs to evaluate
-    std::vector<counters::EvaluateAST> asts{};
-    rocprofiler_profile_config_id_t    id{.handle = 0};
-    // Packet generator to create AQL packets for insertion
-    std::unique_ptr<rocprofiler::aql::CounterPacketConstruct> pkt_generator{nullptr};
-    // A packet cache of AQL packets. This allows reuse of AQL packets (preventing costly
-    // allocation of new packets/destruction).
-    rocprofiler::common::Synchronized<std::vector<std::unique_ptr<rocprofiler::hsa::AQLPacket>>>
-        packets{};
-};
-
 // Internal counter struct that stores the state needed to handle an intercepted
 // HSA kernel packet.
 struct counter_callback_info
@@ -124,30 +98,5 @@ start_context(const context::context*);
 
 void
 stop_context(const context::context*);
-
-std::unique_ptr<rocprofiler::hsa::AQLPacket>
-queue_cb(const context::context*                                         ctx,
-         const std::shared_ptr<counter_callback_info>&                   info,
-         const hsa::Queue&                                               queue,
-         const hsa::rocprofiler_packet&                                  pkt,
-         rocprofiler_kernel_id_t                                         kernel_id,
-         rocprofiler_dispatch_id_t                                       dispatch_id,
-         rocprofiler_user_data_t*                                        user_data,
-         const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-         const context::correlation_id*                                  correlation_id);
-
-using ClientID   = int64_t;
-using inst_pkt_t = common::container::
-    small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
-
-void
-completed_cb(const context::context*                       ctx,
-             const std::shared_ptr<counter_callback_info>& info,
-             const hsa::Queue&                             queue,
-             hsa::rocprofiler_packet,
-             const hsa::Queue::queue_info_session_t& session,
-             inst_pkt_t&                             pkts);
-
-std::shared_ptr<profile_config> get_profile_config(rocprofiler_profile_config_id_t);
 }  // namespace counters
 }  // namespace rocprofiler

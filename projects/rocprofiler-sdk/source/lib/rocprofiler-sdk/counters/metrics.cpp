@@ -24,22 +24,17 @@
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include "lib/common/defines.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/static_object.hpp"
-#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/common/xml.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 
-#include "dimensions.hpp"
 #include "glog/logging.h"
 
 #include <dlfcn.h>  // for dladdr
-#include <atomic>
 #include <cstdint>
 #include <cstdlib>
-#include <optional>
 
 namespace rocprofiler
 {

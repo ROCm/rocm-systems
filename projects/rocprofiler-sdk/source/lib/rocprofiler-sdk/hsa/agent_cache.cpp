@@ -22,16 +22,9 @@
 
 #include "agent_cache.hpp"
 
+#include <fmt/core.h>
 #include <glog/logging.h>
-#include <fstream>
-#include <limits>
-#include <optional>
 #include <stdexcept>
-
-#include "lib/common/defines.hpp"
-#include "lib/common/filesystem.hpp"
-#include "lib/common/synchronized.hpp"
-#include "lib/common/utility.hpp"
 
 namespace
 {

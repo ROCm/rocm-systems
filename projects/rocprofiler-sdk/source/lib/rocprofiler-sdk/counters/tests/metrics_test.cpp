@@ -29,6 +29,7 @@
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 

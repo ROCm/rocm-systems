@@ -26,16 +26,9 @@
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
-#include "fmt/core.h"
-#include "fmt/ranges.h"
-
-#include <string>
 #include <string_view>
-#include <unordered_map>
-#include <vector>
 
 #include <rocprofiler-sdk/agent.h>
-#include "lib/common/utility.hpp"
 
 // Construct const and non-const accessor functions
 #define CONST_NONCONST_ACCESSOR(RTYPE, NAME, VAL)                                                  \

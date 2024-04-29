@@ -23,9 +23,7 @@
 #pragma once
 
 #include <string>
-#include <unordered_map>
 #include <vector>
-#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 
 struct test_data
 {

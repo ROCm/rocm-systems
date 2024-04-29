@@ -29,7 +29,6 @@
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/synchronized.hpp"
-#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
@@ -45,11 +44,8 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
-#include <iostream>
 #include <memory>
-#include <string>
 #include <unordered_map>
-#include <vector>
 
 namespace rocprofiler
 {

@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "lib/common/defines.hpp"
 #include "lib/rocprofiler-sdk/hsa/defines.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 

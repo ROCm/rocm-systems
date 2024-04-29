@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include <cstdlib>
 #include <iostream>
-#include <string>
 
 #define CHECK_HSA(fn, message)                                                                     \
     if((fn) != HSA_STATUS_SUCCESS)                                                                 \

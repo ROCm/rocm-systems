@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/defines.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"

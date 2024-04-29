@@ -24,7 +24,6 @@
 
 #include <rocprofiler-sdk/version.h>
 
-#include "lib/common/mpl.hpp"
 #include "lib/common/stringize_arg.hpp"
 
 #include <fmt/core.h>
@@ -36,11 +35,8 @@
 
 #include <cstdint>
 #include <sstream>
-#include <string>
 #include <string_view>
 #include <type_traits>
-#include <utility>
-#include <vector>
 
 #if !defined(ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION)
 #    define ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION                                                \

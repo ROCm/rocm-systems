@@ -22,9 +22,7 @@
 
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
@@ -35,10 +33,8 @@
 #include <fmt/core.h>
 #include <gtest/gtest.h>
 
-#include <algorithm>
 #include <cstdint>
 #include <sstream>
-#include <tuple>
 
 using namespace rocprofiler::counters;
 

@@ -23,19 +23,19 @@
 #include "dimensions.hpp"
 
 #include <cstdint>
-#include <memory>
 #include <unordered_map>
 #include <vector>
 
 #include <fmt/core.h>
 
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/rocprofiler.h>
+
 #include "lib/common/static_object.hpp"
-#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
 namespace rocprofiler
 {
