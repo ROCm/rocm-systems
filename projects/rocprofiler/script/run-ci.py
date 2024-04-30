@@ -298,7 +298,7 @@ def parse_cdash_args(args):
     parser.add_argument(
         "--gpu-targets",
         help="GPU build architectures",
-        default="gfx900 gfx906 gfx908 gfx90a gfx1030 gfx1100".split(),
+        default="gfx900 gfx906 gfx908 gfx90a gfx942 gfx1030 gfx1031 gfx1032 gfx1100 gfx1101 gfx1102".split(),
         type=str,
         nargs="+",
     )
