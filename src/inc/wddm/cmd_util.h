@@ -1,0 +1,77 @@
+/* Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved. */
+
+#ifndef _CMD_UTIL_H_
+#define _CMD_UTIL_H_
+
+#include <string.h>
+#include "hsa-runtime/inc/hsa.h"
+#include "hsa-runtime/inc/amd_hsa_queue.h"
+#include "hsa-runtime/inc/amd_hsa_kernel_code.h"
+#include "inc/pm4_cmds.h"
+#include "util/utils.h"
+
+namespace rocr {
+namespace core {
+
+struct DispatchInfo {
+  uint8_t                       major;
+  hsa_kernel_dispatch_packet_t  *pPacket;
+  void                          *pEntry;
+  const amd_kernel_code_t       *pKernelObject;
+  uint32_t                      ldsBlks;
+  amd_queue_t                   *pAmdQueue;
+  bool                          wave32;
+  uint32_t                      srd;
+  void                          *pScratchBase;
+  uint32_t                      scratchSizePerWave;
+  uint32_t                      scratchBaseOffset[2];
+  uint32_t                      offsetCnt;
+};
+
+class CmdUtil {
+public:
+  CmdUtil() {};
+  ~CmdUtil() {};
+
+  size_t BuildCopyData(
+    uint64_t  *pDstAddr,
+    void      *pBuffer,
+    uint32_t  dstSel = dst_sel__mec_copy_data__tc_l2,
+    uint32_t  dstCachePolicy = dst_cache_policy__mec_copy_data__stream,
+    uint32_t  srcSel = src_sel__mec_copy_data__gpu_clock_count,
+    uint32_t  srcCachePolicy = src_cache_policy__mec_copy_data__lru,
+    uint32_t  countSel = count_sel__mec_copy_data__64_bits_of_data,
+    uint32_t  wrConfirm = wr_confirm__mec_copy_data__wait_for_confirmation);
+
+  size_t BuildBarrier(
+    void      *pBuffer,
+    uint32_t  eventIndex = event_index__mec_event_write__cs_partial_flush,
+    uint32_t  eventType = CS_PARTIAL_FLUSH);
+
+  size_t BuildAcquireMem(
+    uint8_t major,
+    void    *pBuffer);
+
+  size_t BuildScratch(
+    void  *pScratchBase,
+    void  *pBuffer);
+
+  size_t BuildComputeShaderParams(
+    void  *pBuffer);
+
+  size_t BuildDispatch(
+    struct DispatchInfo *pInfo,
+    void                *pBuffer);
+
+  size_t BuildAtomicMem(
+    uint64_t  *pAddr,
+    uint32_t  atomic,
+    void      *pBuffer,
+    uint32_t  cachePolicy = cache_policy__mec_atomic_mem__stream,
+    uint64_t  srcData = 1);
+};
+
+}   // namespace core
+}   // namespace rocr
+
+#endif
