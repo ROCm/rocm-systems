@@ -606,18 +606,18 @@ TEST_F(CodeobjTest, WhenRunningProfilerWithCodeobjCapture) {
   rocprofiler_codeobj_capture_get(id, &capture);
   EXPECT_EQ(ROCPROFILER_STATUS_SUCCESS, result);
 
-  EXPECT_GE(capture.count, 1);
-  bool bCaptured_itself = false;
+  EXPECT_GE(capture.count, 2);
+  int capture_count = 0;
 
   for (int i = 0; i < (int)capture.count; i++) {
     const char* path = capture.symbols[i].filepath;
     if (!path) continue;
     std::string fpath(path);
-    size_t pos = fpath.find("runFeatureTests#offset=");
+    size_t pos = fpath.find("#offset=");
     if (pos != std::string::npos && fpath.find("&size=", pos) != std::string::npos)
-      bCaptured_itself = true;
+      capture_count ++;
   }
-  EXPECT_EQ(bCaptured_itself, true);
+  EXPECT_GE(capture_count, 2);
 
   TearDownRocprofiler();
 }
