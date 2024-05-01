@@ -258,7 +258,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     auto enable_intercepter = false;
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 184UL;
+        constexpr auto expected_context_size = 192UL;
         static_assert(
             sizeof(context::context) ==
                 expected_context_size + sizeof(std::shared_ptr<rocprofiler::ThreadTracer>),

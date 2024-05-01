@@ -65,7 +65,7 @@ ROCPROFILER_EXTERN_C_FINI
 /** @} */
 
 #include "rocprofiler-sdk/agent.h"
-// #include "rocprofiler-sdk/agent_profile.h"
+#include "rocprofiler-sdk/agent_profile.h"
 #include "rocprofiler-sdk/buffer.h"
 #include "rocprofiler-sdk/buffer_tracing.h"
 #include "rocprofiler-sdk/callback_tracing.h"

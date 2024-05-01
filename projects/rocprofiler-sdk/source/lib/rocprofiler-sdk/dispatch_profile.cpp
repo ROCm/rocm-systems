@@ -22,11 +22,7 @@
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
-#include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 extern "C" {
 /**
@@ -49,9 +45,7 @@ rocprofiler_configure_buffered_dispatch_profile_counting_service(
     void*                                            callback_data_args)
 {
     return rocprofiler::counters::configure_buffered_dispatch(
-               context_id, buffer_id, callback, callback_data_args)
-               ? ROCPROFILER_STATUS_SUCCESS
-               : ROCPROFILER_STATUS_ERROR;
+        context_id, buffer_id, callback, callback_data_args);
 }
 
 /**
@@ -78,8 +72,6 @@ rocprofiler_configure_callback_dispatch_profile_counting_service(
                                                               dispatch_callback,
                                                               dispatch_callback_args,
                                                               record_callback,
-                                                              record_callback_args)
-               ? ROCPROFILER_STATUS_SUCCESS
-               : ROCPROFILER_STATUS_ERROR;
+                                                              record_callback_args);
 }
 }

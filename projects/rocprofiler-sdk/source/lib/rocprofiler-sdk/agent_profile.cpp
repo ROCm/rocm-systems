@@ -20,42 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#include <rocprofiler-sdk/rocprofiler.h>
 
-#include <rocprofiler-sdk/defines.h>
-#include <rocprofiler-sdk/fwd.h>
+#include "lib/rocprofiler-sdk/counters/core.hpp"
 
-ROCPROFILER_EXTERN_C_INIT
-
-/**
- * @defgroup AGENT_PROFILE_COUNTING_SERVICE Agent Profile Counting Service
- * @brief needs brief description
- *
- * @{
- */
-
-/**
- * @brief Configure Profile Counting Service for agent.
- *
- * @param [in] context_id context id
- * @param [in] buffer_id id of the buffer to use for the counting service
- * @param [in] config_id Profile config detailing the counters to collect for this kernel
- * @return ::rocprofiler_status_t
- */
+extern "C" {
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_configure_agent_profile_counting_service(rocprofiler_context_id_t        context_id,
                                                      rocprofiler_buffer_id_t         buffer_id,
-                                                     rocprofiler_profile_config_id_t config_id);
-
-/**
- * @brief Sample Profile Counting Service for agent.
- *
- * @param [out] data // It is always a size of one
- * @return ::rocprofiler_status_t
- */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_sample_agent_profile_counting_service(rocprofiler_context_id_t context_id);
-
-/** @} */
-
-ROCPROFILER_EXTERN_C_FINI
+                                                     rocprofiler_profile_config_id_t config_id)
+{
+    return rocprofiler::counters::configure_agent_collection(context_id, buffer_id, config_id);
+}
+}

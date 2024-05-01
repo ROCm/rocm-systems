@@ -80,18 +80,23 @@ create_counter_profile(std::shared_ptr<rocprofiler::counters::profile_config>&& 
 void
 destroy_counter_profile(uint64_t id);
 
-bool
+rocprofiler_status_t
 configure_buffered_dispatch(rocprofiler_context_id_t                         context_id,
                             rocprofiler_buffer_id_t                          buffer,
                             rocprofiler_profile_counting_dispatch_callback_t callback,
                             void*                                            callback_args);
 
-bool
+rocprofiler_status_t
 configure_callback_dispatch(rocprofiler_context_id_t                         context_id,
                             rocprofiler_profile_counting_dispatch_callback_t callback,
                             void*                                            callback_data_args,
                             rocprofiler_profile_counting_record_callback_t   record_callback,
                             void*                                            record_callback_args);
+
+rocprofiler_status_t
+configure_agent_collection(rocprofiler_context_id_t        context_id,
+                           rocprofiler_buffer_id_t         buffer_id,
+                           rocprofiler_profile_config_id_t config_id);
 
 void
 start_context(const context::context*);

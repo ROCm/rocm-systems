@@ -84,17 +84,29 @@ struct dispatch_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
+struct agent_counter_collection_service
+{
+    std::shared_ptr<rocprofiler::counters::profile_config> profile;
+    rocprofiler_buffer_id_t                                buffer;
+    // A flag to state wether or not the counter set is currently enabled. This is primarily
+    // to protect against multithreaded calls to enable a context (and enabling already enabled
+    // counters).
+    std::atomic<bool> enabled{false};
+};
+
 struct context
 {
     // size is used to ensure that we never read past the end of the version
-    size_t                                               size               = 0;
-    uint64_t                                             context_idx        = 0;  // context id
-    uint32_t                                             client_idx         = 0;  // tool id
-    correlation_tracing_service                          correlation_tracer = {};
-    std::unique_ptr<callback_tracing_service>            callback_tracer    = {};
-    std::unique_ptr<buffer_tracing_service>              buffered_tracer    = {};
-    std::unique_ptr<dispatch_counter_collection_service> counter_collection = {};
-    std::shared_ptr<ThreadTracer>                        thread_trace       = {};
+    size_t                                    size               = 0;
+    uint64_t                                  context_idx        = 0;  // context id
+    uint32_t                                  client_idx         = 0;  // tool id
+    correlation_tracing_service               correlation_tracer = {};
+    std::unique_ptr<callback_tracing_service> callback_tracer    = {};
+    std::unique_ptr<buffer_tracing_service>   buffered_tracer    = {};
+    // Only one of counter collection/agent counter collection can exists in the ctx.
+    std::unique_ptr<dispatch_counter_collection_service> counter_collection       = {};
+    std::unique_ptr<agent_counter_collection_service>    agent_counter_collection = {};
+    std::shared_ptr<ThreadTracer>                        thread_trace             = {};
 };
 
 // set the client index needs to be called before allocate_context()

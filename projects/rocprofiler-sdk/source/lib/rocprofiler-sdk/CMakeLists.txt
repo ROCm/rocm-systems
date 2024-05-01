@@ -10,6 +10,7 @@ set(ROCPROFILER_LIB_SOURCES
     allocator.cpp
     buffer.cpp
     buffer_tracing.cpp
+    agent_profile.cpp
     callback_tracing.cpp
     context.cpp
     counters.cpp

@@ -758,3 +758,54 @@ TEST(core, public_api_iterate_agents)
         EXPECT_TRUE(from_api.empty());
     }
 }
+
+TEST(core, init_agent_collection)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+
+    rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
+    ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                               500 * sizeof(size_t),
+                                               500 * sizeof(size_t),
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               null_buffered_callback,
+                                               nullptr,
+                                               &opt_buff_id),
+                     "Could not create buffer");
+    for(const auto& [_, agent] : agents)
+    {
+        auto metrics = findDeviceMetrics(agent, {});
+        ASSERT_FALSE(metrics.empty());
+        ASSERT_TRUE(agent.get_rocp_agent());
+        for(auto& metric : metrics)
+        {
+            expected_dispatch        expected = {};
+            rocprofiler_counter_id_t id       = {.handle = metric.id()};
+            ROCPROFILER_CALL(
+                rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &expected.id),
+                "Unable to create profile");
+
+            ROCPROFILER_CALL(rocprofiler_configure_agent_profile_counting_service(
+                                 get_client_ctx(), opt_buff_id, expected.id),
+                             "Could not create agent collection");
+            {
+                auto  cfg = counters::get_profile_config(expected.id);
+                auto* ctx = rocprofiler::context::get_mutable_registered_context(get_client_ctx());
+                ASSERT_TRUE(ctx);
+                ASSERT_TRUE(ctx->agent_counter_collection);
+                EXPECT_EQ(ctx->agent_counter_collection->profile, cfg);
+                EXPECT_EQ(ctx->agent_counter_collection->buffer.handle, opt_buff_id.handle);
+            }
+            ROCPROFILER_CALL(rocprofiler_destroy_profile_config(expected.id),
+                             "Could not delete profile id");
+        }
+    }
+    rocprofiler_destroy_buffer(opt_buff_id);
+    registration::set_init_status(1);
+    context::pop_client(1);
+}

@@ -78,13 +78,18 @@ public:
     // to contain the counters that need to be collected (specified in profile_id) and
     // the AQL packet generator for injecting packets. Note: the service is created
     // in the stop state.
-    static bool                     configure_dispatch(rocprofiler_context_id_t                         context_id,
-                                                       rocprofiler_buffer_id_t                          buffer,
-                                                       rocprofiler_profile_counting_dispatch_callback_t callback,
-                                                       void*                                            callback_args,
-                                                       rocprofiler_profile_counting_record_callback_t   record_callback,
-                                                       void* record_callback_args);
+    static rocprofiler_status_t configure_dispatch(
+        rocprofiler_context_id_t                         context_id,
+        rocprofiler_buffer_id_t                          buffer,
+        rocprofiler_profile_counting_dispatch_callback_t callback,
+        void*                                            callback_args,
+        rocprofiler_profile_counting_record_callback_t   record_callback,
+        void*                                            record_callback_args);
     std::shared_ptr<profile_config> get_profile_cfg(rocprofiler_profile_config_id_t id);
+
+    rocprofiler_status_t configure_agent_collection(rocprofiler_context_id_t        context_id,
+                                                    rocprofiler_buffer_id_t         buffer,
+                                                    rocprofiler_profile_config_id_t config_id);
 
 private:
     rocprofiler::common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<profile_config>>>

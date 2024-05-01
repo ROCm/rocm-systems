@@ -206,7 +206,15 @@ stop_context(const context::context* ctx)
     if(controller) controller->disable_serialization();
 }
 
-bool
+rocprofiler_status_t
+configure_agent_collection(rocprofiler_context_id_t        context_id,
+                           rocprofiler_buffer_id_t         buffer_id,
+                           rocprofiler_profile_config_id_t config_id)
+{
+    return get_controller().configure_agent_collection(context_id, buffer_id, config_id);
+}
+
+rocprofiler_status_t
 configure_buffered_dispatch(rocprofiler_context_id_t                         context_id,
                             rocprofiler_buffer_id_t                          buffer,
                             rocprofiler_profile_counting_dispatch_callback_t callback,
@@ -217,7 +225,7 @@ configure_buffered_dispatch(rocprofiler_context_id_t                         con
         context_id, buffer, callback, callback_args, nullptr, nullptr);
 }
 
-bool
+rocprofiler_status_t
 configure_callback_dispatch(rocprofiler_context_id_t                         context_id,
                             rocprofiler_profile_counting_dispatch_callback_t callback,
                             void*                                            callback_data_args,
