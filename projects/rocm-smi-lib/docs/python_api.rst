@@ -196,8 +196,6 @@ Functions
 
 .. autofunction:: rocm_smi.showPower
 
-.. autofunction:: rocm_smi.showPowerPlayTable
-
 .. autofunction:: rocm_smi.showProduct
 
 .. autofunction:: rocm_smi.showProfile
