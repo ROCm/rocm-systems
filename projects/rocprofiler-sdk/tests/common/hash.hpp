@@ -24,21 +24,5 @@
 
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/fwd.h>
-
-namespace std
-{
-template <typename Tp>
-struct hash;
-
-template <>
-struct hash<rocprofiler_agent_id_t>
-{
-    size_t operator()(rocprofiler_agent_id_t id) const { return id.handle; }
-};
-}  // namespace std
-
-inline bool
-operator==(rocprofiler_agent_id_t lhs, rocprofiler_agent_id_t rhs)
-{
-    return (lhs.handle == rhs.handle);
-}
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>

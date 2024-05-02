@@ -35,6 +35,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <fmt/core.h>
 #include <gtest/gtest.h>
@@ -341,18 +342,6 @@ private:
 
 }  // namespace hsa
 }  // namespace rocprofiler
-
-bool
-operator==(rocprofiler_dim3_t lhs, rocprofiler_dim3_t rhs)
-{
-    return std::tie(lhs.x, lhs.y, lhs.z) == std::tie(rhs.x, rhs.y, rhs.z);
-}
-
-bool
-operator==(rocprofiler_agent_id_t lhs, rocprofiler_agent_id_t rhs)
-{
-    return (lhs.handle == rhs.handle);
-}
 
 namespace
 {

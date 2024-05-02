@@ -1,0 +1,122 @@
+// MIT License
+//
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+//
+
+#pragma once
+
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/defines.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/internal_threading.h>
+
+#include <tuple>
+
+#define ROCPROFILER_CXX_DECLARE_OPERATORS(TYPE)                                                    \
+    bool operator==(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);                               \
+    bool operator!=(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);
+
+#define ROCPROFILER_CXX_DEFINE_NE_OPERATOR(TYPE)                                                   \
+    inline bool operator!=(TYPE lhs, TYPE rhs) { return !(lhs == rhs); }
+
+#define ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(TYPE)                                            \
+    inline bool operator==(TYPE lhs, TYPE rhs)                                                     \
+    {                                                                                              \
+        return ::rocprofiler::sdk::operators::equal(lhs, rhs);                                     \
+    }
+
+namespace rocprofiler
+{
+namespace sdk
+{
+namespace operators
+{
+template <typename Tp>
+bool
+equal(Tp lhs, Tp rhs) ROCPROFILER_ATTRIBUTE(pure);
+
+template <typename Tp>
+bool
+equal(Tp lhs, Tp rhs)
+{
+    static_assert(sizeof(Tp) == sizeof(uint64_t), "error! only for opaque handle types");
+    return lhs.handle == rhs.handle;
+}
+}  // namespace operators
+}  // namespace sdk
+}  // namespace rocprofiler
+
+// declaration of operator== and operator!=
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_agent_id_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_queue_id_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_buffer_id_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_counter_id_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_profile_config_id_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_callback_thread_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_agent_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_signal_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_executable_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_agent_v0_t&)
+ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_dim3_t)
+
+// definitions of operator==
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_agent_id_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_queue_id_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_buffer_id_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_counter_id_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_profile_config_id_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_callback_thread_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_agent_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_signal_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_executable_t)
+
+inline bool
+operator==(const rocprofiler_agent_v0_t& lhs, const rocprofiler_agent_v0_t& rhs)
+{
+    return (lhs.id == rhs.id);
+}
+
+inline bool
+operator==(rocprofiler_dim3_t lhs, rocprofiler_dim3_t rhs)
+{
+    return std::tie(lhs.x, lhs.y, lhs.z) == std::tie(rhs.x, rhs.y, rhs.z);
+}
+
+// definitions of operator!=
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_agent_id_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_queue_id_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_buffer_id_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_counter_id_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_profile_config_id_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_callback_thread_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_agent_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_signal_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_executable_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(const rocprofiler_agent_v0_t&)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_dim3_t)
+
+// cleanup defines
+#undef ROCPROFILER_CXX_DECLARE_OPERATORS
+#undef ROCPROFILER_CXX_DEFINE_NE_OPERATOR
+#undef ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR

@@ -41,6 +41,8 @@
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <glog/logging.h>
 
@@ -66,21 +68,6 @@ __gcov_dump(void);
 
 namespace common = ::rocprofiler::common;
 namespace tool   = ::rocprofiler::tool;
-
-namespace std
-{
-template <>
-struct hash<rocprofiler_agent_id_t>
-{
-    size_t operator()(rocprofiler_agent_id_t id) const { return id.handle; }
-};
-}  // namespace std
-
-inline bool
-operator==(rocprofiler_agent_id_t lhs, rocprofiler_agent_id_t rhs)
-{
-    return (lhs.handle == rhs.handle);
-}
 
 namespace
 {
