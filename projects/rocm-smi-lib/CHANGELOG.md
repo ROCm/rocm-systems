@@ -4,6 +4,29 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 6.1.2
+
+### Added
+
+- **Added Ring Hang event**  
+Added `RSMI_EVT_NOTIF_RING_HANG` to the possible events in the `rsmi_evt_notification_type_t` enum.
+
+### Changed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Fixed
+
+- N/A
+
+### Known Issues
+
+- N/A
+
 ## rocm_smi_lib for ROCm 6.1.1
 
 ### Added

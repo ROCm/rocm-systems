@@ -311,6 +311,7 @@ typedef struct {
  * Event notification event types
  */
 typedef enum {
+  RSMI_EVT_NOTIF_NONE = KFD_SMI_EVENT_NONE,        //!< Unused
   RSMI_EVT_NOTIF_VMFAULT = KFD_SMI_EVENT_VMFAULT,  //!< VM page fault
   RSMI_EVT_NOTIF_FIRST = RSMI_EVT_NOTIF_VMFAULT,
   RSMI_EVT_NOTIF_THERMAL_THROTTLE = KFD_SMI_EVENT_THERMAL_THROTTLE,
