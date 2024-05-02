@@ -13,7 +13,7 @@ endforeach()
 
 file(
     WRITE "${PACKAGE_OUTPUT_DIR}/__init__.py"
-    "
+    "#
 from __future__ import absolute_import
 
 from . import pytest_utils

@@ -1,7 +1,7 @@
 
 [tool.black]
 line-length = 90
-target-version = ['py36', 'py37', 'py38', 'py39', 'py310']
+target-version = ['py36', 'py37', 'py38', 'py39', 'py310', 'py311']
 include = '\.py$'
 exclude = '''
 (
@@ -18,8 +18,8 @@ exclude = '''
     | dist
     | external
     | build
-    | build-release
-    | build-rocprofiler
+    | build-docs
+    | build-rocprofiler-sdk
   )/
 )
 '''

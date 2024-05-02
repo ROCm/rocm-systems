@@ -18,6 +18,19 @@ _PROJECT_NAME = "rocprofiler-sdk-internal"
 _BASE_URL = "cdash.mariadb.svc.cluster.local"
 _GCOVR_GENERATE_CMD = None
 
+# these are various default values
+_VISIBLE_PROJECT_NAME = _PROJECT_NAME.replace("-internal", "")
+_DEFAULT_ROCM_PATH = os.path.realpath(os.environ.get("ROCM_PATH", "/opt/rocm"))
+_DEFAULT_INSTALL_PREFIX = (
+    os.path.realpath(_DEFAULT_ROCM_PATH)
+    if os.path.exists(_DEFAULT_ROCM_PATH)
+    else f"/opt/{_VISIBLE_PROJECT_NAME}"
+)
+_DEFAULT_GPU_TARGETS = os.environ.get(
+    "GPU_TARGETS",
+    "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102",
+).split()
+
 
 def which(cmd, require):
     v = shutil.which(cmd)
@@ -54,9 +67,25 @@ def generate_custom(args, cmake_args, ctest_args):
 
     NAME = re.sub(r"(.*)-([0-9]+)/merge", "PR_\\2_\\1", NAME)
 
-    DEFAULT_CMAKE_ARGS = " ".join(
-        [f"-DROCPROFILER_BUILD_{x}=ON" for x in ["CI", "TESTS", "SAMPLES"]]
-    )
+    def option_in_args(_key, _args):
+        _union = [x for x in _args if f"{_key}=" in x]
+        return len(_union) != 0
+
+    DEFAULT_CMAKE_ARGS = []
+    for key, value in dict(
+        [
+            ["CMAKE_BUILD_TYPE", "RelWithDebInfo"],
+            ["CMAKE_INSTALL_PREFIX", f"{_DEFAULT_INSTALL_PREFIX}"],
+            ["CPACK_PACKAGING_INSTALL_PREFIX", f"{_DEFAULT_INSTALL_PREFIX}"],
+            ["CPACK_GENERATOR", "DEB;RPM;TGZ"],
+            ["Python3_EXECUTABLE", sys.executable],
+        ]
+        + [[f"ROCPROFILER_BUILD_{x}", "ON"] for x in ["CI", "TESTS", "SAMPLES"]]
+    ).items():
+        if not option_in_args(key, cmake_args):
+            DEFAULT_CMAKE_ARGS += [f"-D{key}={value}"]
+
+    DEFAULT_CMAKE_ARGS = " ".join(DEFAULT_CMAKE_ARGS)
 
     GPU_TARGETS = ";".join(args.gpu_targets)
     MEMCHECK_TYPE = "" if args.memcheck is None else args.memcheck
@@ -189,7 +218,9 @@ def generate_dashboard_script(args):
     BINARY_DIR = os.path.realpath(args.binary_dir)
     MEMCHECK = 1 if args.memcheck is not None else 0
     SUBMIT = 0 if args.disable_cdash else 1
+    STRICT_SUBMIT = 1 if args.require_cdash_submission else 0
     ARGN = "${ARGN}"
+    SUBMIT_ERR = "${_cdash_submit_err}"
 
     if args.memcheck == "ThreadSanitizer":
         MEMCHECK = 0
@@ -199,7 +230,18 @@ def generate_dashboard_script(args):
 
         macro(dashboard_submit)
             if("{SUBMIT}" GREATER 0)
-                ctest_submit({ARGN})
+                ctest_submit({ARGN}
+                             RETRY_COUNT 1
+                             RETRY_DELAY 10
+                             CAPTURE_CMAKE_ERROR _cdash_submit_err)
+
+                if("{STRICT_SUBMIT}" GREATER 0)
+                    if(NOT _cdash_submit_err EQUAL 0)
+                        message(FATAL_ERROR "CDash submission failed: {SUBMIT_ERR}")
+                    endif()
+                else()
+                    message(AUTHOR_WARNING "CDash submission failure ignored due to absence of --require-cdash-submission")
+                endif()
             endif()
         endmacro()
     """
@@ -373,9 +415,14 @@ def parse_cdash_args(args):
         action="store_true",
     )
     parser.add_argument(
+        "--require-cdash-submission",
+        help="Failure to submit results to CDash dashboard causes CTest failure",
+        action="store_true",
+    )
+    parser.add_argument(
         "--gpu-targets",
         help="GPU build architectures",
-        default="gfx900 gfx906 gfx908 gfx90a gfx1030 gfx1100".split(),
+        default=_DEFAULT_GPU_TARGETS,
         type=str,
         nargs="+",
     )
@@ -445,6 +492,17 @@ def parse_args(args=None):
 
     if cdash_args.linter == "clang-tidy":
         cmake_args += ["-DROCPROFILER_ENABLE_CLANG_TIDY=ON"]
+
+    if (
+        cdash_args.mode == "Nightly"
+        and not cdash_args.require_cdash_submission
+        and not cdash_args.disable_cdash
+    ):
+        sys.stderr.write(
+            "Enabling --require-cdash-submission for Nightly mode. Use --disable-cdash to suppress\n"
+        )
+        sys.stderr.flush()
+        cdash_args.require_cdash_submission = True
 
     def get_repeat_val(_param):
         _value = getattr(cdash_args, f"repeat_{_param}".replace("-", "_"))
