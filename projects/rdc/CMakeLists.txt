@@ -196,7 +196,10 @@ endif()
 message("-----------ROCM_DIR : " ${ROCM_DIR})
 
 # this is needed for INSTALL_RPATH "\$ORIGIN" property to work correctly
+# please note that because of --enable-new-dtags - this actually sets RUNPATH and not RPATH.
+# this means LD_LIBRARY_PATH can override the library locations
 set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE CACHE BOOL "Set all RPATH to be ORIGIN-based")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Use link path for RPATH")
 
 ## Add address sanitizer
 if(${ADDRESS_SANITIZER})
