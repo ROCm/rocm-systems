@@ -146,6 +146,7 @@ class rdc_field_t(c_int):
      RDC_EVNT_NOTIF_THERMAL_THROTTLE = 2001
      RDC_EVNT_NOTIF_PRE_RESET = 2002
      RDC_EVNT_NOTIF_POST_RESET = 2003
+     RDC_EVNT_NOTIF_RING_HANG = 2004
 
 rdc_handle_t = c_void_p
 rdc_gpu_group_t = c_uint32

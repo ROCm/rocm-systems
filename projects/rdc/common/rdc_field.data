@@ -120,3 +120,4 @@ FLD_DESC_ENT(RDC_EVNT_NOTIF_VMFAULT,     "VM page fault",                       
 FLD_DESC_ENT(RDC_EVNT_NOTIF_THERMAL_THROTTLE, "Clk freq decrease due to temp",          "THERMAL_THROT",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PRE_RESET,   "GPU reset is about to occur",                 "GPU_PRE_RESET",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_POST_RESET,  "GPU reset just occurred",                     "GPU_POST_RESET",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_RING_HANG,   "GPU ring hang just occured",                  "RING_HANG",        false)

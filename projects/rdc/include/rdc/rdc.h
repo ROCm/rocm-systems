@@ -301,8 +301,9 @@ typedef enum {
                                     //!< due to temperature rise
   RDC_EVNT_NOTIF_PRE_RESET,         //!< GPU reset is about to occur
   RDC_EVNT_NOTIF_POST_RESET,        //!< GPU reset just occurred
+  RDC_EVNT_NOTIF_RING_HANG,         //!< GPU ring hang just occurred
 
-  RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_POST_RESET,
+  RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_RING_HANG,
 } rdc_field_t;
 #define RDC_EVNT_IS_NOTIF_FIELD(FIELD) \
   ((FIELD) >= RDC_EVNT_NOTIF_FIRST && (FIELD) <= RDC_EVNT_NOTIF_LAST)
