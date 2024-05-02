@@ -1,6 +1,6 @@
-[![Ubuntu 20.04](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-focal.yml)
-[![RHEL 8](https://github.com/ROCm/omniperf/actions/workflows/opensuse.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/opensuse.yml)
-[![MI100](https://github.com/ROCm/omniperf/actions/workflows/mi100.yml/badge.svg?branch=2.x)](https://github.com/ROCm/omniperf/actions/workflows/mi100.yml)
+[![Ubuntu 22.04](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-jammy.yml)
+[![RHEL 8](https://github.com/ROCm/omniperf/actions/workflows/rhel-8.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/rhel-8.yml)
+[![Instinct](https://github.com/ROCm/omniperf/actions/workflows/mi-rhel9.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/mi-rhel9.yml)
 [![Docs](https://github.com/ROCm/omniperf/actions/workflows/docs.yml/badge.svg)](https://rocm.github.io/omniperf/)
 [![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
 
