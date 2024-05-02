@@ -41,6 +41,7 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
+
 set(CPACK_PACKAGE_CONTACT "jonathan.madsen@amd.com")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
@@ -131,9 +132,6 @@ set(CPACK_DEBIAN_PACKAGE_RELEASE
 string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_DEBIAN_PACKAGE_RELEASE
                      "${CPACK_DEBIAN_PACKAGE_RELEASE}")
 string(REPLACE "-" "~" CPACK_DEBIAN_PACKAGE_RELEASE "${CPACK_DEBIAN_PACKAGE_RELEASE}")
-if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-endif()
 
 set(_DEBIAN_PACKAGE_DEPENDS "")
 if(DYNINST_USE_OpenMP)
@@ -182,7 +180,6 @@ string(REPLACE ";" ", " _DEBIAN_PACKAGE_DEPENDS "${_DEBIAN_PACKAGE_DEPENDS}")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
     "${_DEBIAN_PACKAGE_DEPENDS}"
     CACHE STRING "Debian package dependencies" FORCE)
-omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS "Debian package dependencies")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 
 # -------------------------------------------------------------------------------------- #
@@ -200,24 +197,42 @@ set(CPACK_RPM_PACKAGE_RELEASE
 string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_RPM_PACKAGE_RELEASE
                      "${CPACK_RPM_PACKAGE_RELEASE}")
 string(REPLACE "-" "~" CPACK_RPM_PACKAGE_RELEASE "${CPACK_RPM_PACKAGE_RELEASE}")
-if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
-    set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
-endif()
 
-# Get rpm distro
-if(CPACK_RPM_PACKAGE_RELEASE)
-    set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
-endif()
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
+set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 
 # -------------------------------------------------------------------------------------- #
 #
-# Prepare final version for the CPACK use
+# Prepare final CPACK parameters
 #
 # -------------------------------------------------------------------------------------- #
 
 set(CPACK_PACKAGE_VERSION
     "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}"
     )
+
+if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+    set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
+endif()
+
+if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+endif()
+
+if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
+    set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
+endif()
+
+omnitrace_add_feature(CPACK_PACKAGE_NAME "Package name")
+omnitrace_add_feature(CPACK_PACKAGE_VERSION "Package version")
+omnitrace_add_feature(CPACK_PACKAGING_INSTALL_PREFIX "Package installation prefix")
+
+omnitrace_add_feature(CPACK_DEBIAN_FILE_NAME "Debian file name")
+omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_RELEASE "Debian package release version")
+omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS "Debian package dependencies")
+
+omnitrace_add_feature(CPACK_RPM_FILE_NAME "RPM file name")
+omnitrace_add_feature(CPACK_RPM_PACKAGE_RELEASE "RPM package release version")
+omnitrace_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package dependencies")
 
 include(CPack)
