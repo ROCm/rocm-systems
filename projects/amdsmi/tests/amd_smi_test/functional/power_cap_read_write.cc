@@ -89,9 +89,10 @@ void TestPowerCapReadWrite::Close() {
 
 void TestPowerCapReadWrite::Run(void) {
   amdsmi_status_t ret;
-  uint64_t orig, min, max, new_cap;
+  uint64_t default_cap, min, max, new_cap, curr_cap;
   clock_t start, end;
   double cpu_time_used;
+  const uint64_t MICRO_CONVERSION = 1000000;
 
   TestBase::Run();
   if (setup_failed_) {
@@ -110,22 +111,24 @@ void TestPowerCapReadWrite::Run(void) {
     ASSERT_EQ(ret, AMDSMI_STATUS_INVAL);
     min = info.min_power_cap;
     max = info.max_power_cap;
-    orig = info.default_power_cap;
+    default_cap = info.default_power_cap;
+    curr_cap = info.power_cap;
 
+    new_cap = (max + min)/2;
     // Check if power cap is within the range
     // skip the test otherwise
-    if (orig < min || orig > max) {
-      std::cout << "Power cap is not within the range. Skipping test for " << dv_ind << std::endl;
+    if (new_cap < min || new_cap > max) {
+      std::cout << "Power cap requested (" << new_cap
+                << " uW) is not within the range. Skipping test for " << dv_ind << std::endl;
       continue;
     }
 
-    new_cap = (max + min)/2;
-
     IF_VERB(STANDARD) {
-      std::cout << "Original Power Cap: " << orig << " uW" << std::endl;
-      std::cout << "Power Cap Range: " << max << " uW to " << min <<
+      std::cout << "[Before Set]  Default Power Cap: " << default_cap << " uW" << std::endl;
+      std::cout << "[Before Set]  Current Power Cap: " << curr_cap << " uW" << std::endl;
+      std::cout << "[Before Set]  Power Cap Range [max to min]: " << max << " uW to " << min <<
                                                              " uW" << std::endl;
-      std::cout << "Setting new cap to " << new_cap << "..." << std::endl;
+      std::cout << "[Before Set]  Setting new cap to " << new_cap << "..." << std::endl;
     }
     start = clock();
     ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, new_cap);
@@ -142,25 +145,35 @@ void TestPowerCapReadWrite::Run(void) {
 
     ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
     CHK_ERR_ASRT(ret)
-    new_cap = info.default_power_cap;
+    curr_cap = info.power_cap;
 
-    // TODO(cfreehil) add some kind of assertion to verify new_cap is correct
-    //       (or within a range)
     IF_VERB(STANDARD) {
-      std::cout << "Time spent: " << cpu_time_used << " uS" << std::endl;
-      std::cout << "New Power Cap: " << new_cap << " uW" << std::endl;
-      std::cout << "Resetting cap to " << orig << "..." << std::endl;
+      std::cout << "[After Set]   Time spent: " << cpu_time_used << " uS" << std::endl;
+      std::cout << "[After Set]   Current Power Cap: " << curr_cap << " uW" << std::endl;
+      std::cout << "[After Set]   Requested Power Cap: " << new_cap << " uW" << std::endl;
+      std::cout << "[After Set]   Power Cap Range [max to min]: " << max << " uW to "
+                                                                  << min << " uW" << std::endl;
+      std::cout << "[After Set]   Resetting cap to " << default_cap << "..." << std::endl;
     }
+    // Confirm in watts the values are equal
+    ASSERT_EQ(curr_cap/MICRO_CONVERSION, new_cap/MICRO_CONVERSION);
 
-    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, orig);
+    // Reset to default power cap
+    ret =  amdsmi_set_power_cap(processor_handles_[dv_ind], 0, default_cap);
     CHK_ERR_ASRT(ret)
 
     ret = amdsmi_get_power_cap_info(processor_handles_[dv_ind], 0, &info);
     CHK_ERR_ASRT(ret)
-    new_cap = info.default_power_cap;
+    curr_cap = info.power_cap;
 
     IF_VERB(STANDARD) {
-      std::cout << "Current Power Cap: " << new_cap << " uW" << std::endl;
+      std::cout << "[After Reset] Current Power Cap: " << curr_cap << " uW" << std::endl;
+      std::cout << "[After Reset] Requested Power Cap (default): " << default_cap << " uW"
+                                                                   << std::endl;
+      std::cout << "[After Reset] Power Cap Range [max to min]: " << max << " uW to "
+                                                                  << min << " uW" << std::endl;
     }
+    // Confirm in watts the values are equal
+    ASSERT_EQ(curr_cap/MICRO_CONVERSION, default_cap/MICRO_CONVERSION);
   }
 }

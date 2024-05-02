@@ -59,6 +59,7 @@
 #include <cstring>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <sstream>
 #include <vector>
@@ -1973,6 +1974,144 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   CATCH
 }
 
+
+rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
+                             uint32_t* pisolate) {
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start ======= dev_ind:"
+    << dv_ind;
+  LOG_TRACE(ss);
+  CHK_SUPPORT_NAME_ONLY(pisolate)
+
+  // the enforce_isolation sysfs is in this format <partition_id, enable_flag>
+  // Get the partition_id. For SPX, the partition_id will be 0.
+  int partition_id = dev->get_partition_id();
+
+  DEVICE_MUTEX
+
+  std::string str_val;
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevProcessIsolation, dv_ind, &str_val);
+  if (ret == RSMI_STATUS_FILE_ERROR) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+       << ", get_dev_value_str() ret was RSMI_STATUS_FILE_ERROR "
+       << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+       << ", get_dev_value_str() ret was not RSMI_STATUS_SUCCESS"
+       << " -> reporting " << amd::smi::getRSMIStatusString(ret);
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  /*
+  for 4 partition: enforce isolation is enabled on partition 2 and 
+  disabled on partitions 0, 1, 3.
+  $ cat /sys/class/drm/cardX/device/enforce_isolation
+   0 0 1 0
+  */
+  std::stringstream iss(str_val);
+  int number;
+  std::vector<int> partition_status;
+  while ( iss >> number )
+    partition_status.push_back(number);
+  if (partition_status.size() <= partition_id) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+              << ", the sysfs line " << str_val
+              << " does not have the partition_id "
+              << partition_id;
+              LOG_ERROR(ss);
+              return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+  *pisolate = partition_status[partition_id];
+  return RSMI_STATUS_SUCCESS;
+}
+
+rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
+                             uint32_t pisolate) {
+  rsmi_status_t ret;
+
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+
+  // To set the values,need to specify the setting for all of the partitions
+  // For two partition
+  // echo "1 0"  | sudo tee  /sys/class/drm/cardX/device/enforce_isolation
+  int partition_id = dev->get_partition_id();
+  std::string str_val;
+  rsmi_status_t ret = get_dev_value_line(amd::smi::kDevProcessIsolation, dv_ind, &str_val);
+  if (ret == RSMI_STATUS_FILE_ERROR) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+       << ", get_dev_value_str() ret was RSMI_STATUS_FILE_ERROR "
+       << "-> reporting RSMI_STATUS_NOT_SUPPORTED";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+       << ", get_dev_value_str() ret was not RSMI_STATUS_SUCCESS"
+       << " -> reporting " << amd::smi::getRSMIStatusString(ret);
+    LOG_ERROR(ss);
+    return ret;
+  }
+
+  // craft the string need to be writeen.
+  // (1) parse the read enforce_isolation data into a vector
+  std::stringstream iss(str_val);
+  int number;
+  std::vector<int> partition_status;
+  while ( iss >> number ) {
+    partition_status.push_back(number);
+  }
+
+  // (2) Validate the data
+  if (partition_status.size() <= partition_id) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======="
+              << ", the sysfs line " << str_val
+              << " does not have the partition_id "
+              << partition_id;
+    LOG_ERROR(ss);
+    return RSMI_STATUS_UNEXPECTED_DATA;
+  }
+
+  // (3) Create the complete list with the update
+  partition_status[partition_id] = pisolate;
+  std::stringstream result;
+  std::copy(partition_status.begin(), partition_status.end(),
+        std::ostream_iterator<int>(result, " "));
+
+  std::string value = result.str().c_str();
+  int write_ret = dev->writeDevInfo(amd::smi::kDevProcessIsolation , value);
+  return amd::smi::ErrnoToRsmiStatus(write_ret);
+
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_gpu_clear_sram_data(uint32_t dv_ind,
+    uint32_t sclean) {
+  rsmi_status_t ret;
+
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+
+  std::string value = std::to_string(sclean);
+  int ret = dev->writeDevInfo(amd::smi::kDevShaderClean , value);
+  return amd::smi::ErrnoToRsmiStatus(ret);
+
+  CATCH
+}
 
 rsmi_status_t
 rsmi_dev_dpm_policy_set(uint32_t dv_ind,

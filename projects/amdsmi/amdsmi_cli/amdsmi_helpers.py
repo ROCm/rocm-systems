@@ -29,6 +29,7 @@ import time
 from subprocess import run
 from subprocess import PIPE, STDOUT
 from typing import List
+from enum import Enum
 
 from amdsmi_init import *
 from BDF import BDF
@@ -726,3 +727,46 @@ class AMDSMIHelpers():
         if logger.is_human_readable_format():
             return f"{value} {unit}"
         return f"{value}"
+
+    class SI_Unit(float, Enum):
+        GIGA = 1000000000  # 10^9
+        MEGA = 1000000     # 10^6
+        KILO = 1000        # 10^3
+        HECTO = 100        # 10^2
+        DEKA = 10          # 10^1
+        BASE = 1           # 10^0
+        DECI = 0.1         # 10^-1
+        CENTI = 0.01       # 10^-2
+        MILLI = 0.001      # 10^-3
+        MICRO = 0.000001   # 10^-6
+        NANO = 0.000000001 # 10^-9
+
+    def convert_SI_unit(val: float, unit_in: SI_Unit, unit_out = SI_Unit.BASE) -> float:
+        """This function will convert a value into another
+         scientific (SI) unit. Defaults unit_out to SI_Unit.BASE
+         This function returns a float.
+
+        params:
+            val: float unit to convert
+            unit_in: Requires using SI_Unit to set current value's SI unit (eg. SI_Unit.MICRO)
+            unit_out - Requires using SI_Unit to set current value's SI unit
+             default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
+        return:
+            float : converted SI unit of value requested
+        """
+        return val * unit_in / unit_out
+
+    def convert_SI_unit(val: int, unit_in: SI_Unit, unit_out=SI_Unit.BASE) -> int:
+        """This function will convert a value into another
+         scientific (SI) unit. Defaults unit_out to SI_Unit.BASE
+         This function returns a int.
+
+        params:
+            val: int unit to convert
+            unit_in: Requires using SI_Unit to set current value's SI unit (eg. SI_Unit.MICRO)
+            unit_out - Requires using SI_Unit to set current value's SI unit
+             default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
+        return:
+            int : converted SI unit of value requested
+        """
+        return int(float(val) * unit_in / unit_out)

@@ -545,6 +545,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         board_help = "All board information"
         dpm_policy_help = "The available DPM policy"
         xgmi_plpd_help = "The available XGMI per-link power down policy"
+        process_isolation_help = "The process isolation status"
 
         # Options arguments help text for Hypervisors and Baremetal
         ras_help = "Displays RAS features information"
@@ -586,6 +587,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--policy', action='store_true', required=False, help=dpm_policy_help)
                 static_parser.add_argument('-x', '--xgmi-plpd', action='store_true', required=False, help=xgmi_plpd_help)
+                static_parser.add_argument('-R', '--process-isolation', action='store_true', required=False, help=process_isolation_help)
 
             if self.helpers.is_linux() and not self.helpers.is_virtual_os():
                 static_parser.add_argument('-u', '--numa', action='store_true', required=False, help=numa_help)
@@ -967,8 +969,9 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_compute_partition_help = f"Set one of the following the compute partition modes:\n\t{compute_partition_choices_str}"
         set_memory_partition_help = f"Set one of the following the memory partition modes:\n\t{memory_partition_choices_str}"
         set_power_cap_help = "Set power capacity limit"
-        set_dpm_policy_help = f"Set the GPU DPM policy using policy id\n"
-        set_xgmi_plpd_help = f"Set the GPU XGMI per-link power down policy using policy id\n"
+        set_dpm_policy_help = "Set the GPU DPM policy using policy id\n"
+        set_xgmi_plpd_help = "Set the GPU XGMI per-link power down policy using policy id\n"
+        set_process_isolation_help = "Enable or disable the GPU process isolation: 0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
@@ -982,6 +985,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_cpu_enable_apb_help = "Enables the DF p-state performance boost algorithm"
         set_cpu_disable_apb_help = "Disables the DF p-state performance boost algorithm. Input parameter is DFPstate (0-3)"
         set_soc_boost_limit_help = "Sets the boost limit for the given socket. Input parameter is socket BOOST_LIMIT value"
+        run_gpu_clear_sram_data_help = f"Clear the GPU SRAM data\n"
 
         # Help text for CPU Core set options
         set_core_boost_limit_help = "Sets the boost limit for the given core. Input parameter is core BOOST_LIMIT value"
@@ -1006,6 +1010,8 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_parser.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
             set_value_parser.add_argument('-p', '--dpm-policy', action='store', required=False,  type=self._not_negative_int, help=set_dpm_policy_help, metavar='POLICY_ID')
             set_value_parser.add_argument('-x', '--xgmi-plpd', action='store', required=False,  type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
+            set_value_parser.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=self._not_negative_int, required=False, help=set_process_isolation_help, metavar='STATUS')
+            set_value_parser.add_argument('-c', '--clear-sram-data', action='store_true', required=False, help=run_gpu_clear_sram_data_help)
 
         if self.helpers.is_amd_hsmp_initialized():
             # Optional CPU Args
@@ -1104,7 +1110,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         throttle_help = "Monitor thermal throttle status"
         ecc_help = "Monitor ECC single bit, ECC double bit, and PCIe replay error counts"
         mem_usage_help = "Monitor memory usage in MB"
-        pcie_throughput_help = "Monitor PCIe Tx/Rx in MB/s"
+        pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
 
         # Create monitor subparser
         monitor_parser = subparsers.add_parser('monitor', help=monitor_help, description=monitor_subcommand_help)
@@ -1127,7 +1133,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-s', '--throttle-status', action='store_true', required=False, help=throttle_help)
         monitor_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
         monitor_parser.add_argument('-v', '--vram-usage', action='store_true', required=False, help=mem_usage_help)
-        monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_throughput_help)
+        monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_bandwidth_help)
 
 
     def _add_rocm_smi_parser(self, subparsers, func):

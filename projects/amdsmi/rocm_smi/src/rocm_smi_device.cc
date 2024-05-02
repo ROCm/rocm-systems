@@ -82,6 +82,8 @@ static const char *kDevPCieVendorIDFName = "vendor";
 
 // Device sysfs file names
 static const char *kDevPerfLevelFName = "power_dpm_force_performance_level";
+static const char *kDevProcessIsolationFName = "enforce_isolation";
+static const char *kDevShaderCleanFName = "run_cleaner_shader";
 static const char *kDevDevProdNameFName = "product_name";
 static const char *kDevDevProdNumFName = "product_number";
 static const char *kDevDevIDFName = "device";
@@ -317,6 +319,8 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevGpuMetrics, kDevGpuMetricsFName},
     {kDevPmMetrics, kDevPmMetricsFName},
     {kDevDPMPolicy, kDevDPMPolicyFName},
+    {kDevProcessIsolation, kDevProcessIsolationFName},
+    {kDevShaderClean, kDevShaderCleanFName},
     {kDevRegMetrics, kDevRegMetricsFName},
     {kDevGpuReset, kDevGpuResetFName},
     {kDevAvailableComputePartition, kDevAvailableComputePartitionFName},
@@ -475,6 +479,8 @@ Device::devInfoTypesStrings = {
   {kDevMemoryPartition, "kDevMemoryPartition"},
   {kDevPCieVendorID, "kDevPCieVendorID"},
   {kDevDPMPolicy, "kDevDPMPolicy"},
+  {kDevProcessIsolation, "kDevProcessIsolation"},
+  {kDevShaderClean, "kDevShaderClean"},
 };
 
 static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
@@ -516,6 +522,9 @@ static const std::map<const char *, dev_depends_t> kDevFuncDependsMap = {
   {"rsmi_dev_perf_level_set",            {{kDevPerfLevelFName}, {}}},
   {"rsmi_dev_perf_level_set_v1",         {{kDevPerfLevelFName}, {}}},
   {"rsmi_dev_perf_level_get",            {{kDevPerfLevelFName}, {}}},
+  {"rsmi_dev_process_isolation_set",             {{kDevProcessIsolationFName}, {}}},
+  {"rsmi_dev_process_isolation_get",             {{kDevProcessIsolationFName}, {}}},
+  {"rsmi_dev_gpu_shader_clean",            {{kDevShaderCleanFName}, {}}},
   {"rsmi_perf_determinism_mode_set",     {{kDevPerfLevelFName,
                                            kDevPowerODVoltageFName}, {}}},
   {"rsmi_dev_overdrive_level_set",       {{kDevOverDriveLevelFName}, {}}},
@@ -939,6 +948,8 @@ int Device::writeDevInfo(DevInfoTypes type, std::string val) {
   sysfs_path += kDevAttribNameMap.at(type);
   switch (type) {
     case kDevGPUMClk:
+    case kDevProcessIsolation:
+    case kDevShaderClean:
     case kDevDCEFClk:
     case kDevFClk:
     case kDevGPUSClk:
@@ -1212,6 +1223,7 @@ int Device::readDevInfo(DevInfoTypes type, std::vector<std::string> *val) {
 
   switch (type) {
     case kDevGPUMClk:
+    case kDevProcessIsolation:
     case kDevGPUSClk:
     case kDevDCEFClk:
     case kDevFClk:
@@ -1279,6 +1291,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevMemoryPartition:
     case kDevNumaNode:
     case kDevXGMIPhysicalID:
+    case kDevProcessIsolation:
       return readDevInfoStr(type, val);
       break;
 

@@ -657,15 +657,15 @@ int main() {
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_power_cap_info:\n");
             std::cout << "\t\t Power Cap: " << cap_info.power_cap
-                      << "W\n";
+                      << " uW\n";
             std::cout << "\t\t Default Power Cap: " << cap_info.default_power_cap
-                      << "\n\n";
+                      << " uW\n\n";
             std::cout << "\t\t Dpm Cap: " << cap_info.dpm_cap
-                      << "\n\n";
+                      << " MHz\n\n";
             std::cout << "\t\t Min Power Cap: " << cap_info.min_power_cap
-                      << "\n\n";
+                      << " uW\n\n";
             std::cout << "\t\t Max Power Cap: " << cap_info.max_power_cap
-                      << "\n\n";
+                      << " uW\n\n";
 
             /// Get GPU Metrics info
             std::cout << "\n\n";

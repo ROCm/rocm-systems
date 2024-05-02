@@ -245,7 +245,7 @@ class AMDSMICommands():
     def static_gpu(self, args, multiple_devices=False, gpu=None, asic=None, bus=None, vbios=None,
                         limit=None, driver=None, ras=None, board=None, numa=None, vram=None,
                         cache=None, partition=None, dfc_ucode=None, fb_info=None, num_vf=None,
-                        policy=None, xgmi_plpd=None):
+                        policy=None, xgmi_plpd=None, process_isolation=None):
         """Get Static information for target gpu
 
         Args:
@@ -270,6 +270,7 @@ class AMDSMICommands():
             num_vf (bool, optional): Value override for args.num_vf. Defaults to None.
             policy (bool, optional): Value override for args.policy. Defaults to None.
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
+            process_isolation (bool, optional): Value override for args.process_isolation. Defaults to None.
         Returns:
             None: Print output via AMDSMILogger to destination
         """
@@ -306,8 +307,10 @@ class AMDSMICommands():
                 args.policy = policy
             if xgmi_plpd:
                 args.xgmi_plpd = xgmi_plpd
-            current_platform_args += ["ras", "limit", "partition", "policy", "xgmi_plpd"]
-            current_platform_values += [args.ras, args.limit, args.partition, args.policy, args.xgmi_plpd]
+            if process_isolation:
+                args.process_isolation = process_isolation
+            current_platform_args += ["ras", "limit", "partition", "policy", "xgmi_plpd", "process_isolation"]
+            current_platform_values += [args.ras, args.limit, args.partition, args.policy, args.xgmi_plpd, args.process_isolation]
 
         if self.helpers.is_linux() and not self.helpers.is_virtual_os():
             if numa:
@@ -411,7 +414,11 @@ class AMDSMICommands():
                     power_limit_error = False
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
                     max_power_limit = power_cap_info['max_power_cap']
+                    max_power_limit = AMDSMIHelpers.convert_SI_unit(max_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                    min_power_limit = power_cap_info['min_power_cap']
+                    min_power_limit = AMDSMIHelpers.convert_SI_unit(min_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
                     socket_power_limit = power_cap_info['power_cap']
+                    socket_power_limit = AMDSMIHelpers.convert_SI_unit(socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     power_limit_error = True
                     max_power_limit = "N/A"
@@ -489,11 +496,18 @@ class AMDSMICommands():
                 power_unit = 'W'
                 temp_unit_human_readable = '\N{DEGREE SIGN}C'
                 temp_unit_json = 'C'
-                if self.logger.is_human_readable_format():
-                    if not power_limit_error:
-                        max_power_limit = f"{max_power_limit} {power_unit}"
-                        socket_power_limit = f"{socket_power_limit} {power_unit}"
+                if not power_limit_error:
+                    max_power_limit = self.helpers.unit_format(self.logger,
+                                                               max_power_limit,
+                                                               power_unit)
+                    min_power_limit = self.helpers.unit_format(self.logger,
+                                                               min_power_limit,
+                                                               power_unit)
+                    socket_power_limit = self.helpers.unit_format(self.logger,
+                                                                  socket_power_limit,
+                                                                  power_unit)
 
+                if self.logger.is_human_readable_format():
                     if not slowdown_temp_edge_limit_error:
                         slowdown_temp_edge_limit = f"{slowdown_temp_edge_limit} {temp_unit_human_readable}"
                     if not slowdown_temp_hotspot_limit_error:
@@ -506,13 +520,8 @@ class AMDSMICommands():
                         shutdown_temp_hotspot_limit = f"{shutdown_temp_hotspot_limit} {temp_unit_human_readable}"
                     if not shutdown_temp_vram_limit_error:
                         shutdown_temp_vram_limit = f"{shutdown_temp_vram_limit} {temp_unit_human_readable}"
-                if self.logger.is_json_format():
-                    if not power_limit_error:
-                        max_power_limit = {"value" : max_power_limit,
-                                           "unit" : power_unit}
-                        socket_power_limit = {"value" : socket_power_limit,
-                                              "unit" : power_unit}
 
+                if self.logger.is_json_format():
                     if not slowdown_temp_edge_limit_error:
                         slowdown_temp_edge_limit = {"value" : slowdown_temp_edge_limit,
                                                     "unit" : temp_unit_json}
@@ -535,6 +544,7 @@ class AMDSMICommands():
                 limit_info = {}
                 # Power limits
                 limit_info['max_power'] = max_power_limit
+                limit_info['min_power'] = min_power_limit
                 limit_info['socket_power'] = socket_power_limit
 
                 # Shutdown limits
@@ -643,6 +653,16 @@ class AMDSMICommands():
                     logging.debug("Failed to get xgmi_plpd info for gpu %s | %s", gpu_id, e.get_error_info())
 
                 static_dict['xgmi_plpd'] = policy_info
+        if 'process_isolation' in current_platform_args:
+            if args.process_isolation:
+                try:
+                    status = amdsmi_interface.amdsmi_get_gpu_process_isolation(args.gpu)
+                    status = "Enabled" if status else "Disabled"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    status = "N/A"
+                    logging.debug("Failed to process isolation for gpu %s | %s", gpu_id, e.get_error_info())
+
+                static_dict['process_isolation'] = status
         if 'numa' in current_platform_args:
             if args.numa:
                 try:
@@ -779,7 +799,7 @@ class AMDSMICommands():
                 bus=None, vbios=None, limit=None, driver=None, ras=None,
                 board=None, numa=None, vram=None, cache=None, partition=None,
                 dfc_ucode=None, fb_info=None, num_vf=None, cpu=None,
-                interface_ver=None, policy=None, xgmi_plpd = None):
+                interface_ver=None, policy=None, xgmi_plpd = None, process_isolation=None):
         """Get Static information for target gpu and cpu
 
         Args:
@@ -804,6 +824,7 @@ class AMDSMICommands():
             interface_ver (bool, optional): Value override for args.interface_ver. Defaults to None
             policy (bool, optional): Value override for args.policy. Defaults to None.
             xgmi_plpd (bool, optional): Value override for args.xgmi_plpd. Defaults to None.
+            process_isolation (bool, optional): Value override for args.process_isolation. Defaults to None.
         Raises:
             IndexError: Index error if gpu list is empty
 
@@ -829,7 +850,8 @@ class AMDSMICommands():
         gpu_args_enabled = False
         gpu_attributes = ["asic", "bus", "vbios", "limit", "driver", "ras",
                           "board", "numa", "vram", "cache", "partition",
-                          "dfc_ucode", "fb_info", "num_vf", "policy", "xgmi_plpd"]
+                          "dfc_ucode", "fb_info", "num_vf", "policy", "xgmi_plpd",
+                          "process_isolation"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr):
@@ -859,7 +881,8 @@ class AMDSMICommands():
                 self.static_gpu(args, multiple_devices, gpu, asic,
                                     bus, vbios, limit, driver, ras,
                                     board, numa, vram, cache, partition,
-                                    dfc_ucode, fb_info, num_vf, policy)
+                                    dfc_ucode, fb_info, num_vf, policy,
+                                    process_isolation)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None:
                 args.cpu = self.cpu_handles
@@ -873,7 +896,8 @@ class AMDSMICommands():
             self.static_gpu(args, multiple_devices, gpu, asic,
                                 bus, vbios, limit, driver, ras,
                                 board, numa, vram, cache, partition,
-                                dfc_ucode, fb_info, num_vf, policy, xgmi_plpd)
+                                dfc_ucode, fb_info, num_vf, policy, xgmi_plpd,
+                                process_isolation)
 
 
     def firmware(self, args, multiple_devices=False, gpu=None, fw_list=True):
@@ -998,14 +1022,19 @@ class AMDSMICommands():
         # Get gpu_id for logging
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
+        bad_pages_not_found = "No bad pages found."
         try:
             bad_page_info = amdsmi_interface.amdsmi_get_gpu_bad_page_info(args.gpu)
+            # If bad_page_info is an empty list overwrite with not found error statement
+            if bad_page_info == []:
+                bad_page_info = bad_pages_not_found
+                bad_page_error = True
+            else:
+                bad_page_error = False
         except amdsmi_exception.AmdSmiLibraryException as e:
             bad_page_info = "N/A"
-            logging.debug("Failed to get bad page info for gpu %s | %s", gpu_id, e.get_error_info())
-
-        if bad_page_info == "N/A" or bad_page_info == "No bad pages found.":
             bad_page_error = True
+            logging.debug("Failed to get bad page info for gpu %s | %s", gpu_id, e.get_error_info())
 
         if args.retired:
             if bad_page_error:
@@ -1017,13 +1046,17 @@ class AMDSMICommands():
                         bad_page_info_entry = {}
                         bad_page_info_entry["page_address"] = bad_page["page_address"]
                         bad_page_info_entry["page_size"] = bad_page["page_size"]
-                        bad_page_info_entry["status"] = bad_page["status"].name
+                        status_string = amdsmi_interface.amdsmi_wrapper.amdsmi_memory_page_status_t__enumvalues[bad_page["status"]]
+                        bad_page_info_entry["status"] = status_string.replace("AMDSMI_MEM_PAGE_STATUS_", "")
                         bad_page_info_output.append(bad_page_info_entry)
                 # Remove brackets if there is only one value
                 if len(bad_page_info_output) == 1:
                     bad_page_info_output = bad_page_info_output[0]
 
-                values_dict['retired'] = bad_page_info_output
+                if bad_page_info_output == []:
+                    values_dict['retired'] = bad_pages_not_found
+                else:
+                    values_dict['retired'] = bad_page_info_output
 
         if args.pending:
             if bad_page_error:
@@ -1035,13 +1068,17 @@ class AMDSMICommands():
                         bad_page_info_entry = {}
                         bad_page_info_entry["page_address"] = bad_page["page_address"]
                         bad_page_info_entry["page_size"] = bad_page["page_size"]
-                        bad_page_info_entry["status"] = bad_page["status"].name
+                        status_string = amdsmi_interface.amdsmi_wrapper.amdsmi_memory_page_status_t__enumvalues[bad_page["status"]]
+                        bad_page_info_entry["status"] = status_string.replace("AMDSMI_MEM_PAGE_STATUS_", "")
                         bad_page_info_output.append(bad_page_info_entry)
                 # Remove brackets if there is only one value
                 if len(bad_page_info_output) == 1:
                     bad_page_info_output = bad_page_info_output[0]
 
-                values_dict['pending'] = bad_page_info_output
+                if bad_page_info_output == []:
+                    values_dict['pending'] = bad_pages_not_found
+                else:
+                    values_dict['pending'] = bad_page_info_output
 
         if args.un_res:
             if bad_page_error:
@@ -1053,13 +1090,17 @@ class AMDSMICommands():
                         bad_page_info_entry = {}
                         bad_page_info_entry["page_address"] = bad_page["page_address"]
                         bad_page_info_entry["page_size"] = bad_page["page_size"]
-                        bad_page_info_entry["status"] = bad_page["status"].name
+                        status_string = amdsmi_interface.amdsmi_wrapper.amdsmi_memory_page_status_t__enumvalues[bad_page["status"]]
+                        bad_page_info_entry["status"] = status_string.replace("AMDSMI_MEM_PAGE_STATUS_", "")
                         bad_page_info_output.append(bad_page_info_entry)
                 # Remove brackets if there is only one value
                 if len(bad_page_info_output) == 1:
                     bad_page_info_output = bad_page_info_output[0]
 
-                values_dict['un_res'] = bad_page_info_output
+                if bad_page_info_output == []:
+                    values_dict['un_res'] = bad_pages_not_found
+                else:
+                    values_dict['un_res'] = bad_page_info_output
 
         # Store values in logger.output
         self.logger.store_output(args.gpu, 'values', values_dict)
@@ -1295,24 +1336,19 @@ class AMDSMICommands():
                     for key, value in power_info.items():
                         if value == 0xFFFF:
                             power_info[key] = "N/A"
-                        elif self.logger.is_human_readable_format():
-                            if "voltage" in key:
-                                power_info[key] = f"{value} {voltage_unit}"
-                            elif "power" in key:
-                                power_info[key] = f"{value} {power_unit}"
-                        elif self.logger.is_json_format():
-                            if "voltage" in key:
-                                power_info[key] = {"value" : value,
-                                                  "unit" : voltage_unit}
-                            elif "power" in key:
-                                power_info[key] = {"value" : value,
-                                                  "unit" : power_unit}
-
-                    power_dict['socket_power'] = power_info['current_socket_power']
-
-                    if power_dict['socket_power'] == "N/A":
-                        # For older gpu's when current power doesn't populate we use the average socket power instead
-                        power_dict['socket_power'] = power_info['average_socket_power']
+                        elif "voltage" in key:
+                            power_info[key] = self.helpers.unit_format(self.logger,
+                                                                       value,
+                                                                       voltage_unit)
+                        elif "power" in key:
+                            if ((key == "current_socket_power" or key == "average_socket_power")
+                                and value != "N/A"):
+                                power_dict['socket_power'] = self.helpers.unit_format(self.logger,
+                                                                       value,
+                                                                       power_unit)
+                            power_info[key] = self.helpers.unit_format(self.logger,
+                                                                       value,
+                                                                       power_unit)
 
                     power_dict['gfx_voltage'] = power_info['gfx_voltage']
                     power_dict['soc_voltage'] = power_info['soc_voltage']
@@ -3326,7 +3362,8 @@ class AMDSMICommands():
 
     def set_gpu(self, args, multiple_devices=False, gpu=None, fan=None, perf_level=None,
                   profile=None, perf_determinism=None, compute_partition=None,
-                  memory_partition=None, power_cap=None, dpm_policy=None, xgmi_plpd = None):
+                  memory_partition=None, power_cap=None, dpm_policy=None, xgmi_plpd = None,
+                  process_isolation=None, clear_sram_data = None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -3342,7 +3379,8 @@ class AMDSMICommands():
             power_cap (int, optional): Value override for args.power_cap. Defaults to None.
             dpm_policy (int, optional): Value override for args.dpm_policy. Defaults to None.
             xgmi_plpd (int, optional): Value override for args.xgmi_plpd. Defaults to None.
-
+            process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
+            clear_sram_data (int, optional): Value override for args.clear_sram_data. Defaults to None.
         Raises:
             ValueError: Value error if no gpu value is provided
             IndexError: Index error if gpu list is empty
@@ -3371,6 +3409,10 @@ class AMDSMICommands():
             args.dpm_policy = dpm_policy
         if xgmi_plpd:
             args.xgmi_plpd = xgmi_plpd
+        if process_isolation:
+            args.process_isolation = process_isolation
+        if clear_sram_data:
+            args.clear_sram_data = clear_sram_data
         # Handle No GPU passed
         if args.gpu == None:
             raise ValueError('No GPU provided, specific GPU target(s) are needed')
@@ -3389,9 +3431,11 @@ class AMDSMICommands():
                     args.compute_partition,
                     args.memory_partition,
                     args.perf_determinism is not None,
-                    args.power_cap,
-                    args.dpm_policy,
-                    args.xgmi_plpd]):
+                    args.power_cap is not None,
+                    args.dpm_policy is not None,
+                    args.xgmi_plpd is not None,
+                    args.process_isolation is not None,
+                    args.clear_sram_data]):
             command = " ".join(sys.argv[1:])
             raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -3455,32 +3499,16 @@ class AMDSMICommands():
                     raise PermissionError('Command requires elevation') from e
                 raise ValueError(f"Unable to set memory partition to {args.memory_partition} on {gpu_string}") from e
             self.logger.store_output(args.gpu, 'memorypartition', f"Successfully set memory partition to {args.memory_partition}")
-
-        if args.dpm_policy:
-            try:
-                amdsmi_interface.amdsmi_set_dpm_policy(args.gpu, args.dpm_policy)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                raise ValueError(f"Unable to set dpm policy to {args.dpm_policy} on {gpu_string}") from e
-            self.logger.store_output(args.gpu, 'dpmpolicy', f"Successfully set dpm policy to id {args.dpm_policy}")
-
-        if args.xgmi_plpd:
-            try:
-                amdsmi_interface.amdsmi_set_xgmi_plpd(args.gpu, args.xgmi_plpd)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                raise ValueError(f"Unable to set XGMI policy to {args.xgmi_plpd} on {gpu_string}") from e
-            self.logger.store_output(args.gpu, 'xgmiplpd', f"Successfully set per-link power down policy to id {args.dpm_policy}")
-
         if isinstance(args.power_cap, int):
             try:
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
                 logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
                 min_power_cap = power_cap_info["min_power_cap"]
+                min_power_cap = AMDSMIHelpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
                 max_power_cap = power_cap_info["max_power_cap"]
+                max_power_cap = AMDSMIHelpers.convert_SI_unit(max_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
                 current_power_cap = power_cap_info["power_cap"]
+                current_power_cap = AMDSMIHelpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 raise ValueError(f"Unable to get power cap info from {gpu_string}") from e
 
@@ -3488,7 +3516,9 @@ class AMDSMICommands():
                 self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {args.power_cap}")
             elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
                 try:
-                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, args.power_cap * 1000000)
+                    new_power_cap = AMDSMIHelpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
+                                                                  AMDSMIHelpers.SI_Unit.MICRO)
+                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, new_power_cap)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
@@ -3499,6 +3529,48 @@ class AMDSMICommands():
                 if min_power_cap == 0:
                     min_power_cap = 1
                 self.logger.store_output(args.gpu, 'powercap', f"Power cap must be between {min_power_cap} and {max_power_cap}")
+        if isinstance(args.dpm_policy, int):
+            try:
+                amdsmi_interface.amdsmi_set_dpm_policy(args.gpu, args.dpm_policy)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                raise ValueError(f"Unable to set dpm policy to {args.dpm_policy} on {gpu_string}") from e
+            self.logger.store_output(args.gpu, 'dpmpolicy', f"Successfully set dpm policy to id {args.dpm_policy}")
+        if isinstance(args.xgmi_plpd, int):
+            try:
+                amdsmi_interface.amdsmi_set_xgmi_plpd(args.gpu, args.xgmi_plpd)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                raise ValueError(f"Unable to set XGMI policy to {args.xgmi_plpd} on {gpu_string}") from e
+            self.logger.store_output(args.gpu, 'xgmiplpd', f"Successfully set per-link power down policy to id {args.dpm_policy}")
+        if isinstance(args.process_isolation, int):
+            status_string = "Enabled" if args.process_isolation else "Disabled"
+            result = f"Requested process isolation to {status_string}" # This should not print out
+            try:
+                current_status = amdsmi_interface.amdsmi_get_gpu_process_isolation(args.gpu)
+                if current_status == args.process_isolation:
+                    result = f"Process isolation is already {status_string}"
+                else:
+                    amdsmi_interface.amdsmi_set_gpu_process_isolation(args.gpu, args.process_isolation)
+                    result = f"Successfully set process isolation to {status_string}"
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                raise ValueError(f"Unable to set process isolation to {status_string} on {gpu_string}") from e
+
+            self.logger.store_output(args.gpu, 'process_isolation', result)
+        if args.clear_sram_data:
+            try:
+                # Only 1 can be used for now.
+                amdsmi_interface.amdsmi_set_gpu_clear_sram_data(args.gpu, 1)
+                result = 'Successfully clear GPU SRAM data'
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                raise ValueError(f"Unable to clear SRAM data on GPU {gpu_id}") from e
+            self.logger.store_output(args.gpu, 'clear_sram_data', result)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -3513,7 +3585,8 @@ class AMDSMICommands():
                   cpu=None, cpu_pwr_limit=None, cpu_xgmi_link_width=None, cpu_lclk_dpm_level=None,
                   cpu_pwr_eff_mode=None, cpu_gmi3_link_width=None, cpu_pcie_link_rate=None,
                   cpu_df_pstate_range=None, cpu_enable_apb=None, cpu_disable_apb=None,
-                  soc_boost_limit=None, core=None, core_boost_limit=None, dpm_policy=None, xgmi_plpd=None):
+                  soc_boost_limit=None, core=None, core_boost_limit=None, dpm_policy=None, xgmi_plpd=None,
+                  process_isolation=None, clear_sram_data=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -3544,7 +3617,8 @@ class AMDSMICommands():
             core_boost_limit (int, optional): Value override for args.core_boost_limit. Defaults to None
             dpm_policy (int, optional): Value override for args.dpm_policy. Defaults to None.
             xgmi_plpd (int, optional): Value override for args.xgmi_plpd. Defaults to None.
-
+            process_isolation (int, optional): Value override for args.process_isolation. Defaults to None.
+            clear_sram_data (int, optional): Value override for args.clear_sram_data. Defaults to None.
         Raises:
             ValueError: Value error if no gpu value is provided
             IndexError: Index error if gpu list is empty
@@ -3564,13 +3638,13 @@ class AMDSMICommands():
         # Check if a GPU argument has been set
         gpu_args_enabled = False
         gpu_attributes = ["fan", "perf_level", "profile", "perf_determinism", "compute_partition",
-                          "memory_partition", "power_cap", "dpm_policy", "xgmi_plpd"]
+                          "memory_partition", "power_cap", "dpm_policy", "xgmi_plpd", "process_isolation",
+                          "clear_sram_data"]
         for attr in gpu_attributes:
             if hasattr(args, attr):
                 if getattr(args, attr) is not None:
                     gpu_args_enabled = True
                     break
-
         # Check if a CPU argument has been set
         cpu_args_enabled = False
         cpu_attributes = ["cpu_pwr_limit", "cpu_xgmi_link_width", "cpu_lclk_dpm_level", "cpu_pwr_eff_mode",
@@ -3578,7 +3652,7 @@ class AMDSMICommands():
                           "cpu_enable_apb", "cpu_disable_apb", "soc_boost_limit"]
         for attr in cpu_attributes:
             if hasattr(args, attr):
-                if getattr(args, attr) is not None:
+                if getattr(args, attr) not in [None, False]:
                     cpu_args_enabled = True
                     break
 
@@ -3620,7 +3694,8 @@ class AMDSMICommands():
                 self.logger.clear_multiple_devices_ouput()
                 self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                                 profile, perf_determinism, compute_partition,
-                                memory_partition, power_cap, dpm_policy, xgmi_plpd)
+                                memory_partition, power_cap, dpm_policy, xgmi_plpd,
+                                process_isolation, clear_sram_data)
         elif self.helpers.is_amd_hsmp_initialized(): # Only CPU is initialized
             if args.cpu == None and args.core == None:
                 raise ValueError('No CPU or CORE provided, specific target(s) are needed')
@@ -3639,7 +3714,8 @@ class AMDSMICommands():
             self.logger.clear_multiple_devices_ouput()
             self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                             profile, perf_determinism, compute_partition,
-                            memory_partition, power_cap, dpm_policy, xgmi_plpd)
+                            memory_partition, power_cap, dpm_policy, xgmi_plpd,
+                            process_isolation, clear_sram_data)
 
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,
@@ -3660,7 +3736,6 @@ class AMDSMICommands():
             compute_partition (bool, optional): Value override for args.compute_partition. Defaults to None.
             memory_partition (bool, optional): Value override for args.memory_partition. Defaults to None.
             power_cap (int, optional): Value override for args.power_cap. Defaults to None.
-
         Raises:
             ValueError: Value error if no gpu value is provided
             IndexError: Index error if gpu list is empty
@@ -3838,20 +3913,26 @@ class AMDSMICommands():
             try:
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
                 logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
-                default_power_cap = power_cap_info["default_power_cap"]
+                default_power_cap_in_w = power_cap_info["default_power_cap"]
+                default_power_cap_in_w = AMDSMIHelpers.convert_SI_unit(default_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
+                current_power_cap_in_w = power_cap_info["power_cap"]
+                current_power_cap_in_w = AMDSMIHelpers.convert_SI_unit(current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 raise ValueError(f"Unable to get power cap info from {gpu_id}") from e
 
-            if args.power_cap == default_power_cap:
-                self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {default_power_cap}")
+            if current_power_cap_in_w == default_power_cap_in_w:
+                self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {default_power_cap_in_w}")
             else:
                 try:
-                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, default_power_cap * 1000000)
+                    default_power_cap_in_uw = AMDSMIHelpers.convert_SI_unit(default_power_cap_in_w,
+                                                                            AMDSMIHelpers.SI_Unit.BASE,
+                                                                            AMDSMIHelpers.SI_Unit.MICRO)
+                    amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, default_power_cap_in_uw)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
-                    raise ValueError(f"Unable to reset power cap to {default_power_cap} on GPU {gpu_id}") from e
-                self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap}")
+                    raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
+                self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}")
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
@@ -4234,38 +4315,14 @@ class AMDSMICommands():
             self.logger.table_header += 'VRAM_TOTAL'.rjust(12)
         if args.pcie:
             try:
-                pcie_bw = amdsmi_interface.amdsmi_get_gpu_pci_throughput(args.gpu)
-                sent = pcie_bw['sent'] * pcie_bw['max_pkt_sz']
-                received = pcie_bw['received'] * pcie_bw['max_pkt_sz']
-
-                bw_unit = "Mb/s"
-                packet_size_unit = "B"
-                if sent > 0:
-                    sent = sent // 1024 // 1024
-                if received > 0:
-                    received = received // 1024 // 1024
-
-                if self.logger.is_human_readable_format():
-                    sent = f"{sent} {bw_unit}"
-                    received = f"{received} {bw_unit}"
-                    pcie_bw['max_pkt_sz'] = f"{pcie_bw['max_pkt_sz']} {packet_size_unit}"
-                if self.logger.is_json_format():
-                    sent = {"value" : sent,
-                            "unit" : bw_unit}
-                    received = {"value" : received,
-                                "unit" : bw_unit}
-                    pcie_bw['max_pkt_sz'] = {"value" : pcie_bw['max_pkt_sz'],
-                                                "unit" : packet_size_unit}
-
-                monitor_values['pcie_tx'] = sent
-                monitor_values['pcie_rx'] = received
+                pcie_info = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)['pcie_metric']
+                pcie_bw_unit = 'Mb/s'
+                monitor_values['pcie_bw'] = self.helpers.unit_format(self.logger, pcie_info['pcie_bandwidth'], pcie_bw_unit)
             except amdsmi_exception.AmdSmiLibraryException as e:
-                monitor_values['pcie_tx'] = "N/A"
-                monitor_values['pcie_rx'] = "N/A"
-                logging.debug("Failed to get pci throughput on gpu %s | %s", gpu_id, e.get_error_info())
+                monitor_values['pcie_bw'] = "N/A"
+                logging.debug("Failed to get pci bandwidth on gpu %s | %s", gpu_id, e.get_error_info())
 
-            self.logger.table_header += 'PCIE_TX'.rjust(10)
-            self.logger.table_header += 'PCIE_RX'.rjust(10)
+            self.logger.table_header += 'PCIE_BW'.rjust(10)
 
         self.logger.store_output(args.gpu, 'values', monitor_values)
 

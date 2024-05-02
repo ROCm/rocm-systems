@@ -201,8 +201,6 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, int 
         return AMDSMI_STATUS_API_FAILED;
     }
 
-    // Dividing by 1000000 to get measurement in Watts
-    *cap /= 1000000;
 
     return AMDSMI_STATUS_SUCCESS;
 }

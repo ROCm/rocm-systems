@@ -79,7 +79,7 @@ amd-smi will report the version and current platform detected when running the c
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.5.1.0 | ROCm version: 6.1.1 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 24.5.2.0 | ROCm version: 6.1.2 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -148,9 +148,9 @@ Command Modifiers:
 
 ```bash
 ~$ amd-smi static --help
-usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
-                      [-c] [-B] [-r] [-p] [-l] [-u] [-s] [-i] [--json | --csv]
-                      [--file FILE] [--loglevel LEVEL]
+usage: amd-smi static [-h] [-g GPU [GPU ...]] [-a] [-b] [-V] [-d] [-v] [-c] [-B] [-r] [-p]
+                      [-l] [-P] [-x] [-s] [-u] [--json | --csv] [--file FILE]
+                      [--loglevel LEVEL]
 
 If no GPU is specified, returns static information for all GPUs on the system.
 If no static argument is provided, all static information will be displayed.
@@ -179,6 +179,7 @@ Static Arguments:
   -r, --ras                Displays RAS features information
   -p, --partition          Partition information
   -l, --limit              All limit metric values (i.e. power and thermal limits)
+  -s, --process-isolation  The process isolation status
   -u, --numa               All numa node information
 
 CPU Arguments:
@@ -474,13 +475,13 @@ Command Modifiers:
 ```bash
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-o WATTS] [-p POLICY] [--cpu-pwr-limit PWR_LIMIT]
+                   [-o WATTS] [-p POLICY] [-i STATUS] [--cpu-pwr-limit PWR_LIMIT]
                    [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
                    [--cpu-df-pstate-range MAX_PSTATE MIN_PSTATE] [--cpu-enable-apb]
                    [--cpu-disable-apb DF_PSTATE] [--soc-boost-limit BOOST_LIMIT]
-                   [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
+                   [--core-boost-limit BOOST_LIMIT] [-c] [--json | --csv] [--file FILE]
                    [--loglevel LEVEL]
 
 A GPU must be specified to set a configuration.
@@ -514,6 +515,8 @@ Set Arguments:
   -o, --power-cap WATTS                        Set power capacity limit
   -p, --dpm-policy POLICY_ID                   Set the GPU DPM policy using policy id
   -x, --xgmi-plpd POLICY_ID                    Set the GPU XGMI per-link power down policy using policy id
+  -i, --process-isolation STATUS               Enable or disable the GPU process isolation: 0 for disable and 1 for enable.
+  -c, --clear-sram-data                        Clear the GPU SRAM data
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                    Set power limit for the given socket. Input parameter is power limit value.

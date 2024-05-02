@@ -101,6 +101,8 @@ enum DevKFDNodePropTypes {
 
 enum DevInfoTypes {
   kDevPerfLevel,
+  kDevProcessIsolation,
+  kDevShaderClean,
   kDevOverDriveLevel,
   kDevMemOverDriveLevel,
   kDevDevID,
@@ -222,6 +224,7 @@ class Device {
     void set_drm_render_minor(uint32_t minor) {drm_render_minor_ = minor;}
     static rsmi_dev_perf_level perfLvlStrToEnum(std::string s);
     uint64_t bdfid(void) const {return bdfid_;}
+    int get_partition_id() const {return (bdfid_ >> 28) & 0xf; }  // location_id[31:28]
     void set_bdfid(uint64_t val) {bdfid_ = val;}
     pthread_mutex_t *mutex(void) {return mutex_.ptr;}
     evt::dev_evt_grp_set_t* supported_event_groups(void) {

@@ -4,13 +4,53 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/](
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 6.1.1
+## amd_smi_lib for ROCm 6.1.2
 
 ### Added
 
-- N/A
+- **Added process isolation and clean shader APIs and CLI commands**  
+Added APIs CLI and APIs to address LeftoverLocals security issues. Allowing clearing the sram data and setting process isolation on a per GPU basis. New APIs:
+  - `amdsmi_get_gpu_process_isolation()`
+  - `amdsmi_set_gpu_process_isolation()`
+  - `amdsmi_set_gpu_clear_sram_data()`
+
+- **Added `MIN_POWER` to output of `amd-smi static --limit`**  
+This change was to help users to identify what range they can change the power cap of the GPU to. We added this to simplify why a device supports (or does not support) power capping (also known as overdrive). See `amd-smi set -g all --power-cap <value in W>` or `amd-smi reset -g all --power-cap`.
+
+```shell
+$ amd-smi static --limit 
+GPU: 0
+    LIMIT:
+        MAX_POWER: 203 W
+        MIN_POWER: 0 W
+        SOCKET_POWER: 203 W
+        SLOWDOWN_EDGE_TEMPERATURE: 100 °C
+        SLOWDOWN_HOTSPOT_TEMPERATURE: 110 °C
+        SLOWDOWN_VRAM_TEMPERATURE: 100 °C
+        SHUTDOWN_EDGE_TEMPERATURE: 105 °C
+        SHUTDOWN_HOTSPOT_TEMPERATURE: 115 °C
+        SHUTDOWN_VRAM_TEMPERATURE: 105 °C
+
+GPU: 1
+    LIMIT:
+        MAX_POWER: 213 W
+        MIN_POWER: 213 W
+        SOCKET_POWER: 213 W
+        SLOWDOWN_EDGE_TEMPERATURE: 109 °C
+        SLOWDOWN_HOTSPOT_TEMPERATURE: 110 °C
+        SLOWDOWN_VRAM_TEMPERATURE: 100 °C
+        SHUTDOWN_EDGE_TEMPERATURE: 114 °C
+        SHUTDOWN_HOTSPOT_TEMPERATURE: 115 °C
+        SHUTDOWN_VRAM_TEMPERATURE: 105 °C
+```
 
 ### Changed
+
+- **`amdsmi_get_power_cap_info` now returns values in uW instead of W**  
+`amdsmi_get_power_cap_info` will return in uW as originally reflected by driver. Previously `amdsmi_get_power_cap_info` returned W values, this conflicts with our sets and modifies values retrieved from driver. We decided to keep the values returned from driver untouched (in original units, uW). Then in CLI we will convert to watts (as previously done - no changes here). Additionally, driver made updates to min power cap displayed for devices when overdrive is disabled which prompted for this change (in this case min_power_cap and max_power_cap are the same).
+
+- **Updated Python Library return types for amdsmi_get_gpu_memory_reserved_pages & amdsmi_get_gpu_bad_page_info**  
+Previously calls were returning "No bad pages found." if no pages were found, now it only returns the list type and can be empty.
 
 - **Updated `amd-smi metric --ecc-blocks` output**  
 The ecc blocks arguement was outputing blocks without counters available, updated the filtering show blocks that counters are available for:
@@ -51,6 +91,58 @@ GPU: 0
 
 - **Removed `amdsmi_get_gpu_process_info` from python library**  
 amdsmi_get_gpu_process_info was removed from the C library in an earlier build, but the API was still in the python interface
+
+### Optimizations
+
+- **Updated `amd-smi monitor --pcie` output**  
+The source for pcie bandwidth monitor output was a legacy file we no longer support and was causing delays within the monitor command. The output is no longer using TX/RX but instantaneous bandwidth from gpu_metrics instead; updated output:
+
+```shell
+$ amd-smi monitor --pcie
+GPU   PCIE_BW
+  0   26 Mb/s
+```
+
+### Fixed
+
+- **Fixed `amd-smi metric --power` now provides power output for Navi2x/Navi3x/MI1x**  
+These systems use an older version of gpu_metrics in amdgpu. This fix only updates what CLI outputs.
+No change in any of our APIs.
+
+```shell
+$ amd-smi metric --power
+GPU: 0
+    POWER:
+        SOCKET_POWER: 11 W
+        GFX_VOLTAGE: 768 mV
+        SOC_VOLTAGE: 925 mV
+        MEM_VOLTAGE: 1250 mV
+        POWER_MANAGEMENT: ENABLED
+        THROTTLE_STATUS: UNTHROTTLED
+
+GPU: 1
+    POWER:
+        SOCKET_POWER: 17 W
+        GFX_VOLTAGE: 781 mV
+        SOC_VOLTAGE: 806 mV
+        MEM_VOLTAGE: 1250 mV
+        POWER_MANAGEMENT: ENABLED
+        THROTTLE_STATUS: UNTHROTTLED
+```
+
+- **Fixed `amdsmitstReadWrite.TestPowerCapReadWrite` test for Navi3X, Navi2X, MI100**  
+Updates required `amdsmi_get_power_cap_info` to return in uW as originally reflected by driver. Previously `amdsmi_get_power_cap_info` returned W values, this conflicts with our sets and modifies values retrieved from driver. We decided to keep the values returned from driver untouched (in original units, uW). Then in CLI we will convert to watts (as previously done - no changes here). Additionally, driver made updates to min power cap displayed for devices when overdrive is disabled which prompted for this change (in this case min_power_cap and max_power_cap are the same).
+
+- **Fixed python interface call amdsmi_get_gpu_memory_reserved_pages & amdsmi_get_gpu_bad_page_info**  
+Previously python interface calls to populated bad pages resulted in a `ValueError: NULL pointer access`. This fixes the bad-pages subcommand CLI  subcommand as well.
+
+## amd_smi_lib for ROCm 6.1.1
+
+### Added
+
+- N/A
+
+### Changed
 
 - **Updated metrics --clocks**  
 Output for `amd-smi metric --clock` is updated to reflect each engine and bug fixes for the clock lock status and deep sleep status.
@@ -188,9 +280,10 @@ GPU: 0
 ```
 
 - **Updated `amd-smi topology --json` to align with host/guest**  
-Topology's `--json` output now is changed to align with output reported bt host/guest systems. Additionally, users can select/filter specific topology details as desired (refer to `amd-smi topology -h` for full list). See examples shown below.
+Topology's `--json` output now is changed to align with output host/guest systems. Additionally, users can select/filter specific topology details as desired (refer to `amd-smi topology -h` for full list). See examples shown below.
 
-*Previous format:*  
+*Previous format:*
+
 ```shell
 $ amd-smi topology --json
 [
@@ -244,6 +337,7 @@ $ amd-smi topology --json
 ```
 
 *New format:*
+
 ```shell
 $ amd-smi topology --json
 [
@@ -275,6 +369,7 @@ $ amd-smi topology --json
     ...
 ]
 ```
+
 ```shell
 $ /opt/rocm/bin/amd-smi topology -a -t --json
 [
@@ -323,18 +418,18 @@ $ /opt/rocm/bin/amd-smi topology -a -t --json
 
 ### Fixed
 
-- **Fix for GPU reset error on non-amdgpu cards**
+- **Fix for GPU reset error on non-amdgpu cards**  
 Previously our reset could attempting to reset non-amd GPUS- resuting in "Unable to reset non-amd GPU" error. Fix
 updates CLI to target only AMD ASICs.
 
-- **Fix for `amd-smi metric --pcie` and `amdsmi_get_pcie_info()`Navi32/31 cards**
+- **Fix for `amd-smi metric --pcie` and `amdsmi_get_pcie_info()`Navi32/31 cards**  
 Updated API to include `amdsmi_card_form_factor_t.AMDSMI_CARD_FORM_FACTOR_CEM`. Prevously, this would report "UNKNOWN". This fix
 provides the correct board `SLOT_TYPE` associated with these ASICs (and other Navi cards).
 
-- **Fix for `amd-smi process`**
+- **Fix for `amd-smi process`**  
 Fixed output results when getting processes running on a device.
 
-- **Improved Error handling for `amd-smi process`**
+- **Improved Error handling for `amd-smi process`**  
 Fixed Attribute Error when getting process in csv format
 
 ### Known issues

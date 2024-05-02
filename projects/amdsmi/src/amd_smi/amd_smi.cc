@@ -1208,15 +1208,10 @@ amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle,
     if ((status == AMDSMI_STATUS_SUCCESS) && !set_ret_success)
         set_ret_success = true;
 
-    // Dividing by 1000000 to get measurement in Watts
-    (info->default_power_cap) /= 1000000;
 
     status = rsmi_wrapper(rsmi_dev_power_cap_range_get, processor_handle, sensor_ind,
                         &(info->max_power_cap), &(info->min_power_cap));
 
-    // Dividing by 1000000 to get measurement in Watts
-    (info->max_power_cap) /= 1000000;
-    (info->min_power_cap) /= 1000000;
 
     if ((status == AMDSMI_STATUS_SUCCESS) && !set_ret_success)
         set_ret_success = true;
@@ -1383,6 +1378,30 @@ amdsmi_status_t amdsmi_get_xgmi_plpd(amdsmi_processor_handle processor_handle,
 
     return rsmi_wrapper(rsmi_dev_xgmi_plpd_get, processor_handle,
                     reinterpret_cast<rsmi_dpm_policy_t*>(policy));
+}
+
+amdsmi_status_t amdsmi_get_gpu_process_isolation(amdsmi_processor_handle processor_handle,
+                             uint32_t* pisolate) {
+    AMDSMI_CHECK_INIT();
+
+    return rsmi_wrapper(rsmi_dev_process_isolation_get, processor_handle,
+                    pisolate);
+}
+
+amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle processor_handle,
+                             uint32_t pisolate) {
+    AMDSMI_CHECK_INIT();
+
+    return rsmi_wrapper(rsmi_dev_process_isolation_set, processor_handle,
+                   pisolate);
+}
+
+amdsmi_status_t amdsmi_set_gpu_clear_sram_data(amdsmi_processor_handle processor_handle,
+                  uint32_t sclean) {
+    AMDSMI_CHECK_INIT();
+
+    return rsmi_wrapper(rsmi_dev_gpu_clear_sram_data, processor_handle,
+                    sclean);
 }
 
 amdsmi_status_t
