@@ -4,19 +4,24 @@ defaults:
   numbered: False
 root: index
 subtrees:
-- caption: User Guide
+- caption: Install
   entries:
-  - file: user_guide/user_guide
-    subtrees:
-      - entries:
-        - file: user_guide/install
-        - file: user_guide/features
-        - file: user_guide/integration
-        - file: user_guide/handbook
-        - file: user_guide/api
+  - file: install/install
+    title: Installing RDC tool
+  - file: install/handbook
+    title: Building and testing RDC tool
+
+- caption: How to
+  entries:
+  - file: how-to/user_guide
+  - file: how-to/features
+  - file: how-to/integration
+
 - caption: API Reference
   entries:
-  - file: api_ref
+  - file: reference/api_intro
+  - file: reference/api_ref
+
 - caption: About
   entries:
   - file: license
