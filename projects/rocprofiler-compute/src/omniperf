@@ -24,12 +24,66 @@
 # SOFTWARE.
 ##############################################################################el
 
-import sys
 import logging
-from omniperf_base import Omniperf
-from utils.utils import console_error
+import os
+import sys
+import pkg_resources
+from pathlib import Path
+from pkg_resources import DistributionNotFound, VersionConflict
+from distutils import text_file
+
+try:
+    from omniperf_base import Omniperf
+    from utils.utils import console_error
+except:
+    pass
+
+
+def verify_deps():
+
+    bindir = Path(__file__).resolve().parent
+    depsLocation = ["requirements.txt", "../requirements.txt"]
+
+    for location in depsLocation:
+        checkFile = os.path.join(bindir, location)
+        if os.path.exists(checkFile):
+
+            dependencies = text_file.TextFile(checkFile).readlines()
+            error = False
+
+            try:
+                pkg_resources.require(dependencies)
+            except DistributionNotFound as e:
+                print(
+                    "[ERROR] The '%s' distribution was not found in the current execution environment."
+                    % e.req.key
+                )
+                error = True
+
+            except VersionConflict as e:
+                print(
+                    "[ERROR] the '%s' distribution does not meet version requirements to use omniperf."
+                    % e.req.key
+                )
+                print("  --> version installed :", e.dist)
+                print("  --> version required  :", e.req)
+                error = True
+
+            if error:
+                print("")
+                print(
+                    "Please verify all of the python dependencies called out in the requirements file"
+                )
+                print("are installed locally prior to running omniperf.")
+                print("")
+                print("See: %s" % checkFile)
+                sys.exit(1)
+    return
 
 def main():
+
+    # verify required python dependencies
+    verify_deps()
 
     omniperf = Omniperf()
 
@@ -46,6 +100,7 @@ def main():
         console_error("Unsupported execution mode")
 
     sys.exit(0)
+
 
 if __name__ == "__main__":
     main()
