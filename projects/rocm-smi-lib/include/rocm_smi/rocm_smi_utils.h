@@ -554,9 +554,9 @@ class TagTextContents_t
                 ++line_counter;
             }
 
-            // Any remaining elements?
+            // Any remaining elements? If so, the data belongs to the last found section title
             if (line_counter > bottom_title_line) {
-                update_primary_tbl(bottom_title_line, (line_counter - 1));
+                update_primary_tbl(bottom_title_line, line_counter);
             }
         }
 
@@ -570,15 +570,24 @@ class TagTextContents_t
             //  Note: Organizes table with Title as a Key, a Key/ID for values and values.
             //        It takes into consideration the initial constraints were all good and
             //        that the primary table has been populated.
+            auto sec_key = std::string();
+            auto sec_data = std::string();
+            auto auto_key = uint32_t(0);
             for (const auto& [prim_key, prim_values] : m_primary) {
                 for (const auto& value : prim_values) {
                     if (auto mark_pos = value.find_first_of(m_line_splitter_mark.c_str());
                         mark_pos != std::string::npos) {
-                        auto sec_key = trim(value.substr(0, mark_pos + 1));
-                        auto sec_data = trim(value.substr((mark_pos + 1), value.size()));
-                        if (!sec_key.empty()) {
-                            m_structured[prim_key].insert(std::make_pair(sec_key, sec_data));
-                        }
+                        sec_key = trim(value.substr(0, mark_pos + 1));
+                        sec_data = trim(value.substr((mark_pos + 1), value.size()));
+                    }
+                    // In case there is no 'key' based on the data token marker, generate one.
+                    else {
+                        sec_key = std::to_string(auto_key) + m_line_splitter_mark;
+                        sec_data = trim(value.substr(0, value.size()));
+                        ++auto_key;
+                    }
+                    if (!sec_key.empty()) {
+                        m_structured[prim_key].insert(std::make_pair(sec_key, sec_data));
                     }
                 }
             }

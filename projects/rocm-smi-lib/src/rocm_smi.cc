@@ -1286,12 +1286,16 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
-  //
+  // Tags expected in this file
   const std::string kTAG_OD_SCLK{"OD_SCLK:"};
-  const std::string kTAG_GFXCLK{"GFXCLK:"};
   const std::string KTAG_OD_MCLK{"OD_MCLK:"};
+  const std::string kTAG_GFXCLK{"GFXCLK:"};
   const std::string KTAG_MCLK{"MCLK:"};
+  const std::string KTAG_SCLK{"SCLK:"};
+  const std::string KTAG_OD_RANGE{"OD_RANGE:"};
+  const std::string KTAG_OD_VDDGFX_OFFSET{"OD_VDDGFX_OFFSET:"};
   const std::string KTAG_FIRST_FREQ_IDX{"0:"};
+
   amd::smi::TextFileTagContents_t txt_power_dev_od_voltage(val_vec);
   txt_power_dev_od_voltage
     .set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
@@ -1337,6 +1341,20 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
           p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
           p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
       }
+
+      // Validates 'OD_RANGE' is in the structure
+      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                           KTAG_SCLK)) {
+          od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                        .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
+                                     &p->sclk_freq_limits);
+      }
+      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                           KTAG_MCLK)) {
+          od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                        .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
+                                     &p->mclk_freq_limits);
+      }
   }
   // Validates 'GFXCLK' is in the structure
   else if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK,
@@ -1354,6 +1372,8 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
   else {
       return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
+
+  // Note: No curve entries.
   p->num_regions = 0;
 
   return RSMI_STATUS_SUCCESS;
@@ -1562,6 +1582,36 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
 }
 
 
+static void get_vc_region(const std::vector<std::string>& val_vec, rsmi_freq_volt_region_t& p)
+{
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+
+  //
+  amd::smi::TextFileTagContents_t txt_power_dev_od_voltage(val_vec);
+  txt_power_dev_od_voltage
+    .set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+    .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+    .structure_content();
+
+  const std::string KTAG_OD_RANGE{"OD_RANGE:"};
+  const std::string KTAG_MCLK{"MCLK:"};
+  const std::string KTAG_SCLK{"SCLK:"};
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                       KTAG_SCLK)) {
+      od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_SCLK),
+                                 &p.freq_range);
+  }
+  if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_RANGE,
+                                                       KTAG_MCLK)) {
+      od_value_pair_str_to_range(txt_power_dev_od_voltage
+                                    .get_structured_value_by_keys(KTAG_OD_RANGE, KTAG_MCLK),
+                                 &p.volt_range);
+  }
+}
+
 /*
  * num_regions [inout] on calling, the number of regions requested to be read
  * in. At completion, the number of regions actually read in
@@ -1606,7 +1656,11 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
      << " | val_vec_size = " << std::dec
      << val_vec_size;
   LOG_DEBUG(ss);
+
+  // Note: No curve entries.
   *num_regions = 0;
+  // Get OD ranges.
+  get_vc_region(val_vec, *p);
 
   return RSMI_STATUS_SUCCESS;
   CATCH
