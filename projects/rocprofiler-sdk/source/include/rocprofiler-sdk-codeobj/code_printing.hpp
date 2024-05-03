@@ -28,10 +28,15 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
 #include "disassembly.hpp"
 #include "segment.hpp"
 
+namespace rocprofiler
+{
+namespace codeobj
+{
+namespace disassembly
+{
 struct Instruction
 {
     Instruction() = default;
@@ -59,8 +64,14 @@ struct DSourceLine
 class CodeobjDecoderComponent
 {
 public:
-    CodeobjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size);
+    CodeobjDecoderComponent(const void* codeobj_data, uint64_t codeobj_size);
     ~CodeobjDecoderComponent();
+
+    std::optional<uint64_t> va2fo(uint64_t vaddr)
+    {
+        if(disassembly) return disassembly->va2fo(vaddr);
+        return {};
+    };
 
     std::shared_ptr<Instruction> disassemble_instruction(uint64_t faddr, uint64_t vaddr);
     int                          m_fd;
@@ -160,7 +171,7 @@ protected:
 /**
  * @brief Translates virtual addresses to elf file offsets
  */
-class CodeobjAddressTranslate : protected CodeobjMap
+class CodeobjAddressTranslate : public CodeobjMap
 {
     using Super = CodeobjMap;
 
@@ -255,3 +266,7 @@ public:
 private:
     CodeobjTableTranslator table;
 };
+
+}  // namespace disassembly
+}  // namespace codeobj
+}  // namespace rocprofiler

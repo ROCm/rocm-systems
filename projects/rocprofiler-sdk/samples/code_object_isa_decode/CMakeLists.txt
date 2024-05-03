@@ -26,21 +26,28 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
 endforeach()
 
 find_package(rocprofiler-sdk REQUIRED)
-find_package(Threads REQUIRED)
+find_package(amd_comgr REQUIRED)
 
-add_executable(code-object-isa-decode)
-target_sources(code-object-isa-decode PRIVATE main.cpp client.cpp)
+add_library(code-object-isa-decode-client SHARED)
+target_sources(code-object-isa-decode-client PRIVATE client.cpp)
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(main.cpp PROPERTIES COMPILE_FLAGS "-g")
 
 target_link_libraries(
-    code-object-isa-decode PRIVATE Threads::Threads rocprofiler::samples-common-library
-                                   rocprofiler-sdk-codeobj rocprofiler::rocprofiler)
+    code-object-isa-decode-client
+    PRIVATE rocprofiler::samples-common-library rocprofiler-sdk-codeobj
+            rocprofiler::rocprofiler amd_comgr dw)
+
+rocprofiler_samples_get_preload_env(PRELOAD_ENV code-object-isa-decode-client)
+
+add_executable(code-object-isa-decode)
+target_sources(code-object-isa-decode PRIVATE main.cpp)
+target_link_libraries(code-object-isa-decode PRIVATE code-object-isa-decode-client
+                                                     rocprofiler::samples-build-flags)
 
 add_test(NAME code-object-isa-decode COMMAND $<TARGET_FILE:code-object-isa-decode>)
 
 set_tests_properties(
     code-object-isa-decode
-    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}" FAIL_REGULAR_EXPRESSION
-               "threw an exception")
+    PROPERTIES TIMEOUT 45 LABELS "samples" ENVIRONMENT "${PRELOAD_ENV}"
+               FAIL_REGULAR_EXPRESSION "threw an exception")

@@ -31,44 +31,40 @@
  * @brief Example rocprofiler client (tool)
  */
 
-#include <rocprofiler-sdk/buffer.h>
-#include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk-codeobj/code_printing.hpp>
-#include <shared_mutex>
 
-#include "common/defines.hpp"
-#include "common/filesystem.hpp"
-
-#include <cxxabi.h>
 #include <atomic>
 #include <cassert>
-#include <chrono>
-#include <cstddef>
 #include <cstdint>
-#include <cstdio>
 #include <cstdlib>
-#include <fstream>
-#include <functional>
-#include <iomanip>
 #include <iostream>
 #include <map>
 #include <mutex>
-#include <regex>
+#include <sstream>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <unordered_map>
-#include <vector>
 
-#define OUTPUT_OFSTREAM "advanced_thread_trace.log"
-#define TARGET_CU       1
-#define SIMD_SELECT     0x3
-#define BUFFER_SIZE     0x6000000
-#define SE_MASK         0x11
-constexpr bool COPY_MEMORY_CODEOBJ = true;
+#define WAVE_RATIO_TOLERANCE 0.05
+
+#define ROCPROFILER_CALL(result, msg)                                                              \
+    {                                                                                              \
+        rocprofiler_status_t CHECKSTATUS = result;                                                 \
+        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        {                                                                                          \
+            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
+                      << " failed with error code " << CHECKSTATUS << ": " << status_msg           \
+                      << std::endl;                                                                \
+            std::stringstream errmsg{};                                                            \
+            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
+                   << status_msg << ")";                                                           \
+            throw std::runtime_error(errmsg.str());                                                \
+        }                                                                                          \
+    }
 
 #define C_API_BEGIN                                                                                \
     try                                                                                            \
@@ -80,6 +76,23 @@ constexpr bool COPY_MEMORY_CODEOBJ = true;
         std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << ' ' << e.what() << std::endl;   \
     }                                                                                              \
     catch(...) { std::cerr << "Error in " << __FILE__ << ':' << __LINE__ << std::endl; }
+
+namespace thread_trace_test_client
+{
+using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
+using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+using Instruction          = rocprofiler::codeobj::disassembly::Instruction;
+using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
+
+std::mutex               isa_map_mut;
+rocprofiler_client_id_t* client_id = nullptr;
+
+struct isa_map_elem_t
+{
+    std::atomic<size_t>          hitcount{0};
+    std::atomic<size_t>          latency{0};
+    std::shared_ptr<Instruction> code_line{nullptr};
+};
 
 struct pcinfo_t
 {
@@ -100,84 +113,13 @@ operator<(const pcinfo_t& a, const pcinfo_t& b)
     return a.marker_id < b.marker_id;
 };
 
-namespace client
-{
-using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
-using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
-
-using Instruction             = rocprofiler::codeobj::disassembly::Instruction;
-using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
-using SymbolInfo              = rocprofiler::codeobj::disassembly::SymbolInfo;
-
-rocprofiler_client_id_t* client_id  = nullptr;
-rocprofiler_context_id_t client_ctx = {};
-
-struct isa_map_elem_t
-{
-    std::atomic<size_t>          hitcount{0};
-    std::atomic<size_t>          latency{0};
-    std::shared_ptr<Instruction> code_line{nullptr};
-};
-
 struct ToolData
 {
-    ToolData()
-    {
-        try
-        {
-            output_file.open(OUTPUT_OFSTREAM);
-        } catch(...)
-        {}
-
-        if(output_file.is_open())
-            std::cout << "Writing code-object-isa-decode log to: " << OUTPUT_OFSTREAM << std::endl;
-        else
-            std::cout << "Could not open log file: " << OUTPUT_OFSTREAM << ", writing to stdout\n";
-    };
-
-    std::shared_mutex                                   isa_map_mut;
-    std::mutex                                          output_mut;
+    std::unordered_map<uint64_t, std::string>           kernel_object_to_kernel_name = {};
     CodeobjAddressTranslate                             codeobjTranslate;
     std::map<pcinfo_t, std::unique_ptr<isa_map_elem_t>> isa_map;
-    std::unordered_map<uint64_t, SymbolInfo>            kernels_in_codeobj           = {};
-    std::unordered_map<uint64_t, std::string>           kernel_object_to_kernel_name = {};
-    int                                                 num_waves                    = 0;
-
-    std::ostream& output()
-    {
-        if(output_file.is_open())
-            return output_file;
-        else
-            return std::cout;
-    }
-
-    std::stringstream printKernel(uint64_t vaddr)
-    {
-        std::stringstream ss;
-        try
-        {
-            ss << '\n' << std::hex;
-            SymbolInfo& info = kernels_in_codeobj.at(vaddr);
-
-            ss << std::hex << "Found: " << info.name << " at addr: 0x" << vaddr << " with offset 0x"
-               << info.faddr << " vaddr 0x" << info.vaddr << std::dec << '\n';
-        } catch(std::exception& e)
-        {
-            ss << e.what() << '\n';
-        }
-        return ss;
-    }
-
-private:
-    std::ofstream output_file;
-};
-
-struct source_location
-{
-    std::string function = {};
-    std::string file     = {};
-    uint32_t    line     = 0;
-    std::string context  = {};
+    std::atomic<int>                                    waves_started = 0;
+    std::atomic<int>                                    waves_ended   = 0;
 };
 
 struct trace_data_t
@@ -190,8 +132,8 @@ struct trace_data_t
 
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                              rocprofiler_user_data_t*              user_data,
-                              void*                                 callback_data)
+                              rocprofiler_user_data_t* /* user_data */,
+                              void* callback_data)
 {
     C_API_BEGIN
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
@@ -202,38 +144,31 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
     if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        std::unique_lock<std::shared_mutex> lg(tool.isa_map_mut);
-        auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
+        std::unique_lock<std::mutex> lg(isa_map_mut);
+        auto*                        data = static_cast<kernel_symbol_data_t*>(record.payload);
         tool.kernel_object_to_kernel_name.emplace(data->kernel_object, data->kernel_name);
     }
 
     if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
 
-    std::unique_lock<std::shared_mutex> lg(tool.isa_map_mut);
-    auto*                               data = static_cast<code_obj_load_data_t*>(record.payload);
+    auto* data = static_cast<code_obj_load_data_t*>(record.payload);
+    if(!data || !data->uri) return;
+
+    std::unique_lock<std::mutex> lg(isa_map_mut);
 
     if(std::string_view(data->uri).find("file:///") == 0)
     {
-        tool.codeobjTranslate.addDecoder(
-            data->uri, data->code_object_id, data->load_delta, data->load_size);
-        auto symbolmap = tool.codeobjTranslate.getSymbolMap(data->code_object_id);
-        for(auto& [vaddr, symbol] : symbolmap)
-            tool.kernels_in_codeobj[vaddr] = symbol;
+        tool.codeobjTranslate.addDecoder(data->uri, 0, data->load_delta, data->load_size);
     }
-    else if(COPY_MEMORY_CODEOBJ)
+    else
     {
         tool.codeobjTranslate.addDecoder(reinterpret_cast<const void*>(data->memory_base),
                                          data->memory_size,
                                          data->code_object_id,
                                          data->load_delta,
                                          data->load_size);
-        auto symbolmap = tool.codeobjTranslate.getSymbolMap(data->code_object_id);
-        for(auto& [vaddr, symbol] : symbolmap)
-            tool.kernels_in_codeobj[vaddr] = symbol;
     }
 
-    (void) user_data;
-    (void) callback_data;
     C_API_END
 }
 
@@ -249,11 +184,8 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
     assert(userdata && "Dispatch callback passed null!");
     ToolData& tool = *reinterpret_cast<ToolData*>(userdata);
 
-    std::shared_lock<std::shared_mutex> lg(tool.isa_map_mut);
-
-    constexpr int           desired_call_iteration = 1;
     static std::atomic<int> call_id{0};
-    static std::string_view desired_func_name = "transposeLdsSwapInplace";
+    static std::string_view desired_func_name = "branching_kernel";
 
     try
     {
@@ -261,8 +193,7 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
         if(kernel_name.find(desired_func_name) == std::string::npos)
             return ROCPROFILER_ATT_CONTROL_NONE;
 
-        if(call_id.fetch_add(1) == desired_call_iteration)
-            return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
+        if(call_id.fetch_add(1) == 0) return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
     } catch(...)
     {
         std::cerr << "Could not find kernel object: " << dispatch_packet->kernel_object
@@ -282,37 +213,33 @@ get_trace_data(rocprofiler_att_parser_data_type_t type, void* att_data, void* us
     assert(trace_data.tool && "ISA callback passed null!");
     ToolData& tool = *reinterpret_cast<ToolData*>(trace_data.tool);
 
-    std::shared_lock<std::shared_mutex> shared_lock(tool.isa_map_mut);
-
-    if(type == ROCPROFILER_ATT_PARSER_DATA_TYPE_OCCUPANCY) tool.num_waves++;
+    if(type == ROCPROFILER_ATT_PARSER_DATA_TYPE_OCCUPANCY)
+    {
+        const auto& ev = reinterpret_cast<const rocprofiler_att_data_type_occupancy_t*>(att_data);
+        if(ev->enabled)
+            tool.waves_started.fetch_add(1);
+        else
+            tool.waves_ended.fetch_add(1);
+    }
 
     if(type != ROCPROFILER_ATT_PARSER_DATA_TYPE_ISA) return;
 
+    std::unique_lock<std::mutex> lk(isa_map_mut);
     auto& event = *reinterpret_cast<rocprofiler_att_data_type_isa_t*>(att_data);
 
     pcinfo_t pc{event.marker_id, event.offset};
     auto     it = tool.isa_map.find(pc);
     if(it == tool.isa_map.end())
     {
-        shared_lock.unlock();
+        auto ptr = std::make_unique<isa_map_elem_t>();
+        try
         {
-            std::unique_lock<std::shared_mutex> unique_lock(tool.isa_map_mut);
-            auto                                ptr = std::make_unique<isa_map_elem_t>();
-            try
-            {
-                ptr->code_line = tool.codeobjTranslate.get(pc.marker_id, pc.addr);
-            } catch(std::exception& e)
-            {
-                std::cerr << pc.marker_id << ":" << pc.addr << ' ' << e.what() << std::endl;
-                return;
-            } catch(...)
-            {
-                std::cerr << "Could not fetch: " << pc.marker_id << ':' << pc.addr << std::endl;
-                return;
-            }
-            it = tool.isa_map.emplace(pc, std::move(ptr)).first;
+            ptr->code_line = tool.codeobjTranslate.get(pc.marker_id, pc.addr);
+        } catch(...)
+        {
+            return;
         }
-        shared_lock.lock();
+        it = tool.isa_map.emplace(pc, std::move(ptr)).first;
     }
 
     it->second->hitcount.fetch_add(event.hitcount, std::memory_order_relaxed);
@@ -348,7 +275,7 @@ isa_callback(char*     isa_instruction,
     std::shared_ptr<Instruction> instruction;
 
     {
-        std::unique_lock<std::shared_mutex> unique_lock(tool.isa_map_mut);
+        std::unique_lock<std::mutex> unique_lock(isa_map_mut);
         instruction = tool.codeobjTranslate.get(marker_id, offset);
     }
 
@@ -378,10 +305,6 @@ shader_data_callback(int64_t se_id, void* se_data, size_t data_size, void* userd
     assert(userdata && "Shader callback passed null!");
     ToolData& tool = *reinterpret_cast<ToolData*>(userdata);
 
-    {
-        std::unique_lock<std::mutex> lk(tool.output_mut);
-        tool.output() << "SE ID: " << se_id << " with size " << data_size << std::hex << '\n';
-    }
     trace_data_t data{.id = se_id, .data = (uint8_t*) se_data, .size = data_size, .tool = &tool};
     auto status = rocprofiler_att_parse_data(copy_trace_data, get_trace_data, isa_callback, &data);
     if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -392,6 +315,7 @@ shader_data_callback(int64_t se_id, void* se_data, size_t data_size, void* userd
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
+    static rocprofiler_context_id_t client_ctx = {};
     (void) fini_func;
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
 
@@ -404,19 +328,10 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        tool_data),
         "code object tracing service configure");
 
-    std::vector<rocprofiler_att_parameter_t> parameters;
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, TARGET_CU});
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, SIMD_SELECT});
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, BUFFER_SIZE});
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, SE_MASK});
-
-    ROCPROFILER_CALL(rocprofiler_configure_thread_trace_service(client_ctx,
-                                                                parameters.data(),
-                                                                parameters.size(),
-                                                                dispatch_callback,
-                                                                shader_data_callback,
-                                                                tool_data),
-                     "thread trace service configure");
+    ROCPROFILER_CALL(
+        rocprofiler_configure_thread_trace_service(
+            client_ctx, nullptr, 0, dispatch_callback, shader_data_callback, tool_data),
+        "thread trace service configure");
 
     int valid_ctx = 0;
     ROCPROFILER_CALL(rocprofiler_context_is_valid(client_ctx, &valid_ctx),
@@ -441,112 +356,57 @@ tool_fini(void* tool_data)
     assert(tool_data && "tool_fini callback passed null!");
     ToolData& tool = *reinterpret_cast<ToolData*>(tool_data);
 
-    std::unique_lock<std::shared_mutex> isa_lk(tool.isa_map_mut);
-    std::unique_lock<std::mutex>        out_lk(tool.output_mut);
+    std::unique_lock<std::mutex> isa_lk(isa_map_mut);
 
     // Find largest instruction
     size_t max_inst_size = 0;
     for(auto& [addr, lines] : tool.isa_map)
         if(lines.get()) max_inst_size = std::max(max_inst_size, lines->code_line->inst.size());
 
-    std::string empty_space;
-    empty_space.resize(max_inst_size, ' ');
+    assert(max_inst_size > 0);
 
-    size_t vmc_latency    = 0;
-    size_t lgk_latency    = 0;
-    size_t scalar_latency = 0;
-    size_t vector_latency = 0;
-    size_t other_latency  = 0;
-
-    size_t scalar_exec = 0;
-    size_t vector_exec = 0;
-    size_t other_exec  = 0;
+    size_t total_hit    = 0;
+    size_t total_cycles = 0;
 
     for(auto& [addr, line] : tool.isa_map)
-        if(line.get())
-        {
-            size_t hitcount  = line->hitcount.load(std::memory_order_relaxed);
-            size_t latency   = line->latency.load(std::memory_order_relaxed);
-            auto&  code_line = line->code_line->inst;
+    {
+        total_hit += line->hitcount.load(std::memory_order_relaxed);
+        total_cycles += line->latency.load(std::memory_order_relaxed);
+    }
 
-            tool.output() << std::hex << "0x" << addr.addr << std::dec << ' ' << code_line
-                          << empty_space.substr(0, max_inst_size - code_line.size())
-                          << " Hit: " << hitcount << " - Latency: " << latency << '\n';
+    assert(total_cycles > 0);
+    assert(total_hit > 0);
 
-            if(code_line.find("s_waitcnt") == 0)
-            {
-                other_exec += hitcount;
-                if(code_line.find("lgkmcnt") != std::string::npos)
-                    lgk_latency += latency;
-                else
-                    vmc_latency += latency;
-            }
-            else if(code_line.find("v_") == 0)
-            {
-                vector_exec += hitcount;
-                vector_latency += latency;
-            }
-            else if(code_line.find("s_") == 0)
-            {
-                scalar_exec += hitcount;
-                scalar_latency += latency;
-            }
-            else
-            {
-                other_exec += hitcount;
-                other_latency += latency;
-            }
-        }
-
-    size_t total_exec     = vector_exec + scalar_exec + other_exec;
-    size_t memory_latency = vmc_latency + lgk_latency;
-    size_t total_latency  = memory_latency + vector_latency + scalar_latency + other_latency;
-    float  vmc_fraction   = 100 * vmc_latency / float(total_latency);
-    float  lgk_fraction   = 100 * lgk_latency / float(total_latency);
-
-    tool.output() << "Total executed instructions: " << total_exec << '\n'
-                  << "Total executed vector instructions: " << vector_exec << " with average "
-                  << vector_latency / float(vector_exec) << " cycles.\n"
-                  << "Total executed scalar instructions: " << scalar_exec << " with average "
-                  << scalar_latency / float(scalar_exec) << " cycles.\n"
-                  << "Vector memory ops occupied: " << vmc_fraction << "% of cycles.\n"
-                  << "Scalar and LDS memory ops occupied: " << lgk_fraction << "% of cycles.\n"
-                  << std::endl;
+    double wave_started     = (double) tool.waves_started.load();
+    double wave_event_ratio = wave_started / (wave_started + (double) tool.waves_ended.load());
+    assert(wave_event_ratio > 0.5 - WAVE_RATIO_TOLERANCE);
+    assert(wave_event_ratio < 0.5 + WAVE_RATIO_TOLERANCE);
 }
 
-}  // namespace client
+}  // namespace thread_trace_test_client
 
 extern "C" rocprofiler_tool_configure_result_t*
-rocprofiler_configure(uint32_t                 version,
-                      const char*              runtime_version,
+rocprofiler_configure(uint32_t /* version */,
+                      const char* /* runtime_version */,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
+    // only activate if main tool
+    if(priority > 0) return nullptr;
+
     // set the client name
     id->name = "Adv_Thread_Trace_Sample";
 
     // store client info
-    client::client_id = id;
+    thread_trace_test_client::client_id = id;
 
-    // compute major/minor/patch version info
-    uint32_t major = version / 10000;
-    uint32_t minor = (version % 10000) / 100;
-    uint32_t patch = version % 100;
-
-    // generate info string
-    auto info = std::stringstream{};
-    info << id->name << " (priority=" << priority << ") is using rocprofiler-sdk v" << major << "."
-         << minor << "." << patch << " (" << runtime_version << ")";
-
-    std::clog << info.str() << std::endl;
-
-    auto* data = new client::ToolData{};
+    auto* data = new thread_trace_test_client::ToolData{};
 
     // create configure data
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-                                            &client::tool_init,
-                                            &client::tool_fini,
+                                            &thread_trace_test_client::tool_init,
+                                            &thread_trace_test_client::tool_fini,
                                             reinterpret_cast<void*>(data)};
 
     // return pointer to configure data

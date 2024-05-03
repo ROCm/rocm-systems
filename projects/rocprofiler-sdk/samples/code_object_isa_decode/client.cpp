@@ -25,6 +25,8 @@
 #    undef NDEBUG
 #endif
 
+#define OUTPUT_OFSTREAM "code_obj_isa_decode.log"
+
 /**
  * @file samples/code_object_isa_decode/client.cpp
  *
@@ -36,7 +38,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include "lib/rocprofiler-sdk-codeobj/code_printing.hpp"
+#include <rocprofiler-sdk-codeobj/code_printing.hpp>
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
@@ -60,15 +62,36 @@
 #include <string_view>
 #include <thread>
 #include <vector>
-#include "code_object_track.hpp"
+
+constexpr bool COPY_MEMORY_CODEOBJ = true;
 
 namespace client
 {
+std::ostream&
+output_stream()
+{
+    static std::ofstream file(OUTPUT_OFSTREAM);
+
+    static bool file_is_open_check = [&]() {
+        if(!file.is_open())
+            std::cout << "Could not open log file: " << OUTPUT_OFSTREAM << ", writing to stdout\n";
+        else
+            std::cout << "Writing code-object-isa-decode log to: " << OUTPUT_OFSTREAM << std::endl;
+        return file.is_open();
+    }();
+
+    if(!file_is_open_check) return std::cout;
+    return file;
+};
+
 namespace
 {
 using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 using kernel_symbol_map_t  = std::unordered_map<std::string, std::pair<uint64_t, size_t>>;
+
+using Instruction             = rocprofiler::codeobj::disassembly::Instruction;
+using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
 
 rocprofiler_client_id_t*      client_id          = nullptr;
 rocprofiler_client_finalize_t client_fini_func   = nullptr;
@@ -92,28 +115,41 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
         if(std::string_view(data->uri).find("file:///") == 0)
         {
             codeobjTranslate.addDecoder(
-                data->uri, data->code_object_id, data->load_base, data->load_size);
-            auto symbolmap = codeobjTranslate.getSymbolMap();
-            for(auto& [vaddr, symbol] : symbolmap)
-                registered_kernels.insert({symbol.name, {vaddr, vaddr + symbol.mem_size}});
+                data->uri, data->code_object_id, data->load_delta, data->load_size);
         }
+        else if(COPY_MEMORY_CODEOBJ)
+        {
+            codeobjTranslate.addDecoder(reinterpret_cast<const void*>(data->memory_base),
+                                        data->memory_size,
+                                        data->code_object_id,
+                                        data->load_delta,
+                                        data->load_size);
+        }
+        else
+        {
+            return;
+        }
+
+        auto symbolmap = codeobjTranslate.getSymbolMap(data->code_object_id);
+        for(auto& [vaddr, symbol] : symbolmap)
+            registered_kernels.insert({symbol.name, {vaddr, vaddr + symbol.mem_size}});
     }
     else if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        std::cout << std::hex;
+        output_stream() << std::hex;
         auto* data        = static_cast<kernel_symbol_data_t*>(record.payload);
         auto  kernel_name = std::regex_replace(data->kernel_name, std::regex{"(\\.kd)$"}, "");
 
         if(registered_kernels.find(kernel_name) == registered_kernels.end())
         {
-            std::cout << "Not Found: " << kernel_name << " in codeobj." << std::endl;
+            output_stream() << "Not Found: " << kernel_name << " in codeobj." << std::endl;
             return;
         }
 
         auto& begin_end = registered_kernels.at(kernel_name);
 
-        std::cout << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
-                  << std::dec << ". Printing first 64 bytes:" << std::endl;
+        output_stream() << std::hex << "Found: " << kernel_name << " at addr: 0x" << begin_end.first
+                        << std::dec << ". Printing first 64 bytes:" << std::endl;
 
         std::unordered_set<std::string> references{};
         int                             num_waitcnts = 0;
@@ -127,7 +163,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
             auto             inst   = codeobjTranslate.get(vaddr);
             std::string_view source = inst->comment;
             if(source.rfind('/') < source.size()) source = source.substr(source.rfind('/'));
-            if(vaddr < begin_end.first + 64) std::cout << '\t' << inst->inst << '\n';
+            if(vaddr < begin_end.first + 64) output_stream() << '\t' << inst->inst << '\n';
 
             if(source.rfind(':') < source.size()) source = source.substr(0, source.rfind(':'));
 
@@ -144,12 +180,13 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
             vaddr += inst->size;
         }
 
-        std::cout << "  --- Num Scalar: " << num_scalar << "\n  --- Num Vector: " << num_vector
-                  << "\n  --- Num Waitcnts: " << num_waitcnts
-                  << "\n  --- Other instructions: " << num_other
-                  << "\nKernel has source references to: " << std::endl;
+        output_stream() << "  --- Num Scalar: " << num_scalar
+                        << "\n  --- Num Vector: " << num_vector
+                        << "\n  --- Num Waitcnts: " << num_waitcnts
+                        << "\n  --- Other instructions: " << num_other
+                        << "\nKernel has source references to: " << std::endl;
         for(auto& ref : references)
-            std::cout << '\t' << ref << std::endl;
+            output_stream() << '\t' << ref << std::endl;
     }
 
     (void) user_data;
@@ -195,20 +232,8 @@ tool_fini(void* tool_data)
     (void) tool_data;
 }
 
-void
-setup()
-{
-    if(int status = 0;
-       rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
-    {
-        ROCPROFILER_CALL(rocprofiler_force_configure(&rocprofiler_configure),
-                         "force configuration");
-    }
-}
 }  // namespace
 
-// force configuration when library is loaded
-bool cfg_on_load = (client::setup(), true);
 }  // namespace client
 
 extern "C" rocprofiler_tool_configure_result_t*

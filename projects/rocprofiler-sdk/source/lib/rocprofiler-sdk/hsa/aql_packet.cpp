@@ -64,13 +64,7 @@ CounterAQLPacket::~CounterAQLPacket()
     }
 }
 
-TraceAQLPacket::~TraceAQLPacket() = default;
-/*
-TraceAQLPacket::~TraceAQLPacket()
-{
-    aqlprofile_att_delete_packets(this->handle);
-}
-*/
+TraceAQLPacket::~TraceAQLPacket() { aqlprofile_att_delete_packets(this->handle); }
 
 hsa_status_t
 TraceAQLPacket::Alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t flags, void* data)

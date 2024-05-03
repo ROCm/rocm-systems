@@ -131,7 +131,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
         return HSA_STATUS_SUCCESS;
     }
 
-    callback_fn(shader, 0, "", cpu_data.data(), size, tool_userdata);
+    callback_fn(shader, cpu_data.data(), size, tool_userdata);
     return HSA_STATUS_SUCCESS;
 }
 
@@ -140,15 +140,14 @@ post_kernel_call(ThreadTracer& tracer, inst_pkt_t& aql)
 {
     std::vector<uint8_t> cpu_data{};
     auto pair = cbdata_t{tracer.params->callback_userdata, tracer.params->shader_cb_fn, &cpu_data};
-    (void) pair;
 
     for(auto& aql_pkt : aql)
     {
         auto* pkt = dynamic_cast<hsa::TraceAQLPacket*>(aql_pkt.first.get());
         if(!pkt) continue;
 
-        // auto status = aqlprofile_att_iterate_data(pkt->GetHandle(), thread_trace_callback,
-        // &pair); CHECK_HSA(status, "Failed to iterate ATT data");
+        auto status = aqlprofile_att_iterate_data(pkt->GetHandle(), thread_trace_callback, &pair);
+        CHECK_HSA(status, "Failed to iterate ATT data");
 
         std::lock_guard<std::mutex> lk(tracer.trace_resources_mut);
         if(tracer.agent_active_queues.find(pkt->GetAgent()) != tracer.agent_active_queues.end())

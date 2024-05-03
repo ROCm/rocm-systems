@@ -20,8 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk-codeobj/code_printing.hpp"
-
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
@@ -34,6 +32,8 @@
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
+
+#include <rocprofiler-sdk-codeobj/code_printing.hpp>
 
 #include <cstdarg>
 #include <cstdio>
@@ -72,7 +72,13 @@
     }                                                                                              \
     catch(...) { return returndata; }
 
-CodeobjDecoderComponent::CodeobjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size)
+namespace rocprofiler
+{
+namespace codeobj
+{
+namespace disassembly
+{
+CodeobjDecoderComponent::CodeobjDecoderComponent(const void* codeobj_data, uint64_t codeobj_size)
 {
     m_fd = -1;
 #if defined(_GNU_SOURCE) && defined(MFD_ALLOW_SEALING) && defined(MFD_CLOEXEC)
@@ -87,7 +93,7 @@ CodeobjDecoderComponent::CodeobjDecoderComponent(const char* codeobj_data, uint6
         return;
     }
 
-    if(size_t size = ::write(m_fd, codeobj_data, codeobj_size); size != codeobj_size)
+    if(size_t size = ::write(m_fd, (const char*) codeobj_data, codeobj_size); size != codeobj_size)
     {
         printf("could not write to the temporary file\n");
         return;
@@ -150,7 +156,7 @@ CodeobjDecoderComponent::CodeobjDecoderComponent(const char* codeobj_data, uint6
     }
 
     // Can throw
-    disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size);
+    disassembly = std::make_unique<DisassemblyInstance>((const char*) codeobj_data, codeobj_size);
     if(m_line_number_map.size())
     {
         size_t total_size = 0;
@@ -250,7 +256,7 @@ LoadedCodeobjDecoder::add_to_map(uint64_t ld_addr)
     if(!decoder || ld_addr < load_addr) throw std::out_of_range("Addr not in decoder");
 
     uint64_t voffset = ld_addr - load_addr;
-    auto     faddr   = decoder->disassembly->va2fo(voffset);
+    auto     faddr   = decoder->va2fo(voffset);
     if(!faddr) throw std::out_of_range("Could not find file offset");
 
     auto shared          = decoder->disassemble_instruction(*faddr, voffset);
@@ -275,4 +281,6 @@ LoadedCodeobjDecoder::get(uint64_t addr)
     return nullptr;
 }
 
-#define PUBLIC_API __attribute__((visibility("default")))
+}  // namespace disassembly
+}  // namespace codeobj
+}  // namespace rocprofiler

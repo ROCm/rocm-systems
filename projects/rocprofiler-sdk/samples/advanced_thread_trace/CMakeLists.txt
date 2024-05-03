@@ -26,23 +26,23 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
 endforeach()
 
 find_package(rocprofiler-sdk REQUIRED)
+find_package(amd_comgr REQUIRED)
 
 add_library(advanced-thread-trace-client SHARED)
 target_sources(advanced-thread-trace-client PRIVATE client.cpp)
+
 target_link_libraries(
     advanced-thread-trace-client
     PRIVATE rocprofiler::rocprofiler rocprofiler::samples-build-flags
-            rocprofiler-sdk-codeobj rocprofiler::samples-common-library)
+            rocprofiler-sdk-codeobj rocprofiler::samples-common-library amd_comgr dw)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(main.cpp PROPERTIES COMPILE_FLAGS "-g")
-find_package(Threads REQUIRED)
 
 add_executable(advanced-thread-trace)
 target_sources(advanced-thread-trace PRIVATE main.cpp)
-target_link_libraries(
-    advanced-thread-trace PRIVATE advanced-thread-trace-client Threads::Threads
-                                  rocprofiler::samples-build-flags)
+target_link_libraries(advanced-thread-trace PRIVATE advanced-thread-trace-client
+                                                    rocprofiler::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV advanced-thread-trace-client)
 

@@ -28,6 +28,12 @@
 #include <string>
 #include <vector>
 
+namespace rocprofiler
+{
+namespace codeobj
+{
+namespace disassembly
+{
 class CodeObjectBinary
 {
 public:
@@ -66,3 +72,7 @@ public:
     amd_comgr_data_t               data;
     std::map<uint64_t, SymbolInfo> symbol_map;
 };
+
+}  // namespace disassembly
+}  // namespace codeobj
+}  // namespace rocprofiler

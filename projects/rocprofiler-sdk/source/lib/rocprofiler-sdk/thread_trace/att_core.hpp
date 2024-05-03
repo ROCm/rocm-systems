@@ -37,7 +37,7 @@
 
 namespace rocprofiler
 {
-struct thread_trace_parameters
+struct thread_trace_parameter_pack
 {
     rocprofiler_context_id_t               context_id;
     rocprofiler_att_dispatch_callback_t    dispatch_cb_fn;
@@ -45,18 +45,18 @@ struct thread_trace_parameters
     void*                                  callback_userdata;
 
     // Parameters
-    rocprofiler_att_parameter_flag_t flags;
-    uint64_t                         buffer_size;
-    uint8_t                          target_cu;
-    uint8_t                          simd_select;
-    uint8_t                          reserved;
-    uint8_t                          vmid_mask;
-    uint16_t                         perfcounter_mask;
-    uint8_t                          perfcounter_ctrl;
-    uint64_t                         shader_engine_mask;
+    uint8_t  target_cu          = 1;
+    uint8_t  simd_select        = DEFAULT_SIMD;
+    uint8_t  perfcounter_ctrl   = 0;
+    uint64_t shader_engine_mask = DEFAULT_SE_MASK;
+    uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
 
     // GFX9 Only
     std::vector<std::string> perfcounters;
+
+    static constexpr size_t DEFAULT_SIMD        = 0x7;
+    static constexpr size_t DEFAULT_SE_MASK     = 0x21;
+    static constexpr size_t DEFAULT_BUFFER_SIZE = 0x6000000;
 };
 
 namespace hsa
@@ -67,7 +67,7 @@ class AQLPacket;
 class ThreadTracer
 {
 public:
-    ThreadTracer(std::shared_ptr<thread_trace_parameters>& _params)
+    ThreadTracer(std::shared_ptr<thread_trace_parameter_pack>& _params)
     : params(_params){};
     virtual void start_context();
     virtual void stop_context();
@@ -76,7 +76,7 @@ public:
     virtual ~ThreadTracer() = default;
 
     std::mutex                                                    trace_resources_mut;
-    std::shared_ptr<thread_trace_parameters>                      params;
+    std::shared_ptr<thread_trace_parameter_pack>                  params;
     std::unordered_map<uint64_t, std::unique_ptr<hsa::AQLPacket>> resources;
     std::unordered_map<uint64_t, std::atomic<int>>                agent_active_queues;
 };  // namespace thread_trace

@@ -202,10 +202,10 @@ CounterPacketConstruct::construct_packet(const AmdExtTable& ext)
 #pragma GCC diagnostic ignored "-Wnarrowing"
 
 ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
-    const hsa::AgentCache&                    agent,
-    std::shared_ptr<thread_trace_parameters>& params,
-    const CoreApiTable&                       coreapi,
-    const AmdExtTable&                        ext)
+    const hsa::AgentCache&                        agent,
+    std::shared_ptr<thread_trace_parameter_pack>& params,
+    const CoreApiTable&                           coreapi,
+    const AmdExtTable&                            ext)
 {
     this->tracepool                  = std::make_shared<hsa::TraceMemoryPool>();
     this->tracepool->allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
@@ -231,20 +231,22 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
 std::unique_ptr<hsa::TraceAQLPacket>
 ThreadTraceAQLPacketFactory::construct_packet()
 {
-    auto packet = std::make_unique<hsa::TraceAQLPacket>(this->tracepool);
-    /*hsa_status_t _status = aqlprofile_att_create_packets(&packet->handle,
+    auto         packet  = std::make_unique<hsa::TraceAQLPacket>(this->tracepool);
+    hsa_status_t _status = aqlprofile_att_create_packets(&packet->handle,
                                                          &packet->packets,
                                                          this->profile,
                                                          &hsa::TraceAQLPacket::Alloc,
                                                          &hsa::TraceAQLPacket::Free,
                                                          &hsa::TraceAQLPacket::Copy,
                                                          packet.get());
-    CHECK_HSA(_status, "failed to create ATT packet");*/
+    CHECK_HSA(_status, "failed to create ATT packet");
 
     packet->before_krn_pkt.clear();
     packet->after_krn_pkt.clear();
     packet->packets.start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
     packet->packets.stop_packet.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    packet->packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
+    packet->packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
 
     packet->empty = false;
     packet->start = packet->packets.start_packet;

@@ -87,10 +87,10 @@ protected:
 class ThreadTraceAQLPacketFactory
 {
 public:
-    ThreadTraceAQLPacketFactory(const hsa::AgentCache&                    agent,
-                                std::shared_ptr<thread_trace_parameters>& params,
-                                const CoreApiTable&                       coreapi,
-                                const AmdExtTable&                        ext);
+    ThreadTraceAQLPacketFactory(const hsa::AgentCache&                        agent,
+                                std::shared_ptr<thread_trace_parameter_pack>& params,
+                                const CoreApiTable&                           coreapi,
+                                const AmdExtTable&                            ext);
     std::unique_ptr<hsa::TraceAQLPacket> construct_packet();
 
 private:

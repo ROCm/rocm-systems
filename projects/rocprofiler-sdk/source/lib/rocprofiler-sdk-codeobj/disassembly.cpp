@@ -50,9 +50,8 @@
 #include <cstdlib>
 #include <cstring>
 
-#include <elfutils/libdw.h>
 #include <hsa/amd_hsa_elf.h>
-#include "lib/rocprofiler-sdk-codeobj/code_printing.hpp"
+#include <rocprofiler-sdk-codeobj/code_printing.hpp>
 
 #define THROW_COMGR(call)                                                                          \
     if(amd_comgr_status_s status = call)                                                           \
@@ -74,6 +73,12 @@
         return AMD_COMGR_STATUS_ERROR;                                                             \
     }
 
+namespace rocprofiler
+{
+namespace codeobj
+{
+namespace disassembly
+{
 CodeObjectBinary::CodeObjectBinary(const std::string& uri)
 : m_uri(uri)
 {
@@ -151,7 +156,7 @@ CodeObjectBinary::CodeObjectBinary(const std::string& uri)
         if(!(size = std::stoul(size_it->second, nullptr, 0))) return;
     }
 
-    if(protocol != "file") throw protocol + " protocol not supported!";
+    if(protocol == "memory") throw protocol + " protocol not supported!";
 
     std::ifstream file(decoded_path, std::ios::in | std::ios::binary);
     if(!file || !file.is_open()) throw "could not open " + decoded_path;
@@ -370,3 +375,7 @@ DisassemblyInstance::getSegments()
 
     return segments;
 }
+
+}  // namespace disassembly
+}  // namespace codeobj
+}  // namespace rocprofiler

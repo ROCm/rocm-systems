@@ -16,31 +16,9 @@
 # USE OR OTHER DEALINGS # IN THE SOFTWARE.
 # ##############################################################################
 
-set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "development")
-
-set(CODEOBJ_PARSER_SOURCES code_printing.cpp disassembly.cpp)
-
-add_library(rocprofiler-sdk-codeobj STATIC)
-target_sources(rocprofiler-sdk-codeobj PRIVATE ${CODEOBJ_PARSER_SOURCES})
-target_link_libraries(
-    rocprofiler-sdk-codeobj
-    PRIVATE rocprofiler::rocprofiler-amd-comgr rocprofiler::rocprofiler-dw
-            rocprofiler::rocprofiler-elf rocprofiler::rocprofiler-build-flags
-            rocprofiler::rocprofiler-common-library)
-
-target_include_directories(rocprofiler-sdk-codeobj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-set_target_properties(
-    rocprofiler-sdk-codeobj
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
-               POSITION_INDEPENDENT_CODE ON)
+set(CODEOBJ_PARSER_HEADERS code_printing.hpp disassembly.hpp segment.hpp)
 
 install(
-    TARGETS rocprofiler-sdk-codeobj
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    EXPORT rocprofiler-sdk-codeobj-targets)
-
-if(ROCPROFILER_BUILD_TESTS)
-    add_subdirectory(tests)
-endif()
+    FILES ${CODEOBJ_PARSER_HEADERS}
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk-codeobj
+    COMPONENT development)

@@ -92,6 +92,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL,  ///< A service depends on a newer version of KFD
                                                    ///< (amdgpu kernel driver). Check logs for
                                                    ///< service that report incompatibility
+    ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES,     ///< The given resources are
+                                                   ///< insufficient to complete operation
     ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND,    ///< Could not find the counter profile
     ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT,  ///< Cannot enable both agent and dispatch
                                                        ///< counting in the same context.
