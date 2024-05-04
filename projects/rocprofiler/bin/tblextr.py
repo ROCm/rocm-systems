@@ -1136,8 +1136,7 @@ else:
     if hsa_activity_found or len(ops_filtr):
         copy_trace_found = 1
 
-    if any_trace_found:
-        db.open_json(jsonfile)
+    db.open_json(jsonfile)
 
     if ext_trace_found:
         db.label_json(EXT_PID, "Markers and Ranges", jsonfile)
@@ -1150,7 +1149,7 @@ else:
 
     db.label_json(COPY_PID, "COPY", jsonfile)
 
-    if any_trace_found and max_gpu_id >= 0:
+    if max_gpu_id >= 0:
         for ind in range(0, int(max_gpu_id) + 1):
             db.label_json(int(ind) + int(GPU_BASE_PID), "GPU" + str(ind), jsonfile)
             db.label_json(int(ind) + int(GPU_BASE_PID) + 512 , "GPU Barriers" + str(ind), jsonfile)
@@ -1161,7 +1160,7 @@ else:
     if len(var_table) != 0:
         dform.post_process_data(db, "KERN", csvfile)
         dform.gen_table_bins(db, "KERN", statfile, "KernelName", "DurationNs")
-        if hsa_trace_found and "BeginNs" in var_list:
+        if "BeginNs" in var_list:
             dform.gen_kernel_json_trace(db, "KERN", GPU_BASE_PID, START_NS, jsonfile)
 
     if hsa_trace_found:
@@ -1217,9 +1216,8 @@ else:
                 )
                 dep_id += len(from_us_list)
 
-    if any_trace_found:
-        db.metadata_json(jsonfile, sysinfo_file)
-        db.close_json(jsonfile)
+    db.metadata_json(jsonfile, sysinfo_file)
+    db.close_json(jsonfile)
 
     if mcopy_data_enabled:
         memory_manager.dump_data("MM", memcopy_info_file)
