@@ -84,6 +84,7 @@ static const std::map<amdsmi_evt_notification_type_t, const char *>
     {AMDSMI_EVT_NOTIF_THERMAL_THROTTLE, "AMDSMI_EVT_NOTIF_THERMAL_THROTTLE"},
     {AMDSMI_EVT_NOTIF_GPU_PRE_RESET, "AMDSMI_EVT_NOTIF_GPU_PRE_RESET"},
     {AMDSMI_EVT_NOTIF_GPU_POST_RESET, "AMDSMI_EVT_NOTIF_GPU_POST_RESET"},
+    {AMDSMI_EVT_NOTIF_RING_HANG, "AMDSMI_EVT_NOTIF_RING_HANG"},
 };
 const char *
 NameFromEvtNotifType(amdsmi_evt_notification_type_t evt) {

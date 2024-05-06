@@ -1145,8 +1145,9 @@ Event Type | Description
 ---|------
 `VMFAULT` | VM page fault
 `THERMAL_THROTTLE` | thermal throttle
-`GPU_PRE_RESET`   | gpu pre reset
+`GPU_PRE_RESET` | gpu pre reset
 `GPU_POST_RESET` | gpu post reset
+`RING_HANG` | ring hang event
 
 #### read
 

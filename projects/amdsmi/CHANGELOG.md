@@ -8,6 +8,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/](
 
 ### Added
 
+- **Added Ring Hang event**  
+Added `AMDSMI_EVT_NOTIF_RING_HANG` to the possible events in the `amdsmi_evt_notification_type_t` enum.
+
 - **Added process isolation and clean shader APIs and CLI commands**  
 Added APIs CLI and APIs to address LeftoverLocals security issues. Allowing clearing the sram data and setting process isolation on a per GPU basis. New APIs:
   - `amdsmi_get_gpu_process_isolation()`
@@ -135,6 +138,10 @@ Updates required `amdsmi_get_power_cap_info` to return in uW as originally refle
 
 - **Fixed python interface call amdsmi_get_gpu_memory_reserved_pages & amdsmi_get_gpu_bad_page_info**  
 Previously python interface calls to populated bad pages resulted in a `ValueError: NULL pointer access`. This fixes the bad-pages subcommand CLI  subcommand as well.
+
+### Known Issues
+
+- N/A
 
 ## amd_smi_lib for ROCm 6.1.1
 

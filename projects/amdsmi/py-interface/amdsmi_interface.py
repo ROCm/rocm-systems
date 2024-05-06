@@ -217,10 +217,12 @@ class AmdSmiCounterCommand(IntEnum):
 
 
 class AmdSmiEvtNotificationType(IntEnum):
+    NONE = amdsmi_wrapper.AMDSMI_EVT_NOTIF_NONE
     VMFAULT = amdsmi_wrapper.AMDSMI_EVT_NOTIF_VMFAULT
     THERMAL_THROTTLE = amdsmi_wrapper.AMDSMI_EVT_NOTIF_THERMAL_THROTTLE
     GPU_PRE_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_PRE_RESET
     GPU_POST_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_POST_RESET
+    RING_HANG = amdsmi_wrapper.AMDSMI_EVT_NOTIF_RING_HANG
 
 
 class AmdSmiTemperatureMetric(IntEnum):
