@@ -186,10 +186,10 @@ void TestMutualExclusion::Run(void) {
     int64_t dmy_i64 = 0;
     char dmy_str[10];
     rsmi_dev_perf_level_t dmy_perf_lvl;
-    rsmi_frequencies_t dmy_freqs;
-    rsmi_od_volt_freq_data_t dmy_od_volt;
-    rsmi_freq_volt_region_t dmy_vlt_reg;
-    rsmi_error_count_t dmy_err_cnt;
+    rsmi_frequencies_t dmy_freqs{};
+    rsmi_od_volt_freq_data_t dmy_od_volt{};
+    rsmi_freq_volt_region_t dmy_vlt_reg{};
+    rsmi_error_count_t dmy_err_cnt{};
     rsmi_ras_err_state_t dmy_ras_err_st;
 
     // This can be replaced with ASSERT_EQ() once env. stabilizes

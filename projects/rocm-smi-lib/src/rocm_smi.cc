@@ -1262,18 +1262,6 @@ For the new format, GFXCLK field will show min and max values(0/1). If the curre
 frequency in neither min/max but lies within the range, this is indicated by
 an additional value followed by * at index 1 and max value at index 2.
 */
-constexpr uint32_t kOD_SCLK_label_array_index = 0;
-constexpr uint32_t kOD_MCLK_label_array_index =
-                                            kOD_SCLK_label_array_index + 3;
-
-constexpr uint32_t kOD_VDDC_CURVE_label_array_index =
-                                            kOD_MCLK_label_array_index + 2;
-constexpr uint32_t kOD_OD_RANGE_label_array_index =
-                                      kOD_VDDC_CURVE_label_array_index + 4;
-constexpr uint32_t kOD_VDDC_CURVE_start_index =
-                                           kOD_OD_RANGE_label_array_index + 3;
-// constexpr uint32_t kOD_VDDC_CURVE_num_lines =
-//                                             kOD_VDDC_CURVE_start_index + 4;
 constexpr uint32_t kMIN_VALID_LINES = 2;
 
 static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
@@ -1298,62 +1286,75 @@ static rsmi_status_t get_od_clk_volt_info(uint32_t dv_ind,
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
-  assert(val_vec[kOD_SCLK_label_array_index] == "OD_SCLK:" ||
-                            val_vec[kOD_SCLK_label_array_index] == "GFXCLK:");
-  if ((val_vec[kOD_SCLK_label_array_index] != "OD_SCLK:") &&
-                            (val_vec[kOD_SCLK_label_array_index] != "GFXCLK:")) {
-    return RSMI_STATUS_UNEXPECTED_DATA;
+  //
+  const std::string kTAG_OD_SCLK{"OD_SCLK:"};
+  const std::string kTAG_GFXCLK{"GFXCLK:"};
+  const std::string KTAG_OD_MCLK{"OD_MCLK:"};
+  const std::string KTAG_MCLK{"MCLK:"};
+  const std::string KTAG_FIRST_FREQ_IDX{"0:"};
+  amd::smi::TextFileTagContents_t txt_power_dev_od_voltage(val_vec);
+  txt_power_dev_od_voltage
+    .set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
+    .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
+    .structure_content();
+
+  //
+  // Note:  We must have minimum of 'GFXCLK:' && 'MCLK:' OR:
+  //        'OD_SCLK:' && 'OD_MCLK:' tags.
+  if (txt_power_dev_od_voltage.get_title_size() < kMIN_VALID_LINES)  {
+      return rsmi_status_t::RSMI_STATUS_NO_DATA;
   }
 
-
-  // find last_item but skip empty lines
-  int last_item = val_vec.size()-1;
-  while (val_vec[last_item].empty() || val_vec[last_item][0] == 0)
-      last_item--;
-
-  p->curr_sclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
-                                     nullptr, kOD_SCLK_label_array_index + 1);
-  p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                     nullptr, kOD_SCLK_label_array_index + 2);
-
-  if (val_vec.size() < (kOD_MCLK_label_array_index + 1)) {
-    return RSMI_STATUS_UNEXPECTED_SIZE;
-  }
-  // The condition below checks if it is the old style or new style format.
-  if (val_vec[kOD_MCLK_label_array_index] == "OD_MCLK:") {
-    p->curr_mclk_range.lower_bound = 0;
-    p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                   nullptr, kOD_MCLK_label_array_index + 1);
-  } else if (val_vec[kOD_MCLK_label_array_index] == "MCLK:") {
-    p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
-                                 nullptr, kOD_MCLK_label_array_index + 1);
-    // the upper memory frequency is the last
-    p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                 nullptr, last_item);
-    return RSMI_STATUS_SUCCESS;
-  } else {
-    if (val_vec.size() < (kOD_MCLK_label_array_index + 3)) {
-      return RSMI_STATUS_UNEXPECTED_SIZE;
-    }
-    if (val_vec[kOD_MCLK_label_array_index + 1] == "MCLK:") {
-      p->curr_sclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                   nullptr, kOD_SCLK_label_array_index + 3);
-      p->curr_mclk_range.lower_bound = freq_string_to_int(val_vec, nullptr,
-                                   nullptr, kOD_MCLK_label_array_index + 2);
-      // the upper memory frequency is the last
-      p->curr_mclk_range.upper_bound = freq_string_to_int(val_vec, nullptr,
-                                   nullptr, last_item);
-      return RSMI_STATUS_SUCCESS;
-    }
-    return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  // Note:  For debug builds/purposes only.
+  assert(txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) ||
+         txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK));
+  // Note:  For release builds/purposes.
+  if (!txt_power_dev_od_voltage.contains_title_key(kTAG_GFXCLK) &&
+      !txt_power_dev_od_voltage.contains_title_key(kTAG_OD_SCLK)) {
+      return rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
   }
 
-  if (val_vec.size() < kOD_VDDC_CURVE_label_array_index) {
-    return RSMI_STATUS_UNEXPECTED_SIZE;
-  }
+  // Note: Quick helpers for getting 1st and last elements found
+  auto build_lower_bound = [&](const std::string& prim_key) {
+      auto lower_bound_data = txt_power_dev_od_voltage.get_structured_data_subkey_first(prim_key);
+      return std::vector<std::string>{lower_bound_data};
+  };
 
-  p->num_regions =
-     static_cast<uint32_t>((val_vec.size()) / 2);
+  auto build_upper_bound = [&](const std::string& prim_key) {
+      auto upper_bound_data = txt_power_dev_od_voltage.get_structured_data_subkey_last(prim_key);
+      return std::vector<std::string>{upper_bound_data};
+  };
+
+  // Validates 'OD_SCLK' is in the structure
+  if (txt_power_dev_od_voltage.contains_structured_key(kTAG_OD_SCLK,
+                                                       KTAG_FIRST_FREQ_IDX)) {
+      p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
+      p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_OD_SCLK), nullptr, nullptr, 0);
+
+      // Validates 'OD_MCLK' is in the structure
+      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_OD_MCLK,
+                                                           KTAG_FIRST_FREQ_IDX)) {
+          p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+          p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_OD_MCLK), nullptr, nullptr, 0);
+      }
+  }
+  // Validates 'GFXCLK' is in the structure
+  else if (txt_power_dev_od_voltage.contains_structured_key(kTAG_GFXCLK,
+                                                            KTAG_FIRST_FREQ_IDX)) {
+      p->curr_sclk_range.lower_bound = freq_string_to_int(build_lower_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
+      p->curr_sclk_range.upper_bound = freq_string_to_int(build_upper_bound(kTAG_GFXCLK), nullptr, nullptr, 0);
+
+      // Validates 'MCLK' is in the structure
+      if (txt_power_dev_od_voltage.contains_structured_key(KTAG_MCLK,
+                                                           KTAG_FIRST_FREQ_IDX)) {
+          p->curr_mclk_range.lower_bound = freq_string_to_int(build_lower_bound(KTAG_MCLK), nullptr, nullptr, 0);
+          p->curr_mclk_range.upper_bound = freq_string_to_int(build_upper_bound(KTAG_MCLK), nullptr, nullptr, 0);
+      }
+  }
+  else {
+      return RSMI_STATUS_NOT_YET_IMPLEMENTED;
+  }
+  p->num_regions = 0;
 
   return RSMI_STATUS_SUCCESS;
   CATCH
@@ -1561,30 +1562,6 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
 }
 
 
-static void get_vc_region(uint32_t start_ind,
-                std::vector<std::string> *val_vec, rsmi_freq_volt_region_t *p) {
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-  LOG_TRACE(ss);
-  assert(p != nullptr);
-  assert(val_vec != nullptr);
-  THROW_IF_NULLPTR_DEREF(p)
-  THROW_IF_NULLPTR_DEREF(val_vec)
-
-  // There must be at least 1 region to read in
-  assert(val_vec->size() >= kOD_OD_RANGE_label_array_index + 2);
-  assert((*val_vec)[kOD_OD_RANGE_label_array_index] == "OD_RANGE:");
-  if ((val_vec->size() < kOD_OD_RANGE_label_array_index + 2)  ||
-      ((*val_vec)[kOD_OD_RANGE_label_array_index] != "OD_RANGE:") ) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
-       << getRSMIStatusString(RSMI_STATUS_UNEXPECTED_DATA);
-    LOG_TRACE(ss);
-    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
-  }
-  od_value_pair_str_to_range((*val_vec)[start_ind], &p->freq_range);
-  od_value_pair_str_to_range((*val_vec)[start_ind + 1], &p->volt_range);
-}
-
 /*
  * num_regions [inout] on calling, the number of regions requested to be read
  * in. At completion, the number of regions actually read in
@@ -1616,23 +1593,20 @@ static rsmi_status_t get_od_clk_volt_curve_regions(uint32_t dv_ind,
 
   // This is a work-around to handle systems where kDevPowerODVoltage is not
   // fully supported yet.
-  if (val_vec.size() < 2) {
+  if (val_vec.size() < kMIN_VALID_LINES) {
     ss << __PRETTY_FUNCTION__
-       << " | Issue: val_vec.size() < 2" << "; returning "
+       << " | Issue: val_vec.size() < " << kMIN_VALID_LINES << "; returning "
        << getRSMIStatusString(RSMI_STATUS_NOT_YET_IMPLEMENTED);
     LOG_ERROR(ss);
     return RSMI_STATUS_NOT_YET_IMPLEMENTED;
   }
 
   uint32_t val_vec_size = static_cast<uint32_t>(val_vec.size());
-  assert((val_vec_size - kOD_VDDC_CURVE_start_index) > 0);
-
   ss << __PRETTY_FUNCTION__
      << " | val_vec_size = " << std::dec
-     << val_vec_size
-     << " | kOD_VDDC_CURVE_start_index = " << kOD_VDDC_CURVE_start_index;
+     << val_vec_size;
   LOG_DEBUG(ss);
-  *num_regions = std::min((val_vec_size) / 2, *num_regions);
+  *num_regions = 0;
 
   return RSMI_STATUS_SUCCESS;
   CATCH

@@ -141,7 +141,6 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
   amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
 
   if (GetEnvVarUInteger(THREAD_ONLY_ENV_VAR) == 1 || smi.is_thread_only_mutex()) {
-    fprintf(stderr, "rocm-smi: using thread safe only mutex\n");
     return init_thread_safe_only(name);
   }
 
