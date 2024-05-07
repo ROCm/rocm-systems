@@ -308,7 +308,7 @@ function(generate_hsaco TARGET_ID INPUT_FILE OUTPUT_FILE)
         PARENT_SCOPE)
 endfunction(generate_hsaco)
 
-set(GPU_LIST "gfx900" "gfx906" "gfx908" "gfx90a" "gfx942" "gfx1030" "gfx1031" "gfx1032" "gfx1100" "gfx1101" "gfx1102")
+set(GPU_LIST "gfx900" "gfx906" "gfx908" "gfx90a" "gfx942" "gfx1030" "gfx1031" "gfx1032" "gfx1100" "gfx1101" "gfx1102" "gfx1200" "gfx1201")
 foreach(target_id ${GPU_LIST})
     # generate kernel bitcodes
     generate_hsaco(${target_id} ${CMAKE_CURRENT_SOURCE_DIR}/apps/copy.cl
