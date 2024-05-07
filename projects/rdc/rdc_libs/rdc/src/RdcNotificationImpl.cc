@@ -45,6 +45,7 @@ static std::unordered_map<rdc_field_t, amdsmi_evt_notification_type_t> rdc_2_smi
     {RDC_EVNT_NOTIF_THERMAL_THROTTLE, AMDSMI_EVT_NOTIF_THERMAL_THROTTLE},
     {RDC_EVNT_NOTIF_PRE_RESET, AMDSMI_EVT_NOTIF_GPU_PRE_RESET},
     {RDC_EVNT_NOTIF_POST_RESET, AMDSMI_EVT_NOTIF_GPU_POST_RESET},
+    {RDC_EVNT_NOTIF_RING_HANG, AMDSMI_EVT_NOTIF_RING_HANG},
 };
 static std::unordered_map<amdsmi_evt_notification_type_t, rdc_field_t> smi_event_notif_2_rdc_map = {
     {AMDSMI_EVT_NOTIF_VMFAULT, RDC_EVNT_NOTIF_VMFAULT},
@@ -52,6 +53,7 @@ static std::unordered_map<amdsmi_evt_notification_type_t, rdc_field_t> smi_event
     {AMDSMI_EVT_NOTIF_THERMAL_THROTTLE, RDC_EVNT_NOTIF_THERMAL_THROTTLE},
     {AMDSMI_EVT_NOTIF_GPU_PRE_RESET, RDC_EVNT_NOTIF_PRE_RESET},
     {AMDSMI_EVT_NOTIF_GPU_POST_RESET, RDC_EVNT_NOTIF_POST_RESET},
+    {AMDSMI_EVT_NOTIF_RING_HANG, RDC_EVNT_NOTIF_RING_HANG},
 };
 
 // This const determines space allocated on stack for notification events.

@@ -43,6 +43,8 @@ FLD_DESC_ENT(RDC_FI_GPU_TEMP,            "GPU temperature in millidegrees Celsiu
 FLD_DESC_ENT(RDC_FI_POWER_USAGE,         "Power usage in microwatts",                   "POWER_USAGE",      true)
 FLD_DESC_ENT(RDC_FI_PCIE_TX,             "PCIe Tx utilization in bytes/second",         "PCIE_TX",          true)
 FLD_DESC_ENT(RDC_FI_PCIE_RX,             "PCIe Rx utilization in bytes/second",         "PCIE_RX",          true)
+FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in GB/sec",                    "PCIE_BANDWIDTH",          true)
+
 FLD_DESC_ENT(RDC_FI_GPU_UTIL,            "GPU busy percentage",                         "GPU_UTIL",         true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_USAGE,    "Memory usage of the GPU instance in bytes",   "GPU_MEMORY_USAGE", true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_TOTAL,    "Total memory of the GPU instance",            "GPU_MEMORY_TOTAL", true)
@@ -76,6 +78,25 @@ FLD_DESC_ENT(RDC_FI_ECC_FUSE_SEC,        "FUSE Single Error Correction",        
 FLD_DESC_ENT(RDC_FI_ECC_FUSE_DED,        "FUSE Double Error Detection",                 "ECC_FUSE_DED",     true)
 FLD_DESC_ENT(RDC_FI_ECC_UMC_SEC,         "UMC Single Error Correction",                 "ECC_UMC_SEC",      true)
 FLD_DESC_ENT(RDC_FI_ECC_UMC_DED,         "UMC Double Error Detection",                  "ECC_UMC_DED",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_0_READ_KB,      "XGMI0 accumulated data read size (KB)",       "XGMI_0_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_1_READ_KB,      "XGMI1 accumulated data read size (KB)",       "XGMI_1_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_2_READ_KB,      "XGMI2 accumulated data read size (KB)",       "XGMI_2_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_3_READ_KB,      "XGMI3 accumulated data read size (KB)",       "XGMI_3_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_4_READ_KB,      "XGMI4 accumulated data read size (KB)",       "XGMI_4_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_5_READ_KB,      "XGMI5 accumulated data read size (KB)",       "XGMI_5_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_6_READ_KB,      "XGMI6 accumulated data read size (KB)",       "XGMI_6_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_7_READ_KB,      "XGMI7 accumulated data read size (KB)",       "XGMI_7_READ",      true)
+
+FLD_DESC_ENT(RDC_FI_XGMI_0_WRITE_KB,     "XGMI0 accumulated data write size (KB)",      "XGMI_0_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_1_WRITE_KB,     "XGMI1 accumulated data write size (KB)",      "XGMI_1_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_2_WRITE_KB,     "XGMI2 accumulated data write size (KB)",      "XGMI_2_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_3_WRITE_KB,     "XGMI3 accumulated data write size (KB)",      "XGMI_3_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_4_WRITE_KB,     "XGMI4 accumulated data write size (KB)",      "XGMI_4_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_5_WRITE_KB,     "XGMI5 accumulated data write size (KB)",      "XGMI_5_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_6_WRITE_KB,     "XGMI6 accumulated data write size (KB)",      "XGMI_6_WRITE",     true)
+FLD_DESC_ENT(RDC_FI_XGMI_7_WRITE_KB,     "XGMI7 accumulated data write size (KB)",      "XGMI_7_WRITE",     true)
+
+
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
@@ -99,3 +120,4 @@ FLD_DESC_ENT(RDC_EVNT_NOTIF_VMFAULT,     "VM page fault",                       
 FLD_DESC_ENT(RDC_EVNT_NOTIF_THERMAL_THROTTLE, "Clk freq decrease due to temp",          "THERMAL_THROT",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_PRE_RESET,   "GPU reset is about to occur",                 "GPU_PRE_RESET",    false)
 FLD_DESC_ENT(RDC_EVNT_NOTIF_POST_RESET,  "GPU reset just occurred",                     "GPU_POST_RESET",   false)
+FLD_DESC_ENT(RDC_EVNT_NOTIF_RING_HANG,   "GPU ring hang just occured",                  "RING_HANG",        false)
