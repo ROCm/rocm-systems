@@ -231,7 +231,7 @@ def generate_dashboard_script(args):
         macro(dashboard_submit)
             if("{SUBMIT}" GREATER 0)
                 ctest_submit({ARGN}
-                             RETRY_COUNT 1
+                             RETRY_COUNT 0
                              RETRY_DELAY 10
                              CAPTURE_CMAKE_ERROR _cdash_submit_err)
 

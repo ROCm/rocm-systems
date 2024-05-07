@@ -34,18 +34,12 @@ def test_data_structure(input_data):
     node_exists("names", sdk_data["callback_records"])
     node_exists("code_objects", sdk_data["callback_records"])
     node_exists("kernel_symbols", sdk_data["callback_records"])
-    node_exists("hsa_api_traces", sdk_data["callback_records"])
-    node_exists("hip_api_traces", sdk_data["callback_records"], 0)
-    node_exists("marker_api_traces", sdk_data["callback_records"])
+    node_exists("hip_api_traces", sdk_data["callback_records"])
     node_exists("kernel_dispatches", sdk_data["callback_records"])
 
     node_exists("names", sdk_data["buffer_records"])
     node_exists("kernel_dispatches", sdk_data["buffer_records"])
-    node_exists("memory_copies", sdk_data["buffer_records"], 0)
-    node_exists("hsa_api_traces", sdk_data["buffer_records"])
     node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
-    node_exists("marker_api_traces", sdk_data["buffer_records"])
-    node_exists("retired_correlation_ids", sdk_data["buffer_records"])
 
 
 def test_size_entries(input_data):
@@ -119,20 +113,6 @@ def test_timestamps(input_data):
             # assert api_end <= itr["end_timestamp"], f"[{titr}] {itr}"
 
 
-def test_total_runtime(input_data):
-    sdk_data = input_data["rocprofiler-sdk-json-tool"]
-
-    runtime_data = []
-    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
-        elapsed = itr["end_timestamp"] - itr["start_timestamp"]
-        runtime_data.append(elapsed)  # in nanoseconds
-
-    expected_runtime = 1.0e3  # one second in milliseconds
-
-    assert (sum(runtime_data) * 1.0e-6) >= (0.8 * expected_runtime)
-    assert (sum(runtime_data) * 1.0e-6) <= (1.2 * expected_runtime)
-
-
 def test_internal_correlation_ids(input_data):
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
@@ -157,52 +137,6 @@ def test_internal_correlation_ids(input_data):
     len_corr_id_unq = len(api_corr_ids_unique)
     assert len(api_corr_ids) != len_corr_id_unq
     assert max(api_corr_ids_sorted) == len_corr_id_unq
-
-
-def test_retired_correlation_ids(input_data):
-    data = input_data
-    sdk_data = data["rocprofiler-sdk-json-tool"]
-
-    def _sort_dict(inp):
-        return dict(sorted(inp.items()))
-
-    api_corr_ids = {}
-    for titr in ["hsa_api_traces", "marker_api_traces", "hip_api_traces"]:
-        for itr in sdk_data["buffer_records"][titr]:
-            corr_id = itr["correlation_id"]["internal"]
-            assert corr_id not in api_corr_ids.keys()
-            api_corr_ids[corr_id] = itr
-
-    async_corr_ids = {}
-    for titr in ["kernel_dispatches", "memory_copies"]:
-        for itr in sdk_data["buffer_records"][titr]:
-            corr_id = itr["correlation_id"]["internal"]
-            assert corr_id not in async_corr_ids.keys()
-            async_corr_ids[corr_id] = itr
-
-    retired_corr_ids = {}
-    for itr in sdk_data["buffer_records"]["retired_correlation_ids"]:
-        corr_id = itr["internal_correlation_id"]
-        assert corr_id not in retired_corr_ids.keys()
-        retired_corr_ids[corr_id] = itr
-
-    api_corr_ids = _sort_dict(api_corr_ids)
-    async_corr_ids = _sort_dict(async_corr_ids)
-    retired_corr_ids = _sort_dict(retired_corr_ids)
-
-    for cid, itr in async_corr_ids.items():
-        assert cid in retired_corr_ids.keys()
-        retired_ts = retired_corr_ids[cid]["timestamp"]
-        end_ts = itr["end_timestamp"]
-        assert (retired_ts - end_ts) > 0, f"correlation-id: {cid}, data: {itr}"
-
-    for cid, itr in api_corr_ids.items():
-        assert cid in retired_corr_ids.keys()
-        retired_ts = retired_corr_ids[cid]["timestamp"]
-        end_ts = itr["end_timestamp"]
-        assert (retired_ts - end_ts) > 0, f"correlation-id: {cid}, data: {itr}"
-
-    assert len(api_corr_ids.keys()) == (len(retired_corr_ids.keys()))
 
 
 def test_external_correlation_ids(input_data):
@@ -294,30 +228,6 @@ def test_kernel_dispatch_ids(input_data):
     assert len(bf_seq_ids) == num_dispatches
     assert len(bf_seq_ids_uniq) == num_dispatches
     assert len(cb_seq_ids_uniq) == num_dispatches
-
-
-def test_async_copy_direction(input_data):
-    data = input_data
-    sdk_data = data["rocprofiler-sdk-json-tool"]
-
-    # Direction values:
-    #   0 == ??? (unknown)
-    #   1 == H2H (host to host)
-    #   2 == H2D (host to device)
-    #   3 == D2H (device to host)
-    #   4 == D2D (device to device)
-    async_dir_cnt = dict([(idx, 0) for idx in range(0, 5)])
-    for itr in sdk_data["buffer_records"]["memory_copies"]:
-        op_id = itr["operation"]
-        async_dir_cnt[op_id] += 1
-
-    # in the reproducible-runtime test which generates the input file,
-    # we don't expect any async memory copy operations
-    assert async_dir_cnt[0] == 0
-    assert async_dir_cnt[1] == 0
-    assert async_dir_cnt[2] == 0
-    assert async_dir_cnt[3] == 0
-    assert async_dir_cnt[4] == 0
 
 
 if __name__ == "__main__":

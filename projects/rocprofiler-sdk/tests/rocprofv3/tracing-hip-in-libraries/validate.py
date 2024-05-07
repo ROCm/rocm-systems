@@ -37,9 +37,16 @@ def validate_stats(row):
     assert stddev_v > 0.0 if cnt_v > 1 else int(stddev_v) == 0, f"{row}"
 
 
-def test_api_trace(hsa_input_data, hip_input_data, hip_stats_data):
+def test_api_trace(
+    hsa_input_data,
+    hip_input_data,
+    kernel_input_data,
+    memory_copy_input_data,
+    hip_stats_data,
+):
     functions = []
-    correlation_ids = []
+    hsa_correlation_ids = []
+    hip_correlation_ids = []
     for row in hsa_input_data:
         assert row["Domain"] in (
             "HSA_CORE_API",
@@ -51,7 +58,8 @@ def test_api_trace(hsa_input_data, hip_input_data, hip_stats_data):
         assert int(row["Thread_Id"]) >= int(row["Process_Id"])
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
         functions.append(row["Function"])
-        correlation_ids.append(int(row["Correlation_Id"]))
+        cid = int(row["Correlation_Id"])
+        hsa_correlation_ids.append(cid)
 
     for row in hip_input_data:
         assert row["Domain"] in [
@@ -64,15 +72,49 @@ def test_api_trace(hsa_input_data, hip_input_data, hip_stats_data):
         )
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
         functions.append(row["Function"])
-        correlation_ids.append(int(row["Correlation_Id"]))
+        cid = int(row["Correlation_Id"])
+        hip_correlation_ids.append(cid)
 
-    correlation_ids = sorted(list(set(correlation_ids)))
+    def get_sorted_unique(inp):
+        return sorted(list(set(inp)))
+
+    def diagnose_non_unique(_input_data):
+        _corr_id_hist = {}
+        for row in _input_data:
+            _cid = int(row["Correlation_Id"])
+            # ensure duplicate does not already exist
+            assert (
+                _cid not in _corr_id_hist.keys()
+            ), f"\ncurrent : {row}\nprevious: {_corr_id_hist[_cid]}"
+            _corr_id_hist[_cid] = row
+
+    if len(hsa_correlation_ids) != len(get_sorted_unique(hsa_correlation_ids)):
+        diagnose_non_unique(hsa_input_data)
+
+    if len(hip_correlation_ids) != len(get_sorted_unique(hip_correlation_ids)):
+        diagnose_non_unique(hip_input_data)
+
+    correlation_ids = get_sorted_unique(hsa_correlation_ids + hip_correlation_ids)
+
+    # make sure that we have associated API calls for all async ops
+    for itr in [kernel_input_data, memory_copy_input_data]:
+        for row in itr:
+            cid = int(row["Correlation_Id"])
+            assert (
+                cid in correlation_ids
+            ), f"[{cid}] {row}\nCorrelation IDs:\n\t{correlation_ids}"
 
     # all correlation ids are unique
+    if len(correlation_ids) != (len(hsa_input_data) + len(hip_input_data)):
+        for itr in hsa_input_data:
+            assert int(itr["Correlation_Id"]) in correlation_ids, f"{itr}"
+        for itr in hip_input_data:
+            assert int(itr["Correlation_Id"]) in correlation_ids, f"{itr}"
+
     assert len(correlation_ids) == (len(hsa_input_data) + len(hip_input_data))
     # correlation ids are numbered from 1 to N
-    assert correlation_ids[0] == 1
-    assert correlation_ids[-1] == len(correlation_ids)
+    assert correlation_ids[0] == 1, f"{correlation_ids}"
+    assert correlation_ids[-1] == len(correlation_ids), f"{correlation_ids}"
 
     functions = list(set(functions))
     for itr in (

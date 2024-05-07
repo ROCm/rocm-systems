@@ -134,12 +134,12 @@ rocprofiler::buffer::instance::emplace(uint32_t category, uint32_t kind, Tp& val
         if(policy == ROCPROFILER_BUFFER_POLICY_LOSSLESS)
         {
             // blocks until buffer is flushed
-            while(!success)
+            do
             {
-                buffer::flush(buffer_id, false);
+                buffer::flush(buffer_id, true);
                 idx     = get_idx();
                 success = buffers.at(idx).emplace(category, kind, value);
-            }
+            } while(!success);
         }
         else
         {

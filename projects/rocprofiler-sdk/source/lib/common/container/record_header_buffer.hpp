@@ -257,10 +257,10 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
         // placement new
         new(_addr) Tp{_v};
 
-        rocprofiler_record_header_t record = {};
-        record.hash                        = _hash;
-        record.payload                     = _addr;
-        m_headers.at(idx)                  = record;
+        auto record       = rocprofiler_record_header_t{};
+        record.hash       = _hash;
+        record.payload    = _addr;
+        m_headers.at(idx) = record;
     }
     read_unlock();
 
@@ -299,10 +299,11 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
         // placement new
         new(_addr) Tp{_v};
 
-        m_headers.at(idx)          = rocprofiler_record_header_t{};
-        m_headers.at(idx).category = _category;
-        m_headers.at(idx).kind     = _kind;
-        m_headers.at(idx).payload  = _addr;
+        auto record       = rocprofiler_record_header_t{};
+        record.category   = _category;
+        record.kind       = _kind;
+        record.payload    = _addr;
+        m_headers.at(idx) = record;
     }
     read_unlock();
 

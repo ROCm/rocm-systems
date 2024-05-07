@@ -58,6 +58,7 @@ add_subdirectory(scratch-memory-tracing)
 add_subdirectory(c-tool)
 add_subdirectory(page-migration)
 add_subdirectory(thread-trace)
+add_subdirectory(hip-graph-tracing)
 
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)

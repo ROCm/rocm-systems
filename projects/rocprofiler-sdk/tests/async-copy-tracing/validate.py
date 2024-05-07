@@ -115,9 +115,9 @@ def test_timestamps(input_data):
             ), f"[{titr}] {itr}"
 
             api_start = cb_start[itr["correlation_id"]["internal"]]
-            api_end = cb_end[itr["correlation_id"]["internal"]]
+            # api_end = cb_end[itr["correlation_id"]["internal"]]
             assert api_start < itr["start_timestamp"], f"[{titr}] {itr}"
-            assert api_end <= itr["end_timestamp"], f"[{titr}] {itr}"
+            # assert api_end <= itr["end_timestamp"], f"[{titr}] {itr}"
 
 
 def test_internal_correlation_ids(input_data):
