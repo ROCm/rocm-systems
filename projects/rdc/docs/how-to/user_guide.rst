@@ -5,7 +5,7 @@
 .. _rdc-use:
 
 ******************************************
-Introduction to RDC tool
+Introduction to the RDC tool
 ******************************************
 
 The ROCm Data Center tool (RDC) simplifies the administration and addresses key infrastructure challenges in AMD GPUs in cluster and datacenter environments. The main features are:
@@ -15,7 +15,7 @@ The ROCm Data Center tool (RDC) simplifies the administration and addresses key 
 * Integration with third-party tools
 * Open source
 
-You can use the tool in standalone mode if all components are installed. However, the existing management tools can use the same set of features available in a library format.
+You can use the RDC tool in standalone mode if all components are installed. However, the existing management tools can use the same set of features available in a library format.
 
 For details on different modes of operation, refer to *Starting RDC* in :ref:`rdc-install`.
 
@@ -24,7 +24,7 @@ Target Audience
 
 The audience for the AMD RDC tool consists of:
 
-* Administrators: The tool provides the cluster administrator with the capability of monitoring, validating, and configuring policies.
+* Administrators: RDC provides the cluster administrator with the capability of monitoring, validating, and configuring policies.
 * HPC Users: Provides GPU-centric feedback for their workload submissions.
 * OEM: Add GPU information to their existing cluster management software.
 * Open source Contributors: RDC is open source and accepts contributions from the community. 

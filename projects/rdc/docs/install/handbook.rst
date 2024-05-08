@@ -5,16 +5,16 @@
 .. _rdc-handbook:
 
 ***************************************************
-Building and testing RDC tool: A developer handbook
+Building and testing RDC
 ***************************************************
 
-The RDC tool is open source and available under the MIT License. This section is helpful for open source developers. Third-party integrators may also find this information useful.
+RDC is open source and available under the MIT License. This section is helpful for open source developers. Third-party integrators may also find this information useful.
 
 Prerequisites for Building RDC
 ==============================
 
 .. note::
-  The RDC tool is tested on the following software versions. Earlier versions may not work.
+  RDC is tested on the following software versions. Earlier versions may not work.
 
 * CMake 3.15
 * g++ (5.4.0)
@@ -91,7 +91,7 @@ Test
 Authentication
 ==============
 
-The RDC tool supports encrypted communications between clients and servers.
+RDC supports encrypted communications between clients and servers.
 
 Generate Files for Authentication
 ---------------------------------
@@ -148,7 +148,7 @@ These files must be copied to and installed on all client and server machines th
 Known Limitation
 ----------------
 
-The RDC tool has the following authentication limitations:
+RDC has the following authentication limitations:
 
 The client and server are hardcoded to look for the ``openssl`` certificate and key files in ``/etc/rdc``. There is no workaround available currently.
 

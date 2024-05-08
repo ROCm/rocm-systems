@@ -5,8 +5,10 @@
 .. _rdc-features:
 
 ******************************************
-RDC Feature Overview
+RDC tool feature overview
 ******************************************
+
+This topic provides information related to the features of the RDC tool. 
 
 .. figure:: ../data/features.png
 
@@ -139,7 +141,7 @@ You can define ``RDC_FI_ECC_CORRECT_TOTAL`` or ``RDC_FI_ECC_UNCORRECT_TOTAL`` fi
 Device Monitoring
 =================
 
-The RDC Tool enables you to monitor the GPU fields.
+The RDC tool enables you to monitor the GPU fields.
 
 .. code-block:: shell
   
@@ -231,7 +233,7 @@ You can display GPU statistics for any given workload.
 
 
 Job Stats Use Case
-==================
+------------------
 
 A common use case is to record GPU statistics associated with any job or workload. The following example shows how all these features can be put together for this use case:
 
@@ -242,7 +244,7 @@ A common use case is to record GPU statistics associated with any job or workloa
 
 
 rdci commands
--------------
+^^^^^^^^^^^^^
 
 .. code-block:: shell
   

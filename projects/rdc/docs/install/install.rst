@@ -5,7 +5,7 @@
 .. _rdc-install:
 
 ******************************************
-Installing and running RDC tool
+Installing and running RDC
 ******************************************
 
 The ROCm Data Center tool (RDC) is part of the AMD ROCm software and available on the distributions supported by AMD ROCm. For RDC installation from prebuilt packages, follow the instructions in this section.
@@ -23,12 +23,12 @@ To see the instructions for building ``gRPC`` and ``protoc``, refer to `Building
 Authentication keys
 ===================
 
-The RDC tool can be used with or without authentication. If authentication is required you must configure proper authentication keys as described in *Authentication* in :ref:`rdc-handbook`.
+RDC can be used with or without authentication. If authentication is required you must configure proper authentication keys as described in *Authentication* in :ref:`rdc-handbook`.
 
 Prebuilt packages
 =================
 
-The RDC tool is packaged as part of the ROCm software repository. You must install the AMD ROCm software before installing RDC, as described in `ROCm installation <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
+RDC is packaged as part of the ROCm software repository. You must install the AMD ROCm software before installing RDC, as described in `ROCm installation <https://rocm.docs.amd.com/projects/install-on-linux/en/latest/>`_.
 
 To install RDC after installing the ROCm package, use the following instructions.
 
@@ -57,7 +57,7 @@ To install RDC after installing the ROCm package, use the following instructions
 Components
 ==========
 
-The components of RDC tool are as shown below:
+The components of the RDC tool are as shown below:
 
 .. figure:: ../data/install_components.png
 
@@ -92,7 +92,7 @@ The RDC tool can be run in the following two modes. The feature set is similar i
 * :ref:`standalone`
 * :ref:`embedded`
 
-The capability in each mode depends on the privileges you have for starting RDC. A normal user has access only to monitor (GPU telemetry) capabilities. A privileged user can run the tool with full capability. In the full capability mode, GPU configuration features can be invoked. This may or may not affect all the users and processes sharing the GPU.
+The capability in each mode depends on the privileges you have for starting the RDC tool. A normal user has access only to monitor (GPU telemetry) capabilities. A privileged user can run the tool with full capability. In the full capability mode, GPU configuration features can be invoked. This may or may not affect all the users and processes sharing the GPU.
 
 .. _`standalone`:
 
@@ -101,8 +101,8 @@ Standalone mode
 
 This is the preferred mode of operation, as it does not have any external dependencies. To start RDC in standalone mode, RDC Server Daemon (``rdcd``) must run on each compute node. Refer to *Terminology* in :ref:`rdc-use` for more information. You can start ``rdcd`` as a ``systemd`` service or directly from the command-line.
 
-Start RDC tool using ``systemd``
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Start the RDC tool using ``systemd``
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If multiple RDC versions are installed, copy `/opt/rocm-<x.y.z>/rdc/lib/rdc.service`, which is installed with the desired RDC version, to the ``systemd`` folder. The capability of RDC can be configured by modifying the ``rdc.service`` system configuration file. Use the ``systemctl`` command to start ``rdcd``.
 
@@ -139,8 +139,8 @@ If the GPU reset fails, restart the server. Note that restarting the server also
     $ sudo systemctl restart rdcd
 
 
-Start RDC tool from the command-line
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Start the RDC tool from the command-line
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 While ``systemctl`` is the preferred way to start ``rdcd``, you can also start directly from the command-line. The installation scripts create a default user - ``rdc``. Users have the option to edit the profile file (``rdc.service`` installed at ``/lib/systemd/system``) and change these lines accordingly:
 

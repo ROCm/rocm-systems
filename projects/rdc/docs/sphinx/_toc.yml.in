@@ -7,9 +7,9 @@ subtrees:
 - caption: Install
   entries:
   - file: install/install
-    title: Installing RDC tool
+    title: Installing RDC
   - file: install/handbook
-    title: Building and testing RDC tool
+    title: Building and testing RDC
 
 - caption: How to
   entries:
@@ -17,7 +17,7 @@ subtrees:
   - file: how-to/features
   - file: how-to/integration
 
-- caption: API Reference
+- caption: API reference
   entries:
   - file: reference/api_intro
   - file: reference/api_ref

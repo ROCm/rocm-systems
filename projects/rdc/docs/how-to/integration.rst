@@ -5,10 +5,10 @@
 .. _rdc-3rd-party:
 
 ******************************************
-3rd party integration
+Third party integration
 ******************************************
 
-This section lists all the third-party plugins such as Prometheus, Grafana, and Reliability, Availability and Serviceability (RAS) plugin.
+This section lists available third-party plugins for the RDC tool such as Prometheus, Grafana, and Reliability, Availability and Serviceability (RAS).
 
 Python bindings
 ===============
@@ -52,7 +52,7 @@ See the sample program to monitor the power and GPU utilization using the ``RdcR
 In the sample program,
 
 * Class ``SimpleRdcReader`` is derived from the ``RdcReader``.
-* The field ``ip_port=None`` in ``RdcReader`` dictates that the RDC tool runs in the embedded mode.
+* The field ``ip_port=None`` in ``RdcReader`` dictates that RDC runs in the embedded mode.
 * ``SimpleRdcReader::process()`` fetches fields specified in ``default_field_ids``. 
 
 .. note::
@@ -76,7 +76,7 @@ Prometheus plugin helps to monitor events and send alerts. The Prometheus instal
 Prometheus plugin installation
 ------------------------------
 
-The RDC tool's Prometheus plugin ``rdc_prometheus.py`` can be found in the ``python_binding`` folder.
+RDC's Prometheus plugin ``rdc_prometheus.py`` can be found in the ``python_binding`` folder.
 
 .. note::
   Ensure the Prometheus client is installed before the Prometheus plugin installation process.
@@ -220,7 +220,7 @@ Example: gpu_clock
 Grafana Plugin
 ==============
 
-Grafana is a common monitoring stack used for storing and visualizing time series data. Prometheus acts as the storage backend, and Grafana is used as the interface for analysis and visualization. Grafana has a plethora of visualization options and can be integrated with Prometheus for the RDC tool's dashboard.
+Grafana is a common monitoring stack used for storing and visualizing time series data. Prometheus acts as the storage backend, and Grafana is used as the interface for analysis and visualization. Grafana has a plethora of visualization options and can be integrated with Prometheus for RDC's dashboard.
 
 
 Grafana Plugin Installation
@@ -283,7 +283,7 @@ Follow these steps:
 
 .. image:: ../data/integration_config5.png
 
-5.     To import the RDC tool dashboard, click ``+`` and select ``Import``.
+5.     To import RDC dashboard, click ``+`` and select ``Import``.
 
 6.     Click the ``Upload.json`` file command.
 
@@ -296,9 +296,9 @@ Follow these steps:
 Prometheus (Grafana) integration with automatic node detection
 ==============================================================
 
-The RDC tool enables you to use Consul to discover the ``rdc_prometheus`` service automatically. Consul is “a service mesh solution providing a fully featured control plane with service discovery, configuration, and segmentation functionality.” For more information, refer to `Consul <https://developer.hashicorp.com/consul/docs/intro>`_.
+RDC enables you to use Consul to discover the ``rdc_prometheus`` service automatically. Consul is “a service mesh solution providing a fully featured control plane with service discovery, configuration, and segmentation functionality.” For more information, refer to `Consul <https://developer.hashicorp.com/consul/docs/intro>`_.
 
-The RDC tool uses Consul for health checks of RDC's integration with the Prometheus plug-in (``rdc_prometheus``), and these checks provide information on its efficiency.  
+RDC uses Consul for health checks of RDC's integration with the Prometheus plug-in (``rdc_prometheus``), and these checks provide information on its efficiency.  
 
 Previously, when a new compute node was added, users had to manually change ``prometheus_targets.json`` to use Consul. Now, with the Consul agent integration, a new compute node can be discovered automatically.
 
@@ -502,7 +502,7 @@ The RAS plugin helps to gather and count errors. The details of RAS integration 
 RAS Plugin Installation
 -----------------------
 
-In this release, the RDC tool extends support to the Reliability, Availability, and Serviceability (RAS) integration. When the RAS feature is enabled in the graphic card, users can use RDC to monitor RAS errors.
+In this release, RDC extends support to the Reliability, Availability, and Serviceability (RAS) integration. When the RAS feature is enabled in the graphic card, users can use RDC to monitor RAS errors.
 
 Prerequisite
 ^^^^^^^^^^^^
@@ -512,7 +512,7 @@ You must ensure the graphic card supports RAS.
 .. note::
   The RAS library is installed as part of the RDC installation, and no additional configuration is required for RDC.
 
-The RDC tool installation dynamically loads the RAS library ``librdc_ras.so``. The configuration files required by the RAS library are installed in the ``sp3`` and ``config`` folders.
+RDC installation dynamically loads the RAS library ``librdc_ras.so``. The configuration files required by the RAS library are installed in the ``sp3`` and ``config`` folders.
 
 .. code-block:: shell
   

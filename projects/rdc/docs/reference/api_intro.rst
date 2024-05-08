@@ -5,7 +5,7 @@
 .. _api-intro:
 
 ******************************************
-Introduction to RDC tool API
+Introduction to RDC API
 ******************************************
 
 .. note::
@@ -14,9 +14,9 @@ Introduction to RDC tool API
 RDC API
 ===========
 
-The RDC tool API is the core library that provides all the RDC features. This section focuses on how RDC API can be used by third-party software.
+RDC API is the core library that provides all the RDC features. This section focuses on how RDC API can be used by third-party software.
 
-The RDC includes the following libraries:
+RDC includes the following libraries:
 
 * ``librdc_bootstrap.so``: Loads during runtime one of the two libraries by detecting the mode.
 * ``librdc_client.so``: Exposes RDC functionality using ``gRPC`` client.
@@ -38,10 +38,10 @@ Example:
 
 For more information see the :ref:`rdc-ref`.
 
-Job Stats Use Case
+Job stats use case
 ==================
 
-The following pseudocode shows how RDC tool API can be directly used to record GPU statistics associated with any job or workload. Refer to the example code provided with RDC on how to build it.
+The following pseudocode shows how RDC API can be directly used to record GPU statistics associated with any job or workload. Refer to the example code provided with RDC on how to build it.
 
 For more information, see *Job Stats* in :ref:`rdc-features`.
 
