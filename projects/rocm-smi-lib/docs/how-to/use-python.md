@@ -1,23 +1,24 @@
-# Radeon Open Compute (ROCm) - System Management Interface - Command Line Tool
 
-This tool acts as a command line interface for manipulating
-and monitoring the amdgpu kernel, and is intended to replace
-and deprecate the existing rocm_smi.py CLI tool located at
-https://github.com/ROCm/ROC-smi.
-This tool uses Ctypes to call the rocm_smi_lib API.
-Recommended: At least one AMD GPU with ROCm driver installed
+# Using Python in ROCm SMI
+
+This tool acts as a command line interface for manipulating and monitoring the amdgpu kernel, and is intended to replace and deprecate the existing rocm_smi.py CLI tool.
+It uses Ctypes to call the rocm_smi_lib API. Recommended: At least one AMD GPU with ROCm driver installed
+
 Required: ROCm SMI library installed (librocm_smi64)
 
 ## Installation
 
-Follow installation procedure for rocm_smi_lib. Refer to [https://github.com/RadeonOpenCompute/rocm_smi_lib](https://github.com/RadeonOpenCompute/rocm_smi_lib) for the installation guide.
-LD_LIBRARY_PATH  should be set to the folder containing librocm_smi64.
+Follow the installation procedure for rocm_smi_lib. Refer to the [installation](../install/install.rst) section.
+
+LD_LIBRARY_PATH  must be set to the folder containing librocm_smi64.
 
 ## Version
 
-The SMI will report two "versions", ROCM-SMI version and other is ROCM-SMI-LIB version.  
-- ROCM-SMI version is the CLI/tool version number with commit ID appended after + sign.  
+The SMI will report two "versions", ROCM-SMI version and other is ROCM-SMI-LIB version.
+
+- ROCM-SMI version is the CLI/tool version number with commit ID appended after + sign.
 - ROCM-SMI-LIB version is the library package version number.
+  
 ```
 ROCM-SMI version: 2.0.0+8e78352
 ROCM-SMI-LIB version: 6.1.0
@@ -175,13 +176,13 @@ Set options:
   --rasenable BLOCK ERRTYPE                                        Enable RAS for specified block and error type
   --rasdisable BLOCK ERRTYPE                                       Disable RAS for specified block and error type
   --rasinject BLOCK                                                Inject RAS poison for specified block (ONLY WORKS ON
-                                                                   UNSECURED BOARDS)
+                                                                   UNSECURE BOARDS)
 
 Reset options:
   -r, --resetclocks                                                Reset clocks and OverDrive to default
   --resetfans                                                      Reset fans to automatic (driver) control
   --resetprofile                                                   Reset Power Profile back to default
-  --resetpoweroverdrive                                            Set the maximum GPU power back to the device default
+  --resetpoweroverdrive                                            Set the maximum GPU power back to the device deafult
                                                                    state
   --resetxgmierr                                                   Reset XGMI error count
   --resetperfdeterminism                                           Disable performance determinism
@@ -451,10 +452,3 @@ These are the flags that require OverDrive functionality to be enabled for the f
     --setsrange
     --setmrange
 
-## Disclaimer
-
-The information contained herein is for informational purposes only, and is subject to change without notice. While every precaution has been taken in the preparation of this document, it may contain technical inaccuracies, omissions and typographical errors, and AMD is under no obligation to update or otherwise correct this information. Advanced Micro Devices, Inc. makes no representations or warranties with respect to the accuracy or completeness of the contents of this document, and assumes no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
-
-AMD, the AMD Arrow logo, and combinations thereof are trademarks of Advanced Micro Devices, Inc. Other product names used in this publication are for identification purposes only and may be trademarks of their respective companies.
-
-Copyright (c) 2014-2024 Advanced Micro Devices, Inc. All rights reserved.

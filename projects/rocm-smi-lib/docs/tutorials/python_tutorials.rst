@@ -1,8 +1,10 @@
-====================
-Python Tutorials
-====================
+.. meta::
+  :description: ROCm SMI Python tutorial
+  :keywords: install, SMI, library, api, AMD, ROCm
 
-This chapter is the rocm_smi Python api tutorials.
+
+ROCm SMI Python API tutorial
+-----------------------------
 
 .. code-block:: python
 

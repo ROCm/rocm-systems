@@ -1,8 +1,9 @@
-====================
-C++ Tutorials
-====================
+.. meta::
+  :description: ROCm SMI tutorial
+  :keywords: install, SMI, library, api, AMD, ROCm
 
-This chapter contains the ROCm SMI C++ API tutorials.
+ROCm SMI C++ API tutorial
+----------------------------
 
 .. code-block:: c++
 
