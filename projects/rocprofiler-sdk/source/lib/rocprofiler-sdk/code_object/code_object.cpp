@@ -405,7 +405,6 @@ get_code_objects()
 {
     static auto*& _v =
         common::static_object<common::Synchronized<code_object_array_t>>::construct();
-    static auto _dtor = common::scope_destructor{[]() { finalize(); }};
     return _v;
 }
 

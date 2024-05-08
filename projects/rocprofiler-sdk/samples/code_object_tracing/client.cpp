@@ -80,7 +80,7 @@ using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
 rocprofiler_context_id_t      client_ctx       = {};
-kernel_symbol_map_t           client_kernels   = {};
+kernel_symbol_map_t*          client_kernels   = nullptr;
 
 std::string
 cxa_demangle(std::string_view _mangled_name, int* _status)
@@ -252,12 +252,12 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
         {
             info << "kernel symbol load :: ";
-            client_kernels.emplace(data->kernel_id, *data);
+            client_kernels->emplace(data->kernel_id, *data);
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
             info << "kernel symbol unload :: ";
-            client_kernels.erase(data->kernel_id);
+            client_kernels->erase(data->kernel_id);
         }
 
         auto kernel_name     = std::regex_replace(data->kernel_name, std::regex{"(\\.kd)$"}, "");
@@ -281,6 +281,8 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
+    client_kernels = new kernel_symbol_map_t{};
+
     assert(tool_data != nullptr);
 
     auto* call_stack_v = static_cast<call_stack_t*>(tool_data);
@@ -328,6 +330,7 @@ tool_fini(void* tool_data)
     print_call_stack(*_call_stack);
 
     delete _call_stack;
+    delete client_kernels;
 }
 
 void
