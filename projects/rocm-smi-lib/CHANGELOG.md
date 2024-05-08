@@ -21,7 +21,8 @@ Added `RSMI_EVT_NOTIF_RING_HANG` to the possible events in the `rsmi_evt_notific
 
 ### Fixed
 
-- N/A
+- **Fixed parsing of `pp_od_clk_voltage` within `get_od_clk_volt_info`**  
+The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropping of voltage curve support on MI series cards.
 
 ### Known Issues
 
@@ -30,15 +31,15 @@ Added `RSMI_EVT_NOTIF_RING_HANG` to the possible events in the `rsmi_evt_notific
 ## rocm_smi_lib for ROCm 6.1.1
 
 ### Added
-- **Unlock mutex if process is dead**  
+- **Unlock mutex if process is dead**
 Added in order to unlock mutex when process is dead. Additional debug output has been added if futher issues are detected.
 
-- **Added Partition ID to rocm-smi CLI**  
+- **Added Partition ID to rocm-smi CLI**
 `rsmi_dev_pci_id_get()` now provides partition ID. See API for better detail. Previously these bits were reserved bits (right before domain) and partition id was within function.
   - bits [63:32] = domain
   - bits [31:28] = partition id
   - bits [27:16] = reserved
-  - bits [15: 0] = pci bus/device/function  
+  - bits [15: 0] = pci bus/device/function
 
 rocm-smi now provides partition ID in `rocm-smi` and `rocm-smi --showhw`. If device supports partitioning and is in a non-SPX mode (CPX, DPX,TPX,... etc) partition ID will be non-zero. In SPX and non-supported devices will show as 0. See examples provided below.
 
@@ -47,11 +48,11 @@ rocm-smi now provides partition ID in `rocm-smi` and `rocm-smi --showhw`. If dev
 
 ========================================= ROCm System Management Interface =========================================
 =================================================== Concise Info ===================================================
-Device  Node  IDs              Temp    Power  Partitions          SCLK  MCLK   Fan    Perf    PwrCap  VRAM%  GPU%  
-              (DID,     GUID)  (Edge)  (Avg)  (Mem, Compute, ID)                                                   
+Device  Node  IDs              Temp    Power  Partitions          SCLK  MCLK   Fan    Perf    PwrCap  VRAM%  GPU%
+              (DID,     GUID)  (Edge)  (Avg)  (Mem, Compute, ID)
 ====================================================================================================================
-0       1     0x73bf,   34495  43.0°C  6.0W   N/A, N/A, 0         0Mhz  96Mhz  0%     manual  150.0W  3%     0%    
-1       2     0x73a3,   22215  34.0°C  8.0W   N/A, N/A, 0         0Mhz  96Mhz  20.0%  manual  213.0W  0%     0%    
+0       1     0x73bf,   34495  43.0°C  6.0W   N/A, N/A, 0         0Mhz  96Mhz  0%     manual  150.0W  3%     0%
+1       2     0x73a3,   22215  34.0°C  8.0W   N/A, N/A, 0         0Mhz  96Mhz  20.0%  manual  213.0W  0%     0%
 ====================================================================================================================
 =============================================== End of ROCm SMI Log ================================================
 ```
@@ -78,15 +79,15 @@ GPU  NODE  DID     GUID   GFX VER  GFX RAS  SDMA RAS  UMC RAS   VBIOS  BUS      
 ======================================= End of ROCm SMI Log ========================================
 ```
 
-- **Added `NODE`, `GUID`, and `GFX Version`**  
+- **Added `NODE`, `GUID`, and `GFX Version`**
 Changes impact the following rocm-smi CLIs:
   - `rocm-smi`
   - `rocm-smi -i`
   - `rocm-smi --showhw`
   - `rocm-smi --showproduct`
 
-  `NODE` - is the KFD node, since these can both be CPU and GPU devices. This field is invariant between boots.      
-  `GUID` - also known as GPU ID. GUID is the KFD GPU's ID. This field has a chance to be variant between boots.  
+  `NODE` - is the KFD node, since these can both be CPU and GPU devices. This field is invariant between boots.
+  `GUID` - also known as GPU ID. GUID is the KFD GPU's ID. This field has a chance to be variant between boots.
   `GFX Version` - this is the device's target graphics version.
 
 See below for a few example outputs.
@@ -184,12 +185,12 @@ GPU[3]          : GFX Version:          gfx942
 ================================== End of ROCm SMI Log ===================================
 ```
 
-- **Documentation now includes C++ and Python: tutorials, API guides, and C++ reference pages**  
+- **Documentation now includes C++ and Python: tutorials, API guides, and C++ reference pages**
 See [https://rocm.docs.amd.com/](https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/) once 6.1.1 is released.
 
 
 ### Changed
-- **Aligned `rocm-smi` fields display "N/A" instead of "unknown"/"unsupported": `Card ID`, `DID`, `Model`, `SKU`, and `VBIOS`**   
+- **Aligned `rocm-smi` fields display "N/A" instead of "unknown"/"unsupported": `Card ID`, `DID`, `Model`, `SKU`, and `VBIOS`**
 Impacts the following commands:
   - `rocm-smi` - see other examples above for 6.1.1
   - `rocm-smi --showhw` - see other examples above for 6.1.1
@@ -208,11 +209,11 @@ GPU[3]          : VBIOS version: N/A
 ==========================================================================================
 ================================== End of ROCm SMI Log ===================================
 ```
-- **Removed stacked id formatting in `rocm-smi`**  
+- **Removed stacked id formatting in `rocm-smi`**
  This is to simplify identifiers helpful to users. More identifiers can be found on:
    - `rocm-smi -i`
    - `rocm-smi --showhw`
-   - `rocm-smi --showproduct`  
+   - `rocm-smi --showproduct`
 
   See examples shown above for 6.1.1. Previous output example can be seen below.
  ```shell
@@ -233,18 +234,18 @@ Device  [Model : Revision]    Temp        Power     Partitions      SCLK   MCLK 
 - N/A
 
 ### Fixed
-- **Fixed HIP and ROCm SMI mismatch on GPU bus assignments**  
+- **Fixed HIP and ROCm SMI mismatch on GPU bus assignments**
 These changes prompted us to to provide better visability for our device nodes and partition IDs (see addition provided above). See examples below for fix overview.
-1. MI300a GPU device `Domain:Bus:Device.function` clashes with another AMD USB device  
-Cause(s):  
-a. ROCm SMI did not propagate domain consistently (for partitioned devices)  
+1. MI300a GPU device `Domain:Bus:Device.function` clashes with another AMD USB device
+Cause(s):
+a. ROCm SMI did not propagate domain consistently (for partitioned devices)
 b. AMD GPU driver previously reported partition IDs within function node - causing clash with the other AMD USB device PCIe ID displayed.
-2. Domain does not propagate for devices which support partitioning (MI300x/a)  
-Cause(s):  
-a. ROCm SMI did not propagate domain consistently (for partitioned devices) 
-3. Displayed topology will show disordered nodes when compared to HIP  
-Cause(s):  
-a. ROCm SMI did not propogate domain consistently (for partitioned devices)  
+2. Domain does not propagate for devices which support partitioning (MI300x/a)
+Cause(s):
+a. ROCm SMI did not propagate domain consistently (for partitioned devices)
+3. Displayed topology will show disordered nodes when compared to HIP
+Cause(s):
+a. ROCm SMI did not propogate domain consistently (for partitioned devices)
 
 *Device in TPX*
 ```shell
@@ -305,9 +306,9 @@ GPU[11]         : (Topology) Numa Node: 3
 GPU[11]         : (Topology) Numa Affinity: 3
 ================================== End of ROCm SMI Log ===================================
 ```
-- **Fixed memory leaks**  
+- **Fixed memory leaks**
 Caused by not closing directories and creating maps nodes instead of checking using by using .at().
-- **Fixed Python rocm_smi API calls**  
+- **Fixed Python rocm_smi API calls**
 Fixed initializing calls which reuse rocmsmi.initializeRsmi() bindings.
 
 ```shell
@@ -318,7 +319,7 @@ Traceback (most recent call last):
     ret_init = rocmsmi.rsmi_init(0)
 NameError: name 'rocmsmi' is not defined
 ```
-- **Fixed rsmi_dev_activity_metric_get gfx/memory activity does not update with GPU activity**  
+- **Fixed rsmi_dev_activity_metric_get gfx/memory activity does not update with GPU activity**
     Checks and forces rereading gpu metrics unconditionally.
 
 ### Known Issues
@@ -327,10 +328,10 @@ NameError: name 'rocmsmi' is not defined
 ## rocm_smi_lib for ROCm 6.1.0
 
 ### Added
-- **Added support to set max/min clock level for sclk (`RSMI_CLK_TYPE_SYS`) or mclk (`RSMI_CLK_TYPE_MEM`)**  
+- **Added support to set max/min clock level for sclk (`RSMI_CLK_TYPE_SYS`) or mclk (`RSMI_CLK_TYPE_MEM`)**
 Users can now set a maximum or minimum sclk or mclk value through `rsmi_dev_clk_extremum_set()` API provided ASIC support. Alternatively, users can
-use our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.  
-       
+use our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.
+
 ```shell
 $ sudo /opt/rocm/bin/rocm-smi --setextremum max sclk 2100
 
@@ -358,15 +359,15 @@ GPU[3]          : Successfully set max sclk to 2100(MHz)
 ================================== End of ROCm SMI Log ===================================
 ```
 
-- **Added `rsmi_dev_target_graphics_version_get()`**  
+- **Added `rsmi_dev_target_graphics_version_get()`**
 Users can now query through ROCm SMI API (`rsmi_dev_target_graphics_version_get()`) to retreive the target graphics version for a GPU device. Currently, this output is not supplied through our rocm-smi CLI.
 
 ### Changed
 
-- **Removed non-unified API headers: Individual GPU metric APIs are no longer supported**  
+- **Removed non-unified API headers: Individual GPU metric APIs are no longer supported**
 The individual metric APIs (`rsmi_dev_metrics_*`) were removed in order to keep updates easier for new GPU metric support. By providing a simple API (`rsmi_dev_gpu_metrics_info_get()`) with its reported device metrics, it is worth noting there is a risk for ABI break-age using `rsmi_dev_gpu_metrics_info_get()`. It is vital to understand, that ABI breaks are necessary (in some cases) in order to support newer ASICs and metrics for our customers. We will continue to support `rsmi_dev_gpu_metrics_info_get()` with these considerations and limitations in mind.
 
-- **Depricated rsmi_dev_power_ave_get(),  use newer API rsmi_dev_power_get()**  
+- **Depricated rsmi_dev_power_ave_get(),  use newer API rsmi_dev_power_get()**
 As outlined in change below for 6.0.0 (***Added a generic power API: rsmi_dev_power_get***), is now depricated. Please update your ROCm SMI API calls accordingly.
 
 ### Optimizations
@@ -374,17 +375,17 @@ As outlined in change below for 6.0.0 (***Added a generic power API: rsmi_dev_po
 
 
 ### Fixed
-- Fix `--showpids` reporting `[PID] [PROCESS NAME] 1 UNKNOWN UNKNOWN UNKNOWN`  
+- Fix `--showpids` reporting `[PID] [PROCESS NAME] 1 UNKNOWN UNKNOWN UNKNOWN`
 Output was failing because cu_occupancy debugfs method is not provided on some graphics cards by design. `get_compute_process_info_by_pid` was updated to reflect this and returns with output needed by CLI.
-- Fix `rocm-smi --showpower` output was inconsistent on Navi32/31 devices  
+- Fix `rocm-smi --showpower` output was inconsistent on Navi32/31 devices
 Updated to use `rsmi_dev_power_get()` within CLI to provide a consistent device power output. This was caused due to using the now depricated `rsmi_dev_average_power_get()` API.
-- Fixed `rocm-smi --setcomputepartition` and `rocm-smi --resetcomputepartition` to notate if device is EBUSY 
-- Fixed `rocm-smi --setmemorypartition` and `rocm-smi --resetmemorypartition` read only SYSFS to return RSMI_STATUS_NOT_SUPPORTED  
+- Fixed `rocm-smi --setcomputepartition` and `rocm-smi --resetcomputepartition` to notate if device is EBUSY
+- Fixed `rocm-smi --setmemorypartition` and `rocm-smi --resetmemorypartition` read only SYSFS to return RSMI_STATUS_NOT_SUPPORTED
 The  `rsmi_dev_memory_partition_set` API is updated to handle the readonly SYSFS check. Corresponding tests and CLI (`rocm-smi --setmemorypartition` and `rocm-smi --resetmemorypartition`) calls were updated accordingly.
 - Fix `rocm-smi --showclkvolt` and `rocm-smi --showvc` displaying 0 for overdrive and voltage curve is not supported
 
 ### Known Issues
-- **HIP and ROCm SMI mismatch on GPU bus assignments**  
+- **HIP and ROCm SMI mismatch on GPU bus assignments**
 Three separate issues have been identified:
 1. MI300a GPU device `Domain:Bus:Device.function` clashes with another AMD USB device
 ```shell
@@ -408,7 +409,7 @@ GPU[3]          : PCI Bus: 0000:01:00.3
 ==========================================================================================
 ================================== End of ROCm SMI Log ===================================
 ```
-2. Domain does not propagate for devices which support partitioning (MI300x/a)  
+2. Domain does not propagate for devices which support partitioning (MI300x/a)
 For example, a device in non-SPX (single partition) - devices will overlap in function device.
 ```shell
 $ rocm-smi --showbus
@@ -440,7 +441,7 @@ GPU[22]         : PCI Bus: 0002:01:00.0
 GPU[23]         : PCI Bus: 0003:01:00.0
 ================================== End of ROCm SMI Log ===================================
 ```
-3. Displayed topology will show disordered nodes when compared to HIP  
+3. Displayed topology will show disordered nodes when compared to HIP
 See rocm-smi output vs transferbench.
 ```shell
 rocm-smi --showtopo option is not displaying the correct information when the MI300 driver is loaded in TPX mode.
@@ -514,9 +515,9 @@ GPU[11]         : (Topology) Numa Affinity: 3
 
 ### Added
 
-- **Added rocm-smi --version**  
-The SMI will report two "versions", ROCM-SMI version and other is ROCM-SMI-LIB version.  
-  - The ROCM-SMI version is the CLI/tool version number with commit ID appended after `+` sign.  
+- **Added rocm-smi --version**
+The SMI will report two "versions", ROCM-SMI version and other is ROCM-SMI-LIB version.
+  - The ROCM-SMI version is the CLI/tool version number with commit ID appended after `+` sign.
   - The ROCM-SMI-LIB version is the library package version number.
 ```
 $ rocm-smi --version
@@ -524,11 +525,11 @@ ROCM-SMI version: 2.0.0+8e78352
 ROCM-SMI-LIB version: 6.0.0
 ```
 
-- **Added support for gfx941/gfx942 metrics**  
+- **Added support for gfx941/gfx942 metrics**
 You can now query MI300 device metrics to get real-time information. Metrics include power, temperature, energy, and performance. Users can query through `rsmi_dev_gpu_metrics_info_get()`.
 
 
-- **Compute and memory partition support**  
+- **Compute and memory partition support**
 Users can now view, set, and reset partitions. The topology display can provide a more in-depth look at the device's current configuration. If your ASIC supports these features, the following commands can help get started:
   - `rocm-smi --showcomputepartition`
   - `rocm-smi --setcomputepartition <SPX, DPX, CPX, TPX, QPX>`
@@ -539,23 +540,23 @@ Users can now view, set, and reset partitions. The topology display can provide 
 
 ### Changed
 
-- **GPU index sorting made consistent with other tools**  
+- **GPU index sorting made consistent with other tools**
 To ensure alignment with other ROCm software tools, GPU index sorting is optimized to use Bus:Device.Function (BDF) rather than the card number.
 
-- **Increase max BDF ID length**  
+- **Increase max BDF ID length**
 To allow for larger BDF data, we have increased the maximum BDF length from 256 to 512 buffer size.
 
-- **Documentation is transitioning to Sphinx**  
+- **Documentation is transitioning to Sphinx**
 Sphinx allows us to generate code documentation easier for our users. Helps us provide centrized HTML documentation at single website location. Here customers can see how to use our software and tools.
 
-- **Added a generic power API: `rsmi_dev_power_get()`**  
-Older ASICs provided average socket power, newer ASICs (MI300) provide current socket power. The generic API provides one interface to retreive either of these power readings, allowing backwards compatability.  
+- **Added a generic power API: `rsmi_dev_power_get()`**
+Older ASICs provided average socket power, newer ASICs (MI300) provide current socket power. The generic API provides one interface to retreive either of these power readings, allowing backwards compatability.
 
-- **Added flexible temperature readings (`rocm-smi` and `rocm-smi --showtempgraph`)**  
+- **Added flexible temperature readings (`rocm-smi` and `rocm-smi --showtempgraph`)**
 Older ASICs provided edge temperature, newer ASICs (MI300) provide junction socket power (not edge). The rocm-smi CLI now provides a way to view which type of temperature is read across all sockets.
 
-- **Added deep sleep frequency readings**  
-Newer ASICs (MI300) provide ability to know if a clock is in deep sleep. 
+- **Added deep sleep frequency readings**
+Newer ASICs (MI300) provide ability to know if a clock is in deep sleep.
 
 
 ### Optimizations
@@ -566,8 +567,8 @@ Newer ASICs (MI300) provide ability to know if a clock is in deep sleep.
 
 ### Fixed
 - Fix memory usage division by 0
-- Fix missing firmware blocks (rocm-smi --showfw)  
-- Fix rocm-smi --showevents shows wrong gpuID 
+- Fix missing firmware blocks (rocm-smi --showfw)
+- Fix rocm-smi --showevents shows wrong gpuID
 
 
 ## rocm_smi_lib for ROCm 5.5.0

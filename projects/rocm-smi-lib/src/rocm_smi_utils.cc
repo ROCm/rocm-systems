@@ -1076,6 +1076,7 @@ static std::string print_pnt(rsmi_od_vddc_point_t *pt) {
   ss << "\t\t** Voltage: " << pt->voltage << " mV\n";
   return ss.str();
 }
+
 static std::string pt_vddc_curve(rsmi_od_volt_curve *c) {
   std::ostringstream ss;
   if (c == nullptr) {
@@ -1098,6 +1099,14 @@ std::string print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv) {
 
   ss << pt_rng_Mhz("\t**Current SCLK frequency range: ", &odv->curr_sclk_range);
   ss << pt_rng_Mhz("\t**Current MCLK frequency range: ", &odv->curr_mclk_range);
+  ss << pt_rng_Mhz("\t**Min/Max Possible SCLK frequency range: ",
+                   &odv->sclk_freq_limits);
+  ss << pt_rng_Mhz("\t**Min/Max Possible MCLK frequency range: ",
+                   &odv->mclk_freq_limits);
+
+  ss << "\t**Current Freq/Volt. curve: " << "\n";
+  ss << "\t\t N/A" << "\n";
+
   ss << "\t**Number of Freq./Volt. regions: " << odv->num_regions << "\n\n";
   return ss.str();
 }

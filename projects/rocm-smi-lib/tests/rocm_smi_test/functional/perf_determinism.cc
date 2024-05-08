@@ -93,9 +93,9 @@ void TestPerfDeterminism::Close() {
 void TestPerfDeterminism::Run(void) {
   rsmi_status_t err;
   rsmi_dev_perf_level_t pfl;
-  rsmi_od_volt_freq_data_t odv;
+  rsmi_od_volt_freq_data_t odv{};
   rsmi_status_t ret;
-  uint64_t clkvalue;
+  uint64_t clkvalue(0);
   TestBase::Run();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;

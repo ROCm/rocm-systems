@@ -3,8 +3,9 @@
 
 This tool acts as a command line interface for manipulating
 and monitoring the amdgpu kernel, and is intended to replace
-and deprecate the existing rocm_smi.py CLI tool.
-It uses Ctypes to call the rocm_smi_lib API.
+and deprecate the existing rocm_smi.py CLI tool located at
+https://github.com/ROCm/ROC-smi.
+This tool uses Ctypes to call the rocm_smi_lib API.
 Recommended: At least one AMD GPU with ROCm driver installed
 Required: ROCm SMI library installed (librocm_smi64)
 """
@@ -31,7 +32,7 @@ from rsmiBindings import *
 # Patch version - Increment when adding a fix, set to 0 when minor is incremented
 # Hash  version - Shortened commit hash. Print here and not with lib for consistency with amd-smi
 SMI_MAJ = 2
-SMI_MIN = 1
+SMI_MIN = 2
 SMI_PAT = 0
 # SMI_HASH is provided by rsmiBindings
 __version__ = '%s.%s.%s+%s' % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
@@ -1267,6 +1268,34 @@ def setClockExtremum(deviceList, level,  clkType, clkValue, autoRespond):
             RETCODE = 1
             if ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
                 printLog(device, 'Setting %s %s clock is not supported for this device.' % (level, clkType), None)
+
+
+def setVoltageCurve(deviceList, point, clk, volt, autoRespond):
+    """ Set voltage curve for a point in the PowerPlay table for a list of devices.
+
+    :param deviceList: List of DRM devices (can be a single-item list)
+    :param point: Point on the voltage curve to modify
+    :param clk: Clock speed specified for this curve point
+    :param volt: Voltage specified for this curve point
+    :param autoRespond: Response to automatically provide for all prompts
+    """
+    global RETCODE
+    value = '%s %s %s' % (point, clk, volt)
+    try:
+        any(int(item) for item in value.split())
+    except ValueError:
+        printErrLog(None, 'Unable to set Voltage curve')
+        printErrLog(None, 'Non-integer characters are present in %s' %value)
+        RETCODE = 1
+        return
+    confirmOutOfSpecWarning(autoRespond)
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_od_volt_info_set(device, int(point), int(clk), int(volt))
+        if rsmi_ret_ok(ret, device, 'set_voltage_curve'):
+            printLog(device, 'Successfully set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt), None)
+        else:
+            printErrLog(device, 'Unable to set voltage point %s to %s(MHz) %s(mV)' % (point, clk, volt))
+            RETCODE = 1
 
 
 def setPowerPlayTableLevel(deviceList, clkType, point, clk, volt, autoRespond):
@@ -2682,6 +2711,38 @@ def showPower(deviceList):
     printLogSpacer()
 
 
+def showPowerPlayTable(deviceList):
+    """ Display current GPU Memory clock frequencies and voltages for a list of devices
+
+    :param deviceList: List of DRM devices (can be a single-item list)
+    """
+    global PRINT_JSON
+    if PRINT_JSON:
+        return
+    printLogSpacer(' GPU Memory clock frequencies and voltages ')
+    odvf = rsmi_od_volt_freq_data_t()
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
+        if rsmi_ret_ok(ret, device, 'get_od_volt'):
+            # TODO: Make this more dynamic and less hard-coded if possible
+            printLog(device, 'OD_SCLK:', None)
+            printLog(device, '0: %sMhz' % (int(odvf.curr_sclk_range.lower_bound / 1000000)), None)
+            printLog(device, '1: %sMhz' % (int(odvf.curr_sclk_range.upper_bound / 1000000)), None)
+            printLog(device, 'OD_MCLK:', None)
+            printLog(device, '0: %sMhz' % (int(odvf.curr_mclk_range.lower_bound / 1000000)), None)
+            printLog(device, '1: %sMhz' % (int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
+            if odvf.sclk_freq_limits.lower_bound > 0 or  odvf.sclk_freq_limits.upper_bound > 0 \
+                or odvf.mclk_freq_limits.lower_bound >0 or odvf.mclk_freq_limits.upper_bound > 0:
+                printLog(device, 'OD_RANGE:', None)
+            if odvf.sclk_freq_limits.lower_bound > 0 or  odvf.sclk_freq_limits.upper_bound > 0:
+                printLog(device, 'SCLK:     %sMhz        %sMhz' % (
+                int(odvf.sclk_freq_limits.lower_bound / 1000000), int(odvf.sclk_freq_limits.upper_bound / 1000000)), None)
+            if odvf.mclk_freq_limits.lower_bound >0 or odvf.mclk_freq_limits.upper_bound > 0:
+                printLog(device, 'MCLK:     %sMhz        %sMhz' % (
+                int(odvf.mclk_freq_limits.lower_bound / 1000000), int(odvf.mclk_freq_limits.upper_bound / 1000000)), None)
+    printLogSpacer()
+
+
 def showProduct(deviceList):
     """ Show the requested product information for a list of devices
 
@@ -2753,7 +2814,7 @@ def showRange(deviceList, rangeType):
     :param rangeType: [sclk|voltage] Type of range to return
     """
     global RETCODE
-    if rangeType not in {'sclk', 'mclk'}:
+    if rangeType not in {'sclk', 'mclk', 'voltage'}:
         printLog(None, 'Invalid range identifier %s' % (rangeType), None)
         RETCODE = 1
         return
@@ -2768,6 +2829,21 @@ def showRange(deviceList, rangeType):
             if rangeType == 'mclk':
                 printLog(device, 'Valid mclk range: %sMhz - %sMhz' % (
                 int(odvf.curr_mclk_range.lower_bound / 1000000), int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
+            if rangeType == 'voltage':
+                if odvf.num_regions == 0:
+                    printErrLog(device, 'Voltage curve regions unsupported.')
+                    continue
+                num_regions = c_uint32(odvf.num_regions)
+                regions = (rsmi_freq_volt_region_t * odvf.num_regions)()
+                ret = rocmsmi.rsmi_dev_od_volt_curve_regions_get(device, byref(num_regions), byref(regions))
+                if rsmi_ret_ok(ret, device, 'volt'):
+                    for i in range(num_regions.value):
+                        printLog(device,
+                                 'Region %d: Valid voltage range: %smV - %smV' % (i, regions[i].volt_range.lower_bound,
+                                                                                  regions[i].volt_range.upper_bound),
+                                 None)
+                else:
+                    printLog(device, 'Unable to display %s range' % (rangeType), None)
     printLogSpacer()
 
 
@@ -3082,6 +3158,25 @@ def showVoltage(deviceList):
             printLog(device, 'Voltage (mV)', str(voltage.value))
         else:
             logging.debug('GPU voltage not supported')
+    printLogSpacer()
+
+
+def showVoltageCurve(deviceList):
+    """ Show the voltage curve points for the specified devices
+
+    :param deviceList: List of DRM devices (can be a single-item list)
+    """
+    printLogSpacer(' Voltage Curve Points ')
+    odvf = rsmi_od_volt_freq_data_t()
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_od_volt_info_get(device, byref(odvf))
+        if rsmi_ret_ok(ret, device, 'get_od_volt_info', silent=False) and odvf.num_regions > 0:
+            for position in range(3):
+                printLog(device, 'Voltage point %d: %sMhz %smV' % (
+                position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
+                int(list(odvf.curve.vc_points)[position].voltage)), None)
+        else:
+            printErrLog(device, 'Voltage curve Points unsupported.')
     printLogSpacer()
 
 
@@ -3738,6 +3833,7 @@ if __name__ == '__main__':
     groupDisplayTop.add_argument('--showproductname', help='Show product details', action='store_true')
     groupDisplayTop.add_argument('--showserial', help='Show GPU\'s Serial Number', action='store_true')
     groupDisplayTop.add_argument('--showuniqueid', help='Show GPU\'s Unique ID', action='store_true')
+    groupDisplayTop.add_argument('--showvoltagerange', help='Show voltage range', action='store_true')
     groupDisplayTop.add_argument('--showbus', help='Show PCI bus number', action='store_true')
     groupDisplayPages.add_argument('--showpagesinfo', help='Show retired, pending and unreservable pages',
                                    action='store_true')
@@ -3762,6 +3858,8 @@ if __name__ == '__main__':
     groupDisplay.add_argument('-o', '--showoverdrive', help='Show current GPU Clock OverDrive level',
                               action='store_true')
     groupDisplay.add_argument('-p', '--showperflevel', help='Show current DPM Performance Level', action='store_true')
+    groupDisplay.add_argument('-S', '--showclkvolt', help='Show supported GPU and Memory Clocks and Voltages',
+                              action='store_true')
     groupDisplay.add_argument('-s', '--showclkfrq', help='Show supported GPU and Memory Clock', action='store_true')
     groupDisplay.add_argument('--showmeminfo', help='Show Memory usage information for given block(s) TYPE',
                               metavar='TYPE', type=str, nargs='+')
@@ -3773,6 +3871,7 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--showrasinfo',
                               help='Show RAS enablement information and error counts for the specified block(s) (all if no arg given)',
                               nargs='*')
+    groupDisplay.add_argument('--showvc', help='Show voltage curve', action='store_true')
     groupDisplay.add_argument('--showxgmierr', help='Show XGMI error information since last read', action='store_true')
     groupDisplay.add_argument('--showtopo', help='Show hardware topology information', action='store_true')
     groupDisplay.add_argument('--showtopoaccess', help='Shows the link accessibility between GPUs ', action='store_true')
@@ -3812,6 +3911,8 @@ if __name__ == '__main__':
     groupAction.add_argument('--setmlevel',
                              help='Change GPU Memory clock frequency (MHz) and Voltage for (mV) a specific Level',
                              metavar=('MCLKLEVEL', 'MCLK', 'MVOLT'), nargs=3)
+    groupAction.add_argument('--setvc', help='Change SCLK Voltage Curve (MHz mV) for a specific point',
+                             metavar=('POINT', 'SCLK', 'SVOLT'), nargs=3)
     groupAction.add_argument('--setsrange', help='Set min and max SCLK speed', metavar=('SCLKMIN', 'SCLKMAX'), nargs=2)
     groupAction.add_argument('--setextremum', help='Set min/max of SCLK/MCLK speed', metavar=('min|max', "sclk|mclk", 'CLK'), nargs=3)
     groupAction.add_argument('--setmrange', help='Set min and max MCLK speed', metavar=('MCLKMIN', 'MCLKMAX'), nargs=2)
@@ -3881,7 +3982,7 @@ if __name__ == '__main__':
             or args.resetclocks or args.setprofile or args.resetprofile or args.setoverdrive or args.setmemoverdrive \
             or args.setpoweroverdrive or args.resetpoweroverdrive or args.rasenable or args.rasdisable or \
             args.rasinject or args.gpureset or args.setperfdeterminism or args.setslevel or args.setmlevel or \
-            args.setsrange or args.setextremum or args.setmrange or args.setclock or \
+            args.setvc or args.setsrange or args.setextremum or args.setmrange or args.setclock or \
             args.setcomputepartition or args.setmemorypartition or args.resetcomputepartition or args.resetmemorypartition:
         relaunchAsSudo()
 
@@ -3928,6 +4029,7 @@ if __name__ == '__main__':
         args.showproductname = True
         args.showserial = True
         args.showuniqueid = True
+        args.showvoltagerange = True
         args.showbus = True
         args.showpagesinfo = True
         args.showfan = True
@@ -3945,12 +4047,14 @@ if __name__ == '__main__':
         args.showpids = "summary"
         args.showpidgpus = []
         args.showreplaycount = True
+        args.showvc = True
         args.showcomputepartition = True
         args.showmemorypartition = True
 
         if not PRINT_JSON:
             args.showprofile = True
             args.showclkfrq = True
+            args.showclkvolt = True
 
     # Don't do reset in combination with any other command
     if args.gpureset:
@@ -4021,6 +4125,8 @@ if __name__ == '__main__':
         showPids(args.showpids)
     if args.showpidgpus or str(args.showpidgpus) == '[]':
         showGpusByPid(args.showpidgpus)
+    if args.showclkvolt:
+        showPowerPlayTable(deviceList)
     if args.showvoltage:
         showVoltage(deviceList)
     if args.showbus:
@@ -4064,6 +4170,10 @@ if __name__ == '__main__':
         showRange(deviceList, 'sclk')
     if args.showmclkrange:
         showRange(deviceList, 'mclk')
+    if args.showvoltagerange:
+        showRange(deviceList, 'voltage')
+    if args.showvc:
+        showVoltageCurve(deviceList)
     if args.showenergycounter:
         showEnergy(deviceList)
     if args.showcomputepartition:
@@ -4100,6 +4210,8 @@ if __name__ == '__main__':
         resetPowerOverDrive(deviceList, args.autorespond)
     if args.setprofile:
         setProfile(deviceList, args.setprofile)
+    if args.setvc:
+        setVoltageCurve(deviceList, args.setvc[0], args.setvc[1], args.setvc[2], args.autorespond)
     if args.setextremum:
         setClockExtremum(deviceList, args.setextremum[0], args.setextremum[1], args.setextremum[2], args.autorespond)
     if args.setsrange:

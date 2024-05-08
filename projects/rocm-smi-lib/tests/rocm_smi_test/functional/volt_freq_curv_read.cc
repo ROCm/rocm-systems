@@ -113,22 +113,7 @@ void TestVoltCurvRead::Run(void) {
                 << amd::smi::getRSMIStatusString(ret, false) << "\n";
     }
     CHK_ERR_ASRT(ret)
-    err = rsmi_dev_od_volt_info_get(i, &odv);
-    IF_VERB(STANDARD) {
-        std::cout << "\t**rsmi_dev_od_volt_info_get(i, &odv): "
-                  << amd::smi::getRSMIStatusString(err, false)
-                  << "\n"
-                  << amd::smi::print_rsmi_od_volt_freq_data_t(&odv)
-                  << "\n";
-    }
-    if (err != RSMI_STATUS_SUCCESS) {
-      IF_VERB(STANDARD) {
-        std::cout <<
-            "\t**rsmi_dev_od_volt_info_get: Not supported on this machine"
-                                                               << std::endl;
-      }
-      continue;
-    }
+
     // Verify api support checking functionality is working
     err = rsmi_dev_od_volt_info_get(i, nullptr);
     IF_VERB(STANDARD) {
@@ -143,6 +128,45 @@ void TestVoltCurvRead::Run(void) {
                   << amd::smi::print_rsmi_od_volt_freq_data_t(&odv)
                   << "\t**odv.num_regions = " << std::dec
                   << odv.num_regions << "\n";
+    }
+    if (err == RSMI_STATUS_SUCCESS) {
+      std::cout << "\t**Frequency-voltage curve data:" << "\n";
+      std::cout << amd::smi::print_rsmi_od_volt_freq_data_t(&odv);
+
+      rsmi_freq_volt_region_t *regions{};
+      uint32_t num_regions;
+      regions = new rsmi_freq_volt_region_t[odv.num_regions];
+      ASSERT_TRUE(regions != nullptr);
+
+      num_regions = odv.num_regions;
+      err = rsmi_dev_od_volt_curve_regions_get(i, &num_regions, regions);
+      IF_VERB(STANDARD) {
+        std::cout << "\t**rsmi_dev_od_volt_curve_regions_get("
+                  << "i, &num_regions, regions): "
+                  << amd::smi::getRSMIStatusString(err, false) << "\n"
+                  << "\t**Number of regions: " << std::dec << num_regions
+                  << "\n";
+      }
+      ASSERT_TRUE(err == RSMI_STATUS_SUCCESS
+                  || err == RSMI_STATUS_NOT_SUPPORTED
+                  || err == RSMI_STATUS_UNEXPECTED_DATA
+                  || err == RSMI_STATUS_UNEXPECTED_SIZE
+                  || err == RSMI_STATUS_INVALID_ARGS);
+      if (err != RSMI_STATUS_SUCCESS) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**rsmi_dev_od_volt_curve_regions_get: "
+                       "Not supported on this machine" << std::endl;
+        }
+        continue;
+      }
+      CHK_ERR_ASRT(err)
+      ASSERT_TRUE(num_regions == odv.num_regions);
+
+      std::cout << "\t**Frequency-voltage curve regions:" << std::endl;
+      std::cout << amd::smi::print_rsmi_od_volt_freq_regions(num_regions,
+                                                             regions);
+
+      delete []regions;
     }
   }
 }

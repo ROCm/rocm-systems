@@ -2870,8 +2870,6 @@ rsmi_status_t rsmi_dev_od_clk_info_set(uint32_t dv_ind, rsmi_freq_ind_t level,
 /**
  *  @brief This function sets  1 of the 3 voltage curve points.
  *
- *  @deprecated This function is deprecated due to driver changes.
- *
  *  @details Given a device index @p dv_ind, a voltage point @p vpoint
  *  and a voltage value @p voltvalue this function will set voltage curve point
  *
@@ -2896,8 +2894,6 @@ rsmi_status_t rsmi_dev_od_volt_info_set(uint32_t dv_ind, uint32_t vpoint,
 /**
  *  @brief This function will retrieve the current valid regions in the
  *  frequency/voltage space.
- *
- *  @deprecated This function is deprecated due to driver changes.
  *
  *  @details Given a device index @p dv_ind, a pointer to an unsigned integer
  *  @p num_regions and a buffer of ::rsmi_freq_volt_region_t structures, @p
