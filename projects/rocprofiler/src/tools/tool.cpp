@@ -200,7 +200,7 @@ struct hip_api_trace_entry_t {
 size_t GetBufferSize() {
   auto bufSize = getenv("ROCPROFILER_BUFFER_SIZE");
   // Default size if not set
-  if (!bufSize) return 0x200000;
+  if (!bufSize) return 0x40000;
   return std::stoll({bufSize});
 }
 
