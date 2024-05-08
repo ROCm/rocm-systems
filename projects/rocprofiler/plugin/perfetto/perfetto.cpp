@@ -45,7 +45,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-#include "perfetto_sdk/sdk/perfetto.h"
+#include "perfetto/sdk/perfetto.h"
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
 
@@ -108,6 +108,7 @@ struct std::hash<TrackID>
 };
 
 namespace {
+std::mutex writing_lock{};
 
 std::string process_name;
 
@@ -156,22 +157,14 @@ class perfetto_plugin_t {
     perfetto::TrackEvent::Register();
 
     perfetto::protos::gen::TrackEventConfig track_event_cfg;
-    track_event_cfg.add_disabled_categories("*");
-    track_event_cfg.add_enabled_categories("GENERIC");
-    track_event_cfg.add_enabled_categories("ROCTX_API");
-    track_event_cfg.add_enabled_categories("HSA_API");
-    track_event_cfg.add_enabled_categories("HIP_API");
-    track_event_cfg.add_enabled_categories("External_API");
-    track_event_cfg.add_enabled_categories("HIP_OPS");
-    track_event_cfg.add_enabled_categories("HSA_OPS");
-    track_event_cfg.add_enabled_categories("MEM_COPIES");
-    track_event_cfg.add_enabled_categories("KERNELS");
-    track_event_cfg.add_enabled_categories("COUNTERS");
+    track_event_cfg.add_enabled_categories("*");
 
     perfetto::TraceConfig trace_cfg;
 
     auto buffer_cfg = trace_cfg.add_buffers();
     uint32_t max_buffer_size = 1024 * 1024;  // Default max buffer size is 1 GB
+    buffer_cfg->set_fill_policy(
+      perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER);
     const char* max_buffer_size_str = getenv("rocprofiler_PERFETTO_MAX_BUFFER_SIZE_KIB");
     if (max_buffer_size_str && std::atol(max_buffer_size_str) > 0)
       max_buffer_size = std::atol(max_buffer_size_str);
@@ -180,13 +173,13 @@ class perfetto_plugin_t {
 
     auto* data_source_cfg = trace_cfg.add_data_sources()->mutable_config();
     data_source_cfg->set_name("track_event");
-    data_source_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
 
     output_prefix_.append(output_file_name + std::to_string(GetPid()) + "_output.pftrace");
     file_descriptor_ = open(output_prefix_.string().c_str(), O_RDWR | O_CREAT | O_TRUNC, 0600);
     if (file_descriptor_ == -1) rocprofiler::warning("Can't open output file\n");
 
     tracing_session_ = perfetto::Tracing::NewTrace();
+    trace_cfg.set_unique_session_name(output_prefix_.string());
     tracing_session_->Setup(trace_cfg, file_descriptor_);
     tracing_session_->StartBlocking();
 
@@ -199,10 +192,12 @@ class perfetto_plugin_t {
     is_valid_ = true;
   }
 
-  ~perfetto_plugin_t() {
-    if (is_valid_) {
+  void delete_perfetto_plugin() {
+    if (is_valid_ && tracing_session_ && internal_buffer_finished.load(std::memory_order_acquire)) {
+      writing_lock.lock();
       tracing_session_->StopBlocking();
-      close(file_descriptor_);
+      // close(file_descriptor_);
+      writing_lock.unlock();
     }
   }
 
@@ -236,6 +231,8 @@ class perfetto_plugin_t {
     // ToDO: rename this variable?
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
 
+    writing_lock.lock();
+
     const uint64_t device_id = profiler_record.gpu_id.handle;
     const uint64_t queue_id = profiler_record.queue_id.handle;
     const uint64_t correlation_id = profiler_record.correlation_id.value;
@@ -246,14 +243,9 @@ class perfetto_plugin_t {
       device_track_it = device_tracks.find(device_track_id);
       if (device_track_it == device_tracks.end()) {
         /* Create a new perfetto::Track (Sub-Track) */
-        device_track_it = device_tracks.emplace(
-            device_track_id,
-            perfetto::ProcessTrack::Current()
-          ).first;
+        device_track_it = device_tracks.emplace(device_track_id, perfetto::Track(device_track_id, perfetto::ProcessTrack::Current())).first;
         auto gpu_desc = device_track_it->second.Serialize();
         gpu_desc.mutable_process()->set_pid(device_id);
-        gpu_desc.mutable_process()->set_chrome_process_type(
-            perfetto::protos::gen::ProcessDescriptor::PROCESS_GPU);
         gpu_desc.mutable_process()->set_process_name("Node: " + hostname_ + " Device: ");
         perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
         track_ids_used_.emplace_back(device_track_id);
@@ -328,12 +320,14 @@ class perfetto_plugin_t {
       TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.end.value, 0);
     }
 
+    writing_lock.unlock();
     return 0;
   }
 
   int FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
                         rocprofiler_session_id_t session_id) {
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
+    writing_lock.lock();
     uint64_t device_id = tracer_record.agent_id.handle;
     std::string kernel_name;
     const char* operation_name_c = nullptr;
@@ -356,12 +350,7 @@ class perfetto_plugin_t {
       thread_track_it = thread_tracks_.find(thread_track_id);
       if (thread_track_it == thread_tracks_.end()) {
         thread_track_it = thread_tracks_.emplace(thread_track_id,
-                      perfetto::Track(thread_track_id, perfetto::ProcessTrack::Current())).first;
-
-        auto thread_track_desc = thread_track_it->second.Serialize();
-        thread_track_desc.mutable_process()->set_pid(thread_id);
-        thread_track_desc.mutable_process()->set_process_name("Thread: ");
-        perfetto::TrackEvent::SetTrackDescriptor(thread_track_it->second, thread_track_desc);
+                      perfetto::ThreadTrack::ForThread(thread_track_id)).first;
         track_ids_used_.emplace_back(thread_track_id);
       }
     }
@@ -381,12 +370,10 @@ class perfetto_plugin_t {
           /* Create a new perfetto::Track (Sub-Track) */
           device_track_it = device_tracks.emplace(
             device_track_id,
-            perfetto::ProcessTrack::Current()
+            perfetto::Track(device_track_id, perfetto::ProcessTrack::Current())
           ).first;
           auto gpu_desc = device_track_it->second.Serialize();
           gpu_desc.mutable_process()->set_pid(device_id);
-          gpu_desc.mutable_process()->set_chrome_process_type(
-              perfetto::protos::gen::ProcessDescriptor::PROCESS_GPU);
           gpu_desc.mutable_process()->set_process_name("Node: " + hostname_ + " Device: ");
           perfetto::TrackEvent::SetTrackDescriptor(device_track_it->second, gpu_desc);
           track_ids_used_.emplace_back(device_track_id);
@@ -523,33 +510,32 @@ class perfetto_plugin_t {
         break;
       }
       case ACTIVITY_DOMAIN_HIP_OPS: {
-        std::string::size_type pos = std::string::npos;
+        std::size_t pos = std::string::npos;
         if (tracer_record.name) {
-          kernel_name = rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name));
           TRACE_EVENT_BEGIN(
-              "HIP_OPS", perfetto::DynamicString(rocprofiler::truncate_name(kernel_name).c_str()),
+              "HIP_OPS", perfetto::DynamicString(rocprofiler::cxx_demangle(tracer_record.name)),
               gpu_track, tracer_record.timestamps.begin.value, "Agent ID",
-              tracer_record.agent_id.handle, "Process ID", GetPid(), "Kernel Name", kernel_name,
+              tracer_record.agent_id.handle, "Process ID", GetPid(),
               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+          TRACE_EVENT_END("HIP_OPS", gpu_track, tracer_record.timestamps.end.value);
         } else {
           // MEM Copies are not correlated to GPUs, so they need a special track
           pos = operation_name_c ? std::string_view(operation_name_c).find("Copy")
                                  : std::string::npos;
 
-          if (std::string::npos == pos)
+          if (std::string::npos == pos) {
             TRACE_EVENT_BEGIN("HIP_OPS", perfetto::DynamicString(operation_name_c), gpu_track,
                               tracer_record.timestamps.begin.value, "Process ID", GetPid(),
                               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
-          else
+            TRACE_EVENT_END("HIP_OPS", gpu_track, tracer_record.timestamps.end.value);
+          } else {
             TRACE_EVENT_BEGIN("MEM_COPIES", perfetto::DynamicString(operation_name_c),
                               mem_copies_track, tracer_record.timestamps.begin.value, "Process ID",
                               GetPid(),
                               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
+            TRACE_EVENT_END("MEM_COPIES", mem_copies_track, tracer_record.timestamps.end.value);
+          }
         }
-        if (std::string::npos == pos)
-          TRACE_EVENT_END("HIP_OPS", gpu_track, tracer_record.timestamps.end.value);
-        else
-          TRACE_EVENT_END("MEM_COPIES", mem_copies_track, tracer_record.timestamps.end.value);
         break;
       }
       case ACTIVITY_DOMAIN_HSA_OPS: {
@@ -564,6 +550,7 @@ class perfetto_plugin_t {
         break;
       }
     }
+    writing_lock.unlock();
     return 0;
   }
 
@@ -592,17 +579,20 @@ class perfetto_plugin_t {
       }
       rocprofiler_next_record(begin, &begin, session_id, buffer_id);
     }
+    internal_buffer_finished.exchange(true, std::memory_order_acq_rel);
     return 0;
   }
 
   bool IsValid() const { return is_valid_; }
 
  private:
-  fs::path output_prefix_;
   std::unique_ptr<perfetto::TracingSession> tracing_session_;
+  fs::path output_prefix_;
   int file_descriptor_;
   bool is_valid_{false};
   size_t roctx_track_entries_{0};
+
+  std::atomic<bool> internal_buffer_finished{false};
 
   // Correlate stream id(s) with correlation id(s) to identify the stream id of every HIP activity
   std::unordered_map<uint64_t, uint64_t> stream_ids_;
@@ -647,37 +637,39 @@ perfetto_plugin_t* perfetto_plugin = nullptr;
 
 }  // namespace
 
-static std::mutex writing_lock;
-
 int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
                                   uint32_t rocprofiler_minor_version, void* data) {
   if (rocprofiler_major_version != ROCPROFILER_VERSION_MAJOR ||
       rocprofiler_minor_version > ROCPROFILER_VERSION_MINOR)
     return -1;
 
-  std::lock_guard<std::mutex> lock(writing_lock);
+  // std::lock_guard<std::mutex> lock(writing_lock);
+  writing_lock.lock();
   if (perfetto_plugin != nullptr) return -1;
 
   perfetto_plugin = new perfetto_plugin_t();
-  if (perfetto_plugin->IsValid()) return 0;
+  if (perfetto_plugin->IsValid()) {
+    writing_lock.unlock();
+    return 0;
+  }
 
-  delete perfetto_plugin;
-  perfetto_plugin = nullptr;
+  // delete perfetto_plugin;
+  // perfetto_plugin = nullptr;
+  writing_lock.unlock();
   return -1;
 }
 
 void rocprofiler_plugin_finalize() {
-  std::lock_guard<std::mutex> lock(writing_lock);
 
   if (!perfetto_plugin) return;
-  delete perfetto_plugin;
-  perfetto_plugin = nullptr;
+  perfetto_plugin->delete_perfetto_plugin();
+  // delete perfetto_plugin;
+  // perfetto_plugin = nullptr;
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
     const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
-  std::lock_guard<std::mutex> lock(writing_lock);
 
   if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
   return perfetto_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
@@ -685,8 +677,6 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record) {
   if (record.header.id.handle == 0) return 0;
-
-  std::lock_guard<std::mutex> lock(writing_lock);
 
   if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
   return perfetto_plugin->FlushTracerRecord(record, rocprofiler_session_id_t{0});

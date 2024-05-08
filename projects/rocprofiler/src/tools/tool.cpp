@@ -153,7 +153,7 @@ class rocprofiler_plugin_t {
   decltype(rocprofiler_plugin_write_record)* rocprofiler_plugin_write_record_;
 };
 
-std::optional<rocprofiler_plugin_t> plugin;
+rocprofiler_plugin_t* plugin;
 
 struct hsa_api_trace_entry_t {
   std::atomic<uint32_t> valid;
@@ -436,6 +436,8 @@ void finish() {
     rocprofiler::TraceBufferBase::FlushAll();
     CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
   }
+
+  // delete plugin;
   // If hsa_shut_down() is not called from the application then we may still have async calls back
   // to the rocprofiler to use session parameters, thats why we need to leak the session up till
   // this is fixed in the ROCR-Runtime
@@ -506,8 +508,9 @@ void plugins_load(void* userdata) {
       .plugin_path = fs::path(dl_info.dli_fname).replace_filename(plugin_name),
       .userdata = userdata
     };
-    if (!plugin.emplace(header).is_valid()) {
-      plugin.reset();
+    plugin = new rocprofiler_plugin_t{header};
+    if (!plugin->is_valid()) {
+      delete plugin;
     }
   }
 }
