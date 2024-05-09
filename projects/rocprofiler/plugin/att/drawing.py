@@ -210,7 +210,8 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
     for k in range(len(OCCUPANCY)):
         if len(OCCUPANCY[k]) <= 1:
             continue
-        maxtime = max(maxtime, OCCUPANCY[k][-1][0])
+        for ev in OCCUPANCY[k]:
+            maxtime = max(maxtime, ev[0])
 
     NUM_DOTS = 1600 # number of points taken for graphing
     delta = max(1, maxtime // NUM_DOTS) # Spacing between data points. Waves will be averaged over this interval.
@@ -247,7 +248,7 @@ def draw_occupancy_per_dispatch(selections, normalize, OCCUPANCY, dispatchnames)
         chart += small_chart/norm_fact # small_chart / norm_fact is the mean number of waves a tthat time point
 
     for (id, name), occ in zip(dispatchnames.items(), chart):
-        plt.plot(np.arange(occ.size) * delta, occ, label=str(id)+'#'+name, linewidth=1.1)
+        plt.plot(np.arange(occ.size) * delta * 8, occ, label=str(id)+'#'+name, linewidth=1.1)
 
     plt.legend()
     if normalize:
