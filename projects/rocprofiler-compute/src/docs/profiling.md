@@ -142,6 +142,11 @@ GPU Device 2: Profiling...
 GPU Device 3: Profiling...
 ...
 ```
+
+```{tip}
+To reduce verbosity of profiling output try the `--quiet` flag which will hide rocprofiler output and activate a progress bar.
+```
+
 You will notice two main stages in *default* Omniperf profiling. 
 
 1. The first stage collects all the counters needed for Omniperf analysis (omitting any filters you have provided).

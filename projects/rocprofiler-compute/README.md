@@ -10,7 +10,7 @@
 ## General
 Omniperf is a system performance profiling tool for machine
 learning/HPC workloads running on AMD MI GPUs. The tool presently
-targets usage on MI100 and MI200 accelerators.
+targets usage on MI100, MI200, and MI300 accelerators.
 
 * For more information on available features, installation steps, and
 workload profiling and analysis, please refer to the online
