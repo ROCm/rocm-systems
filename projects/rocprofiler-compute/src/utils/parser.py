@@ -132,6 +132,8 @@ def to_max(*args):
 def to_avg(a):
     if str(type(a)) == "<class 'NoneType'>":
         return np.nan
+    elif np.isnan(a).all():
+        return np.nan
     elif a.empty:
         return np.nan
     elif isinstance(a, pd.core.series.Series):
