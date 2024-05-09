@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include <sys/time.h>
 
+#include <algorithm>
 #include <cstring>
 #include <map>
 #include <memory>
@@ -42,11 +43,8 @@ rdc_status_t rdc_module_init(uint64_t flags) { return RDC_ST_OK; }
 // TODO: Query fields with rocprofiler
 rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint32_t* field_count) {
   // extract all keys from counter_map
-  std::vector<uint32_t> counter_keys;
-  counter_keys.reserve(amd::rdc::counter_map_k.size());
-  for (auto it : amd::rdc::counter_map_k) {
-    counter_keys.push_back(it.first);
-  }
+  std::vector<rdc_field_t> fields = rocp.get_field_ids();
+  std::vector<uint32_t> counter_keys(fields.begin(), fields.end());
 
   *field_count = counter_keys.size();
   // copy from vector into array

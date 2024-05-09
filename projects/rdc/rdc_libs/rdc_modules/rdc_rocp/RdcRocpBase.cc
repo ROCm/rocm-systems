@@ -26,7 +26,9 @@ THE SOFTWARE.
 #include <unistd.h>
 
 #include <cassert>
+#include <cstdio>
 #include <cstring>
+#include <utility>
 
 // #include "hsa.h"
 #include "rdc/rdc.h"
@@ -114,7 +116,7 @@ bool createHsaQueue(hsa_queue_t** queue, hsa_agent_t gpu_agent) {
   return (status == HSA_STATUS_SUCCESS);
 }
 
-int RdcRocpBase::run_profiler(const char* feature_name, hsa_queue_t** queues) {
+int RdcRocpBase::run_profiler(const char* feature_name) {
   const char* events[features_count] = {feature_name};
 
   // initialize hsa. hsa_init() will also load the profiler libs under the hood
@@ -176,14 +178,39 @@ int RdcRocpBase::run_profiler(const char* feature_name, hsa_queue_t** queues) {
   return 0;
 }
 
-RdcRocpBase::RdcRocpBase() {
-  // populate monitored fields
-  const std::map<rdc_field_t, const char*> counter_map_k = {
-      {RDC_FI_PROF_TA_BUSY_AVR, "TA_BUSY_avr"},
-  };
-  std::cout << "Size of counter_map_k: " << counter_map_k.size() << "\n";
+const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
+  return counter_map_k.at(field);
+}
+
+const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
+  std::vector<rdc_field_t> field_ids;
   for (auto& [k, v] : counter_map_k) {
-    metrics[v] = 0.0;
+    field_ids.push_back(k);
+  }
+  return field_ids;
+}
+
+RdcRocpBase::RdcRocpBase() {
+  counter_map_k = {
+      {RDC_FI_PROF_CU_UTILIZATION, "CU_UTILIZATION"},
+      {RDC_FI_PROF_CU_OCCUPANCY, "CU_OCCUPANCY"},
+      {RDC_FI_PROF_FLOPS_16, "FLOPS_16"},
+      {RDC_FI_PROF_FLOPS_32, "FLOPS_32"},
+      {RDC_FI_PROF_FLOPS_64, "FLOPS_64"},
+      {RDC_FI_PROF_ACTIVE_CYCLES, "ACTIVE_CYCLES"},
+      {RDC_FI_PROF_ACTIVE_WAVES, "ACTIVE_WAVES"},
+      {RDC_FI_PROF_ELAPSED_CYCLES, "ELAPSED_CYCLES"},
+  };
+
+  // populate monitored fields
+  std::cout << "Size of counter_map_k: " << counter_map_k.size() << "\n";
+
+  for (auto& k : counter_map_k) {
+    printf("metric %d = %s\n", k.first, k.second);
+  }
+  for (auto& [k, v] : counter_map_k) {
+    const char* str = v;
+    metrics.emplace(std::make_pair(str, 0.0));
   }
   assert(metrics.size() == counter_map_k.size());
 
@@ -253,8 +280,7 @@ rdc_status_t RdcRocpBase::rocp_lookup(pair_gpu_field_t gpu_field, double* value)
   }
   switch (gpu_field.second) {
     default:
-      run_profiler("TA_BUSY_avr", queues);
-      // read_features(contexts[gpu_field.first], features_count);
+      run_profiler(counter_map_k.at(gpu_field.second));
       *value = metrics[counter_map_k.at(gpu_field.second)];
       break;
   }

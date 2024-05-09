@@ -39,17 +39,6 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-/**
- * @brief Map of RDC fields to rocmtools counters
- *
- * See metrics.xml in rocmtools for more info.
- * RDC_CALC fields are calculated over time by RDC.
- */
-static const std::map<rdc_field_t, const char*> counter_map_k = {
-    {RDC_FI_PROF_GPU_UTIL, "GPU_UTIL"},
-    {RDC_FI_PROF_TA_BUSY_AVR, "TA_BUSY_avr"},
-};
-
 typedef struct {
   hsa_agent_t* agents;
   unsigned count;
@@ -79,17 +68,20 @@ class RdcRocpBase {
    * successfully.
    */
   rdc_status_t rocp_lookup(pair_gpu_field_t gpu_field, double* value);
+  const char* get_field_id_from_name(rdc_field_t);
+  const std::vector<rdc_field_t> get_field_ids();
 
  protected:
  private:
   rocprofiler_t* contexts[dev_count] = {nullptr};
   static const int features_count = 1;
-  std::map<const char*, double> metrics;
-  rocprofiler_feature_t features[dev_count][features_count];
+  std::map<const char*, double> metrics = {};
+  rocprofiler_feature_t features[dev_count][features_count] = {};
   void read_features(rocprofiler_t* context, const unsigned feature_count);
-  int run_profiler(const char* feature_name, hsa_queue_t** queues);
+  int run_profiler(const char* feature_name);
   hsa_queue_t* queues[dev_count] = {nullptr};
-  hsa_agent_arr_t agent_arr;
+  hsa_agent_arr_t agent_arr = {};
+  std::map<rdc_field_t, const char*> counter_map_k = {};
 
   /**
    * @brief Convert from rocmtools status into RDC status

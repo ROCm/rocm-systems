@@ -102,8 +102,14 @@ FLD_DESC_ENT(RDC_FI_XGMI_7_WRITE_KB,     "XGMI7 accumulated data write size (KB)
 // This doesn't map to rocprofiler counters directly
 // See counter_map in rdc/include/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.h
 // See metrics.xml in rocprofiler
-FLD_DESC_ENT(RDC_FI_PROF_GPU_UTIL,    "", "PROF_GPU_UTIL",    false)
-FLD_DESC_ENT(RDC_FI_PROF_TA_BUSY_AVR, "", "PROF_TA_BUSY_AVR", false)
+FLD_DESC_ENT(RDC_FI_PROF_CU_UTILIZATION, "", "CU_UTILIZATION", false)
+FLD_DESC_ENT(RDC_FI_PROF_CU_OCCUPANCY,   "", "CU_OCCUPANCY",   false)
+FLD_DESC_ENT(RDC_FI_PROF_FLOPS_16,       "", "FLOPS_16",       false)
+FLD_DESC_ENT(RDC_FI_PROF_FLOPS_32,       "", "FLOPS_32",       false)
+FLD_DESC_ENT(RDC_FI_PROF_FLOPS_64,       "", "FLOPS_64",       false)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,  "", "ACTIVE_CYCLES",  false)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,   "", "ACTIVE_WAVES",   false)
+FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES, "", "ELAPSED_CYCLES", false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)
