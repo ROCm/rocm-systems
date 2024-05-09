@@ -436,9 +436,9 @@ def mibench(args, mspec):
 
     distro_map = {
         "platform:el8": "rhel8",
-        "15.3": "sle15sp3",
+        "15.3": "sles15sp5",
         "20.04": "ubuntu20_04",
-        "22.04": "ubuntu22_04",
+        "22.04": "ubuntu20_04",
     }
 
     binary_paths = []
@@ -477,14 +477,17 @@ def mibench(args, mspec):
     if not found:
         console_error("roofline", "Unable to locate expected binary (%s)." % binary_paths)
 
+    my_args = [
+        path_to_binary,
+        "-o",
+        args.path + "/" + "roofline.csv",
+        "-d",
+        str(args.device),
+    ]
+    if(args.quiet):
+        my_args += "--quiet"
     subprocess.run(
-        [
-            path_to_binary,
-            "-o",
-            args.path + "/" + "roofline.csv",
-            "-d",
-            str(args.device),
-        ],
+        my_args,
         check=True,
     )
 
