@@ -6,6 +6,8 @@
    :maxdepth: 4
 ```
 
+## Install Omniperf from source
+
 Omniperf is broken into two installation components:
 
 1. **Omniperf Client-side (_Required_)**
@@ -23,7 +25,7 @@ Determine what you need to install based on how you would like to interact with 
 
 ---
 
-## Client-side Installation
+### Client-side Installation
 
 Omniperf client-side requires the following basic software dependencies prior to usage:
 
@@ -102,7 +104,7 @@ $ ls $INSTALL_DIR
 modulefiles  {__VERSION__}  python-libs
 ```
 
-### Execution using modulefiles
+#### Execution using modulefiles
 
 The installation process includes creation of an environment
 modulefile for use with [Lmod](https://lmod.readthedocs.io). On
@@ -129,7 +131,7 @@ customize the resulting Omniperf modulefile post-installation to
 include additional module dependencies.
 ```
 
-### Execution without modulefiles
+#### Execution without modulefiles
 
 To use Omniperf without the companion modulefile, update your `PATH`
 settings to enable access to the command-line binary. If you installed Python
@@ -140,7 +142,7 @@ export PATH=$INSTALL_DIR/{__VERSION__}/bin:$PATH
 export PYTHONPATH=$INSTALL_DIR/python-libs
 ```
 
-### rocProf
+#### rocProf
 
 Omniperf relies on a rocProf binary during the profiling
 process. Normally the path to this binary will be detected
@@ -162,7 +164,7 @@ wishes to use instead.
 
 ---
 
-## Server-side Setup
+### Server-side Setup
 
 ```{note}
 Server-side setup is **not required** to profile or analyze performance data from the CLI. It is provided as an additional mechanism to import performance data for examination within a detailed [Grafana](https://github.com/grafana/grafana) GUI.
@@ -176,7 +178,7 @@ The recommended process for enabling the server-side of Omniperf is to use the p
 
 Once you have decided which machine you would like to use to host the Grafana and MongoDB instance, please follow the set-up instructions below.
 
-### Install MongoDB Utils
+#### Install MongoDB Utils
 Omniperf uses [mongoimport](https://www.mongodb.com/docs/database-tools/mongoimport/) to upload data to Grafana's backend database. Install for Ubuntu 20.04 is as follows:
 
 ```bash 
@@ -185,7 +187,7 @@ $ sudo apt install ./mongodb-database-tools-ubuntu2004-x86_64-100.6.1.deb
 ```
 > Installation instructions for alternative distributions can be found [here](https://www.mongodb.com/download-center/database-tools/releases/archive)
 
-### Persistent Storage
+#### Persistent Storage
 
 The user will also bind MongoDB to a directory on the host OS to create a local backup in case of a crash or reset. In the Docker world, this is known as "creating a persistent volume":
 
@@ -196,10 +198,11 @@ $ sudo docker volume create --driver local --opt type=none --opt device=/usr/loc
 $ sudo docker volume create --driver local --opt type=none --opt device=/usr/local/persist/mongodb --opt o=bind grafana-mongo-db
 ```
 
-### Build and Launch
+#### Build and Launch
 
 We are now ready to build our Docker file. Navigate to your Omniperf install directory to begin.
 ```bash
+$ cd grafana
 $ sudo docker-compose build
 $ sudo docker-compose up -d
 ```
@@ -210,11 +213,12 @@ In the event that your Grafana or MongoDB instance crash fatally, you can always
 ```
 
 ```bash
+$ cd grafana
 $ sudo docker-compose down
 $ sudo docker-compose up -d
 ```
 
-### Setup Grafana Instance
+#### Setup Grafana Instance
 Once you have launched your docker container you should be able to reach Grafana at **http://\<host-ip>:14000**. The default login credentials for the first-time Grafana setup are:
 
 - Username: **admin**
@@ -222,7 +226,7 @@ Once you have launched your docker container you should be able to reach Grafana
 
 ![Grafana Welcome Page](images/grafana_welcome.png)
 
-### MongoDB Datasource Configuration
+#### MongoDB Datasource Configuration
 
 The MongoDB Datasource must be configured prior to the first-time use. Navigate to Grafana's Configuration page (shown below) to add the **Omniperf Data** connection.
 
@@ -240,7 +244,7 @@ After properly configuring these fields click **Save & Test** (as shown below) t
 
 ![Datasource Settings](images/datasource_settings.jpg)
 
-### Omniperf Dashboard Import
+#### Omniperf Dashboard Import
 
 From *Create* → *Import*, (as shown below) upload the dashboard file, `/dashboards/Omniperf_v{__VERSION__}_pub.json`, from the Omniperf tarball.
 
@@ -248,7 +252,7 @@ Edit both the Dashboard Name and the Unique Identifier (UID) to uniquely identif
 
 ![Import Dashboard](images/import_dashboard.png)
 
-### Using your dashboard
+#### Using your dashboard
 
 Once you have imported a dashboard you are ready to begin! Start by browsing available dashboards and selecting the dashboard you have just imported.
 
