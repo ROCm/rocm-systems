@@ -102,6 +102,7 @@ class OmniSoC_Base:
     def check_arch_override(self):
         if "OMNIPERF_ARCH_OVERRIDE" in os.environ.keys():
             return os.environ["OMNIPERF_ARCH_OVERRIDE"]
+        return ""
 
     @demarcate
     def populate_mspec(self):
