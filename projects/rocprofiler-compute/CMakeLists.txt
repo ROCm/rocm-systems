@@ -312,6 +312,12 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE)
+# grafana assets
+install(
+    DIRECTORY grafana
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
+    COMPONENT main
+)
 # samples
 install(
     DIRECTORY sample
