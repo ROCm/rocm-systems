@@ -13,6 +13,10 @@ services:
     container_name: omniperf-grafana-v1.0
     restart: always
     build: .
+    environment:
+      - GF_PATHS_CONFIG="grafana/etc/grafana.ini"
+      - GF_PLUGINS_ALLOW_LOADING_UNSIGNED_PLUGINS=amd-omniperf-data-plugin
+      - GF_DEFAULT_APP_MODE=development
     ports:
       - "14000:4000"
     volumes:
