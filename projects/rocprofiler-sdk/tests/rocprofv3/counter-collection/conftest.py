@@ -2,12 +2,22 @@
 
 import json
 import pytest
+import csv
 import pandas as pd
 
 
 def pytest_addoption(parser):
     parser.addoption("--input", action="store", help="Path to csv file.")
-    parser.addoption("--input-dir", action="store", help="Path to output dir.")
+    parser.addoption(
+        "--agent-input",
+        action="store",
+        help="Path to agent info CSV file.",
+    )
+    parser.addoption(
+        "--counter-input",
+        action="store",
+        help="Path to counter collection CSV file.",
+    )
 
 
 @pytest.fixture
@@ -21,6 +31,24 @@ def input_data(request):
 
 
 @pytest.fixture
-def input_dir(request):
-    dirname = request.config.getoption("--input-dir")
-    return dirname
+def agent_info_input_data(request):
+    filename = request.config.getoption("--agent-input")
+    data = []
+    with open(filename, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+
+    return data
+
+
+@pytest.fixture
+def counter_input_data(request):
+    filename = request.config.getoption("--counter-input")
+    data = []
+    with open(filename, "r") as inp:
+        reader = csv.DictReader(inp)
+        for row in reader:
+            data.append(row)
+
+    return data

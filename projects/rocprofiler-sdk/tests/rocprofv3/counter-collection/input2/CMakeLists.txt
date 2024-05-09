@@ -20,8 +20,8 @@ add_test(
     NAME rocprofv3-test-counter-collection-pmc2-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2 -o
-        pmc2 $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o
+        out $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -39,12 +39,33 @@ set_tests_properties(
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc2}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-add_test(NAME rocprofv3-test-counter-collection-pmc2-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                 --input-dir "${CMAKE_CURRENT_BINARY_DIR}/out_cc_2")
+add_test(
+    NAME rocprofv3-test-counter-collection-pmc2-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --agent-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_agent_info.csv
+        --counter-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_counter_collection.csv
+        --agent-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_agent_info.csv
+        --counter-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv)
+
+set(SYS_VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_counter_collection.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv)
 
 set_tests_properties(
     rocprofv3-test-counter-collection-pmc2-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-counter-collection-pmc2-execute FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               rocprofv3-test-counter-collection-pmc2-execute
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               ATTACHED_FILES_ON_FAIL
+               "${VALIDATION_FILES}")

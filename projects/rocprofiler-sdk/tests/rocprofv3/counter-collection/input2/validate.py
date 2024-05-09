@@ -4,43 +4,45 @@ import sys
 import pytest
 
 
-def test_validate_counter_collection_pmc2(input_dir: pd.DataFrame):
-    directory_path = input_dir
+def test_agent_info(agent_info_input_data):
+    logical_node_id = max([int(itr["Logical_Node_Id"]) for itr in agent_info_input_data])
 
-    # Check if the directory is not empty
-    assert os.path.isdir(directory_path), f"{directory_path} is not a directory."
-    assert os.listdir(directory_path), f"{directory_path} is empty."
+    assert logical_node_id + 1 == len(agent_info_input_data)
 
-    # Check if there are 2 subdirectories pmc_1 and pmc_2
-    subdirectories = [
-        d
-        for d in os.listdir(directory_path)
-        if os.path.isdir(os.path.join(directory_path, d))
-    ]
-    assert (
-        len(subdirectories) == 2
-    ), f"Expected 2 subdirectories, found {len(subdirectories)}."
+    for row in agent_info_input_data:
+        agent_type = row["Agent_Type"]
+        assert agent_type in ("CPU", "GPU")
+        if agent_type == "CPU":
+            assert int(row["Cpu_Cores_Count"]) > 0
+            assert int(row["Simd_Count"]) == 0
+            assert int(row["Max_Waves_Per_Simd"]) == 0
+        else:
+            assert int(row["Cpu_Cores_Count"]) == 0
+            assert int(row["Simd_Count"]) > 0
+            assert int(row["Max_Waves_Per_Simd"]) > 0
 
-    # Check if each subdirectory has files
-    for subdirectory in subdirectories:
-        subdirectory_path = os.path.join(directory_path, subdirectory)
-        assert os.listdir(subdirectory_path), f"{subdirectory_path} is empty."
 
-        # Check if each file in the subdirectory has some data
-        for file_name in os.listdir(subdirectory_path):
-            file_path = os.path.join(subdirectory_path, file_name)
-            # ignore hidden folders
-            if os.path.isdir(file_path) and os.path.basename(file_path).startswith("."):
-                continue
-            assert os.path.isfile(file_path), f"{file_path} is not a file."
+def test_validate_counter_collection_pmc2(counter_input_data):
+    counter_names = ["SQ_WAVES", "GRBM_COUNT"]
+    di_list = []
 
-            if "agent_info.csv" not in file_path:
-                with open(file_path, "r") as file:
-                    df = pd.read_csv(file)
-                    # check if kernel-name is present
-                    assert len(df["Kernel_Name"]) > 0
-                    # check if counter value is positive
-                    assert len(df["Counter_Value"]) > 0
+    for row in counter_input_data:
+        assert int(row["Agent_Id"]) > 0
+        assert int(row["Queue_Id"]) > 0
+        assert int(row["Process_Id"]) > 0
+        assert len(row["Kernel_Name"]) > 0
+
+        assert len(row["Counter_Value"]) > 0
+        # assert row["Counter_Name"].contains("SQ_WAVES").all()
+        assert row["Counter_Name"] in counter_names
+        assert int(row["Counter_Value"]) > 0
+
+        di_list.append(int(row["Dispatch_Id"]))
+
+    # # make sure the dispatch ids are unique and ordered
+    di_list = list(dict.fromkeys(di_list))
+    di_expect = [idx + 1 for idx in range(len(di_list))]
+    assert di_expect == di_list
 
 
 if __name__ == "__main__":
