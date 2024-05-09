@@ -100,8 +100,8 @@ class OmniSoC_Base:
         return []
 
     def check_arch_override(self):
-        if 'OMNIPERF_ARCH_OVERRIDE' in os.environ.keys():
-            return os.environ['OMNIPERF_ARCH_OVERRIDE']
+        if "OMNIPERF_ARCH_OVERRIDE" in os.environ.keys():
+            return os.environ["OMNIPERF_ARCH_OVERRIDE"]
 
     @demarcate
     def populate_mspec(self):
@@ -183,14 +183,20 @@ class OmniSoC_Base:
                 0
             ][0]
         if self._mspec.gpu_arch == "gfx942":
-            if "MI300A" in "\n".join(self._mspec._rocminfo) or 'MI300A' in self.check_arch_override():
+            if (
+                "MI300A" in "\n".join(self._mspec._rocminfo)
+                or "MI300A" in self.check_arch_override()
+            ):
                 self._mspec.gpu_model = "MI300A_A1"
-            elif "MI300X" in "\n".join(self._mspec._rocminfo) or 'MI300X' in self.check_arch_override():
+            elif (
+                "MI300X" in "\n".join(self._mspec._rocminfo)
+                or "MI300X" in self.check_arch_override()
+            ):
                 self._mspec.gpu_model = "MI300X_A1"
             else:
                 console_error(
                     "Cannot parse MI300 details from rocminfo. Please verify output or set the arch using (e.g.,) "
-                    "export OMNIPERF_ARCH_OVERRIDE=\"MI300A\""
+                    'export OMNIPERF_ARCH_OVERRIDE="MI300A"'
                 )
 
         self._mspec.num_xcd = str(
