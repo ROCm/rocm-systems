@@ -316,8 +316,7 @@ install(
 install(
     DIRECTORY grafana
     DESTINATION ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}
-    COMPONENT main
-)
+    COMPONENT main)
 # samples
 install(
     DIRECTORY sample

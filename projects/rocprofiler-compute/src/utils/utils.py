@@ -484,7 +484,7 @@ def mibench(args, mspec):
         "-d",
         str(args.device),
     ]
-    if(args.quiet):
+    if args.quiet:
         my_args += "--quiet"
     subprocess.run(
         my_args,
