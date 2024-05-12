@@ -88,9 +88,16 @@ bool TestHsa::Initialize(int /*arg_cnt*/, char** /*arg_list*/) {
 
   // Obtain the code object file name
   std::string agentName(agent_info_->name);
+  const char* hsaco_obj_files_path_str = getenv("HSACO_OBJ_FILES_PATH");
+  fs::path hsaco_obj_files_path;
   Dl_info dl_info;
+  if(hsaco_obj_files_path_str) {
+    hsaco_obj_files_path = fs::path(hsaco_obj_files_path_str);
+  } else {
+    hsaco_obj_files_path = fs::path(dl_info.dli_fname);
+  }
   if (dladdr(reinterpret_cast<const void*>(TestHsa::HsaShutdown), &dl_info) != 0)
-    brig_path_obj_.append(fs::path(dl_info.dli_fname).remove_filename().remove_filename());
+    brig_path_obj_.append(hsaco_obj_files_path.remove_filename().remove_filename());
   brig_path_obj_.append(agentName);
   brig_path_obj_.append("_" + name_ + ".hsaco");
 

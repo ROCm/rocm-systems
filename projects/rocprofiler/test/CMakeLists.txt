@@ -210,10 +210,6 @@ execute_process(COMMAND ${CMAKE_COMMAND} -E copy ${XML_FILES} ${PROJECT_BINARY_D
 # TODO(aelwazir): Should be replaced by the current location in the main CMakeLists.txt
 install(
     TARGETS ${EXE_NAME}
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test
-    COMPONENT tests)
-install(
-    TARGETS ${EXE_NAME}
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}
     COMPONENT runtime)
 
@@ -227,10 +223,6 @@ target_include_directories(${TEST_LIB} PRIVATE ${TEST_DIR} ${ROOT_DIR}
 target_link_libraries(${TEST_LIB} ${ROCPROFILER_TARGET} hsa-runtime64::hsa-runtime64
                       Threads::Threads atomic dl)
 # TODO(aelwazir): Should be replaced by the current location in the main CMakeLists.txt
-install(
-    TARGETS ${TEST_LIB}
-    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests-v1/test
-    COMPONENT tests)
 install(
     TARGETS ${TEST_LIB}
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/${ROCPROFILER_NAME}

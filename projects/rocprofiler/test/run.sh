@@ -84,6 +84,20 @@ export ROCP_METRICS=$BIN_DIR/metrics.xml
 ## C test
 eval_test "C test" $BIN_DIR/test/c_test
 
+export HSACO_OBJ_FILES_PATH="$BIN_DIR/test/"
+
+if test -f "$BIN_DIR/test/librocprof-tool.so" ; then
+  export ROCPROF_TOOL_PATH="$BIN_DIR/test/"
+else
+  export ROCPROF_TOOL_PATH="$BIN_DIR/../../../lib/rocprofiler/"
+fi
+
+if test -f "$BIN_DIR/test/rocprof-ctrl" ; then
+  export ROCPROF_CTRL_PATH="$BIN_DIR/test/"
+else
+  export ROCPROF_CTRL_PATH="$BIN_DIR/../../../lib/rocprofiler/"
+fi
+
 ## Standalone sampling usage model test
 unset HSA_TOOLS_LIB
 unset ROCP_TOOL_LIB
@@ -111,48 +125,44 @@ export ROCP_KITER=20
 export ROCP_DITER=20
 export ROCP_AGENTS=1
 export ROCP_THRS=3
-eval_test "Intercepting usage model test" $BIN_DIR/test/rocprof-ctrl
+eval_test "Intercepting usage model test" ${ROCPROF_CTRL_PATH}rocprof-ctrl
 
 ## Libtool test
 # tool library loaded by ROC profiler
-export ROCP_TOOL_LIB=librocprof-tool.so
+export ROCP_TOOL_LIB="${ROCPROF_TOOL_PATH}librocprof-tool.so"
 # ROC profiler kernels timing
 export ROCP_TIMESTAMP_ON=1
 # output directory for the tool library, for metrics results file 'results.txt'
 mkdir -p /tmp/rocprofiler/RESULTS
 export ROCP_OUTPUT_DIR=/tmp/rocprofiler/RESULTS
 
-if [ ! -e $ROCP_TOOL_LIB ] ; then
-  export ROCP_TOOL_LIB=$BIN_DIR/test/librocprof-tool.so
-fi
-
 export ROCP_KITER=20
 export ROCP_DITER=20
 export ROCP_AGENTS=1
 export ROCP_THRS=1
 export ROCP_INPUT=$BIN_DIR/pmc_input.xml
-eval_test "'rocprof' rocprof-tool PMC test" $BIN_DIR/test/rocprof-ctrl
+eval_test "'rocprof' rocprof-tool PMC test" ${ROCPROF_CTRL_PATH}rocprof-ctrl
 
 export ROCP_KITER=20
 export ROCP_DITER=20
 export ROCP_AGENTS=1
 export ROCP_THRS=10
 export ROCP_INPUT=$BIN_DIR/pmc_input.xml
-eval_test "'rocprof' rocprof-tool PMC n-thread test" $BIN_DIR/test/rocprof-ctrl
+eval_test "'rocprof' rocprof-tool PMC n-thread test" ${ROCPROF_CTRL_PATH}rocprof-ctrl
 
 export ROCP_KITER=20
 export ROCP_DITER=20
 export ROCP_AGENTS=1
 export ROCP_THRS=1
 export ROCP_INPUT=$BIN_DIR/pmc_input1.xml
-eval_test "'rocprof' rocprof-tool PMC test1" $BIN_DIR/test/rocprof-ctrl
+eval_test "'rocprof' rocprof-tool PMC test1" ${ROCPROF_CTRL_PATH}rocprof-ctrl
 
 export ROCP_KITER=20
 export ROCP_DITER=20
 export ROCP_AGENTS=1
 export ROCP_THRS=10
 export ROCP_INPUT=$BIN_DIR/pmc_input1.xml
-eval_test "'rocprof' rocprof-tool PMC n-thread test1" $BIN_DIR/test/rocprof-ctrl
+eval_test "'rocprof' rocprof-tool PMC n-thread test1" ${ROCPROF_CTRL_PATH}rocprof-ctrl
 
 unset ROCP_MCOPY_TRACKING
 # enable HSA intercepting
@@ -160,7 +170,7 @@ export ROCP_HSA_INTERC=1
 
 export ROCP_KITER=10
 export ROCP_DITER=10
-eval_test "rocprof-tool test, counter sets" $BIN_DIR/test/rocprof-ctrl
+eval_test "rocprof-tool test, counter sets" ${ROCPROF_CTRL_PATH}rocprof-ctrl
 
 ## OpenCL test
 #eval_test "libtool test, OpenCL sample" ./test/ocl/SimpleConvolution
