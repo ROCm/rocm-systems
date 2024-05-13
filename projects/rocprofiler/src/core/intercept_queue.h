@@ -628,7 +628,10 @@ class InterceptQueue {
       const InterceptQueue* obj = it->second;
       assert(queue == obj->queue_);
       delete obj;
-      obj_map_.erase(it);
+      // TODO(aelwazir): This doesn't work anymore with the latest update from HIP Runtime
+      // when they delete their queues, that causes double free.
+      // We need another way to solve this issue.
+      // obj_map_.erase(it);
       status = HSA_STATUS_SUCCESS;
     }
     return status;
