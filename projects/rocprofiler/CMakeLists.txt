@@ -316,7 +316,7 @@ endif() # FILE_REORG_BACKWARD_COMPATIBILITY
 
 if(${LIBRARY_TYPE} STREQUAL SHARED)
     # Packaging directives
-    set(CPACK_GENERATOR "DEB" "RPM" "TGZ")
+    set(CPACK_GENERATOR "DEB" "RPM" "TGZ" CACHE STRING "CPACK GENERATOR DEB;RPM")
     set(ENABLE_LDCONFIG
         ON
         CACHE BOOL "Set library links and caches using ldconfig.")
