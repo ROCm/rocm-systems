@@ -104,7 +104,9 @@ class Profile {
   Profile(const util::AgentInfo* agent_info) : agent_info_(agent_info) {
     profile_ = {};
     profile_.agent = agent_info->dev_id;
+    is_standalone_mode = util::check_standalone_mode();
     completion_signal_ = {};
+    stop_completion_signal_ = {};
     dispatch_signal_ = {};
     barrier_signal_ = {};
     read_signal_ = {};
@@ -119,6 +121,10 @@ class Profile {
     if (profile_.parameters) free(const_cast<parameter_t*>(profile_.parameters));
     if (completion_signal_.handle) {
       hsa_status_t status = hsa_signal_destroy(completion_signal_);
+      if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
+    }
+    if (is_standalone_mode == true && stop_completion_signal_.handle) {
+      hsa_status_t status = hsa_signal_destroy(stop_completion_signal_);
       if (status != HSA_STATUS_SUCCESS) EXC_ABORT(status, "signal_destroy " << std::hex << status);
     }
     if (dispatch_signal_.handle) {
@@ -214,9 +220,17 @@ class Profile {
       dummy_signal.handle = 0;
       start.completion_signal = dummy_signal;
 
-      // Set completion signal of read/stop
+      // Set completion signal of read
       status = hsa_signal_create(1, 0, NULL, &completion_signal_);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
+
+      if (is_standalone_mode) {
+        // Set completion signal of stop
+        status = hsa_signal_create(1, 0, NULL, &stop_completion_signal_);
+        if (status != HSA_STATUS_SUCCESS)
+          EXC_RAISING(status, "signal_create " << std::hex << status);
+      }
+
       if (is_concurrent) {
         status = hsa_signal_create(1, 0, NULL, &read_signal_);
         if (status != HSA_STATUS_SUCCESS)
@@ -227,6 +241,7 @@ class Profile {
         read.completion_signal = completion_signal_;
       }
       stop.completion_signal = completion_signal_;
+      if (is_standalone_mode) stop.completion_signal = stop_completion_signal_;
 
       status = hsa_signal_create(1, 0, NULL, &dispatch_signal_);
       if (status != HSA_STATUS_SUCCESS) EXC_RAISING(status, "signal_create " << std::hex << status);
@@ -312,7 +327,9 @@ class Profile {
   bool is_legacy_;
   profile_t profile_;
   info_vector_t info_vector_;
+  bool is_standalone_mode;
   hsa_signal_t completion_signal_;
+  hsa_signal_t stop_completion_signal_;
   hsa_signal_t dispatch_signal_;
   hsa_signal_t barrier_signal_;
   hsa_signal_t read_signal_;

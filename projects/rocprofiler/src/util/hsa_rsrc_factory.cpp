@@ -49,6 +49,20 @@ POSSIBILITY OF SUCH DAMAGE.
 namespace rocprofiler {
 namespace util {
 
+bool check_standalone_mode() {
+  static bool is_standalone_mode = [] {
+    // Checking environment variable to see if interception is enabled.
+    // value of zero indicates standalone mode
+    const char* intercept_env = getenv("ROCP_HSA_INTERCEPT");
+    int intercept_env_value = 0;
+    if (intercept_env != NULL) {
+      intercept_env_value = atoi(intercept_env);
+    }
+    return intercept_env_value == 0;
+  }();
+  return is_standalone_mode;
+}
+
 // Demangle C++ symbol name
 static const char* cpp_demangle(const char* symname) {
   size_t size = 0;
@@ -392,8 +406,8 @@ const AgentInfo* HsaRsrcFactory::AddAgentInfo(const hsa_agent_t agent) {
     agent_info->vgpr_block_size = 4;
 
     if (hsa_api_.hsa_agent_get_info(agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC),
-                        &agent_info->xcc_num) != HSA_STATUS_SUCCESS) {
-        agent_info->xcc_num = 1;
+                                    &agent_info->xcc_num) != HSA_STATUS_SUCCESS) {
+      agent_info->xcc_num = 1;
     };
 
     // Set GPU index

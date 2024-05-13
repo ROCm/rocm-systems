@@ -73,6 +73,7 @@ namespace util {
 static const size_t MEM_PAGE_BYTES = 0x1000;
 static const size_t MEM_PAGE_MASK = MEM_PAGE_BYTES - 1;
 typedef decltype(hsa_agent_t::handle) hsa_agent_handle_t;
+bool check_standalone_mode();
 
 struct hsa_pfn_t {
   decltype(::hsa_init)* hsa_init;
