@@ -329,7 +329,6 @@ class perfetto_plugin_t {
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
     writing_lock.lock();
     uint64_t device_id = tracer_record.agent_id.handle;
-    std::string kernel_name;
     const char* operation_name_c = nullptr;
     // ROCTX domain Operation ID doesn't have a name
     // It depends on the user input of the roctx functions.
@@ -512,8 +511,14 @@ class perfetto_plugin_t {
       case ACTIVITY_DOMAIN_HIP_OPS: {
         std::size_t pos = std::string::npos;
         if (tracer_record.name) {
+          auto kernel_name_it = kernel_names_map.find(tracer_record.name);
+          if (kernel_name_it == kernel_names_map.end())
+          {
+            kernel_name_it = kernel_names_map.emplace(tracer_record.name,
+              rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name))).first; 
+          }
           TRACE_EVENT_BEGIN(
-              "HIP_OPS", perfetto::DynamicString(rocprofiler::cxx_demangle(tracer_record.name)),
+              "HIP_OPS", perfetto::DynamicString(kernel_name_it->second.c_str()),
               gpu_track, tracer_record.timestamps.begin.value, "Agent ID",
               tracer_record.agent_id.handle, "Process ID", GetPid(),
               perfetto::Flow::ProcessScoped(tracer_record.correlation_id.value));
@@ -618,6 +623,7 @@ class perfetto_plugin_t {
   std::unordered_map<TrackID, uint64_t>  track_ids;
   std::unordered_map<uint64_t, perfetto::Track> device_tracks;
   std::unordered_map<uint64_t, perfetto::Track> hip_stream_tracks;
+  std::unordered_map<std::string, std::string>  kernel_names_map;
 
   uint64_t getTrackID(TrackType type, uint64_t machine, uint64_t device, uint64_t queue) {
     TrackID id(type, machine, device, queue);
