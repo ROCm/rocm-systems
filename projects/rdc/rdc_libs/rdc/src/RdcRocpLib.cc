@@ -38,16 +38,16 @@ RdcRocpLib::RdcRocpLib()
       telemetry_fields_value_get_(nullptr),
       telemetry_fields_watch_(nullptr),
       telemetry_fields_unwatch_(nullptr) {
-  rdc_status_t status = lib_loader_.load("librdc_rocp.so");
+  rdc_status_t status = set_rocprofiler_path();
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
+    throw RdcException(RDC_ST_FAIL_LOAD_MODULE, "rocprofiler path could not be set");
     return;
   }
 
-  status = set_rocmtools_path();
+  status = lib_loader_.load("librdc_rocp.so");
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
-    throw RdcException(RDC_ST_FAIL_LOAD_MODULE, "rocmtools path could not be set");
     return;
   }
 
@@ -142,7 +142,7 @@ std::string RdcRocpLib::get_rocm_path() {
 
   std::string line;
   while (getline(file, line)) {
-    size_t index_end = line.find("librocmtools.so");
+    size_t index_end = line.find("librocprofiler64.so");
     size_t index_start = index_end;
     if (index_end == std::string::npos) {
       // no library on this line
@@ -162,30 +162,36 @@ std::string RdcRocpLib::get_rocm_path() {
   return rocm_path;
 }
 
-rdc_status_t RdcRocpLib::set_rocmtools_path() {
-  // librocmtools requires ROCMTOOLS_METRICS_PATH to be set
-  std::string rocmtools_metrics_path =
-      get_rocm_path() + "/libexec/rocmtools/counters/derived_counters.xml";
+rdc_status_t RdcRocpLib::set_rocprofiler_path() {
+  // librocprofiler64 requires ROCPROFILER_METRICS_PATH to be set
+  std::string rocprofiler_metrics_path =
+      get_rocm_path() + "/libexec/rocprofiler/counters/derived_counters.xml";
 
   // set rocm prefix
-  int result = setenv("ROCMTOOLS_METRICS_PATH", rocmtools_metrics_path.c_str(), 0);
+  int result = setenv("ROCPROFILER_METRICS_PATH", rocprofiler_metrics_path.c_str(), 0);
   if (result != 0) {
-    RDC_LOG(RDC_ERROR, "setenv ROCMTOOLS_METRICS_PATH failed! " << result);
+    RDC_LOG(RDC_ERROR, "setenv ROCPROFILER_METRICS_PATH failed! " << result);
     return RDC_ST_PERM_ERROR;
   }
 
   // check that env exists
-  const char* rocmtools_metrics_env = getenv("ROCMTOOLS_METRICS_PATH");
-  if (rocmtools_metrics_env == nullptr) {
-    RDC_LOG(RDC_ERROR, "ROCMTOOLS_METRICS_PATH is not set!");
+  const char* rocprofiler_metrics_env = getenv("ROCPROFILER_METRICS_PATH");
+  if (rocprofiler_metrics_env == nullptr) {
+    RDC_LOG(RDC_ERROR, "ROCPROFILER_METRICS_PATH is not set!");
     return RDC_ST_NO_DATA;
   }
 
   // check that file can be accessed
-  std::ifstream test_file(rocmtools_metrics_env);
+  std::ifstream test_file(rocprofiler_metrics_env);
   if (!test_file.good()) {
-    RDC_LOG(RDC_ERROR, "failed to open ROCMTOOLS_METRICS_PATH: " << rocmtools_metrics_env);
+    RDC_LOG(RDC_ERROR, "failed to open ROCPROFILER_METRICS_PATH: " << rocprofiler_metrics_env);
     return RDC_ST_FILE_ERROR;
+  }
+
+  result = setenv("ROCP_METRICS", rocprofiler_metrics_path.c_str(), 0);
+  if (result != 0) {
+    RDC_LOG(RDC_ERROR, "setenv ROCP_METRICS failed! " << result);
+    return RDC_ST_PERM_ERROR;
   }
 
   return RDC_ST_OK;

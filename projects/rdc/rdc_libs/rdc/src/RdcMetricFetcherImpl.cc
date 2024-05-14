@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include "amd_smi/amdsmi.h"
 #include "common/rdc_capabilities.h"
 #include "common/rdc_fields_supported.h"
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/impl/SmiUtils.h"
 #include "rdc_lib/rdc_common.h"
@@ -436,17 +437,26 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       value->status = amdsmi_get_power_info(processor_handle, &power_info);
       value->type = INTEGER;
       if (value->status != AMDSMI_STATUS_SUCCESS) {
+        RDC_LOG(RDC_ERROR, "amdsmi_get_power_info failed!");
         break;
       }
 
       // Use current_socket_power if average_socket_power is not available
       if (power_info.average_socket_power != 65535) {
+        RDC_LOG(RDC_DEBUG, "AMDSMI: using average_socket_power");
         value->value.l_int = static_cast<int64_t>(power_info.average_socket_power) * 1000 * 1000;
-      } else {
-        value->value.l_int = static_cast<int64_t>(power_info.current_socket_power) * 1000 * 1000;
+        break;
       }
 
-      break;
+      if (power_info.current_socket_power != 65535) {
+        RDC_LOG(RDC_DEBUG, "AMDSMI: using current_socket_power");
+        value->value.l_int = static_cast<int64_t>(power_info.current_socket_power) * 1000 * 1000;
+        break;
+      }
+
+      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      RDC_LOG(RDC_ERROR, "AMDSMI: cannot get POWER_USAGE");
+      return RDC_ST_NO_DATA;
     }
     case RDC_FI_GPU_CLOCK:
     case RDC_FI_MEM_CLOCK: {

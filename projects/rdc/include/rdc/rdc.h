@@ -230,13 +230,13 @@ typedef enum {
   // In new ASCI, such as MI300, the XGMI events is not supported
   // Using below XGMI related fields to calculate the bandwidth.
   RDC_FI_XGMI_0_READ_KB = 700,  //!< XGMI_0 accumulated data read size (KB)
-  RDC_FI_XGMI_1_READ_KB,  //!< XGMI_1 accumulated data read size (KB)
-  RDC_FI_XGMI_2_READ_KB,  //!< XGMI_2 accumulated data read size (KB)
-  RDC_FI_XGMI_3_READ_KB,  //!< XGMI_3 accumulated data read size (KB)
-  RDC_FI_XGMI_4_READ_KB,  //!< XGMI_4 accumulated data read size (KB)
-  RDC_FI_XGMI_5_READ_KB,  //!< XGMI_5 accumulated data read size (KB)
-  RDC_FI_XGMI_6_READ_KB,  //!< XGMI_6 accumulated data read size (KB)
-  RDC_FI_XGMI_7_READ_KB,  //!< XGMI_7 accumulated data read size (KB)
+  RDC_FI_XGMI_1_READ_KB,        //!< XGMI_1 accumulated data read size (KB)
+  RDC_FI_XGMI_2_READ_KB,        //!< XGMI_2 accumulated data read size (KB)
+  RDC_FI_XGMI_3_READ_KB,        //!< XGMI_3 accumulated data read size (KB)
+  RDC_FI_XGMI_4_READ_KB,        //!< XGMI_4 accumulated data read size (KB)
+  RDC_FI_XGMI_5_READ_KB,        //!< XGMI_5 accumulated data read size (KB)
+  RDC_FI_XGMI_6_READ_KB,        //!< XGMI_6 accumulated data read size (KB)
+  RDC_FI_XGMI_7_READ_KB,        //!< XGMI_7 accumulated data read size (KB)
 
   RDC_FI_XGMI_0_WRITE_KB,  //!< XGMI_0 accumulated data write size (KB)
   RDC_FI_XGMI_1_WRITE_KB,  //!< XGMI_1 accumulated data write size (KB)
@@ -246,6 +246,18 @@ typedef enum {
   RDC_FI_XGMI_5_WRITE_KB,  //!< XGMI_5 accumulated data write size (KB)
   RDC_FI_XGMI_6_WRITE_KB,  //!< XGMI_6 accumulated data write size (KB)
   RDC_FI_XGMI_7_WRITE_KB,  //!< XGMI_7 accumulated data write size (KB)
+
+  /**
+   * @brief ROC-profiler related fields
+   */
+  RDC_FI_PROF_CU_UTILIZATION = 800,
+  RDC_FI_PROF_CU_OCCUPANCY,
+  RDC_FI_PROF_FLOPS_16,
+  RDC_FI_PROF_FLOPS_32,
+  RDC_FI_PROF_FLOPS_64,
+  RDC_FI_PROF_ACTIVE_CYCLES,
+  RDC_FI_PROF_ACTIVE_WAVES,
+  RDC_FI_PROF_ELAPSED_CYCLES,
 
   /*
    * @brief Raw XGMI counter events

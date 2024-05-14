@@ -117,16 +117,19 @@ rdc_status_t RdcEmbeddedHandler::get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges) {
       RDC_LOG(RDC_ERROR, "Fail to get total memory of GPU " << gpu_index_list[i]);
       return status;
     }
-    gpu_gauges->insert({{gpu_index_list[i], RDC_FI_GPU_MEMORY_TOTAL}, value.value.l_int});
+    gpu_gauges->insert(
+        {{gpu_index_list[i], RDC_FI_GPU_MEMORY_TOTAL}, static_cast<uint64_t>(value.value.l_int)});
 
     status = metric_fetcher_->fetch_smi_field(gpu_index_list[i], RDC_FI_ECC_CORRECT_TOTAL, &value);
     if (status == RDC_ST_OK) {
-      gpu_gauges->insert({{gpu_index_list[i], RDC_FI_ECC_CORRECT_TOTAL}, value.value.l_int});
+      gpu_gauges->insert({{gpu_index_list[i], RDC_FI_ECC_CORRECT_TOTAL},
+                          static_cast<uint64_t>(value.value.l_int)});
     }
     status =
         metric_fetcher_->fetch_smi_field(gpu_index_list[i], RDC_FI_ECC_UNCORRECT_TOTAL, &value);
     if (status == RDC_ST_OK) {
-      gpu_gauges->insert({{gpu_index_list[i], RDC_FI_ECC_UNCORRECT_TOTAL}, value.value.l_int});
+      gpu_gauges->insert({{gpu_index_list[i], RDC_FI_ECC_UNCORRECT_TOTAL},
+                          static_cast<uint64_t>(value.value.l_int)});
     }
   }
   return RDC_ST_OK;

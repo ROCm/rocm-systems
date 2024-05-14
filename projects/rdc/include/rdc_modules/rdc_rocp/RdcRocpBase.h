@@ -22,54 +22,33 @@ THE SOFTWARE.
 
 #ifndef RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
 #define RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
-#include <rocmtools.h>
+#include <rocprofiler/rocprofiler.h>
 
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
+#include <list>
 #include <map>
 #include <string>
 #include <typeinfo>
 #include <unordered_map>
+#include <vector>
 
 #include "rdc/rdc.h"
 
 namespace amd {
 namespace rdc {
 
-/**
- * @brief Map of RDC fields to rocmtools counters
- *
- * See metrics.xml in rocmtools for more info.
- * RDC_CALC fields are calculated over time by RDC.
- */
-static const std::unordered_map<rdc_field_t, const char*> counter_map_k = {
-    {RDC_FI_PROF_ELAPSED_CYCLES, "GRBM_COUNT"},
-    {RDC_FI_PROF_ACTIVE_WAVES, "SQ_WAVES"},
-    {RDC_FI_PROF_ACTIVE_CYCLES, "SQ_BUSY_CU_CYCLES"},
-    {RDC_FI_PROF_CU_OCCUPANCY, "CU_OCCUPANCY"},
-    {RDC_FI_PROF_CU_UTILIZATION, "CU_UTILIZATION"},
-    {RDC_FI_PROF_FETCH_SIZE, "FETCH_SIZE"},
-    {RDC_FI_PROF_WRITE_SIZE, "WRITE_SIZE"},
-    {RDC_FI_PROF_FLOPS_16, "TOTAL_16_OPS"},
-    {RDC_FI_PROF_FLOPS_32, "TOTAL_32_OPS"},
-    {RDC_FI_PROF_FLOPS_64, "TOTAL_64_OPS"},
-    // fields below require special handling
-    {RDC_FI_PROF_GFLOPS_16, "TOTAL_16_OPS"},
-    {RDC_FI_PROF_GFLOPS_32, "TOTAL_32_OPS"},
-    {RDC_FI_PROF_GFLOPS_64, "TOTAL_64_OPS"},
-    {RDC_FI_PROF_MEMR_BW_KBPNS, "FETCH_SIZE"},
-    {RDC_FI_PROF_MEMW_BW_KBPNS, "WRITE_SIZE"},
-};
+typedef struct {
+  hsa_agent_t* agents;
+  unsigned count;
+  unsigned capacity;
+} hsa_agent_arr_t;
 
 /// Common interface for RocP tests and samples
 class RdcRocpBase {
+  static const int dev_count = 1;
   typedef std::pair<uint32_t, rdc_field_t> pair_gpu_field_t;
-  typedef struct session_info_t {
-    rocmtools_session_id_t id{};
-    std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> start_time;
-    std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> stop_time;
-  } session_info_t;
 
  public:
   RdcRocpBase();
@@ -89,44 +68,25 @@ class RdcRocpBase {
    * successfully.
    */
   rdc_status_t rocp_lookup(pair_gpu_field_t gpu_field, double* value);
-
-  /**
-   * @brief Destroy ROCmTools session responsible for monitoring a given
-   * field
-   *
-   * @details While rocmtools supports multiple fields per ID - it has a
-   * limit to how many counters it can query internally.
-   * To avoid concerning ourselves with said limit, we limit each session to
-   * 1 field.
-   * In the future this can be optimized to allow for multiple fields per
-   * session.
-   *
-   * @param[in] field A field to start monitoring
-   *
-   * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
-   * successfully.
-   */
-  rdc_status_t create_session(pair_gpu_field_t gpu_field);
-
-  /**
-   * @brief Destroy ROCmTools session responsible for monitoring a given
-   * field
-   *
-   * @param[in] field A field to stop monitoring
-   *
-   * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
-   * successfully.
-   */
-  rdc_status_t destroy_session(pair_gpu_field_t gpu_field);
+  const char* get_field_id_from_name(rdc_field_t);
+  const std::vector<rdc_field_t> get_field_ids();
 
  protected:
  private:
-  std::map<pair_gpu_field_t, session_info_t> sessions;
+  rocprofiler_t* contexts[dev_count] = {nullptr};
+  static const int features_count = 1;
+  std::map<const char*, double> metrics = {};
+  rocprofiler_feature_t features[dev_count][features_count] = {};
+  void read_features(rocprofiler_t* context, const unsigned feature_count);
+  int run_profiler(const char* feature_name);
+  hsa_queue_t* queues[dev_count] = {nullptr};
+  hsa_agent_arr_t agent_arr = {};
+  std::map<rdc_field_t, const char*> counter_map_k = {};
 
   /**
    * @brief Convert from rocmtools status into RDC status
    */
-  rdc_status_t Rocp2RdcError(rocmtools_status_t rocm_status);
+  rdc_status_t Rocp2RdcError(hsa_status_t rocm_status);
 };
 
 }  // namespace rdc

@@ -83,12 +83,12 @@ add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
 
 # help find librdc_bootstrap.so at runtime
 set_target_properties(${SERVER_DAEMON_EXE}
-    PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib")
+    PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib:\$ORIGIN/../lib/rdc/grpc/lib")
 
 target_link_libraries(${SERVER_DAEMON_EXE} pthread rt gRPC::grpc++
     cap dl amd_smi rdc_bootstrap)
 
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${SERVER_DAEMON_EXE}
+install(TARGETS ${SERVER_DAEMON_EXE}
     PERMISSIONS OWNER_EXECUTE OWNER_READ OWNER_WRITE GROUP_READ
     GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
     DESTINATION ${CMAKE_INSTALL_BINDIR}

@@ -72,17 +72,22 @@ set(RDCI_SRC_LIST
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
 
+link_directories(${SMI_LIB_DIR})
+
 add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
 
-target_link_libraries(${RDCI_EXE} pthread dl rdc_bootstrap gRPC::grpc++)
+# help find librdc_bootstrap.so at runtime
+set_target_properties(${RDCI_EXE}
+    PROPERTIES INSTALL_RPATH "\$ORIGIN/../lib:\$ORIGIN/../lib/rdc/grpc/lib")
 
+target_link_libraries(${RDCI_EXE} pthread dl gRPC::grpc++ rdc_bootstrap)
 
 ## Add the install directives for the rdci executable
-install(FILES ${CMAKE_CURRENT_BINARY_DIR}/${RDCI_EXE}
+install(TARGETS ${RDCI_EXE}
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
     WORLD_READ WORLD_EXECUTE
-    COMPONENT ${CLIENT_COMPONENT}
-    DESTINATION ${CMAKE_INSTALL_BINDIR})
+    DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT ${CLIENT_COMPONENT})
 
 
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

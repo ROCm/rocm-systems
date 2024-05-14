@@ -48,13 +48,13 @@ option(BUILD_STANDALONE "Build targets for rdci and rdcd" ON)
 # which requires the ROCT-Thunk-Interface.
 option(BUILD_RASLIB "Build targets for raslib" OFF)
 
-# When cmake -DBUILD_ROCRTEST=off, it will not build the librdc_rocr.so
+# When cmake -DBUILD_RUNTIME=off, it will not build the librdc_rocr.so
 # which requires the Rocm run time.
-option(BUILD_ROCRTEST "Build targets for librdc_rocr.so" ON)
+option(BUILD_RUNTIME "Build targets for librdc_rocr.so" ON)
 
-# When cmake -DBUILD_ROCPTEST=off, it will not build the librdc_rocp.so
+# When cmake -DBUILD_PROFILER=off, it will not build the librdc_rocp.so
 # which requires the Rocm profiler.
-option(BUILD_ROCPTEST "Build targets for librdc_rocp.so" OFF)
+option(BUILD_PROFILER "Build targets for librdc_rocp.so" OFF)
 
 # When cmake -DBUILD_RVS=off, it will not build the librdc_rvs.so
 # which requires the RocmValidationSuite
@@ -196,7 +196,10 @@ endif()
 message("-----------ROCM_DIR : " ${ROCM_DIR})
 
 # this is needed for INSTALL_RPATH "\$ORIGIN" property to work correctly
+# please note that because of --enable-new-dtags - this actually sets RUNPATH and not RPATH.
+# this means LD_LIBRARY_PATH can override the library locations
 set(CMAKE_BUILD_RPATH_USE_ORIGIN TRUE CACHE BOOL "Set all RPATH to be ORIGIN-based")
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE CACHE BOOL "Use link path for RPATH")
 
 ## Add address sanitizer
 if(${ADDRESS_SANITIZER})

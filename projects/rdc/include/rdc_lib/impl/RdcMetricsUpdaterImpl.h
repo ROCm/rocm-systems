@@ -31,12 +31,13 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-class RdcMetricsUpdaterImpl : public RdcMetricsUpdater {
+class RdcMetricsUpdaterImpl final : public RdcMetricsUpdater {
  public:
   void start() override;
   void stop() override;
   explicit RdcMetricsUpdaterImpl(const RdcWatchTablePtr& watch_table,
                                  const uint32_t check_frequency);
+  ~RdcMetricsUpdaterImpl() = default;
 
  private:
   RdcWatchTablePtr watch_table_;

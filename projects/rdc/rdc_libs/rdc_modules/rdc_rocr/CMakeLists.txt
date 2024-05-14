@@ -29,7 +29,7 @@ set(RDC_ROCR_LIB_INC_LIST
     "${RDC_LIB_INC_DIR}/RdcDiagnosticLibInterface.h"
     "${RDC_LIB_INC_DIR}/rdc_common.h")
 
-if(BUILD_ROCRTEST)
+if(BUILD_RUNTIME)
     message("Build librdc_rocr.so is enabled, make sure the Rocm run time is installed.")
 
     message("RDC_ROCR_LIB_INC_LIST=${RDC_ROCR_LIB_INC_LIST}")

@@ -9,7 +9,7 @@ The ROCm™ Data Center Tool simplifies the administration and addresses key inf
 
 For up-to-date document and how to start using RDC from pre-built packages, please refer to the [**ROCm DataCenter Tool User Guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/)
 
-For certificate generation, please refer to [**RDC Developer Handbook**#generate-files-for-authentication](https://rocm.docs.amd.com/projects/rdc/en/latest/user_guide/handbook.html#generate-files-for-authentication)
+For certificate generation, please refer to [**RDC Developer Handbook**#generate-files-for-authentication](https://rocm.docs.amd.com/projects/rdc/en/latest/install/handbook.html#generate-files-for-authentication)
 
 ## Supported platforms
 
@@ -83,9 +83,9 @@ If only the RDC libraries are needed (i.e. only "embedded mode" is required), th
 
 ## Building RDC library without ROCM Run time (optional)
 
-The user can choose to not build RDC diagnostic ROCM Run time. This will eliminate the need for ROCM Run time. To build in this way, -DBUILD_ROCRTEST=off should be passed on the the cmake command line:
+The user can choose to not build RDC diagnostic ROCM Run time. This will eliminate the need for ROCM Run time. To build in this way, -DBUILD_RUNTIME=off should be passed on the the cmake command line:
 
-    cmake -B build -DBUILD_ROCRTEST=off
+    cmake -B build -DBUILD_RUNTIME=off
 
 ## Update System Library Path
 
@@ -133,7 +133,7 @@ When *rdcd* is started from a command-line the *capabilities* are determined by 
 
 ## Invoke RDC using ROCm™ Data Center Interface (RDCI)
 
-RDCI provides command-line interface to all RDC features. This CLI can be run locally or remotely. Refer to [**user guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/user_guide/features.html) for the current list of features.
+RDCI provides command-line interface to all RDC features. This CLI can be run locally or remotely. Refer to [**user guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/how-to/features.html) for the current list of features.
 
     ## sample rdci commands to test RDC functionality
     ## discover devices in a local or remote compute node
