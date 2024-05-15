@@ -1140,7 +1140,7 @@ std::string print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv) {
                    &odv->mclk_freq_limits);
 
   ss << "\t**Current Freq/Volt. curve: " << "\n";
-  ss << pt_vddc_curve(&odv->curve);
+  ss << "\t\t N/A" << "\n";
 
   ss << "\t**Number of Freq./Volt. regions: " << odv->num_regions << "\n\n";
   return ss.str();
@@ -1223,6 +1223,7 @@ std::queue<std::string> getAllDeviceGfxVers() {
   }
   return deviceGfxVersions;
 }
+
 
 }  // namespace smi
 }  // namespace amd

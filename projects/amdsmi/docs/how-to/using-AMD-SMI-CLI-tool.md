@@ -1,85 +1,12 @@
-# AMD SMI CLI Tool
+# Using AMD SMI Command Line Interface tool
 
-This tool acts as a command line interface for manipulating
-and monitoring the amdgpu kernel, and is intended to replace
-and deprecate the existing rocm_smi CLI tool & gpuv-smi tool.
-It uses Ctypes to call the amd_smi_lib API.
-Recommended: At least one AMD GPU with AMD driver installed
-
-## Install CLI Tool and Python Library
-
-### Requirements
-
-* python 3.6.8+ 64-bit
-* amdgpu or amd_hsmp driver must be loaded for amdsmi_init() to pass
-
-### Installation
-
-* [Install amdgpu driver](../README.md#install-amdgpu-using-rocm)
-* Optionally install amd_hsmp driver for ESMI CPU functions
-* Install amd-smi-lib package through package manager
-* amd-smi --help
-
-### Install Example for Ubuntu 22.04
-
-``` bash
-apt install amd-smi-lib
-amd-smi --help
-```
-
-### Optional autocompletion
-
-`amd-smi` cli application supports autocompletion. The package should attempt to install it, if argcomplete is not installed you can enable it by using the following commands:
-
-```bash
-python3 -m pip install argcomplete
-activate-global-python-argcomplete --user
-# restart shell to enable
-```
-
-### Manual/Multiple Rocm Instance Python Library Install
-
-In the event there are multiple rocm installations and pyenv is not being used, to use the correct amdsmi version you must uninstall previous versions of amd-smi and install the version you want directly from your rocm instance.
-
-#### Python Library Install Example for Ubuntu 22.04
-
-Remove previous amdsmi installation:
-
-```bash
-python3 -m pip list | grep amd
-python3 -m pip uninstall amdsmi
-```
-
-Then install Python library from your target rocm instance:
-
-``` bash
-apt install amd-smi-lib
-amd-smi --help
-cd /opt/rocm/share/amd_smi
-python3 -m pip install --upgrade pip
-python3 -m pip install --user .
-```
-
-Now you have the amdsmi python library in your python path:
-
-``` bash
-~$ python3
-Python 3.8.10 (default, May 26 2023, 14:05:08)
-[GCC 9.4.0] on linux
-Type "help", "copyright", "credits" or "license" for more information.
->>> import amdsmi
->>>
-```
-
-## Usage
-
-amd-smi will report the version and current platform detected when running the command without arguments:
+AMD-SMI reports the version and current platform detected when running the command line interface (CLI) without arguments:
 
 ``` bash
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.5.3.0 | ROCm version: 6.1.2 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 24.5.2.0 | ROCm version: 6.1.2 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -114,11 +41,12 @@ For convenience, here is the help output for each command
 usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                     [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
 
-Lists all the devices on the system and the links between devices.
-Lists all the sockets and for each socket, GPUs and/or CPUs associated to
-that socket alongside some basic information for each device.
-In virtualization environments, it can also list VFs associated to each
-GPU with some basic information for each VF.
+- Lists all the devices on the system and the links between devices.
+- Lists all the sockets and for each socket, GPUs and/or CPUs associated to that socket alongside some basic information for each device.
+
+.. NOTE::
+
+In virtualization environments, it can also list VFs associated to each GPU with some basic information for each VF.
 
 options:
   -h, --help                  show this help message and exit
@@ -152,8 +80,8 @@ usage: amd-smi static [-h] [-g GPU [GPU ...]] [-a] [-b] [-V] [-d] [-v] [-c] [-B]
                       [-l] [-P] [-x] [-s] [-u] [--json | --csv] [--file FILE]
                       [--loglevel LEVEL]
 
-If no GPU is specified, returns static information for all GPUs on the system.
-If no static argument is provided, all static information will be displayed.
+- If no GPU is specified, returns static information for all GPUs on the system.
+- If no static argument is provided, all static information will be displayed.
 
 Static Arguments:
   -h, --help               show this help message and exit
@@ -281,8 +209,8 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [--core-curr-active-freq-core-limit] [--core-energy]
                       [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
-If no GPU is specified, returns metric information for all GPUs on the system.
-If no metric argument is provided all metric information will be displayed.
+- If no GPU is specified, returns metric information for all GPUs on the system.
+- If no metric argument is provided all metric information will be displayed.
 
 Metric arguments:
   -h, --help                                show this help message and exit
@@ -362,8 +290,8 @@ usage: amd-smi process [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                        [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-G] [-e] [-p PID]
                        [-n NAME]
 
-If no GPU is specified, returns information for all GPUs on the system.
-If no process argument is provided all process information will be displayed.
+- If no GPU is specified, returns information for all GPUs on the system.
+- If no process argument is provided all process information will be displayed.
 
 Process arguments:
   -h, --help                   show this help message and exit
@@ -438,8 +366,8 @@ usage: amd-smi topology [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                         [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-a]
                         [-w] [-o] [-t] [-b]
 
-If no GPU is specified, returns information for all GPUs on the system.
-If no topology argument is provided all topology information will be displayed.
+- If no GPU is specified, returns information for all GPUs on the system.
+- If no topology argument is provided all topology information will be displayed.
 
 Topology arguments:
   -h, --help                  show this help message and exit
@@ -484,8 +412,8 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--core-boost-limit BOOST_LIMIT] [-c] [--json | --csv] [--file FILE]
                    [--loglevel LEVEL]
 
-A GPU must be specified to set a configuration.
-A set argument must be provided; Multiple set arguments are accepted
+- A GPU must be specified to set a configuration.
+- A set argument must be provided; Multiple set arguments are accepted
 
 Set Arguments:
   -h, --help                                   show this help message and exit
@@ -548,8 +476,8 @@ usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                      (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-G] [-c]
                      [-f] [-p] [-x] [-d] [-C] [-M] [-o]
 
-A GPU must be specified to reset a configuration.
-A reset argument must be provided; Multiple reset arguments are accepted
+- A GPU must be specified to reset a configuration.
+- A reset argument must be provided; Multiple reset arguments are accepted
 
 Reset Arguments:
   -h, --help                  show this help message and exit
@@ -1090,10 +1018,3 @@ GPU: 3
 
 ```
 
-## Disclaimer
-
-The information contained herein is for informational purposes only, and is subject to change without notice. While every precaution has been taken in the preparation of this document, it may contain technical inaccuracies, omissions and typographical errors, and AMD is under no obligation to update or otherwise correct this information. Advanced Micro Devices, Inc. makes no representations or warranties with respect to the accuracy or completeness of the contents of this document, and assumes no liability of any kind, including the implied warranties of noninfringement, merchantability or fitness for particular purposes, with respect to the operation or use of AMD hardware, software or other products described herein.
-
-AMD, the AMD Arrow logo, and combinations thereof are trademarks of Advanced Micro Devices, Inc. Other product names used in this publication are for identification purposes only and may be trademarks of their respective companies.
-
-Copyright (c) 2014-2023 Advanced Micro Devices, Inc. All rights reserved.

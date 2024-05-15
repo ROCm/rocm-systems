@@ -83,7 +83,7 @@ typedef enum {
 #define AMDSMI_MAX_DEVICES            32
 #define AMDSMI_MAX_NAME               32
 #define AMDSMI_MAX_DRIVER_VERSION_LENGTH 80
-#define AMDSMI_PRODUCT_NAME_LENGTH 128
+#define AMDSMI_256_LENGTH 256
 #define AMDSMI_MAX_CONTAINER_TYPE    2
 #define AMDSMI_MAX_CACHE_TYPES 10
 #define AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK 64
@@ -154,7 +154,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 5
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 2
+#define AMDSMI_LIB_VERSION_MINOR 3
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
 #define AMDSMI_LIB_VERSION_RELEASE 0
@@ -573,7 +573,7 @@ typedef struct {
 } amdsmi_fw_info_t;
 
 typedef struct {
-  char  market_name[AMDSMI_MAX_STRING_LENGTH];
+  char  market_name[AMDSMI_256_LENGTH];
   uint32_t vendor_id;   //< Use 32 bit to be compatible with other platform.
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t subvendor_id;   //< The subsystem vendor id
@@ -619,11 +619,11 @@ typedef struct {
 } amdsmi_driver_info_t;
 
 typedef struct {
-  char  model_number[AMDSMI_NORMAL_STRING_LENGTH];
+  char  model_number[AMDSMI_256_LENGTH];
   char  product_serial[AMDSMI_NORMAL_STRING_LENGTH];
   char  fru_id[AMDSMI_NORMAL_STRING_LENGTH];
-  char  product_name[AMDSMI_PRODUCT_NAME_LENGTH];
-  char  manufacturer_name[AMDSMI_NORMAL_STRING_LENGTH];
+  char  product_name[AMDSMI_256_LENGTH];
+  char  manufacturer_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t reserved[32];
 } amdsmi_board_info_t;
 
@@ -1255,7 +1255,7 @@ typedef struct {
 typedef struct {
   amdsmi_range_t curr_sclk_range;          //!< The current SCLK frequency range
   amdsmi_range_t curr_mclk_range;          //!< The current MCLK frequency range;
-                                         //!< (upper bound only)
+                                           //!< (upper bound only)
   amdsmi_range_t sclk_freq_limits;         //!< The range possible of SCLK values
   amdsmi_range_t mclk_freq_limits;         //!< The range possible of MCLK values
 
@@ -2967,8 +2967,9 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
 amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle);
 
 /**
- *  @brief This function retrieves the voltage/frequency curve information. It is
- *  not supported on virtual machine guest
+ *  @brief This function retrieves the overdrive GFX & MCLK information. If valid
+ *  for the GPU it will also populate the voltage curve data. It is not supported
+ *  on virtual machine guest
  *
  *  @platform{gpu_bm_linux}
  *
@@ -3054,14 +3055,14 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
  *  metrics is allocated for pm_metrics array as input, and the number of metrics retreived
  *  as output. If this parameter is NULL, this function will return
- *  ::AMDSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
- *  @retval ::AMDSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *
  */
 amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(
@@ -3092,14 +3093,14 @@ amdsmi_status_t amdsmi_get_gpu_pm_metrics_info(
  *  @param[inout] num_of_metrics a pointer to uint32_t to which the number of
  *  metrics is allocated for reg_metrics array as input, and the number of metrics retreived
  *  as output. If this parameter is NULL, this function will return
- *  ::AMDSMI_STATUS_INVALID_ARGS if the function is supported with the provided,
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
  *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
- *  @retval ::AMDSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *
  */
 amdsmi_status_t amdsmi_get_gpu_reg_table_info(
@@ -3504,7 +3505,7 @@ amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle process
  * @platform{gpu_bm_linux} @platform{guest_1vf}
  *
  * @details Given a processor handle @p processor_handle, and a sclean flag @p sclean,
- * this function will clear the SRAM data of this processor. This can be called between 
+ * this function will clear the SRAM data of this processor. This can be called between
  * user logins to prevent information leak.
  *
  *  @note This function requires root access
@@ -4222,7 +4223,7 @@ amdsmi_is_P2P_accessible(amdsmi_processor_handle processor_handle_src,
  *  , suggested length is 4 or greater.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
@@ -4252,7 +4253,7 @@ amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_PERMISSION function requires root access
- *  @retval ::AMDSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_SETTING_UNAVAILABLE the provided setting is
  *  unavailable for current device
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
@@ -4312,7 +4313,7 @@ amdsmi_status_t amdsmi_reset_gpu_compute_partition(amdsmi_processor_handle proce
  *  suggested length is 5 or greater.
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
@@ -4341,7 +4342,7 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
  *
  *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
  *  @retval ::AMDSMI_STATUS_PERMISSION function requires root access
- *  @retval ::AMDSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::AMDSMI_STATUS_INVAL the provided arguments are not valid
  *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function
  *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart

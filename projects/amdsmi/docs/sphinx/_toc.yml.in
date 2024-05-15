@@ -1,26 +1,49 @@
-# Anywhere {branch} is used, the branch name will be substituted.
-# These comments will also be removed.
 defaults:
-  numbered: False
-  maxdepth: 6
+  numbered: false
 root: index
-subtrees:
-  - caption: AMD SMI APIs
-    entries:
-    - file: doxygen/docBin/html/index
-      title: C
-    - file: py-interface_readme_link
-      title: Python
-  - caption: CLI Tools
-    entries:
-      - file: amdsmi_cli_readme_link
-        title: Python CLI Tool
-      - file: amdsmi_release_notes_link
-        title: Python CLI Release Notes
-  - caption: Changelog
-    entries:
-      - file: amdsmi_changelog_link
-        title: AMD-SMI Changelog
-  - caption: About
-    entries:
-      - file: license
+subtrees: 
+- entries:
+  - file: what-is-AMDSMI.rst
+    title: What is AMD SMI?
+    
+- caption: Install
+  entries:
+    - file: install/install.rst
+      title: AMD SMI installation
+      
+      
+- caption: How to
+  entries:
+    - file: how-to/using-amdsmi-for-C++.rst
+      title: Use AMD SMI for C++ library
+    - file: how-to/using-amdsmi-for-python.md
+      title: Use AMD SMI for Python library
+    - file: how-to/using-AMD-SMI-CLI-tool.md
+      title: Use AMD SMI CLI tool
+  
+- caption: API reference
+  entries:
+    - file: doxygen/docBin/html/files
+      title: Files
+    - file: doxygen/docBin/html/globals
+      title: Globals
+    - file: doxygen/docBin/html/annotated
+      title: Data structures
+    - file: doxygen/docBin/html/modules
+      title: Modules
+    - file: doxygen/docBin/html/functions_data_fields
+      title: Data fields
+
+    
+      
+- caption: Tutorials
+  entries:
+    - url: https://github.com/ROCm/amdsmi/tree/develop/example
+      title: AMD SMI GitHub samples
+    - url: https://github.com/ROCm/rocm_smi_lib/tree/develop/docs
+      title: ROCm SMI lib GitHub samples
+      
+- caption: About
+  entries:
+    - file: license.md
+

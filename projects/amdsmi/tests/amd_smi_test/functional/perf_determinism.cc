@@ -92,9 +92,9 @@ void TestPerfDeterminism::Close() {
 void TestPerfDeterminism::Run(void) {
   amdsmi_status_t err;
   amdsmi_dev_perf_level_t pfl;
-  amdsmi_od_volt_freq_data_t odv;
+  amdsmi_od_volt_freq_data_t odv{};
   amdsmi_status_t ret;
-  uint64_t clkvalue;
+  uint64_t clkvalue(0);
   TestBase::Run();
   if (setup_failed_) {
     std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;

@@ -183,10 +183,10 @@ void TestMutualExclusion::Run(void) {
     int64_t dmy_i64 = 0;
     char dmy_str[10];
     amdsmi_dev_perf_level_t dmy_perf_lvl;
-    amdsmi_frequencies_t dmy_freqs;
-    amdsmi_od_volt_freq_data_t dmy_od_volt;
-    amdsmi_freq_volt_region_t dmy_vlt_reg;
-    amdsmi_error_count_t dmy_err_cnt;
+    amdsmi_frequencies_t dmy_freqs{};
+    amdsmi_od_volt_freq_data_t dmy_od_volt{};
+    amdsmi_freq_volt_region_t dmy_vlt_reg{};
+    amdsmi_error_count_t dmy_err_cnt{};
     amdsmi_ras_err_state_t dmy_ras_err_st;
 
     // This can be replaced with ASSERT_EQ() once env. stabilizes

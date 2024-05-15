@@ -36,7 +36,9 @@
 #include <fstream>
 #include <iostream>
 #include <regex>
+#include <cstdio>
 #include <sstream>
+#include <iterator>
 #include <sys/ioctl.h>
 #include <algorithm>
 #include <limits.h>
@@ -44,6 +46,69 @@
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "shared_mutex.h"  // NOLINT
 #include "rocm_smi/rocm_smi_logger.h"
+
+std::string leftTrim(const std::string &s) {
+  if (!s.empty()) {
+    return std::regex_replace(s, std::regex("^\\s+"), "");
+  }
+  return s;
+}
+
+std::string rightTrim(const std::string &s) {
+  if (!s.empty()) {
+    return std::regex_replace(s, std::regex("\\s+$"), "");
+  }
+  return s;
+}
+
+std::string removeNewLines(const std::string &s) {
+  if (!s.empty()) {
+    return std::regex_replace(s, std::regex("\n+"), "");
+  }
+  return s;
+}
+
+std::string trim(const std::string &s) {
+  if (!s.empty()) {
+    // remove new lines -> trim white space at ends
+    std::string noNewLines = removeNewLines(s);
+    return leftTrim(rightTrim(noNewLines));
+  }
+  return s;
+}
+
+// Given original string and string to remove (removeMe)
+// Return will provide the resulting modified string with the removed string(s)
+std::string removeString(const std::string origStr,
+                         const std::string &removeMe) {
+  std::string modifiedStr = origStr;
+  std::string::size_type l = removeMe.length();
+  for (std::string::size_type i = modifiedStr.find(removeMe);
+       i != std::string::npos;
+       i = modifiedStr.find(removeMe)) {
+    modifiedStr.erase(i, l);
+  }
+  return modifiedStr;
+}
+
+void openFileAndModifyBuffer(std::string path, char *buff, size_t sizeOfBuff) {
+    bool errorDiscovered = false;
+    std::ifstream file(path, std::ifstream::in);
+    std::string contents = {std::istreambuf_iterator<char>{file}, std::istreambuf_iterator<char>{}};
+    memset(buff, 0, sizeof(char) * sizeOfBuff);
+    if (!file.is_open()) {
+        errorDiscovered = true;
+    } else {
+        contents = trim(contents);
+    }
+
+    file.close();
+    if (!errorDiscovered && file.good() && !file.bad() && !file.fail() && !file.eof()
+        && !contents.empty()) {
+        std::strncpy(buff, contents.c_str(), sizeOfBuff-1);
+        buff[sizeOfBuff-1] = '\0';
+    }
+}
 
 static const uint32_t kAmdGpuId = 0x1002;
 
@@ -123,50 +188,26 @@ amdsmi_status_t smi_amdgpu_get_board_info(amd::smi::AMDSmiGPUDevice* device, amd
     std::string manufacturer_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/manufacturer");
     std::string product_name_path = "/sys/class/drm/" + device->get_gpu_path() + std::string("/device/product_name");
 
-    FILE *fp;
+    openFileAndModifyBuffer(model_number_path, info->model_number, AMDSMI_256_LENGTH);
+    openFileAndModifyBuffer(product_serial_path, info->product_serial, AMDSMI_NORMAL_STRING_LENGTH);
+    openFileAndModifyBuffer(fru_id_path, info->fru_id, AMDSMI_NORMAL_STRING_LENGTH);
+    openFileAndModifyBuffer(manufacturer_name_path, info->manufacturer_name,
+                            AMDSMI_MAX_STRING_LENGTH);
+    openFileAndModifyBuffer(product_name_path, info->product_name, AMDSMI_256_LENGTH);
 
-    fp = fopen(model_number_path.c_str(), "rb");
-    if (fp) {
-        fgets(info->model_number, sizeof(info->model_number), fp);
-        fclose(fp);
-    }
-
-    fp = fopen(product_serial_path.c_str(), "rb");
-    if (fp) {
-        fgets(info->product_serial, sizeof(info->product_serial), fp);
-        fclose(fp);
-    }
-
-    fp = fopen(fru_id_path.c_str(), "rb");
-    if (fp) {
-        fgets(info->fru_id, sizeof(info->fru_id), fp);
-        fclose(fp);
-    }
-
-    fp = fopen(manufacturer_name_path.c_str(), "rb");
-    if (fp) {
-        fgets(info->manufacturer_name, sizeof(info->manufacturer_name), fp);
-        fclose(fp);
-    }
-
-    fp = fopen(product_name_path.c_str(), "rb");
-    if (fp) {
-        fgets(info->product_name, sizeof(info->product_name), fp);
-        fclose(fp);
-    }
     std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__
+    ss << __PRETTY_FUNCTION__ << "[Before correction] "
        << "Returning status = AMDSMI_STATUS_SUCCESS"
-       << " | model_number_path = " << model_number_path
-       << "; info->model_number: " << info->model_number
-       << "\n product_serial_path = " << product_serial_path
-       << "; info->product_serial: " << info->product_serial
-       << "\n fru_id_path = " << fru_id_path
-       << "; info->fru_id: " << info->fru_id
-       << "\n manufacturer_name_path = " << manufacturer_name_path
-       << "; info->manufacturer_name: " << info->manufacturer_name
-       << "\n product_name_path = " << product_name_path
-       << "; info->product_name: " << info->product_name;
+       << " | model_number_path = |" << model_number_path << "|\n"
+       << "; info->model_number: |" << info->model_number << "|\n"
+       << "\n product_serial_path = |" << product_serial_path << "|\n"
+       << "; info->product_serial: |" << info->product_serial << "|\n"
+       << "\n fru_id_path = |" << fru_id_path << "|\n"
+       << "; info->fru_id: |" << info->fru_id << "|\n"
+       << "\n manufacturer_name_path = |" << manufacturer_name_path << "|\n"
+       << "; info->manufacturer_name: |" << info->manufacturer_name << "|\n"
+       << "\n product_name_path = |" << product_name_path << "|\n"
+       << "; info->product_name: |" << info->product_name << "|";
     LOG_INFO(ss);
 
     return AMDSMI_STATUS_SUCCESS;

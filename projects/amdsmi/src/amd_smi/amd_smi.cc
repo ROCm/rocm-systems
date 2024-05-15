@@ -389,7 +389,6 @@ amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_handle, amdsmi_bdf_t
 }
 
 amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_handle, amdsmi_board_info_t *board_info) {
-
     AMDSMI_CHECK_INIT();
 
     if (board_info == nullptr) {
@@ -405,16 +404,85 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
     if (gpu_device->check_if_drm_is_supported()) {
         // Populate product_serial, product_name, & product_number from sysfs
         status = smi_amdgpu_get_board_info(gpu_device, board_info);
-    }
-    else {
+    } else {
         // ignore the errors so that it can populate as many fields as possible.
         // call rocm-smi which search multiple places for device name
         status = rsmi_wrapper(rsmi_dev_name_get, processor_handle,
-                        board_info->product_name, AMDSMI_PRODUCT_NAME_LENGTH);
+                        board_info->product_name, AMDSMI_256_LENGTH);
 
         status = rsmi_wrapper(rsmi_dev_serial_number_get, processor_handle,
                         board_info->product_serial, AMDSMI_NORMAL_STRING_LENGTH);
     }
+
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << "[Before rocm smi correction] "
+       << "Returning status = AMDSMI_STATUS_SUCCESS"
+       << "\n; info->model_number: |" << board_info->model_number << "|"
+       << "\n; info->product_serial: |" << board_info->product_serial << "|"
+       << "\n; info->fru_id: |" << board_info->fru_id << "|"
+       << "\n; info->manufacturer_name: |" << board_info->manufacturer_name << "|"
+       << "\n; info->product_name: |" << board_info->product_name << "|";
+    LOG_INFO(ss);
+
+    // Correct any missing details
+    if (board_info->model_number[0] == '\0') {
+        status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, board_info->model_number,
+                            AMDSMI_256_LENGTH);
+         if (status != AMDSMI_STATUS_SUCCESS) {
+            memset(board_info->model_number, 0,
+                   AMDSMI_256_LENGTH * sizeof(board_info->model_number[0]));
+        }
+        ss << __PRETTY_FUNCTION__ << " | [rsmi_correction] board_info->model_number= |"
+        << board_info->model_number << "|";
+        LOG_INFO(ss);
+    }
+
+    if (board_info->product_serial[0] == '\0') {
+        status = rsmi_wrapper(rsmi_dev_serial_number_get, processor_handle,
+                              board_info->product_serial, AMDSMI_NORMAL_STRING_LENGTH);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            memset(board_info->product_serial, 0,
+                   AMDSMI_NORMAL_STRING_LENGTH * sizeof(board_info->product_serial[0]));
+        }
+        ss << __PRETTY_FUNCTION__ << " | [rsmi_correction] board_info->product_serial= |"
+        << board_info->product_serial << "|";
+        LOG_INFO(ss);
+    }
+
+    if (board_info->product_name[0] == '\0') {
+        status = rsmi_wrapper(rsmi_dev_subsystem_name_get,
+                              processor_handle, board_info->product_name,
+                              AMDSMI_256_LENGTH);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            memset(board_info->product_name, 0,
+                    AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+        }
+        ss << __PRETTY_FUNCTION__ << " | [rsmi_correction] board_info->product_name= |"
+        << board_info->product_name << "|";
+        LOG_INFO(ss);
+    }
+
+    if (board_info->manufacturer_name[0] == '\0') {
+        status = rsmi_wrapper(rsmi_dev_vendor_name_get,
+                              processor_handle, board_info->manufacturer_name,
+                              AMDSMI_MAX_STRING_LENGTH);
+        if (status != AMDSMI_STATUS_SUCCESS) {
+            memset(board_info->manufacturer_name, 0,
+                   AMDSMI_MAX_STRING_LENGTH * sizeof(board_info->manufacturer_name[0]));
+        }
+        ss << __PRETTY_FUNCTION__ << " | [rsmi_correction] board_info->manufacturer_name= |"
+        << board_info->manufacturer_name << "|";
+        LOG_INFO(ss);
+    }
+
+    ss << __PRETTY_FUNCTION__ << "[After rocm smi correction] "
+       << "Returning status = AMDSMI_STATUS_SUCCESS"
+       << "\n; info->model_number: |" << board_info->model_number << "|"
+       << "\n; info->product_serial: |" << board_info->product_serial << "|"
+       << "\n; info->fru_id: |" << board_info->fru_id << "|"
+       << "\n; info->manufacturer_name: |" << board_info->manufacturer_name << "|"
+       << "\n; info->product_name: |" << board_info->product_name << "|";
+    LOG_INFO(ss);
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -654,7 +722,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         status = smi_amdgpu_get_market_name_from_dev_id(dev_info.device_id, info->market_name);
         if (status != AMDSMI_STATUS_SUCCESS) {
             rsmi_wrapper(rsmi_dev_brand_get, processor_handle,
-                info->market_name, AMDSMI_NORMAL_STRING_LENGTH);
+                info->market_name, AMDSMI_256_LENGTH);
         }
 
         info->device_id = dev_info.device_id;
@@ -667,7 +735,7 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
         if (status == AMDSMI_STATUS_SUCCESS) snprintf(info->asic_serial, sizeof(info->asic_serial), "%lu", dv_uid);
 
         status = rsmi_wrapper(rsmi_dev_brand_get, processor_handle,
-                info->market_name, AMDSMI_NORMAL_STRING_LENGTH);
+                info->market_name, AMDSMI_256_LENGTH);
 
         status = rsmi_wrapper(rsmi_dev_vendor_id_get, processor_handle,
                                     &vendor_id);

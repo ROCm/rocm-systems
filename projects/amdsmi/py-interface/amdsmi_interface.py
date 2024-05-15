@@ -39,6 +39,37 @@ AMDSMI_MAX_NUM_VCN = 4
 AMDSMI_MAX_NUM_CLKS = 4
 AMDSMI_MAX_NUM_XGMI_LINKS = 8
 AMDSMI_MAX_NUM_GFX_CLKS = 8
+AMDSMI_MAX_AID = 4
+AMDSMI_MAX_ENGINES = 8
+AMDSMI_MAX_NUM_JPEG = 32
+
+# Max number of DPM policies
+AMDSMI_MAX_NUM_PM_POLICIES = 32
+
+# Max supported frequencies
+AMDSMI_MAX_NUM_FREQUENCIES = 33
+
+# Max Fan speed
+AMDSMI_MAX_FAN_SPEED = 255
+
+# Max Votlage Curve Points
+AMDSMI_NUM_VOLTAGE_CURVE_POINTS = 3
+
+# Max size definitions
+AMDSMI_MAX_MM_IP_COUNT = 8
+AMDSMI_MAX_DATE_LENGTH = 32
+AMDSMI_MAX_STRING_LENGTH = 64
+AMDSMI_NORMAL_STRING_LENGTH = 32
+AMDSMI_MAX_DEVICES = 32
+AMDSMI_MAX_NAME = 32
+AMDSMI_MAX_DRIVER_VERSION_LENGTH = 80
+AMDSMI_256_LENGTH = 256
+AMDSMI_MAX_CONTAINER_TYPE = 2
+AMDSMI_MAX_CACHE_TYPES = 10
+AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK = 64
+AMDSMI_GPU_UUID_SIZE = 38
+MAX_AMDSMI_NAME_LENGTH = 64
+MAX_EVENT_NOTIFICATION_MSG_SIZE = 64
 
 
 class AmdSmiInitFlags(IntEnum):
@@ -223,7 +254,6 @@ class AmdSmiEvtNotificationType(IntEnum):
     GPU_PRE_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_PRE_RESET
     GPU_POST_RESET = amdsmi_wrapper.AMDSMI_EVT_NOTIF_GPU_POST_RESET
     RING_HANG = amdsmi_wrapper.AMDSMI_EVT_NOTIF_RING_HANG
-
 
 class AmdSmiTemperatureMetric(IntEnum):
     CURRENT = amdsmi_wrapper.AMDSMI_TEMP_CURRENT
@@ -538,6 +568,21 @@ def _make_amdsmi_bdf_from_list(bdf):
     amdsmi_bdf.fields.bus_number = bdf[1]
     amdsmi_bdf.fields.domain_number = bdf[0]
     return amdsmi_bdf
+
+def _padHexValue(value, length):
+    """ Pad a hexadecimal value with a given length of zeros
+
+    :param value: A hexadecimal value to be padded with zeros
+    :param length: Number of zeros to pad the hexadecimal value
+    :param return original string string or
+        padded hex of confirmed hex output (using length provided)
+    """
+    # Ensure value entered meets the minimum length and is hexadecimal
+    if len(value) > 2 and length > 1 and value[:2].lower() == '0x' \
+        and all(c in '0123456789abcdefABCDEF' for c in value[2:]):
+        # Pad with zeros after '0x' prefix
+        return '0x' + value[2:].zfill(length)
+    return value
 
 
 def amdsmi_get_socket_handles() -> List[amdsmi_wrapper.amdsmi_socket_handle]:
@@ -1585,12 +1630,12 @@ def amdsmi_get_gpu_asic_info(
     )
 
     asic_info = {
-        "market_name": asic_info_struct.market_name.decode("utf-8"),
+        "market_name": _padHexValue(asic_info_struct.market_name.decode("utf-8"), 4),
         "vendor_id": asic_info_struct.vendor_id,
         "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
         "subvendor_id": asic_info_struct.subvendor_id,
         "device_id": asic_info_struct.device_id,
-        "rev_id": hex(asic_info_struct.rev_id),
+        "rev_id": _padHexValue(hex(asic_info_struct.rev_id), 2),
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": asic_info_struct.oam_id
     }
@@ -1863,17 +1908,16 @@ def amdsmi_get_gpu_board_info(
     )
 
     board_info_dict = {
-        "model_number": board_info.model_number.decode("utf-8").strip(),
+        "model_number": _padHexValue(board_info.model_number.decode("utf-8").strip(), 4),
         "product_serial": board_info.product_serial.decode("utf-8").strip(),
         "fru_id": board_info.fru_id.decode("utf-8").strip(),
-        "product_name": board_info.product_name.decode("utf-8").strip(),
+        "product_name": _padHexValue(board_info.product_name.decode("utf-8").strip(), 4),
         "manufacturer_name": board_info.manufacturer_name.decode("utf-8").strip()
     }
 
     for key, value in board_info_dict.items():
         if value == "":
             board_info_dict[key] = "N/A"
-
     return board_info_dict
 
 

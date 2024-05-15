@@ -882,7 +882,7 @@ class struct_amdsmi_asic_info_t(Structure):
 
 struct_amdsmi_asic_info_t._pack_ = 1 # source:False
 struct_amdsmi_asic_info_t._fields_ = [
-    ('market_name', ctypes.c_char * 64),
+    ('market_name', ctypes.c_char * 256),
     ('vendor_id', ctypes.c_uint32),
     ('vendor_name', ctypes.c_char * 64),
     ('subvendor_id', ctypes.c_uint32),
@@ -961,11 +961,11 @@ class struct_amdsmi_board_info_t(Structure):
 
 struct_amdsmi_board_info_t._pack_ = 1 # source:False
 struct_amdsmi_board_info_t._fields_ = [
-    ('model_number', ctypes.c_char * 32),
+    ('model_number', ctypes.c_char * 256),
     ('product_serial', ctypes.c_char * 32),
     ('fru_id', ctypes.c_char * 32),
-    ('product_name', ctypes.c_char * 128),
-    ('manufacturer_name', ctypes.c_char * 32),
+    ('product_name', ctypes.c_char * 256),
+    ('manufacturer_name', ctypes.c_char * 64),
     ('reserved', ctypes.c_uint32 * 32),
 ]
 

@@ -3451,8 +3451,7 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
                              uint32_t pisolate);
 
 /**
- * @brief Clear the GPU SRAM data 
- *
+ * @brief Clear the GPU SRAM data
  *
  * @details Given a device index @p dv_ind, this function will clear the
  * GPU SRAM data  of this device. This can be called between user logins to prevent information leak.
