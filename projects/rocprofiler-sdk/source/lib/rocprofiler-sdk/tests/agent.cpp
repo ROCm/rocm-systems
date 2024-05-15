@@ -121,6 +121,8 @@ TEST(rocprofiler_lib, agent)
     rocprofiler::registration::init_logging();
 
     auto info_ret = std::system("/usr/bin/rocminfo");
+    if(info_ret != 0) info_ret = std::system("rocminfo");
+    if(info_ret != 0) info_ret = std::system("/opt/rocm/bin/rocminfo");
     EXPECT_EQ(info_ret, 0);
 
     std::cout << "# Data from '/sys/class/kfd/kfd/topology/nodes': \n" << std::flush;
