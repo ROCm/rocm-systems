@@ -134,7 +134,7 @@ struct table_size;
 
 // latest version of hsa runtime that has been updated for support by rocprofiler
 // and the current version of hsa runtime during this compilation
-constexpr size_t latest_version  = ROCPROFILER_COMPUTE_VERSION(1, 12, 0);
+constexpr size_t latest_version  = ROCPROFILER_COMPUTE_VERSION(1, 13, 0);
 constexpr size_t current_version = ROCPROFILER_HSA_RUNTIME_VERSION;
 
 // aliases to the template specializations providing the table size info
