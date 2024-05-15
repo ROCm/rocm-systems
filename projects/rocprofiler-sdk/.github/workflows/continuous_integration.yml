@@ -51,8 +51,8 @@ jobs:
         git config --global --add safe.directory '*'
         apt-get update
         apt-get install -y build-essential cmake g++-11 g++-12 python3-pip libdw-dev
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-11 10 --slave /usr/bin/g++ g++ /usr/bin/g++-11 --slave /usr/bin/gcov gcov /usr/bin/gcov-11
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-12 20 --slave /usr/bin/g++ g++ /usr/bin/g++-12 --slave /usr/bin/gcov gcov /usr/bin/gcov-12
         python3 -m pip install -r requirements.txt
 
     - name: List Files
@@ -61,7 +61,7 @@ jobs:
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python3 git cmake ctest; do which-realpath $i; done
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         ls -la
 
     - name: Exclude PC Sampling Tests
@@ -163,6 +163,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
+      GCC_COMPILER_VERSION: 11
 
     steps:
     - name: Patch Git
@@ -205,13 +206,23 @@ jobs:
         apt-get install -y build-essential cmake python3-pip gcovr wkhtmltopdf xvfb xfonts-base xfonts-75dpi xfonts-100dpi xfonts-utils xfonts-encodings libfontconfig libdw-dev
         python3 -m pip install -r requirements.txt
 
+    - name: Sync gcov with compilers
+      timeout-minutes: 10
+      shell: bash
+      run:
+        apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} &&
+        update-alternatives
+            --install /usr/bin/gcc  gcc  /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 500
+            --slave   /usr/bin/g++  g++  /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }}
+            --slave   /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
+
     - name: List Files
       shell: bash
       run: |
         echo "PATH: ${PATH}"
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python3 git cmake ctest; do which-realpath $i; done
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         ls -la
 
     - name: Exclude PC Sampling Tests
@@ -400,14 +411,14 @@ jobs:
         add-apt-repository ppa:ubuntu-toolchain-r/test
         apt-get update
         apt-get install -y gcc-${{ env.GCC_COMPILER_VERSION }} g++-${{ env.GCC_COMPILER_VERSION }} libdw-dev
-        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }}
+        update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-${{ env.GCC_COMPILER_VERSION }} 100 --slave /usr/bin/g++ g++ /usr/bin/g++-${{ env.GCC_COMPILER_VERSION }} --slave /usr/bin/gcov gcov /usr/bin/gcov-${{ env.GCC_COMPILER_VERSION }}
         python3 -m pip install -r requirements.txt
 
     - name: List Files
       shell: bash
       run: |
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
-        for i in python3 git cmake ctest gcc g++; do which-realpath $i; done
+        for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         ls -la
 
     - name: Exclude PC Sampling Tests
