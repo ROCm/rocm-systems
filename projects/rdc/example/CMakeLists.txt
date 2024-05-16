@@ -107,6 +107,12 @@ set(DIAGNOSTIC_EXAMPLE_EXE "diagnostic")
 add_executable(${DIAGNOSTIC_EXAMPLE_EXE} "${DIAGNOSTIC_EXAMPLE_SRC_LIST}")
 target_link_libraries(${DIAGNOSTIC_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
+set(ROCPROFILER_EXAMPLE_SRC_LIST "rocprofiler_example.cc")
+cmake_print_variables(ROCPROFILER_EXAMPLE_SRC_LIST)
+set(ROCPROFILER_EXAMPLE_EXE "rocprofiler")
+add_executable(${ROCPROFILER_EXAMPLE_EXE} "${ROCPROFILER_EXAMPLE_SRC_LIST}")
+target_link_libraries(${ROCPROFILER_EXAMPLE_EXE} pthread dl rdc_bootstrap)
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                          ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

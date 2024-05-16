@@ -107,11 +107,15 @@ bool createHsaQueue(hsa_queue_t** queue, hsa_agent_t gpu_agent) {
   hsa_status_t status;
   status = hsa_queue_create(gpu_agent, 64, HSA_QUEUE_TYPE_SINGLE, NULL, NULL, UINT32_MAX,
                             UINT32_MAX, queue);
-  if (status != HSA_STATUS_SUCCESS) fprintf(stdout, "Queue creation failed");
+  if (status != HSA_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "Queue creation failed");
+  }
 
   // TODO: warning: is it really required!! ??
   status = hsa_amd_queue_set_priority(*queue, HSA_AMD_QUEUE_PRIORITY_HIGH);
-  if (status != HSA_STATUS_SUCCESS) fprintf(stdout, "HSA Queue Priority Set Failed");
+  if (status != HSA_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "HSA Queue Priority Set Failed");
+  }
 
   return (status == HSA_STATUS_SUCCESS);
 }
@@ -140,11 +144,10 @@ int RdcRocpBase::run_profiler(const char* feature_name) {
     int mode = (ROCPROFILER_MODE_STANDALONE | ROCPROFILER_MODE_SINGLEGROUP);
     hsa_errno = rocprofiler_open(agent_arr.agents[i], features[i], features_count, &contexts[i],
                                  mode, &properties);
-    const char* error_string;
+    const char* error_string = nullptr;
     rocprofiler_error_string(&error_string);
     if (error_string != NULL) {
-      fprintf(stdout, "%s", error_string);
-      fflush(stdout);
+      RDC_LOG(RDC_ERROR, error_string);
     }
     assert(hsa_errno == HSA_STATUS_SUCCESS);
   }
@@ -155,6 +158,7 @@ int RdcRocpBase::run_profiler(const char* feature_name) {
   }
 
   // this is the duration for which the counter increments from zero.
+  // TODO: Return error if sampling interval is lower than this value
   usleep(10000);
 
   for (int i = 0; i < dev_count; ++i) {
@@ -163,8 +167,6 @@ int RdcRocpBase::run_profiler(const char* feature_name) {
   }
 
   for (int i = 0; i < dev_count; ++i) {
-    // printf("Iteration %d\n", loopcount++);
-    // fprintf(stdout, "------ Collecting Device[%d] -------\n", i);
     read_features(contexts[i], features_count);
   }
 
@@ -205,19 +207,11 @@ RdcRocpBase::RdcRocpBase() {
   // populate monitored fields
   std::cout << "Size of counter_map_k: " << counter_map_k.size() << "\n";
 
-  for (auto& k : counter_map_k) {
-    printf("metric %d = %s\n", k.first, k.second);
-  }
   for (auto& [k, v] : counter_map_k) {
     const char* str = v;
     metrics.emplace(std::make_pair(str, 0.0));
   }
   assert(metrics.size() == counter_map_k.size());
-
-  printf("Metric size %d\n", (int)metrics.size());
-  for (auto& metric : metrics) {
-    printf("Metric: %s\n", metric.first);
-  }
 
   hsa_status_t err = hsa_init();
   if (err != HSA_STATUS_SUCCESS) {
@@ -231,22 +225,19 @@ RdcRocpBase::RdcRocpBase() {
   if (errcode != 0) {
     return;
   }
-  printf("number of devices: %u\n", agent_arr.count);
-  printf("devices being profiled: %u\n", dev_count);
 
   for (int i = 0; i < dev_count; ++i) {
     int j = 0;
     for (auto& metric : metrics) {
       features[i][j].kind = (rocprofiler_feature_kind_t)ROCPROFILER_FEATURE_KIND_METRIC;
       features[i][j].name = metric.first;
-      printf("Metric[%d]: %s\n", j, features[i][j].name);
       j++;
     }
   }
 
   for (int i = 0; i < dev_count; ++i) {
     if (!createHsaQueue(&queues[i], agent_arr.agents[i])) {
-      fprintf(stdout, "can't create queues[%d]\n", i);
+      RDC_LOG(RDC_ERROR, "can't create queues[" << i << "]\n");
     }
   }
 }
