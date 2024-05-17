@@ -1,3 +1,18 @@
+Version 2.0.0 (17 May 2024)
+
+  * improved logging than spans all modes (#177) (#317) (#335) (#341)
+  * overhauled CI/CD that spans all modes (#179)
+  * extensible SoC classes to better support adding new hardware configs (#180)
+  * --kernel-verbose no longer overwrites kernel names (#193)
+  * general cleanup and improved organization of source code (#200) (#210) 
+  * separate requirement files for docs and testing dependencies (#205) (#262) (#358)
+  * add support for MI300 hardware (#231)
+  * upgrade Grafana assets and build script to latest release (#235)
+  * update minimum ROCm and Python requirements (#277)
+  * sort rocprofiler input files prior to profiling (#304)
+  * new --quiet option will suppress verbose output and show a progress bar (#308)
+  * roofline support for Ubuntu 22.04 (#319)
+
 Version 1.1.0-PR1 (13 Oct 2023)
 
   * standardize headers to use 'avg' instead of 'mean'
