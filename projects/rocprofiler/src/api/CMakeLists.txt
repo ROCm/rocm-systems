@@ -70,7 +70,8 @@ set(OLD_LIB_SRC
     ${LIB_DIR}/core/intercept_queue.cpp
     ${LIB_DIR}/core/metrics.cpp
     ${LIB_DIR}/core/activity.cpp
-    ${LIB_DIR}/util/hsa_rsrc_factory.cpp)
+    ${LIB_DIR}/util/hsa_rsrc_factory.cpp
+    ${LIB_DIR}/core/profiling_lock.cpp)
 
 # ########################################################################################
 # Configuring Basic/Derived Counters
@@ -213,6 +214,7 @@ file(GLOB CORE_SESSION_SRC_FILES ${CORE_SESSION_DIR}/session.cpp)
 file(GLOB CORE_FILTER_SRC_FILES ${CORE_SESSION_DIR}/filter.cpp)
 file(GLOB CORE_DEVICE_PROFILING_SRC_FILES ${CORE_SESSION_DIR}/device_profiling.cpp)
 file(GLOB CORE_COUNTERS_SAMPLER_SRC_FILES ${CORE_SESSION_DIR}/counters_sampler.cpp)
+file(GLOB CORE_PROFILING_LOCK_FILES ${PROJECT_SOURCE_DIR}/src/core/profiling_lock.cpp)
 
 file(GLOB CORE_COUNTERS_SRC_FILES ${PROJECT_BINARY_DIR}/src/api/*_counter.cpp)
 file(GLOB CORE_COUNTERS_PARENT_SRC_FILES ${PROJECT_SOURCE_DIR}/src/core/counters/*.cpp)
@@ -289,7 +291,8 @@ add_library(
     ${ROCPROFILER_ROCTRACER_SRC_FILES}
     ${GENERATED_SOURCES}
     ${CORE_COUNTERS_SRC_FILES}
-    ${CORE_PC_SAMPLING_FILES})
+    ${CORE_PC_SAMPLING_FILES}
+    ${CORE_PROFILING_LOCK_FILES})
 set_target_properties(
     rocprofiler-v2
     PROPERTIES CXX_VISIBILITY_PRESET hidden

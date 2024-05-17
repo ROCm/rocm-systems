@@ -9,6 +9,7 @@
 #include "src/api/rocprofiler_singleton.h"
 #include "src/utils/helper.h"
 #include "src/core/isa_capture/code_object_track.hpp"
+#include "core/profiling_lock.h"
 
 // TODO(aelwazir): change that to adapt with our own Exception
 // What about outside exceptions and callbacks exceptions!!
@@ -617,6 +618,7 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                                uint64_t failed_tool_count, const char* const* failed_tool_names) {
   if (started) rocprofiler::fatal("HSA Tool started already!");
   started = true;
+  ProfilingLock::Lock(PROFILER_V2_LOCK);
   rocprofiler::HSASupport_Singleton::GetInstance().HSAInitialize(table);
   return true;
 }

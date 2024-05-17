@@ -39,6 +39,7 @@ THE SOFTWARE.
 #include "util/exception.h"
 #include "util/hsa_rsrc_factory.h"
 #include "util/logger.h"
+#include "core/profiling_lock.h"
 
 #define PUBLIC_API __attribute__((visibility("default")))
 #define CONSTRUCTOR_API __attribute__((constructor))
@@ -393,6 +394,7 @@ ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 25;
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
+  ProfilingLock::Lock(PROFILER_V1_LOCK);
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
 
