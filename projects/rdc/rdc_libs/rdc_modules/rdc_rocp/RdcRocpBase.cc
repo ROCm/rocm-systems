@@ -202,6 +202,8 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_ACTIVE_CYCLES, "ACTIVE_CYCLES"},
       {RDC_FI_PROF_ACTIVE_WAVES, "ACTIVE_WAVES"},
       {RDC_FI_PROF_ELAPSED_CYCLES, "ELAPSED_CYCLES"},
+      {RDC_FI_PROF_FETCH_SIZE, "FETCH_SIZE"},
+      {RDC_FI_PROF_WRITE_SIZE, "WRITE_SIZE"},
   };
 
   // populate monitored fields
