@@ -337,6 +337,13 @@ Usage:
   rocprofv2 --plugin ctf --hip-trace -d output_dir <app_relative_path> # -d is optional, but can be used to define the directory output for output results
   ```
 
+- JSON plugin: Outputs `.json` file, the JSON file matches Google Trace Format, so it should be easily loaded to perfetto, chrome tracing or speedscope. For Speedscope, `--disable-json-data-flows` option will be needed as speedscope doesn't work with data flows.
+Usage:
+
+  ```bash
+  rocprofv2 --plugin json --hip-trace -d output_dir <app_relative_path>
+  ```
+
 - ATT (Advanced thread tracer) plugin: advanced hardware traces data in binary format. Please refer ATT section.
 Tool used to collect fine-grained hardware metrics. Provides ISA-level instruction hotspot analysis via hardware tracing.
 
@@ -641,6 +648,7 @@ Please report in the Github Issues.
   Recommended: "profile_standard" for counter collection and "auto" for all other profiling. Use rocm-smi to verify the current power state. For multiGPU systems (includes integrated graphics), replace "card0" by the desired card.
 - Timestamps may be incorrect with HIP_OPS when the system has been in sleep state.
 - HIP_OPS are mutually exclusive with HSA_OPS.
+- JSON Plugin as of now doesn't have an automated way to merge for multiple processes, a file will be generated per process (rank).
 
 ## Supported AMD GPU Architectures (V2)
 

@@ -334,3 +334,9 @@ Example for file plugin output:
 ### Removed
 
 - pcsampler sample code has been removed due to deprecation from v2.
+
+## ROCprofiler for rocm 6.3
+
+### Added
+
+- JSON output plugin for rocprofv2, the JSON file matches Google Trace Format, so it should be easily loaded to perfetto, chrome tracing or speedscope. For Speedscope, `--disable-json-data-flows` option will be needed as speedscope doesn't work with data flows.

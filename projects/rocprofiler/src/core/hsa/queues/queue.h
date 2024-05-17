@@ -46,7 +46,7 @@ void RemoveKernelName(uint64_t handle);
 void AddKernelNameWithDispatchID(std::string name, uint64_t id);
 std::string GetKernelNameUsingDispatchID(uint64_t given_id);
 std::string GetKernelNameFromKsymbols(uint64_t handle);
-uint32_t GetCurrentActiveInterruptSignalsCount();
+// uint32_t GetCurrentActiveInterruptSignalsCount();
 
 namespace queue {
 

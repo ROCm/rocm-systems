@@ -62,8 +62,7 @@
 #include "core/session/att/att.h"
 
 
-struct PluginHeaderPacket
-{
+struct PluginHeaderPacket {
   std::string plugin_path;
   void* userdata;
 };
@@ -95,6 +94,7 @@ std::atomic<bool> roc_sys_handler{false};
 std::atomic<bool> session_created{false};
 std::atomic<bool> trace_period_thread_control{false};
 std::atomic<bool> flush_thread_control{false};
+std::atomic<bool> rocprof_started{false};
 
 [[maybe_unused]] static rocprofiler_session_id_t session_id;
 static std::vector<rocprofiler_filter_id_t> filter_ids;
@@ -266,8 +266,7 @@ std::vector<std::string> GetCounterNames() {
   return counters;
 }
 
-struct att_parsed_input_t
-{
+struct att_parsed_input_t {
   std::vector<std::pair<rocprofiler_att_parameter_name_t, uint32_t>> params{};
   std::vector<std::string> kernel_names{};
   std::vector<std::string> counters_names{};
@@ -311,9 +310,9 @@ att_parsed_input_t GetATTParams() {
 
   // Default values used for token generation.
   std::unordered_map<std::string, uint32_t> default_params = {
-      {"SE_MASK", 0x111111},        // One every 4 SEs, by default
-      {"SIMD_SELECT", 0x3},         // 0x3 works for both gfx9 and Navi
-      {"BUFFER_SIZE", 0xA000000},   // 160MB
+      {"SE_MASK", 0x111111},       // One every 4 SEs, by default
+      {"SIMD_SELECT", 0x3},        // 0x3 works for both gfx9 and Navi
+      {"BUFFER_SIZE", 0xA000000},  // 160MB
       {"ISA_CAPTURE_MODE", static_cast<uint32_t>(ROCPROFILER_CAPTURE_COPY_MEMORY)}};
 
   std::ifstream trace_file(path);
@@ -414,7 +413,13 @@ att_parsed_input_t GetATTParams() {
   return ret;
 }
 
+std::mutex finish_lock{};
+
 void finish() {
+  std::lock_guard<std::mutex> lock(finish_lock);
+
+  if (!rocprof_started.load(std::memory_order_acquire)) return;
+
   if (trace_period_thread_control.load(std::memory_order_acquire)) {
     trace_period_thread_control.exchange(false, std::memory_order_release);
     trace_period_thread.join();
@@ -437,7 +442,8 @@ void finish() {
     CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
   }
 
-  // delete plugin;
+  delete plugin;
+  rocprof_started.exchange(false, std::memory_order_acquire);
   // If hsa_shut_down() is not called from the application then we may still have async calls back
   // to the rocprofiler to use session parameters, thats why we need to leak the session up till
   // this is fixed in the ROCR-Runtime
@@ -486,8 +492,7 @@ void plugins_load(void* userdata) {
     }
 
     bool bIsATT = std::string_view(plugin_name) == "libatt_plugin.so";
-    if (!bIsATT)
-      env_var_replace("OUTPUT_PATH");
+    if (!bIsATT) env_var_replace("OUTPUT_PATH");
     env_var_replace("OUT_FILE_NAME");
 
     std::string out_path = getenv("OUTPUT_PATH") ? getenv("OUTPUT_PATH") : "";
@@ -505,9 +510,8 @@ void plugins_load(void* userdata) {
     }
 
     PluginHeaderPacket header{
-      .plugin_path = fs::path(dl_info.dli_fname).replace_filename(plugin_name),
-      .userdata = userdata
-    };
+        .plugin_path = fs::path(dl_info.dli_fname).replace_filename(plugin_name),
+        .userdata = userdata};
     plugin = new rocprofiler_plugin_t{header};
     if (!plugin->is_valid()) {
       delete plugin;
@@ -698,6 +702,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
     warning("the ROCProfiler API version is not compatible with this tool");
     return true;
   }
+  rocprof_started.exchange(true, std::memory_order_acquire);
 
   std::atexit(finish);
 
@@ -859,7 +864,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
         if (att_params.dispatch_ids.size()) {  // Correlation ID filter
           property.kind = ROCPROFILER_FILTER_DISPATCH_IDS;
           property.data_count = att_params.dispatch_ids.size();
-          property.dispatch_ids = reinterpret_cast<decltype(property.dispatch_ids)>(att_params.dispatch_ids.data());
+          property.dispatch_ids =
+              reinterpret_cast<decltype(property.dispatch_ids)>(att_params.dispatch_ids.data());
         } else {  // Kernel names filter
           for (auto& name : att_params.kernel_names) kernel_names_c.push_back(name.data());
 
@@ -920,6 +926,6 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
 /**
 @brief Callback function upon unloading the HSA.
 */
-ROCPROFILER_EXPORT void OnUnload() { printf("\n\nTool is getting unloaded\n\n"); }
+ROCPROFILER_EXPORT void OnUnload() { finish(); }
 
 }  // extern "C"

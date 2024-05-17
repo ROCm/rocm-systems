@@ -39,3 +39,5 @@ endif()
 if(ROCPROFILER_BUILD_PLUGIN_CTF)
     add_subdirectory(ctf)
 endif()
+
+add_subdirectory(json)
