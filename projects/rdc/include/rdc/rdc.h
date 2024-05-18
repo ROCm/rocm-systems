@@ -258,6 +258,8 @@ typedef enum {
   RDC_FI_PROF_ACTIVE_CYCLES,
   RDC_FI_PROF_ACTIVE_WAVES,
   RDC_FI_PROF_ELAPSED_CYCLES,
+  RDC_FI_PROF_FETCH_SIZE,
+  RDC_FI_PROF_WRITE_SIZE,
 
   /*
    * @brief Raw XGMI counter events
