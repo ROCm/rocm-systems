@@ -25,8 +25,6 @@
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
 
-#include <glog/logging.h>
-
 #include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <unistd.h>

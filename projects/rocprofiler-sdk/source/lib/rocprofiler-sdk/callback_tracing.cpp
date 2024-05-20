@@ -38,8 +38,6 @@
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include <glog/logging.h>
-
 #include <atomic>
 #include <cstdint>
 #include <vector>
@@ -358,7 +356,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         const char* name = "(unknown)";
         rocprofiler_query_callback_tracing_kind_operation_name(
             record.kind, record.operation, &name, nullptr);
-        LOG(WARNING) << __FUNCTION__
+        ROCP_WARNING << __FUNCTION__
                      << " invoked with a max dereference count > 1 when the record.phase == "
                      << "ROCPROFILER_CALLBACK_PHASE_ENTER for '" << name
                      << "' record. This may result in a segmentation fault";

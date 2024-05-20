@@ -29,7 +29,6 @@
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
 
-#include <glog/logging.h>
 #include <rocprofiler-register/rocprofiler-register.h>
 
 #include <array>
@@ -179,7 +178,7 @@ struct roctx_api_table
 auto*&
 get_table_impl()
 {
-    rocprofiler::common::init_logging("ROCTX_LOG_LEVEL");
+    rocprofiler::common::init_logging("ROCTX");
 
     auto*& tbl = rocprofiler::common::static_object<roctx_api_table>::construct();
 
@@ -214,7 +213,7 @@ get_table_impl()
     ROCP_INFO << "[rocprofiler-sdk-roctx][" << getpid() << "] rocprofiler-register returned code "
               << rocp_reg_status << ": " << rocprofiler_register_error_string(rocp_reg_status);
 
-    LOG_IF(WARNING, rocp_reg_status != ROCP_REG_SUCCESS && rocp_reg_status != ROCP_REG_NO_TOOLS)
+    ROCP_WARNING_IF(rocp_reg_status != ROCP_REG_SUCCESS && rocp_reg_status != ROCP_REG_NO_TOOLS)
         << "[rocprofiler-sdk-roctx][" << getpid()
         << "] rocprofiler-register failed with error code " << rocp_reg_status << ": "
         << rocprofiler_register_error_string(rocp_reg_status);

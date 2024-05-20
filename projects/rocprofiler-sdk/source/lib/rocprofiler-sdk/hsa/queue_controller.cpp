@@ -29,8 +29,6 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
-#include <glog/logging.h>
-
 namespace rocprofiler
 {
 namespace hsa

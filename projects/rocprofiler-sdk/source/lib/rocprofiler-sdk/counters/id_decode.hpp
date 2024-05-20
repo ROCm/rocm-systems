@@ -22,11 +22,13 @@
 
 #pragma once
 
-#include <unordered_map>
-
 #include <rocprofiler-sdk/fwd.h>
 
-#include <glog/logging.h>
+#include "lib/common/logging.hpp"
+
+#include <limits>
+#include <string_view>
+#include <unordered_map>
 
 namespace rocprofiler
 {

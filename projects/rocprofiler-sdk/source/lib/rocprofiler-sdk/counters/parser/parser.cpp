@@ -70,8 +70,6 @@
 #include <stdexcept>
 #include <string>
 
-#include <glog/logging.h>
-
 #include "raw_ast.hpp"
 
 int

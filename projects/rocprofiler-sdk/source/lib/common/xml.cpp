@@ -23,8 +23,6 @@
 #include "lib/common/xml.hpp"
 #include "lib/common/logging.hpp"
 
-#include <glog/logging.h>
-
 namespace rocprofiler
 {
 namespace common

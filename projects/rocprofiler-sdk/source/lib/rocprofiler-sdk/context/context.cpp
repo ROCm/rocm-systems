@@ -34,8 +34,6 @@
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
 
-#include <glog/logging.h>
-
 #include <unistd.h>
 #include <atomic>
 #include <cstddef>

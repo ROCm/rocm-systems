@@ -46,7 +46,7 @@
         auto _status = (fn);                                                                       \
         if(_status != HSA_STATUS_SUCCESS)                                                          \
         {                                                                                          \
-            LOG(ERROR) << "HSA Err: " << _status << '\n';                                          \
+            ROCP_ERROR << "HSA Err: " << _status << '\n';                                          \
             throw std::runtime_error(message);                                                     \
         }                                                                                          \
     }
@@ -105,7 +105,7 @@ pre_kernel_call(ThreadTracer&                  tracer,
         return moved;
     } catch(std::out_of_range& e)
     {
-        LOG(WARNING) << "Attempt to initialize ATT without allocated resources!\n";
+        ROCP_WARNING << "Attempt to initialize ATT without allocated resources!\n";
         return nullptr;
     }
 }
@@ -127,7 +127,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
         cpu_data.data(), buffer, size);
     if(status != HSA_STATUS_SUCCESS)
     {
-        LOG(WARNING) << "Failed to copy hsa memory!";
+        ROCP_WARNING << "Failed to copy hsa memory!";
         return HSA_STATUS_SUCCESS;
     }
 

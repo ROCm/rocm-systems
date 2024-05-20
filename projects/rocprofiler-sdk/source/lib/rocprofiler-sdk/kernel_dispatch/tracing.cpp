@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -35,17 +36,10 @@
 
 #include <string_view>
 
-#if defined(ROCPROFILER_CI)
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
-#else
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
-#endif
-
 #define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
     auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
-    LOG_IF(SEVERITY, ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) != HSA_STATUS_SUCCESS)   \
+    ROCP_##SEVERITY##_IF(ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) !=                   \
+                         HSA_STATUS_SUCCESS)                                                       \
         << #EXPR << " returned non-zero status code "                                              \
         << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
         << ::rocprofiler::hsa::get_hsa_status_string(                                              \

@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/marker/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
+#include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
@@ -36,8 +37,6 @@
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-
-#include <glog/logging.h>
 
 #include <atomic>
 #include <limits>

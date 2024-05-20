@@ -36,7 +36,6 @@
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <glog/logging.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 
@@ -58,14 +57,6 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
 static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_barrier_or_packet_t, completion_signal),
               "unexpected ABI incompatibility");
-
-#if defined(ROCPROFILER_CI)
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
-#else
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
-#endif
 
 namespace rocprofiler
 {
@@ -150,7 +141,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     auto* _corr_id = queue_info_session.correlation_id;
     if(_corr_id)
     {
-        LOG_IF(FATAL, _corr_id->get_ref_count() == 0)
+        ROCP_FATAL_IF(_corr_id->get_ref_count() == 0)
             << "reference counter for correlation id " << _corr_id->internal << " from thread "
             << _corr_id->thread_idx << " has no reference count";
         _corr_id->sub_kern_count();
@@ -219,7 +210,7 @@ WriteInterceptor(const void* packets,
         _packets.emplace_back(barrier);
     };
 
-    LOG_IF(FATAL, data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
+    ROCP_FATAL_IF(data == nullptr) << "WriteInterceptor was not passed a pointer to the queue";
 
     auto& queue = *static_cast<Queue*>(data);
 
@@ -419,7 +410,7 @@ WriteInterceptor(const void* packets,
             transformed_packets.emplace_back(barrier);
         }
 
-        LOG_IF(FATAL, packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
+        ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
             << "get_kernel_id below might need to be updated";
 
         // Enqueue the signal into the handler. Will call completed_cb when
@@ -520,7 +511,7 @@ Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_sessio
 #endif
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
         signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, static_cast<void*>(data));
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_async_handler failed";
 }
 
@@ -528,7 +519,7 @@ void
 Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
 {
     hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
-    LOG_IF(FATAL, status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
         << "Error: hsa_amd_signal_create failed";
 }
 
@@ -546,7 +537,7 @@ void
 Queue::register_callback(ClientID id, queue_cb_t enqueue_cb, completed_cb_t complete_cb)
 {
     _callbacks.wlock([&](auto& map) {
-        LOG_IF(FATAL, rocprofiler::common::get_val(map, id)) << "ID already exists!";
+        ROCP_FATAL_IF(rocprofiler::common::get_val(map, id)) << "ID already exists!";
         _notifiers++;
         map[id] = std::make_pair(enqueue_cb, complete_cb);
     });

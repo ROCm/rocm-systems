@@ -26,13 +26,7 @@ add_test(
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
-    set(LOG_LEVEL "warning") # info produces memory leak
-else()
-    set(LOG_LEVEL "info")
-endif()
-
-set(cc-env-pmc1 "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
+set(cc-env-pmc1 "${PRELOAD_ENV}")
 
 set_tests_properties(
     rocprofv3-test-counter-collection-pmc1-execute

@@ -22,6 +22,12 @@
 
 #pragma once
 
+#include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+
+#include <fmt/core.h>
+#include <fmt/ranges.h>
+
 #include <map>
 #include <optional>
 #include <string>
@@ -30,13 +36,6 @@
 #include <utility>
 #include <variant>
 #include <vector>
-
-#include <fmt/core.h>
-#include <fmt/ranges.h>
-#include <glog/logging.h>
-
-#include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
 namespace rocprofiler
 {

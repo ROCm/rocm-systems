@@ -23,8 +23,6 @@
 #include "lib/rocprofiler-sdk/allocator.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include <glog/logging.h>
-
 #include <mutex>
 
 namespace rocprofiler

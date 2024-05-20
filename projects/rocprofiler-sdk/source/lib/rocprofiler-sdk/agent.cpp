@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
@@ -34,7 +35,6 @@
 #include <fmt/core.h>
 #include <fmt/format.h>
 #include <fmt/ranges.h>
-#include <glog/logging.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <libdrm/amdgpu.h>
@@ -222,7 +222,7 @@ is_readable(const fs::path& fpath)
 {
     auto ec    = std::error_code{};
     auto perms = fs::status(fpath, ec).permissions();
-    LOG_IF(ERROR, ec) << fmt::format(
+    ROCP_ERROR_IF(ec) << fmt::format(
         "Error getting status for file '{}': {}", fpath.string(), ec.message());
     return (!ec && (perms & fs::perms::owner_read) != fs::perms::none);
 }
@@ -773,7 +773,7 @@ construct_agent_cache(::HsaApiTable* table)
                 static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_DRIVER_NODE_ID),
                 &internal_node_id);
 
-            LOG_IF(ERROR, ret != HSA_STATUS_SUCCESS)
+            ROCP_ERROR_IF(ret != HSA_STATUS_SUCCESS)
                 << "hsa_agent_get_info(hsa_agent_t=" << hitr.handle
                 << ", HSA_AMD_AGENT_INFO_DRIVER_NODE_ID, ...) returned " << ret
                 << " :: " << get_hsa_status_string(ret);
@@ -782,7 +782,7 @@ construct_agent_cache(::HsaApiTable* table)
             {
                 {
                     auto ret_emplace = rocp_hsa_agent_node_ids.emplace(internal_node_id).second;
-                    LOG_IF(WARNING, !ret_emplace)
+                    ROCP_WARNING_IF(!ret_emplace)
                         << "duplicate internal node id " << internal_node_id;
                 }
 
@@ -800,7 +800,7 @@ construct_agent_cache(::HsaApiTable* table)
         }
     }
 
-    LOG_IF(FATAL, !rocp_hsa_agent_node_ids.empty())
+    ROCP_FATAL_IF(!rocp_hsa_agent_node_ids.empty())
         << "Found " << rocp_agents.size() << " rocprofiler agents and " << hsa_agents.size()
         << " HSA agents. HSA agents contained " << rocp_hsa_agent_node_ids.size()
         << " internal node ids not found by rocprofiler: "
@@ -848,7 +848,7 @@ construct_agent_cache(::HsaApiTable* table)
 
     ROCP_INFO << "# agent node maps: " << hsa_agent_node_map.size();
 
-    LOG_IF(FATAL, agent_map.size() != hsa_agents.size())
+    ROCP_FATAL_IF(agent_map.size() != hsa_agents.size())
         << "rocprofiler was only able to map " << agent_map.size()
         << " rocprofiler agents to HSA agents, expected " << hsa_agents.size();
 
@@ -873,14 +873,14 @@ construct_agent_cache(::HsaApiTable* table)
                 auto        _from   = io_link.node_from;
                 auto        _to     = io_link.node_to;
 
-                LOG_IF(FATAL, _from != node_id)
+                ROCP_FATAL_IF(_from != node_id)
                     << "unexpected condition for node_id=" << node_id << ". io_link[" << i
                     << "].node_from=" << _from
                     << ". Expected this to match the node_id (node_to=" << _to << ")";
 
                 if(agent_map.find(_to) == agent_map.end())
                 {
-                    LOG(WARNING) << "no agent mapping for io_link[" << i << "].node_to=" << _to
+                    ROCP_WARNING << "no agent mapping for io_link[" << i << "].node_to=" << _to
                                  << " in rocprofiler agent " << node_id;
                     continue;
                 }

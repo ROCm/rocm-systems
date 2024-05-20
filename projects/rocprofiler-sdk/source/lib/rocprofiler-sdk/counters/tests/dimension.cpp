@@ -182,7 +182,7 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
     std::vector<counters::Metric> ret;
     auto                          all_counters = counters::getMetricMap();
 
-    ROCP_ERROR << "Looking up counters for " << std::string(agent.name());
+    ROCP_INFO << "Looking up counters for " << std::string(agent.name());
     auto gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
@@ -234,7 +234,7 @@ TEST(dimension, block_dim_test)
              */
             std::unordered_map<counters::rocprofiler_profile_counter_instance_types, uint64_t>
                 rocp_dims;
-            ROCP_ERROR << metric.name() << " " << metric.special();
+            ROCP_INFO << metric.name() << " " << metric.special();
             if(!metric.special().empty())
             {
                 rocp_dims[counters::rocprofiler_profile_counter_instance_types::

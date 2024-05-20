@@ -28,8 +28,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <glog/logging.h>
-
 namespace rocprofiler
 {
 namespace context
@@ -64,7 +62,7 @@ correlation_id::add_ref_count()
 {
     auto _ret = m_ref_count.fetch_add(1);
 
-    LOG_IF(FATAL, _ret == 0) << "correlation id already retired";
+    ROCP_FATAL_IF(_ret == 0) << "correlation id already retired";
 
     return _ret;
 }
@@ -74,7 +72,7 @@ correlation_id::sub_ref_count()
 {
     auto _ret = m_ref_count.fetch_sub(1);
 
-    LOG_IF(FATAL, _ret == 0) << "correlation id underflow";
+    ROCP_FATAL_IF(_ret == 0) << "correlation id underflow";
 
     if(_ret == 1)
     {
@@ -102,7 +100,7 @@ correlation_id::sub_ref_count()
                     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,
                     record);
 
-                LOG_IF(FATAL, !success) << "failed to emplace correlation id retirement";
+                ROCP_FATAL_IF(!success) << "failed to emplace correlation id retirement";
             }
         }
     }
@@ -125,7 +123,7 @@ correlation_id::sub_kern_count()
 correlation_id*
 correlation_tracing_service::construct(uint32_t _init_ref_count)
 {
-    LOG_IF(FATAL, _init_ref_count == 0) << "must have reference count > 0";
+    ROCP_FATAL_IF(_init_ref_count == 0) << "must have reference count > 0";
 
     auto  _internal_id = get_unique_internal_id();
     auto* corr_id_map  = get_correlation_id_map();
@@ -160,7 +158,7 @@ pop_latest_correlation_id(correlation_id* val)
         return nullptr;
     }
 
-    LOG_IF(ERROR, get_latest_correlation_id_impl().back() != val)
+    ROCP_ERROR_IF(get_latest_correlation_id_impl().back() != val)
         << "pop_latest_correlation_id is happening out of order for " << val->internal
         << ". top of stack is " << get_latest_correlation_id_impl().back()->internal;
 

@@ -11,14 +11,7 @@ project(
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
-    set(LOG_LEVEL "warning") # info produces memory leak
-else()
-    set(LOG_LEVEL "info")
-endif()
-
-set(tracing-env "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}"
-                "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}")
+set(tracing-env "${PRELOAD_ENV}")
 
 foreach(FILENAME validate.py conftest.py)
     configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}

@@ -20,10 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/common/logging.hpp"
 
 #include <fmt/core.h>
-#include <glog/logging.h>
 #include <stdexcept>
 
 namespace
@@ -45,16 +45,14 @@ FindGlobalPool(hsa_amd_memory_pool_t pool, void* data, bool kern_arg)
     auto [api_ptr, pool_ptr] =
         *static_cast<std::pair<const AmdExtTable*, hsa_amd_memory_pool_t*>*>(data);
     hsa_amd_segment_t segment;
-    LOG_IF(FATAL,
-           api_ptr->hsa_amd_memory_pool_get_info_fn(
-               pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) == HSA_STATUS_ERROR)
+    ROCP_FATAL_IF(api_ptr->hsa_amd_memory_pool_get_info_fn(
+                      pool, HSA_AMD_MEMORY_POOL_INFO_SEGMENT, &segment) == HSA_STATUS_ERROR)
         << "Could not get pool segment";
     if(HSA_AMD_SEGMENT_GLOBAL != segment) return HSA_STATUS_SUCCESS;
 
     uint32_t flag;
-    LOG_IF(FATAL,
-           api_ptr->hsa_amd_memory_pool_get_info_fn(
-               pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag) == HSA_STATUS_ERROR)
+    ROCP_FATAL_IF(api_ptr->hsa_amd_memory_pool_get_info_fn(
+                      pool, HSA_AMD_MEMORY_POOL_INFO_GLOBAL_FLAGS, &flag) == HSA_STATUS_ERROR)
         << "Could not get flag value";
     uint32_t karg_st = flag & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT;
     if((karg_st == 0 && kern_arg) || (karg_st != 0 && !kern_arg))
@@ -143,7 +141,7 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
         init_gpu_pool(ext_table, *this);
     } catch(std::runtime_error& e)
     {
-        LOG(WARNING) << fmt::format(
+        ROCP_WARNING << fmt::format(
             "Buffer creation for Agent {} failed ({}), Some profiling options will be unavailable.",
             rocp_agent->node_id,
             e.what());

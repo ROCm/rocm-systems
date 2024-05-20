@@ -35,7 +35,6 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
-#include <glog/logging.h>
 #include <hip/driver_types.h>
 #include <hip/hip_runtime_api.h>
 // must be included after runtime api
@@ -192,7 +191,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
     constexpr auto external_corr_id_domain_idx =
         hip_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
-    LOG_IF(INFO, registration::get_fini_status() != 0) << "Executing " << info_type::name;
+    ROCP_INFO_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
 
     constexpr auto ref_count         = 2;
     auto           thr_id            = common::get_tid();
@@ -216,7 +215,7 @@ hip_api_impl<TableIdx, OpIdx>::functor(Args... args)
             return;
     }
 
-    LOG_IF(FATAL, external_corr_ids.size() < (callback_contexts.size() + buffered_contexts.size()))
+    ROCP_FATAL_IF(external_corr_ids.size() < (callback_contexts.size() + buffered_contexts.size()))
         << "missing external correlation ids";
 
     auto  buffer_record    = common::init_public_api_struct(buffered_api_data_t{});
@@ -438,7 +437,7 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         auto& _copy_table = _info.get_table(get_table());
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
-        LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
+        ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
             << _info.name << " has non-null function pointer " << _copy_func
             << " despite this being the first instance of the library being copies";
 

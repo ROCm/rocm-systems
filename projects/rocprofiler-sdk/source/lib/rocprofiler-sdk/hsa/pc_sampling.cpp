@@ -24,6 +24,7 @@
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
+#    include "lib/common/logging.hpp"
 #    include "lib/rocprofiler-sdk/hsa/defines.hpp"
 #    include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
@@ -133,18 +134,18 @@ copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t _tbl_instance)
         auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}(LookupT{}));
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
-        LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
+        ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
             << _info.name << " has non-null function pointer " << _copy_func
             << " despite this being the first instance of the library being copies";
 
         if(!_copy_func)
         {
-            LOG(INFO) << "copying table entry for " << _info.name;
+            ROCP_INFO << "copying table entry for " << _info.name;
             _copy_func = _orig_func;
         }
         else
         {
-            LOG(INFO) << "skipping copying table entry for " << _info.name
+            ROCP_INFO << "skipping copying table entry for " << _info.name
                       << " from table instance " << _tbl_instance;
         }
     }

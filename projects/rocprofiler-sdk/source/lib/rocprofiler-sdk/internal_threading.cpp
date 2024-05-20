@@ -33,7 +33,6 @@
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
-#include <glog/logging.h>
 #include <pthread.h>
 
 #include <cstdint>

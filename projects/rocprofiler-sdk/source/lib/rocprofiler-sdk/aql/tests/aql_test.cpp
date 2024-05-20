@@ -20,7 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
 
 #include <functional>
@@ -78,7 +77,7 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
     std::vector<counters::Metric> ret;
     auto                          all_counters = counters::getBaseHardwareMetrics();
 
-    ROCP_ERROR << "Looking up counters for " << std::string(agent.name());
+    ROCP_INFO << "Looking up counters for " << std::string(agent.name());
     auto gfx_metrics = common::get_val(all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
@@ -119,7 +118,7 @@ TEST(aql_profile, construct_packets)
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
-        LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
+        ROCP_INFO << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
         auto metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
         ASSERT_EQ(metrics.size(), 1);
         CounterPacketConstruct(agent.get_rocp_agent()->id, metrics);
@@ -135,7 +134,7 @@ TEST(aql_profile, too_many_counters)
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
-        LOG(WARNING) << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
+        ROCP_INFO << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
 
         auto metrics = rocprofiler::findDeviceMetrics(agent, {});
         EXPECT_THROW(

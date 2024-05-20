@@ -79,7 +79,7 @@ getBlockDimensions(std::string_view agent, const Metric& metric)
                     }
                     else
                     {
-                        ROCP_ERROR << "Unknown AQL Profiler Dimension " << id << " " << extent;
+                        ROCP_WARNING << "Unknown AQL Profiler Dimension " << id << " " << extent;
                     }
                 }
             }

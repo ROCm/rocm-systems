@@ -84,7 +84,7 @@ output_file::output_file(std::string                       name,
 
     for(auto& itr : header)
     {
-        LOG_IF(FATAL, itr.empty())
+        ROCP_FATAL_IF(itr.empty())
             << "CSV file for " << m_name << " was not provided the correct number of headers";
     }
 

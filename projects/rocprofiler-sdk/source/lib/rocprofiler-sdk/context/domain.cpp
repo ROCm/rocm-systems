@@ -25,8 +25,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <glog/logging.h>
-
 #include <limits>
 
 namespace rocprofiler

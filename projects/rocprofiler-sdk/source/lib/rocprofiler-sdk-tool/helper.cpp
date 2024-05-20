@@ -25,8 +25,6 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
-#include <glog/logging.h>
-
 #include <atomic>
 #include <iostream>
 #include <mutex>

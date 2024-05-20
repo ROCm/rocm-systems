@@ -22,7 +22,6 @@
 
 #include "metrics_test.h"
 
-#include <glog/logging.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -75,7 +74,7 @@ TEST(metrics, base_load)
     auto find = [&rocp_data_v](const auto& v) -> std::optional<counters::Metric> {
         for(const auto& ditr : rocp_data_v)
         {
-            ROCP_ERROR << fmt::format("{}", ditr);
+            ROCP_INFO << fmt::format("{}", ditr);
             if(ditr.name() == v.name()) return ditr;
         }
         return std::nullopt;

@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 
 #include <fmt/core.h>
-#include <glog/logging.h>
 
 #include <rocprofiler-sdk/fwd.h>
 

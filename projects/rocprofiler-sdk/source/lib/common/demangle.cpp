@@ -23,8 +23,6 @@
 #include "lib/common/demangle.hpp"
 #include "lib/common/logging.hpp"
 
-#include <glog/logging.h>
-
 #include <cxxabi.h>
 #include <cstdarg>
 #include <cstdint>

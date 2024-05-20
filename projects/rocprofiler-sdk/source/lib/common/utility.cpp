@@ -24,8 +24,6 @@
 #include "lib/common/utility.hpp"
 #include "lib/common/logging.hpp"
 
-#include <glog/logging.h>
-
 #include <unistd.h>
 #include <cerrno>
 #include <cstring>

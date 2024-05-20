@@ -111,7 +111,7 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
     std::vector<counters::Metric> ret;
     auto                          all_counters = counters::getMetricMap();
 
-    ROCP_ERROR << "Looking up counters for " << std::string(agent.name());
+    ROCP_INFO << "Looking up counters for " << std::string(agent.name());
     auto gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {

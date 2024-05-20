@@ -88,7 +88,7 @@ loadXml(const std::string& filename, bool load_constants = false)
     ROCP_INFO << "Loading Counter Config: " << filename;
     // todo: return unique_ptr....
     auto xml = common::Xml::Create(filename);
-    LOG_IF(FATAL, !xml)
+    ROCP_FATAL_IF(!xml)
         << "Could not open XML Counter Config File (set env ROCPROFILER_METRICS_PATH)";
 
     const auto& constant_metrics = get_constants();
@@ -128,7 +128,7 @@ loadXml(const std::string& filename, bool load_constants = false)
         }
     }
 
-    LOG_IF(FATAL, current_id() > 65536)
+    ROCP_FATAL_IF(current_id() > 65536)
         << "Counter count exceeds 16 bits, which may break counter id output";
     return ret;
 }
@@ -164,7 +164,7 @@ MetricMap
 getDerivedHardwareMetrics()
 {
     auto counters_path = findViaEnvironment("derived_counters.xml");
-    LOG_IF(FATAL, !common::filesystem::exists(counters_path))
+    ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
         << "metric xml file '" << counters_path << "' does not exist";
     return loadXml(counters_path);
 }
@@ -173,7 +173,7 @@ MetricMap
 getBaseHardwareMetrics()
 {
     auto counters_path = findViaEnvironment("basic_counters.xml");
-    LOG_IF(FATAL, !common::filesystem::exists(counters_path))
+    ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
         << "metric xml file '" << counters_path << "' does not exist";
     return loadXml(counters_path, true);
 }

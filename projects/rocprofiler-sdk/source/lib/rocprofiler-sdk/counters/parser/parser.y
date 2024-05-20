@@ -10,8 +10,6 @@ using namespace rocprofiler::counters;
 #include <stdio.h>
 #include <string>
 
-#include <glog/logging.h>
-
 #include "raw_ast.hpp"
 
 int yyparse(rocprofiler::counters::RawAST** result);
@@ -81,17 +79,17 @@ exp: NUMBER                               { $$ = new RawAST(NUMBER_NODE, $1); }
 
 
 
-reduce_dim_args: NAME                     { $$ = new LinkedList($1, NULL); 
+reduce_dim_args: NAME                     { $$ = new LinkedList($1, NULL);
                                             free($1);
                                           }
- | NAME CM reduce_dim_args               { $$ = new LinkedList($1, $3); 
+ | NAME CM reduce_dim_args               { $$ = new LinkedList($1, $3);
                                             free($1);
                                           }
  ;
 
 
 
-select_dim_args: NAME EQUALS NUMBER       { $$ = new LinkedList($1, $3, NULL); 
+select_dim_args: NAME EQUALS NUMBER       { $$ = new LinkedList($1, $3, NULL);
                                             free($1);
                                           }
  | NAME EQUALS NUMBER CM select_dim_args { $$ = new LinkedList($1, $3, $5);

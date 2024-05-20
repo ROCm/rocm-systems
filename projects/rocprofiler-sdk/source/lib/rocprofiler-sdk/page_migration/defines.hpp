@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/common/logging.hpp"
+
 #define KFD_EVENT_PARSE_EVENTS(X, HANDLER)                                                         \
     do                                                                                             \
     {                                                                                              \
@@ -35,7 +37,7 @@
             assert(char_count > 0);                                                                \
             std::string_view event_str{cursor, char_count};                                        \
                                                                                                    \
-            LOG(INFO) << fmt::format("KFD event: [{}]", event_str);                                \
+            ROCP_INFO << fmt::format("KFD event: [{}]", event_str);                                \
             HANDLER(event_str);                                                                    \
                                                                                                    \
             cursor = pos + 1;                                                                      \

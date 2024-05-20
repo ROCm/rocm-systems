@@ -23,8 +23,7 @@
 #pragma once
 
 #include "lib/common/defines.hpp"
-
-#include <glog/logging.h>
+#include "lib/common/logging.hpp"
 
 #include <array>
 #include <cstddef>
@@ -123,7 +122,7 @@ static_object<Tp, ContextT>::construct(Args&&... args)
         });
     }
 
-    LOG_IF(FATAL, m_object)
+    ROCP_FATAL_IF(m_object)
         << "reconstructing static object. Use get() function to retrieve pointer";
 
     m_object = new(m_buffer.data()) Tp{std::forward<Args>(args)...};

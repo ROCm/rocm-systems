@@ -35,7 +35,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
-#include <glog/logging.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_loader.h>
@@ -47,14 +46,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#if defined(ROCPROFILER_CI)
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(FATAL)
-#else
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
-#endif
 
 namespace rocprofiler
 {
@@ -259,7 +250,7 @@ accum_vgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
         emplaced           = warned.emplace(name).second;
     }
 
-    LOG_IF(WARNING, emplaced) << "Missing support for accum_vgpr_count for " << name;
+    ROCP_INFO_IF(emplaced) << "Missing support for accum_vgpr_count for " << name;
     return 0;
 }
 
@@ -292,7 +283,16 @@ sgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
         }
     }
 
-    LOG(WARNING) << "Missing support for sgpr_count for " << name;
+    bool emplaced = false;
+    {
+        static auto warned = std::unordered_set<std::string>{};
+        static auto mtx    = std::mutex{};
+        auto        lk     = std::unique_lock<std::mutex>{mtx};
+        emplaced           = warned.emplace(name).second;
+    }
+
+    ROCP_INFO_IF(emplaced) << "Missing support for sgpr_count for " << name;
+
     return 0;
 }
 
@@ -363,7 +363,7 @@ get_kernel_descriptor(uint64_t kernel_object)
         reinterpret_cast<const void**>(&kernel_code));
     if(status == HSA_STATUS_SUCCESS) return kernel_code;
 
-    LOG(WARNING) << "hsa_ven_amd_loader_query_host_address(kernel_object=" << kernel_object
+    ROCP_WARNING << "hsa_ven_amd_loader_query_host_address(kernel_object=" << kernel_object
                  << ") returned " << status << ": " << get_status_string(status);
 
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
@@ -425,7 +425,7 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
 #define ROCP_HSA_CORE_GET_EXE_SYMBOL_INFO(...)                                                     \
     {                                                                                              \
         auto _status = core_table.hsa_executable_symbol_get_info_fn(symbol, __VA_ARGS__);          \
-        LOG_IF(ERROR, _status != HSA_STATUS_SUCCESS)                                               \
+        ROCP_ERROR_IF(_status != HSA_STATUS_SUCCESS)                                               \
             << "core_table.hsa_executable_symbol_get_info_fn(hsa_executable_symbol_t{.handle="     \
             << symbol.handle << "}, " << #__VA_ARGS__ << " failed";                                \
         if(_status != HSA_STATUS_SUCCESS) return _status;                                          \
@@ -447,7 +447,7 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
     // if there is an existing matching kernel symbol, return success and move onto next symbol
     if(exists) return HSA_STATUS_SUCCESS;
 
-    LOG_IF(FATAL, data.size == 0) << "kernel symbol did not properly initialized the size field "
+    ROCP_FATAL_IF(data.size == 0) << "kernel symbol did not properly initialized the size field "
                                      "upon construction (this is likely a compiler bug)";
 
     auto type = hsa_symbol_kind_t{};
@@ -552,7 +552,7 @@ code_object_load_callback(hsa_executable_t         executable,
     {                                                                                              \
         auto _status = loader_table.hsa_ven_amd_loader_loaded_code_object_get_info(                \
             loaded_code_object, __VA_ARGS__);                                                      \
-        LOG_IF(ERROR, _status != HSA_STATUS_SUCCESS)                                               \
+        ROCP_ERROR_IF(_status != HSA_STATUS_SUCCESS)                                               \
             << "loader_table.hsa_ven_amd_loader_loaded_code_object_get_info(loaded_code_object, "  \
             << #__VA_ARGS__ << " failed";                                                          \
         if(_status != HSA_STATUS_SUCCESS) return _status;                                          \
@@ -563,7 +563,7 @@ code_object_load_callback(hsa_executable_t         executable,
     auto&    data          = code_obj_v.rocp_data;
     uint32_t _storage_type = ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_NONE;
 
-    LOG_IF(FATAL, data.size == 0) << "code object did not properly initialized the size field upon "
+    ROCP_FATAL_IF(data.size == 0) << "code object did not properly initialized the size field upon "
                                      "construction (this is likely a compiler bug)";
 
     code_obj_v.hsa_executable  = executable;
@@ -596,7 +596,7 @@ code_object_load_callback(hsa_executable_t         executable,
     ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(
         HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE, &_storage_type);
 
-    LOG_IF(FATAL, _storage_type >= ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_LAST)
+    ROCP_FATAL_IF(_storage_type >= ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_LAST)
         << "HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_CODE_OBJECT_STORAGE_TYPE returned an "
            "unsupported code object storage type. Expected 0=none, 1=file, or 2=memory but "
            "received a value of "
@@ -621,7 +621,7 @@ code_object_load_callback(hsa_executable_t         executable,
     }
     else if(_storage_type == HSA_VEN_AMD_LOADER_CODE_OBJECT_STORAGE_TYPE_NONE)
     {
-        LOG(WARNING) << "Code object storage type of none was ignored";
+        ROCP_WARNING << "Code object storage type of none was ignored";
         return HSA_STATUS_SUCCESS;
     }
 
@@ -920,7 +920,7 @@ shutdown(hsa_executable_t executable)
     auto tidx = common::get_tid();
     for(auto& itr : _unloaded)
     {
-        LOG_IF(FATAL, itr.object == nullptr);
+        ROCP_FATAL_IF(itr.object == nullptr);
         for(const auto* citr : itr.object->contexts)
         {
             if(citr->callback_tracer->domains(CODE_OBJECT_KIND, CODE_OBJECT_LOAD))
@@ -992,7 +992,7 @@ initialize(HsaApiTable* table)
     auto _status = core_table.hsa_system_get_major_extension_table_fn(
         HSA_EXTENSION_AMD_LOADER, 1, sizeof(hsa_loader_table_t), &get_loader_table());
 
-    LOG_IF(ERROR, _status != HSA_STATUS_SUCCESS)
+    ROCP_ERROR_IF(_status != HSA_STATUS_SUCCESS)
         << "hsa_system_get_major_extension_table failed: " << get_status_string(_status);
 
     if(_status == HSA_STATUS_SUCCESS)
@@ -1001,9 +1001,9 @@ initialize(HsaApiTable* table)
         get_destroy_function()               = CHECK_NOTNULL(core_table.hsa_executable_destroy_fn);
         core_table.hsa_executable_freeze_fn  = executable_freeze;
         core_table.hsa_executable_destroy_fn = executable_destroy;
-        LOG_IF(FATAL, get_freeze_function() == core_table.hsa_executable_freeze_fn)
+        ROCP_FATAL_IF(get_freeze_function() == core_table.hsa_executable_freeze_fn)
             << "infinite recursion";
-        LOG_IF(FATAL, get_destroy_function() == core_table.hsa_executable_destroy_fn)
+        ROCP_FATAL_IF(get_destroy_function() == core_table.hsa_executable_destroy_fn)
             << "infinite recursion";
     }
 }

@@ -199,7 +199,7 @@ rocprofiler_at_intercept_table_registration(rocprofiler_intercept_library_cb_t c
     if(rocprofiler::registration::get_init_status() > 0)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    LOG_IF(WARNING, libs == 0) << "invoking " << __FUNCTION__ << " with a value of zero is a no-op";
+    ROCP_WARNING_IF(libs == 0) << "invoking " << __FUNCTION__ << " with a value of zero is a no-op";
 
     rocprofiler::intercept_table::update_intercepts(
         callback, libs, data, rocprofiler::intercept_table::intercept_library_seq);

@@ -383,7 +383,7 @@ format(std::string _fpath, const std::string& _tag)
         }
     } catch(std::exception& _e)
     {
-        LOG(WARNING) << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
+        ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
                      << "\n";
     }
 
@@ -395,7 +395,7 @@ format(std::string _fpath, const std::string& _tag)
             _fpath = std::regex_replace(_fpath, _re, "$1$4");
     } catch(std::exception& _e)
     {
-        LOG(WARNING) << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
+        ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
                      << "\n";
     }
 

@@ -24,7 +24,6 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/utility.hpp"
 
-#include <glog/logging.h>
 #include <fstream>
 
 #include <grp.h>

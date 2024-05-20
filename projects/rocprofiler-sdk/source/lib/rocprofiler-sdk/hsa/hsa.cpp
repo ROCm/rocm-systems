@@ -41,8 +41,6 @@
 #include <rocprofiler-sdk/hsa/core_api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 
-#include <glog/logging.h>
-
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -308,7 +306,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
     constexpr auto external_corr_id_domain_idx =
         hsa_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
-    LOG_IF(INFO, registration::get_fini_status() != 0) << "Executing " << info_type::name;
+    ROCP_INFO_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
 
     if(registration::get_fini_status() != 0)
     {
@@ -341,7 +339,7 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
             return;
     }
 
-    LOG_IF(FATAL, external_corr_ids.size() < (callback_contexts.size() + buffered_contexts.size()))
+    ROCP_FATAL_IF(external_corr_ids.size() < (callback_contexts.size() + buffered_contexts.size()))
         << "missing external correlation ids";
 
     auto  buffer_record    = common::init_public_api_struct(buffer_hsa_api_record_t{});
@@ -563,7 +561,7 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}(LookupT{}));
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
-        LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
+        ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
             << _info.name << " has non-null function pointer " << _copy_func
             << " despite this being the first instance of the library being copies";
 

@@ -83,7 +83,7 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
                    aqlprofile_validate_pmc_event(aql_agent,
                                                  &_metrics.back().events.back(),
                                                  &validate_event_result) != HSA_STATUS_SUCCESS);
-            LOG_IF(FATAL, !validate_event_result)
+            ROCP_FATAL_IF(!validate_event_result)
                 << "Invalid Metric: " << block_index << " " << event_id;
             _event_to_metric[std::make_tuple(
                 static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id),

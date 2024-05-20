@@ -22,6 +22,9 @@
 
 #pragma once
 
+#include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/translation.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 
 #include <cstdint>
@@ -29,10 +32,6 @@
 #include <memory>
 #include <unordered_map>
 #include <vector>
-
-#include <glog/logging.h>
-
-#include "lib/rocprofiler-sdk/pc_sampling/parser/translation.hpp"
 
 template <>
 struct std::hash<device_handle>
@@ -264,7 +263,7 @@ _parse_buffer(generic_sample_t*       buffer,
                 break;
             }
             default:
-                LOG(WARNING) << "Index " << index
+                ROCP_WARNING << "Index " << index
                              << " - Invalid sample type: " << buffer[index].type << "\n";
                 return PCSAMPLE_STATUS_INVALID_SAMPLE;
         }

@@ -32,8 +32,6 @@
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
-#include <glog/logging.h>
-
 extern "C" {
 /**
  * @brief Create Profile Configuration.

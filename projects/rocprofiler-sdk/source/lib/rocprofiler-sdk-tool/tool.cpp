@@ -44,8 +44,6 @@
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
-#include <glog/logging.h>
-
 #include <fmt/core.h>
 #include <unistd.h>
 #include <cassert>
@@ -632,7 +630,7 @@ get_file_name(buffer_type_t buffer_type)
         case buffer_type_t::ROCPROFILER_TOOL_BUFFER_SCRATCH_MEMORY: return "scratch_memory"; break;
     }
 
-    LOG(FATAL) << "buffer type " << static_cast<std::underlying_type_t<buffer_type_t>>(buffer_type)
+    ROCP_FATAL << "buffer type " << static_cast<std::underlying_type_t<buffer_type_t>>(buffer_type)
                << " not supported";
     return std::string{};
 }
@@ -839,7 +837,7 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
         {
             if(record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
             {
-                LOG_IF(FATAL, stacked_range.empty())
+                ROCP_FATAL_IF(stacked_range.empty())
                     << "roctxRangePop invoked more times than roctxRangePush on thread "
                     << rocprofiler::common::get_tid();
 
@@ -973,7 +971,7 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                           ->emplace(sym_data->kernel_id,
                                     kernel_symbol_data{get_dereference(sym_data)});
             }
-            LOG_IF(WARNING, !itr.second)
+            ROCP_WARNING_IF(!itr.second)
                 << "duplicate kernel symbol data for kernel_id=" << sym_data->kernel_id;
 
             // add the kernel to the kernel_targets if
@@ -1052,7 +1050,7 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
 {
     ROCP_INFO << "Executing buffered tracing callback for " << num_headers << " headers";
 
-    LOG_IF(ERROR, headers == nullptr)
+    ROCP_ERROR_IF(headers == nullptr)
         << "rocprofiler invoked a buffer callback with a null pointer to the array of headers. "
            "this should never happen";
 
@@ -1293,9 +1291,9 @@ counter_record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_da
     counter_record.sgpr_count           = kernel_info->sgpr_count;
     counter_record.lds_block_size_v     = lds_block_size_v;
 
-    LOG_IF(FATAL, !kernel_info) << "missing kernel information for kernel_id=" << kernel_id;
+    ROCP_FATAL_IF(!kernel_info) << "missing kernel information for kernel_id=" << kernel_id;
 
-    LOG_IF(ERROR, record_count == 0) << "zero record count for kernel_id=" << kernel_id
+    ROCP_ERROR_IF(record_count == 0) << "zero record count for kernel_id=" << kernel_id
                                      << " (name=" << kernel_info->kernel_name << ")";
 
     for(size_t count = 0; count < record_count; count++)
@@ -1798,7 +1796,7 @@ rocprofiler_configure(uint32_t                 version,
                       rocprofiler_client_id_t* id)
 {
     auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
-    common::init_logging("ROCPROF_LOG_LEVEL", logging_cfg);
+    common::init_logging("ROCPROF", logging_cfg);
     FLAGS_colorlogtostderr = true;
 
     // set the client name
@@ -1808,7 +1806,7 @@ rocprofiler_configure(uint32_t                 version,
     client_identifier = id;
 
     // note that rocprofv3 is not the primary tool
-    LOG_IF(WARNING, priority > 0) << id->name << " has a priority of " << priority
+    ROCP_WARNING_IF(priority > 0) << id->name << " has a priority of " << priority
                                   << " (not primary tool)";
 
     // compute major/minor/patch version info

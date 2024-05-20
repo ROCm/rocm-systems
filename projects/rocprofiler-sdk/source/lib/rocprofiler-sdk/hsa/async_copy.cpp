@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
@@ -47,20 +48,13 @@
 
 #define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
     auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
-    LOG_IF(SEVERITY, ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) != HSA_STATUS_SUCCESS)   \
+    ROCP_CI_LOG_IF(SEVERITY,                                                                       \
+                   ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) != HSA_STATUS_SUCCESS)     \
         << #EXPR << " returned non-zero status code "                                              \
         << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
         << ::rocprofiler::hsa::get_hsa_status_string(                                              \
                ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
         << " "
-
-#if defined(ROCPROFILER_CI)
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(FATAL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    ROCP_FATAL
-#else
-#    define ROCP_CI_LOG_IF(NON_CI_LEVEL, ...) LOG_IF(NON_CI_LEVEL, __VA_ARGS__)
-#    define ROCP_CI_LOG(NON_CI_LEVEL, ...)    LOG(NON_CI_LEVEL)
-#endif
 
 #define ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL 1
 
@@ -184,7 +178,7 @@ struct async_copy_data
 async_copy_data::callback_data_t
 async_copy_data::get_callback_data(timestamp_t _beg, timestamp_t _end) const
 {
-    LOG_IF(FATAL, direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
+    ROCP_FATAL_IF(direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
 
     return common::init_public_api_struct(
         callback_data_t{}, _beg, _end, dst_agent, src_agent, bytes_copied);
@@ -195,7 +189,7 @@ async_copy_data::get_buffered_record(const context_t* _ctx,
                                      timestamp_t      _beg,
                                      timestamp_t      _end) const
 {
-    LOG_IF(FATAL, direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
+    ROCP_FATAL_IF(direction == ROCPROFILER_MEMORY_COPY_NONE) << "direction has not been set";
 
     auto _external_corr_id =
         (_ctx) ? tracing_data.external_correlation_ids.at(_ctx) : context::null_user_data;
@@ -233,7 +227,11 @@ private:
     std::atomic<int64_t> m_count  = 0;
 };
 
-active_signals::active_signals() { create(); }
+active_signals::active_signals()
+{
+    // only create if not started finalization
+    if(registration::get_fini_status() == 0) create();
+}
 
 void
 active_signals::create()
@@ -444,9 +442,9 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         const hsa_signal_value_t new_value =
             get_core_table()->hsa_signal_load_relaxed_fn(_data->orig_signal) - 1;
 
-        LOG_IF(ERROR, signal_value != new_value) << "bad original signal value in " << __FUNCTION__;
+        ROCP_ERROR_IF(signal_value != new_value) << "bad original signal value in " << __FUNCTION__;
         // Move to ROCP_TRACE when rebasing
-        LOG(INFO) << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
+        ROCP_INFO << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_store_screlease_fn(_data->orig_signal, signal_value);
     }
 
@@ -582,10 +580,10 @@ async_copy_impl(Args... args)
         }
         else
         {
-            LOG_IF(ERROR, !_rocp_src_agent)
+            ROCP_ERROR_IF(!_rocp_src_agent)
                 << "failed to find source rocprofiler agent for hsa agent with handle="
                 << _hsa_src_agent.handle;
-            LOG_IF(ERROR, !_rocp_dst_agent)
+            ROCP_ERROR_IF(!_rocp_dst_agent)
                 << "failed to find destination rocprofiler agent for hsa agent with handle="
                 << _hsa_dst_agent.handle;
         }
@@ -712,7 +710,7 @@ async_copy_impl(Args... args)
     _data->orig_signal = _completion_signal;
     _completion_signal = _data->rocp_signal;
 
-    LOG(INFO) << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
+    ROCP_INFO << "Memcpy Original Signal " << std::hex << _data->orig_signal.handle << std::dec
               << ": " << original_value << " | Replacement Signal: " << std::hex
               << _completion_signal.handle << std::dec << ": 1";
 
@@ -745,7 +743,7 @@ async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance)
     // table with copy function
     auto& _copy_func = get_next_dispatch<TableIdx, OpIdx>();
 
-    LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
+    ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
         << _meta.name << " has non-null function pointer " << _copy_func
         << " despite this being the first instance of the library being copies";
 

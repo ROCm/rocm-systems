@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <glog/logging.h>
+#include "lib/common/logging.hpp"
 
 #include <unistd.h>
 #include <string>
@@ -89,7 +89,7 @@ struct env_config
     auto operator()(bool _verbose = false) const
     {
         if(env_name.empty()) return -1;
-        LOG_IF(INFO, _verbose) << "[rocprofiler][set_env] setenv(\"" << env_name << "\", \""
+        ROCP_INFO_IF(_verbose) << "[rocprofiler][set_env] setenv(\"" << env_name << "\", \""
                                << env_value << "\", " << overwrite << ")\n";
         return setenv(env_name.c_str(), env_value.c_str(), overwrite);
     }

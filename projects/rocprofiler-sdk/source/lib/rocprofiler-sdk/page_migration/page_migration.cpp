@@ -38,7 +38,6 @@
 #include <rocprofiler-sdk/hsa/table_id.h>
 
 #include <fmt/core.h>
-#include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 
@@ -169,7 +168,7 @@ to_string(EnumT val,
 template <size_t>
 page_migration_record_t parse_uvm_event(std::string_view)
 {
-    LOG_IF(FATAL, false) << uvm_event_info<ROCPROFILER_UVM_EVENT_NONE>::format_str;
+    ROCP_FATAL_IF(false) << uvm_event_info<ROCPROFILER_UVM_EVENT_NONE>::format_str;
     return {};
 }
 
@@ -194,7 +193,7 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_PAGE_FAULT_START>(std::string_view str)
     e.read_fault = (fault == 'R');
     e.address    = page_to_bytes(e.address);
 
-    LOG(INFO) << fmt::format("Page fault start [ ts: {} pid: {} addr: 0x{:X} node: {} ] \n",
+    ROCP_INFO << fmt::format("Page fault start [ ts: {} pid: {} addr: 0x{:X} node: {} ] \n",
                              rec.start_timestamp,
                              rec.pid,
                              e.address,
@@ -230,7 +229,7 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_PAGE_FAULT_END>(std::string_view str)
     // throw std::runtime_error("Invalid SVM memory migrate type");
     e.address = page_to_bytes(e.address);
 
-    LOG(INFO) << fmt::format(
+    ROCP_INFO << fmt::format(
         "Page fault end [ ts: {} pid: {} addr: 0x{:X} node: {} migrated: {} ] \n",
         rec.end_timestamp,
         rec.pid,
@@ -268,7 +267,7 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_MIGRATE_START>(std::string_view str)
     e.start_addr = page_to_bytes(e.start_addr);
     e.end_addr   = page_to_bytes(e.end_addr) - 1;
 
-    LOG(INFO) << fmt::format(
+    ROCP_INFO << fmt::format(
         "Page migrate start [ ts: {} pid: {} addr s: 0x{:X} addr "
         "e: 0x{:X} size: {}B from node: {} to node: {} prefetch node: {} preferred node: {} "
         "trigger: {} ] \n",
@@ -311,7 +310,7 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_MIGRATE_END>(std::string_view str)
     e.start_addr = page_to_bytes(e.start_addr);
     e.end_addr   = page_to_bytes(e.end_addr) - 1;
 
-    LOG(INFO) << fmt::format("Page migrate end [ ts: {} pid: {} addr s: 0x{:X} addr e: "
+    ROCP_INFO << fmt::format("Page migrate end [ ts: {} pid: {} addr s: 0x{:X} addr e: "
                              "0x{:X} from node: {} to node: {} trigger: {} ] \n",
                              rec.end_timestamp,
                              rec.pid,
@@ -343,7 +342,7 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_QUEUE_EVICTION>(std::string_view str)
 
     rec.queue_suspend.trigger = static_cast<qsuspend_trigger_t>(trigger);
 
-    LOG(INFO) << fmt::format("Queue evict [ ts: {} pid: {} node: {} trigger: {} ] \n",
+    ROCP_INFO << fmt::format("Queue evict [ ts: {} pid: {} node: {} trigger: {} ] \n",
                              rec.start_timestamp,
                              rec.pid,
                              e.node_id,
@@ -372,7 +371,7 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_QUEUE_RESTORE>(std::string_view str)
     else
         e.rescheduled = false;
 
-    LOG(INFO) << fmt::format(
+    ROCP_INFO << fmt::format(
         "Queue restore [ ts: {} pid: {} node: {} ] \n", rec.end_timestamp, rec.pid, e.node_id);
 
     return rec;
@@ -403,7 +402,7 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_UNMAP_FROM_GPU>(std::string_view str)
     e.start_addr               = page_to_bytes(e.start_addr);
     e.end_addr                 = page_to_bytes(e.end_addr);
 
-    LOG(INFO) << fmt::format("Unmap from GPU [ ts: {} pid: {} start addr: 0x{:X} end addr: 0x{:X}  "
+    ROCP_INFO << fmt::format("Unmap from GPU [ ts: {} pid: {} start addr: 0x{:X} end addr: 0x{:X}  "
                              "node: {} trigger {} ] \n",
                              rec.start_timestamp,
                              rec.pid,
@@ -793,7 +792,7 @@ struct kfd_device_fd
     kfd_device_fd()
     {
         fd = ::open(KFD_DEVICE_PATH, O_RDWR | O_CLOEXEC);
-        LOG_IF(FATAL, fd == -1) << "Error opening KFD handle @ " << KFD_DEVICE_PATH;
+        ROCP_FATAL_IF(fd == -1) << "Error opening KFD handle @ " << KFD_DEVICE_PATH;
     }
 
     ~kfd_device_fd()
@@ -810,9 +809,9 @@ get_version()
         kfd_device_fd kfd_fd{};
 
         if(ioctl(kfd_fd.fd, args) != -1)
-            LOG(INFO) << fmt::format("KFD v{}.{}", args.major_version, args.minor_version);
+            ROCP_INFO << fmt::format("KFD v{}.{}", args.major_version, args.minor_version);
         else
-            LOG(ERROR) << fmt::format("Could not determine KFD version");
+            ROCP_ERROR << fmt::format("Could not determine KFD version");
         return args;
     }();
 
@@ -844,7 +843,7 @@ struct poll_kfd_t
         const auto kfd_flags =
             kfd_bitmask(rprof_ev, std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
 
-        LOG(INFO) << fmt::format("Setting KFD flags to [0b{:b}] \n", kfd_flags);
+        ROCP_INFO << fmt::format("Setting KFD flags to [0b{:b}] \n", kfd_flags);
 
         // Create fd for notifying thread when we want to wake it up, and an eventfd for any events
         // to this thread
@@ -877,7 +876,7 @@ struct poll_kfd_t
             {
                 auto gpu_event_fd = get_node_fd(agent->gpu_id);
                 file_handles.emplace_back(pollfd{gpu_event_fd, POLLIN, 0});
-                LOG(INFO) << fmt::format(
+                ROCP_INFO << fmt::format(
                     "GPU node {} with fd {} added\n", agent->gpu_id, gpu_event_fd);
             }
         }
@@ -887,7 +886,7 @@ struct poll_kfd_t
         {
             auto& fd         = file_handles[i];
             auto  write_size = write(fd.fd, &kfd_flags, sizeof(kfd_flags));
-            LOG(INFO) << fmt::format(
+            ROCP_INFO << fmt::format(
                 "Writing {} to GPU fd {} ({} bytes)\n", kfd_flags, fd.fd, write_size);
             CHECK(write_size == sizeof(kfd_flags));
         }
@@ -922,7 +921,7 @@ struct poll_kfd_t
         args.gpuid = gpu_node_id;
 
         if(auto ret = ioctl(kfd_fd.fd, args); ret == -1)
-            LOG(ERROR) << fmt::format(
+            ROCP_ERROR << fmt::format(
                 "Could not get GPU node {} file descriptor (exit code: {})", gpu_node_id, ret);
         return args.anon_fd;
     }
@@ -950,7 +949,7 @@ get_config()
 
 kfd::poll_kfd_t::~poll_kfd_t()
 {
-    LOG(INFO) << fmt::format("Terminating poll_kfd\n");
+    ROCP_INFO << fmt::format("Terminating poll_kfd\n");
     if(!active) return;
 
     // wake thread up
@@ -962,7 +961,7 @@ kfd::poll_kfd_t::~poll_kfd_t()
     } while(bytes_written == -1 && (errno == EINTR || errno == EAGAIN));
 
     if(bg_thread.joinable()) bg_thread.join();
-    LOG(INFO) << fmt::format("Background thread terminated\n");
+    ROCP_INFO << fmt::format("Background thread terminated\n");
 
     for(const auto& f : file_handles)
         close(f.fd);
@@ -982,7 +981,7 @@ poll_events(small_vector<pollfd> file_handles, bool non_blocking)
     //  0 -> return immediately even if no events
     // -1 -> wait indefinitely
 
-    LOG(INFO) << fmt::format("{} polling = {}, polling with timeout = {}",
+    ROCP_INFO << fmt::format("{} polling = {}, polling with timeout = {}",
                              non_blocking ? "Non-blocking" : "Blocking",
                              non_blocking,
                              timeout_val);
@@ -991,7 +990,7 @@ poll_events(small_vector<pollfd> file_handles, bool non_blocking)
 
     for(auto& fd : file_handles)
     {
-        LOG(INFO) << fmt::format(
+        ROCP_INFO << fmt::format(
             "Handle = {}, events = {}, revents = {}\n", fd.fd, fd.events, fd.revents);
     }
 
@@ -1004,7 +1003,7 @@ poll_events(small_vector<pollfd> file_handles, bool non_blocking)
 
         if((exitfd.revents & POLLIN) != 0)
         {
-            LOG(INFO) << "Terminating background thread\n";
+            ROCP_INFO << "Terminating background thread\n";
             return;
         }
 
@@ -1019,11 +1018,11 @@ poll_events(small_vector<pollfd> file_handles, bool non_blocking)
             {
                 size_t status_size = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
 
-                // LOG(INFO) << fmt::format(
+                // ROCP_INFO << fmt::format(
                 //     "status_size: {} size {}\n", status_size, scratch_buffer.size());
                 std::string_view event_strings{scratch_buffer.data(), status_size};
 
-                // LOG(INFO) << fmt::format("Raw KFD string [({})]\n",
+                // ROCP_INFO << fmt::format("Raw KFD string [({})]\n",
                 // event_strings.data());
                 KFD_EVENT_PARSE_EVENTS(event_strings, handle_reporting);
             }
@@ -1092,7 +1091,7 @@ init(const small_vector<size_t>& event_ids, bool non_blocking)
     else
     {
         // Add a buffer record with this info
-        LOG(ERROR) << fmt::format(
+        ROCP_ERROR << fmt::format(
             "KFD does not support SVM event reporting in v{}.{} (requires v1.11)",
             ver.major_version,
             ver.minor_version);

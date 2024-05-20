@@ -34,8 +34,6 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#include <glog/logging.h>
-
 #include <atomic>
 #include <exception>
 #include <mutex>
@@ -157,7 +155,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     auto* task_group =
         internal_threading::get_task_group(rocprofiler_callback_thread_t{buff->task_group_id});
 
-    LOG_IF(FATAL, !task_group)
+    ROCP_FATAL_IF(!task_group)
         << "buffer (" << buffer_id.handle
         << ") flush request received after the task group for handling request was destroyed";
 
@@ -177,7 +175,7 @@ flush(rocprofiler_buffer_id_t buffer_id, bool wait)
     auto idx = buff->buffer_idx++;
 
     auto _task = [buffer_id, idx, offset]() {
-        LOG_IF(ERROR, registration::get_fini_status() > 0)
+        ROCP_ERROR_IF(registration::get_fini_status() > 0)
             << "executing buffer (" << buffer_id.handle << ") flush task finalization!";
 
         auto& buff_v          = CHECK_NOTNULL(get_buffers())->at(buffer_id.handle - offset);

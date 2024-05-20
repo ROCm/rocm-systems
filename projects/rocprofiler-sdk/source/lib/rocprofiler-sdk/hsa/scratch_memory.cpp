@@ -35,7 +35,6 @@
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 
-#include <glog/logging.h>
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_amd_tool.h>
@@ -311,18 +310,18 @@ copy_table(hsa_amd_tool_table_t* _orig, uint64_t _tbl_instance)
         auto& _copy_table = _info.get_table(hsa_table_lookup<TableIdx>{}(LookupT{}));
         auto& _copy_func  = _info.get_table_func(_copy_table);
 
-        LOG_IF(FATAL, _copy_func && _tbl_instance == 0)
+        ROCP_FATAL_IF(_copy_func && _tbl_instance == 0)
             << _info.name << " has non-null function pointer " << _copy_func
             << " despite this being the first instance of the library being copies";
 
         if(!_copy_func)
         {
-            LOG(INFO) << "copying table entry for " << _info.name;
+            ROCP_INFO << "copying table entry for " << _info.name;
             _copy_func = _orig_func;
         }
         else
         {
-            LOG(INFO) << "skipping copying table entry for " << _info.name
+            ROCP_INFO << "skipping copying table entry for " << _info.name
                       << " from table instance " << _tbl_instance;
         }
     }
@@ -414,7 +413,7 @@ get_tls_pair(rocprofiler_callback_phase_t phase)
         // duplicate entries
         using clear_containers = std::true_type;
 
-        LOG_IF(FATAL, held) << "Overwriting scratch memory TLS data";
+        ROCP_FATAL_IF(held) << "Overwriting scratch memory TLS data";
         held = true;
         tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
                                    ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
@@ -471,7 +470,7 @@ impl(Args... args)
                 }
             });
 
-        LOG_IF(FATAL, !found_agent) << fmt::format(
+        ROCP_FATAL_IF(!found_agent) << fmt::format(
             "Scratch memory tracing: Could not find a valid agent for queue id {}", hsa_queue->id);
         return _agent_id;
     };
@@ -581,7 +580,7 @@ update_table(const context_array_t& ctxs, hsa_amd_tool_table_t* _orig)
 
         if(!should_wrap_functor(ctxs, OpIdx)) return;
 
-        LOG(INFO) << "updating table entry for " << _info.name;
+        ROCP_INFO << "updating table entry for " << _info.name;
 
         auto  _meta  = hsa_api_meta<TableIdx, OpIdx>{};
         auto& _table = _meta.get_table(_orig);

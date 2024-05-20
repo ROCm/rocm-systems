@@ -31,7 +31,8 @@ else()
     set(LOG_LEVEL "info")
 endif()
 
-set(cc-tracing-env "${PRELOAD_ENV}" "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
+set(cc-tracing-env "${PRELOAD_ENV}" "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
+                   "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
 
 set_tests_properties(
     rocprofv3-test-tracing-plus-cc-execute
