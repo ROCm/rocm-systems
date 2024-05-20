@@ -27,10 +27,11 @@
 import logging
 import os
 import sys
-import pkg_resources
+from pip._internal.req import parse_requirements
 from pathlib import Path
-from pkg_resources import DistributionNotFound, VersionConflict
+from importlib import import_module, metadata
 from distutils import text_file
+import re
 
 try:
     from omniperf_base import Omniperf
@@ -39,35 +40,66 @@ except:
     pass
 
 
-def verify_deps():
+def verify_deps_version(localVer, desiredVer, operator):
+    """Check package version strings with simple operators used in companion requirements.txt file"""
+    if operator == "==":
+        return localVer == desiredVer
+    elif operator == ">=":
+        return localVer >= desiredVer
+    elif operator == "<=":
+        return localVer <= desiredVer
+    elif operator == ">":
+        return localVer > desiredVer
+    elif operator == "<":
+        return localVer < desiredVer
+    else:
+        return True
 
+
+def verify_deps():
+    """Utility to read library dependencies from requirements.txt and endeavor to load them within current execution environment. 
+    Used in top-level omniperf to provide error messages if necessary dependencies are not available. """
     bindir = Path(__file__).resolve().parent
     depsLocation = ["requirements.txt", "../requirements.txt"]
 
     for location in depsLocation:
         checkFile = os.path.join(bindir, location)
         if os.path.exists(checkFile):
-
             dependencies = text_file.TextFile(checkFile).readlines()
             error = False
 
-            try:
-                pkg_resources.require(dependencies)
-            except DistributionNotFound as e:
-                print(
-                    "[ERROR] The '%s' distribution was not found in the current execution environment."
-                    % e.req.key
-                )
-                error = True
+            version_pattern = r"^([^=<>]+)([=<>]+)(.*)$"
 
-            except VersionConflict as e:
-                print(
-                    "[ERROR] the '%s' distribution does not meet version requirements to use omniperf."
-                    % e.req.key
-                )
-                print("  --> version installed :", e.dist)
-                print("  --> version required  :", e.req)
-                error = True
+            for dependency in dependencies:
+                desiredVersion = None
+                match = re.match(version_pattern, dependency)
+                if match:
+                    package = match.group(1)
+                    operator = match.group(2) or None
+                    desiredVersion = match.group(3) or None
+                else:
+                    package = dependency
+                try:
+                    localVersion = metadata.distribution(package).version
+                except metadata.PackageNotFoundError:
+                    error = True
+                    print(
+                        "[ERROR] The '%s' package was not found in the current execution environment."
+                        % dependency
+                    )
+
+                # check version requirement
+                if not error:
+                    if desiredVersion:
+                        if not verify_deps_version(
+                            localVersion, desiredVersion, operator
+                        ):
+                            print(
+                                "[ERROR] the '%s' distribution does not meet version requirements to use omniperf."
+                                % dependency
+                            )
+                            print("  --> version installed :", localVersion)
+                            error = True
 
             if error:
                 print("")
