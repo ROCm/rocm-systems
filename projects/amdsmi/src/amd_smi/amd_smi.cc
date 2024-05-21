@@ -424,19 +424,6 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
        << "\n; info->product_name: |" << board_info->product_name << "|";
     LOG_INFO(ss);
 
-    // Correct any missing details
-    if (board_info->model_number[0] == '\0') {
-        status = rsmi_wrapper(rsmi_dev_name_get, processor_handle, board_info->model_number,
-                            AMDSMI_256_LENGTH);
-         if (status != AMDSMI_STATUS_SUCCESS) {
-            memset(board_info->model_number, 0,
-                   AMDSMI_256_LENGTH * sizeof(board_info->model_number[0]));
-        }
-        ss << __PRETTY_FUNCTION__ << " | [rsmi_correction] board_info->model_number= |"
-        << board_info->model_number << "|";
-        LOG_INFO(ss);
-    }
-
     if (board_info->product_serial[0] == '\0') {
         status = rsmi_wrapper(rsmi_dev_serial_number_get, processor_handle,
                               board_info->product_serial, AMDSMI_NORMAL_STRING_LENGTH);
@@ -450,9 +437,16 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
     }
 
     if (board_info->product_name[0] == '\0') {
-        status = rsmi_wrapper(rsmi_dev_subsystem_name_get,
+        status = rsmi_wrapper(rsmi_dev_name_get,
                               processor_handle, board_info->product_name,
                               AMDSMI_256_LENGTH);
+        // Check if the value is in hex format
+        if (status == AMDSMI_STATUS_SUCCESS) {
+            if (board_info->product_name[0] == '0' && board_info->product_name[1] == 'x') {
+                memset(board_info->product_name, 0,
+                        AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
+            }
+        }
         if (status != AMDSMI_STATUS_SUCCESS) {
             memset(board_info->product_name, 0,
                     AMDSMI_256_LENGTH * sizeof(board_info->product_name[0]));
