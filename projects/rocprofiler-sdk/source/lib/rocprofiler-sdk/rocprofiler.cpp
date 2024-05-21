@@ -96,7 +96,17 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND,
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT,
                           "Cannot have both an agent counter collection and a dispatch counter "
                           "in the same context")
-
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_INTERNAL_NO_AGENT_CONTEXT,
+                          "No context has agent profiling enabled, "
+                          "error generally not returned to tools")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_SAMPLE_RATE_EXCEEDED,
+                          "A sample is in progress and a new sample cannot be started")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_NO_PROFILE_QUEUE,
+                          "No profile queue is available for this agent")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS,
+                          "Counter set does not include any hardware counters")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH,
+                          "Counter profile agent does not match the agent in the context")
 template <size_t Idx, size_t... Tail>
 const char*
 get_status_name(rocprofiler_status_t status, std::index_sequence<Idx, Tail...>)

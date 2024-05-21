@@ -64,9 +64,11 @@ CounterController::destroy_profile(uint64_t id)
 }
 
 rocprofiler_status_t
-CounterController::configure_agent_collection(rocprofiler_context_id_t        context_id,
-                                              rocprofiler_buffer_id_t         buffer,
-                                              rocprofiler_profile_config_id_t config_id)
+CounterController::configure_agent_collection(rocprofiler_context_id_t             context_id,
+                                              rocprofiler_buffer_id_t              buffer_id,
+                                              rocprofiler_agent_id_t               agent_id,
+                                              rocprofiler_agent_profile_callback_t cb,
+                                              void*                                user_data)
 {
     auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
@@ -74,13 +76,10 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t        co
     auto& ctx = *ctx_p;
 
     if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
-    if(!rocprofiler::buffer::get_buffer(buffer.handle))
+    if(!rocprofiler::buffer::get_buffer(buffer_id.handle))
     {
         return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
     }
-    auto cfg = get_profile_cfg(config_id);
-
-    if(!cfg) return ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND;
 
     if(!ctx.agent_counter_collection)
     {
@@ -88,8 +87,10 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t        co
             std::make_unique<rocprofiler::context::agent_counter_collection_service>();
     }
 
-    ctx.agent_counter_collection->profile = cfg;
-    ctx.agent_counter_collection->buffer  = buffer;
+    ctx.agent_counter_collection->agent_id  = agent_id;
+    ctx.agent_counter_collection->cb        = cb;
+    ctx.agent_counter_collection->user_data = user_data;
+    ctx.agent_counter_collection->buffer    = buffer_id;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

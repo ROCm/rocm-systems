@@ -26,6 +26,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 
+#include "lib/common/logging.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
@@ -111,5 +112,54 @@ get_dim_info(rocprofiler_agent_id_t   agent,
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
+
+rocprofiler_status_t
+set_profiler_active_on_queue(const AmdExtTable&                api,
+                             hsa_amd_memory_pool_t             pool,
+                             hsa_agent_t                       hsa_agent,
+                             const rocprofiler_profile_pkt_cb& packet_submit)
+{
+    // Inject packet to enable profiling of other process queues on this queue
+    hsa_ven_amd_aqlprofile_profile_t profile{};
+    profile.agent = hsa_agent;
+
+    // Query for cmd buffer size
+    hsa_ven_amd_aqlprofile_info_type_t info_type =
+        (hsa_ven_amd_aqlprofile_info_type_t)((int) HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD);
+    if(hsa_ven_amd_aqlprofile_get_info(&profile, info_type, nullptr) != HSA_STATUS_SUCCESS)
+    {
+        return ROCPROFILER_STATUS_ERROR;
+    }
+    // Allocate cmd buffer
+    const size_t mask = 0x1000 - 1;
+    auto         size = (profile.command_buffer.size + mask) & ~mask;
+
+    if(api.hsa_amd_memory_pool_allocate_fn(pool, size, 0, &profile.command_buffer.ptr) !=
+       HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Failed to allocate memory to enable profile command on agent, some "
+                        "counters will be unavailable";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+    if(api.hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, profile.command_buffer.ptr) !=
+       HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Agent cannot access memory, some counters will be unavailable";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    hsa::rocprofiler_packet packet{};
+    if(hsa_ven_amd_aqlprofile_get_info(&profile, info_type, &packet.ext_amd_aql_pm4) !=
+       HSA_STATUS_SUCCESS)
+    {
+        ROCP_WARNING << "Failed to generate command packet, some counters will be unavailable";
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    packet_submit(packet);
+    api.hsa_amd_memory_pool_free_fn(profile.command_buffer.ptr);
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
 }  // namespace aql
 }  // namespace rocprofiler

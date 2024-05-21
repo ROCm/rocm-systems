@@ -32,11 +32,13 @@
 
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 
 namespace rocprofiler
 {
 namespace aql
 {
+using rocprofiler_profile_pkt_cb = std::function<void(hsa::rocprofiler_packet)>;
 // Query HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID from aqlprofile
 hsa_ven_amd_aqlprofile_id_query_t
 get_query_info(rocprofiler_agent_id_t agent, const counters::Metric& metric);
@@ -58,5 +60,11 @@ set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
                        hsa_agent_t                        agent,
                        hsa_ven_amd_aqlprofile_event_t     event,
                        uint32_t                           sample_id);
+
+rocprofiler_status_t
+set_profiler_active_on_queue(const AmdExtTable&                api,
+                             hsa_amd_memory_pool_t             pool,
+                             hsa_agent_t                       hsa_agent,
+                             const rocprofiler_profile_pkt_cb& packet_submit);
 }  // namespace aql
 }  // namespace rocprofiler

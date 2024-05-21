@@ -87,9 +87,11 @@ public:
         void*                                            record_callback_args);
     std::shared_ptr<profile_config> get_profile_cfg(rocprofiler_profile_config_id_t id);
 
-    rocprofiler_status_t configure_agent_collection(rocprofiler_context_id_t        context_id,
-                                                    rocprofiler_buffer_id_t         buffer,
-                                                    rocprofiler_profile_config_id_t config_id);
+    static rocprofiler_status_t configure_agent_collection(rocprofiler_context_id_t context_id,
+                                                           rocprofiler_buffer_id_t  buffer_id,
+                                                           rocprofiler_agent_id_t   agent_id,
+                                                           rocprofiler_agent_profile_callback_t cb,
+                                                           void* user_data);
 
 private:
     rocprofiler::common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<profile_config>>>

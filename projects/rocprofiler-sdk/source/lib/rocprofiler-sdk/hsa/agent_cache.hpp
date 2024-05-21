@@ -52,7 +52,8 @@ public:
                hsa_agent_t                hsa_agent,
                size_t                     index,
                hsa_agent_t                nearest_cpu,
-               const AmdExtTable&         ext_table);
+               const AmdExtTable&         ext_table,
+               const CoreApiTable&        api);
     ~AgentCache()                     = default;
     AgentCache(const AgentCache&)     = default;
     AgentCache(AgentCache&&) noexcept = default;
@@ -67,10 +68,12 @@ public:
     CONST_NONCONST_ACCESSOR(hsa_agent_t, get_hsa_agent, m_hsa_agent);
     CONST_NONCONST_ACCESSOR(hsa_agent_t, near_cpu, m_nearest_cpu);
 
+    hsa_queue_t*               profile_queue() const { return m_profile_queue; }
     const rocprofiler_agent_t* get_rocp_agent() const { return m_rocp_agent; }
     std::string_view           name() const { return m_name; }
     size_t                     index() const { return m_index; }
 
+    void init_agent_profile_queue(const CoreApiTable& api, const AmdExtTable& ext) const;
     bool operator==(const rocprofiler_agent_t*) const;
     bool operator==(hsa_agent_t) const;
 
@@ -88,7 +91,8 @@ private:
     hsa_amd_memory_pool_t m_kernarg_pool{.handle = 0};
     hsa_amd_memory_pool_t m_gpu_pool{.handle = 0};
 
-    std::string_view m_name = {};
+    std::string_view     m_name          = {};
+    mutable hsa_queue_t* m_profile_queue = {};
 };
 
 inline bool

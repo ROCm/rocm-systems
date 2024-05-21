@@ -656,8 +656,8 @@ get_agent_topology()
 auto&
 get_agent_caches()
 {
-    static auto _v = std::vector<hsa::AgentCache>{};
-    return _v;
+    static auto*& _v = common::static_object<std::vector<hsa::AgentCache>>::construct();
+    return *_v;
 }
 
 struct agent_pair
@@ -920,7 +920,7 @@ construct_agent_cache(::HsaApiTable* table)
         try
         {
             get_agent_caches().emplace_back(
-                rocp_agent, hsa_agent, itr.first, _nearest_cpu, *table->amd_ext_);
+                rocp_agent, hsa_agent, itr.first, _nearest_cpu, *table->amd_ext_, *table->core_);
         } catch(std::runtime_error& err)
         {
             if(rocp_agent->type == ROCPROFILER_AGENT_TYPE_GPU)

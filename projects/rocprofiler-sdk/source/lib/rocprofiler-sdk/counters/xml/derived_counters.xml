@@ -48,7 +48,7 @@
   <metric name="TCC_EA_WRREQ_sum" expr=reduce(TCC_EA_WRREQ,sum) descr="Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
   <metric name="TCC_EA_WRREQ_64B_sum" expr=reduce(TCC_EA_WRREQ_64B,sum) descr="Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface. Sum over TCC instances."></metric>
   <metric name="TCC_WRREQ_STALL_max" expr=reduce(TCC_EA_WRREQ_STALL,max) descr="Number of cycles a write request was stalled. Max over TCC instances."></metric>
-
+  <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,sum) descr="Total number of TCP stalls TA data interface."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max) descr="Maximum number of TCP stalls TA data interface."></metric>
 
@@ -425,6 +425,7 @@
   <metric name="TOTAL_16_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512) descr="The number of 16 bits OPS executed"></metric>
   <metric name="TOTAL_32_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512) descr="The number of 32 bits OPS executed"></metric>
   <metric name="TOTAL_64_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512) descr="The number of 64 bits OPS executed"></metric>
+  <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
 </gfx940>
 
 <gfx10>
@@ -468,6 +469,9 @@
 
 <gfx1031 base="gfx10">
 </gfx1031>
+
+<gfx1010 base="gfx10">
+</gfx1010>
 
 <gfx1032 base="gfx10">
 </gfx1032>

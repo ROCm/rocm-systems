@@ -166,7 +166,12 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
 
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>> derived_gfx908 =
     {{"gfx908",
-      {{"SQ_WAVES_sum",
+      {{"GPU_UTIL",
+        "",
+        "",
+        "100*GRBM_GUI_ACTIVE/GRBM_COUNT",
+        "Percentage of the time that GUI is active"},
+       {"SQ_WAVES_sum",
         "",
         "",
         "reduce(SQ_WAVES,sum)",

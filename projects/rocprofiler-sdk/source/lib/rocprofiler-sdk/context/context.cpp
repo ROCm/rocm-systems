@@ -317,10 +317,13 @@ start_context(rocprofiler_context_id_t context_id)
         return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
     }
 
+    auto status = ROCPROFILER_STATUS_SUCCESS;
+
     if(cfg->counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->thread_trace) cfg->thread_trace->start_context();
+    if(cfg->agent_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
 
-    return ROCPROFILER_STATUS_SUCCESS;
+    return status;
 }
 
 rocprofiler_status_t
@@ -344,9 +347,16 @@ stop_context(rocprofiler_context_id_t idx)
                 if(nactive > 0) get_num_active_contexts().fetch_sub(1, std::memory_order_release);
 
                 if(_expected->counter_collection)
+                {
                     rocprofiler::counters::stop_context(const_cast<context*>(_expected));
-                else if(_expected->thread_trace)
-                    _expected->thread_trace->stop_context();
+                }
+
+                if(_expected->thread_trace) _expected->thread_trace->stop_context();
+
+                if(_expected->agent_counter_collection)
+                {
+                    rocprofiler::counters::stop_agent_ctx(const_cast<context*>(_expected));
+                }
                 return ROCPROFILER_STATUS_SUCCESS;
             }
         }

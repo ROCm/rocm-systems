@@ -646,17 +646,22 @@ TEST(evaluate_ast, counter_reduction_sum)
                       sum_vec(base_counter_data["KRUEGER"])),
              2},
             {"KRAMER",
-             plus_vec(times_vec(
-                          std::vector<rocprofiler_record_counter_t>{
-                              {.id = 0, .counter_value = 5.0, .dispatch_id = 0}},
-                          sum_vec(base_counter_data["VOORHEES"])),
-                      sum_vec(base_counter_data["KRUEGER"])),
+             plus_vec(
+                 times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                      .counter_value = 5.0,
+                                                                      .dispatch_id   = 0,
+                                                                      .user_data = {.value = 0}}},
+                           sum_vec(base_counter_data["VOORHEES"])),
+                 sum_vec(base_counter_data["KRUEGER"])),
              2},
             {"GHOSTFACE",
              plus_vec(sum_vec(base_counter_data["VOORHEES"]),
-                      divide_vec(sum_vec(base_counter_data["KRUEGER"]),
-                                 std::vector<rocprofiler_record_counter_t>{
-                                     {.id = 0, .counter_value = 5.0, .dispatch_id = 0}})),
+                      divide_vec(
+                          sum_vec(base_counter_data["KRUEGER"]),
+                          std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                     .counter_value = 5.0,
+                                                                     .dispatch_id   = 0,
+                                                                     .user_data = {.value = 0}}})),
              2},
         };
 
@@ -727,17 +732,22 @@ TEST(evaluate_ast, counter_reduction_min)
                       min_vec(base_counter_data["KRUEGER"])),
              2},
             {"KRAMER",
-             plus_vec(times_vec(
-                          std::vector<rocprofiler_record_counter_t>{
-                              {.id = 0, .counter_value = 5.0, .dispatch_id = 0}},
-                          min_vec(base_counter_data["VOORHEES"])),
-                      min_vec(base_counter_data["KRUEGER"])),
+             plus_vec(
+                 times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                      .counter_value = 5.0,
+                                                                      .dispatch_id   = 0,
+                                                                      .user_data = {.value = 0}}},
+                           min_vec(base_counter_data["VOORHEES"])),
+                 min_vec(base_counter_data["KRUEGER"])),
              2},
             {"GHOSTFACE",
              plus_vec(min_vec(base_counter_data["VOORHEES"]),
-                      divide_vec(min_vec(base_counter_data["KRUEGER"]),
-                                 std::vector<rocprofiler_record_counter_t>{
-                                     {.id = 0, .counter_value = 5.0, .dispatch_id = 0}})),
+                      divide_vec(
+                          min_vec(base_counter_data["KRUEGER"]),
+                          std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                     .counter_value = 5.0,
+                                                                     .dispatch_id   = 0,
+                                                                     .user_data = {.value = 0}}})),
              2},
         };
 
@@ -808,17 +818,22 @@ TEST(evaluate_ast, counter_reduction_max)
                       max_vec(base_counter_data["KRUEGER"])),
              2},
             {"KRAMER",
-             plus_vec(times_vec(
-                          std::vector<rocprofiler_record_counter_t>{
-                              {.id = 0, .counter_value = 5.0, .dispatch_id = 0}},
-                          max_vec(base_counter_data["VOORHEES"])),
-                      max_vec(base_counter_data["KRUEGER"])),
+             plus_vec(
+                 times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                      .counter_value = 5.0,
+                                                                      .dispatch_id   = 0,
+                                                                      .user_data = {.value = 0}}},
+                           max_vec(base_counter_data["VOORHEES"])),
+                 max_vec(base_counter_data["KRUEGER"])),
              2},
             {"GHOSTFACE",
              plus_vec(max_vec(base_counter_data["VOORHEES"]),
-                      divide_vec(max_vec(base_counter_data["KRUEGER"]),
-                                 std::vector<rocprofiler_record_counter_t>{
-                                     {.id = 0, .counter_value = 5.0, .dispatch_id = 0}})),
+                      divide_vec(
+                          max_vec(base_counter_data["KRUEGER"]),
+                          std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                     .counter_value = 5.0,
+                                                                     .dispatch_id   = 0,
+                                                                     .user_data = {.value = 0}}})),
              2},
         };
 
@@ -891,17 +906,22 @@ TEST(evaluate_ast, counter_reduction_avg)
                       avg_vec(base_counter_data["KRUEGER"])),
              2},
             {"KRAMER",
-             plus_vec(times_vec(
-                          std::vector<rocprofiler_record_counter_t>{
-                              {.id = 0, .counter_value = 5.0, .dispatch_id = 0}},
-                          avg_vec(base_counter_data["VOORHEES"])),
-                      avg_vec(base_counter_data["KRUEGER"])),
+             plus_vec(
+                 times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                      .counter_value = 5.0,
+                                                                      .dispatch_id   = 0,
+                                                                      .user_data = {.value = 0}}},
+                           avg_vec(base_counter_data["VOORHEES"])),
+                 avg_vec(base_counter_data["KRUEGER"])),
              2},
             {"GHOSTFACE",
              plus_vec(avg_vec(base_counter_data["VOORHEES"]),
-                      divide_vec(avg_vec(base_counter_data["KRUEGER"]),
-                                 std::vector<rocprofiler_record_counter_t>{
-                                     {.id = 0, .counter_value = 5.0, .dispatch_id = 0}})),
+                      divide_vec(
+                          avg_vec(base_counter_data["KRUEGER"]),
+                          std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                     .counter_value = 5.0,
+                                                                     .dispatch_id   = 0,
+                                                                     .user_data = {.value = 0}}})),
              2},
         };
 
@@ -962,18 +982,23 @@ TEST(evaluate_ast, evaluate_mixed_counters)
             {"BATES",
              times_vec(
                  std::vector<rocprofiler_record_counter_t>{
-                     {.id = 0, .counter_value = 32, .dispatch_id = 0}},
+                     {.id = 0, .counter_value = 32, .dispatch_id = 0, .user_data = {.value = 0}}},
                  sum_vec(base_counter_data["VOORHEES"])),
              2},
             {"KRAMER",
              times_vec(sum_vec(base_counter_data["KRUEGER"]),
-                       std::vector<rocprofiler_record_counter_t>{
-                           {.id = 0, .counter_value = 8.0 / 5.0, .dispatch_id = 0}}),
+                       std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                  .counter_value = 8.0 / 5.0,
+                                                                  .dispatch_id   = 0,
+                                                                  .user_data     = {.value = 0}}}),
              3},
             {"TORRANCE",
-             times_vec(sum_vec(base_counter_data["KRUEGER"]),
-                       std::vector<rocprofiler_record_counter_t>{
-                           {.id = 0, .counter_value = 104.0 / (156.0 * 8.0), .dispatch_id = 0}}),
+             times_vec(
+                 sum_vec(base_counter_data["KRUEGER"]),
+                 std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                            .counter_value = 104.0 / (156.0 * 8.0),
+                                                            .dispatch_id   = 0,
+                                                            .user_data     = {.value = 0}}}),
              4},
         };
 

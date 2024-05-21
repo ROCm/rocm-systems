@@ -207,11 +207,14 @@ stop_context(const context::context* ctx)
 }
 
 rocprofiler_status_t
-configure_agent_collection(rocprofiler_context_id_t        context_id,
-                           rocprofiler_buffer_id_t         buffer_id,
-                           rocprofiler_profile_config_id_t config_id)
+configure_agent_collection(rocprofiler_context_id_t             context_id,
+                           rocprofiler_buffer_id_t              buffer_id,
+                           rocprofiler_agent_id_t               agent_id,
+                           rocprofiler_agent_profile_callback_t cb,
+                           void*                                user_data)
 {
-    return get_controller().configure_agent_collection(context_id, buffer_id, config_id);
+    return get_controller().configure_agent_collection(
+        context_id, buffer_id, agent_id, cb, user_data);
 }
 
 rocprofiler_status_t

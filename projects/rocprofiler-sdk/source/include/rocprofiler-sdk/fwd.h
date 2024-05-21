@@ -97,6 +97,11 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND,    ///< Could not find the counter profile
     ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT,  ///< Cannot enable both agent and dispatch
                                                        ///< counting in the same context.
+    ROCPROFILER_STATUS_INTERNAL_NO_AGENT_CONTEXT,   ///< No agent context found, may not be an error
+    ROCPROFILER_STATUS_ERROR_SAMPLE_RATE_EXCEEDED,  ///< Sample rate exceeded
+    ROCPROFILER_STATUS_ERROR_NO_PROFILE_QUEUE,      ///< Profile queue creation failed
+    ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS,  ///< No hardware counters were specified
+    ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH,        ///< Agent mismatch between profile and context.
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
@@ -385,6 +390,16 @@ typedef enum
     /// ::rocprofiler_profile_counting_dispatch_record_t
 } rocprofiler_counter_record_kind_t;
 
+/**
+ * @brief Enumeration of flags that can be used with some counter api calls
+ */
+typedef enum
+{
+    ROCPROFILER_COUNTER_FLAG_NONE = 0,
+    ROCPROFILER_COUNTER_FLAG_ASYNC,  ///< Do not wait for completion before returning.
+    ROCPROFILER_COUNTER_FLAG_LAST,
+} rocprofiler_counter_flag_t;
+
 //--------------------------------------------------------------------------------------//
 //
 //                                      ALIASES
@@ -651,6 +666,7 @@ typedef struct
     rocprofiler_counter_instance_id_t id;             ///< counter identifier
     double                            counter_value;  ///< counter value
     rocprofiler_dispatch_id_t         dispatch_id;
+    rocprofiler_user_data_t           user_data;
 
     /// @var dispatch_id
     /// @brief A value greater than zero indicates that this counter record is associated with a

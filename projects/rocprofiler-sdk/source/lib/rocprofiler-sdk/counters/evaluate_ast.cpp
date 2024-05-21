@@ -57,7 +57,8 @@ get_reduce_op_type_from_string(const std::string& op)
 std::vector<rocprofiler_record_counter_t>*
 perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_counter_t>* input_array)
 {
-    rocprofiler_record_counter_t result{.id = 0, .counter_value = 0, .dispatch_id = 0};
+    rocprofiler_record_counter_t result{
+        .id = 0, .counter_value = 0, .dispatch_id = 0, .user_data = {.value = 0}};
     if(input_array->empty()) return input_array;
     switch(reduce_op)
     {
@@ -83,12 +84,14 @@ perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_coun
             result = std::accumulate(
                 input_array->begin(),
                 input_array->end(),
-                rocprofiler_record_counter_t{.id = 0, .counter_value = 0, .dispatch_id = 0},
+                rocprofiler_record_counter_t{
+                    .id = 0, .counter_value = 0, .dispatch_id = 0, .user_data = {.value = 0}},
                 [](auto& a, auto& b) {
                     return rocprofiler_record_counter_t{
                         .id            = a.id,
                         .counter_value = a.counter_value + b.counter_value,
-                        .dispatch_id   = a.dispatch_id};
+                        .dispatch_id   = a.dispatch_id,
+                        .user_data     = {.value = 0}};
                 });
             break;
         }
@@ -97,12 +100,14 @@ perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_coun
             result = std::accumulate(
                 input_array->begin(),
                 input_array->end(),
-                rocprofiler_record_counter_t{.id = 0, .counter_value = 0, .dispatch_id = 0},
+                rocprofiler_record_counter_t{
+                    .id = 0, .counter_value = 0, .dispatch_id = 0, .user_data = {.value = 0}},
                 [](auto& a, auto& b) {
                     return rocprofiler_record_counter_t{
                         .id            = a.id,
                         .counter_value = a.counter_value + b.counter_value,
-                        .dispatch_id   = a.dispatch_id};
+                        .dispatch_id   = a.dispatch_id,
+                        .user_data     = {.value = 0}};
                 });
             result.counter_value /= input_array->size();
             break;
@@ -219,7 +224,8 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
         _raw_value = std::get<int64_t>(ast.value);
         _static_value.push_back({.id            = 0,
                                  .counter_value = static_cast<double>(std::get<int64_t>(ast.value)),
-                                 .dispatch_id   = 0});
+                                 .dispatch_id   = 0,
+                                 .user_data     = {.value = 0}});
     }
 
     for(const auto& nextAst : ast.counter_set)
@@ -596,28 +602,32 @@ EvaluateAST::evaluate(
                 return rocprofiler_record_counter_t{
                     .id            = a.id,
                     .counter_value = a.counter_value + b.counter_value,
-                    .dispatch_id   = a.dispatch_id};
+                    .dispatch_id   = a.dispatch_id,
+                    .user_data     = {.value = 0}};
             });
         case SUBTRACTION_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{
                     .id            = a.id,
                     .counter_value = a.counter_value - b.counter_value,
-                    .dispatch_id   = a.dispatch_id};
+                    .dispatch_id   = a.dispatch_id,
+                    .user_data     = {.value = 0}};
             });
         case MULTIPLY_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{
                     .id            = a.id,
                     .counter_value = a.counter_value * b.counter_value,
-                    .dispatch_id   = a.dispatch_id};
+                    .dispatch_id   = a.dispatch_id,
+                    .user_data     = {.value = 0}};
             });
         case DIVIDE_NODE:
             return perform_op([](auto& a, auto& b) {
                 return rocprofiler_record_counter_t{
                     .id            = a.id,
                     .counter_value = (b.counter_value == 0 ? 0 : a.counter_value / b.counter_value),
-                    .dispatch_id   = a.dispatch_id};
+                    .dispatch_id   = a.dispatch_id,
+                    .user_data     = {.value = 0}};
             });
         case REFERENCE_NODE:
         {

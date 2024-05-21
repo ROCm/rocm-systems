@@ -26,6 +26,8 @@
 #include <fmt/core.h>
 #include <stdexcept>
 
+#include "lib/rocprofiler-sdk/context/context.hpp"
+
 namespace
 {
 // This function checks to see if the provided
@@ -123,11 +125,48 @@ namespace rocprofiler
 {
 namespace hsa
 {
+void
+AgentCache::init_agent_profile_queue(const CoreApiTable& api, const AmdExtTable& ext) const
+{
+    static std::mutex           m_mutex;
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    using context         = rocprofiler::context::context;
+    const auto* agent_ctx = []() -> const context* {
+        for(auto& ctx : rocprofiler::context::get_registered_contexts())
+        {
+            if(ctx->agent_counter_collection) return ctx;
+        }
+        return nullptr;
+    }();
+
+    if(!agent_ctx || m_profile_queue) return;
+    ROCP_ERROR << "Creating Profile Queue";
+    // create the queue and set it to high_priority
+    CHECK(api.hsa_queue_create_fn) << "no hsa_queue_create_fn in api table";
+    auto status = api.hsa_queue_create_fn(get_hsa_agent(),
+                                          64,
+                                          HSA_QUEUE_TYPE_SINGLE,
+                                          nullptr,
+                                          nullptr,
+                                          UINT32_MAX,
+                                          UINT32_MAX,
+                                          &m_profile_queue);
+    if(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
+    {
+        throw std::runtime_error("Error: Queue is not initialized");
+    }
+
+    CHECK(ext.hsa_amd_queue_set_priority_fn) << "no hsa_amd_queue_set_priority_fn in api table";
+    ext.hsa_amd_queue_set_priority_fn(m_profile_queue, HSA_AMD_QUEUE_PRIORITY_HIGH);
+}
+
 AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
                        hsa_agent_t                hsa_agent,
                        size_t                     index,
                        hsa_agent_t                nearest_cpu,
-                       const AmdExtTable&         ext_table)
+                       const AmdExtTable&         ext_table,
+                       const CoreApiTable&        api)
 : m_rocp_agent{rocp_agent}
 , m_index{index}
 , m_hsa_agent{hsa_agent}
@@ -139,6 +178,7 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
     {
         init_cpu_pool(ext_table, *this);
         init_gpu_pool(ext_table, *this);
+        init_agent_profile_queue(api, ext_table);
     } catch(std::runtime_error& e)
     {
         ROCP_WARNING << fmt::format(
