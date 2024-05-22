@@ -62,22 +62,6 @@ if(ROCPROFILER_BUILD_TESTS)
         find_package(GTest REQUIRED)
         target_link_libraries(rocprofiler-gtest INTERFACE GTest::gtest)
     endif()
-
-    # checkout submodule if not already checked out or clone repo if no .gitmodules file
-    rocprofiler_checkout_git_submodule(
-        RECURSIVE
-        RELATIVE_PATH external/cereal
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
-        REPO_URL https://github.com/jrmadsen/cereal.git
-        REPO_BRANCH "rocprofiler")
-
-    add_library(rocprofiler-cereal INTERFACE)
-    add_library(rocprofiler::cereal ALIAS rocprofiler-cereal)
-    target_compile_definitions(rocprofiler-cereal
-                               INTERFACE $<BUILD_INTERFACE:CEREAL_THREAD_SAFE=1>)
-    target_include_directories(
-        rocprofiler-cereal
-        INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cereal/include>)
 endif()
 
 if(ROCPROFILER_BUILD_GLOG)
@@ -141,6 +125,20 @@ if(NOT TARGET PTL::ptl-static)
     set(PTL_DEVELOPER_INSTALL OFF)
     add_subdirectory(ptl EXCLUDE_FROM_ALL)
 endif()
+
+# checkout submodule if not already checked out or clone repo if no .gitmodules file
+rocprofiler_checkout_git_submodule(
+    RECURSIVE
+    RELATIVE_PATH external/cereal
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    REPO_URL https://github.com/jrmadsen/cereal.git
+    REPO_BRANCH "rocprofiler")
+
+target_compile_definitions(rocprofiler-cereal
+                           INTERFACE $<BUILD_INTERFACE:CEREAL_THREAD_SAFE=1>)
+target_include_directories(
+    rocprofiler-cereal
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cereal/include>)
 
 # doxygen-awesome
 if(ROCPROFILER_BUILD_DOCS)

@@ -10,18 +10,16 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-foreach(FILENAME validate.py input.txt)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
-endforeach()
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
+                                                          input.txt)
 
 # pmc2
 add_test(
     NAME rocprofv3-test-counter-collection-pmc2-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o
-        out $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/input.txt --output-format CSV,JSON -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o out $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -58,7 +56,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                DEPENDS
-               rocprofv3-test-counter-collection-pmc2-execute
+               "rocprofv3-test-counter-collection-pmc2-execute"
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                ATTACHED_FILES_ON_FAIL

@@ -24,6 +24,7 @@
 #include "config.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/name_info.hpp>
 
 #include <atomic>
 #include <iostream>
@@ -33,133 +34,14 @@
 #include <unordered_set>
 #include <utility>
 
-rocprofiler_tool_buffer_name_info_t
+::rocprofiler::sdk::buffer_name_info_t<std::string_view>
 get_buffer_id_names()
 {
-    static auto supported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{
-        ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
-        ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
-        ROCPROFILER_BUFFER_TRACING_HSA_IMAGE_EXT_API,
-        ROCPROFILER_BUFFER_TRACING_HSA_FINALIZE_EXT_API,
-        ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API,
-        ROCPROFILER_BUFFER_TRACING_HIP_COMPILER_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_CONTROL_API,
-        ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API,
-        ROCPROFILER_BUFFER_TRACING_MEMORY_COPY,
-        ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,
-    };
-
-    auto cb_name_info = rocprofiler_tool_buffer_name_info_t{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<rocprofiler_tool_buffer_name_info_t*>(data_v);
-
-            if(supported.count(kindv) > 0)
-            {
-                const char* name = nullptr;
-                ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_operation_name(
-                                     kindv, operation, &name, nullptr),
-                                 "query buffer failed");
-                if(name) name_info_v->operation_names[kindv][operation] = name;
-            }
-
-            return 0;
-        };
-
-    //
-    //  callback for each kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_buffer_tracing_kind_t kind, void* data) {
-        //  store the buffer kind name
-        auto*       name_info_v = static_cast<rocprofiler_tool_buffer_name_info_t*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_buffer_tracing_kind_name(kind, &name, nullptr),
-                         "query buffer failed");
-
-        if(name) name_info_v->kind_names[kind] = name;
-
-        if(supported.count(kind) > 0)
-        {
-            ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kind_operations(
-                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
-                             "query buffer failed");
-        }
-
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_buffer_tracing_kinds(tracing_kind_cb,
-                                                              static_cast<void*>(&cb_name_info)),
-                     "iterate_buffer failed");
-
-    return cb_name_info;
+    return ::rocprofiler::sdk::get_buffer_tracing_names();
 }
 
-rocprofiler_tool_callback_name_info_t
+::rocprofiler::sdk::callback_name_info_t<std::string_view>
 get_callback_id_names()
 {
-    static auto supported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{
-        ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_IMAGE_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HSA_FINALIZE_EXT_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_RUNTIME_API,
-        ROCPROFILER_CALLBACK_TRACING_HIP_COMPILER_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API,
-        ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,
-        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-    };
-
-    auto cb_name_info = rocprofiler_tool_callback_name_info_t{};
-    //
-    // callback for each kind operation
-    //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<rocprofiler_tool_callback_name_info_t*>(data_v);
-
-            if(supported.count(kindv) > 0)
-            {
-                const char* name = nullptr;
-                ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_operation_name(
-                                     kindv, operation, &name, nullptr),
-                                 "query callback failed");
-                if(name) name_info_v->operation_names[kindv][operation] = name;
-            }
-
-            return 0;
-        };
-
-    //
-    //  callback for each kind (i.e. domain)
-    //
-    static auto tracing_kind_cb = [](rocprofiler_callback_tracing_kind_t kind, void* data) {
-        //  store the callback kind name
-        auto*       name_info_v = static_cast<rocprofiler_tool_callback_name_info_t*>(data);
-        const char* name        = nullptr;
-        ROCPROFILER_CALL(rocprofiler_query_callback_tracing_kind_name(kind, &name, nullptr),
-                         "query callback failed");
-
-        if(name) name_info_v->kind_names[kind] = name;
-
-        if(supported.count(kind) > 0)
-        {
-            ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kind_operations(
-                                 kind, tracing_kind_operation_cb, static_cast<void*>(data)),
-                             "query callback failed");
-        }
-
-        return 0;
-    };
-
-    ROCPROFILER_CALL(rocprofiler_iterate_callback_tracing_kinds(tracing_kind_cb,
-                                                                static_cast<void*>(&cb_name_info)),
-                     "iterate_callback failed");
-
-    return cb_name_info;
+    return ::rocprofiler::sdk::get_callback_tracing_names();
 }

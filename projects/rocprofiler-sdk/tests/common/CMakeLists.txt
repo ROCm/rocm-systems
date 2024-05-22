@@ -41,11 +41,11 @@ if(ROCPROFILER_BUILD_CI OR ROCPROFILER_BUILD_WERROR)
 endif()
 
 # serialization library
-if(NOT TARGET rocprofiler::cereal)
+if(NOT TARGET rocprofiler::rocprofiler-cereal)
     get_filename_component(ROCPROFILER_SOURCE_DIR "${PROJECT_SOURCE_DIR}/.." REALPATH)
 
     add_library(rocprofiler-cereal INTERFACE)
-    add_library(rocprofiler::cereal ALIAS rocprofiler-cereal)
+    add_library(rocprofiler::rocprofiler-cereal ALIAS rocprofiler-cereal)
     target_compile_definitions(rocprofiler-cereal
                                INTERFACE $<BUILD_INTERFACE:CEREAL_THREAD_SAFE=1>)
 
@@ -115,8 +115,9 @@ cmake_path(GET CMAKE_CURRENT_SOURCE_DIR PARENT_PATH COMMON_LIBRARY_INCLUDE_DIR)
 
 add_library(rocprofiler-tests-common-library INTERFACE)
 add_library(rocprofiler::tests-common-library ALIAS rocprofiler-tests-common-library)
-target_link_libraries(rocprofiler-tests-common-library
-                      INTERFACE rocprofiler::tests-build-flags rocprofiler::cereal)
+target_link_libraries(
+    rocprofiler-tests-common-library INTERFACE rocprofiler::tests-build-flags
+                                               rocprofiler::rocprofiler-cereal)
 target_compile_features(rocprofiler-tests-common-library INTERFACE cxx_std_17)
 target_include_directories(rocprofiler-tests-common-library
                            INTERFACE ${COMMON_LIBRARY_INCLUDE_DIR})

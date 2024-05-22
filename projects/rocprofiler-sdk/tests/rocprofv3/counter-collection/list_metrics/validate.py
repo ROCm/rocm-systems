@@ -5,7 +5,7 @@ import pytest
 
 def test_validate_list_basic_metrics(basic_metrics_input_data):
     for row in basic_metrics_input_data:
-        assert row["Agent-id"].isdigit() == True
+        assert row["Agent_Id"].isdigit() == True
         assert row["Name"] != ""
         assert row["Description"] != ""
         assert row["Block"] != ""
@@ -19,7 +19,7 @@ def test_validate_list_basic_metrics(basic_metrics_input_data):
 
 def test_validate_list_derived_metrics(derived_metrics_input_data):
     for row in derived_metrics_input_data:
-        assert row["Agent-id"].isdigit() == True
+        assert row["Agent_Id"].isdigit() == True
         assert row["Name"] != ""
         assert row["Description"] != ""
         assert row["Expression"] != ""

@@ -20,31 +20,36 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace
-        -o pmc3 $<TARGET_FILE:simple-transpose>)
+        -o pmc3 --output-format JSON:CSV $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
-    set(LOG_LEVEL "warning") # info produces memory leak
-else()
-    set(LOG_LEVEL "info")
-endif()
-
-set(cc-tracing-env "${PRELOAD_ENV}" "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
-                   "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
+set(cc-tracing-env "${PRELOAD_ENV}")
 
 set_tests_properties(
     rocprofv3-test-tracing-plus-cc-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-tracing-env}"
-               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
-
-add_test(NAME rocprofv3-test-tracing-plus-cc-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
-                 --input-dir "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace")
-
-set_tests_properties(
-    rocprofv3-test-tracing-plus-cc-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-tracing-plus-cc-execute FAIL_REGULAR_EXPRESSION
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests;application-replay" ENVIRONMENT
+               "${cc-tracing-env}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
+    add_test(
+        NAME rocprofv3-test-tracing-plus-cc-validate-${_DIR}
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_results.json"
+            --hsa-input
+            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_hsa_api_trace.csv"
+            --agent-input
+            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_agent_info.csv"
+            --counter-input
+            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_counter_collection.csv"
+        )
+
+    set_tests_properties(
+        rocprofv3-test-tracing-plus-cc-validate-${_DIR}
+        PROPERTIES TIMEOUT 45 LABELS "integration-tests;application-replay" DEPENDS
+                   "rocprofv3-test-tracing-plus-cc-execute" FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endforeach()

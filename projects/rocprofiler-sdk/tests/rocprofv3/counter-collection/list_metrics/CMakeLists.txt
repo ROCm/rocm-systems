@@ -10,10 +10,7 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-foreach(FILENAME validate.py conftest.py)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
-endforeach()
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
 # basic-metrics
 add_test(NAME rocprofv3-test-list-metrics-execute

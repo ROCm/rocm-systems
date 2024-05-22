@@ -4,10 +4,30 @@
 
 rocprofiler_activate_clang_tidy()
 
-set(TOOL_HEADERS config.hpp csv.hpp generateCSV.hpp helper.hpp output_file.hpp
-                 statistics.hpp tmp_file.hpp)
-set(TOOL_SOURCES config.cpp generateCSV.cpp helper.cpp output_file.cpp tmp_file.cpp
-                 tool.cpp)
+set(TOOL_HEADERS
+    buffered_output.hpp
+    config.hpp
+    csv.hpp
+    domain_type.hpp
+    generateCSV.hpp
+    generateJSON.hpp
+    helper.hpp
+    output_file.hpp
+    statistics.hpp
+    tmp_file_buffer.hpp
+    tmp_file.hpp)
+
+set(TOOL_SOURCES
+    config.cpp
+    domain_type.cpp
+    generateCSV.cpp
+    generateJSON.cpp
+    helper.cpp
+    main.c
+    output_file.cpp
+    tmp_file_buffer.cpp
+    tmp_file.cpp
+    tool.cpp)
 
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
@@ -18,7 +38,7 @@ target_link_libraries(
     rocprofiler-sdk-tool
     PRIVATE rocprofiler::rocprofiler-shared-library rocprofiler::rocprofiler-headers
             rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library)
+            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-cereal)
 
 set_target_properties(
     rocprofiler-sdk-tool

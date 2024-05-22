@@ -128,7 +128,7 @@ handle_special_chars(std::string& str)
 {
     // Iterate over the string and replace any special characters with a space.
     auto pos = std::string::npos;
-    while((pos = str.find_first_of("!@#$%&(),*+-./;<=>?@{}^`~|:")) != std::string::npos)
+    while((pos = str.find_first_of("!@#$%&(),*+-./;<>?@{}^`~|")) != std::string::npos)
         str.at(pos) = ' ';
 }
 
@@ -186,21 +186,36 @@ parse_counters(std::string line)
 
     if(line.empty()) return counters;
 
-    // trim line for any white spaces
+    // strip the comment
+    if(auto pos = std::string::npos; (pos = line.find('#')) != std::string::npos)
+        line = line.substr(0, pos);
+
+    // trim line for any white spaces after comment strip
     trim(line);
 
-    if(!(line[0] == '#' || line.find("pmc") == std::string::npos))
+    // check to see if comment stripping + trim resulted in empty line
+    if(line.empty()) return counters;
+
+    constexpr auto pmc_qualifier = std::string_view{"pmc:"};
+    auto           pos           = std::string::npos;
+
+    // should we handle an "pmc:" not being present? Seems like it should be a fatal error
+    if((pos = line.find(pmc_qualifier)) != std::string::npos)
     {
+        // strip out pmc qualifier
+        line = line.substr(pos + pmc_qualifier.length());
+
         handle_special_chars(line);
 
-        std::stringstream input_line(line);
-        std::string       counter;
-        while(getline(input_line, counter, ' '))
+        auto input_ss = std::stringstream{line};
+        while(true)
         {
-            if(counter.substr(0, 3) != "pmc" && has_counter_format(counter))
-            {
+            auto counter = std::string{};
+            input_ss >> counter;
+            if(counter.empty())
+                break;
+            else if(counter != pmc_qualifier && has_counter_format(counter))
                 counters.emplace(counter);
-            }
         }
     }
 
@@ -227,7 +242,45 @@ get_mpi_rank()
 config::config()
 : kernel_names{parse_kernel_names(get_env("ROCPROF_KERNEL_NAMES", std::string{}))}
 , counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
-{}
+{
+    auto output_format = get_env("ROCPROF_OUTPUT_FORMAT", "CSV");
+
+    for(auto& itr : output_format)
+        itr = toupper(itr);
+
+    for(auto itr : {',', ';', ':'})
+    {
+        auto pos = std::string::npos;
+        do
+        {
+            pos = output_format.find(itr);
+            if(pos != std::string::npos) output_format.replace(pos, 1, " ");
+        } while(pos != std::string::npos);
+    }
+
+    auto entries = std::set<std::string>{};
+    auto parser  = std::stringstream{output_format};
+
+    while(true)
+    {
+        auto _val = std::string{};
+        parser >> _val;
+        if(!_val.empty())
+            entries.emplace(_val);
+        else
+            break;
+    }
+
+    csv_output  = entries.count("CSV") > 0 || entries.empty();
+    json_output = entries.count("JSON") > 0;
+
+    const auto supported_formats = std::set<std::string_view>{"CSV", "JSON"};
+    for(const auto& itr : entries)
+    {
+        LOG_IF(FATAL, supported_formats.count(itr) == 0)
+            << "Unsupported output format type: " << itr;
+    }
+}
 
 std::vector<output_key>
 output_keys(std::string _tag)

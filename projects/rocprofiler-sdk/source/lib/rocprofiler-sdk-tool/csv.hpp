@@ -38,27 +38,36 @@ namespace tool
 {
 namespace csv
 {
-template <typename TupleT, size_t... Idx>
+struct numerical_formatter
+{
+    template <typename Tp>
+    std::ostream& operator()(std::ostream& ofs, const Tp& _val) const
+    {
+        using value_type = common::mpl::unqualified_type_t<Tp>;
+
+        if constexpr(std::is_floating_point<value_type>::value)
+        {
+            constexpr value_type one = 1;
+            if(_val >= one)
+                ofs << std::setprecision(6) << std::fixed;
+            else
+                ofs << std::setprecision(8) << std::scientific;
+        }
+
+        return ofs;
+    }
+};
+
+template <typename FmtT = numerical_formatter, typename TupleT, size_t... Idx>
 std::ostream&
 write_csv_entry(std::ostream& ofs, TupleT&& _data, std::index_sequence<Idx...>)
 {
     auto _write = [&ofs](size_t idx, auto&& _val) {
         using value_type = common::mpl::unqualified_type_t<decltype(_val)>;
         if(idx > 0) ofs << ",";
-        if constexpr(std::is_floating_point<value_type>::value)
-        {
-            constexpr value_type one = 1;
-            if(_val >= one)
-                ofs << std::setprecision(6) << std::fixed << _val;
-            else
-                ofs << std::setprecision(6) << std::scientific << _val;
-        }
-        else
-        {
-            if constexpr(common::mpl::is_string_type<value_type>::value) ofs << "\"";
-            ofs << _val;
-            if constexpr(common::mpl::is_string_type<value_type>::value) ofs << "\"";
-        }
+        if constexpr(common::mpl::is_string_type<value_type>::value) ofs << "\"";
+        FmtT{}(ofs, _val) << _val;
+        if constexpr(common::mpl::is_string_type<value_type>::value) ofs << "\"";
     };
 
     (_write(Idx, std::get<Idx>(_data)), ...);
@@ -70,21 +79,22 @@ struct csv_encoder
 {
     static constexpr auto columns = NumCols;
 
-    template <typename... Args,
+    template <typename FmtT = numerical_formatter,
+              typename... Args,
               typename Tp                                       = void,
               std::enable_if_t<sizeof...(Args) == columns, int> = 0>
     static auto write_row(std::ostream& ofs, Args&&... args)
     {
-        write_csv_entry(
+        write_csv_entry<FmtT>(
             ofs, std::make_tuple(std::forward<Args>(args)...), std::make_index_sequence<columns>{});
         return csv_encoder<columns>{};
     }
 
-    template <typename Tp, size_t N>
+    template <typename FmtT = numerical_formatter, typename Tp, size_t N>
     static auto write_row(std::ostream& ofs, const std::array<Tp, N>& arr)
     {
         static_assert(N == columns, "Error! too many/few args passed");
-        write_csv_entry(ofs, arr, std::make_index_sequence<columns>{});
+        write_csv_entry<FmtT>(ofs, arr, std::make_index_sequence<columns>{});
         return csv_encoder<columns>{};
     }
 };

@@ -306,8 +306,6 @@ hsa_api_impl<TableIdx, OpIdx>::functor(Args... args)
     constexpr auto external_corr_id_domain_idx =
         hsa_domain_info<TableIdx>::external_correlation_id_domain_idx;
 
-    ROCP_INFO_IF(registration::get_fini_status() != 0) << "Executing " << info_type::name;
-
     if(registration::get_fini_status() != 0)
     {
         [[maybe_unused]] auto _ret = exec(info_type::get_table_func(), std::forward<Args>(args)...);

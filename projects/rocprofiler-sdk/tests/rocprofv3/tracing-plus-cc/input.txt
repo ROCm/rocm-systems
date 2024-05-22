@@ -1,6 +1,8 @@
 # multi block counters
 
-pmc: GRBM_COUNT GRBM_GUI_ACTIVE SQ_CYCLES SQ_BUSY_CYCLES SQ_WAVES 
-pmc: TCC_REQ_sum                            TCC_STREAMING_REQ_sum                 TCC_HIT_sum                            TCC_MISS_sum
-pmc: TCC_EA_WRREQ_sum                       TCC_EA_WRREQ_64B_sum                  TCC_EA_WR_UNCACHED_32B_sum 
-pmc: TCC_TOO_MANY_EA_WRREQS_STALL_sum       TCC_EA_ATOMIC_sum                     TCC_EA_RDREQ_sum                       TCC_EA_RDREQ_32B_sum
+pmc: GRBM_COUNT
+pmc: GRBM_GUI_ACTIVE
+pmc: TA_BUSY_avr
+
+# below line expects that no system has >= 16384 GPUs so they should never be collected
+pmc: SQ_WAVES           SQ_CYCLES:device=16384      SQ_BUSY_CYCLES:device=65536

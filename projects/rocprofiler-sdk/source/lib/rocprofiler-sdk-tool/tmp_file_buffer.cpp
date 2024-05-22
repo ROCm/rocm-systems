@@ -19,9 +19,18 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-//
 
-#pragma once
+#include "tmp_file_buffer.hpp"
 
-// provided by the library
-#include <rocprofiler-sdk/cxx/serialization.hpp>
+#include <fmt/format.h>
+
+#include <utility>
+
+std::string
+compose_tmp_file_name(domain_type buffer_type)
+{
+    return rocprofiler::tool::format(fmt::format("{}/.rocprofv3/{}-{}.dat",
+                                                 rocprofiler::tool::get_config().tmp_directory,
+                                                 "%ppid%-%pid%",
+                                                 get_domain_file_name(buffer_type)));
+}

@@ -281,7 +281,8 @@ ring_buffer::retrieve() const
 template <typename Tp>
 struct ring_buffer : private base::ring_buffer
 {
-    using base_type = base::ring_buffer;
+    using base_type  = base::ring_buffer;
+    using value_type = Tp;
 
     static size_t get_items_per_page();
 

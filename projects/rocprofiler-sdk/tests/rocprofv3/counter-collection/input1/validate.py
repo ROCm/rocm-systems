@@ -52,6 +52,60 @@ def test_validate_counter_collection_pmc1(input_data: pd.DataFrame):
     assert di_expect == di_uniq
 
 
+def test_validate_counter_collection_pmc1_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+    counter_collection_data = data["callback_records"]["counter_collection"]
+    dispatch_ids = []
+    # at present, AQLProfile has bugs when reporting the counters for below architectures
+    skip_gfx = ("gfx1101", "gfx1102")
+
+    def get_kernel_name(kernel_id):
+        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+
+    def get_agent(agent_id):
+        for agent in data["agents"]:
+            if agent["id"]["handle"] == agent_id["handle"]:
+                return agent
+        return None
+
+    def get_counter(counter_id):
+        for counter in data["counters"]:
+            if counter["id"]["handle"] == counter_id["handle"]:
+                return counter
+        return None
+
+    for counter in counter_collection_data:
+        dispatch_data = counter["dispatch_data"]["dispatch_info"]
+
+        assert dispatch_data["dispatch_id"] > 0
+        assert dispatch_data["agent_id"]["handle"] > 0
+        assert dispatch_data["queue_id"]["handle"] > 0
+
+        agent = get_agent(dispatch_data["agent_id"])
+        kernel_name = get_kernel_name(dispatch_data["kernel_id"])
+
+        assert agent is not None
+        assert len(kernel_name) > 0
+
+        dispatch_ids.append(dispatch_data["dispatch_id"])
+        if not re.search(r"__amd_rocclr_.*", kernel_name):
+            for record in counter["records"]:
+                counter = get_counter(record["counter_id"])
+                assert counter is not None, f"record:\n\t{record}"
+                assert (
+                    counter["name"] == "SQ_WAVES"
+                ), f"record:\n\t{record}\ncounter:\n\t{counter}"
+                if agent["name"] not in skip_gfx:
+                    assert (
+                        record["value"] > 0
+                    ), f"record: {record}\ncounter: {counter}\nagent: {agent}"
+
+    di_uniq = list(set(sorted(dispatch_ids)))
+    # make sure the dispatch ids are unique and ordered
+    di_expect = [idx + 1 for idx in range(len(dispatch_ids))]
+    assert di_expect == di_uniq
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

@@ -19,9 +19,25 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-//
 
 #pragma once
 
-// provided by the library
-#include <rocprofiler-sdk/cxx/serialization.hpp>
+#include <string_view>
+
+enum class domain_type
+{
+    HSA = 0,
+    HIP,
+    MEMORY_COPY,
+    COUNTER_COLLECTION,
+    KERNEL_DISPATCH,
+    MARKER,
+    SCRATCH_MEMORY,
+    LAST,
+};
+
+std::string_view
+get_domain_file_name(domain_type val);
+
+std::string_view
+get_domain_column_name(domain_type _buffer_type);

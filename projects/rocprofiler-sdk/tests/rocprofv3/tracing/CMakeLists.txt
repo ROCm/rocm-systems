@@ -15,7 +15,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
         --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
-        out $<TARGET_FILE:simple-transpose>)
+        out --output-format csv,json $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -42,10 +42,7 @@ set_tests_properties(
         "HSA_API|HIP_API|HIP_COMPILER_API|MARKER_CORE_API|MARKER_CONTROL_API|MARKER_NAME_API|KERNEL_DISPATCH|CODE_OBJECT"
     )
 
-foreach(FILENAME validate.py conftest.py)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
-endforeach()
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
 add_test(
     NAME rocprofv3-test-trace-validate
@@ -59,14 +56,16 @@ add_test(
         --marker-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv
+        --json-input ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_results.json)
 
 set(VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_hsa_api_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_kernel_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_results.json)
 
 set_tests_properties(
     rocprofv3-test-trace-validate
@@ -75,7 +74,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                DEPENDS
-               rocprofv3-test-trace-execute
+               "rocprofv3-test-trace-execute"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                ATTACHED_FILES_ON_FAIL
@@ -88,7 +87,7 @@ add_test(
     NAME rocprofv3-test-systrace-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out --output-format csv,json
         $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
@@ -117,14 +116,17 @@ add_test(
         --marker-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv
+        --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_results.json)
 
 set(SYS_VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_hsa_api_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_kernel_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_results.json)
 
 set_tests_properties(
     rocprofv3-test-systrace-validate
@@ -133,7 +135,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                DEPENDS
-               rocprofv3-test-systrace-execute
+               "rocprofv3-test-systrace-execute"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                ATTACHED_FILES_ON_FAIL

@@ -2,6 +2,7 @@
 
 import sys
 import pytest
+import re
 
 
 def test_agent_info(agent_info_input_data):
@@ -41,11 +42,54 @@ def test_hsa_api_trace(hsa_input_data):
     correlation_ids = sorted(list(set(correlation_ids)))
 
     hsa_api_calls_offset = 2  # roctxRangePush is first
-    num_marker_api_calls = 7  # seven marker API calls, only six entries in
+    num_marker_api_calls = 6  # seven marker API calls, only six entries in
     # marker csv data because roctxRangePush + roctxRangePop is one entry
 
     # all correlation ids are unique
     assert len(correlation_ids) == len(hsa_input_data)
+    # correlation ids are numbered from 1 to N
+    assert correlation_ids[0] == hsa_api_calls_offset
+    assert correlation_ids[-1] == len(correlation_ids) + num_marker_api_calls
+
+    functions = list(set(functions))
+    assert "hsa_amd_memory_async_copy_on_engine" in functions
+
+
+def test_hsa_api_trace_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    def get_operation_name(kind_id, op_id):
+        return data["strings"]["buffer_records"][kind_id]["operations"][op_id]
+
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    valid_domain_names = (
+        "HSA_CORE_API",
+        "HSA_AMD_EXT_API",
+        "HSA_IMAGE_EXT_API",
+        "HSA_FINALIZE_EXT_API",
+    )
+
+    hsa_api_data = data["buffer_records"]["hsa_api"]
+
+    functions = []
+    correlation_ids = []
+    for api in hsa_api_data:
+        kind = get_kind_name(api["kind"])
+        assert kind in valid_domain_names
+        assert api["end_timestamp"] >= api["start_timestamp"]
+        functions.append(get_operation_name(api["kind"], api["operation"]))
+        correlation_ids.append(api["correlation_id"]["internal"])
+
+    correlation_ids = sorted(list(set(correlation_ids)))
+
+    hsa_api_calls_offset = 2  # roctxRangePush is first
+    num_marker_api_calls = 6  # seven marker API calls, only six entries in
+    # marker csv data because roctxRangePush + roctxRangePop is one entry
+
+    # all correlation ids are unique
+    assert len(correlation_ids) == len(hsa_api_data)
     # correlation ids are numbered from 1 to N
     assert correlation_ids[0] == hsa_api_calls_offset
     assert correlation_ids[-1] == len(correlation_ids) + num_marker_api_calls
@@ -77,8 +121,43 @@ def test_kernel_trace(kernel_input_data):
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
 
-def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
+def test_kernel_trace_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
 
+    def get_kernel_name(kernel_id):
+        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    valid_kernel_names = (
+        "_Z15matrixTransposePfS_i.kd",
+        "matrixTranspose(float*, float*, int)",
+    )
+    kernel_dispatch_data = data["buffer_records"]["kernel_dispatches"]
+    assert len(kernel_dispatch_data) == 1
+    for dispatch in kernel_dispatch_data:
+        dispatch_info = dispatch["dispatch_info"]
+        kernel_name = get_kernel_name(dispatch_info["kernel_id"])
+
+        assert get_kind_name(dispatch["kind"]) == "KERNEL_DISPATCH"
+        assert dispatch["correlation_id"]["internal"] > 0
+        assert dispatch_info["agent_id"]["handle"] > 0
+        assert dispatch_info["queue_id"]["handle"] > 0
+        assert dispatch_info["kernel_id"] > 0
+        if not re.search(r"__amd_rocclr_.*", kernel_name):
+            assert kernel_name in valid_kernel_names
+
+        assert dispatch_info["workgroup_size"]["x"] == 4
+        assert dispatch_info["workgroup_size"]["y"] == 4
+        assert dispatch_info["workgroup_size"]["z"] == 1
+        assert dispatch_info["grid_size"]["x"] == 1024
+        assert dispatch_info["grid_size"]["y"] == 1024
+        assert dispatch_info["grid_size"]["z"] == 1
+        assert dispatch["end_timestamp"] >= dispatch["start_timestamp"]
+
+
+def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
     def get_agent(node_id):
         for row in agent_info_input_data:
             if row["Logical_Node_Id"] == node_id:
@@ -110,6 +189,45 @@ def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
     test_row(1, "DEVICE_TO_HOST")
 
 
+def test_memory_copy_json_trace(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    buffer_records = data["buffer_records"]
+    agent_data = data["agents"]
+    memory_copy_data = buffer_records["memory_copy"]
+
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    def get_agent(node_id):
+        for agent in agent_data:
+            if agent["id"]["handle"] == node_id["handle"]:
+                return agent
+        return None
+
+    assert len(memory_copy_data) == 2
+
+    def test_row(idx, direction):
+        assert direction in ("HOST_TO_DEVICE", "DEVICE_TO_HOST")
+        row = memory_copy_data[idx]
+        src_agent = get_agent(row["src_agent_id"])
+        dst_agent = get_agent(row["dst_agent_id"])
+        assert get_kind_name(row["kind"]) == "MEMORY_COPY"
+        assert src_agent is not None, f"{row}"
+        assert dst_agent is not None, f"{row}"
+        if direction == "HOST_TO_DEVICE":
+            assert src_agent["type"] == 1
+            assert dst_agent["type"] == 2
+        else:
+            assert src_agent["type"] == 2
+            assert dst_agent["type"] == 1
+        assert row["correlation_id"]["internal"] > 0
+        assert row["end_timestamp"] >= row["start_timestamp"]
+
+    test_row(0, "HOST_TO_DEVICE")
+    test_row(1, "DEVICE_TO_HOST")
+
+
 def test_marker_api_trace(marker_input_data):
     functions = []
     for row in marker_input_data:
@@ -127,6 +245,22 @@ def test_marker_api_trace(marker_input_data):
 
     functions = list(set(functions))
     assert "main" in functions
+
+
+def test_marker_api_trace_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    def get_kind_name(kind_id):
+        return data["strings"]["buffer_records"][kind_id]["kind"]
+
+    valid_domain = ("MARKER_CORE_API", "MARKER_CONTROL_API", "MARKER_NAME_API")
+
+    buffer_records = data["buffer_records"]
+    marker_data = buffer_records["marker_api"]
+    for marker in marker_data:
+        assert get_kind_name(marker["kind"]) in valid_domain
+        assert marker["thread_id"] >= data["metadata"]["pid"]
+        assert marker["end_timestamp"] >= marker["start_timestamp"]
 
 
 if __name__ == "__main__":

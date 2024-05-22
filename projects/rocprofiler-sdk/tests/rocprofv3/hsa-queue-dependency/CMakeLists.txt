@@ -13,10 +13,7 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(tracing-env "${PRELOAD_ENV}")
 
-foreach(FILENAME validate.py conftest.py)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
-endforeach()
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
 find_package(rocprofiler-sdk REQUIRED)
 
@@ -25,7 +22,8 @@ add_test(
     NAME rocprofv3-test-hsa-multiqueue-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace --kernel-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out $<TARGET_FILE:multiqueue_testapp>)
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --output-format json:csv
+        $<TARGET_FILE:multiqueue_testapp>)
 
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-execute
@@ -38,11 +36,14 @@ add_test(
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --hsa-trace-input
         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_hsa_api_trace.csv
         --kernel-trace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_kernel_trace.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_kernel_trace.csv
+        --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.json)
 
 set(MULTIQUEUE_VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_kernel_api_trace.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_kernel_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.json)
 
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-validate
@@ -51,7 +52,7 @@ set_tests_properties(
                LABELS
                "integration-tests"
                DEPENDS
-               rocprofv3-test-hsa-multiqueue-execute
+               "rocprofv3-test-hsa-multiqueue-execute"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                ATTACHED_FILES_ON_FAIL

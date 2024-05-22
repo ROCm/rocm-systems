@@ -55,6 +55,7 @@ usage() {
   echo -e "\t#${GREY} usage (with custom dir):  rocprofv3 --hsa-trace -d <out_dir> -o <file_name> <executable>${RESET}\n"
   echo -e ""
   echo -e "${GREEN}-d   | --output-directory ${RESET}    For adding output path where the output files will be saved"
+  echo -e "${GREEN} | --output-format ${RESET}    For adding output format"
   echo -e "\t#${GREY} usage (with custom dir):  rocprofv3 --hsa-trace -d <out_dir> <executable>${RESET}"
   echo -e ""
   echo -e "${GREEN}-M   | --mangled-kernels ${RESET}     Do not demangle the kernel names"
@@ -137,6 +138,14 @@ while true; do
       ROCPROF_OUTPUT_PATH_INTERNAL=$2
       export ROCPROF_OUTPUT_PATH=$ROCPROF_OUTPUT_PATH_INTERNAL
       export ROCPROF_OUTPUT_LIST_METRICS_FILE=1
+    else
+      usage 1
+    fi
+    shift
+    shift
+  elif [[ "$1" == "--output-format" ]]; then
+    if [ "$2" ]; then
+      export ROCPROF_OUTPUT_FORMAT=$2
     else
       usage 1
     fi

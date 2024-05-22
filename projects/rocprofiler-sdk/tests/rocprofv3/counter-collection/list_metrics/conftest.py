@@ -2,7 +2,6 @@
 
 import csv
 import pytest
-import pandas as pd
 
 
 def pytest_addoption(parser):

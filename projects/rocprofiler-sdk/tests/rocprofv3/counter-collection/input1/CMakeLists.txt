@@ -10,10 +10,8 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-foreach(FILENAME validate.py input.txt)
-    configure_file(${CMAKE_CURRENT_SOURCE_DIR}/${FILENAME}
-                   ${CMAKE_CURRENT_BINARY_DIR}/${FILENAME} COPYONLY)
-endforeach()
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
+                                                          input.txt)
 
 # pmc1
 add_test(
@@ -21,7 +19,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1
-        -o pmc1 $<TARGET_FILE:vector-ops>)
+        -o pmc1 --output-format csv,json $<TARGET_FILE:vector-ops>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -33,12 +31,15 @@ set_tests_properties(
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc1}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-add_test(NAME rocprofv3-test-counter-collection-pmc1-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
-                 ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1/pmc_1/pmc1_counter_collection.csv)
+add_test(
+    NAME rocprofv3-test-counter-collection-pmc1-validate
+    COMMAND
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
+        ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1/pmc_1/pmc1_counter_collection.csv
+        --json-input ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1/pmc_1/pmc1_results.json)
 
 set_tests_properties(
     rocprofv3-test-counter-collection-pmc1-validate
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-counter-collection-pmc1-execute FAIL_REGULAR_EXPRESSION
+               "rocprofv3-test-counter-collection-pmc1-execute" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

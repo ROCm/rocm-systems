@@ -1,44 +1,23 @@
-import pandas as pd
-import os
 import sys
 import pytest
 
 
-def test_validate_counter_collection_plus_tracing(input_dir: pd.DataFrame):
-    directory_path = input_dir
+def test_validate_counter_collection_plus_tracing(
+    json_data, counter_input_data, hsa_input_data
+):
 
-    # Check if the directory is not empty
-    assert os.path.isdir(directory_path), f"{directory_path} is not a directory."
-    assert os.listdir(directory_path), f"{directory_path} is empty."
-
-    # Check if there are 4 subdirectories for pmc's
-    subdirectories = [
-        d
-        for d in os.listdir(directory_path)
-        if os.path.isdir(os.path.join(directory_path, d))
-    ]
+    # check if either kernel-name/FUNCTION is present
     assert (
-        len(subdirectories) == 4
-    ), f"Expected 4 subdirectories, found {len(subdirectories)}."
+        "Kernel_Name" in counter_input_data.columns
+        or "Function" in counter_input_data.columns
+    )
 
-    # Check if each subdirectory has files
-    for subdirectory in subdirectories:
-        subdirectory_path = os.path.join(directory_path, subdirectory)
-        assert os.listdir(subdirectory_path), f"{subdirectory_path} is empty."
+    data = json_data["rocprofiler-sdk-tool"]
+    hsa_api = data["buffer_records"]["hsa_api"]
+    assert len(hsa_input_data) == len(hsa_api)
 
-        # Check if each file in the subdirectory has some data
-        for file_name in os.listdir(subdirectory_path):
-            file_path = os.path.join(subdirectory_path, file_name)
-            # ignore hidden folders
-            if os.path.isdir(file_path) and os.path.basename(file_path).startswith("."):
-                continue
-            assert os.path.isfile(file_path), f"{file_path} is not a file."
-
-            if "agent_info.csv" not in file_path:
-                with open(file_path, "r") as file:
-                    df = pd.read_csv(file)
-                    # check if either kernel-name/FUNCTION is present
-                    assert "Kernel_Name" in df.columns or "Function" in df.columns
+    counter_collection_data = data["callback_records"]["counter_collection"]
+    assert len(counter_collection_data) > 0
 
 
 if __name__ == "__main__":

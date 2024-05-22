@@ -23,11 +23,14 @@
 #include "generateCSV.hpp"
 #include "csv.hpp"
 #include "helper.hpp"
+#include "lib/rocprofiler-sdk-tool/config.hpp"
 #include "statistics.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 
+#include <iomanip>
+#include <string_view>
 #include <utility>
 
 namespace rocprofiler
@@ -36,43 +39,170 @@ namespace tool
 {
 namespace
 {
-using float_type   = double;
 using stats_data_t = statistics<uint64_t, float_type>;
 using stats_map_t  = std::map<std::string_view, stats_data_t>;
 
-void
-write_stats(output_file& ofs, timestamps_t* app_timestamps, const stats_map_t& data)
+struct percentage
 {
-    auto       _ss          = std::stringstream{};
-    float_type app_duration = (app_timestamps->app_end_time - app_timestamps->app_start_time);
-    for(const auto& [id, value] : data)
-    {
-        auto        duration_ns = value.get_sum();
-        auto        calls       = value.get_count();
-        const auto& name        = id;
-        float_type  avg_ns      = value.get_mean();
-        float_type  percentage  = (duration_ns / app_duration) * static_cast<float_type>(100);
+    float_type value = {};
 
-        rocprofiler::tool::csv::stats_csv_encoder::write_row(_ss,
-                                                             name,
-                                                             calls,
-                                                             duration_ns,
-                                                             avg_ns,
-                                                             percentage,
-                                                             value.get_min(),
-                                                             value.get_max(),
-                                                             value.get_stddev());
+    friend std::ostream& operator<<(std::ostream& os, percentage val) { return (os << val.value); }
+};
+
+struct stats_formatter
+{
+    template <typename Tp>
+    std::ostream& operator()(std::ostream& ofs, const Tp& _val) const
+    {
+        using value_type = common::mpl::unqualified_type_t<Tp>;
+
+        if constexpr(std::is_floating_point<value_type>::value)
+        {
+            constexpr value_type one_hundredth = 1.0e-2;
+            if(_val > one_hundredth)
+                ofs << std::setprecision(6) << std::fixed;
+            else
+                ofs << std::setprecision(8) << std::scientific;
+        }
+        else if constexpr(std::is_same<Tp, percentage>::value)
+        {
+            constexpr float_type one           = 1.0;
+            constexpr float_type one_hundredth = 1.0e-2;
+            if(_val.value >= one)
+                ofs << std::setprecision(2) << std::fixed;
+            else if(_val.value > one_hundredth)
+                ofs << std::setprecision(4) << std::fixed;
+            else
+                ofs << std::setprecision(3) << std::scientific;
+        }
+
+        return ofs;
     }
-    ofs << _ss.str();
+};
+
+tool::output_file
+get_stats_output_file(std::string name)
+{
+    return tool::output_file{std::move(name),
+                             tool::csv::stats_csv_encoder{},
+                             {
+                                 "Name",
+                                 "Calls",
+                                 "TotalDurationNs",
+                                 "AverageNs",
+                                 "Percentage",
+                                 "MinNs",
+                                 "MaxNs",
+                                 "StdDev",
+                             }};
+}
+
+stats_data_t
+write_stats(output_file&& ofs, const stats_map_t& data_v)
+{
+    auto data      = std::vector<std::pair<std::string_view, stats_data_t>>{};
+    auto _duration = stats_data_t{};
+    for(const auto& [id, value] : data_v)
+    {
+        data.emplace_back(id, value);
+        _duration += value;
+    }
+
+    std::sort(data.begin(), data.end(), [](const auto& lhs, const auto& rhs) {
+        return (lhs.second.get_sum() > rhs.second.get_sum());
+    });
+
+    constexpr float_type one_hundred = 100.0;
+
+    const float_type _total_duration = _duration.get_sum();
+    for(const auto& [name, value] : data)
+    {
+        auto       duration_ns = value.get_sum();
+        auto       calls       = value.get_count();
+        float_type avg_ns      = value.get_mean();
+        float_type percent_v   = (duration_ns / _total_duration) * one_hundred;
+
+        auto _row = std::stringstream{};
+        rocprofiler::tool::csv::stats_csv_encoder::write_row<stats_formatter>(_row,
+                                                                              name,
+                                                                              calls,
+                                                                              duration_ns,
+                                                                              avg_ns,
+                                                                              percentage{percent_v},
+                                                                              value.get_min(),
+                                                                              value.get_max(),
+                                                                              value.get_stddev());
+        ofs << _row.str() << std::flush;
+    }
+
+    return _duration;
 }
 }  // namespace
 
 void
-generate_csv(tool_table* tool_functions, std::vector<rocprofiler_agent_v0_t>& data)
+generate_csv(tool_table* /*tool_functions*/, std::vector<rocprofiler_agent_v0_t>& data)
 {
+    if(data.empty()) return;
+
     std::sort(data.begin(), data.end(), [](rocprofiler_agent_v0_t lhs, rocprofiler_agent_v0_t rhs) {
         return lhs.node_id < rhs.node_id;
     });
+
+    auto ofs = tool::output_file{"agent_info",
+                                 tool::csv::agent_info_csv_encoder{},
+                                 {"Node_Id",
+                                  "Logical_Node_Id",
+                                  "Agent_Type",
+                                  "Cpu_Cores_Count",
+                                  "Simd_Count",
+                                  "Cpu_Core_Id_Base",
+                                  "Simd_Id_Base",
+                                  "Max_Waves_Per_Simd",
+                                  "Lds_Size_In_Kb",
+                                  "Gds_Size_In_Kb",
+                                  "Num_Gws",
+                                  "Wave_Front_Size",
+                                  "Num_Xcc",
+                                  "Cu_Count",
+                                  "Array_Count",
+                                  "Num_Shader_Banks",
+                                  "Simd_Arrays_Per_Engine",
+                                  "Cu_Per_Simd_Array",
+                                  "Simd_Per_Cu",
+                                  "Max_Slots_Scratch_Cu",
+                                  "Gfx_Target_Version",
+                                  "Vendor_Id",
+                                  "Device_Id",
+                                  "Location_Id",
+                                  "Domain",
+                                  "Drm_Render_Minor",
+                                  "Num_Sdma_Engines",
+                                  "Num_Sdma_Xgmi_Engines",
+                                  "Num_Sdma_Queues_Per_Engine",
+                                  "Num_Cp_Queues",
+                                  "Max_Engine_Clk_Ccompute",
+                                  "Max_Engine_Clk_Fcompute",
+                                  "Sdma_Fw_Version",
+                                  "Fw_Version",
+                                  "Capability",
+                                  "Cu_Per_Engine",
+                                  "Max_Waves_Per_Cu",
+                                  "Family_Id",
+                                  "Workgroup_Max_Size",
+                                  "Grid_Max_Size",
+                                  "Local_Mem_Size",
+                                  "Hive_Id",
+                                  "Gpu_Id",
+                                  "Workgroup_Max_Dim_X",
+                                  "Workgroup_Max_Dim_Y",
+                                  "Workgroup_Max_Dim_Z",
+                                  "Grid_Max_Dim_X",
+                                  "Grid_Max_Dim_Y",
+                                  "Grid_Max_Dim_Z",
+                                  "Name",
+                                  "Vendor_Name",
+                                  "Product_Name",
+                                  "Model_Name"}};
 
     for(auto& itr : data)
     {
@@ -84,8 +214,8 @@ generate_csv(tool_table* tool_functions, std::vector<rocprofiler_agent_v0_t>& da
         else
             _type = "UNK";
 
-        auto agent_info_ss = std::stringstream{};
-        rocprofiler::tool::csv::agent_info_csv_encoder::write_row(agent_info_ss,
+        auto row_ss = std::stringstream{};
+        rocprofiler::tool::csv::agent_info_csv_encoder::write_row(row_ss,
                                                                   itr.node_id,
                                                                   itr.logical_node_id,
                                                                   _type,
@@ -139,309 +269,419 @@ generate_csv(tool_table* tool_functions, std::vector<rocprofiler_agent_v0_t>& da
                                                                   itr.vendor_name,
                                                                   itr.product_name,
                                                                   itr.model_name);
-        tool_functions->tool_get_agent_info_file_fn() << agent_info_ss.str();
+        ofs << row_ss.str();
     }
 }
 
-void
-generate_csv(tool_table* tool_functions, std::vector<kernel_dispatch_ring_buffer_t>& data)
+stats_data_t
+generate_csv(tool_table*                                                            tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& data)
 {
+    if(data.empty()) return stats_data_t{};
+
     auto kernel_stats = stats_map_t{};
-    for(auto& buf : data)
+    auto ofs          = tool::output_file{"kernel_trace",
+                                 tool::csv::kernel_trace_csv_encoder{},
+                                 {"Kind",
+                                  "Agent_Id",
+                                  "Queue_Id",
+                                  "Kernel_Id",
+                                  "Kernel_Name",
+                                  "Correlation_Id",
+                                  "Start_Timestamp",
+                                  "End_Timestamp",
+                                  "Private_Segment_Size",
+                                  "Group_Segment_Size",
+                                  "Workgroup_Size_X",
+                                  "Workgroup_Size_Y",
+                                  "Workgroup_Size_Z",
+                                  "Grid_Size_X",
+                                  "Grid_Size_Y",
+                                  "Grid_Size_Z"}};
+
+    for(const auto& record : data)
     {
-        while(true)
-        {
-            auto kernel_trace_ss                                        = std::stringstream{};
-            rocprofiler_buffer_tracing_kernel_dispatch_record_t* record = buf.retrieve();
-            if(record == nullptr) break;
-            auto kernel_name =
-                tool_functions->tool_get_kernel_name_fn(record->dispatch_info.kernel_id);
-            rocprofiler::tool::csv::kernel_trace_csv_encoder::write_row(
-                kernel_trace_ss,
-                tool_functions->tool_get_domain_name_fn(record->kind),
-                tool_functions->tool_get_agent_node_id_fn(record->dispatch_info.agent_id),
-                record->dispatch_info.queue_id.handle,
-                record->dispatch_info.kernel_id,
-                kernel_name,
-                record->correlation_id.internal,
-                record->start_timestamp,
-                record->end_timestamp,
-                record->dispatch_info.private_segment_size,
-                record->dispatch_info.group_segment_size,
-                record->dispatch_info.workgroup_size.x,
-                record->dispatch_info.workgroup_size.y,
-                record->dispatch_info.workgroup_size.z,
-                record->dispatch_info.grid_size.x,
-                record->dispatch_info.grid_size.y,
-                record->dispatch_info.grid_size.z);
+        auto row_ss      = std::stringstream{};
+        auto kernel_name = tool_functions->tool_get_kernel_name_fn(record.dispatch_info.kernel_id);
+        rocprofiler::tool::csv::kernel_trace_csv_encoder::write_row(
+            row_ss,
+            tool_functions->tool_get_domain_name_fn(record.kind),
+            tool_functions->tool_get_agent_node_id_fn(record.dispatch_info.agent_id),
+            record.dispatch_info.queue_id.handle,
+            record.dispatch_info.kernel_id,
+            kernel_name,
+            record.correlation_id.internal,
+            record.start_timestamp,
+            record.end_timestamp,
+            record.dispatch_info.private_segment_size,
+            record.dispatch_info.group_segment_size,
+            record.dispatch_info.workgroup_size.x,
+            record.dispatch_info.workgroup_size.y,
+            record.dispatch_info.workgroup_size.z,
+            record.dispatch_info.grid_size.x,
+            record.dispatch_info.grid_size.y,
+            record.dispatch_info.grid_size.z);
 
-            if(tool::get_config().stats)
-                kernel_stats[kernel_name] += (record->end_timestamp - record->start_timestamp);
+        if(tool::get_config().stats)
+            kernel_stats[kernel_name] += (record.end_timestamp - record.start_timestamp);
 
-            tool_functions->tool_get_kernel_trace_file_fn() << kernel_trace_ss.str();
-        }
+        ofs << row_ss.str();
     }
 
+    auto _duration = stats_data_t{};
     if(tool::get_config().stats)
-        write_stats(tool_functions->tool_get_kernel_stats_file_fn(),
-                    tool_functions->tool_get_app_timestamps_fn(),
-                    kernel_stats);
+        _duration = write_stats(get_stats_output_file("kernel_stats"), kernel_stats);
+
+    return _duration;
 }
 
-void
-generate_csv(tool_table* tool_functions, std::vector<hip_ring_buffer_t>& data)
+stats_data_t
+generate_csv(tool_table*                                                    tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_hip_api_record_t>& data)
 {
+    if(data.empty()) return stats_data_t{};
+
     auto hip_stats = stats_map_t{};
-    for(auto& buf : data)
+    auto ofs       = tool::output_file{"hip_api_trace",
+                                 tool::csv::api_csv_encoder{},
+                                 {"Domain",
+                                  "Function",
+                                  "Process_Id",
+                                  "Thread_Id",
+                                  "Correlation_Id",
+                                  "Start_Timestamp",
+                                  "End_Timestamp"}};
+    for(const auto& record : data)
     {
-        while(true)
-        {
-            auto                                         hip_trace_ss = std::stringstream{};
-            rocprofiler_buffer_tracing_hip_api_record_t* record       = buf.retrieve();
-            if(record == nullptr) break;
-            auto api_name =
-                tool_functions->tool_get_operation_name_fn(record->kind, record->operation);
-            rocprofiler::tool::csv::api_csv_encoder::write_row(
-                hip_trace_ss,
-                tool_functions->tool_get_domain_name_fn(record->kind),
-                api_name,
-                getpid(),
-                record->thread_id,
-                record->correlation_id.internal,
-                record->start_timestamp,
-                record->end_timestamp);
+        auto row_ss   = std::stringstream{};
+        auto api_name = tool_functions->tool_get_operation_name_fn(record.kind, record.operation);
+        rocprofiler::tool::csv::api_csv_encoder::write_row(
+            row_ss,
+            tool_functions->tool_get_domain_name_fn(record.kind),
+            api_name,
+            getpid(),
+            record.thread_id,
+            record.correlation_id.internal,
+            record.start_timestamp,
+            record.end_timestamp);
 
-            if(tool::get_config().stats)
-                hip_stats[api_name] += (record->end_timestamp - record->start_timestamp);
+        if(tool::get_config().stats)
+            hip_stats[api_name] += (record.end_timestamp - record.start_timestamp);
 
-            tool_functions->tool_get_hip_api_trace_file_fn() << hip_trace_ss.str();
-        }
+        ofs << row_ss.str();
     }
 
+    auto _duration = stats_data_t{};
     if(tool::get_config().stats)
     {
-        write_stats(tool_functions->tool_get_hip_stats_file_fn(),
-                    tool_functions->tool_get_app_timestamps_fn(),
-                    hip_stats);
+        _duration = write_stats(get_stats_output_file("hip_stats"), hip_stats);
     }
+    return _duration;
 }
 
-void
-generate_csv(tool_table* tool_functions, std::vector<hsa_ring_buffer_t>& data)
+stats_data_t
+generate_csv(tool_table*                                                    tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>& data)
 {
+    if(data.empty()) return stats_data_t{};
+
     auto hsa_stats = stats_map_t{};
-    for(auto& buf : data)
+    auto ofs       = tool::output_file{"hsa_api_trace",
+                                 tool::csv::api_csv_encoder{},
+                                 {"Domain",
+                                  "Function",
+                                  "Process_Id",
+                                  "Thread_Id",
+                                  "Correlation_Id",
+                                  "Start_Timestamp",
+                                  "End_Timestamp"}};
+
+    for(const auto& record : data)
     {
-        while(true)
-        {
-            auto                                         hsa_trace_ss = std::stringstream{};
-            rocprofiler_buffer_tracing_hsa_api_record_t* record       = buf.retrieve();
-            if(record == nullptr) break;
-            auto api_name =
-                tool_functions->tool_get_operation_name_fn(record->kind, record->operation);
-            rocprofiler::tool::csv::api_csv_encoder::write_row(
-                hsa_trace_ss,
-                tool_functions->tool_get_domain_name_fn(record->kind),
-                api_name,
-                getpid(),
-                record->thread_id,
-                record->correlation_id.internal,
-                record->start_timestamp,
-                record->end_timestamp);
+        auto row_ss   = std::stringstream{};
+        auto api_name = tool_functions->tool_get_operation_name_fn(record.kind, record.operation);
+        rocprofiler::tool::csv::api_csv_encoder::write_row(
+            row_ss,
+            tool_functions->tool_get_domain_name_fn(record.kind),
+            api_name,
+            getpid(),
+            record.thread_id,
+            record.correlation_id.internal,
+            record.start_timestamp,
+            record.end_timestamp);
 
-            if(tool::get_config().stats)
-                hsa_stats[api_name] += (record->end_timestamp - record->start_timestamp);
+        if(tool::get_config().stats)
+            hsa_stats[api_name] += (record.end_timestamp - record.start_timestamp);
 
-            tool_functions->tool_get_hsa_api_trace_file_fn() << hsa_trace_ss.str();
-        }
+        ofs << row_ss.str();
     }
 
+    auto _duration = stats_data_t{};
     if(tool::get_config().stats)
     {
-        write_stats(tool_functions->tool_get_hsa_stats_file_fn(),
-                    tool_functions->tool_get_app_timestamps_fn(),
-                    hsa_stats);
+        _duration = write_stats(get_stats_output_file("hsa_stats"), hsa_stats);
     }
+    return _duration;
 }
 
-void
-generate_csv(tool_table* tool_functions, std::vector<memory_copy_ring_buffer_t>& data)
+stats_data_t
+generate_csv(tool_table*                                                        tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>& data)
 {
+    if(data.empty()) return stats_data_t{};
+
     auto memory_copy_stats = stats_map_t{};
-    for(auto& buf : data)
+    auto ofs               = tool::output_file{"memory_copy_trace",
+                                 tool::csv::memory_copy_csv_encoder{},
+                                 {"Kind",
+                                  "Direction",
+                                  "Source_Agent_Id",
+                                  "Destination_Agent_Id",
+                                  "Correlation_Id",
+                                  "Start_Timestamp",
+                                  "End_Timestamp"}};
+    for(const auto& record : data)
     {
-        while(true)
-        {
-            auto memory_copy_trace_ss                               = std::stringstream{};
-            rocprofiler_buffer_tracing_memory_copy_record_t* record = buf.retrieve();
-            if(record == nullptr) break;
-            auto api_name =
-                tool_functions->tool_get_operation_name_fn(record->kind, record->operation);
-            rocprofiler::tool::csv::memory_copy_csv_encoder::write_row(
-                memory_copy_trace_ss,
-                tool_functions->tool_get_domain_name_fn(record->kind),
-                api_name,
-                tool_functions->tool_get_agent_node_id_fn(record->src_agent_id),
-                tool_functions->tool_get_agent_node_id_fn(record->dst_agent_id),
-                record->correlation_id.internal,
-                record->start_timestamp,
-                record->end_timestamp);
+        auto row_ss   = std::stringstream{};
+        auto api_name = tool_functions->tool_get_operation_name_fn(record.kind, record.operation);
+        rocprofiler::tool::csv::memory_copy_csv_encoder::write_row(
+            row_ss,
+            tool_functions->tool_get_domain_name_fn(record.kind),
+            api_name,
+            tool_functions->tool_get_agent_node_id_fn(record.src_agent_id),
+            tool_functions->tool_get_agent_node_id_fn(record.dst_agent_id),
+            record.correlation_id.internal,
+            record.start_timestamp,
+            record.end_timestamp);
 
-            if(tool::get_config().stats)
-                memory_copy_stats[api_name] += (record->end_timestamp - record->start_timestamp);
+        if(tool::get_config().stats)
+            memory_copy_stats[api_name] += (record.end_timestamp - record.start_timestamp);
 
-            tool_functions->tool_get_memory_copy_trace_file_fn() << memory_copy_trace_ss.str();
-        }
+        ofs << row_ss.str();
     }
 
+    auto _duration = stats_data_t{};
     if(tool::get_config().stats)
     {
-        write_stats(tool_functions->tool_get_memory_copy_stats_file_fn(),
-                    tool_functions->tool_get_app_timestamps_fn(),
-                    memory_copy_stats);
+        _duration = write_stats(get_stats_output_file("memory_copy_stats"), memory_copy_stats);
     }
+    return _duration;
 }
 
-void
-generate_csv(tool_table* tool_functions, std::vector<marker_api_ring_buffer_t>& data)
+stats_data_t
+generate_csv(tool_table*                                                       tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_marker_api_record_t>& data)
 {
-    for(auto& buf : data)
+    if(data.empty()) return stats_data_t{};
+
+    auto marker_stats = stats_map_t{};
+    auto ofs          = tool::output_file{"marker_api_trace",
+                                 tool::csv::marker_csv_encoder{},
+                                 {"Domain",
+                                  "Function",
+                                  "Process_Id",
+                                  "Thread_Id",
+                                  "Correlation_Id",
+                                  "Start_Timestamp",
+                                  "End_Timestamp"}};
+    for(const auto& record : data)
     {
-        while(true)
+        auto row_ss = std::stringstream{};
+        auto _name  = std::string_view{};
+
+        if(record.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API &&
+           (record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA ||
+            record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA ||
+            record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStartA))
         {
-            auto                              marker_api_trace_ss = std::stringstream{};
-            rocprofiler_tool_marker_record_t* record              = buf.retrieve();
-            if(record == nullptr) break;
-            if(record->kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API &&
-               ((record->op == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA &&
-                 record->phase == ROCPROFILER_CALLBACK_PHASE_EXIT) ||
-                (record->op == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop &&
-                 record->phase == ROCPROFILER_CALLBACK_PHASE_ENTER) ||
-                (record->op == ROCPROFILER_MARKER_CORE_API_ID_roctxRangeStop &&
-                 record->phase == ROCPROFILER_CALLBACK_PHASE_ENTER)))
-            {
-                tool::csv::marker_csv_encoder::write_row(
-                    marker_api_trace_ss,
-                    tool_functions->tool_get_callback_kind_fn(record->kind),
-                    tool_functions->tool_get_roctx_msg_fn(record->cid),
-                    record->pid,
-                    record->tid,
-                    record->cid,
-                    record->start_timestamp,
-                    record->end_timestamp);
-            }
+            _name = tool_functions->tool_get_roctx_msg_fn(record.correlation_id.internal);
+        }
+        else
+        {
+            _name = tool_functions->tool_get_operation_name_fn(record.kind, record.operation);
+        }
+
+        tool::csv::marker_csv_encoder::write_row(
+            row_ss,
+            tool_functions->tool_get_domain_name_fn(record.kind),
+            _name,
+            getpid(),
+            record.thread_id,
+            record.correlation_id.internal,
+            record.start_timestamp,
+            record.end_timestamp);
+
+        if(tool::get_config().stats)
+            marker_stats[_name] += (record.end_timestamp - record.start_timestamp);
+
+        ofs << row_ss.str();
+    }
+
+    auto _duration = stats_data_t{};
+    if(tool::get_config().stats)
+    {
+        _duration = write_stats(get_stats_output_file("marker_stats"), marker_stats);
+    }
+    return _duration;
+}
+
+stats_data_t
+generate_csv(tool_table*                                                     tool_functions,
+             const std::deque<rocprofiler_tool_counter_collection_record_t>& data)
+{
+    if(data.empty()) return stats_data_t{};
+
+    auto ofs = tool::output_file{"counter_collection",
+                                 tool::csv::counter_collection_csv_encoder{},
+                                 {"Correlation_Id",
+                                  "Dispatch_Id",
+                                  "Agent_Id",
+                                  "Queue_Id",
+                                  "Process_Id",
+                                  "Thread_Id",
+                                  "Grid_Size",
+                                  "Kernel_Name",
+                                  "Workgroup_Size",
+                                  "LDS_Block_Size",
+                                  "Scratch_Size",
+                                  "VGPR_Count",
+                                  "SGPR_Count",
+                                  "Counter_Name",
+                                  "Counter_Value"}};
+    for(const auto& record : data)
+    {
+        auto kernel_id          = record.dispatch_data.dispatch_info.kernel_id;
+        auto counter_name_value = std::map<std::string, uint64_t>{};
+        for(const auto& count : record.records)
+        {
+            auto        rec          = count.record_counter;
+            std::string counter_name = tool_functions->tool_get_counter_info_name_fn(rec.id);
+            auto        search       = counter_name_value.find(counter_name);
+            if(search == counter_name_value.end())
+                counter_name_value.emplace(
+                    std::pair<std::string, uint64_t>{counter_name, rec.counter_value});
             else
-            {
-                tool::csv::marker_csv_encoder::write_row(
-                    marker_api_trace_ss,
-                    tool_functions->tool_get_callback_kind_fn(record->kind),
-                    tool_functions->tool_get_callback_op_name_fn(record->kind, record->op),
-                    record->pid,
-                    record->tid,
-                    record->cid,
-                    record->start_timestamp,
-                    record->end_timestamp);
-            }
-            tool_functions->tool_get_marker_api_trace_file_fn() << marker_api_trace_ss.str();
+                search->second = search->second + rec.counter_value;
         }
-    }
-}
 
-void
-generate_csv(tool_table* tool_functions, std::vector<counter_collection_ring_buffer_t>& data)
-{
-    for(auto& buf : data)
-    {
-        while(true)
+        const auto& correlation_id = record.dispatch_data.correlation_id;
+
+        auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
+        auto row_ss    = std::stringstream{};
+        for(auto& itr : counter_name_value)
         {
-            rocprofiler_tool_counter_collection_record_t* record = buf.retrieve();
-            if(record == nullptr) break;
-            auto kernel_id          = record->dispatch_data.dispatch_info.kernel_id;
-            auto counter_name_value = std::map<std::string, uint64_t>{};
-            for(const auto& count : record->profiler_record)
-            {
-                auto        rec          = static_cast<rocprofiler_record_counter_t>(count);
-                std::string counter_name = tool_functions->tool_get_counter_info_name_fn(rec.id);
-                auto        search       = counter_name_value.find(counter_name);
-                if(search == counter_name_value.end())
-                    counter_name_value.emplace(
-                        std::pair<std::string, uint64_t>{counter_name, rec.counter_value});
-                else
-                    search->second = search->second + rec.counter_value;
-            }
-
-            const auto& correlation_id = record->dispatch_data.correlation_id;
-
-            auto magnitude = [](rocprofiler_dim3_t dims) { return (dims.x * dims.y * dims.z); };
-            auto counter_collection_ss = std::stringstream{};
-            for(auto& itr : counter_name_value)
-            {
-                tool::csv::counter_collection_csv_encoder::write_row(
-                    counter_collection_ss,
-                    correlation_id.internal,
-                    record->dispatch_index,
-                    tool_functions->tool_get_agent_node_id_fn(
-                        record->dispatch_data.dispatch_info.agent_id),
-                    record->dispatch_data.dispatch_info.queue_id.handle,
-                    record->pid,
-                    record->thread_id,
-                    magnitude(record->dispatch_data.dispatch_info.grid_size),
-                    tool_functions->tool_get_kernel_name_fn(kernel_id),
-                    magnitude(record->dispatch_data.dispatch_info.workgroup_size),
-                    record->lds_block_size_v,
-                    record->private_segment_size,
-                    record->arch_vgpr_count,
-                    record->sgpr_count,
-                    itr.first,
-                    itr.second);
-            }
-            tool_functions->tool_get_counter_collection_file_fn() << counter_collection_ss.str();
+            tool::csv::counter_collection_csv_encoder::write_row(
+                row_ss,
+                correlation_id.internal,
+                record.dispatch_data.dispatch_info.dispatch_id,
+                tool_functions->tool_get_agent_node_id_fn(
+                    record.dispatch_data.dispatch_info.agent_id),
+                record.dispatch_data.dispatch_info.queue_id.handle,
+                getpid(),
+                record.thread_id,
+                magnitude(record.dispatch_data.dispatch_info.grid_size),
+                tool_functions->tool_get_kernel_name_fn(kernel_id),
+                magnitude(record.dispatch_data.dispatch_info.workgroup_size),
+                record.lds_block_size_v,
+                record.dispatch_data.dispatch_info.private_segment_size,
+                record.arch_vgpr_count,
+                record.sgpr_count,
+                itr.first,
+                itr.second);
         }
+        ofs << row_ss.str();
     }
+    return stats_data_t{};
 }
 
-void
-generate_csv(tool_table* tool_functions, std::vector<scratch_memory_ring_buffer_t>& data)
+stats_data_t
+generate_csv(tool_table*                                                           tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>& data)
 {
-    auto* ofs = tool_functions->tool_get_scratch_memory_file_fn();
-    if(!ofs) throw std::runtime_error{"error creating scratch memory output file"};
+    if(data.empty()) return stats_data_t{};
+
+    auto ofs = tool::output_file{"scratch_memory_trace",
+                                 tool::csv::scratch_memory_encoder{},
+                                 {
+                                     "Kind",
+                                     "Operation",
+                                     "Agent_Id",
+                                     "Queue_Id",
+                                     "Thread_Id",
+                                     "Alloc_flags",
+                                     "Start_Timestamp",
+                                     "End_Timestamp",
+                                 }};
 
     auto scratch_memory_stats = stats_map_t{};
-    for(auto& buf : data)
+    for(const auto& record : data)
     {
-        while(true)
-        {
-            rocprofiler_buffer_tracing_scratch_memory_record_t* record = buf.retrieve();
-            if(record == nullptr) break;
+        auto row_ss    = std::stringstream{};
+        auto kind_name = tool_functions->tool_get_domain_name_fn(record.kind);
+        auto op_name   = tool_functions->tool_get_operation_name_fn(record.kind, record.operation);
 
-            auto scratch_memory_trace = std::stringstream{};
-            auto kind_name            = tool_functions->tool_get_domain_name_fn(record->kind);
-            auto op_name =
-                tool_functions->tool_get_operation_name_fn(record->kind, record->operation);
+        tool::csv::scratch_memory_encoder::write_row(
+            row_ss,
+            kind_name,
+            op_name,
+            tool_functions->tool_get_agent_node_id_fn(record.agent_id),
+            record.queue_id.handle,
+            record.thread_id,
+            record.flags,
+            record.start_timestamp,
+            record.end_timestamp);
 
-            tool::csv::scratch_memory_encoder::write_row(
-                scratch_memory_trace,
-                kind_name,
-                op_name,
-                tool_functions->tool_get_agent_node_id_fn(record->agent_id),
-                record->queue_id.handle,
-                record->thread_id,
-                record->flags,
-                record->start_timestamp,
-                record->end_timestamp);
+        if(tool::get_config().stats)
+            scratch_memory_stats[op_name] += (record.end_timestamp - record.start_timestamp);
 
-            if(tool::get_config().stats)
-                scratch_memory_stats[op_name] += (record->end_timestamp - record->start_timestamp);
-
-            (*ofs) << scratch_memory_trace.str();
-        }
+        ofs << row_ss.str();
     }
 
+    auto _duration = stats_data_t{};
     if(tool::get_config().stats)
     {
-        auto* stats_ofs = tool_functions->tool_get_scratch_memory_stats_file_fn();
-        if(!stats_ofs) throw std::runtime_error{"error creating scratch memory stats output file"};
-        write_stats(*stats_ofs, tool_functions->tool_get_app_timestamps_fn(), scratch_memory_stats);
+        _duration =
+            write_stats(get_stats_output_file("scratch_memory_stats"), scratch_memory_stats);
+    }
+    return _duration;
+}
+
+void
+generate_csv(tool_table* /*tool_functions*/, std::unordered_map<domain_type, stats_data_t>& data)
+{
+    using csv_encoder_t = rocprofiler::tool::csv::stats_csv_encoder;
+
+    if(!tool::get_config().stats) return;
+
+    auto _total_stats = stats_data_t{};
+    for(const auto& itr : data)
+        _total_stats += itr.second;
+
+    if(_total_stats.get_count() == 0) return;
+
+    auto ofs = get_stats_output_file("domain_stats");
+
+    constexpr float_type one_hundred     = 100.0;
+    const float_type     _total_duration = _total_stats.get_sum();
+    for(const auto& [type, value] : data)
+    {
+        auto       name        = get_domain_column_name(type);
+        auto       duration_ns = value.get_sum();
+        auto       calls       = value.get_count();
+        float_type avg_ns      = value.get_mean();
+        float_type percent_v   = (duration_ns / _total_duration) * one_hundred;
+
+        auto _row = std::stringstream{};
+        csv_encoder_t::write_row<stats_formatter>(_row,
+                                                  name,
+                                                  calls,
+                                                  duration_ns,
+                                                  avg_ns,
+                                                  percentage{percent_v},
+                                                  value.get_min(),
+                                                  value.get_max(),
+                                                  value.get_stddev());
+        ofs << _row.str() << std::flush;
     }
 }
 }  // namespace tool

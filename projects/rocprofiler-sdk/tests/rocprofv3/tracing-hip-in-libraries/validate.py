@@ -148,6 +148,87 @@ def test_api_trace(
         validate_stats(row)
 
 
+def test_api_trace_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    metadata = data["metadata"]
+    names = data["strings"]["buffer_records"]
+    buffer_records = data["buffer_records"]
+    hsa_data = buffer_records["hsa_api"]
+    hip_data = buffer_records["hip_api"]
+
+    valid_domain = [
+        "HSA_CORE_API",
+        "HSA_AMD_EXT_API",
+        "HSA_IMAGE_EXT_API",
+        "HSA_FINALIZE_EXT_API",
+    ]
+
+    valid_hip_domain = [
+        "HIP_RUNTIME_API",
+        "HIP_COMPILER_API",
+    ]
+
+    def get_operation_name(kind_id, op_id):
+        return names[kind_id]["operations"][op_id]
+
+    def get_kind_name(kind_id):
+        return names[kind_id]["kind"]
+
+    assert metadata["pid"] > 0
+
+    functions = []
+    correlation_ids = []
+    for api in hsa_data:
+        kind = get_kind_name(api["kind"])
+        assert kind in valid_domain
+        assert api["thread_id"] >= metadata["pid"]
+        assert api["end_timestamp"] >= api["start_timestamp"]
+        functions.append(get_operation_name(api["kind"], api["operation"]))
+        correlation_ids.append(api["correlation_id"]["internal"])
+
+    for api in hip_data:
+        kind = get_kind_name(api["kind"])
+        assert kind in valid_hip_domain
+        assert metadata["pid"] > 0
+        assert api["thread_id"] == 0 or api["thread_id"] >= metadata["pid"]
+        assert api["end_timestamp"] >= api["start_timestamp"]
+        functions.append(get_operation_name(api["kind"], api["operation"]))
+        correlation_ids.append(api["correlation_id"]["internal"])
+
+    correlation_ids = sorted(list(set(correlation_ids)))
+
+    # all correlation ids are unique
+    assert len(correlation_ids) == (len(hsa_data) + len(hip_data))
+    # correlation ids are numbered from 1 to N
+    assert correlation_ids[0] == 1
+    assert correlation_ids[-1] == len(correlation_ids)
+
+    functions = list(set(functions))
+    for itr in (
+        "hsa_amd_memory_async_copy_on_engine",
+        "hsa_agent_get_info",
+        "hsa_agent_iterate_isas",
+        "hsa_signal_create",
+        "hsa_agent_get_info",
+        "hsa_executable_symbol_get_info",
+    ):
+        assert itr in functions
+    if hip_data:
+        for itr in (
+            "hipGetLastError",
+            "hipLaunchKernel",
+            "hipStreamSynchronize",
+            "hipMemcpyAsync",
+            "hipFree",
+            "hipStreamDestroy",
+            "hipDeviceSynchronize",
+            "hipDeviceReset",
+            "hipSetDevice",
+        ):
+            assert itr in functions
+
+
 def test_kernel_trace(kernel_input_data, kernel_stats_data):
     valid_kernel_names = sorted(
         [
@@ -201,6 +282,68 @@ def test_kernel_trace(kernel_input_data, kernel_stats_data):
         validate_average(row)
         assert float(row["Percentage"]) > 0.0
         validate_stats(row)
+
+
+def test_kernel_trace_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    buffer_records = data["buffer_records"]
+    names = data["strings"]["buffer_records"]
+
+    valid_kernel_names = sorted(
+        [
+            "(anonymous namespace)::transpose(int const*, int*, int, int)",
+            "void (anonymous namespace)::addition_kernel<float>(float*, float const*, float const*, int, int)",
+            "void (anonymous namespace)::divide_kernel<float>(float*, float const*, float const*, int, int)",
+            "void (anonymous namespace)::multiply_kernel<float>(float*, float const*, float const*, int, int)",
+            "void (anonymous namespace)::subtract_kernel<float>(float*, float const*, float const*, int, int)",
+        ]
+    )
+
+    def get_kernel_name(kernel_id):
+        return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
+
+    kernels = []
+    for row in buffer_records["kernel_dispatches"]:
+        dispatch_info = row["dispatch_info"]
+        kernel_name = get_kernel_name(dispatch_info["kernel_id"])
+        if re.search(r"__amd_rocclr_.*", kernel_name):
+            continue
+
+        kernels.append(kernel_name)
+
+        assert names[row["kind"]]["kind"] == "KERNEL_DISPATCH"
+        assert dispatch_info["agent_id"]["handle"] > 0
+        assert dispatch_info["queue_id"]["handle"] > 0
+        assert dispatch_info["kernel_id"] > 0
+        assert row["correlation_id"]["internal"] > 0
+        assert kernel_name in valid_kernel_names, f"row:\n\t{row}"
+
+        workgrp_size = dim3(
+            dispatch_info["workgroup_size"]["x"],
+            dispatch_info["workgroup_size"]["y"],
+            dispatch_info["workgroup_size"]["z"],
+        )
+        grid_size = dim3(
+            dispatch_info["grid_size"]["x"],
+            dispatch_info["grid_size"]["y"],
+            dispatch_info["grid_size"]["z"],
+        )
+
+        if kernel_name == "__amd_rocclr_fillBufferAligned":
+            assert workgrp_size.as_tuple() > (1, 1, 1)
+            assert grid_size.as_tuple() > (1, 1, 1)
+        elif "transpose" in kernel_name:
+            assert workgrp_size.as_tuple() == (32, 32, 1)
+            assert grid_size.as_tuple() == (9920, 9920, 1)
+        else:
+            assert workgrp_size.as_tuple() == (64, 1, 1)
+            assert grid_size.as_tuple() == (4096, 2048, 1)
+
+        assert int(row["end_timestamp"]) >= int(row["start_timestamp"])
+
+    kernels = sorted(list(set(kernels)))
+    assert kernels == valid_kernel_names
 
 
 def test_memory_copy_trace(

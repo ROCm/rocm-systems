@@ -73,11 +73,12 @@ struct config
     bool        list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool        list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool        stats                       = get_env("ROCPROF_STATS", false);
+    bool        csv_output                  = false;
+    bool        json_output                 = false;
     int         mpi_size                    = get_mpi_size();
     int         mpi_rank                    = get_mpi_rank();
     std::string output_path   = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
     std::string output_file   = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
-    std::string output_format = get_env("ROCPROF_OUTPUT_FORMAT", "CSV");
     std::string tmp_directory = get_env("ROCPROF_TMPDIR", output_path);
     std::vector<std::string> kernel_names = {};
     std::set<std::string>    counters     = {};

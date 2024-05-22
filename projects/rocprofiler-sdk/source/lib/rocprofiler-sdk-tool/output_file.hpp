@@ -41,8 +41,10 @@ namespace rocprofiler
 {
 namespace tool
 {
-std::pair<std::ostream*, void (*)(std::ostream*&)>
-get_output_stream(const std::string& fname, const std::string& ext = ".csv");
+using output_stream_dtor_t = void (*)(std::ostream*&);
+
+std::pair<std::ostream*, output_stream_dtor_t>
+get_output_stream(std::string_view fname, std::string_view ext);
 
 struct output_file
 {
@@ -66,12 +68,10 @@ struct output_file
     operator bool() const { return m_stream != nullptr; }
 
 private:
-    using stream_dtor_t = void (*)(std::ostream*&);
-
-    const std::string m_name   = {};
-    std::mutex        m_mutex  = {};
-    std::ostream*     m_stream = nullptr;
-    stream_dtor_t     m_dtor   = [](std::ostream*&) {};
+    const std::string    m_name   = {};
+    std::mutex           m_mutex  = {};
+    std::ostream*        m_stream = nullptr;
+    output_stream_dtor_t m_dtor   = [](std::ostream*&) {};
 };
 
 template <size_t N>
@@ -80,7 +80,7 @@ output_file::output_file(std::string                       name,
                          std::array<std::string_view, N>&& header)
 : m_name{std::move(name)}
 {
-    std::tie(m_stream, m_dtor) = get_output_stream(m_name);
+    std::tie(m_stream, m_dtor) = get_output_stream(m_name, ".csv");
 
     for(auto& itr : header)
     {

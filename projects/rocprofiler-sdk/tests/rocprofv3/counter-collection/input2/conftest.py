@@ -3,11 +3,17 @@
 import json
 import pytest
 import csv
-import pandas as pd
+
+from rocprofiler_sdk.pytest_utils.dotdict import dotdict
+from rocprofiler_sdk.pytest_utils import collapse_dict_list
 
 
 def pytest_addoption(parser):
-    parser.addoption("--input", action="store", help="Path to csv file.")
+    parser.addoption(
+        "--json-input",
+        action="store",
+        help="Path to JSON file.",
+    )
     parser.addoption(
         "--agent-input",
         action="store",
@@ -18,16 +24,6 @@ def pytest_addoption(parser):
         action="store",
         help="Path to counter collection CSV file.",
     )
-
-
-@pytest.fixture
-def input_data(request):
-    filename = request.config.getoption("--input")
-    if filename:
-        with open(filename, "r") as inp:
-            return pd.read_csv(filename)
-    else:
-        return None
 
 
 @pytest.fixture
@@ -52,3 +48,10 @@ def counter_input_data(request):
             data.append(row)
 
     return data
+
+
+@pytest.fixture
+def json_data(request):
+    filename = request.config.getoption("--json-input")
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))

@@ -21,3 +21,23 @@
 # SOFTWARE.
 
 from __future__ import absolute_import
+
+
+def collapse_dict_list(data, key="rocprofiler-sdk-tool"):
+    """Collapse a dictionary entry list into a single mapped value"""
+
+    def check_return(_data):
+        assert isinstance(_data, dict), "expected dict, type: {}".format(
+            type(_data).__name__
+        )
+        return _data
+
+    if (
+        key in data.keys()
+        and len(data.keys()) == 1
+        and isinstance(data[key], (list, tuple))
+        and len(data[key]) == 1
+    ):
+        return check_return({key: data[key][0]})
+
+    return check_return(data)

@@ -24,6 +24,7 @@
 #include "config.hpp"
 #include "lib/common/logging.hpp"
 
+#include <fmt/core.h>
 #include <fmt/format.h>
 
 namespace rocprofiler
@@ -32,8 +33,8 @@ namespace tool
 {
 namespace fs = common::filesystem;
 
-std::pair<std::ostream*, void (*)(std::ostream*&)>
-get_output_stream(const std::string& fname, const std::string& ext)
+std::pair<std::ostream*, output_stream_dtor_t>
+get_output_stream(std::string_view fname, std::string_view ext)
 {
     auto cfg_output_path = tool::format(tool::get_config().output_path);
 
@@ -44,8 +45,14 @@ get_output_stream(const std::string& fname, const std::string& ext)
     else if(cfg_output_path.empty())
         return {&std::clog, [](auto*&) {}};
 
-    auto output_path      = fs::path{cfg_output_path};
-    auto output_file_name = tool::format(tool::get_config().output_file);
+    // add a period to provided file extension if necessary
+    constexpr auto period   = std::string_view{"."};
+    constexpr auto noperiod = std::string_view{};
+    const auto     _ext =
+        fmt::format("{}{}", (!ext.empty() && ext.find('.') != 0) ? period : noperiod, ext);
+
+    auto output_path   = fs::path{cfg_output_path};
+    auto output_prefix = tool::format(tool::get_config().output_file);
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
         throw std::runtime_error{
@@ -53,11 +60,12 @@ get_output_stream(const std::string& fname, const std::string& ext)
                         output_path.string())};
     if(!fs::exists(output_path)) fs::create_directories(output_path);
 
-    auto  output_file = tool::format(output_path / (output_file_name + "_" + fname + ext));
-    auto* _ofs        = new std::ofstream{output_file};
-    if(!_ofs && !*_ofs)
-        throw std::runtime_error{fmt::format("Failed to open {} for output", output_file)};
+    auto output_file =
+        tool::format(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
 
+    auto* _ofs = new std::ofstream{output_file};
+
+    LOG_IF(FATAL, !_ofs && !*_ofs) << fmt::format("Failed to open {} for output", output_file);
     ROCP_ERROR << "Opened result file: " << output_file;
 
     return {_ofs, [](std::ostream*& v) {
