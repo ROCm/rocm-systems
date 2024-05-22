@@ -271,10 +271,11 @@ config::config()
             break;
     }
 
-    csv_output  = entries.count("CSV") > 0 || entries.empty();
-    json_output = entries.count("JSON") > 0;
+    csv_output     = entries.count("CSV") > 0 || entries.empty();
+    json_output    = entries.count("JSON") > 0;
+    pftrace_output = entries.count("PFTRACE") > 0;
 
-    const auto supported_formats = std::set<std::string_view>{"CSV", "JSON"};
+    const auto supported_formats = std::set<std::string_view>{"CSV", "JSON", "PFTRACE"};
     for(const auto& itr : entries)
     {
         LOG_IF(FATAL, supported_formats.count(itr) == 0)

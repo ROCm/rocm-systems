@@ -56,7 +56,7 @@ namespace
 {
 using auto_lock_t = std::unique_lock<std::mutex>;
 auto   print_lock = std::mutex{};
-size_t nqueues    = 8;
+size_t nqueues    = 4;
 size_t nthreads   = 4;
 size_t nitr       = 500;
 size_t nsync      = 10;
@@ -112,7 +112,8 @@ main(int argc, char** argv)
 
     {
         auto vector_ops_thread = std::thread{run_vector_ops, nthreads, nqueues};
-        auto transpose_thread  = std::thread{run_transpose, nthreads, nitr, nsync};
+        std::this_thread::sleep_for(std::chrono::milliseconds{100});
+        auto transpose_thread = std::thread{run_transpose, nthreads, nitr, nsync};
 
         vector_ops_thread.join();
         transpose_thread.join();

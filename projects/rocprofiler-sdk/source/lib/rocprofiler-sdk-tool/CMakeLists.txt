@@ -11,6 +11,7 @@ set(TOOL_HEADERS
     domain_type.hpp
     generateCSV.hpp
     generateJSON.hpp
+    generatePerfetto.hpp
     helper.hpp
     output_file.hpp
     statistics.hpp
@@ -22,6 +23,7 @@ set(TOOL_SOURCES
     domain_type.cpp
     generateCSV.cpp
     generateJSON.cpp
+    generatePerfetto.cpp
     helper.cpp
     main.c
     output_file.cpp
@@ -36,9 +38,13 @@ add_subdirectory(plugins)
 
 target_link_libraries(
     rocprofiler-sdk-tool
-    PRIVATE rocprofiler::rocprofiler-shared-library rocprofiler::rocprofiler-headers
-            rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-cereal)
+    PRIVATE rocprofiler::rocprofiler-shared-library
+            rocprofiler::rocprofiler-headers
+            rocprofiler::rocprofiler-build-flags
+            rocprofiler::rocprofiler-memcheck
+            rocprofiler::rocprofiler-common-library
+            rocprofiler::rocprofiler-cereal
+            rocprofiler::rocprofiler-perfetto)
 
 set_target_properties(
     rocprofiler-sdk-tool

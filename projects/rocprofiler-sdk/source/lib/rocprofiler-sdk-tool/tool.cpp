@@ -26,6 +26,7 @@
 #include "domain_type.hpp"
 #include "generateCSV.hpp"
 #include "generateJSON.hpp"
+#include "generatePerfetto.hpp"
 #include "helper.hpp"
 #include "output_file.hpp"
 #include "tmp_file.hpp"
@@ -1431,6 +1432,19 @@ tool_fini(void* /*tool_data*/)
                                       &counters_output.element_data,
                                       &marker_output.element_data,
                                       &scratch_memory_output.element_data);
+    }
+
+    if(tool::get_config().pftrace_output)
+    {
+        rocprofiler::tool::write_perfetto(tool_functions,
+                                          getpid(),
+                                          _agents,
+                                          &hip_output.element_data,
+                                          &hsa_output.element_data,
+                                          &kernel_dispatch_output.element_data,
+                                          &memory_copy_output.element_data,
+                                          &marker_output.element_data,
+                                          &scratch_memory_output.element_data);
     }
 
     auto destroy_output = [](auto& _buffered_output_v) { _buffered_output_v.destroy(); };

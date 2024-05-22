@@ -75,6 +75,7 @@ struct config
     bool        stats                       = get_env("ROCPROF_STATS", false);
     bool        csv_output                  = false;
     bool        json_output                 = false;
+    bool        pftrace_output              = false;
     int         mpi_size                    = get_mpi_size();
     int         mpi_rank                    = get_mpi_rank();
     std::string output_path   = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());

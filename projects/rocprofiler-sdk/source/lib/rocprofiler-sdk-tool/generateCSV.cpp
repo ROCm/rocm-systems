@@ -28,6 +28,7 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
+#include <unistd.h>
 
 #include <iomanip>
 #include <string_view>

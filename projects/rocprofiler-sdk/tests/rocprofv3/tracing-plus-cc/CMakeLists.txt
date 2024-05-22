@@ -20,7 +20,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace
-        -o pmc3 --output-format JSON:CSV $<TARGET_FILE:simple-transpose>)
+        -o pmc3 --output-format JSON:PFTRACE:CSV $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -39,6 +39,8 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
         COMMAND
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
             "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_results.json"
+            --pftrace-input
+            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_results.pftrace"
             --hsa-input
             "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_hsa_api_trace.csv"
             --agent-input

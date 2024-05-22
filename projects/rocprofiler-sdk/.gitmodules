@@ -19,3 +19,6 @@
 [submodule "external/filesystem"]
 	path = external/filesystem
 	url = https://github.com/gulrak/filesystem.git
+[submodule "external/perfetto"]
+	path = external/perfetto
+	url = https://android.googlesource.com/platform/external/perfetto

@@ -150,3 +150,25 @@ if(ROCPROFILER_BUILD_DOCS)
         REPO_URL https://github.com/jothepro/doxygen-awesome-css.git
         REPO_BRANCH "main")
 endif()
+
+rocprofiler_checkout_git_submodule(
+    RECURSIVE
+    RELATIVE_PATH external/perfetto
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    TEST_FILE meson.build
+    REPO_URL https://android.googlesource.com/platform/external/perfetto external/perfetto
+    REPO_BRANCH "v44.0")
+
+add_library(rocprofiler-perfetto-static-library STATIC)
+target_sources(
+    rocprofiler-perfetto-static-library
+    PRIVATE ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.h
+            ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.cc)
+target_include_directories(
+    rocprofiler-perfetto-static-library SYSTEM
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/perfetto/sdk>)
+set_target_properties(
+    rocprofiler-perfetto-static-library PROPERTIES POSITION_INDEPENDENT_CODE ON
+                                                   OUTPUT_NAME rocprofiler-sdk-perfetto)
+target_link_libraries(rocprofiler-perfetto
+                      INTERFACE $<BUILD_INTERFACE:rocprofiler-perfetto-static-library>)

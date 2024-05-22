@@ -32,7 +32,11 @@
 
 #define ROCPROFILER_CXX_DECLARE_OPERATORS(TYPE)                                                    \
     bool operator==(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);                               \
-    bool operator!=(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);
+    bool operator!=(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);                               \
+    bool operator<(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);                                \
+    bool operator>(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);                                \
+    bool operator<=(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);                               \
+    bool operator>=(TYPE lhs, TYPE rhs) ROCPROFILER_ATTRIBUTE(pure);
 
 #define ROCPROFILER_CXX_DEFINE_NE_OPERATOR(TYPE)                                                   \
     inline bool operator!=(TYPE lhs, TYPE rhs) { return !(lhs == rhs); }
@@ -42,6 +46,17 @@
     {                                                                                              \
         return ::rocprofiler::sdk::operators::equal(lhs, rhs);                                     \
     }
+
+#define ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(TYPE)                                            \
+    inline bool operator<(TYPE lhs, TYPE rhs)                                                      \
+    {                                                                                              \
+        return ::rocprofiler::sdk::operators::less(lhs, rhs);                                      \
+    }
+
+#define ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(TYPE)                                             \
+    inline bool operator>(TYPE lhs, TYPE rhs) { return (lhs == rhs || !(lhs < rhs)); }             \
+    inline bool operator<=(TYPE lhs, TYPE rhs) { return (lhs == rhs || lhs < rhs); }               \
+    inline bool operator>=(TYPE lhs, TYPE rhs) { return !(lhs < rhs); }
 
 namespace rocprofiler
 {
@@ -55,10 +70,22 @@ equal(Tp lhs, Tp rhs) ROCPROFILER_ATTRIBUTE(pure);
 
 template <typename Tp>
 bool
+less(Tp lhs, Tp rhs) ROCPROFILER_ATTRIBUTE(pure);
+
+template <typename Tp>
+bool
 equal(Tp lhs, Tp rhs)
 {
     static_assert(sizeof(Tp) == sizeof(uint64_t), "error! only for opaque handle types");
     return lhs.handle == rhs.handle;
+}
+
+template <typename Tp>
+bool
+less(Tp lhs, Tp rhs)
+{
+    static_assert(sizeof(Tp) == sizeof(uint64_t), "error! only for opaque handle types");
+    return lhs.handle < rhs.handle;
 }
 }  // namespace operators
 }  // namespace sdk
@@ -116,7 +143,52 @@ ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_executable_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(const rocprofiler_agent_v0_t&)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_dim3_t)
 
+// definitions of operator<
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_agent_id_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_queue_id_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_buffer_id_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_counter_id_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_profile_config_id_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_callback_thread_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_agent_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_signal_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_executable_t)
+
+inline bool
+operator<(const rocprofiler_agent_v0_t& lhs, const rocprofiler_agent_v0_t& rhs)
+{
+    return (lhs.id < rhs.id);
+}
+
+inline bool
+operator<(rocprofiler_dim3_t lhs, rocprofiler_dim3_t rhs)
+{
+    const auto magnitude = [](rocprofiler_dim3_t dim_v) { return dim_v.x * dim_v.y * dim_v.z; };
+    auto       lhs_m     = magnitude(lhs);
+    auto       rhs_m     = magnitude(rhs);
+
+    return (lhs_m == rhs_m) ? std::tie(lhs.x, lhs.y, lhs.z) < std::tie(rhs.x, rhs.y, rhs.z)
+                            : (lhs_m < rhs_m);
+}
+
+// definitions of operator>, operator<=, operator>=
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_context_id_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_agent_id_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_queue_id_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_buffer_id_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_counter_id_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_profile_config_id_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_callback_thread_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_agent_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_signal_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_executable_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(const rocprofiler_agent_v0_t&)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_dim3_t)
+
 // cleanup defines
 #undef ROCPROFILER_CXX_DECLARE_OPERATORS
 #undef ROCPROFILER_CXX_DEFINE_NE_OPERATOR
 #undef ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR
+#undef ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR
+#undef ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS

@@ -20,6 +20,14 @@ def test_validate_counter_collection_plus_tracing(
     assert len(counter_collection_data) > 0
 
 
+def test_perfetto_data(pftrace_data, json_data):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_perfetto_data(
+        pftrace_data, json_data, ("hip", "hsa", "marker", "kernel", "memory_copy")
+    )
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

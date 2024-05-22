@@ -22,7 +22,7 @@ add_test(
     NAME rocprofv3-test-hsa-multiqueue-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace --kernel-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --output-format json:csv
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --output-format json:csv:pftrace
         $<TARGET_FILE:multiqueue_testapp>)
 
 set_tests_properties(
@@ -38,7 +38,9 @@ add_test(
         --kernel-trace-input
         ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_kernel_trace.csv
         --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.json)
+        ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.json
+        --pftrace-input
+        ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_results.pftrace)
 
 set(MULTIQUEUE_VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/multiqueue_testapp-trace/out_hsa_api_trace.csv

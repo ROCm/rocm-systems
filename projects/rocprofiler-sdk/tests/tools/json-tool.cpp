@@ -1436,14 +1436,15 @@ write_json(call_stack_t* _call_stack)
     }
 
     {
+        namespace sdk           = ::rocprofiler::sdk;
         using JSONOutputArchive = cereal::MinimalJSONOutputArchive;
 
         constexpr auto json_prec    = 32;
         constexpr auto json_indent  = JSONOutputArchive::Options::IndentChar::space;
         auto           json_opts    = JSONOutputArchive::Options{json_prec, json_indent, 1};
         auto           json_ar      = JSONOutputArchive{*ofs, json_opts};
-        auto           buffer_names = rocprofiler::sdk::get_buffer_tracing_names();
-        auto           callbk_names = rocprofiler::sdk::get_callback_tracing_names();
+        auto           buffer_names = sdk::get_buffer_tracing_names();
+        auto           callbk_names = sdk::get_callback_tracing_names();
         auto           validate_page_migration =
             (page_migration_status != ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL);
 
@@ -1655,8 +1656,10 @@ write_perfetto()
     }
 
     {
-        auto buffer_names     = rocprofiler::sdk::get_buffer_tracing_names();
-        auto callbk_name_info = rocprofiler::sdk::get_callback_tracing_names();
+        namespace sdk = ::rocprofiler::sdk;
+
+        auto buffer_names     = sdk::get_buffer_tracing_names();
+        auto callbk_name_info = sdk::get_callback_tracing_names();
 
         for(auto itr : hsa_api_bf_records)
         {
@@ -1671,7 +1674,7 @@ write_perfetto()
                 });
             if(ritr != hsa_api_cb_records.end()) _args = ritr->args;
 
-            TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::hsa_api>::value,
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hsa_api>::name,
                               ::perfetto::StaticString(name.data()),
                               track,
                               itr.start_timestamp,
@@ -1688,9 +1691,9 @@ write_perfetto()
                               itr.correlation_id.internal,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
-                                      add_perfetto_annotation(ctx, aitr.first, aitr.second);
+                                      sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
                               });
-            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::hsa_api>::value,
+            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::hsa_api>::name,
                             track,
                             itr.end_timestamp,
                             "end_ns",
@@ -1710,7 +1713,7 @@ write_perfetto()
                 });
             if(ritr != hip_api_cb_records.end()) _args = ritr->args;
 
-            TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::hip_api>::value,
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_api>::name,
                               ::perfetto::StaticString(name.data()),
                               track,
                               itr.start_timestamp,
@@ -1727,9 +1730,9 @@ write_perfetto()
                               itr.correlation_id.internal,
                               [&](::perfetto::EventContext ctx) {
                                   for(const auto& aitr : _args)
-                                      add_perfetto_annotation(ctx, aitr.first, aitr.second);
+                                      sdk::add_perfetto_annotation(ctx, aitr.first, aitr.second);
                               });
-            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::hip_api>::value,
+            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::hip_api>::name,
                             track,
                             itr.end_timestamp,
                             "end_ns",
@@ -1741,7 +1744,7 @@ write_perfetto()
             auto  name  = buffer_names.at(itr.kind, itr.operation);
             auto& track = agent_tracks.at(itr.dst_agent_id.handle);
 
-            TRACE_EVENT_BEGIN(rocprofiler::trait::name<rocprofiler::category::memory_copy>::value,
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_copy>::name,
                               ::perfetto::StaticString(name.data()),
                               track,
                               itr.start_timestamp,
@@ -1758,7 +1761,7 @@ write_perfetto()
                               agents_map.at(itr.dst_agent_id).logical_node_id,
                               "copy_bytes",
                               itr.bytes);
-            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::memory_copy>::value,
+            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
                             track,
                             itr.end_timestamp,
                             "end_ns",
@@ -1787,34 +1790,33 @@ write_perfetto()
                 demangled.emplace(name, demangle(name));
             }
 
-            TRACE_EVENT_BEGIN(
-                rocprofiler::trait::name<rocprofiler::category::kernel_dispatch>::value,
-                ::perfetto::StaticString(demangled.at(name).c_str()),
-                track,
-                itr.start_timestamp,
-                ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
-                "begin_ns",
-                itr.start_timestamp,
-                "kind",
-                itr.kind,
-                "agent",
-                agents_map.at(info.agent_id).logical_node_id,
-                "corr_id",
-                itr.correlation_id.internal,
-                "queue",
-                info.queue_id.handle,
-                "kernel_id",
-                info.kernel_id,
-                "private_segment_size",
-                info.private_segment_size,
-                "group_segment_size",
-                info.group_segment_size,
-                "workgroup_size",
-                info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
-                "grid_size",
-                info.grid_size.x * info.grid_size.y * info.grid_size.z);
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
+                              ::perfetto::StaticString(demangled.at(name).c_str()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "kind",
+                              itr.kind,
+                              "agent",
+                              agents_map.at(info.agent_id).logical_node_id,
+                              "corr_id",
+                              itr.correlation_id.internal,
+                              "queue",
+                              info.queue_id.handle,
+                              "kernel_id",
+                              info.kernel_id,
+                              "private_segment_size",
+                              info.private_segment_size,
+                              "group_segment_size",
+                              info.group_segment_size,
+                              "workgroup_size",
+                              info.workgroup_size.x * info.workgroup_size.y * info.workgroup_size.z,
+                              "grid_size",
+                              info.grid_size.x * info.grid_size.y * info.grid_size.z);
 
-            TRACE_EVENT_END(rocprofiler::trait::name<rocprofiler::category::kernel_dispatch>::value,
+            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
                             track,
                             itr.end_timestamp,
                             "end_ns",

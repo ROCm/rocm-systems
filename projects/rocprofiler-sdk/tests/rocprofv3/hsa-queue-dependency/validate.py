@@ -154,6 +154,14 @@ def test_hsa_api_trace_json(json_data):
     assert functions.count("hsa_signal_destroy") == num_hsa_signal_destroy_calls
 
 
+def test_perfetto_data(pftrace_data, json_data):
+    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
+
+    rocprofv3.test_perfetto_data(
+        pftrace_data, json_data, ("hip", "hsa", "marker", "kernel", "memory_copy")
+    )
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

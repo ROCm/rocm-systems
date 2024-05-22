@@ -27,6 +27,15 @@ add_test(
         --hsa-finalizer-trace --kernel-trace --memory-copy-trace --output-format JSON -d
         ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out $<TARGET_FILE:hip-in-libraries>)
 
+add_test(
+    NAME rocprofv3-test-trace-hip-in-libraries-pftrace-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-runtime-trace
+        --hip-compiler-trace --hsa-core-trace --hsa-amd-trace --hsa-image-trace
+        --hsa-finalizer-trace --kernel-trace --memory-copy-trace --output-format pftrace
+        -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out
+        $<TARGET_FILE:hip-in-libraries>)
+
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
@@ -47,6 +56,19 @@ set_tests_properties(
 
 set_tests_properties(
     rocprofv3-test-trace-hip-in-libraries-json-execute
+    PROPERTIES
+        TIMEOUT
+        100
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${tracing-env}"
+        FAIL_REGULAR_EXPRESSION
+        "HSA_CORE_API|HSA_AMD_EXT_API|HSA_IMAGE_EXT_API|HSA_FINALIZER_EXT_API|HIP_API|HIP_COMPILER_API|KERNEL_DISPATCH|CODE_OBJECT"
+    )
+
+set_tests_properties(
+    rocprofv3-test-trace-hip-in-libraries-pftrace-execute
     PROPERTIES
         TIMEOUT
         100
@@ -79,9 +101,13 @@ add_test(
         --hsa-stats ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_stats.csv
         --memory-copy-stats
         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv
-        --json-input ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.json)
+        --json-input ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.json
+        --pftrace-input
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.pftrace)
 
 set(VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.pftrace
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.json
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_trace.csv
@@ -90,8 +116,7 @@ set(VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_stats.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_stats.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_stats.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.json)
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv)
 
 set_tests_properties(
     rocprofv3-test-trace-hip-in-libraries-validate
@@ -101,7 +126,7 @@ set_tests_properties(
         LABELS
         "integration-tests"
         DEPENDS
-        "rocprofv3-test-trace-hip-in-libraries-execute;rocprofv3-test-trace-hip-in-libraries-json-execute"
+        "rocprofv3-test-trace-hip-in-libraries-execute;rocprofv3-test-trace-hip-in-libraries-json-execute;rocprofv3-test-trace-hip-in-libraries-pftrace-execute"
         FAIL_REGULAR_EXPRESSION
         "AssertionError"
         ATTACHED_FILES_ON_FAIL
