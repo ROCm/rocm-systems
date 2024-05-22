@@ -141,6 +141,7 @@ Below is the list of `rocprofv3` command-line options. Some options are used for
 | --hsa-image-trace | Collects HSA API Ttaces (Image-extension API). | Application tracing |
 | --hsa-finalizer-trace | Collects HSA API traces (Finalizer-extension API). | Application tracing |
 | -i | Specifies the input file. | Kernel profiling |
+|--stats | For Collecting statistics of enabled tracing types | Application tracing |
 | -L \| --list-metrics | List metrics for counter collection. | Kernel profiling |
 | --kernel-trace | Collects kernel dispatch traces. | Application tracing |
 | -M \| --mangled-kernels | Overrides the default demangling of kernel names. | Output control |
@@ -176,7 +177,9 @@ To trace HIP runtime APIs, use:
 rocprofv3 --hip-trace < app_relative_path >
 ```
 
-The above command generates a `hip_api_trace.csv` file prefixed with the process ID.
+**Note: The tracing and counter colleciton options generates an additional agent info file. See** [Agent Info](#agent-info)
+
+The above command generates a `hip_api_trace.csv` file prefixed with the process ID.  
 
 ```bash
 $ cat 238_hip_api_trace.csv
@@ -211,6 +214,16 @@ $ cat 208_hip_api_trace.csv
 ```
 
 To describe the fields in the output file, see [Output file fields](#output-file-fields).
+
+##### Agent Info
+
+```bash
+$ cat 238_agent_info.csv
+
+"Node_Id","Logical_Node_Id","Agent_Type","Cpu_Cores_Count","Simd_Count","Cpu_Core_Id_Base","Simd_Id_Base","Max_Waves_Per_Simd","Lds_Size_In_Kb","Gds_Size_In_Kb","Num_Gws","Wave_Front_Size","Num_Xcc","Cu_Count","Array_Count","Num_Shader_Banks","Simd_Arrays_Per_Engine","Cu_Per_Simd_Array","Simd_Per_Cu","Max_Slots_Scratch_Cu","Gfx_Target_Version","Vendor_Id","Device_Id","Location_Id","Domain","Drm_Render_Minor","Num_Sdma_Engines","Num_Sdma_Xgmi_Engines","Num_Sdma_Queues_Per_Engine","Num_Cp_Queues","Max_Engine_Clk_Ccompute","Max_Engine_Clk_Fcompute","Sdma_Fw_Version","Fw_Version","Capability","Cu_Per_Engine","Max_Waves_Per_Cu","Family_Id","Workgroup_Max_Size","Grid_Max_Size","Local_Mem_Size","Hive_Id","Gpu_Id","Workgroup_Max_Dim_X","Workgroup_Max_Dim_Y","Workgroup_Max_Dim_Z","Grid_Max_Dim_X","Grid_Max_Dim_Y","Grid_Max_Dim_Z","Name","Vendor_Name","Product_Name","Model_Name"
+0,0,"CPU",24,0,0,0,0,0,0,0,0,1,24,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,3800,0,0,0,0,0,0,23,0,0,0,0,0,0,0,0,0,0,0,"AMD Ryzen 9 3900X 12-Core Processor","CPU","AMD Ryzen 9 3900X 12-Core Processor",""
+1,1,"GPU",0,256,0,2147487744,10,64,0,64,64,1,64,4,4,1,16,4,32,90000,4098,26751,12032,0,128,2,0,2,24,3800,1630,432,440,138420864,16,40,141,1024,4294967295,0,0,64700,1024,1024,1024,4294967295,4294967295,4294967295,"gfx900","AMD","Radeon RX Vega","vega10"
+```
 
 #### HSA trace
 
@@ -348,6 +361,41 @@ rocprofv3 –-sys-trace < app_relative_path >
 ```
 
 Running the above command generates `hip_api_trace.csv`, `hsa_api_trace.csv`, `kernel_trace.csv`, `memory_copy_trace.csv`, and `marker_api_trace.csv` (if `rocTX` APIs are specified in the application) files prefixed with the process Id.
+
+#### Scratch Memory Trace
+
+This command collects scratch memory operations traces. Scratch is an address space on AMD GPUs that is roughly equivalent to “local memory” in CUDA (i.e., thread-local global memory with interleaved addressing) that is used for register spills/stack space. rocprof
+traces when the rocr runtime allocates, frees, and tries to reclaim scratch memory.
+
+```bash
+rocprofv3 --scratch-memory-trace < app_relative_path >
+```
+
+#### Stats
+
+This command collects statistics of enabled tracing types. If HIP trace is enabled, then statisitics of HIP APIs will be collected
+
+```bash
+rocprofv3 --stats --hip-trace  < app_relative_path >
+```
+
+The above command generates a `hip_stats.csv`, `hip_api_trace` file prefixed with the process ID.
+
+```bash
+$ cat 24189_hip_stats.csv
+
+"Name","Calls","TotalDurationNs","AverageNs","Percentage","MinNs","MaxNs","StdDev"
+"__hipPopCallConfiguration",1,721,721.000000,2.541116e-04,721,721,0.000000e+00
+"__hipPushCallConfiguration",1,1090,1090.000000,3.841631e-04,1090,1090,0.000000e+00
+"__hipRegisterFatBinary",1,5290,5290.000000,1.864425e-03,5290,5290,0.000000e+00
+"__hipRegisterFunction",1,6620,6620.000000,2.333174e-03,6620,6620,0.000000e+00
+"__hipUnregisterFatBinary",1,866077,866077.000000,3.052430e-01,866077,866077,0.000000e+00
+"hipFree",2,65271,32635.500000,2.300432e-02,10900,54371,30738.638885
+"hipGetDevicePropertiesR0600",1,37427618,37427618.000000,13.191110,37427618,37427618,0.000000e+00
+"hipLaunchKernel",1,352186,352186.000000,1.241256e-01,352186,352186,0.000000e+00
+"hipMalloc",2,237654,118827.000000,8.375954e-02,60091,177563,83065.247800
+"hipMemcpy",3,232015273,77338424.333333,81.772208,9630,230659937,132782005.405723
+```
 
 ### Kernel profiling
 

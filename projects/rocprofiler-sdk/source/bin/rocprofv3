@@ -92,6 +92,18 @@ LD_LIBRARY_PATH=${ROCM_DIR}/lib:${LD_LIBRARY_PATH}
 export ROCP_TOOL_LIBRARIES
 export LD_LIBRARY_PATH
 
+function check_tracing_enabled() {
+    if [[ -n "$ROCPROF_HSA_CORE_API_TRACE" || -n "$ROCPROF_HSA_AMD_EXT_API_TRACE" ||
+          -n "$ROCPROF_HSA_IMAGE_EXT_API_TRACE" || -n "$ROCPROF_HSA_FINALIZER_EXT_API_TRACE" ||
+          -n "$ROCPROF_HIP_RUNTIME_API_TRACE" || -n "$ROCPROF_HIP_COMPILER_API_TRACE" ||
+          -n "$ROCPROF_KERNEL_TRACE" || -n "$ROCPROF_MEMORY_COPY_TRACE" || -n "$ROCPROF_SCRATCH_MEMORY_TRACE"
+        ]]; then
+        return 0  # Return true if at least one tracing option is set
+    else
+        return 1  # Return false if none of the tracing options are set
+    fi
+}
+
 while true; do
   if [[ "$1" == "-h" || "$1" == "--help" ]]; then
     usage 0
@@ -234,6 +246,11 @@ if [ -n "${PMC_LINES:-}" ]; then
 elif [ -n "$ROCPROF_LIST_METRICS" ]; then
     LD_PRELOAD="${ROCPROF_PRELOAD}" exec ${ROCM_DIR}/lib/rocprofiler-sdk/rocprofv3-trigger-list-metrics
 else
+  if ! check_tracing_enabled && [ "$ROCPROF_STATS" == 1 ]; then
+    echo -e "Error: Please enable at least one tracing option to collect statistics."
+    echo -e "eg: rocprofv3 --stats --kernel-trace <executable>"
+    exit 1
+   fi
   # for non counter collection. e.g: tracing
   LD_PRELOAD="${ROCPROF_PRELOAD}" exec "${@}"
 fi
