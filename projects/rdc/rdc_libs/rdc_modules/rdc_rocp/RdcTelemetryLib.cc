@@ -20,6 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
+#include <math.h>
 #include <sys/time.h>
 
 #include <algorithm>
@@ -40,7 +41,6 @@ amd::rdc::RdcRocpBase rocp;
 rdc_status_t rdc_module_init(uint64_t flags) { return RDC_ST_OK; }
 
 // get supported field ids
-// TODO: Query fields with rocprofiler
 rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint32_t* field_count) {
   // extract all keys from counter_map
   std::vector<rdc_field_t> fields = rocp.get_field_ids();
@@ -69,7 +69,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
   rdc_gpu_field_value_t values[BULK_FIELDS_MAX];
   uint32_t bulk_count = 0;
   rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
-  double data;
+  double data = NAN;
 
   for (uint32_t i = 0; i < fields_count; i++) {
     if (bulk_count >= BULK_FIELDS_MAX) {
@@ -81,7 +81,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
       bulk_count = 0;
     }
 
-    status = rocp.rocp_lookup(std::make_pair(fields[i].gpu_index, fields[i].field_id), &data);
+    status = rocp.rocp_lookup(fields[i].gpu_index, fields[i].field_id, &data);
     // get value
     values[bulk_count].gpu_index = fields[i].gpu_index;
     values[bulk_count].field_value.type = DOUBLE;
@@ -92,7 +92,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
     bulk_count++;
   }
   if (bulk_count != 0) {
-    rdc_status_t status = callback(values, bulk_count, user_data);
+    status = callback(values, bulk_count, user_data);
     if (status != RDC_ST_OK) {
       return status;
     }
