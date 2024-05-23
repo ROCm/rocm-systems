@@ -37,11 +37,11 @@ def test_data_structure(input_data):
     node_exists("hsa_api_traces", sdk_data["callback_records"])
     node_exists("hip_api_traces", sdk_data["callback_records"], 0)
     node_exists("marker_api_traces", sdk_data["callback_records"])
-    node_exists("kernel_dispatches", sdk_data["callback_records"])
+    node_exists("kernel_dispatch", sdk_data["callback_records"])
     node_exists("memory_copies", sdk_data["callback_records"], 24)
 
     node_exists("names", sdk_data["buffer_records"])
-    node_exists("kernel_dispatches", sdk_data["buffer_records"])
+    node_exists("kernel_dispatch", sdk_data["buffer_records"])
     node_exists("memory_copies", sdk_data["buffer_records"], 12)
     node_exists("hsa_api_traces", sdk_data["buffer_records"])
     node_exists("hip_api_traces", sdk_data["buffer_records"], 0)
@@ -96,7 +96,7 @@ def test_timestamps(input_data):
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["start_timestamp"] <= itr["end_timestamp"]
 
-    for titr in ["kernel_dispatches", "memory_copies"]:
+    for titr in ["kernel_dispatch", "memory_copies"]:
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["start_timestamp"] < itr["end_timestamp"], f"[{titr}] {itr}"
             assert itr["correlation_id"]["internal"] > 0, f"[{titr}] {itr}"
@@ -135,7 +135,7 @@ def test_internal_correlation_ids(input_data):
     api_corr_ids_sorted = sorted(api_corr_ids)
     api_corr_ids_unique = list(set(api_corr_ids))
 
-    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
         assert itr["correlation_id"]["internal"] in api_corr_ids_unique
 
     for itr in sdk_data["buffer_records"]["memory_copies"]:
@@ -167,7 +167,7 @@ def test_external_correlation_ids(input_data):
             assert itr["thread_id"] in extern_corr_ids, f"[{titr}] {itr}"
             assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
 
-    for titr in ["kernel_dispatches", "memory_copies"]:
+    for titr in ["kernel_dispatch", "memory_copies"]:
         for itr in sdk_data["buffer_records"][titr]:
             assert itr["correlation_id"]["external"] > 0, f"[{titr}] {itr}"
             assert itr["correlation_id"]["external"] in extern_corr_ids, f"[{titr}] {itr}"
@@ -196,10 +196,10 @@ def test_kernel_ids(input_data):
             assert payload["kernel_id"] in symbol_info.keys()
             assert payload["kernel_name"] == symbol_info[kern_id]["kernel_name"]
 
-    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
         assert itr["dispatch_info"]["kernel_id"] in symbol_info.keys()
 
-    for itr in sdk_data["callback_records"]["kernel_dispatches"]:
+    for itr in sdk_data["callback_records"]["kernel_dispatch"]:
         assert itr["payload"]["dispatch_info"]["kernel_id"] in symbol_info.keys()
 
 
@@ -207,17 +207,17 @@ def test_kernel_dispatch_ids(input_data):
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
 
-    num_dispatches = len(sdk_data["buffer_records"]["kernel_dispatches"])
-    num_cb_dispatches = len(sdk_data["callback_records"]["kernel_dispatches"])
+    num_dispatches = len(sdk_data["buffer_records"]["kernel_dispatch"])
+    num_cb_dispatches = len(sdk_data["callback_records"]["kernel_dispatch"])
 
     assert num_cb_dispatches == (3 * num_dispatches)
 
     bf_seq_ids = []
-    for itr in sdk_data["buffer_records"]["kernel_dispatches"]:
+    for itr in sdk_data["buffer_records"]["kernel_dispatch"]:
         bf_seq_ids.append(itr["dispatch_info"]["dispatch_id"])
 
     cb_seq_ids = []
-    for itr in sdk_data["callback_records"]["kernel_dispatches"]:
+    for itr in sdk_data["callback_records"]["kernel_dispatch"]:
         cb_seq_ids.append(itr["payload"]["dispatch_info"]["dispatch_id"])
 
     bf_seq_ids = sorted(bf_seq_ids)
@@ -305,7 +305,7 @@ def test_retired_correlation_ids(input_data):
             api_corr_ids[corr_id] = itr
 
     async_corr_ids = {}
-    for titr in ["kernel_dispatches", "memory_copies"]:
+    for titr in ["kernel_dispatch", "memory_copies"]:
         for itr in sdk_data["buffer_records"][titr]:
             corr_id = itr["correlation_id"]["internal"]
             assert corr_id not in async_corr_ids.keys()

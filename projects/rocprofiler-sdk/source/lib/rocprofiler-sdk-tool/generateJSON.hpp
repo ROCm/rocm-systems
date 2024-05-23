@@ -39,7 +39,7 @@ write_json(tool_table*                                                      tool
            std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_deque,
            std::deque<rocprofiler_tool_counter_collection_record_t>*       counter_collection_deque,
            std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*     marker_api_deque,
-           std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* scratch_api_deque);
+           std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* scratch_memory_deque);
 
 }  // namespace tool
 }  // namespace rocprofiler

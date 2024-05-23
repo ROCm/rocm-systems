@@ -45,7 +45,7 @@ write_json(tool_table*                                                      tool
            std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_deque,
            std::deque<rocprofiler_tool_counter_collection_record_t>*       counter_collection_deque,
            std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*     marker_api_deque,
-           std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* scratch_api_deque)
+           std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* scratch_memory_deque)
 
 {
     using JSONOutputArchive = cereal::MinimalJSONOutputArchive;
@@ -118,12 +118,12 @@ write_json(tool_table*                                                      tool
         {
             json_ar.setNextName("buffer_records");
             json_ar.startNode();
-            json_ar(cereal::make_nvp("kernel_dispatches", *kernel_dispatch_deque));
+            json_ar(cereal::make_nvp("kernel_dispatch", *kernel_dispatch_deque));
             json_ar(cereal::make_nvp("hip_api", *hip_api_deque));
             json_ar(cereal::make_nvp("hsa_api", *hsa_api_deque));
-            json_ar(cereal::make_nvp("memory_copy", *memory_copy_deque));
-            json_ar(cereal::make_nvp("scratch_api", *scratch_api_deque));
             json_ar(cereal::make_nvp("marker_api", *marker_api_deque));
+            json_ar(cereal::make_nvp("memory_copy", *memory_copy_deque));
+            json_ar(cereal::make_nvp("scratch_memory", *scratch_memory_deque));
             json_ar.finishNode();
         }
 

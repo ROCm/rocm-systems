@@ -70,7 +70,7 @@ def test_kernel_trace_json(json_data):
     valid_kernel_names = ["copyA", "copyB", "copyC"]
     buffer_records = data["buffer_records"]
     buffer_names = data["strings"]["buffer_records"]
-    kernel_dispatch_data = buffer_records["kernel_dispatches"]
+    kernel_dispatch_data = buffer_records["kernel_dispatch"]
 
     def get_kernel_name(kernel_id):
         return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]

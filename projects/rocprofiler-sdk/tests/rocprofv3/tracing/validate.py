@@ -134,7 +134,7 @@ def test_kernel_trace_json(json_data):
         "_Z15matrixTransposePfS_i.kd",
         "matrixTranspose(float*, float*, int)",
     )
-    kernel_dispatch_data = data["buffer_records"]["kernel_dispatches"]
+    kernel_dispatch_data = data["buffer_records"]["kernel_dispatch"]
     assert len(kernel_dispatch_data) == 1
     for dispatch in kernel_dispatch_data:
         dispatch_info = dispatch["dispatch_info"]

@@ -45,9 +45,7 @@
 #include <cereal/types/functional.hpp>
 #include <cereal/types/list.hpp>
 #include <cereal/types/map.hpp>
-#include <cereal/types/memory.hpp>
 #include <cereal/types/optional.hpp>
-#include <cereal/types/polymorphic.hpp>
 #include <cereal/types/queue.hpp>
 #include <cereal/types/set.hpp>
 #include <cereal/types/stack.hpp>

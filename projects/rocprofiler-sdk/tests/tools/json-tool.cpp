@@ -1475,7 +1475,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("hip_api_traces", hip_api_cb_records));
             json_ar(cereal::make_nvp("marker_api_traces", marker_api_cb_records));
             json_ar(cereal::make_nvp("scratch_memory_traces", scratch_memory_cb_records));
-            json_ar(cereal::make_nvp("kernel_dispatches", kernel_dispatch_cb_records));
+            json_ar(cereal::make_nvp("kernel_dispatch", kernel_dispatch_cb_records));
             json_ar(cereal::make_nvp("memory_copies", memory_copy_cb_records));
         } catch(std::exception& e)
         {
@@ -1490,7 +1490,7 @@ write_json(call_stack_t* _call_stack)
         try
         {
             json_ar(cereal::make_nvp("names", buffer_names));
-            json_ar(cereal::make_nvp("kernel_dispatches", kernel_dispatch_bf_records));
+            json_ar(cereal::make_nvp("kernel_dispatch", kernel_dispatch_bf_records));
             json_ar(cereal::make_nvp("memory_copies", memory_copy_bf_records));
             json_ar(cereal::make_nvp("scratch_memory_traces", scratch_memory_records));
             json_ar(cereal::make_nvp("page_migration", page_migration_records));

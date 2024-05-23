@@ -31,7 +31,7 @@ def test_perfetto_data(
         "hip": ("hip_api", "hip_api"),
         "hsa": ("hsa_api", "hsa_api"),
         "marker": ("marker_api", "marker_api"),
-        "kernel": ("kernel_dispatch", "kernel_dispatches"),
+        "kernel": ("kernel_dispatch", "kernel_dispatch"),
         "memory_copy": ("memory_copy", "memory_copy"),
     }
 
@@ -45,4 +45,6 @@ def test_perfetto_data(
         _pf_data = pftrace_data.loc[pftrace_data["category"] == pf_category]
         _js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"][js_category]
 
-        assert len(_pf_data) == len(_js_data)
+        assert len(_pf_data) == len(
+            _js_data
+        ), f"{pf_category} ({len(_pf_data)}):\n\t{_pf_data}\n{js_category} ({len(_js_data)}):\n\t{_js_data}"

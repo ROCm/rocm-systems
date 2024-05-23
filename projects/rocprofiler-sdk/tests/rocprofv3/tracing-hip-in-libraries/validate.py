@@ -304,7 +304,7 @@ def test_kernel_trace_json(json_data):
         return data["kernel_symbols"][kernel_id]["formatted_kernel_name"]
 
     kernels = []
-    for row in buffer_records["kernel_dispatches"]:
+    for row in buffer_records["kernel_dispatch"]:
         dispatch_info = row["dispatch_info"]
         kernel_name = get_kernel_name(dispatch_info["kernel_id"])
         if re.search(r"__amd_rocclr_.*", kernel_name):
