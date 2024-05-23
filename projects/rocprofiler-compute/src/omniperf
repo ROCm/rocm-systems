@@ -30,7 +30,6 @@ import sys
 from pip._internal.req import parse_requirements
 from pathlib import Path
 from importlib import import_module, metadata
-from distutils import text_file
 import re
 
 try:
@@ -65,9 +64,10 @@ def verify_deps():
     for location in depsLocation:
         checkFile = os.path.join(bindir, location)
         if os.path.exists(checkFile):
-            dependencies = text_file.TextFile(checkFile).readlines()
-            error = False
+            with open(checkFile, "r") as file_in:
+                dependencies = file_in.read().splitlines()
 
+            error = False
             version_pattern = r"^([^=<>]+)([=<>]+)(.*)$"
 
             for dependency in dependencies:
