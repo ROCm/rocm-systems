@@ -396,10 +396,11 @@ configure_file(
     ${PROJECT_SOURCE_DIR}/src/core/counters/metrics/derived_counters.xml
     ${PROJECT_BINARY_DIR}/libexec/rocprofiler/counters/derived_counters.xml COPYONLY)
 
+# instead of Directory install, using each file install for better handling of Permissions
+file(GLOB install_files CONFIGURE_DEPENDS "${PROJECT_BINARY_DIR}/libexec/rocprofiler/counters/*.xml")
 install(
-    DIRECTORY ${PROJECT_BINARY_DIR}/libexec/rocprofiler/counters
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
-    USE_SOURCE_PERMISSIONS
+    FILES ${install_files}
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/counters
     COMPONENT runtime)
 
 # ########################################################################################

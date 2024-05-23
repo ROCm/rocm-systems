@@ -64,5 +64,4 @@ configure_file(ui/httpserver.py att/ui/httpserver.py COPYONLY)
 install(
     DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/att
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/rocprofiler
-    USE_SOURCE_PERMISSIONS
     COMPONENT runtime)

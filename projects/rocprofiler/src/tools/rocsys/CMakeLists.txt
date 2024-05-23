@@ -19,9 +19,7 @@ target_link_libraries(rocprofiler_rocsys_fe dl rt stdc++fs)
 
 install(
     TARGETS rocprofiler_rocsys_fe
-    RUNTIME PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE
-                        WORLD_READ WORLD_EXECUTE
-            DESTINATION ${CMAKE_INSTALL_BINDIR}
-            COMPONENT runtime)
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT runtime)
 
 # ########################################################################################
