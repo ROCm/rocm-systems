@@ -23,6 +23,8 @@
 from __future__ import absolute_import
 
 import re
+import sys
+import time
 import pandas as pd
 
 from collections import OrderedDict
@@ -157,10 +159,22 @@ class PerfettoReader:
 
         _new_filenames = [x for x in self.filename if x not in _filenames]
 
+        def construct_trace_processor(trace_v):
+            for i in range(4):
+                try:
+                    return TraceProcessor(trace=(trace_v))
+                except Exception as e:
+                    nwait = i + 1
+                    sys.stderr.write(
+                        f"{e}\n\nRetrying trace processor construction after {nwait} seconds...\n"
+                    )
+                    sys.stderr.flush()
+                    time.sleep(nwait)
+
         if len(self.filename) + len(_new_filenames) != len(self.trace_processor):
-            self.trace_processor = [TraceProcessor(trace=(f)) for f in self.filename]
+            self.trace_processor = [construct_trace_processor(f) for f in self.filename]
         elif _new_filenames:
-            self.trace_processor += [TraceProcessor(trace=(f)) for f in _new_filenames]
+            self.trace_processor += [construct_trace_processor(f) for f in _new_filenames]
 
         self.max_depth = kwargs.get("max_depth", None)
 

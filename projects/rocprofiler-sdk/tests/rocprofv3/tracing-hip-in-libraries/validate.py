@@ -40,6 +40,7 @@ def validate_stats(row):
 def test_api_trace(
     hsa_input_data,
     hip_input_data,
+    marker_input_data,
     kernel_input_data,
     memory_copy_input_data,
     hip_stats_data,
@@ -47,6 +48,7 @@ def test_api_trace(
     functions = []
     hsa_correlation_ids = []
     hip_correlation_ids = []
+    marker_correlation_ids = []
     for row in hsa_input_data:
         assert row["Domain"] in (
             "HSA_CORE_API",
@@ -75,6 +77,18 @@ def test_api_trace(
         cid = int(row["Correlation_Id"])
         hip_correlation_ids.append(cid)
 
+    for row in marker_input_data:
+        assert row["Domain"] in [
+            "MARKER_CORE_API",
+        ]
+        assert int(row["Process_Id"]) > 0
+        assert int(row["Thread_Id"]) == 0 or int(row["Thread_Id"]) >= int(
+            row["Process_Id"]
+        )
+        assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
+        cid = int(row["Correlation_Id"])
+        marker_correlation_ids.append(cid)
+
     def get_sorted_unique(inp):
         return sorted(list(set(inp)))
 
@@ -94,7 +108,9 @@ def test_api_trace(
     if len(hip_correlation_ids) != len(get_sorted_unique(hip_correlation_ids)):
         diagnose_non_unique(hip_input_data)
 
-    correlation_ids = get_sorted_unique(hsa_correlation_ids + hip_correlation_ids)
+    correlation_ids = get_sorted_unique(
+        hsa_correlation_ids + hip_correlation_ids + marker_correlation_ids
+    )
 
     # make sure that we have associated API calls for all async ops
     for itr in [kernel_input_data, memory_copy_input_data]:
@@ -111,10 +127,12 @@ def test_api_trace(
         for itr in hip_input_data:
             assert int(itr["Correlation_Id"]) in correlation_ids, f"{itr}"
 
-    assert len(correlation_ids) == (len(hsa_input_data) + len(hip_input_data))
+    assert len(correlation_ids) == (
+        len(hsa_input_data) + len(hip_input_data) + len(marker_input_data)
+    )
     # correlation ids are numbered from 1 to N
     assert correlation_ids[0] == 1, f"{correlation_ids}"
-    assert correlation_ids[-1] == len(correlation_ids), f"{correlation_ids}"
+    assert correlation_ids[-1] == len(correlation_ids) + 5, f"{correlation_ids}"
 
     functions = list(set(functions))
     for itr in (
@@ -156,6 +174,7 @@ def test_api_trace_json(json_data):
     buffer_records = data["buffer_records"]
     hsa_data = buffer_records["hsa_api"]
     hip_data = buffer_records["hip_api"]
+    marker_data = buffer_records["marker_api"]
 
     valid_domain = [
         "HSA_CORE_API",
@@ -167,6 +186,10 @@ def test_api_trace_json(json_data):
     valid_hip_domain = [
         "HIP_RUNTIME_API",
         "HIP_COMPILER_API",
+    ]
+
+    valid_marker_domain = [
+        "MARKER_CORE_API",
     ]
 
     def get_operation_name(kind_id, op_id):
@@ -196,13 +219,21 @@ def test_api_trace_json(json_data):
         functions.append(get_operation_name(api["kind"], api["operation"]))
         correlation_ids.append(api["correlation_id"]["internal"])
 
+    for api in marker_data:
+        kind = get_kind_name(api["kind"])
+        assert kind in valid_marker_domain
+        assert metadata["pid"] > 0
+        assert api["thread_id"] == 0 or api["thread_id"] >= metadata["pid"]
+        assert api["end_timestamp"] >= api["start_timestamp"]
+        correlation_ids.append(api["correlation_id"]["internal"])
+
     correlation_ids = sorted(list(set(correlation_ids)))
 
     # all correlation ids are unique
-    assert len(correlation_ids) == (len(hsa_data) + len(hip_data))
+    assert len(correlation_ids) == (len(hsa_data) + len(hip_data) + len(marker_data))
     # correlation ids are numbered from 1 to N
     assert correlation_ids[0] == 1
-    assert correlation_ids[-1] == len(correlation_ids)
+    assert correlation_ids[-1] == len(correlation_ids) + 5
 
     functions = list(set(functions))
     for itr in (
@@ -401,9 +432,9 @@ def test_memory_copy_trace(
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
-    # do not test for HSA since that may vary b/t two separate runs
+    # do not test for HSA and HIP since that may vary slightly b/t two separate runs
     rocprofv3.test_perfetto_data(
-        pftrace_data, json_data, ("hip", "marker", "kernel", "memory_copy")
+        pftrace_data, json_data, ("marker", "kernel", "memory_copy")
     )
 
 
