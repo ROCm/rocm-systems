@@ -33,13 +33,16 @@
 #include "lib/rocprofiler-sdk/counters/agent_profiling.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
 #include "rocprofiler-sdk/agent.h"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
+#include <unordered_map>
 
 namespace rocprofiler
 {
@@ -112,6 +115,16 @@ struct agent_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
+struct pc_sampling_service
+{
+    // Contains a map with pairs (rocprofiler_agent_id_t, PCSAgentSession*).
+    // The PCSAgentSession encapsulates the information about the configured PC sampling session
+    // used on the agent with `rocprofiler_agent_id_t`.
+    std::unordered_map<rocprofiler_agent_id_t,
+                       std::unique_ptr<rocprofiler::pc_sampling::PCSAgentSession>>
+        agent_sessions;
+};
+
 struct context
 {
     // size is used to ensure that we never read past the end of the version
@@ -125,6 +138,7 @@ struct context
     std::unique_ptr<dispatch_counter_collection_service> counter_collection       = {};
     std::unique_ptr<agent_counter_collection_service>    agent_counter_collection = {};
     std::shared_ptr<ThreadTracer>                        thread_trace             = {};
+    std::unique_ptr<pc_sampling_service>                 pc_sampler               = {};
 };
 
 // set the client index needs to be called before allocate_context()

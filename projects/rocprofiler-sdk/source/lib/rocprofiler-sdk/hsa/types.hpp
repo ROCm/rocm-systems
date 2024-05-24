@@ -152,8 +152,10 @@ struct table_size<ROCPROFILER_COMPUTE_VERSION(1, 12, 0)>
     // TODO(jomadsen): come up with a better way of handling this
 #            if HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x00
     static constexpr size_t amd_ext = 552;
-#            else
+#            elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x1
     static constexpr size_t amd_ext = 560;
+#            else
+    static constexpr size_t amd_ext = 568;
 #            endif
 };
 

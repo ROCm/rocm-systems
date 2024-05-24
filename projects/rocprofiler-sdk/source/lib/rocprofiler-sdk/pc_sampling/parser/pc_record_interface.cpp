@@ -23,7 +23,7 @@
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 
 uint64_t
-PCSamplingParserContext::alloc(rocprofiler_pc_sampling_record_s** buffer, uint64_t size)
+PCSamplingParserContext::alloc(rocprofiler_pc_sampling_record_t** buffer, uint64_t size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
     assert(buffer != nullptr);
@@ -97,3 +97,21 @@ PCSamplingParserContext::shouldFlipRocrBuffer(const dispatch_pkt_id_t& pkt) cons
     std::shared_lock<std::shared_mutex> lock(mut);
     return corr_map->checkDispatch(pkt);
 }
+
+void
+PCSamplingParserContext::generate_upcoming_pc_record(
+    uint64_t                                agent_id_handle,
+    const rocprofiler_pc_sampling_record_t* samples,
+    size_t                                  num_samples)
+{
+    auto buff_id = _agent_buffers.at(rocprofiler_agent_id_t{agent_id_handle});
+    rocprofiler::buffer::instance* buff = rocprofiler::buffer::get_buffer(buff_id);
+
+    if(!buff)
+        throw std::runtime_error(fmt::format("Buffer with id: {} does not exists", buff_id.handle));
+
+    for(size_t i = 0; i < num_samples; i++)
+        buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
+                      ROCPROFILER_PC_SAMPLING_RECORD_SAMPLE,
+                      samples[i]);
+};

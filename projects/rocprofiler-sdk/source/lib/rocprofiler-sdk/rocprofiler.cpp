@@ -107,6 +107,11 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS,
                           "Counter set does not include any hardware counters")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH,
                           "Counter profile agent does not match the agent in the context")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE,
+                          "The service is not available."
+                          "Please refer to API functions that return this status code"
+                          "for more information.")
+
 template <size_t Idx, size_t... Tail>
 const char*
 get_status_name(rocprofiler_status_t status, std::index_sequence<Idx, Tail...>)

@@ -102,6 +102,9 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_NO_PROFILE_QUEUE,      ///< Profile queue creation failed
     ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS,  ///< No hardware counters were specified
     ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH,        ///< Agent mismatch between profile and context.
+    ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE,         ///< The service is not available.
+                                             ///< Please refer to API functions that return this
+                                             ///< status code for more information.
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 
@@ -400,6 +403,19 @@ typedef enum
     ROCPROFILER_COUNTER_FLAG_LAST,
 } rocprofiler_counter_flag_t;
 
+/**
+ * @brief Enumeration for distinguishing different buffer record kinds within the
+ * ::ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING category
+ */
+typedef enum
+{
+    ROCPROFILER_PC_SAMPLING_RECORD_NONE = 0,
+    ROCPROFILER_PC_SAMPLING_RECORD_SAMPLE,                   ///< ::rocprofiler_pc_sampling_record_t
+    ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_LOAD_MARKER,  ///< ::rocprofiler_pc_sampling_code_object_load_marker_t
+    ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_UNLOAD_MARKER,  ///< ::rocprofiler_pc_sampling_code_object_unload_marker_t
+    ROCPROFILER_PC_SAMPLING_RECORD_LAST,
+} rocprofiler_pc_sampling_record_kind_t;
+
 //--------------------------------------------------------------------------------------//
 //
 //                                      ALIASES
@@ -441,10 +457,6 @@ typedef uint64_t rocprofiler_kernel_id_t;
 //  *
 //  */
 typedef uint64_t rocprofiler_dispatch_id_t;
-
-// forward declaration of struct
-typedef struct rocprofiler_pc_sampling_configuration_s rocprofiler_pc_sampling_configuration_t;
-typedef struct rocprofiler_pc_sampling_record_s        rocprofiler_pc_sampling_record_t;
 
 /**
  * @brief Unique record id encoding both the counter

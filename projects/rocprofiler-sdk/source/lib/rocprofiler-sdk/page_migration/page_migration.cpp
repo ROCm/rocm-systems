@@ -27,8 +27,8 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
-#include "lib/rocprofiler-sdk/page_migration/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/page_migration/utils.hpp"
 
 #include <rocprofiler-sdk/agent.h>

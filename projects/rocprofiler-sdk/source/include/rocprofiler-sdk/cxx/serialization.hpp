@@ -720,7 +720,6 @@ save(ArchiveT& ar, const rocprofiler_agent_v0_t& data)
     ROCP_SDK_SAVE_DATA_CSTR(vendor_name);
     ROCP_SDK_SAVE_DATA_CSTR(product_name);
     ROCP_SDK_SAVE_DATA_CSTR(model_name);
-    ROCP_SDK_SAVE_DATA_FIELD(num_pc_sampling_configs);
     ROCP_SDK_SAVE_DATA_FIELD(node_id);
     ROCP_SDK_SAVE_DATA_FIELD(logical_node_id);
 

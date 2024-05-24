@@ -39,6 +39,8 @@
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -601,6 +603,10 @@ finalize()
         hsa::async_copy_fini();
         hsa::queue_controller_fini();
         page_migration::finalize();
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        // WARNING: this must precede `code_object::finalize()`
+        pc_sampling::code_object::finalize();
+#endif
         code_object::finalize();
         if(get_init_status() > 0)
         {
@@ -753,6 +759,9 @@ rocprofiler_set_api_table(const char* name,
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::code_object::initialize(hsa_api_table);
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
+#endif
 
         // install rocprofiler API wrappers
         rocprofiler::hsa::update_table(hsa_api_table->core_, lib_instance);
@@ -760,6 +769,11 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::hsa::update_table(hsa_api_table->image_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->finalizer_ext_, lib_instance);
         rocprofiler::hsa::update_table(hsa_api_table->tools_, lib_instance);
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+        // Initialize PC sampling service if configured
+        rocprofiler::pc_sampling::post_hsa_init_start_active_service();
+#endif
 
         // allow tools to install API wrappers
         rocprofiler::intercept_table::notify_intercept_table_registration(
@@ -816,6 +830,7 @@ rocprofiler_set_api_table(const char* name,
     return 0;
 }
 
+// #if 0
 bool
 OnLoad(HsaApiTable*       table,
        uint64_t           runtime_version,
@@ -843,4 +858,5 @@ OnUnload()
     ::rocprofiler::registration::finalize();
     ROCP_INFO << "Finalization complete.";
 }
+// #endif
 }

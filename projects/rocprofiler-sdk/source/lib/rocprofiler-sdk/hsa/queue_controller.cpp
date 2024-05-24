@@ -136,8 +136,6 @@ constexpr rocprofiler_agent_t default_agent =
                         .vendor_name                = nullptr,
                         .product_name               = nullptr,
                         .model_name                 = nullptr,
-                        .num_pc_sampling_configs    = 0,
-                        .pc_sampling_configs        = nullptr,
                         .node_id                    = 0,
                         .logical_node_id            = 0};
 }  // namespace
@@ -256,25 +254,23 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     auto enable_intercepter = false;
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 192UL;
+        constexpr auto expected_context_size = 200UL;
         static_assert(
             sizeof(context::context) ==
                 expected_context_size + sizeof(std::shared_ptr<rocprofiler::ThreadTracer>),
             "If you added a new field to context struct, make sure there is a check here if it "
             "requires queue interception. Once you have done so, increment expected_context_size");
 
-        if(itr->counter_collection)
+        bool has_kernel_tracing =
+            (itr->callback_tracer &&
+             itr->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH)) ||
+            (itr->buffered_tracer &&
+             itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH));
+
+        if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing)
         {
             enable_intercepter = true;
             break;
-        }
-        else if(itr->buffered_tracer)
-        {
-            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH))
-            {
-                enable_intercepter = true;
-                break;
-            }
         }
         else if(itr->thread_trace)
         {
@@ -288,15 +284,6 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
                 [trace](const AgentCache& cache, const CoreApiTable&, const AmdExtTable&) {
                     if(auto locked = trace.lock()) locked->resource_deinit(cache);
                 });
-            break;
-        }
-        else if(itr->callback_tracer)
-        {
-            if(itr->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH))
-            {
-                enable_intercepter = true;
-                break;
-            }
         }
     }
 

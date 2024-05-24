@@ -355,12 +355,6 @@ read_property(const MapT& data, const std::string& label, Tp& value)
     }
 }
 
-constexpr auto
-compute_version(uint32_t major_v, uint32_t minor_v, uint32_t patch_v)
-{
-    return (major_v * 10000) + (minor_v * 100) + patch_v;
-}
-
 auto
 read_topology()
 {
@@ -370,15 +364,6 @@ read_topology()
     if(!fs::exists(sysfs_nodes_path))
         throw std::runtime_error{
             fmt::format("sysfs nodes path '{}' does not exist", sysfs_nodes_path.string())};
-
-    using pc_sampling_config_vec_t = std::vector<rocprofiler_pc_sampling_configuration_t>;
-
-    static auto mi200_pc_sampling_config = pc_sampling_config_vec_t{
-        rocprofiler_pc_sampling_configuration_t{ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
-                                                ROCPROFILER_PC_SAMPLING_UNIT_TIME,
-                                                1UL,
-                                                1000000000UL,
-                                                0}};
 
     const auto& cpu_info_v = get_cpu_info();
     auto        data       = std::vector<unique_agent_t>{};
@@ -512,18 +497,6 @@ read_topology()
                     amdgpu_device_deinitialize(device_handle);
                 }
                 drmClose(drm_fd);
-            }
-
-            // TODO(jomadsen): make contingent on whether this process acquired the PC sampling
-            // device lock
-            {
-                constexpr auto gfx90a_version = compute_version(9, 0, 10);
-
-                if(agent_info.gfx_target_version >= gfx90a_version)
-                {
-                    agent_info.pc_sampling_configs     = mi200_pc_sampling_config.data();
-                    agent_info.num_pc_sampling_configs = mi200_pc_sampling_config.size();
-                }
             }
         }
         else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)

@@ -70,6 +70,12 @@ jobs:
       run: |
           echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.runner, 'mi200') }}
+      shell: bash
+      run: |
+          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
     - name: Configure, Build, and Test
       timeout-minutes: 30
       shell: bash
@@ -153,7 +159,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi3']
+        runner: ['mi200']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
@@ -164,6 +170,7 @@ jobs:
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
       GCC_COMPILER_VERSION: 11
+      ROCPROFILER_PC_SAMPLING_BETA_ENABLED: 1
 
     steps:
     - name: Patch Git
@@ -224,12 +231,6 @@ jobs:
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         ls -la
-
-    - name: Exclude PC Sampling Tests
-      if: ${{ !contains(matrix.runner, 'mi200') && !contains(matrix.runner, 'mi300') }}
-      shell: bash
-      run: |
-          echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
@@ -384,11 +385,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi200']
+        runner: ['navi3', 'vega20', 'mi300']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
-        ci-flags: ['']
+        exclude:
+          - { runner: 'navi3',  sanitizer: 'ThreadSanitizer' }
+          - { runner: 'navi3',  sanitizer: 'LeakSanitizer' }
+          - { runner: 'vega20', sanitizer: 'AddressSanitizer' }
+          - { runner: 'vega20', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi300',  sanitizer: 'AddressSanitizer' }
+          - { runner: 'mi300',  sanitizer: 'ThreadSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-runner-set
@@ -427,6 +434,12 @@ jobs:
       run: |
           echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.runner, 'mi200') }}
+      shell: bash
+      run: |
+          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
+
     - name: Configure, Build, and Test
       timeout-minutes: 45
       shell: bash
@@ -438,7 +451,6 @@ jobs:
           --gpu-targets ${{ env.GPU_TARGETS }}
           --memcheck ${{ matrix.sanitizer }}
           --run-attempt ${{ github.run_attempt }}
-          ${{ matrix.ci-flags }}
           --
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
           -DCMAKE_INSTALL_PREFIX="${{ env.ROCM_PATH }}"

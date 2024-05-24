@@ -29,6 +29,7 @@
 #include "lib/rocprofiler-sdk/context/domain.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -271,6 +272,10 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
 rocprofiler_status_t
 rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
 {
+    // Drain internal PC sampling buffers, if needed.
+    auto status = rocprofiler::pc_sampling::flush_internal_agent_buffers(buffer_id);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
     return rocprofiler::buffer::flush(buffer_id, true);
 }
 

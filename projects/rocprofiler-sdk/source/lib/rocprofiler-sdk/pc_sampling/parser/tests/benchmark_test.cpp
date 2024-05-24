@@ -56,8 +56,8 @@ Benchmark(bool bWarmup)
             for(size_t i = 0; i < SAMPLE_PER_DISPATCH; i++)
                 MockWave(dispatch).genPCSample();
 
-    std::pair<rocprofiler_pc_sampling_record_s*, size_t> userdata;
-    userdata.first  = new rocprofiler_pc_sampling_record_s[TOTAL_NUM_SAMPLES];
+    std::pair<rocprofiler_pc_sampling_record_t*, size_t> userdata;
+    userdata.first  = new rocprofiler_pc_sampling_record_t[TOTAL_NUM_SAMPLES];
     userdata.second = TOTAL_NUM_SAMPLES;
 
     auto t0 = std::chrono::system_clock::now();
@@ -65,9 +65,9 @@ Benchmark(bool bWarmup)
         (generic_sample_t*) buffer->packets.data(),
         buffer->packets.size(),
         GFXIP_MAJOR,
-        [](rocprofiler_pc_sampling_record_s** sample, uint64_t size, void* userdata_) {
+        [](rocprofiler_pc_sampling_record_t** sample, uint64_t size, void* userdata_) {
             auto* pair =
-                reinterpret_cast<std::pair<rocprofiler_pc_sampling_record_s*, size_t>*>(userdata_);
+                reinterpret_cast<std::pair<rocprofiler_pc_sampling_record_t*, size_t>*>(userdata_);
             assert(TOTAL_NUM_SAMPLES == pair->second);
             *sample = pair->first;
             return size;
@@ -80,7 +80,7 @@ Benchmark(bool bWarmup)
     {
         std::cout << "Benchmark: Parsed " << int(samples_per_us * 1E3f + 0.5f) * 1E-3f
                   << " Msample/s (";
-        std::cout << int(sizeof(rocprofiler_pc_sampling_record_s) * samples_per_us) << " MB/s)"
+        std::cout << int(sizeof(rocprofiler_pc_sampling_record_t) * samples_per_us) << " MB/s)"
                   << std::endl;
     }
 

@@ -184,17 +184,20 @@ add_upcoming_samples(const device_handle               device,
                      const generic_sample_t*           buffer,
                      const size_t                      available_samples,
                      Parser::CorrelationMap*           corr_map,
-                     rocprofiler_pc_sampling_record_s* samples)
+                     rocprofiler_pc_sampling_record_t* samples)
 {
     pcsample_status_t status = PCSAMPLE_STATUS_SUCCESS;
     for(uint64_t p = 0; p < available_samples; p++)
     {
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
         samples[p]       = copySample<bHostTrap, GFXIP>((const void*) (buffer + p));
+        samples[p].size  = 0;  // pc sampling record with size 0 will indicate invalid sample
         try
         {
             Parser::trap_correlation_id_t trap{.raw = snap->correlation_id};
             samples[p].correlation_id = corr_map->get(device, trap);
+            samples[p].size           = sizeof(rocprofiler_pc_sampling_record_t);
+            // set size after corr_map->get which may throw
         } catch(std::exception& e)
         {
             status = PCSAMPLE_STATUS_PARSER_ERROR;
@@ -240,7 +243,7 @@ _parse_buffer(generic_sample_t*       buffer,
 
                 while(pkt_counter > 0)
                 {
-                    rocprofiler_pc_sampling_record_s* samples = nullptr;
+                    rocprofiler_pc_sampling_record_t* samples = nullptr;
                     uint64_t available_samples = callback(&samples, pkt_counter, userdata);
 
                     if(available_samples == 0 || available_samples > pkt_counter)

@@ -38,53 +38,57 @@ ROCPROFILER_EXTERN_C_INIT
  * @brief Function used to configure the PC sampling service on the GPU agent with @p agent_id.
  *
  * Prerequisites are the following:
- * - The user must create a context and supply its @p context_id. By using this context,
- * - The user must create a context and supply its @p context_id. By using this context,
- *   the user can start/stop PC sampling on the agent. For more information,
- *   please @see `rocprofiler_start_context`/`rocprofiler_stop_context`.
- * - The user must create a buffer and supply its @p buffer_id. Rocprofiler uses the buffer
- * - The user must create a buffer and supply its @p buffer_id. Rocprofiler uses the buffer
- *   to deliver the PC samples to the user. For more information about the data delivery,
- *   please @see `rocprofiler_create_buffer` and `rocprofiler_buffer_tracing_cb_t`.
+ * - The client must create a context and supply its @p context_id. By using this context,
+ *   the client can start/stop PC sampling on the agent. For more information,
+ *   please @see rocprofiler_start_context/rocprofiler_stop_context.
+ * - The user must create a buffer and supply its @p buffer_id. Rocprofiler-SDK uses the buffer
+ *   to deliver the PC samples to the client. For more information about the data delivery,
+ *   please @see rocprofiler_create_buffer and @see rocprofiler_buffer_tracing_cb_t.
  *
  * Before calling this function, we recommend querying PC sampling configurations
- * supported by the GPU agent via the `rocprofiler_query_pc_sampling_agent_configurations`.
- * The user then chooses the @p method, @p unit, and @p interval to match one of the
- * available configurations. Note that the @p interval must belong to the range of values
- * The user then chooses the @p method, @p unit, and @p interval to match one of the
+ * supported by the GPU agent via the @see rocprofiler_query_pc_sampling_agent_configurations.
+ * The client chooses the @p method, @p unit, and @p interval to match one of the
  * available configurations. Note that the @p interval must belong to the range of values
  * [available_config.min_interval, available_config.max_interval],
- * where available_config is the instance of the `rocprofiler_pc_sampling_configuration_s`
- * supported at the moment.
+ * where available_config is the instance of the @see rocprofiler_pc_sampling_configuration_s
+ * supported/available at the moment.
  *
- * Rocprofiler checks whether the requsted configuration is actually supported
+ * Rocprofiler-SDK checks whether the requsted configuration is actually supported
  * at the moment of calling this function. If the answer is yes, it returns
- * the ROCPROFILER_STATUS_SUCCESS. Otherwise, notifies the caller about the
+ * the @see ROCPROFILER_STATUS_SUCCESS. Otherwise, it notifies the client about the
  * rejection reason via the returned status code. For more information
  * about the status codes, please @see rocprofiler_status_t.
+ *
+ * There are a few constraints a client's code needs to be aware of.
  *
  * Constraint1: A GPU agent can be configured to support at most one running PC sampling
  * configuration at any time, which implies some of the consequences described below.
  * After the tool configures the PC sampling with one of the available configurations,
- * rocprofiler guarantees that this configuration will be valid for the tool's
+ * rocprofiler-SDK guarantees that this configuration will be valid for the tool's
  * lifetime. The tool can start and stop the configured PC sampling service whenever convenient.
  *
  * Constraint2: Since the same GPU agent can be used by multiple processes concurrently,
- * Rocprofiler cannot guarantee the exclusive access to the PC sampling capability.
+ * Rocprofiler-SDK cannot guarantee the exclusive access to the PC sampling capability.
  * The consequence is the following scenario. The tool TA that belongs to the process PA,
- * calls the `rocprofiler_query_pc_sampling_agent_configurations` that returns the
- * two supported configurations CA and CB by the agent. Then the toolb TB of the process PB,
+ * calls the @see rocprofiler_query_pc_sampling_agent_configurations that returns the
+ * two supported configurations CA and CB by the agent. Then the tool TB of the process PB,
  * configures the PC sampling on the same agent by using the configuration CB.
  * Subsequently, the TA tries configuring the CA on the agent, and it fails.
- * To point out that this case happened, we introduce a special status code (TODO: ARE WE)?
- * When this status code is observed by the tool TA, it queties all available configurations again
- * by calling `rocprofiler_query_pc_sampling_agent_configurations`,
+ * To point out that this case happened, we introduce a special status code
+ * @see ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE.
+ * When this status code is observed by the tool TA, it queries all available configurations again
+ * by calling @see rocprofiler_query_pc_sampling_agent_configurations,
  * that returns only CB this time. The tool TA can choose CB, so that both
  * TA and TB use the PC sampling capability in the separate processes.
+ * Both TA and TB receives samples generated by the kernels launched by the
+ * corresponding processes PA and PB, respectively.
  *
- * Constraints3: We allow only one context to contain the configured PC sampling service
- * within the process, that implies that at most one of the loaded tools can use PC sampling.
- * One context can contains multiple PC sampling services configured for different GPU agents.
+ * Constraint3: Rocprofiler-SDK allows only one context to contain the configured PC sampling
+ * service within the process, that implies that at most one of the loaded tools can use PC
+ * sampling. One context can contains multiple PC sampling services configured for different GPU
+ * agents.
+ *
+ * Constraint4: PC sampling feature is not available within the ROCgdb.
  *
  * @param [in] context_id - id of the context used for starting/stopping PC sampling service
  * @param [in] agent_id   - id of the agent on which caller tries using PC sampling capability
@@ -93,6 +97,14 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [in] interval   - frequency at which PC samples are generated
  * @param [in] buffer_id  - id of the buffer used for delivering PC samples
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_SUCCESS PC sampling service configured successfully
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE One of the scenarios is present:
+ * 1. PC sampling is already configured with configuration different than requested,
+ * 2. PC sampling is requested from a process that runs within the ROCgdb.
+ * 3. HSA runtime does not support PC sampling.
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
+ * does not support the PC sampling feature
+ * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
  *
  */
 rocprofiler_status_t ROCPROFILER_API
@@ -105,45 +117,45 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
 
 /**
  * @brief PC sampling configuration supported by a GPU agent.
- * @var rocprofiler_pc_sampling_configuration_s::method
- * Sampling method supported by the GPU
- * agent. Currenlty, it can take one of the following two values:
- * - ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP: a background host thread
- * periodically interrupts waves execution on the GPU to generate PC samples
- * - ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC: performance monitoring hardware
- * on the GPU periodically interrupts waves to generate PC samples.
- * @var rocprofiler_pc_sampling_configuration_s::unit
- * A unit used to specify the period of the
- * @ref method for samples generation.
- * @var rocprofiler_pc_sampling_configuration_s::min_interval
- * the highest possible frequencey for
- * generating samples using @ref method.
- * @var rocprofiler_pc_sampling_configuration_s::max_interval
- * the lowest possible frequency for
- * generating samples using @ref method
- * @var rocprofiler_pc_sampling_configuration_s::flags
- * TODO: ???
  */
-struct rocprofiler_pc_sampling_configuration_s
+typedef struct
 {
+    uint64_t                         size;  ///< Size of this struct
     rocprofiler_pc_sampling_method_t method;
     rocprofiler_pc_sampling_unit_t   unit;
     size_t                           min_interval;
     size_t                           max_interval;
-    uint64_t                         flags;
-};
+    uint64_t                         flags;  /// for future use
+
+    /// @var method
+    /// @brief Sampling method supported by the GPU agent.
+    /// Currently, it can take one of the following two values:
+    /// - ::ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP: a background host kernel thread
+    /// periodically interrupts waves execution on the GPU to generate PC samples
+    /// - ::ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC: performance monitoring hardware
+    /// on the GPU periodically interrupts waves to generate PC samples.
+    /// @var unit
+    /// @brief A unit used to specify the interval of the @ref method for samples generation.
+    /// @var min_interval
+    /// @brief the highest possible frequencey for generating samples using @ref method.
+    /// @var max_interva
+    /// @brief the lowest possible frequency for generating samples using @ref method
+
+} rocprofiler_pc_sampling_configuration_t;
 
 /**
- * @brief The rocprofiler calls the tool's callback to deliver the list
- * of available configurations upon the calls to the @ref
- * rocprofiler_query_pc_sampling_agent_configurations.
+ * @brief Rocprofiler SDK's callback function to deliver the list of available PC
+ * sampling configurations upon the call to the
+ * @ref rocprofiler_query_pc_sampling_agent_configurations.
  *
- * @param[out] configs - The list of PC sampling configurations supported by the agent of the
- * moment of invoking @ref rocprofiler_query_pc_sampling_agent_configurations.
- * @param[out] num_config - The number of configuration contained in the underlying
+ * @param[out] configs - The array of PC sampling configurations supported by the agent
+ * at the moment of invoking @ref rocprofiler_query_pc_sampling_agent_configurations.
+ * @param[out] num_config - The number of configurations contained in the underlying array
+ * @p configs.
  * In case the GPU agent does not support PC sampling, the value is 0.
- * @param[in] user_data - A pointer passed as the last argument of the
+ * @param[in] user_data - client's private data passed via
  * @ref rocprofiler_query_pc_sampling_agent_configurations
+ * @return ::rocprofiler_status_t
  */
 typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_cb_t)(
     const rocprofiler_pc_sampling_configuration_t* configs,
@@ -153,10 +165,24 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
 /**
  * @brief Query PC Sampling Configuration.
  *
- * @param [in] agent_id  - id of the agent for which available configuration will be listed
+ * Lists PC sampling configurations a GPU agent with @p agent_id supports at the moment
+ * of invoking the function. Delivers configurations via @p cb.
+ * In case the PC sampling is configured on the GPU agent, the @p cb delivers information
+ * about the active PC sampling configuration.
+ * In case the GPU agent does not support PC sampling capability,
+ * the @p cb delivers none PC sampling configurations.
+ *
+ * @param [in] agent_id  - id of the agent for which available configurations will be listed
  * @param [in] cb        - User callback that delivers the available PC sampling configurations
  * @param [in] user_data - passed to the @p cb
  * @return ::rocprofiler_status_t
+ * @retval ::ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE One of the scenarios is present:
+ * 1. PC sampling is requested from a process that runs within the ROCgdb.
+ * 2. HSA runtime does not support PC sampling.
+ * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
+ * does not support the PC sampling feature.
+ * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
+ * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_query_pc_sampling_agent_configurations(
@@ -165,36 +191,31 @@ rocprofiler_query_pc_sampling_agent_configurations(
     void*                                                 user_data) ROCPROFILER_NONNULL(2, 3);
 
 /**
- * @brief The header of the @ref rocprofiler_pc_sampling_record_s, indicating
- * what fields of the @ref rocprofiler_pc_sampling_record_s instance are meaningful
- * @brief The header of the @ref rocprofiler_pc_sampling_record_s, indicating
- * what fields of the @ref rocprofiler_pc_sampling_record_s instance are meaningful
+ * @brief The header of the @ref rocprofiler_pc_sampling_record_t, indicating
+ * what fields of the @ref rocprofiler_pc_sampling_record_t instance are meaningful
  * for the sample.
- * @var rocprofiler_pc_sampling_header_v1_t::valid
- * the sample is valid
- * @var rocprofiler_pc_sampling_header_v1_t::type
- * The following values are possible:
- * - 0 - reserved
- * - 1 - host trap pc sample
- * - 2 - stochastic pc sample
- * - 3 - perfcounter (unsupported at the moment)
- * - other values does not mean anything at the moment
- * @var rocprofiler_pc_sampling_header_v1_t::has_stall_reason
- * whether the sample contains
- * information about the stall reason. If so, please @see rocprofiler_pc_sampling_snapshot_v1_t.
- * @var rocprofiler_pc_sampling_header_v1_t::has_wave_cnt
- * whether the @ref rocprofiler_pc_sampling_record_s::wave_count contains
- * meaningful value
- * @var rocprofiler_pc_sampling_header_v1_t::reserved
- * for future use
  */
 typedef struct
 {
-    uint8_t valid            : 1;
-    uint8_t type             : 4;  // 0=reserved, 1=hosttrap, 2=stochastic
+    uint8_t valid            : 1;  /// sample is valid
+    uint8_t type             : 4;
     uint8_t has_stall_reason : 1;
     uint8_t has_wave_cnt     : 1;
-    uint8_t reserved         : 1;
+    uint8_t reserved         : 1;  /// for future use
+
+    /// @var type
+    /// @brief The following values are possible:
+    /// - 0 - reserved
+    /// - 1 - host trap pc sample
+    /// - 2 - stochastic pc sample
+    /// - 3 - perfcounter (unsupported at the moment)
+    /// - other values does not mean anything at the moment
+    /// @var has_stall_reason
+    /// @brief whether the sample contains information about the stall reason.
+    /// If so, please @see rocprofiler_pc_sampling_snapshot_v1_t.
+    /// @var has_wave_cnt
+    /// @brief whether the @ref rocprofiler_pc_sampling_record_t::wave_count
+    /// contains meaningful value
 } rocprofiler_pc_sampling_header_v1_t;
 
 /**
@@ -213,65 +234,73 @@ typedef struct
 // to reduce the space needed to represent a single sample.
 /**
  * @brief ROCProfiler PC Sampling Record corresponding to the interrupted wave.
- * @var rocprofiler_pc_sampling_record_s::flags
- * header that indicates what fields are meaningful
- * for the PC sample. The values depend on what the underlying GPU agent architecture supports.
- * @var rocprofiler_pc_sampling_record_s::chiplet
- * chiplet index
- * @var rocprofiler_pc_sampling_record_s::wave_id
- * wave identifier within the workgroup
- * @var rocprofiler_pc_sampling_record_s::wave_issued
- * a flags indicated whether the wave is
- * issueing the instruction' represented by the @ref pc at the moment of interruption.
- * @var rocprofiler_pc_sampling_record_s::reserved
- * FIXME: reserved 7 bits, must be zero.
- * @var rocprofiler_pc_sampling_record_s::hw_id
- * compute unit identifier
- * @var rocprofiler_pc_sampling_record_s::pc
- * The current program counter of the wave at the moment
- * of interruption
- * @var rocprofiler_pc_sampling_record_s::exec_mask
- * shows how many SIMD lanes of the wave were
- * executing the instruction represented by the @ref pc. Useful to understand thread-divergance
- * within the wave
- * @var rocprofiler_pc_sampling_record_s::workgroup_id_x
- * the x coordinate of the wave within the workgroup
- * @var rocprofiler_pc_sampling_record_s::workgroup_id_y
- * the y coordinate of the wave within the workgroup
- * @var rocprofiler_pc_sampling_record_s::workgroup_id_z
- * the y coordinate of the wave within the workgroup
- * @var rocprofiler_pc_sampling_record_s::wave_count
- * FIXME: number of waves active at the CU at the moment of sample generation???
- * @var rocprofiler_pc_sampling_record_s::timestamp
- * represents the GPU timestamp when the sample is generated
- * @var rocprofiler_pc_sampling_record_s::correlation_id
- * correlation id of the API call that
- * initiated kernel laucnh. The interrupted wave is executed as part of the kernel.
- * @var rocprofiler_pc_sampling_record_s::snapshot
- * TODO:
- * @var rocprofiler_pc_sampling_record_s::reserved2
- * for future use
  */
-struct rocprofiler_pc_sampling_record_s
+typedef struct
 {
-    rocprofiler_pc_sampling_header_v1_t   flags;
-    uint8_t                               chiplet;
-    uint8_t                               wave_id;
-    uint8_t                               wave_issued : 1;
-    uint8_t                               reserved    : 7;
-    uint32_t                              hw_id;
-    uint64_t                              pc;
-    uint64_t                              exec_mask;
-    uint32_t                              workgroup_id_x;
-    uint32_t                              workgroup_id_y;
-    uint32_t                              workgroup_id_z;
-    uint32_t                              wave_count;
-    uint64_t                              timestamp;
-    rocprofiler_correlation_id_t          correlation_id;
-    rocprofiler_pc_sampling_snapshot_v1_t snapshot;
-    uint32_t                              reserved2;
-};
+    uint64_t                            size;  ///< Size of this struct
+    rocprofiler_pc_sampling_header_v1_t flags;
+    uint8_t                             chiplet;  /// chiplet index
+    uint8_t                             wave_id;  /// wave identifier within the workgroup
+    uint8_t                             wave_issued : 1;
+    uint8_t                             reserved    : 7;  /// reserved 7 bits, must be zero
+    uint32_t                            hw_id;            /// compute unit identifier
+    uint64_t                     pc;  /// Program counter of the wave of the moment of interruption
+    uint64_t                     exec_mask;
+    rocprofiler_dim3_t           workgroup_id;  /// wave coordinates within the workgroup
+    uint32_t                     wave_count;
+    uint64_t                     timestamp;  /// timestamp when sample is generated
+    rocprofiler_correlation_id_t correlation_id;
+    rocprofiler_pc_sampling_snapshot_v1_t
+             snapshot;   /// @see ::rocprofiler_pc_sampling_snapshot_v1_t
+    uint32_t reserved2;  /// for future use
+
+    /// @var flags
+    /// @brief indicates what fields of this struct are meaningful for the represented sample.
+    /// The values depend on what the underlying GPU agent architecture supports.
+    /// @var wave_issue
+    /// @brief indicates whether the wave is issueing the instruction represented by the @ref pc
+    /// @var exec_mask
+    /// @brief shows how many SIMD lanes of the wave were executing the instruction
+    /// represented by the @ref pc. Useful to understand thread-divergance within the wave
+    /// @var wave_count
+    /// @brief number of active waves on the CU at the moment of sample generation
+    /// @var correlation_id
+    /// @brief correlation id of the API call that initiated kernel launch.
+    /// The interrupted wave is executed as part of the kernel.
+} rocprofiler_pc_sampling_record_t;
+
+/**
+ * @brief Marker representing code object loading event.
+ *
+ * @see rocprofiler_callback_tracing_code_object_load_data_t
+ * for more information
+ */
+typedef struct
+{
+    uint64_t size;            ///< Size of this struct
+    uint64_t code_object_id;  /// unique code object identifier
+} rocprofiler_pc_sampling_code_object_load_marker_t;
+
+/**
+ * @brief Marker representing code object unloading event.
+ *
+ * @see rocprofiler_callback_tracing_code_object_load_data_t
+ * for more information
+ */
+typedef struct
+{
+    uint64_t size;            ///< Size of this struct
+    uint64_t code_object_id;  /// unique code object identifier
+} rocprofiler_pc_sampling_code_object_unload_marker_t;
 
 /** @} */
 
 ROCPROFILER_EXTERN_C_FINI
+
+ROCPROFILER_CXX_CODE(
+    static_assert(sizeof(rocprofiler_pc_sampling_record_t) == 80,
+                  "Increasing the size of the pc sampling record is not permitted."));
+
+ROCPROFILER_CXX_CODE(static_assert(offsetof(rocprofiler_pc_sampling_record_t, chiplet) == 9 &&
+                                       offsetof(rocprofiler_pc_sampling_record_t, reserved2) == 76,
+                                   "PC sampling record layout changed."));

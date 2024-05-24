@@ -87,7 +87,7 @@ union pcsample_header_v1_t
     uint8_t                             raw;
 };
 
-typedef uint64_t (*user_callback_t)(rocprofiler_pc_sampling_record_s**, uint64_t, void*);
+typedef uint64_t (*user_callback_t)(rocprofiler_pc_sampling_record_t**, uint64_t, void*);
 
 /**
  * The types of errors to be returned by parse_buffer.

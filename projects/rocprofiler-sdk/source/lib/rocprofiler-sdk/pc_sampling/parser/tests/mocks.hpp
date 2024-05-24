@@ -65,7 +65,7 @@ public:
         submit(uni);
     }
 
-    std::vector<std::vector<rocprofiler_pc_sampling_record_s>> get_parsed_buffer(int GFXIP_MAJOR)
+    std::vector<std::vector<rocprofiler_pc_sampling_record_t>> get_parsed_buffer(int GFXIP_MAJOR)
     {
         parsed_data = {};
 
@@ -78,18 +78,18 @@ public:
         return parsed_data;
     }
 
-    static uint64_t alloc_parse_memory(rocprofiler_pc_sampling_record_s** sample,
+    static uint64_t alloc_parse_memory(rocprofiler_pc_sampling_record_t** sample,
                                        uint64_t                           req_size,
                                        void*                              userdata)
     {
         auto* buffer = reinterpret_cast<MockRuntimeBuffer*>(userdata);
-        buffer->parsed_data.push_back(std::vector<rocprofiler_pc_sampling_record_s>(req_size));
+        buffer->parsed_data.push_back(std::vector<rocprofiler_pc_sampling_record_t>(req_size));
         *sample = buffer->parsed_data.back().data();
         return req_size;
     }
 
     std::vector<packet_union_t>                                packets;
-    std::vector<std::vector<rocprofiler_pc_sampling_record_s>> parsed_data;
+    std::vector<std::vector<rocprofiler_pc_sampling_record_t>> parsed_data;
 };
 
 /**

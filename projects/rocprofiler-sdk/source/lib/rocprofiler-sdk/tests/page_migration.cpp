@@ -21,7 +21,7 @@
 // SOFTWARE.
 
 #include "lib/common/defines.hpp"
-#include "lib/rocprofiler-sdk/page_migration/details/kfd_ioctl.h"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 #include "lib/rocprofiler-sdk/page_migration/utils.hpp"
 
 #include <rocprofiler-sdk/fwd.h>

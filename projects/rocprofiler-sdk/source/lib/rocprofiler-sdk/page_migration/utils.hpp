@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/page_migration/details/kfd_ioctl.h"
+#include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>

@@ -32,6 +32,7 @@
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
 
 #include <unistd.h>
@@ -322,6 +323,7 @@ start_context(rocprofiler_context_id_t context_id)
     if(cfg->counter_collection) rocprofiler::counters::start_context(cfg);
     if(cfg->thread_trace) cfg->thread_trace->start_context();
     if(cfg->agent_counter_collection) status = rocprofiler::counters::start_agent_ctx(cfg);
+    if(cfg->pc_sampler) status = rocprofiler::pc_sampling::start_service(cfg);
 
     return status;
 }
@@ -357,6 +359,12 @@ stop_context(rocprofiler_context_id_t idx)
                 {
                     rocprofiler::counters::stop_agent_ctx(const_cast<context*>(_expected));
                 }
+
+                if(_expected->pc_sampler)
+                {
+                    rocprofiler::pc_sampling::stop_service(_expected);
+                }
+
                 return ROCPROFILER_STATUS_SUCCESS;
             }
         }

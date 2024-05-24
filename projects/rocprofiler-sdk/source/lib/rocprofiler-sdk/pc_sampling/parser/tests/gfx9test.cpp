@@ -24,12 +24,14 @@
 #    undef NDEBUG
 #endif
 
+#include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
+
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
 #include <gtest/gtest.h>
 #include <cassert>
 #include <cstddef>
-
-#include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/tests/mocks.hpp"
 
 #define GFXIP_MAJOR 9
 
@@ -295,7 +297,7 @@ class WaveIssueAndErrorTest : public WaveSnapTest
 
     void genPCSample(bool valid, bool issued, bool dual, bool error)
     {
-        rocprofiler_pc_sampling_record_s sample;
+        rocprofiler_pc_sampling_record_t sample;
         ::memset(&sample, 0, sizeof(sample));
         sample.pc                      = dispatch->unique_id;
         sample.correlation_id.internal = dispatch->getMockId().raw;
@@ -320,7 +322,7 @@ class WaveIssueAndErrorTest : public WaveSnapTest
         dispatch->submit(std::move(pss));
     };
 
-    std::vector<rocprofiler_pc_sampling_record_s> compare;
+    std::vector<rocprofiler_pc_sampling_record_t> compare;
 };
 
 class WaveOtherFieldsTest : public WaveSnapTest
@@ -347,9 +349,7 @@ class WaveOtherFieldsTest : public WaveSnapTest
             assert(parsed[0][i].flags.reserved == false);
 
             assert(compare[i].exec_mask == parsed[0][i].exec_mask);
-            assert(compare[i].workgroup_id_x == parsed[0][i].workgroup_id_x);
-            assert(compare[i].workgroup_id_y == parsed[0][i].workgroup_id_y);
-            assert(compare[i].workgroup_id_z == parsed[0][i].workgroup_id_z);
+            assert(compare[i].workgroup_id == parsed[0][i].workgroup_id);
 
             assert(compare[i].chiplet == parsed[0][i].chiplet);
             assert(compare[i].wave_id == parsed[0][i].wave_id);
@@ -360,13 +360,13 @@ class WaveOtherFieldsTest : public WaveSnapTest
 
     void genPCSample(int pc, int exec, int blkx, int blky, int blkz, int chip, int wave, int hwid)
     {
-        rocprofiler_pc_sampling_record_s sample;
+        rocprofiler_pc_sampling_record_t sample;
         ::memset(&sample, 0, sizeof(sample));
 
         sample.exec_mask      = exec;
-        sample.workgroup_id_x = blkx;
-        sample.workgroup_id_y = blky;
-        sample.workgroup_id_z = blkz;
+        sample.workgroup_id.x = blkx;
+        sample.workgroup_id.y = blky;
+        sample.workgroup_id.z = blkz;
 
         sample.chiplet                 = chip;
         sample.wave_id                 = wave;
@@ -392,7 +392,7 @@ class WaveOtherFieldsTest : public WaveSnapTest
         (void) pc;
     };
 
-    std::vector<rocprofiler_pc_sampling_record_s> compare;
+    std::vector<rocprofiler_pc_sampling_record_t> compare;
 };
 
 TEST(pcs_parser, gfx9_test)

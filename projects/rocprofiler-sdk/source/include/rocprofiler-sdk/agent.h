@@ -187,17 +187,10 @@ typedef struct rocprofiler_agent_v0_t
     const char* vendor_name;   ///< Vendor of agent (will be AMD)
     const char* product_name;  ///< Marketing name
     const char* model_name;    ///< GPU only. Will be something like vega20, mi200, etc.
-    uint64_t num_pc_sampling_configs;  ///< GPU only. Number of PC sampling modes available for this
-                                       ///< device type. Note: if another process is currently using
-                                       ///< PC sampling on this agent, this value will be zero so
-                                       ///< do not assume the number of PC sampling configurations
-                                       ///< based on the device type.
-    const rocprofiler_pc_sampling_configuration_t*
-             pc_sampling_configs;  ///< GPU only. Array of PC sampling configuration types.
-    uint32_t node_id;         ///< Node sequence number. This will be equivalent to the HSA-runtime
-                              ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
-    int32_t logical_node_id;  ///< Logical sequence number. This will always be [0..N) where N is
-                              ///< the total number of agents
+    uint32_t    node_id;       ///< Node sequence number. This will be equivalent to the HSA-runtime
+                               ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
+    int32_t logical_node_id;   ///< Logical sequence number. This will always be [0..N) where N is
+                               ///< the total number of agents
 } rocprofiler_agent_v0_t;
 
 typedef rocprofiler_agent_v0_t rocprofiler_agent_t;

@@ -22,15 +22,24 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/buffer.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.h"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
+
+#include <fmt/core.h>
+#include <sys/types.h>
 #include <cassert>
 #include <condition_variable>
+#include <cstdint>
+#include <memory>
 #include <mutex>
 #include <shared_mutex>
 #include <thread>
 #include <unordered_set>
-
-#include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.h"
 
 struct PCSamplingData
 {
@@ -38,7 +47,7 @@ struct PCSamplingData
     : samples(size){};
     PCSamplingData& operator=(PCSamplingData&) = delete;
 
-    std::vector<rocprofiler_pc_sampling_record_s> samples;
+    std::vector<rocprofiler_pc_sampling_record_t> samples;
 };
 
 class PCSamplingParserContext
@@ -52,7 +61,7 @@ public:
      * @param[in] size Number of samples requested.
      * @returns Number of samples actually allocated on *buffer.
      */
-    uint64_t alloc(rocprofiler_pc_sampling_record_s** buffer, uint64_t size);
+    uint64_t alloc(rocprofiler_pc_sampling_record_t** buffer, uint64_t size);
 
     /**
      * @brief Parses a chunk of samples.
@@ -95,6 +104,24 @@ public:
      */
     bool shouldFlipRocrBuffer(const dispatch_pkt_id_t& pkt) const;
 
+    bool register_buffer_for_agent(rocprofiler_buffer_id_t buffer_id,
+                                   rocprofiler_agent_id_t  agent_id)
+    {
+        std::unique_lock<std::shared_mutex> lock(mut);
+        // Single buffer per agent is allowed
+        if(_agent_buffers.count(agent_id) > 0) return false;
+
+        _agent_buffers.emplace(agent_id, buffer_id);
+        return true;
+    }
+
+    void unregister_buffer_from_agent(rocprofiler_agent_id_t agent_id)
+    {
+        std::unique_lock<std::shared_mutex> lock(mut);
+
+        _agent_buffers.erase(agent_id);
+    }
+
 protected:
     /**
      * @brief Parses the given input data and generates pc sampling records.
@@ -103,7 +130,7 @@ protected:
     template <typename GFX>
     pcsample_status_t _parse(const upcoming_samples_t& upcoming, const generic_sample_t* data_)
     {
-        std::shared_lock<std::shared_mutex> lock(mut);
+        // std::shared_lock<std::shared_mutex> lock(mut);
 
         pcsample_status_t status      = PCSAMPLE_STATUS_SUCCESS;
         uint64_t          pkt_counter = upcoming.num_samples;
@@ -112,7 +139,7 @@ protected:
 
         while(pkt_counter > 0)
         {
-            rocprofiler_pc_sampling_record_s* samples = nullptr;
+            rocprofiler_pc_sampling_record_t* samples = nullptr;
             uint64_t                          memsize = alloc(&samples, pkt_counter);
 
             if(memsize == 0 || memsize > pkt_counter) return PCSAMPLE_STATUS_CALLBACK_ERROR;
@@ -125,7 +152,7 @@ protected:
 
             data_ += memsize;
             pkt_counter -= memsize;
-            generate_upcoming_pc_record(samples, memsize);
+            generate_upcoming_pc_record(dev.handle, samples, memsize);
         }
 
         return status;
@@ -137,12 +164,9 @@ protected:
      */
     pcsample_status_t flushForgetList();
     static void       generate_id_completion_record(const dispatch_pkt_id_t& pkt) { (void) pkt; };
-    static void       generate_upcoming_pc_record(const rocprofiler_pc_sampling_record_s* samples,
-                                                  size_t                                  num_samples)
-    {
-        (void) samples;
-        (void) num_samples;
-    };
+    void              generate_upcoming_pc_record(uint64_t                                agent_id_handle,
+                                                  const rocprofiler_pc_sampling_record_t* samples,
+                                                  size_t                                  num_samples);
 
     //! Maps doorbells and dispatch_index to correlation_id
     std::unique_ptr<Parser::CorrelationMap> corr_map;
@@ -156,4 +180,7 @@ protected:
     std::unordered_set<uint64_t> forget_list;
 
     mutable std::shared_mutex mut;
+
+private:
+    std::unordered_map<rocprofiler_agent_id_t, rocprofiler_buffer_id_t> _agent_buffers;
 };
