@@ -1,4 +1,4 @@
-# Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2024 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -18,24 +18,23 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-CC=g++
-CPPFLAGS=-std=c++17
-LDFLAGS=-lstdc++fs
-SRC=mainCoverage.cpp hipAPI.cpp hipAPIGroup.cpp reportGenerators.cpp hipAPICoverageUtils.cpp
-OBJ=generateHipAPICoverage
+cmake_minimum_required(VERSION 3.0)
+project(generateHipAPICoverage)
 
-default_target: all
-.PHONY : default_target
+set(CMAKE_CXX_STANDARD 17)
 
-all: ${OBJ}
+set(SRC
+    mainCoverage.cpp
+    hipAPI.cpp
+    hipAPIGroup.cpp
+    reportGenerators.cpp
+    hipAPICoverageUtils.cpp)
 
-${OBJ}: ${SRC}
-	@${CC} ${CPPFLAGS} $^ -o ${OBJ} ${LDFLAGS}
+add_executable(generateHipAPICoverage ${SRC})
 
-clean:
-	rm -f ${OBJ}
-	rm -f *.xml
-	rm -fr ./coverageReportHTML/testModules
-	rm -fr ./coverageReportHTML/testAPIs
-	rm -f ./coverageReportHTML/*.html
-.PHONY : clean
+add_custom_target(clean-cov-report
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_LIST_DIR}/*.xml
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/testModules
+    COMMAND ${CMAKE_COMMAND} -E remove_directory ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/testAPIs
+    COMMAND ${CMAKE_COMMAND} -E remove ${CMAKE_CURRENT_LIST_DIR}/coverageReportHTML/*.html
+)
