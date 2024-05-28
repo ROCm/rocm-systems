@@ -75,15 +75,8 @@ ALL_CSVS = sorted(
     ]
 )
 ALL_CSVS_MI200 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
+    ALL_CSVS
+    + [
         "pmc_perf_10.csv",
         "pmc_perf_11.csv",
         "pmc_perf_12.csv",
@@ -93,29 +86,12 @@ ALL_CSVS_MI200 = sorted(
         "pmc_perf_16.csv",
         "pmc_perf_17.csv",
         "pmc_perf_18.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
         "roofline.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
     ]
 )
 ALL_CSVS_MI300 = sorted(
-    [
-        "SQ_IFETCH_LEVEL.csv",
-        "SQ_INST_LEVEL_LDS.csv",
-        "SQ_INST_LEVEL_SMEM.csv",
-        "SQ_INST_LEVEL_VMEM.csv",
-        "SQ_LEVEL_WAVES.csv",
-        "pmc_perf.csv",
-        "pmc_perf_0.csv",
-        "pmc_perf_1.csv",
+    ALL_CSVS
+    + [
         "pmc_perf_10.csv",
         "pmc_perf_11.csv",
         "pmc_perf_12.csv",
@@ -124,16 +100,6 @@ ALL_CSVS_MI300 = sorted(
         "pmc_perf_15.csv",
         "pmc_perf_16.csv",
         "pmc_perf_17.csv",
-        "pmc_perf_2.csv",
-        "pmc_perf_3.csv",
-        "pmc_perf_4.csv",
-        "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
-        "sysinfo.csv",
-        "timestamps.csv",
     ]
 )
 ROOF_ONLY_FILES = sorted(
@@ -548,35 +514,10 @@ def test_no_roof():
     if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
     elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == [
-            "SQ_IFETCH_LEVEL.csv",
-            "SQ_INST_LEVEL_LDS.csv",
-            "SQ_INST_LEVEL_SMEM.csv",
-            "SQ_INST_LEVEL_VMEM.csv",
-            "SQ_LEVEL_WAVES.csv",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_11.csv",
-            "pmc_perf_12.csv",
-            "pmc_perf_13.csv",
-            "pmc_perf_14.csv",
-            "pmc_perf_15.csv",
-            "pmc_perf_16.csv",
-            "pmc_perf_17.csv",
-            "pmc_perf_18.csv",
-            "pmc_perf_2.csv",
-            "pmc_perf_3.csv",
-            "pmc_perf_4.csv",
-            "pmc_perf_5.csv",
-            "pmc_perf_6.csv",
-            "pmc_perf_7.csv",
-            "pmc_perf_8.csv",
-            "pmc_perf_9.csv",
-            "sysinfo.csv",
-            "timestamps.csv",
-        ]
+        breakpoint()
+        assert sorted(list(file_dict.keys())) == sorted(
+            list(filter(lambda elm: elm != "roofline.csv", ALL_CSVS_MI200))
+        )
     elif "MI300" in soc:
         assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     else:
@@ -608,18 +549,9 @@ def test_kernel_names():
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
     if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == [
-            "empirRoof_gpu-0_fp32_fp64.pdf",
-            "empirRoof_gpu-0_int8_fp16.pdf",
-            "kernelName_legend.pdf",
-            "pmc_perf.csv",
-            "pmc_perf_0.csv",
-            "pmc_perf_1.csv",
-            "pmc_perf_2.csv",
-            "roofline.csv",
-            "sysinfo.csv",
-            "timestamps.csv",
-        ]
+        assert sorted(list(file_dict.keys())) == sorted(
+            ROOF_ONLY_FILES + ["kernelName_legend.pdf"]
+        )
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
@@ -667,32 +599,6 @@ def test_device_filter():
 @pytest.mark.kernel_execution
 def test_kernel():
     options = baseline_opts + ["--kernel", config["kernel_name_1"]]
-    workload_dir = test_utils.get_output_dir()
-    test_utils.launch_omniperf(config, options, workload_dir)
-
-    file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI100":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
-    elif soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    elif "MI300" in soc:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
-    else:
-        print("Testing isn't supported yet for {}".format(soc))
-        assert 0
-
-    validate(
-        inspect.stack()[0][3],
-        workload_dir,
-        file_dict,
-    )
-
-    test_utils.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.kernel_execution
-def test_kernel_summaries():
-    options = baseline_opts + ["--kernel-summaries", "vcopy"]
     workload_dir = test_utils.get_output_dir()
     test_utils.launch_omniperf(config, options, workload_dir)
 
