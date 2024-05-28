@@ -46,12 +46,12 @@ namespace ioctl
 rocprofiler_ioctl_version_info_t&
 get_ioctl_version();
 
-// IOCTL 1.16 is the first one supporting PC sampling.
+// IOCTL 1.17 is the first one supporting PC sampling.
 #define CHECK_IOCTL_VERSION                                                                        \
     do                                                                                             \
     {                                                                                              \
         auto ioctl_version = get_ioctl_version();                                                  \
-        if(ioctl_version.major_version < 1 || ioctl_version.minor_version < 16)                    \
+        if(ioctl_version.major_version < 1 || ioctl_version.minor_version < 17)                    \
         {                                                                                          \
             LOG(ERROR) << "PC sampling unavailable\n";                                             \
             return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;                                   \
