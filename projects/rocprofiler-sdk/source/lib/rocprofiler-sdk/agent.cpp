@@ -355,11 +355,11 @@ read_property(const MapT& data, const std::string& label, Tp& value)
     }
 }
 
+using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
+
 auto
 read_topology()
 {
-    using unique_agent_t = std::unique_ptr<rocprofiler_agent_t, void (*)(rocprofiler_agent_t*)>;
-
     auto sysfs_nodes_path = fs::path{"/sys/class/kfd/kfd/topology/nodes/"};
     if(!fs::exists(sysfs_nodes_path))
         throw std::runtime_error{
@@ -622,8 +622,9 @@ read_topology()
 auto&
 get_agent_topology()
 {
-    static auto _v = read_topology();
-    return _v;
+    static auto*& _v =
+        common::static_object<std::vector<unique_agent_t>>::construct(read_topology());
+    return *CHECK_NOTNULL(_v);
 }
 
 auto&
