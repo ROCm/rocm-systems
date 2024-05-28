@@ -94,7 +94,10 @@ def clean_output_dir(cleanup, output_dir):
     """
     if cleanup:
         if os.path.exists(output_dir):
-            shutil.rmtree(output_dir)
+            try:
+                shutil.rmtree(output_dir)
+            except OSError as e:
+                print("WARNING: shutil.rmdir(output_dir): directory may not be empty...")
     return
 
 

@@ -11,6 +11,24 @@ import inspect
 import sys
 import test_utils
 
+# Globals
+
+SUPPORTED_ARCHS = {
+    "gfx906": {"mi50": ["MI50", "MI60"]},
+    "gfx908": {"mi100": ["MI100"]},
+    "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
+    "gfx940": {"mi300": ["MI300A_A0"]},
+    "gfx941": {"mi300": ["MI300X_A0"]},
+    "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
+}
+
+
+def check_arch_override():
+    if "OMNIPERF_ARCH_OVERRIDE" in os.environ.keys():
+        return os.environ["OMNIPERF_ARCH_OVERRIDE"]
+    return ""
+
+
 # --
 # Runtime config options
 # --
@@ -34,75 +52,103 @@ DEFAULT_ABS_DIFF = 15
 DEFAULT_REL_DIFF = 50
 MAX_REOCCURING_COUNT = 28
 
-ALL_CSVS = [
-    "SQ_IFETCH_LEVEL.csv",
-    "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
-    "SQ_LEVEL_WAVES.csv",
-    "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_10.csv",
-    "pmc_perf_11.csv",
-    "pmc_perf_12.csv",
-    "pmc_perf_13.csv",
-    "pmc_perf_14.csv",
-    "pmc_perf_15.csv",
-    "pmc_perf_16.csv",
-    "pmc_perf_2.csv",
-    "pmc_perf_3.csv",
-    "pmc_perf_4.csv",
-    "pmc_perf_5.csv",
-    "pmc_perf_6.csv",
-    "pmc_perf_7.csv",
-    "pmc_perf_8.csv",
-    "pmc_perf_9.csv",
-    "sysinfo.csv",
-    "timestamps.csv",
-]
-ALL_CSVS_MI200 = [
-    "SQ_IFETCH_LEVEL.csv",
-    "SQ_INST_LEVEL_LDS.csv",
-    "SQ_INST_LEVEL_SMEM.csv",
-    "SQ_INST_LEVEL_VMEM.csv",
-    "SQ_LEVEL_WAVES.csv",
-    "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_10.csv",
-    "pmc_perf_11.csv",
-    "pmc_perf_12.csv",
-    "pmc_perf_13.csv",
-    "pmc_perf_14.csv",
-    "pmc_perf_15.csv",
-    "pmc_perf_16.csv",
-    "pmc_perf_17.csv",
-    "pmc_perf_18.csv",
-    "pmc_perf_2.csv",
-    "pmc_perf_3.csv",
-    "pmc_perf_4.csv",
-    "pmc_perf_5.csv",
-    "pmc_perf_6.csv",
-    "pmc_perf_7.csv",
-    "pmc_perf_8.csv",
-    "pmc_perf_9.csv",
-    "roofline.csv",
-    "sysinfo.csv",
-    "timestamps.csv",
-]
-
-ROOF_ONLY_FILES = [
-    "empirRoof_gpu-0_fp32_fp64.pdf",
-    "empirRoof_gpu-0_int8_fp16.pdf",
-    "pmc_perf.csv",
-    "pmc_perf_0.csv",
-    "pmc_perf_1.csv",
-    "pmc_perf_2.csv",
-    "roofline.csv",
-    "sysinfo.csv",
-    "timestamps.csv",
-]
+ALL_CSVS = sorted(
+    [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
+)
+ALL_CSVS_MI200 = sorted(
+    [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_10.csv",
+        "pmc_perf_11.csv",
+        "pmc_perf_12.csv",
+        "pmc_perf_13.csv",
+        "pmc_perf_14.csv",
+        "pmc_perf_15.csv",
+        "pmc_perf_16.csv",
+        "pmc_perf_17.csv",
+        "pmc_perf_18.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "roofline.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
+)
+ALL_CSVS_MI300 = sorted(
+    [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_10.csv",
+        "pmc_perf_11.csv",
+        "pmc_perf_12.csv",
+        "pmc_perf_13.csv",
+        "pmc_perf_14.csv",
+        "pmc_perf_15.csv",
+        "pmc_perf_16.csv",
+        "pmc_perf_17.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
+)
+ROOF_ONLY_FILES = sorted(
+    [
+        "empirRoof_gpu-0_fp32_fp64.pdf",
+        "empirRoof_gpu-0_int8_fp16.pdf",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "roofline.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
+    ]
+)
 
 METRIC_THRESHOLDS = {
     "2.1.12": {"absolute": 0, "relative": 8},
@@ -243,38 +289,56 @@ def run(cmd):
 
 
 def gpu_soc():
+    ## 1) Parse arch details from rocminfo
     rocminfo = str(
+        # decode with utf-8 to account for rocm-smi changes in latest rocm
         subprocess.run(
             ["rocminfo"], stdout=subprocess.PIPE, stderr=subprocess.PIPE
-        ).stdout.decode("ascii")
+        ).stdout.decode("utf-8")
     )
     rocminfo = rocminfo.split("\n")
-    print(rocminfo)
     soc_regex = re.compile(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", re.MULTILINE)
     devices = list(filter(soc_regex.match, rocminfo))
+    gpu_arch = devices[0].split()[1]
 
-    num_devices = (
-        len(devices)
-        if not "CI_VISIBLE_DEVICES" in os.environ
-        else os.environ["CI_VISIBLE_DEVICES"]
-    )
-    gpu_id = devices[0].split()[1]
-
-    if gpu_id == "gfx906":
-        return "MI50"
-    elif gpu_id == "gfx908":
-        return "MI100"
-    elif gpu_id == "gfx90a":
-        return "MI200"
-    elif gpu_id == "gfx900":
-        return "vega10"
-    else:
-        print("Invalid SoC (%s)" % gpu_id)
-        print(rocminfo)
+    if not gpu_arch in SUPPORTED_ARCHS.keys():
+        print("Cannot find a supported arch in rocminfo")
         assert 0
+    else:
+        num_devices = (
+            len(devices)
+            if not "CI_VISIBLE_DEVICES" in os.environ
+            else os.environ["CI_VISIBLE_DEVICES"]
+        )
+
+    ## 2) Deduce gpu model name from arch
+    gpu_model = list(SUPPORTED_ARCHS[gpu_arch].keys())[0].upper()
+    if gpu_model == "MI300":
+        gpu_model = list(SUPPORTED_ARCHS[gpu_arch].values())[0][0]
+    if gpu_arch == "gfx942":
+        soc_regex = re.compile(
+            r"^\s*Marketing Name\s*:\s+ ([ a-zA-Z0-9]+)\s*$", re.MULTILINE
+        )
+        names = list(filter(soc_regex.match, rocminfo))
+        gpu_model_2 = names[0].split()[4]
+        if "MI300A" in gpu_model_2 or "MI300A" in check_arch_override():
+            gpu_model = "MI300A_A1"
+        elif "MI300X" in gpu_model_2 or "MI300X" in check_arch_override():
+            gpu_model = "MI300X_A1"
+        else:
+            print(
+                "Cannot parse MI300 details from rocminfo. Please verify output or set the arch using (e.g.,) "
+                'export OMNIPERF_ARCH_OVERRIDE="MI300A"'
+            )
+            assert 0
+    return gpu_model
 
 
 soc = gpu_soc()
+
+# Set rocprofv2 as profiler if MI300
+if "MI300" in soc:
+    os.environ["ROCPROF"] = "/opt/rocm/bin/rocprofv2"
 
 Baseline_dir = os.path.realpath("tests/workloads/vcopy/" + soc)
 
@@ -458,10 +522,16 @@ def test_path():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("This test is not supported for {}".format(soc))
+        assert 0
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
@@ -475,7 +545,9 @@ def test_no_roof():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
+    if soc == "MI100":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
         assert sorted(list(file_dict.keys())) == [
             "SQ_IFETCH_LEVEL.csv",
             "SQ_INST_LEVEL_LDS.csv",
@@ -505,8 +577,11 @@ def test_no_roof():
             "sysinfo.csv",
             "timestamps.csv",
         ]
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
     else:
-        assert sorted(list(file_dict.keys())) == ALL_CSVS
+        print("This test is not supported for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -523,7 +598,7 @@ def test_kernel_names():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -545,7 +620,6 @@ def test_kernel_names():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-
     else:
         assert sorted(list(file_dict.keys())) == ALL_CSVS
 
@@ -569,10 +643,15 @@ def test_device_filter():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, 1, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     # TODO - verify expected device id in results
 
@@ -592,10 +671,15 @@ def test_kernel():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -613,10 +697,15 @@ def test_kernel_summaries():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -678,8 +767,32 @@ def test_block_SQ():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_9.csv",
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "timestamps.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "sysinfo.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -707,9 +820,9 @@ def test_block_SQC():
         "timestamps.csv",
     ]
     if soc == "MI200":
-        expected_csvs.insert(5, "roofline.csv")
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+        expected_csvs.append("roofline.csv")
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -742,8 +855,8 @@ def test_block_TA():
     ]
     if soc == "MI200":
         expected_csvs.insert(9, "roofline.csv")
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -780,8 +893,18 @@ def test_block_TD():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -816,8 +939,8 @@ def test_block_TCP():
     ]
     if soc == "MI200":
         expected_csvs.insert(11, "roofline.csv")
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -867,8 +990,23 @@ def test_block_TCC():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf.csv",
+            "sysinfo.csv",
+            "timestamps.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -902,8 +1040,8 @@ def test_block_SPI():
     ]
     if soc == "MI200":
         expected_csvs.insert(10, "roofline.csv")
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -934,7 +1072,8 @@ def test_block_CPC():
     ]
     if soc == "MI200":
         expected_csvs.insert(7, "roofline.csv")
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
@@ -959,7 +1098,8 @@ def test_block_CPF():
     ]
     if soc == "MI200":
         expected_csvs.insert(5, "roofline.csv")
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -1021,8 +1161,32 @@ def test_block_SQ_CPC():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_9.csv",
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "timestamps.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "sysinfo.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -1084,7 +1248,32 @@ def test_block_SQ_TA():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_9.csv",
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "timestamps.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "sysinfo.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
@@ -1142,7 +1331,32 @@ def test_block_SQ_SPI():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_9.csv",
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "timestamps.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "sysinfo.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -1204,7 +1418,32 @@ def test_block_SQ_SQC_TCP_CPC():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_9.csv",
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "timestamps.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "sysinfo.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(inspect.stack()[0][3], workload_dir, file_dict)
 
@@ -1264,7 +1503,32 @@ def test_block_SQ_SPI_TA_TCC_CPF():
             "sysinfo.csv",
             "timestamps.csv",
         ]
-    assert sorted(list(file_dict.keys())) == expected_csvs
+    if "MI300" in soc:
+        expected_csvs = [
+            "pmc_perf_0.csv",
+            "pmc_perf_11.csv",
+            "pmc_perf_1.csv",
+            "pmc_perf_3.csv",
+            "pmc_perf_5.csv",
+            "pmc_perf_7.csv",
+            "pmc_perf_9.csv",
+            "SQ_IFETCH_LEVEL.csv",
+            "SQ_INST_LEVEL_SMEM.csv",
+            "SQ_LEVEL_WAVES.csv",
+            "timestamps.csv",
+            "pmc_perf_10.csv",
+            "pmc_perf_12.csv",
+            "pmc_perf_2.csv",
+            "pmc_perf_4.csv",
+            "pmc_perf_6.csv",
+            "pmc_perf_8.csv",
+            "pmc_perf.csv",
+            "SQ_INST_LEVEL_LDS.csv",
+            "SQ_INST_LEVEL_VMEM.csv",
+            "sysinfo.csv",
+        ]
+    print("Expected CSVs MI300A", "\n", sorted(list(file_dict.keys())))
+    assert sorted(list(file_dict.keys())) == sorted(expected_csvs)
 
     validate(
         inspect.stack()[0][3],
@@ -1282,10 +1546,15 @@ def test_dispatch_0():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -1307,10 +1576,15 @@ def test_dispatch_0_1():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 2)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -1329,10 +1603,15 @@ def test_dispatch_2():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, 1)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -1354,10 +1633,15 @@ def test_join_type_grid():
     test_utils.launch_omniperf(config, options, workload_dir)
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -1376,10 +1660,15 @@ def test_join_type_kernel():
 
     file_dict = test_utils.check_csv_files(workload_dir, num_devices, num_kernels)
 
-    if soc == "MI200":
-        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
-    else:
+    if soc == "MI100":
         assert sorted(list(file_dict.keys())) == ALL_CSVS
+    elif soc == "MI200":
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI200
+    elif "MI300" in soc:
+        assert sorted(list(file_dict.keys())) == ALL_CSVS_MI300
+    else:
+        print("Testing isn't supported yet for {}".format(soc))
+        assert 0
 
     validate(
         inspect.stack()[0][3],
@@ -1396,7 +1685,7 @@ def test_sort_dispatches():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1427,7 +1716,7 @@ def test_sort_kernels():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1457,7 +1746,7 @@ def test_mem_levels_HBM():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1487,7 +1776,7 @@ def test_mem_levels_L2():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1517,7 +1806,7 @@ def test_mem_levels_vL1D():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1547,7 +1836,7 @@ def test_mem_levels_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1577,7 +1866,7 @@ def test_mem_levels_HBM_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1607,7 +1896,7 @@ def test_mem_levels_vL1D_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
@@ -1637,7 +1926,7 @@ def test_mem_levels_L2_vL1D_LDS():
     workload_dir = test_utils.get_output_dir()
     e = test_utils.launch_omniperf(config, options, workload_dir, check_success=False)
 
-    if soc == "MI100":
+    if soc == "MI100" or "MI300" in soc:
         # assert that it did not run
         assert e.value.code >= 1
         # Do not continue testing
