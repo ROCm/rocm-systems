@@ -39,6 +39,7 @@ class gfx90a_soc(OmniSoC_Base):
                     str(config.omniperf_home),
                     "omniperf_soc",
                     "profile_configs",
+                    self.get_arch(),
                     "roofline",
                 )
             )
