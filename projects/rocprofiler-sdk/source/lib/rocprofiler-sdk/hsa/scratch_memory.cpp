@@ -316,13 +316,13 @@ copy_table(hsa_amd_tool_table_t* _orig, uint64_t _tbl_instance)
 
         if(!_copy_func)
         {
-            ROCP_INFO << "copying table entry for " << _info.name;
+            ROCP_TRACE << "copying table entry for " << _info.name;
             _copy_func = _orig_func;
         }
         else
         {
-            ROCP_INFO << "skipping copying table entry for " << _info.name
-                      << " from table instance " << _tbl_instance;
+            ROCP_TRACE << "skipping copying table entry for " << _info.name
+                       << " from table instance " << _tbl_instance;
         }
     }
 }
@@ -580,7 +580,7 @@ update_table(const context_array_t& ctxs, hsa_amd_tool_table_t* _orig)
 
         if(!should_wrap_functor(ctxs, OpIdx)) return;
 
-        ROCP_INFO << "updating table entry for " << _info.name;
+        ROCP_TRACE << "updating table entry for " << _info.name;
 
         auto  _meta  = hsa_api_meta<TableIdx, OpIdx>{};
         auto& _table = _meta.get_table(_orig);

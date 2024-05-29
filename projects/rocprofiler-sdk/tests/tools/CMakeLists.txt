@@ -15,7 +15,7 @@ add_library(rocprofiler-sdk-json-tool SHARED)
 target_sources(rocprofiler-sdk-json-tool PRIVATE json-tool.cpp)
 target_link_libraries(
     rocprofiler-sdk-json-tool
-    PRIVATE rocprofiler::rocprofiler rocprofiler::rocprofiler-cereal
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::rocprofiler-cereal
             rocprofiler::tests-build-flags rocprofiler::tests-common-library
             rocprofiler::tests-perfetto)
 set_target_properties(
@@ -29,7 +29,7 @@ set_target_properties(
 # tool library which just checks that tools can be compiled with C language
 add_library(rocprofiler-sdk-c-tool SHARED)
 target_sources(rocprofiler-sdk-c-tool PRIVATE c-tool.c)
-target_link_libraries(rocprofiler-sdk-c-tool PRIVATE rocprofiler::rocprofiler
+target_link_libraries(rocprofiler-sdk-c-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                                      rocprofiler::tests-build-flags)
 set_target_properties(
     rocprofiler-sdk-c-tool

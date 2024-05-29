@@ -76,7 +76,7 @@ if(ROCPROFILER_BUILD_GLOG)
     # May want to use GFLAGS in the future
     set(WITH_GFLAGS OFF)
     set(WITH_GTEST OFF)
-    set(WITH_UNWIND OFF)
+    set(WITH_UNWIND "none")
     add_subdirectory(glog EXCLUDE_FROM_ALL)
 
     target_link_libraries(rocprofiler-glog INTERFACE $<BUILD_INTERFACE:glog::glog>)

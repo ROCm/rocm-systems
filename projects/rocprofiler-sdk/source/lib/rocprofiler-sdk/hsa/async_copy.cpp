@@ -749,13 +749,13 @@ async_copy_save(hsa_amd_ext_table_t* _orig, uint64_t _tbl_instance)
 
     if(!_copy_func)
     {
-        ROCP_INFO << "copying table entry for " << _meta.name;
+        ROCP_TRACE << "copying table entry for " << _meta.name;
         _copy_func = _orig_func;
     }
     else
     {
-        ROCP_INFO << "skipping copying table entry for " << _meta.name << " from table instance "
-                  << _tbl_instance;
+        ROCP_TRACE << "skipping copying table entry for " << _meta.name << " from table instance "
+                   << _tbl_instance;
     }
 }
 

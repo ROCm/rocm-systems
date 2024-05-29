@@ -34,12 +34,14 @@ endforeach()
 set(@PACKAGE_NAME@_LIBRARIES)
 
 # add interface library
-add_library(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE IMPORTED)
-add_library(@PACKAGE_NAME@::@PACKAGE_NAME@ ALIAS @PROJECT_NAME@::@PROJECT_NAME@)
+add_library(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE IMPORTED)
+if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
+    add_library(@PROJECT_NAME@::@PROJECT_NAME@ ALIAS @PACKAGE_NAME@::@PACKAGE_NAME@)
+endif()
 
-target_include_directories(@PROJECT_NAME@::@PROJECT_NAME@
+target_include_directories(@PACKAGE_NAME@::@PACKAGE_NAME@
                            INTERFACE "${@PACKAGE_NAME@_INCLUDE_DIR}")
-target_link_directories(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE
+target_link_directories(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE
                         "${@PACKAGE_NAME@_LIB_DIR}")
 
 if(@PACKAGE_NAME@_BUILD_TREE
@@ -111,7 +113,7 @@ else()
         set(TARG @PROJECT_NAME@::@PROJECT_NAME@-${TARG})
         if(NOT @PACKAGE_NAME@_FIND_COMPONENTS)
             list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
-            target_link_libraries(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE ${TARG})
+            target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
         endif()
     endforeach()
 
@@ -121,14 +123,14 @@ else()
             if(TARGET ${TARG})
                 set(@PACKAGE_NAME@_${COMP}_FOUND 1)
                 list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
-                target_link_libraries(@PROJECT_NAME@::@PROJECT_NAME@ INTERFACE ${TARG})
+                target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
             else()
                 set(@PACKAGE_NAME@_${COMP}_FOUND 0)
             endif()
         endforeach()
     endif()
 
-    target_link_libraries(@PROJECT_NAME@::@PROJECT_NAME@
+    target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@
                           INTERFACE @PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink)
 endif()
 

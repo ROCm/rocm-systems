@@ -44,7 +44,7 @@ ROCPROFILER_EXTERN_C_INIT
  * to the @ref rocprofiler_client_finalize_t function to force finalization (i.e. deactivate all of
  * it's contexts) for the client.
  */
-typedef struct
+typedef struct rocprofiler_client_id_t
 {
     const char*    name;    ///< clients should set this value for debugging
     const uint32_t handle;  ///< internal handle
@@ -92,7 +92,7 @@ typedef void (*rocprofiler_tool_finalize_t)(void* tool_data);
  ::rocprofiler_tool_configure_result_t struct
  * and it should be set to `sizeof(rocprofiler_tool_configure_result_t)`
  */
-typedef struct
+typedef struct rocprofiler_tool_configure_result_t
 {
     size_t                        size;  ///< size of this struct (in case of future extensions)
     rocprofiler_tool_initialize_t initialize;  ///< context creation

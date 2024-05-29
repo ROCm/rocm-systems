@@ -115,8 +115,8 @@ add_executable(thread-trace-api-single-test)
 target_sources(
     thread-trace-api-single-test PRIVATE main.cpp trace_callbacks.cpp single_dispatch.cpp
                                          kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(thread-trace-api-single-test PRIVATE rocprofiler::rocprofiler
-                                                           amd_comgr dw)
+target_link_libraries(thread-trace-api-single-test
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk amd_comgr dw)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
     set(PRELOAD_ENV
@@ -138,7 +138,7 @@ add_executable(thread-trace-api-multi-test)
 target_sources(
     thread-trace-api-multi-test PRIVATE main.cpp trace_callbacks.cpp multi_dispatch.cpp
                                         kernel_branch.cpp kernel_lds.cpp)
-target_link_libraries(thread-trace-api-multi-test PRIVATE rocprofiler::rocprofiler
+target_link_libraries(thread-trace-api-multi-test PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                                           amd_comgr dw)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)

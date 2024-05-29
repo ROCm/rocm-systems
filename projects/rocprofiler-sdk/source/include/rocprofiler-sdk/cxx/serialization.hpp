@@ -71,8 +71,18 @@
         ar(make_nvp(NAME, _val));                                                                  \
     }
 
-namespace cereal
-{
+#if !defined(ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN)
+#    define ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN                                                 \
+        namespace cereal                                                                           \
+        {
+#endif
+
+#if !defined(ROCPROFILER_SDK_CEREAL_NAMESPACE_END)
+#    define ROCPROFILER_SDK_CEREAL_NAMESPACE_END }  // namespace cereal
+#endif
+
+ROCPROFILER_SDK_CEREAL_NAMESPACE_BEGIN
+
 template <typename ArchiveT>
 void
 save(ArchiveT& ar, rocprofiler_context_id_t data)
@@ -781,7 +791,8 @@ save(ArchiveT& ar, const rocprofiler::sdk::utility::name_info_impl<EnumT, ValueT
         _ops.emplace_back(itr);
     ar(cereal::make_nvp("operations", _ops));
 }
-}  // namespace cereal
+
+ROCPROFILER_SDK_CEREAL_NAMESPACE_END
 
 #undef ROCP_SDK_SAVE_DATA_FIELD
 #undef ROCP_SDK_SAVE_DATA_VALUE

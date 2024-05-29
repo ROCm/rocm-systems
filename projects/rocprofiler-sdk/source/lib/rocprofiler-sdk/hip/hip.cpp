@@ -450,13 +450,13 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
 
         if(!_copy_func)
         {
-            ROCP_INFO << "copying table entry for " << _info.name;
+            ROCP_TRACE << "copying table entry for " << _info.name;
             _copy_func = _orig_func;
         }
         else
         {
-            ROCP_INFO << "skipping copying table entry for " << _info.name
-                      << " from table instance " << _tbl_instance;
+            ROCP_TRACE << "skipping copying table entry for " << _info.name
+                       << " from table instance " << _tbl_instance;
         }
     }
 }
@@ -479,7 +479,7 @@ update_table(Tp* _orig, std::integral_constant<size_t, OpIdx>)
                _info.callback_domain_idx, _info.buffered_domain_idx, _info.operation_idx))
             return;
 
-        ROCP_INFO << "updating table entry for " << _info.name;
+        ROCP_TRACE << "updating table entry for " << _info.name;
 
         // 1. get the sub-table containing the function pointer in original table
         // 2. get reference to function pointer in sub-table in original table

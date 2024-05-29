@@ -68,7 +68,7 @@ find_package(
 target_link_libraries(multiqueue_testapp PRIVATE amd_comgr)
 
 find_package(rocprofiler-sdk REQUIRED)
-target_link_libraries(multiqueue_testapp PRIVATE rocprofiler::rocprofiler
+target_link_libraries(multiqueue_testapp PRIVATE rocprofiler-sdk::rocprofiler-sdk
                                                  rocprofiler::tests-common-library)
 
 find_package(
