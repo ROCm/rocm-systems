@@ -140,9 +140,9 @@ public:
         if(dev.handle == cache_dev_id && correlation_in == cache_correlation_id_in)
             return cache_correlation_id_out;
 #endif
+        cache_correlation_id_out = dispatch_to_correlation.at({correlation_in, dev});
         cache_dev_id             = dev.handle;
         cache_correlation_id_in  = correlation_in;
-        cache_correlation_id_out = dispatch_to_correlation.at({correlation_in, dev});
         return cache_correlation_id_out;
     }
 
@@ -191,16 +191,17 @@ add_upcoming_samples(const device_handle               device,
     {
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
         samples[p]       = copySample<bHostTrap, GFXIP>((const void*) (buffer + p));
-        samples[p].size  = 0;  // pc sampling record with size 0 will indicate invalid sample
+        samples[p].size  = sizeof(rocprofiler_pc_sampling_record_t);
         try
         {
             Parser::trap_correlation_id_t trap{.raw = snap->correlation_id};
             samples[p].correlation_id = corr_map->get(device, trap);
-            samples[p].size           = sizeof(rocprofiler_pc_sampling_record_t);
-            // set size after corr_map->get which may throw
         } catch(std::exception& e)
         {
-            status = PCSAMPLE_STATUS_PARSER_ERROR;
+            samples[p].correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_VALUE_NONE,
+                                         .external = rocprofiler_user_data_t{
+                                             .value = ROCPROFILER_CORRELATION_ID_VALUE_NONE}};
+            status                    = PCSAMPLE_STATUS_PARSER_ERROR;
         }
     }
     return status;

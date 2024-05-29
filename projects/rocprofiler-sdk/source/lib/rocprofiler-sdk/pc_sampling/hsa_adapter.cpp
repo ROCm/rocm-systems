@@ -176,8 +176,7 @@ data_ready_callback(void*                                client_callback_data,
 
         if(pcs_parser_status != PCSAMPLE_STATUS_SUCCESS)
         {
-            // TODO: should we end program here or somehow report an error to the user and continue?
-            throw std::runtime_error("Error while parsing PC samples");
+            ROCP_INFO << "PCS Parser encountered samples from a blit kernel.\n";
         }
     });
 }

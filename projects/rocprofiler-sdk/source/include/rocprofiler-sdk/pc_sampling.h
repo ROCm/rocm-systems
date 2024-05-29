@@ -197,7 +197,7 @@ rocprofiler_query_pc_sampling_agent_configurations(
  */
 typedef struct
 {
-    uint8_t valid            : 1;  /// sample is valid
+    uint8_t valid            : 1;  /// ::rocprofiler_pc_sampling_snapshot_v1_t field is valid
     uint8_t type             : 4;
     uint8_t has_stall_reason : 1;
     uint8_t has_wave_cnt     : 1;
@@ -219,7 +219,12 @@ typedef struct
 } rocprofiler_pc_sampling_header_v1_t;
 
 /**
- * @brief TODO: provide the description
+ * @brief For future use.
+ *
+ * @todo: Provide the description
+ * @todo: Should we use bitfields because of C ABI portability?
+ * @todo: Should we abstract this to be architecture agnostic?
+ * @todo: Consider having a query to determine organization of this information.
  */
 typedef struct
 {
