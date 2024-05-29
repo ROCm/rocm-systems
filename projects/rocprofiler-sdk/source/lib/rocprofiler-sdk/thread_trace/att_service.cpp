@@ -25,6 +25,7 @@
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 extern "C" {
 rocprofiler_status_t ROCPROFILER_API
@@ -35,16 +36,20 @@ rocprofiler_configure_thread_trace_service(rocprofiler_context_id_t             
                                            rocprofiler_att_shader_data_callback_t shader_callback,
                                            void*                                  callback_userdata)
 {
+    if(rocprofiler::registration::get_init_status() > -1)
+        return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
     if(ctx->thread_trace) return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
-    auto thread_tracer = std::make_shared<rocprofiler::thread_trace_parameter_pack>();
+    auto param_pack = rocprofiler::thread_trace_parameter_pack{};
 
-    thread_tracer->context_id        = context_id;
-    thread_tracer->dispatch_cb_fn    = dispatch_callback;
-    thread_tracer->shader_cb_fn      = shader_callback;
-    thread_tracer->callback_userdata = callback_userdata;
+    param_pack.context_id        = context_id;
+    param_pack.dispatch_cb_fn    = dispatch_callback;
+    param_pack.shader_cb_fn      = shader_callback;
+    param_pack.callback_userdata = callback_userdata;
+    bool bEnableCodeobj          = false;
 
     for(size_t p = 0; p < num_parameters; p++)
     {
@@ -54,30 +59,38 @@ rocprofiler_configure_thread_trace_service(rocprofiler_context_id_t             
 
         switch(param.type)
         {
-            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: thread_tracer->target_cu = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: param_pack.target_cu = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK:
-                thread_tracer->shader_engine_mask = param.value;
+                param_pack.shader_engine_mask = param.value;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE:
-                thread_tracer->buffer_size = param.value;
+            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: param_pack.buffer_size = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: param_pack.simd_select = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_CODE_OBJECT_TRACE_ENABLE:
+                bEnableCodeobj = param.value != 0;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT:
-                thread_tracer->simd_select = param.value;
-                break;
-            case ROCPROFILER_ATT_PARAMETER_OCCUPANCY_MODE_ENABLE:
-                return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
-                return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
-                return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
             case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
         // for(int i = 0; i < parameters.perfcounter_num; i++)
         //    thread_tracer->perfcounters.emplace_back(parameters.perfcounter[i]);
     }
 
-    ctx->thread_trace = std::make_shared<rocprofiler::ThreadTracer>(thread_tracer);
+    ctx->thread_trace = std::make_shared<rocprofiler::GlobalThreadTracer>(param_pack);
 
-    return ROCPROFILER_STATUS_SUCCESS;
+    if(!bEnableCodeobj) return ROCPROFILER_STATUS_SUCCESS;  // Skip TRACING_CODE_OBJECT setup
+
+    auto& client_ctx = ctx->thread_trace->codeobj_client_ctx;
+
+    rocprofiler_status_t status = rocprofiler_create_context(&client_ctx);
+    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+
+    status = rocprofiler_configure_callback_tracing_service(
+        client_ctx,
+        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
+        nullptr,
+        0,
+        rocprofiler::GlobalThreadTracer::codeobj_tracing_callback,
+        ctx->thread_trace.get());
+
+    return status;
 }
 }

@@ -104,25 +104,54 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-set_source_files_properties(kernel_run.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
-set_source_files_properties(kernel_run.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(kernel_branch.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
+set_source_files_properties(kernel_branch.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(kernel_lds.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
+set_source_files_properties(kernel_lds.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
-add_executable(thread-trace-api-test-binary)
-target_sources(thread-trace-api-test-binary PRIVATE kernel_run.cpp verify_data.cpp)
+# Single dispatch test
+add_executable(thread-trace-api-single-test)
+target_sources(
+    thread-trace-api-single-test PRIVATE main.cpp trace_callbacks.cpp single_dispatch.cpp
+                                         kernel_branch.cpp kernel_lds.cpp)
+target_link_libraries(thread-trace-api-single-test PRIVATE rocprofiler::rocprofiler
+                                                           amd_comgr dw)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
     set(PRELOAD_ENV
-        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:thread-trace-api-test-binary>")
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:thread-trace-api-single-test>")
 else()
-    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:thread-trace-api-test-binary>")
+    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:thread-trace-api-single-test>")
 endif()
 
-target_link_libraries(thread-trace-api-test-binary PRIVATE rocprofiler::rocprofiler
-                                                           libdw::libdw amd_comgr)
-
-add_test(NAME thread-trace-api-tests COMMAND $<TARGET_FILE:thread-trace-api-test-binary>)
+add_test(NAME thread-trace-api-single-test
+         COMMAND $<TARGET_FILE:thread-trace-api-single-test>)
 
 set_tests_properties(
-    thread-trace-api-tests
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${PRELOAD_ENV}"
+    thread-trace-api-single-test
+    PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT "${PRELOAD_ENV}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Multi dispatch test
+add_executable(thread-trace-api-multi-test)
+target_sources(
+    thread-trace-api-multi-test PRIVATE main.cpp trace_callbacks.cpp multi_dispatch.cpp
+                                        kernel_branch.cpp kernel_lds.cpp)
+target_link_libraries(thread-trace-api-multi-test PRIVATE rocprofiler::rocprofiler
+                                                          amd_comgr dw)
+
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
+    set(PRELOAD_ENV
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:thread-trace-api-multi-test>")
+else()
+    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:thread-trace-api-multi-test>")
+endif()
+
+add_test(NAME thread-trace-api-multi-test
+         COMMAND $<TARGET_FILE:thread-trace-api-multi-test>)
+
+set_tests_properties(
+    thread-trace-api-multi-test
+    PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT "${PRELOAD_ENV}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

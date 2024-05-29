@@ -26,7 +26,7 @@
 #endif
 
 /**
- * @file samples/code_object_isa_decode/client.cpp
+ * @file samples/advanced_thread_trace/client.cpp
  *
  * @brief Example rocprofiler client (tool)
  */
@@ -140,9 +140,9 @@ struct ToolData
     std::mutex                                          output_mut;
     CodeobjAddressTranslate                             codeobjTranslate;
     std::map<pcinfo_t, std::unique_ptr<isa_map_elem_t>> isa_map;
-    std::unordered_map<uint64_t, SymbolInfo>            kernels_in_codeobj           = {};
-    std::unordered_map<uint64_t, std::string>           kernel_object_to_kernel_name = {};
-    int                                                 num_waves                    = 0;
+    std::unordered_map<uint64_t, SymbolInfo>            kernels_in_codeobj       = {};
+    std::unordered_map<uint64_t, std::string>           kernel_id_to_kernel_name = {};
+    int                                                 num_waves                = 0;
 
     std::ostream& output()
     {
@@ -205,7 +205,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
     {
         std::unique_lock<std::shared_mutex> lg(tool.isa_map_mut);
         auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
-        tool.kernel_object_to_kernel_name.emplace(data->kernel_object, data->kernel_name);
+        tool.kernel_id_to_kernel_name.emplace(data->kernel_id, data->kernel_name);
     }
 
     if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
@@ -242,9 +242,8 @@ rocprofiler_att_control_flags_t
 dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
                   const rocprofiler_agent_t* /* agent  */,
                   rocprofiler_correlation_id_t /* correlation_id  */,
-                  const hsa_kernel_dispatch_packet_t* dispatch_packet,
-                  uint64_t /* kernel_id */,
-                  void* userdata)
+                  rocprofiler_kernel_id_t kernel_id,
+                  void*                   userdata)
 {
     C_API_BEGIN
     assert(userdata && "Dispatch callback passed null!");
@@ -252,22 +251,20 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
 
     std::shared_lock<std::shared_mutex> lg(tool.isa_map_mut);
 
-    constexpr int           desired_call_iteration = 1;
     static std::atomic<int> call_id{0};
-    static std::string_view desired_func_name = "transposeLdsSwapInplace";
+    static std::string_view desired_func_name = "transposeLds";
 
     try
     {
-        auto& kernel_name = tool.kernel_object_to_kernel_name.at(dispatch_packet->kernel_object);
+        auto& kernel_name = tool.kernel_id_to_kernel_name.at(kernel_id);
         if(kernel_name.find(desired_func_name) == std::string::npos)
             return ROCPROFILER_ATT_CONTROL_NONE;
 
-        if(call_id.fetch_add(1) == desired_call_iteration)
-            return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
+        int id = call_id.fetch_add(1);
+        if(id == 1) return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
     } catch(...)
     {
-        std::cerr << "Could not find kernel object: " << dispatch_packet->kernel_object
-                  << std::endl;
+        std::cerr << "Could not find kernel id: " << kernel_id << std::endl;
     }
 
     C_API_END
@@ -512,7 +509,7 @@ tool_fini(void* tool_data)
                   << scalar_latency / float(scalar_exec) << " cycles.\n"
                   << "Vector memory ops occupied: " << vmc_fraction << "% of cycles.\n"
                   << "Scalar and LDS memory ops occupied: " << lgk_fraction << "% of cycles.\n"
-                  << std::endl;
+                  << "Num waves created: " << (tool.num_waves / 2) << std::endl;
 }
 
 }  // namespace client

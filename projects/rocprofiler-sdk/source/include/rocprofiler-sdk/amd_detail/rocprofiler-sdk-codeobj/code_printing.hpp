@@ -309,7 +309,8 @@ private:
 class CodeobjMap
 {
 public:
-    CodeobjMap() = default;
+    CodeobjMap()          = default;
+    virtual ~CodeobjMap() = default;
 
     virtual void addDecoder(const char*         filepath,
                             codeobj_marker_id_t id,
@@ -357,7 +358,8 @@ class CodeobjAddressTranslate : public CodeobjMap
     using Super = CodeobjMap;
 
 public:
-    CodeobjAddressTranslate() = default;
+    CodeobjAddressTranslate()           = default;
+    ~CodeobjAddressTranslate() override = default;
 
     virtual void addDecoder(const char*         filepath,
                             codeobj_marker_id_t id,
@@ -409,39 +411,31 @@ public:
         return nullptr;
     }
 
-    void getSymbolMap(const std::shared_ptr<LoadedCodeobjDecoder>& dec,
-                      std::unordered_map<uint64_t, SymbolInfo>&    symbols) const
+    std::map<uint64_t, SymbolInfo> getSymbolMap() const
     {
-        try
+        std::map<uint64_t, SymbolInfo> symbols;
+
+        for(auto& [_, dec] : decoders)
         {
             auto& smap = dec->getSymbolMap();
             for(auto& [vaddr, sym] : smap)
                 symbols[vaddr + dec->load_addr] = sym;
-        } catch(std::exception& e)
+        }
+
+        return symbols;
+    }
+
+    std::map<uint64_t, SymbolInfo> getSymbolMap(codeobj_marker_id_t id) const
+    {
+        if(decoders.find(id) == decoders.end()) return {};
+
+        try
         {
-            return;
-        };
-    }
-
-    std::unordered_map<uint64_t, SymbolInfo> getSymbolMap() const
-    {
-        std::unordered_map<uint64_t, SymbolInfo> symbols;
-
-        for(auto& [_, dec] : decoders)
-            this->getSymbolMap(dec, symbols);
-
-        return symbols;
-    }
-
-    std::unordered_map<uint64_t, SymbolInfo> getSymbolMap(codeobj_marker_id_t id) const
-    {
-        std::unordered_map<uint64_t, SymbolInfo> symbols;
-
-        auto it = decoders.find(id);
-        if(it == decoders.end()) return symbols;
-
-        this->getSymbolMap(it->second, symbols);
-        return symbols;
+            return decoders.at(id)->getSymbolMap();
+        } catch(...)
+        {
+            return {};
+        }
     }
 
 private:

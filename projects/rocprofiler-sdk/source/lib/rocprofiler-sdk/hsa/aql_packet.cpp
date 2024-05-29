@@ -23,11 +23,12 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include <cstdlib>
 #include <iostream>
+#include "lib/common/logging.hpp"
 
 #define CHECK_HSA(fn, message)                                                                     \
     if((fn) != HSA_STATUS_SUCCESS)                                                                 \
     {                                                                                              \
-        std::cerr << __FILE__ << ':' << __LINE__ << ' ' << message;                                \
+        ROCP_ERROR << message;                                                                     \
         exit(1);                                                                                   \
     }
 
@@ -64,47 +65,96 @@ CounterAQLPacket::~CounterAQLPacket()
     }
 }
 
-TraceAQLPacket::~TraceAQLPacket() { aqlprofile_att_delete_packets(this->handle); }
-
 hsa_status_t
-TraceAQLPacket::Alloc(void** ptr, size_t size, aqlprofile_buffer_desc_flags_t flags, void* data)
+BaseTTAQLPacket::Alloc(void** ptr, size_t size, desc_t flags, void* data)
 {
     if(!data) return HSA_STATUS_ERROR;
-    if(!reinterpret_cast<TraceAQLPacket*>(data)->tracepool) return HSA_STATUS_ERROR;
-
-    auto& pool = *reinterpret_cast<TraceAQLPacket*>(data)->tracepool;
+    auto& pool = reinterpret_cast<BaseTTAQLPacket*>(data)->tracepool;
 
     if(!pool.allocate_fn || !pool.free_fn || !pool.allow_access_fn) return HSA_STATUS_ERROR;
 
+    hsa_status_t status = HSA_STATUS_ERROR;
     if(flags.host_access)
     {
-        hsa_status_t status = pool.allocate_fn(pool.cpu_pool_, size, 0, ptr);
-        if(!flags.device_access || status != HSA_STATUS_SUCCESS) return status;
-        return pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
+        status = pool.allocate_fn(pool.cpu_pool_, size, 0, ptr);
+
+        if(status == HSA_STATUS_SUCCESS)
+            status = pool.allow_access_fn(1, &pool.gpu_agent, nullptr, *ptr);
     }
-    return pool.allocate_fn(pool.gpu_pool_, size, 0, ptr);
+    else
+    {
+        // Return page aligned data to avoid cache flush overlap
+        status = pool.allocate_fn(pool.gpu_pool_, size + 0x2000, 0, ptr);
+        *ptr   = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT
+    }
+    return status;
 }
 
 void
-TraceAQLPacket::Free(void* ptr, void* data)
+BaseTTAQLPacket::Free(void* ptr, void* data)
 {
-    auto* pool = reinterpret_cast<TraceAQLPacket*>(data)->tracepool.get();
-    if(!pool || !pool->free_fn) return;
+    assert(data);
+    auto& pool = reinterpret_cast<BaseTTAQLPacket*>(data)->tracepool;
 
-    pool->free_fn(ptr);
+    if(pool.free_fn) pool.free_fn(ptr);
 }
 
 hsa_status_t
-TraceAQLPacket::Copy(void* dst, const void* src, size_t size, void* data)
+BaseTTAQLPacket::Copy(void* dst, const void* src, size_t size, void* data)
 {
-    auto* pool = reinterpret_cast<TraceAQLPacket*>(data)->tracepool.get();
-    if(!pool || !pool->api_copy_fn) return HSA_STATUS_ERROR;
+    if(!data) return HSA_STATUS_ERROR;
+    auto& pool = reinterpret_cast<BaseTTAQLPacket*>(data)->tracepool;
 
-    return pool->api_copy_fn(dst, src, size);
+    if(!pool.api_copy_fn) return HSA_STATUS_ERROR;
+
+    return pool.api_copy_fn(dst, src, size);
 }
 
-TraceAQLPacket::TraceAQLPacket(std::shared_ptr<TraceMemoryPool>& _tracepool)
-: tracepool(_tracepool){};
+TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tracepool,
+                                             const aqlprofile_att_profile_t& p)
+: BaseTTAQLPacket(_tracepool)
+{
+    auto status = aqlprofile_att_create_packets(&handle, &packets, p, &Alloc, &Free, &Copy, this);
+    CHECK_HSA(status, "failed to create ATT packet");
+
+    packets.start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    packets.stop_packet.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
+    packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
+    this->empty                            = false;
+};
+
+void
+TraceControlAQLPacket::populate_before()
+{
+    before_krn_pkt.push_back(packets.start_packet);
+    for(auto& [_, codeobj] : loaded_codeobj)
+        if(codeobj) before_krn_pkt.push_back(codeobj->packet);
+};
+
+CodeobjMarkerAQLPacket::CodeobjMarkerAQLPacket(const TraceMemoryPool& _tracepool,
+                                               uint64_t               id,
+                                               uint64_t               addr,
+                                               uint64_t               size,
+                                               bool                   bFromStart,
+                                               bool                   bIsUnload)
+: BaseTTAQLPacket(_tracepool)
+{
+    aqlprofile_att_codeobj_data_t codeobj{};
+    codeobj.id        = id;
+    codeobj.addr      = addr;
+    codeobj.size      = size;
+    codeobj.agent     = _tracepool.gpu_agent;
+    codeobj.isUnload  = bIsUnload;
+    codeobj.fromStart = bFromStart;
+
+    auto status = aqlprofile_att_codeobj_marker(&packet, &handle, codeobj, &Alloc, &Free, this);
+    CHECK_HSA(status, "failed to create ATT marker");
+
+    packet.header            = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    packet.completion_signal = hsa_signal_t{.handle = 0};
+    this->empty              = false;
+}
 
 }  // namespace hsa
 }  // namespace rocprofiler

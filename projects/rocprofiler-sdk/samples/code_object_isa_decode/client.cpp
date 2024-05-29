@@ -130,7 +130,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
             return;
         }
 
-        auto symbolmap = codeobjTranslate.getSymbolMap(data->code_object_id);
+        auto symbolmap = codeobjTranslate.getSymbolMap();
         for(auto& [vaddr, symbol] : symbolmap)
             registered_kernels.insert({symbol.name, {vaddr, vaddr + symbol.mem_size}});
     }
@@ -160,14 +160,17 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
         size_t vaddr = begin_end.first;
         while(vaddr < begin_end.second)
         {
-            auto             inst   = codeobjTranslate.get(vaddr);
-            std::string_view source = inst->comment;
-            if(source.rfind('/') < source.size()) source = source.substr(source.rfind('/'));
-            if(vaddr < begin_end.first + 64) output_stream() << '\t' << inst->inst << '\n';
+            auto inst = codeobjTranslate.get(vaddr);
+            if(inst->comment.size())
+            {
+                std::string_view source = inst->comment;
+                if(source.rfind('/') < source.size()) source = source.substr(source.rfind('/'));
+                if(vaddr < begin_end.first + 64) output_stream() << '\t' << inst->inst << '\n';
 
-            if(source.rfind(':') < source.size()) source = source.substr(0, source.rfind(':'));
+                if(source.rfind(':') < source.size()) source = source.substr(0, source.rfind(':'));
 
-            references.insert(std::string(source));
+                references.insert(std::string(source));
+            }
             if(inst->inst.find("v_") == 0)
                 num_vector++;
             else if(inst->inst.find("s_waitcnt") == 0)
@@ -227,10 +230,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 }
 
 void
-tool_fini(void* tool_data)
-{
-    (void) tool_data;
-}
+tool_fini(void* /* tool_data */)
+{}
 
 }  // namespace
 

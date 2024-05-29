@@ -25,34 +25,27 @@
 #    undef NDEBUG
 #endif
 
-/**
- * @file samples/code_object_isa_decode/client.cpp
- *
- * @brief Example rocprofiler client (tool)
- */
-
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include "hip/hip_runtime.h"
 
-// Three waves per SIMD on MI300
-#define DATA_SIZE          (304 * 64 * 4 * 3)
+// Two waves per SIMD on MI300
+#define DATA_SIZE          (304 * 64 * 4 * 2)
 #define HIP_API_CALL(CALL) assert((CALL) == hipSuccess)
 
-template <typename T>
+#define SHM_SIZE  64
+#define LOOPCOUNT 4
+
 __global__ void
-branching_kernel(T* __restrict__ a,
-                 const float* __restrict__ b,
-                 const float* __restrict__ c,
-                 int size)
-{
-    int index = blockDim.x * blockIdx.x + threadIdx.x;
-    if(blockIdx.x % 2 == 0)
-        a[index] = b[index] + c[index];
-    else
-        a[index] = b[index] * c[index] - 2.0f;
-}
+branching_kernel(float* __restrict__ a, const float* __restrict__ b, const float* __restrict__ c);
+
+__global__ void
+looping_lds_kernel(float* __restrict__ a,
+                   const float* __restrict__ b,
+                   const float* __restrict__ c,
+                   size_t size,
+                   size_t loopcount);
 
 class hipMemory
 {
@@ -76,18 +69,27 @@ main(int argc, char** argv)
     hipMemory src2(DATA_SIZE);
     hipMemory dst(DATA_SIZE);
 
-    hipLaunchKernelGGL(branching_kernel,
-                       dim3(DATA_SIZE / 64),
-                       dim3(64),
-                       0,
-                       0,
-                       dst.ptr,
-                       src1.ptr,
-                       src2.ptr,
-                       DATA_SIZE);
-
-    HIP_API_CALL(hipGetLastError());
     HIP_API_CALL(hipDeviceSynchronize());
+
+    for(size_t i = 0; i < LOOPCOUNT; i++)
+    {
+        hipLaunchKernelGGL(
+            branching_kernel, dim3(DATA_SIZE / 64), dim3(64), 0, 0, dst.ptr, src1.ptr, src2.ptr);
+        HIP_API_CALL(hipGetLastError());
+
+        hipLaunchKernelGGL(looping_lds_kernel,
+                           dim3(DATA_SIZE / 64),
+                           dim3(64),
+                           0,
+                           0,
+                           dst.ptr,
+                           src1.ptr,
+                           src2.ptr,
+                           DATA_SIZE,
+                           LOOPCOUNT);
+        HIP_API_CALL(hipGetLastError());
+        HIP_API_CALL(hipDeviceSynchronize());
+    }
 
     return 0;
 }

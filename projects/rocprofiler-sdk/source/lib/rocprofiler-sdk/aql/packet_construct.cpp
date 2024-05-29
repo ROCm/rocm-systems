@@ -198,63 +198,52 @@ CounterPacketConstruct::construct_packet(const AmdExtTable& ext)
     return pkt_ptr;
 }
 
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wnarrowing"
-
-ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
-    const hsa::AgentCache&                        agent,
-    std::shared_ptr<thread_trace_parameter_pack>& params,
-    const CoreApiTable&                           coreapi,
-    const AmdExtTable&                            ext)
+ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache&             agent,
+                                                         const thread_trace_parameter_pack& params,
+                                                         const CoreApiTable&                coreapi,
+                                                         const AmdExtTable&                 ext)
 {
-    this->tracepool                  = std::make_shared<hsa::TraceMemoryPool>();
-    this->tracepool->allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
-    this->tracepool->allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
-    this->tracepool->free_fn         = ext.hsa_amd_memory_pool_free_fn;
-    this->tracepool->api_copy_fn     = coreapi.hsa_memory_copy_fn;
-    this->tracepool->gpu_agent       = agent.get_hsa_agent();
-    this->tracepool->cpu_pool_       = agent.cpu_pool();
-    this->tracepool->gpu_pool_       = agent.gpu_pool();
+    this->tracepool                 = hsa::TraceMemoryPool{};
+    this->tracepool.allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
+    this->tracepool.allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
+    this->tracepool.free_fn         = ext.hsa_amd_memory_pool_free_fn;
+    this->tracepool.api_copy_fn     = coreapi.hsa_memory_copy_fn;
+    this->tracepool.gpu_agent       = agent.get_hsa_agent();
+    this->tracepool.cpu_pool_       = agent.cpu_pool();
+    this->tracepool.gpu_pool_       = agent.gpu_pool();
 
-    this->aql_params.clear();
-    auto& p = this->aql_params;
-    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET, params->target_cu});
-    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK, params->shader_engine_mask});
-    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION, params->simd_select});
-    p.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, params->buffer_size});
+    uint32_t cu                 = static_cast<uint32_t>(params.target_cu);
+    uint32_t shader_engine_mask = static_cast<uint32_t>(params.shader_engine_mask);
+    uint32_t simd               = static_cast<uint32_t>(params.simd_select);
+    uint32_t buffer_size        = static_cast<uint32_t>(params.buffer_size);
 
-    this->profile = aqlprofile_att_profile_t{agent.get_hsa_agent(), p.data(), p.size()};
+    aql_params.clear();
+    aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET, cu});
+    aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK, shader_engine_mask});
+    aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION, simd});
+    aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, buffer_size});
 }
 
-#pragma GCC diagnostic pop
-
-std::unique_ptr<hsa::TraceAQLPacket>
+std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTraceAQLPacketFactory::construct_packet()
 {
-    auto         packet  = std::make_unique<hsa::TraceAQLPacket>(this->tracepool);
-    hsa_status_t _status = aqlprofile_att_create_packets(&packet->handle,
-                                                         &packet->packets,
-                                                         this->profile,
-                                                         &hsa::TraceAQLPacket::Alloc,
-                                                         &hsa::TraceAQLPacket::Free,
-                                                         &hsa::TraceAQLPacket::Copy,
-                                                         packet.get());
-    CHECK_HSA(_status, "failed to create ATT packet");
-
-    packet->before_krn_pkt.clear();
-    packet->after_krn_pkt.clear();
-    packet->packets.start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    packet->packets.stop_packet.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    packet->packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
-    packet->packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
-
-    packet->empty = false;
-    packet->start = packet->packets.start_packet;
-    packet->stop  = packet->packets.stop_packet;
-    packet->before_krn_pkt.push_back(packet->start);
-    packet->after_krn_pkt.push_back(packet->stop);
-
+    uint32_t num_params = static_cast<uint32_t>(aql_params.size());
+    auto     profile = aqlprofile_att_profile_t{tracepool.gpu_agent, aql_params.data(), num_params};
+    auto     packet  = std::make_unique<hsa::TraceControlAQLPacket>(this->tracepool, profile);
+    packet->clear();
     return packet;
+}
+
+std::unique_ptr<hsa::CodeobjMarkerAQLPacket>
+ThreadTraceAQLPacketFactory::construct_load_marker_packet(uint64_t id, uint64_t addr, uint64_t size)
+{
+    return std::make_unique<hsa::CodeobjMarkerAQLPacket>(tracepool, id, addr, size, false, false);
+}
+
+std::unique_ptr<hsa::CodeobjMarkerAQLPacket>
+ThreadTraceAQLPacketFactory::construct_unload_marker_packet(uint64_t id)
+{
+    return std::make_unique<hsa::CodeobjMarkerAQLPacket>(tracepool, id, 0, 0, false, true);
 }
 
 std::vector<hsa_ven_amd_aqlprofile_event_t>

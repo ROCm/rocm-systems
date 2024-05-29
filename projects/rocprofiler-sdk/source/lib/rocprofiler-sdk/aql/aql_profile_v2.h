@@ -634,36 +634,32 @@ aqlprofile_att_parse_data(aqlprofile_att_se_data_callback_t se_data_callback,
                           aqlprofile_att_isa_callback_t     isa_callback,
                           void*                             userdata);
 
-/**
- * @brief Contains flags for how code objects are interpreted
- */
-typedef union
+typedef struct
 {
-    struct
-    {
-        uint32_t isUnload   : 1;   // 0 if code object is being loaded, 1 for unload
-        uint32_t bFromStart : 1;   // Has this code object been loaded before thread trace started?
-        uint32_t legacy_id  : 30;  // Legacy code object ID, if it fits in 30 bits.
-    };
-    uint32_t raw;
-} aqlprofile_att_header_marker_t;
+    uint64_t    id;
+    uint64_t    addr;
+    uint64_t    size;
+    hsa_agent_t agent;
+    uint32_t    isUnload  : 1;
+    uint32_t    fromStart : 1;
+} aqlprofile_att_codeobj_data_t;
 
 /**
  * @brief Creates an AQL packet for marking code objects
- * @param[out] packets Returned packet
- * @param[in] handle The handle created from aqlprofile_att_create_packets()
- * @param[in] header Header containing code object information created from profiler
- * @param[in] id To be passed back to isa_string_callback in marker_id
- * @param[in] addr Code object loaded address.
- * @param[in] size Code object loaded size.
+ * @param[out] packet Returned packet
+ * @param[out] handle The handle created from aqlprofile_att_create_packets()
+ * @param[in] data Code object information
+ * @param[in] alloc_cb Callback to return both CPU and GPU accessible memory on demand
+ * @param[in] dealloc_cb Callback to free data allocated by alloc_cb()
+ * @param[in] userdata Userdata to be passed back to memory callbacks
  */
 hsa_status_t
-aqlprofile_att_codeobj_load_marker(hsa_ext_amd_aql_pm4_packet_t*  packets,
-                                   aqlprofile_handle_t            handle,
-                                   aqlprofile_att_header_marker_t header,
-                                   uint64_t                       id,
-                                   uint64_t                       addr,
-                                   uint64_t                       size);
+aqlprofile_att_codeobj_marker(hsa_ext_amd_aql_pm4_packet_t*        packet,
+                              aqlprofile_handle_t*                 handle,
+                              aqlprofile_att_codeobj_data_t        data,
+                              aqlprofile_memory_alloc_callback_t   alloc_cb,
+                              aqlprofile_memory_dealloc_callback_t dealloc_cb,
+                              void*                                userdata);
 
 #ifdef __cplusplus
 }
