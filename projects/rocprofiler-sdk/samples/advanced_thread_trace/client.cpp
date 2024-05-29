@@ -36,7 +36,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk-codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj/code_printing.hpp>
 #include <shared_mutex>
 
 #include "common/defines.hpp"

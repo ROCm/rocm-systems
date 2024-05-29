@@ -22,8 +22,74 @@ project(
     LANGUAGES CXX HIP
     VERSION 0.0.0)
 
+find_package(PkgConfig)
+
+if(PkgConfig_FOUND)
+    set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
+    pkg_check_modules(DW libdw)
+
+    if(DW_FOUND
+       AND DW_INCLUDE_DIRS
+       AND DW_LIBRARIES)
+        set(libdw_INCLUDE_DIR
+            "${DW_INCLUDE_DIRS}"
+            CACHE FILEPATH "libdw include directory")
+        set(libdw_LIBRARY
+            "${DW_LIBRARIES}"
+            CACHE FILEPATH "libdw libraries")
+    endif()
+endif()
+
+if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
+    find_path(
+        libdw_ROOT_DIR
+        NAMES include/elfutils/libdw.h
+        HINTS ${libdw_ROOT}
+        PATHS ${libdw_ROOT})
+
+    mark_as_advanced(libdw_ROOT_DIR)
+
+    find_path(
+        libdw_INCLUDE_DIR
+        NAMES elfutils/libdw.h
+        HINTS ${libdw_ROOT}
+        PATHS ${libdw_ROOT}
+        PATH_SUFFIXES include)
+
+    find_library(
+        libdw_LIBRARY
+        NAMES dw
+        HINTS ${libdw_ROOT}
+        PATHS ${libdw_ROOT}
+        PATH_SUFFIXES lib lib64)
+endif()
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(libdw DEFAULT_MSG libdw_LIBRARY libdw_INCLUDE_DIR)
+
+if(libdw_FOUND AND NOT TARGET libdw::libdw)
+    add_library(libdw::libdw INTERFACE IMPORTED)
+    if(TARGET PkgConfig::DW AND DW_FOUND)
+        target_link_libraries(libdw::libdw INTERFACE PkgConfig::DW)
+    else()
+        target_link_libraries(libdw::libdw INTERFACE ${libdw_LIBRARY})
+        target_include_directories(libdw::libdw SYSTEM INTERFACE ${libdw_INCLUDE_DIR})
+    endif()
+endif()
+
 find_package(rocprofiler-sdk REQUIRED)
-find_package(amd_comgr REQUIRED)
+find_package(
+    amd_comgr
+    REQUIRED
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATH_SUFFIXES
+    lib/cmake/amd_comgr)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_EXTENSIONS OFF)
@@ -38,17 +104,11 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-add_library(thread-trace-api-test-lib SHARED)
-target_sources(thread-trace-api-test-lib PRIVATE verify_data.cpp)
-target_link_libraries(
-    thread-trace-api-test-lib PRIVATE rocprofiler::rocprofiler rocprofiler-sdk-codeobj
-                                      amd_comgr dw)
-
 set_source_files_properties(kernel_run.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
 set_source_files_properties(kernel_run.cpp PROPERTIES LANGUAGE HIP)
 
 add_executable(thread-trace-api-test-binary)
-target_sources(thread-trace-api-test-binary PRIVATE kernel_run.cpp)
+target_sources(thread-trace-api-test-binary PRIVATE kernel_run.cpp verify_data.cpp)
 
 if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
     set(PRELOAD_ENV
@@ -57,7 +117,8 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:thread-trace-api-test-binary>")
 endif()
 
-target_link_libraries(thread-trace-api-test-binary PRIVATE thread-trace-api-test-lib)
+target_link_libraries(thread-trace-api-test-binary PRIVATE rocprofiler::rocprofiler
+                                                           libdw::libdw amd_comgr)
 
 add_test(NAME thread-trace-api-tests COMMAND $<TARGET_FILE:thread-trace-api-test-binary>)
 

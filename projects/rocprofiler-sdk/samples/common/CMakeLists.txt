@@ -2,6 +2,63 @@
 # common utilities for samples
 #
 
+find_package(PkgConfig)
+
+if(PkgConfig_FOUND)
+    set(ENV{PKG_CONFIG_SYSTEM_INCLUDE_PATH} "")
+    pkg_check_modules(DW libdw)
+
+    if(DW_FOUND
+       AND DW_INCLUDE_DIRS
+       AND DW_LIBRARIES)
+        set(libdw_INCLUDE_DIR
+            "${DW_INCLUDE_DIRS}"
+            CACHE FILEPATH "libdw include directory")
+        set(libdw_LIBRARY
+            "${DW_LIBRARIES}"
+            CACHE FILEPATH "libdw libraries")
+    endif()
+endif()
+
+if(NOT libdw_INCLUDE_DIR OR NOT libdw_LIBRARY)
+    find_path(
+        libdw_ROOT_DIR
+        NAMES include/elfutils/libdw.h
+        HINTS ${libdw_ROOT}
+        PATHS ${libdw_ROOT})
+
+    mark_as_advanced(libdw_ROOT_DIR)
+
+    find_path(
+        libdw_INCLUDE_DIR
+        NAMES elfutils/libdw.h
+        HINTS ${libdw_ROOT}
+        PATHS ${libdw_ROOT}
+        PATH_SUFFIXES include)
+
+    find_library(
+        libdw_LIBRARY
+        NAMES dw
+        HINTS ${libdw_ROOT}
+        PATHS ${libdw_ROOT}
+        PATH_SUFFIXES lib lib64)
+endif()
+
+include(FindPackageHandleStandardArgs)
+find_package_handle_standard_args(libdw DEFAULT_MSG libdw_LIBRARY libdw_INCLUDE_DIR)
+
+if(libdw_FOUND AND NOT TARGET libdw::libdw)
+    add_library(libdw::libdw INTERFACE IMPORTED)
+    if(TARGET PkgConfig::DW AND DW_FOUND)
+        target_link_libraries(libdw::libdw INTERFACE PkgConfig::DW)
+    else()
+        target_link_libraries(libdw::libdw INTERFACE ${libdw_LIBRARY})
+        target_include_directories(libdw::libdw SYSTEM INTERFACE ${libdw_INCLUDE_DIR})
+    endif()
+endif()
+
+mark_as_advanced(libdw_INCLUDE_DIR libdw_LIBRARY)
+
 # default FAIL_REGULAR_EXPRESSION for tests
 set(ROCPROFILER_DEFAULT_FAIL_REGEX
     "threw an exception|Permission denied|Could not create logging file"
@@ -24,7 +81,7 @@ cmake_path(GET CMAKE_CURRENT_SOURCE_DIR PARENT_PATH COMMON_LIBRARY_INCLUDE_DIR)
 add_library(rocprofiler-samples-common-library INTERFACE)
 add_library(rocprofiler::samples-common-library ALIAS rocprofiler-samples-common-library)
 target_link_libraries(rocprofiler-samples-common-library
-                      INTERFACE rocprofiler::samples-build-flags)
+                      INTERFACE rocprofiler::samples-build-flags libdw::libdw)
 target_compile_features(rocprofiler-samples-common-library INTERFACE cxx_std_17)
 target_include_directories(rocprofiler-samples-common-library
                            INTERFACE ${COMMON_LIBRARY_INCLUDE_DIR})

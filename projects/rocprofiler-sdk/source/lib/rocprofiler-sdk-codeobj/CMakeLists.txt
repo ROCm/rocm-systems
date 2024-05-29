@@ -18,28 +18,18 @@
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "development")
 
-set(CODEOBJ_PARSER_SOURCES code_printing.cpp disassembly.cpp)
+add_library(rocprofiler-sdk-codeobj INTERFACE)
+add_library(rocprofiler::rocprofiler-sdk-codeobj ALIAS rocprofiler-sdk-codeobj)
 
-add_library(rocprofiler-sdk-codeobj STATIC)
-target_sources(rocprofiler-sdk-codeobj PRIVATE ${CODEOBJ_PARSER_SOURCES})
+target_include_directories(
+    rocprofiler-sdk-codeobj
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/source/include>
+              $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+
 target_link_libraries(
     rocprofiler-sdk-codeobj
-    PRIVATE rocprofiler::rocprofiler-amd-comgr rocprofiler::rocprofiler-dw
-            rocprofiler::rocprofiler-elf rocprofiler::rocprofiler-build-flags
-            rocprofiler::rocprofiler-common-library)
-
-target_include_directories(rocprofiler-sdk-codeobj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
-
-set_target_properties(
-    rocprofiler-sdk-codeobj
-    PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
-               POSITION_INDEPENDENT_CODE ON)
-
-install(
-    TARGETS rocprofiler-sdk-codeobj
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    EXPORT rocprofiler-sdk-codeobj-targets)
+    INTERFACE rocprofiler::rocprofiler-amd-comgr rocprofiler::rocprofiler-dw
+              rocprofiler::rocprofiler-elf)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

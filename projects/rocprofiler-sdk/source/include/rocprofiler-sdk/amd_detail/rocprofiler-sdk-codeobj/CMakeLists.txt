@@ -20,5 +20,6 @@ set(CODEOBJ_PARSER_HEADERS code_printing.hpp disassembly.hpp segment.hpp)
 
 install(
     FILES ${CODEOBJ_PARSER_HEADERS}
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk-codeobj
+    DESTINATION
+        ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj
     COMPONENT development)

@@ -23,7 +23,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <fstream>
-#include <rocprofiler-sdk-codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj/code_printing.hpp>
 #include <string_view>
 #include <vector>
 
