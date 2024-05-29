@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler-sdk/amd_detail/thread_trace.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <atomic>
 #include <string_view>

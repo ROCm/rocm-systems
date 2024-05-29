@@ -24,8 +24,8 @@
 
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
+#include <rocprofiler-sdk/amd_detail/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
-#include <rocprofiler-sdk/thread_trace.h>
 
 #include <cstdint>
 #include <memory>

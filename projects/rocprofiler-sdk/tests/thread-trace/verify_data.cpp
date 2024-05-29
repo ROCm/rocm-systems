@@ -31,6 +31,7 @@
  * @brief Example rocprofiler client (tool)
  */
 
+#include <rocprofiler-sdk/amd_detail/thread_trace.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>

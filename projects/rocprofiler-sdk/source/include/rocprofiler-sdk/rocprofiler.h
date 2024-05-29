@@ -80,7 +80,6 @@ ROCPROFILER_EXTERN_C_FINI
 // #include "rocprofiler-sdk/marker.h"
 #include "rocprofiler-sdk/pc_sampling.h"
 #include "rocprofiler-sdk/profile_config.h"
-#include "rocprofiler-sdk/thread_trace.h"
 // #include "rocprofiler-sdk/spm.h"
 
 ROCPROFILER_EXTERN_C_INIT
