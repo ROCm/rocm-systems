@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 

@@ -22,33 +22,26 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
+#include <rocprofiler-sdk/hsa.h>
 
-#include <cstdint>
-#include <vector>
-
-namespace rocprofiler
-{
-namespace hsa
-{
-namespace pc_sampling
-{
-const char*
-name_by_id(uint32_t id);
-
-std::vector<uint32_t>
-get_ids();
-
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-
-void
-copy_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
-
-void
-update_table(hsa_pc_sampling_ext_table_t* _orig, uint64_t lib_instance);
-
+#if defined(HSA_PC_SAMPLING_API_TABLE_MAJOR_VERSION) &&                                            \
+    HSA_PC_SAMPLING_API_TABLE_MAJOR_VERSION > 0x0
+#    define ROCPROFILER_SDK_HSA_PC_SAMPLING 1
+#else
+#    define ROCPROFILER_SDK_HSA_PC_SAMPLING 0
 #endif
-}  // namespace pc_sampling
-}  // namespace hsa
-}  // namespace rocprofiler
+
+// redundant check based on whether the pc sampling API header was found
+#if defined __has_include
+#    if __has_include(<hsa/hsa_ven_amd_pc_sampling.h>)
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING == 0
+#            error                                                                                 \
+                "rocprofiler-sdk disabled the HSA PC sampling table even though the hsa_ven_amd_pc_sampling.h was found"
+#        endif
+#    else
+#        if ROCPROFILER_SDK_HSA_PC_SAMPLING == 1
+#            error                                                                                 \
+                "rocprofiler-sdk enabled the HSA PC sampling table even though the hsa_ven_amd_pc_sampling.h was not found"
+#        endif
+#    endif
+#endif
