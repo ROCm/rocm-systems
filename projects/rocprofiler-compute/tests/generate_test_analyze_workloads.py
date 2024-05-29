@@ -19,47 +19,28 @@ if __name__ == "__main__":
         with open("test_saved_analysis.py", "a") as g:
             for workload in workloads:
                 workload_name = workload[workload.rfind("/") + 1 :]
-                if (
-                    os.path.exists(workload + "/MI100")
-                    and len(os.listdir(workload + "/MI100")) > 0
-                ):
+                archs = os.listdir(workload)
+                for arch in archs:
                     test = (
                         "\n\ndef test_analyze_"
                         + workload_name
-                        + "_MI100():\n    with patch('sys.argv',['omniperf', 'analyze', '--path', '"
+                        + "_"+arch+"():"+
+                        "\n\twith pytest.raises(SystemExit) as e:"+
+                        "\n\t\twith patch('sys.argv',['omniperf', 'analyze', '--path', '"
                         + workload
-                        + "/MI100']): omniperf.main()"
+                        + "/"+arch+"']):\n\t\t\tomniperf.main()"+
+                        "\n\tassert e.value.code == 0"
                     )
                     f.write(test)
                     test = (
                         "\n\ndef test_saved_"
                         + workload_name
-                        + "_MI100():\n    compare('"
+                        + "_"+arch+"():\n\tcompare('"
                         + workload
-                        + "/MI100/prev_analysis', '"
+                        + "/"+arch+"/prev_analysis', '"
+                        + "/"+arch+"/prev_analysis', '"
                         + workload
-                        + "/MI100/saved_analysis')"
-                    )
-                    g.write(test)
-                if (
-                    os.path.exists(workload + "/MI200")
-                    and len(os.listdir(workload + "/MI200")) > 0
-                ):
-                    test = (
-                        "\n\ndef test_"
-                        + workload_name
-                        + "_MI200():\n    with patch('sys.argv',['omniperf', 'analyze', '--path', '"
-                        + workload
-                        + "/MI200']): omniperf.main()"
-                    )
-                    f.write(test)
-                    test = (
-                        "\n\ndef test_saved_"
-                        + workload_name
-                        + "_MI200():\n    compare('"
-                        + workload
-                        + "/MI200/prev_analysis', '"
-                        + workload
-                        + "/MI200/saved_analysis')"
+                        + "/"+arch+"/saved_analysis')"
+                        + "/"+arch+"/saved_analysis')"
                     )
                     g.write(test)
