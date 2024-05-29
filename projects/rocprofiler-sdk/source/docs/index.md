@@ -12,6 +12,7 @@
    tool_library_overview
    callback_services
    buffered_services
+   pc_sampling
    intercept_table
    developer_api
    samples

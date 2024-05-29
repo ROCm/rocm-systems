@@ -130,7 +130,6 @@ Below is the list of `rocprofv3` command-line options. Some options are used for
 
 | Option | Description | Use |
 |--------|-------------|-----|
-| -d \| --output-directory | Specifies the path for the output files. | Output control |
 | --hip-trace | Collects HIP runtime traces. | Application tracing |
 | --hip-runtime-trace | Collects HIP runtime API traces. | Application tracing |
 | --hip-compiler-trace | Collects HIP compiler-generated code traces. | Application tracing |
@@ -140,16 +139,18 @@ Below is the list of `rocprofv3` command-line options. Some options are used for
 | --hsa-amd-trace | Collects HSA API traces (AMD-extension API). | Application tracing |
 | --hsa-image-trace | Collects HSA API Ttaces (Image-extension API). | Application tracing |
 | --hsa-finalizer-trace | Collects HSA API traces (Finalizer-extension API). | Application tracing |
-| -i | Specifies the input file. | Kernel profiling |
-|--stats | For Collecting statistics of enabled tracing types | Application tracing |
-| -L \| --list-metrics | List metrics for counter collection. | Kernel profiling |
+| --stats | For Collecting statistics of enabled tracing types | Application tracing |
 | --kernel-trace | Collects kernel dispatch traces. | Application tracing |
-| -M \| --mangled-kernels | Overrides the default demangling of kernel names. | Output control |
 | --marker-trace | Collects marker (ROC-TX) traces. | Application tracing |
 | --memory-copy-trace | Collects memory copy traces. | Application tracing |
-| -o \| --output-file | Specifies the name of the output file. Note that this name is appended to the default names (_api_trace or counter_collection.csv) of the generated files'. | Output control |
 | --sys-trace | Collects HIP, HSA, memory copy, marker, and kernel dispatch traces. | Application Tracing |
+| -i | Specifies the input file. | Kernel profiling |
+| -L \| --list-metrics | List metrics for counter collection. | Kernel profiling |
+| -d \| --output-directory | Specifies the path for the output files. | Output control |
+| -o \| --output-file | Specifies the name of the output file. Note that this name is appended to the default names (_api_trace or counter_collection.csv) of the generated files'. | Output control |
+| -M \| --mangled-kernels | Overrides the default demangling of kernel names. | Output control |
 | -T \| --truncate-kernels | Truncates the demangled kernel names for improved readability. | Output control |
+| --output-format  | For adding output format (supported formats: csv, json, pftrace)  | Output control |
 
 You can also see all the `rocprofv3` options using:
 
@@ -405,7 +406,7 @@ For more information on counters available on MI200, refer to the [MI200 Perform
 
 #### Input file
 
-To collect the desired basic counters or derived metrics, you can just mention them in an input file below. The line consisting of the counter or metric names must begin with `pmc`. We support input file in text(.txt extension) or yaml(.yaml/.yml) format.
+To collect the desired basic counters or derived metrics, you can just mention them in an input file below. The line consisting of the counter or metric names must begin with `pmc`. We support input file in text(.txt extension), yaml(.yaml/.yml) and json(.json) format.
 
 ```bash
 $ cat input.txt
@@ -415,7 +416,7 @@ pmc: GRBM_GUI_ACTIVE
 
 OR
 
-$ cat input.yaml
+$ cat input.json
 {
     "metrics": [
       {
@@ -426,6 +427,22 @@ $ cat input.yaml
       }
     ]
   }
+
+OR
+
+$ cat input.yaml
+
+metrics:
+  - pmc:
+      - SQ_WAVES
+      - GRBM_COUNT
+      - GUI_ACTIVE
+      - 'TCC_HIT[1]'
+      - 'TCC_HIT[2]'
+  - pmc:
+      - FETCH_SIZE
+      - WRITE_SIZE
+
 ```
 
 The GPU hardware resources limit the number of basic counters or derived metrics that can be collected in one run of profiling. If too many counters or metrics are selected, the kernels need to be executed multiple times to collect them. For multi-pass execution, include multiple `pmc` rows in the input file. Counters or metrics in each `pmc` row can be collected in each kernel run.
