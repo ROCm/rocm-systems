@@ -44,11 +44,12 @@ enum DimensionTypes
 {
     DIMENSION_NONE          = 0,
     DIMENSION_XCC           = 1 << 0,
-    DIMENSION_SHADER_ENGINE = 1 << 1,
-    DIMENSION_AGENT         = 1 << 2,
-    DIMENSION_PMC_CHANNEL   = 1 << 3,
-    DIMENSION_CU            = 1 << 4,
-    DIMENSION_LAST          = 1 << 5,
+    DIMENSION_AID           = 1 << 1,
+    DIMENSION_SHADER_ENGINE = 1 << 2,
+    DIMENSION_AGENT         = 1 << 3,
+    DIMENSION_PMC_CHANNEL   = 1 << 4,
+    DIMENSION_CU            = 1 << 5,
+    DIMENSION_LAST          = 1 << 6,
 };
 
 enum ReduceOperation

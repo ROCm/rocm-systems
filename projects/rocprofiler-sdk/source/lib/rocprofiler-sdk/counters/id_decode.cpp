@@ -39,6 +39,7 @@ dimension_map()
     static auto*& _v = common::static_object<DimensionMap>::construct(DimensionMap{
         {ROCPROFILER_DIMENSION_NONE, std::string_view("DIMENSION_NONE")},
         {ROCPROFILER_DIMENSION_XCC, std::string_view("DIMENSION_XCC")},
+        {ROCPROFILER_DIMENSION_AID, std::string_view("DIMENSION_AID")},
         {ROCPROFILER_DIMENSION_SHADER_ENGINE, std::string_view("DIMENSION_SHADER_ENGINE")},
         {ROCPROFILER_DIMENSION_AGENT, std::string_view("DIMENSION_AGENT")},
         {ROCPROFILER_DIMENSION_SHADER_ARRAY, std::string_view("DIMENSION_SHADER_ARRAY")},
@@ -63,6 +64,7 @@ aqlprofile_id_to_rocprof_instance()
                                              rocprofiler_profile_counter_instance_types>
                         aql_string_to_dim = {
                             {"XCD", ROCPROFILER_DIMENSION_XCC},
+                            {"AID", ROCPROFILER_DIMENSION_AID},
                             {"SE", ROCPROFILER_DIMENSION_SHADER_ENGINE},
                             {"SA", ROCPROFILER_DIMENSION_SHADER_ARRAY},
                             {"CU", ROCPROFILER_DIMENSION_CU},

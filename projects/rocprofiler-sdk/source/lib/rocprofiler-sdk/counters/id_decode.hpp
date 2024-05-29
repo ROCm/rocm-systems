@@ -41,6 +41,7 @@ enum rocprofiler_profile_counter_instance_types
 {
     ROCPROFILER_DIMENSION_NONE = 0,       ///< No dimension data, returns/sets 48 bit value as is
     ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
+    ROCPROFILER_DIMENSION_AID,            ///< AID dimension of result
     ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
     ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension
     ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays

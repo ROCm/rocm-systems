@@ -148,7 +148,7 @@ TEST(parser, reduction)
          "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[\"2\",\"1\"], \"Select_Dimension_Set\":[]}"},
+         "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Set\":[]}"},
         {"reduce(AB+CD, SUM, [DIMENSION_XCC,DIMENSION_SHADER_ENGINE])",
          "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
          "\"Counter_Set\":[{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", "
@@ -157,7 +157,7 @@ TEST(parser, reduction)
          "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[\"2\",\"1\"], "
+         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[\"3\",\"1\"], "
          "\"Select_Dimension_Set\":[]}"},
         {"reduce(AB,DIV, [DIMENSION_XCC,DIMENSION_SHADER_ENGINE])+reduce(DC,SUM, "
          "[DIMENSION_XCC,DIMENSION_SHADER_ENGINE])",
@@ -165,11 +165,11 @@ TEST(parser, reduction)
          "\"Counter_Set\":[{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"DIV\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[\"2\",\"1\"], "
+         "\"Reduce_Dimension_Set\":[\"3\",\"1\"], "
          "\"Select_Dimension_Set\":[]},{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"DC\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[\"2\",\"1\"], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"}};
 
     for(auto [op, expected] : expressionToExpected)
