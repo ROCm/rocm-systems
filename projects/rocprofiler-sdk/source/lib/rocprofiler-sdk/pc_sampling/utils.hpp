@@ -41,14 +41,14 @@ get_matching_hsa_pcs_method(rocprofiler_pc_sampling_method_t method);
 hsa_ven_amd_pcs_units_t
 get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit);
 
-inline constexpr size_t
+constexpr size_t
 get_hsa_pcs_latency()
 {
     // TODO: Check with David about the default value in the hsa-runtime
     return 1000;
 }
 
-inline constexpr size_t
+constexpr size_t
 get_hsa_pcs_buffer_size()
 {
     // TODO: Find the minimum size of all buffers and use that.

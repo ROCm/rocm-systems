@@ -168,9 +168,9 @@ ioctl_query_pc_sampling_capabilities(uint32_t  kfd_gpu_id,
     }
     *size = args.num_sample_info;
 
-    return (ret == -ENOSPC) ? ROCPROFILER_IOCTL_STATUS_BUFFER_TOO_SMALL
-           : (ret != 0)     ? ROCPROFILER_IOCTL_STATUS_ERROR
-                            : ROCPROFILER_IOCTL_STATUS_SUCCESS;
+    if(ret == -ENOSPC) return ROCPROFILER_IOCTL_STATUS_BUFFER_TOO_SMALL;
+
+    return ret != 0 ? ROCPROFILER_IOCTL_STATUS_ERROR : ROCPROFILER_IOCTL_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t
