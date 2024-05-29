@@ -415,7 +415,9 @@ WriteInterceptor(const void* packets,
         {
             get_core_table()->hsa_signal_store_screlease_fn(interrupt_signal, 0);
             hsa_barrier_and_packet_t barrier{};
-            barrier.header            = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+            barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
+            barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
+            barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
             barrier.completion_signal = interrupt_signal;
             transformed_packets.emplace_back(barrier);
         }

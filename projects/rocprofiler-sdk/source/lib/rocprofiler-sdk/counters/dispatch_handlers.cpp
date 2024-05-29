@@ -148,8 +148,8 @@ queue_cb(const context::context*                                         ctx,
     }
 
     ret_pkt->before_krn_pkt.push_back(ret_pkt->start);
-    ret_pkt->after_krn_pkt.push_back(ret_pkt->stop);
     ret_pkt->after_krn_pkt.push_back(ret_pkt->read);
+    ret_pkt->after_krn_pkt.push_back(ret_pkt->stop);
     for(auto& aql_pkt : ret_pkt->after_krn_pkt)
     {
         aql_pkt.completion_signal.handle = 0;
