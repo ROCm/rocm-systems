@@ -20,7 +20,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace
-        -o pmc3 --output-format JSON:PFTRACE:CSV $<TARGET_FILE:simple-transpose>)
+        -o pmc3 --output-format JSON PFTRACE CSV -- $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")

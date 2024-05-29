@@ -164,7 +164,7 @@ Application tracing provides the big picture of a program’s execution by colle
 To use `rocprofv3` for application tracing, run:
 
 ```bash
-rocprofv3 <tracing_option> <app_relative_path>
+rocprofv3 <tracing_option> -- <app_relative_path>
 ```
 
 #### HIP trace
@@ -174,7 +174,7 @@ HIP trace comprises execution traces for the entire application at the HIP level
 To trace HIP runtime APIs, use:
 
 ```bash
-rocprofv3 --hip-trace < app_relative_path >
+rocprofv3 --hip-trace -- < app_relative_path >
 ```
 
 **Note: The tracing and counter colleciton options generates an additional agent info file. See** [Agent Info](#agent-info)
@@ -198,7 +198,7 @@ $ cat 238_hip_api_trace.csv
 To trace HIP compile time APIs, use:
 
 ```bash
-rocprofv3 --hip-compiler-trace < app_relative_path >
+rocprofv3 --hip-compiler-trace -- < app_relative_path >
 ```
 
 The above command generates a `hip_api_trace.csv` file prefixed with the process ID.
@@ -232,7 +232,7 @@ The HIP runtime library is implemented with the low-level HSA runtime. HSA API t
 HSA trace contains the start and end time of HSA runtime API calls and their asynchronous activities.
 
 ```bash
-rocprofv3 --hsa-trace < app_relative_path >
+rocprofv3 --hsa-trace -- < app_relative_path >
 ```
 
 The above command generates a `hsa_api_trace.csv` file prefixed with process ID.
@@ -295,7 +295,7 @@ roctxRangeStop(rangeId);
 To trace the API calls enclosed within the range, use:
 
 ```bash
-rocprofv3 --marker-trace < app_relative_path >
+rocprofv3 --marker-trace -- < app_relative_path >
 ```
 
 Running the above command generates a `marker_api_trace.csv` file prefixed with the process ID.
@@ -318,7 +318,7 @@ For the description of the fields in the output file, see [Output file fields](#
 To trace kernel dispatch traces, use:
 
 ```bash
-rocprofv3 --kernel-trace < app_relative_path >
+rocprofv3 --kernel-trace -- < app_relative_path >
 ```
 
 The above command generates a `kernel_trace.csv` file prefixed with the process ID.
@@ -337,7 +337,7 @@ To describe the fields in the output file, see [Output file fields](#output-file
 To trace memory moves across the application, use:
 
 ```bash
-rocprofv3 –-memory-copy-trace < app_relative_path >
+rocprofv3 –-memory-copy-trace -- < app_relative_path >
 ```
 
 The above command generates a `memory_copy_trace.csv` file prefixed with the process ID.
@@ -357,7 +357,7 @@ To describe the fields in the output file, see [Output file fields](#output-file
 This is an all-inclusive option to collect all the above-mentioned traces.
 
 ```bash
-rocprofv3 –-sys-trace < app_relative_path >
+rocprofv3 –-sys-trace -- < app_relative_path >
 ```
 
 Running the above command generates `hip_api_trace.csv`, `hsa_api_trace.csv`, `kernel_trace.csv`, `memory_copy_trace.csv`, and `marker_api_trace.csv` (if `rocTX` APIs are specified in the application) files prefixed with the process Id.
@@ -405,13 +405,27 @@ For more information on counters available on MI200, refer to the [MI200 Perform
 
 #### Input file
 
-To collect the desired basic counters or derived metrics, you can just mention them in an input file below. The line consisting of the counter or metric names must begin with `pmc`.
+To collect the desired basic counters or derived metrics, you can just mention them in an input file below. The line consisting of the counter or metric names must begin with `pmc`. We support input file in text(.txt extension) or yaml(.yaml/.yml) format.
 
 ```bash
 $ cat input.txt
 
 pmc: GPUBusy SQ_WAVES
 pmc: GRBM_GUI_ACTIVE
+
+OR
+
+$ cat input.yaml
+{
+    "metrics": [
+      {
+        "pmc": ["SQ_WAVES", "GRBM_COUNT", "GUI_ACTIVE"]
+      },
+      {
+        "pmc": ["FETCH_SIZE", "WRITE_SIZE"]
+      }
+    ]
+  }
 ```
 
 The GPU hardware resources limit the number of basic counters or derived metrics that can be collected in one run of profiling. If too many counters or metrics are selected, the kernels need to be executed multiple times to collect them. For multi-pass execution, include multiple `pmc` rows in the input file. Counters or metrics in each `pmc` row can be collected in each kernel run.
@@ -421,7 +435,7 @@ The GPU hardware resources limit the number of basic counters or derived metrics
 To supply the input file for kernel profiling, use:
 
 ```bash
-rocprofv3 -i input.txt <app_relative_path>
+rocprofv3 -i input.txt -- <app_relative_path>
 ```
 
 Running the above command generates a `./pmc_n/counter_collection.csv` file prefixed with the process ID. For each `pmc` row, a directory `pmc_n` containing a `counter_collection.csv` file is generated, where n = 1 for the first row and so on.
@@ -502,9 +516,8 @@ rocprofv3 provides the following output formats:
 - PFTrace
 
 Specification of the output format is via the `--output-format` command-line option. Format selection is case-insensitive
-and multiple output formats can be selected via a single string concatenated by commas, colons, or semi-colons. Example:
-`--output-format JSON` enables JSON output exclusively where as `--output-format csv,json,pftrace` enables all three output formats
-for the run.
+and multiple output formats are supported. Example: `--output-format json` enables JSON output exclusively whereas
+`--output-format csv json pftrace` enables all three output formats for the run.
 
 For trace visualization, use the PFTrace format and open the trace in [ui.perfetto.dev](https://ui.perfetto.dev/).
 

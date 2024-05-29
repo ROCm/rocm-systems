@@ -15,11 +15,11 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 # pmc2
 add_test(
-    NAME rocprofv3-test-counter-collection-pmc2-execute
+    NAME rocprofv3-test-cc-txt-pmc2-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt --output-format CSV,JSON -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o out $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/input.txt --output-format CSV JSON -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-cc -o out -- $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -27,12 +27,12 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 set(cc-env-pmc2 "${PRELOAD_ENV}")
 
 set_tests_properties(
-    rocprofv3-test-counter-collection-pmc2-execute
+    rocprofv3-test-cc-txt-pmc2-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc2}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(
-    NAME rocprofv3-test-counter-collection-pmc2-validate
+    NAME rocprofv3-test-cc-txt-pmc2-execute-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --agent-input
         ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_agent_info.csv
@@ -50,7 +50,7 @@ set(SYS_VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_counter_collection.csv)
 
 set_tests_properties(
-    rocprofv3-test-counter-collection-pmc2-validate
+    rocprofv3-test-cc-txt-pmc2-execute-validate
     PROPERTIES TIMEOUT
                45
                LABELS

@@ -10,24 +10,24 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-add_test(
-    NAME rocprofv3-test-trace-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
-        --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
-        out --output-format pftrace,csv,json $<TARGET_FILE:simple-transpose>)
-
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
-
 if(ROCPROFILER_MEMCHECK STREQUAL "LeakSanitizer")
     set(LOG_LEVEL "warning") # info produces memory leak
 else()
     set(LOG_LEVEL "info")
 endif()
 
-set(tracing-env "${PRELOAD_ENV}" "ROCPROFILER_LOG_LEVEL=${LOG_LEVEL}"
-                "ROCPROF_LOG_LEVEL=${LOG_LEVEL}")
+add_test(
+    NAME rocprofv3-test-trace-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
+        --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
+        out --output-format pftrace csv json --log-level ${LOG_LEVEL} --
+        $<TARGET_FILE:simple-transpose>)
+
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+set(tracing-env "${PRELOAD_ENV}")
 
 set_tests_properties(
     rocprofv3-test-trace-execute
@@ -90,8 +90,8 @@ add_test(
     NAME rocprofv3-test-systrace-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out --output-format
-        pftrace,csv,json $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out --output-format pftrace csv
+        json -- $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
     rocprofv3-test-systrace-execute

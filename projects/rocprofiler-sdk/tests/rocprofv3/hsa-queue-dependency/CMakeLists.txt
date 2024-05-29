@@ -8,10 +8,10 @@ project(
     LANGUAGES CXX
     VERSION 0.0.0)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
+string(REPLACE "LD_PRELOAD=" "--preload;" PRELOAD_ARGS
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(tracing-env "${PRELOAD_ENV}")
+set(tracing-env "")
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
@@ -22,8 +22,8 @@ add_test(
     NAME rocprofv3-test-hsa-multiqueue-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace --kernel-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --output-format json:csv:pftrace
-        $<TARGET_FILE:multiqueue_testapp>)
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --output-format json csv pftrace
+        ${PRELOAD_ARGS} -- $<TARGET_FILE:multiqueue_testapp>)
 
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-execute

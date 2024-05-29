@@ -1066,8 +1066,17 @@ rocprofiler_client_finalize_t client_finalizer  = nullptr;
 rocprofiler_client_id_t*      client_identifier = nullptr;
 
 void
+initialize_logging()
+{
+    auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
+    common::init_logging("ROCPROF", logging_cfg);
+    FLAGS_colorlogtostderr = true;
+}
+
+void
 initialize_rocprofv3()
 {
+    ROCP_INFO << "initializing rocprofv3...";
     if(int status = 0;
        rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
     {
@@ -1083,6 +1092,7 @@ initialize_rocprofv3()
 void
 finalize_rocprofv3()
 {
+    ROCP_INFO << "finalizing rocprofv3...";
     if(client_finalizer && client_identifier)
     {
         client_finalizer(*client_identifier);
@@ -1597,9 +1607,7 @@ rocprofiler_configure(uint32_t                 version,
                       uint32_t                 priority,
                       rocprofiler_client_id_t* id)
 {
-    auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
-    common::init_logging("ROCPROF", logging_cfg);
-    FLAGS_colorlogtostderr = true;
+    initialize_logging();
 
     // set the client name
     id->name = "rocprofv3";
@@ -1673,19 +1681,15 @@ rocprofv3_set_main(main_func_t main_func)
 int
 rocprofv3_main(int argc, char** argv, char** envp)
 {
-    auto logging_cfg = rocprofiler::common::logging_config{.install_failure_handler = true};
-    common::init_logging("ROCPROF_LOG_LEVEL", logging_cfg);
-    FLAGS_colorlogtostderr = true;
+    initialize_logging();
 
-    LOG(INFO) << "initializing rocprofv3...";
     initialize_rocprofv3();
 
     auto ret = CHECK_NOTNULL(get_main_function())(argc, argv, envp);
 
-    LOG(INFO) << "finalizing rocprofv3...";
     finalize_rocprofv3();
 
-    LOG(INFO) << "rocprofv3 finished. exit code: " << ret;
+    ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;
 }
 }

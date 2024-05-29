@@ -56,6 +56,7 @@ usage() {
   echo -e ""
   echo -e "${GREEN}-d   | --output-directory ${RESET}    For adding output path where the output files will be saved"
   echo -e "\t#${GREY} usage (with custom dir):  rocprofv3 --hsa-trace -d <out_dir> <executable>${RESET}"
+  echo -e "${GREEN} | --output-format ${RESET}    For adding output format(supported formats: csv, json)"
   echo -e ""
   echo -e "${GREEN}--output-format ${RESET}              For specifying output format. Case-insensitive, comma separated. Options: CSV, JSON, PFTRACE"
   echo -e "\t#${GREY} Examples:"

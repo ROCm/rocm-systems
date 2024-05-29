@@ -4,10 +4,8 @@
 
 rocprofiler_activate_clang_tidy()
 
-configure_file(rocprofv3.sh ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_SBINDIR}/rocprofv3.sh
-               COPYONLY)
-
-configure_file(rocprofv3.sh ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
+# Adding main rocprofv3
+configure_file(rocprofv3.py ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}/rocprofv3
                COPYONLY)
 
 install(
@@ -16,6 +14,19 @@ install(
     PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
                 WORLD_EXECUTE
     COMPONENT tools)
+
+configure_file(rocprofv3.py ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_SBINDIR}/rocprofv3.py
+               COPYONLY)
+
+install(
+    FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_SBINDIR}/rocprofv3.py
+    DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ
+                WORLD_EXECUTE
+    COMPONENT tools)
+
+configure_file(rocprofv3.sh ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_SBINDIR}/rocprofv3.sh
+               COPYONLY)
 
 install(
     FILES ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_SBINDIR}/rocprofv3.sh

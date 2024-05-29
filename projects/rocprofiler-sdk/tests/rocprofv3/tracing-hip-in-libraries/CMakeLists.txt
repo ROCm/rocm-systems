@@ -15,7 +15,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-runtime-trace --hsa-core-trace
         --hsa-amd-trace --marker-trace --kernel-trace --memory-copy-trace --stats
-        --output-format csv -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out
+        --output-format csv -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --
         $<TARGET_FILE:hip-in-libraries>)
 
 add_test(
@@ -23,7 +23,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-runtime-trace --hsa-core-trace
         --hsa-amd-trace --marker-trace --kernel-trace --memory-copy-trace --stats
-        --output-format JSON -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out
+        --output-format JSON -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --
         $<TARGET_FILE:hip-in-libraries>)
 
 add_test(
@@ -31,7 +31,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-runtime-trace --hsa-core-trace
         --hsa-amd-trace --marker-trace --kernel-trace --memory-copy-trace --stats
-        --output-format pftrace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out
+        --output-format pftrace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --
         $<TARGET_FILE:hip-in-libraries>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
