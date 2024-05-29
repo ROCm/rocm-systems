@@ -5,7 +5,6 @@ declare -A commands=(
     [kernel_names]='--roof-only --kernel-names'
     [device_filter]='--device 0'
     [kernel]='--kernel "vecCopy(double*, double*, double*, int, int) [clone .kd]"'
-    [kernel_summaries]='--kernel-summaries vcopy'
     [ipblocks_SQ]='-b SQ'
     [ipblocks_SQC]='-b SQC'
     [ipblocks_TA]='-b TA'
@@ -52,7 +51,7 @@ declare -A commands=(
     [device_inv]='--device invalid' # does not generate a workload
     [device_inv_int]='--device -1'
     )
-soc=MI100
+soc=MI300X_A1
 echo "starting"
 for key in "${!commands[@]}"; do
     echo profiling $key;
