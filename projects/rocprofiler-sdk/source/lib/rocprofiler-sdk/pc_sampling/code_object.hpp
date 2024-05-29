@@ -22,7 +22,11 @@
 
 #pragma once
 
-#include <hsa/hsa_api_trace.h>
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+#    include <hsa/hsa_api_trace.h>
 
 namespace rocprofiler
 {
@@ -38,3 +42,5 @@ finalize();
 }  // namespace code_object
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif

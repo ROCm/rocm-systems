@@ -272,9 +272,11 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
 rocprofiler_status_t
 rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id)
 {
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
     // Drain internal PC sampling buffers, if needed.
     auto status = rocprofiler::pc_sampling::flush_internal_agent_buffers(buffer_id);
     if(status != ROCPROFILER_STATUS_SUCCESS) return status;
+#endif
 
     return rocprofiler::buffer::flush(buffer_id, true);
 }

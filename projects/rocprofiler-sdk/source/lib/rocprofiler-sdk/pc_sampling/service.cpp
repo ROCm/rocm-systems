@@ -22,10 +22,12 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 
-#include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+#    include "lib/common/logging.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/ioctl/ioctl_adapter.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
 
 namespace rocprofiler
 {
@@ -266,3 +268,5 @@ flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id)
 
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif

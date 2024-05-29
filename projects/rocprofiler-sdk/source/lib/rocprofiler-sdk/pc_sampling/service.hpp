@@ -22,14 +22,18 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/pc_sampling.h>
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
-#include <hsa/hsa_api_trace.h>
+#    include "lib/rocprofiler-sdk/context/context.hpp"
 
-#include <atomic>
+#    include <rocprofiler-sdk/fwd.h>
+#    include <rocprofiler-sdk/pc_sampling.h>
+
+#    include <hsa/hsa_api_trace.h>
+
+#    include <atomic>
 
 namespace rocprofiler
 {
@@ -64,3 +68,5 @@ rocprofiler_status_t
 flush_internal_agent_buffers(rocprofiler_buffer_id_t buffer_id);
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif

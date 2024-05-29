@@ -22,19 +22,21 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 
-#include "lib/common/container/operators.hpp"
-#include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/code_object/code_object.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/pc_sampling.h>
-#include <rocprofiler-sdk/cxx/operators.hpp>
+#    include "lib/common/container/operators.hpp"
+#    include "lib/common/logging.hpp"
+#    include "lib/rocprofiler-sdk/code_object/code_object.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
 
-#include <glog/logging.h>
-#include <hsa/hsa.h>
-#include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ven_amd_loader.h>
+#    include <rocprofiler-sdk/fwd.h>
+#    include <rocprofiler-sdk/pc_sampling.h>
+#    include <rocprofiler-sdk/cxx/operators.hpp>
+
+#    include <glog/logging.h>
+#    include <hsa/hsa.h>
+#    include <hsa/hsa_api_trace.h>
+#    include <hsa/hsa_ven_amd_loader.h>
 
 namespace rocprofiler
 {
@@ -188,3 +190,5 @@ finalize()
 }  // namespace code_object
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif

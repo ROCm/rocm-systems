@@ -22,23 +22,25 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 
-#include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
-#include <hsa/hsa.h>
-#include <hsa/hsa_ext_amd.h>
-#include <hsa/hsa_ven_amd_pc_sampling.h>
+#    include "lib/common/logging.hpp"
+#    include "lib/rocprofiler-sdk/context/context.hpp"
+#    include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#    include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
 
-#include <mutex>
-#include <optional>
-#include <shared_mutex>
-#include <stdexcept>
+#    include <hsa/hsa.h>
+#    include <hsa/hsa_ext_amd.h>
+#    include <hsa/hsa_ven_amd_pc_sampling.h>
+
+#    include <mutex>
+#    include <optional>
+#    include <shared_mutex>
+#    include <stdexcept>
 
 namespace rocprofiler
 {
@@ -376,3 +378,5 @@ flush_internal_agent_buffers(const PCSAgentSession* agent_session)
 }  // namespace hsa
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/cid_manager.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
@@ -8,7 +9,9 @@
 #include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/hsa.h>
-#include <hsa/hsa_ven_amd_pc_sampling.h>
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+#    include <hsa/hsa_ven_amd_pc_sampling.h>
+#endif
 
 #include <memory>
 
@@ -28,8 +31,10 @@ struct PCSAgentSession
     rocprofiler_buffer_id_t          buffer_id;
     // hsa relevant information
     std::optional<hsa_agent_t> hsa_agent = std::nullopt;
-    hsa_ven_amd_pcs_t          hsa_pc_sampling;
-    hsa::ClientID              intercept_cb_id{-1};
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+    hsa_ven_amd_pcs_t hsa_pc_sampling;
+#endif
+    hsa::ClientID intercept_cb_id{-1};
     // ioctl relevant information
     uint32_t ioctl_pcs_id;
     // PC sampling parser

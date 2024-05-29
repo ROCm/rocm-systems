@@ -92,6 +92,8 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
     (void) interval;
     (void) buffer_id;
 
+    ROCP_ERROR << "PC sampling unavailable\n";
+
     // ROCr runtime is missing PC sampling.
     return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
 #endif
@@ -117,6 +119,8 @@ rocprofiler_query_pc_sampling_agent_configurations(
     (void) agent_id;
     (void) cb;
     (void) user_data;
+
+    ROCP_ERROR << "PC sampling unavailable\n";
 
     // ROCr runtime is missing PC sampling.
     return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;

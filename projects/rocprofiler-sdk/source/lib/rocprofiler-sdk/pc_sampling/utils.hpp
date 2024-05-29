@@ -20,14 +20,20 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/pc_sampling.h>
+#pragma once
 
-#include <hsa/hsa.h>
-#include <hsa/hsa_ven_amd_pc_sampling.h>
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include <cstdint>
-#include <optional>
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+#    include <rocprofiler-sdk/fwd.h>
+#    include <rocprofiler-sdk/pc_sampling.h>
+
+#    include <hsa/hsa.h>
+#    include <hsa/hsa_ven_amd_pc_sampling.h>
+
+#    include <cstdint>
+#    include <optional>
 
 namespace rocprofiler
 {
@@ -54,9 +60,8 @@ get_hsa_pcs_buffer_size()
     // TODO: Find the minimum size of all buffers and use that.
     return 1024 * sizeof(perf_sample_hosttrap_v1_t);
 }
-
-uint64_t
-get_unique_correlation_id();
 }  // namespace utils
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif

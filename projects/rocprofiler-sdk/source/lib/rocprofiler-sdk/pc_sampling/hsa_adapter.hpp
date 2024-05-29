@@ -22,12 +22,16 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
-#include "lib/rocprofiler-sdk/tracing/fwd.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 
-#include <hsa/hsa_api_trace.h>
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+#    include "lib/rocprofiler-sdk/context/context.hpp"
+#    include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#    include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
+#    include "lib/rocprofiler-sdk/tracing/fwd.hpp"
+
+#    include <hsa/hsa_api_trace.h>
 
 namespace rocprofiler
 {
@@ -54,3 +58,5 @@ flush_internal_agent_buffers(const PCSAgentSession* agent_session);
 }  // namespace hsa
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif

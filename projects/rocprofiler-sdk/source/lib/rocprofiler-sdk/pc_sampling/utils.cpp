@@ -21,14 +21,15 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/pc_sampling/utils.hpp"
-#include "lib/rocprofiler-sdk/agent.hpp"
 
-#include <hsa/hsa_ext_amd.h>
-#include <hsa/hsa_ven_amd_pc_sampling.h>
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
 
-#include <fmt/core.h>
-#include <glog/logging.h>
-#include <vector>
+#    include "lib/rocprofiler-sdk/agent.hpp"
+
+#    include <hsa/hsa_ext_amd.h>
+#    include <hsa/hsa_ven_amd_pc_sampling.h>
+
+#    include <stdexcept>
 
 namespace rocprofiler
 {
@@ -41,10 +42,13 @@ get_matching_hsa_pcs_method(rocprofiler_pc_sampling_method_t method)
 {
     switch(method)
     {
+        case ROCPROFILER_PC_SAMPLING_METHOD_NONE: break;
         case ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC: return HSA_VEN_AMD_PCS_METHOD_STOCHASTIC_V1;
         case ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP: return HSA_VEN_AMD_PCS_METHOD_HOSTTRAP_V1;
-        default: throw std::runtime_error("Illegal pc sampling method\n");
+        case ROCPROFILER_PC_SAMPLING_METHOD_LAST: break;
     }
+
+    throw std::runtime_error("Illegal pc sampling method\n");
 }
 
 hsa_ven_amd_pcs_units_t
@@ -63,17 +67,8 @@ get_matching_hsa_pcs_units(rocprofiler_pc_sampling_unit_t unit)
 
     throw std::runtime_error("Illegal pc sampling units\n");
 }
-
-uint64_t
-get_unique_correlation_id()
-{
-    // TODO: Remove once we confirmed it is unnecessary.
-    // Also, update the PC sampling parser not to decode correlation ID
-    // (or always 0 for both internal/external correlation IDs)
-    static auto _cnt = std::atomic<int>{0};
-    return ++_cnt;
-}
-
 }  // namespace utils
 }  // namespace pc_sampling
 }  // namespace rocprofiler
+
+#endif
