@@ -188,13 +188,18 @@ set(CPACK_DEBIAN_PACKAGE_PROVIDES "${ROCM_SMI_PACKAGE}")
 set(CPACK_RPM_PACKAGE_PROVIDES "${CPACK_DEBIAN_PACKAGE_PROVIDES}")
 
 # Add dependencies
+# no rocm-core
+# python doesn't need to be asan
 set(CPACK_DEBIAN_PACKAGE_DEPENDS "python3")
+set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
 # Only add dependency on rocm-core if -DROCM_DEP_ROCMCORE=ON is given
-# carefully reuse DEB's "DEPENDS" for RPM's "REQUIRES"
 if(ROCM_DEP_ROCMCORE)
     set(CPACK_DEBIAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}, rocm-core")
+    # rocm-core needs to be asan
+    # override original variable because CPACK_DEBIAN_PACKAGE_DEPENDS changed
     set(CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS "${CPACK_DEBIAN_PACKAGE_DEPENDS}-asan")
 endif()
+# carefully reuse DEB's "DEPENDS" for RPM's "REQUIRES"
 set(CPACK_RPM_PACKAGE_REQUIRES "${CPACK_DEBIAN_PACKAGE_DEPENDS}")
 set(CPACK_RPM_ASAN_PACKAGE_REQUIRES "${CPACK_DEBIAN_ASAN_PACKAGE_DEPENDS}")
 
