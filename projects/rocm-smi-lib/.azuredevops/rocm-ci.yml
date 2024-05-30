@@ -37,4 +37,4 @@ pr:
   drafts: false
 
 jobs:
-  - template: ${{ variables.CI_COMPONENT_PATH }}/rocm_smi_lib.yml.yml@pipelines_repo
+  - template: ${{ variables.CI_COMPONENT_PATH }}/rocm_smi_lib.yml@pipelines_repo
