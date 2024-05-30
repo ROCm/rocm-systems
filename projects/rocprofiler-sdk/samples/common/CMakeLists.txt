@@ -66,7 +66,7 @@ set(ROCPROFILER_DEFAULT_FAIL_REGEX
 
 # build flags
 add_library(rocprofiler-samples-build-flags INTERFACE)
-add_library(rocprofiler::samples-build-flags ALIAS rocprofiler-samples-build-flags)
+add_library(rocprofiler-sdk::samples-build-flags ALIAS rocprofiler-samples-build-flags)
 target_compile_options(rocprofiler-samples-build-flags INTERFACE -W -Wall -Wextra
                                                                  -Wshadow)
 target_compile_features(rocprofiler-samples-build-flags INTERFACE cxx_std_17)
@@ -79,9 +79,10 @@ endif()
 cmake_path(GET CMAKE_CURRENT_SOURCE_DIR PARENT_PATH COMMON_LIBRARY_INCLUDE_DIR)
 
 add_library(rocprofiler-samples-common-library INTERFACE)
-add_library(rocprofiler::samples-common-library ALIAS rocprofiler-samples-common-library)
+add_library(rocprofiler-sdk::samples-common-library ALIAS
+            rocprofiler-samples-common-library)
 target_link_libraries(rocprofiler-samples-common-library
-                      INTERFACE rocprofiler::samples-build-flags libdw::libdw)
+                      INTERFACE rocprofiler-sdk::samples-build-flags libdw::libdw)
 target_compile_features(rocprofiler-samples-common-library INTERFACE cxx_std_17)
 target_include_directories(rocprofiler-samples-common-library
                            INTERFACE ${COMMON_LIBRARY_INCLUDE_DIR})

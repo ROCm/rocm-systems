@@ -31,8 +31,8 @@ add_library(external-correlation-id-request-client SHARED)
 target_sources(external-correlation-id-request-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     external-correlation-id-request-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
-            rocprofiler::samples-common-library)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-build-flags
+            rocprofiler-sdk::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)
@@ -42,7 +42,7 @@ target_sources(external-correlation-id-request PRIVATE main.cpp)
 target_link_libraries(
     external-correlation-id-request
     PRIVATE external-correlation-id-request-client Threads::Threads
-            rocprofiler::samples-build-flags)
+            rocprofiler-sdk::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV external-correlation-id-request-client)
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)

@@ -31,8 +31,8 @@ add_library(intercept-table-client SHARED)
 target_sources(intercept-table-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     intercept-table-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
-            rocprofiler::samples-common-library)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-build-flags
+            rocprofiler-sdk::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)
@@ -40,7 +40,7 @@ find_package(Threads REQUIRED)
 add_executable(intercept-table)
 target_sources(intercept-table PRIVATE main.cpp)
 target_link_libraries(intercept-table PRIVATE intercept-table-client Threads::Threads
-                                              rocprofiler::samples-build-flags)
+                                              rocprofiler-sdk::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV intercept-table-client)
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)

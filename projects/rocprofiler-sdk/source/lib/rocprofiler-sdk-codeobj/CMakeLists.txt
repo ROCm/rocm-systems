@@ -19,7 +19,7 @@
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "development")
 
 add_library(rocprofiler-sdk-codeobj INTERFACE)
-add_library(rocprofiler::rocprofiler-sdk-codeobj ALIAS rocprofiler-sdk-codeobj)
+add_library(rocprofiler-sdk::rocprofiler-sdk-codeobj ALIAS rocprofiler-sdk-codeobj)
 
 target_include_directories(
     rocprofiler-sdk-codeobj
@@ -28,8 +28,8 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-sdk-codeobj
-    INTERFACE rocprofiler::rocprofiler-amd-comgr rocprofiler::rocprofiler-dw
-              rocprofiler::rocprofiler-elf)
+    INTERFACE rocprofiler-sdk::rocprofiler-amd-comgr rocprofiler-sdk::rocprofiler-dw
+              rocprofiler-sdk::rocprofiler-elf)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

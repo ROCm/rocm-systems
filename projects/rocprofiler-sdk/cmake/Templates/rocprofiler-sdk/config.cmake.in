@@ -35,9 +35,6 @@ set(@PACKAGE_NAME@_LIBRARIES)
 
 # add interface library
 add_library(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE IMPORTED)
-if(NOT TARGET @PROJECT_NAME@::@PROJECT_NAME@)
-    add_library(@PROJECT_NAME@::@PROJECT_NAME@ ALIAS @PACKAGE_NAME@::@PACKAGE_NAME@)
-endif()
 
 target_include_directories(@PACKAGE_NAME@::@PACKAGE_NAME@
                            INTERFACE "${@PACKAGE_NAME@_INCLUDE_DIR}")
@@ -110,7 +107,7 @@ else()
 
     # Library dependencies
     foreach(TARG @PROJECT_BUILD_TARGETS@)
-        set(TARG @PROJECT_NAME@::@PROJECT_NAME@-${TARG})
+        set(TARG @PACKAGE_NAME@::@PROJECT_NAME@-${TARG})
         if(NOT @PACKAGE_NAME@_FIND_COMPONENTS)
             list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})
             target_link_libraries(@PACKAGE_NAME@::@PACKAGE_NAME@ INTERFACE ${TARG})
@@ -119,7 +116,7 @@ else()
 
     if(@PACKAGE_NAME@_FIND_COMPONENTS)
         foreach(COMP ${@PACKAGE_NAME@_FIND_COMPONENTS})
-            set(TARG @PROJECT_NAME@::${COMP})
+            set(TARG @PACKAGE_NAME@::${COMP})
             if(TARGET ${TARG})
                 set(@PACKAGE_NAME@_${COMP}_FOUND 1)
                 list(APPEND @PACKAGE_NAME@_LIBRARIES ${TARG})

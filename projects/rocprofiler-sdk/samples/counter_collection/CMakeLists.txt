@@ -31,8 +31,8 @@ add_library(counter-collection-buffer-client SHARED)
 target_sources(counter-collection-buffer-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     counter-collection-buffer-client
-    PUBLIC rocprofiler::samples-build-flags
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-common-library)
+    PUBLIC rocprofiler-sdk::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(counter-collection-buffer)
@@ -57,8 +57,8 @@ add_library(counter-collection-callback-client SHARED)
 target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
 target_link_libraries(
     counter-collection-callback-client
-    PUBLIC rocprofiler::samples-build-flags
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-common-library)
+    PUBLIC rocprofiler-sdk::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 add_executable(counter-collection-callback)
@@ -84,8 +84,8 @@ target_sources(counter-collection-functional-counter-client
                PRIVATE print_functional_counters.cpp client.hpp)
 target_link_libraries(
     counter-collection-functional-counter-client
-    PUBLIC rocprofiler::samples-build-flags
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-common-library)
+    PUBLIC rocprofiler-sdk::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library)
 
 add_executable(counter-collection-print-functional-counters)
 target_sources(counter-collection-print-functional-counters PRIVATE main.cpp)
@@ -112,8 +112,8 @@ target_sources(counter-collection-agent-profiling-client PRIVATE agent_profiling
                                                                  client.hpp)
 target_link_libraries(
     counter-collection-agent-profiling-client
-    PUBLIC rocprofiler::samples-build-flags
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-common-library)
+    PUBLIC rocprofiler-sdk::samples-build-flags
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library)
 
 add_executable(counter-collection-agent-profiling)
 target_sources(counter-collection-agent-profiling PRIVATE main.cpp)

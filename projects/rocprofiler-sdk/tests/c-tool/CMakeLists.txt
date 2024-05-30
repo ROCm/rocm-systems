@@ -21,7 +21,7 @@ add_test(NAME test-c-tool-execute COMMAND $<TARGET_FILE:transpose> 1)
 
 set(c-tool-env
     "${PRELOAD_ENV}"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 set_tests_properties(

@@ -53,9 +53,9 @@ add_dependencies(counter-test agent_hasco_targets)
 
 target_link_libraries(
     counter-test
-    PRIVATE rocprofiler::rocprofiler-hsa-runtime rocprofiler::rocprofiler-hip
-            rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-hsa-runtime rocprofiler-sdk::rocprofiler-hip
+            rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET counter-test

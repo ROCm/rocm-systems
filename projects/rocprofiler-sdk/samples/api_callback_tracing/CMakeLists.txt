@@ -31,8 +31,8 @@ add_library(callback-api-tracing-client SHARED)
 target_sources(callback-api-tracing-client PRIVATE client.cpp client.hpp)
 target_link_libraries(
     callback-api-tracing-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
-            rocprofiler::samples-common-library)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-build-flags
+            rocprofiler-sdk::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
@@ -44,7 +44,8 @@ target_sources(callback-api-tracing PRIVATE main.cpp)
 target_link_libraries(
     callback-api-tracing
     PRIVATE callback-api-tracing-client Threads::Threads
-            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx rocprofiler::samples-build-flags)
+            rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
+            rocprofiler-sdk::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV callback-api-tracing-client)
 rocprofiler_samples_get_ld_library_path_env(

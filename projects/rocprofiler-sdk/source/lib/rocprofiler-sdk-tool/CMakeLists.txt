@@ -38,13 +38,13 @@ add_subdirectory(plugins)
 
 target_link_libraries(
     rocprofiler-sdk-tool
-    PRIVATE rocprofiler::rocprofiler-shared-library
-            rocprofiler::rocprofiler-headers
-            rocprofiler::rocprofiler-build-flags
-            rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-cereal
-            rocprofiler::rocprofiler-perfetto)
+    PRIVATE rocprofiler-sdk::rocprofiler-shared-library
+            rocprofiler-sdk::rocprofiler-headers
+            rocprofiler-sdk::rocprofiler-build-flags
+            rocprofiler-sdk::rocprofiler-memcheck
+            rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-cereal
+            rocprofiler-sdk::rocprofiler-perfetto)
 
 set_target_properties(
     rocprofiler-sdk-tool
@@ -64,7 +64,7 @@ install(
 add_executable(rocprofv3-trigger-list-metrics)
 target_sources(rocprofv3-trigger-list-metrics PRIVATE rocprofv3_trigger_list_metrics.cpp)
 target_link_libraries(rocprofv3-trigger-list-metrics
-                      PRIVATE rocprofiler::rocprofiler-hsa-runtime)
+                      PRIVATE rocprofiler-sdk::rocprofiler-hsa-runtime)
 set_target_properties(
     rocprofv3-trigger-list-metrics
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY

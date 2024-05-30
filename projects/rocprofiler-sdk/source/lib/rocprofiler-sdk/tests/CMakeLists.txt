@@ -18,9 +18,9 @@ add_executable(rocprofiler-lib-tests)
 target_sources(rocprofiler-lib-tests PRIVATE ${rocprofiler_lib_sources} details/agent.cpp)
 target_link_libraries(
     rocprofiler-lib-tests
-    PRIVATE rocprofiler::rocprofiler-static-library
-            rocprofiler::rocprofiler-common-library rocprofiler::rocprofiler-hsa-runtime
-            GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-static-library
+            rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-hsa-runtime GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET rocprofiler-lib-tests
@@ -44,11 +44,11 @@ add_executable(rocprofiler-lib-tests-shared)
 target_sources(rocprofiler-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
 target_link_libraries(
     rocprofiler-lib-tests-shared
-    PRIVATE rocprofiler::rocprofiler-shared-library
-            rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-hsa-runtime
-            rocprofiler::rocprofiler-drm
-            rocprofiler::rocprofiler-sdk-roctx-shared-library
+    PRIVATE rocprofiler-sdk::rocprofiler-shared-library
+            rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-hsa-runtime
+            rocprofiler-sdk::rocprofiler-drm
+            rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library
             GTest::gtest
             GTest::gtest_main)
 set_target_properties(rocprofiler-lib-tests-shared PROPERTIES BUILD_RPATH

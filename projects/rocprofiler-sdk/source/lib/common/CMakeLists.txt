@@ -19,7 +19,7 @@ set(common_headers
     xml.hpp)
 
 add_library(rocprofiler-common-library STATIC)
-add_library(rocprofiler::rocprofiler-common-library ALIAS rocprofiler-common-library)
+add_library(rocprofiler-sdk::rocprofiler-common-library ALIAS rocprofiler-common-library)
 
 add_subdirectory(container)
 add_subdirectory(memory)
@@ -30,17 +30,17 @@ target_include_directories(rocprofiler-common-library
 
 target_link_libraries(
     rocprofiler-common-library
-    PUBLIC $<BUILD_INTERFACE:rocprofiler::rocprofiler-headers>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-build-flags>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-threading>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-memcheck>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-cxx-filesystem>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-glog>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-fmt>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-dl>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-ptl>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-atomic>
-           $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsakmt-nolink>)
+    PUBLIC $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-headers>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-build-flags>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-threading>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-memcheck>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-cxx-filesystem>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-glog>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-fmt>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-dl>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-ptl>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-atomic>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-hsakmt-nolink>)
 
 set_target_properties(rocprofiler-common-library PROPERTIES OUTPUT_NAME
                                                             rocprofiler-common)

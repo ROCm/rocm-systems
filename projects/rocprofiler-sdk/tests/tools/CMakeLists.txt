@@ -15,9 +15,9 @@ add_library(rocprofiler-sdk-json-tool SHARED)
 target_sources(rocprofiler-sdk-json-tool PRIVATE json-tool.cpp)
 target_link_libraries(
     rocprofiler-sdk-json-tool
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::rocprofiler-cereal
-            rocprofiler::tests-build-flags rocprofiler::tests-common-library
-            rocprofiler::tests-perfetto)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::rocprofiler-cereal
+            rocprofiler-sdk::tests-build-flags rocprofiler-sdk::tests-common-library
+            rocprofiler-sdk::tests-perfetto)
 set_target_properties(
     rocprofiler-sdk-json-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
@@ -30,7 +30,7 @@ set_target_properties(
 add_library(rocprofiler-sdk-c-tool SHARED)
 target_sources(rocprofiler-sdk-c-tool PRIVATE c-tool.c)
 target_link_libraries(rocprofiler-sdk-c-tool PRIVATE rocprofiler-sdk::rocprofiler-sdk
-                                                     rocprofiler::tests-build-flags)
+                                                     rocprofiler-sdk::tests-build-flags)
 set_target_properties(
     rocprofiler-sdk-c-tool
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"

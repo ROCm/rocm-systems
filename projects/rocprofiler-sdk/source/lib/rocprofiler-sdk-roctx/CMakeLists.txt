@@ -6,7 +6,7 @@ set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "roctx")
 find_package(rocprofiler-register REQUIRED)
 
 add_library(rocprofiler-sdk-roctx-shared-library SHARED)
-add_library(rocprofiler::rocprofiler-sdk-roctx-shared-library ALIAS
+add_library(rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library ALIAS
             rocprofiler-sdk-roctx-shared-library)
 add_library(rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library ALIAS
             rocprofiler-sdk-roctx-shared-library)
@@ -19,9 +19,11 @@ target_include_directories(
               $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 target_link_libraries(
     rocprofiler-sdk-roctx-shared-library
-    PRIVATE rocprofiler-register::rocprofiler-register rocprofiler::rocprofiler-headers
-            rocprofiler::rocprofiler-build-flags rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library)
+    PRIVATE rocprofiler-register::rocprofiler-register
+            rocprofiler-sdk::rocprofiler-headers
+            rocprofiler-sdk::rocprofiler-build-flags
+            rocprofiler-sdk::rocprofiler-memcheck
+            rocprofiler-sdk::rocprofiler-common-library)
 
 set_target_properties(
     rocprofiler-sdk-roctx-shared-library

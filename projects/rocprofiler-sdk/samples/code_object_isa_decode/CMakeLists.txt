@@ -103,8 +103,8 @@ add_executable(code-object-isa-decode)
 target_sources(code-object-isa-decode PRIVATE main.cpp client.cpp)
 target_link_libraries(
     code-object-isa-decode
-    PRIVATE rocprofiler::samples-common-library rocprofiler-sdk::rocprofiler-sdk
-            amd_comgr rocprofiler::samples-build-flags)
+    PRIVATE rocprofiler-sdk::samples-common-library rocprofiler-sdk::rocprofiler-sdk
+            amd_comgr rocprofiler-sdk::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV code-object-isa-decode)
 

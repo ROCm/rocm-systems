@@ -10,9 +10,9 @@ target_sources(thread-trace-packet-test PRIVATE ${ROCPROFILER_THREAD_TRACE_TEST_
 
 target_link_libraries(
     thread-trace-packet-test
-    PRIVATE rocprofiler::rocprofiler-static-library rocprofiler::rocprofiler-glog
-            rocprofiler::rocprofiler-hsa-runtime rocprofiler::rocprofiler-hip
-            rocprofiler::rocprofiler-common-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-static-library rocprofiler-sdk::rocprofiler-glog
+            rocprofiler-sdk::rocprofiler-hsa-runtime rocprofiler-sdk::rocprofiler-hip
+            rocprofiler-sdk::rocprofiler-common-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET thread-trace-packet-test

@@ -32,7 +32,7 @@ set(GPU_TARGETS
 
 # build flags
 add_library(rocprofiler-tests-build-flags INTERFACE)
-add_library(rocprofiler::tests-build-flags ALIAS rocprofiler-tests-build-flags)
+add_library(rocprofiler-sdk::tests-build-flags ALIAS rocprofiler-tests-build-flags)
 target_compile_options(rocprofiler-tests-build-flags INTERFACE -W -Wall -Wextra -Wshadow)
 target_compile_features(rocprofiler-tests-build-flags INTERFACE cxx_std_17)
 
@@ -41,11 +41,11 @@ if(ROCPROFILER_BUILD_CI OR ROCPROFILER_BUILD_WERROR)
 endif()
 
 # serialization library
-if(NOT TARGET rocprofiler::rocprofiler-cereal)
+if(NOT TARGET rocprofiler-sdk::rocprofiler-cereal)
     get_filename_component(ROCPROFILER_SOURCE_DIR "${PROJECT_SOURCE_DIR}/.." REALPATH)
 
     add_library(rocprofiler-cereal INTERFACE)
-    add_library(rocprofiler::rocprofiler-cereal ALIAS rocprofiler-cereal)
+    add_library(rocprofiler-sdk::rocprofiler-cereal ALIAS rocprofiler-cereal)
     target_compile_definitions(rocprofiler-cereal
                                INTERFACE $<BUILD_INTERFACE:CEREAL_THREAD_SAFE=1>)
 
@@ -84,7 +84,7 @@ if(NOT TARGET rocprofiler::rocprofiler-cereal)
     endif()
 endif()
 
-if(NOT TARGET rocprofiler::rocprofiler-perfetto)
+if(NOT TARGET rocprofiler-sdk::rocprofiler-perfetto)
     # perfetto
     fetchcontent_declare(
         perfetto
@@ -101,7 +101,7 @@ if(NOT TARGET rocprofiler::rocprofiler-perfetto)
     endif()
 
     add_library(rocprofiler-tests-perfetto STATIC)
-    add_library(rocprofiler::tests-perfetto ALIAS rocprofiler-tests-perfetto)
+    add_library(rocprofiler-sdk::tests-perfetto ALIAS rocprofiler-tests-perfetto)
     target_sources(
         rocprofiler-tests-perfetto
         PRIVATE ${PROJECT_BINARY_DIR}/external/perfetto/sdk/perfetto.h
@@ -113,19 +113,19 @@ if(NOT TARGET rocprofiler::rocprofiler-perfetto)
                                                                 ON)
 else()
     add_library(rocprofiler-tests-perfetto INTERFACE)
-    add_library(rocprofiler::tests-perfetto ALIAS rocprofiler-tests-perfetto)
+    add_library(rocprofiler-sdk::tests-perfetto ALIAS rocprofiler-tests-perfetto)
     target_link_libraries(rocprofiler-tests-perfetto
-                          INTERFACE rocprofiler::rocprofiler-perfetto)
+                          INTERFACE rocprofiler-sdk::rocprofiler-perfetto)
 endif()
 
 # common utilities
 cmake_path(GET CMAKE_CURRENT_SOURCE_DIR PARENT_PATH COMMON_LIBRARY_INCLUDE_DIR)
 
 add_library(rocprofiler-tests-common-library INTERFACE)
-add_library(rocprofiler::tests-common-library ALIAS rocprofiler-tests-common-library)
+add_library(rocprofiler-sdk::tests-common-library ALIAS rocprofiler-tests-common-library)
 target_link_libraries(
-    rocprofiler-tests-common-library INTERFACE rocprofiler::tests-build-flags
-                                               rocprofiler::rocprofiler-cereal)
+    rocprofiler-tests-common-library INTERFACE rocprofiler-sdk::tests-build-flags
+                                               rocprofiler-sdk::rocprofiler-cereal)
 target_compile_features(rocprofiler-tests-common-library INTERFACE cxx_std_17)
 target_include_directories(rocprofiler-tests-common-library
                            INTERFACE ${COMMON_LIBRARY_INCLUDE_DIR})

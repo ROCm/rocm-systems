@@ -4,6 +4,7 @@ include_guard(GLOBAL)
 include(CMakePackageConfigHelpers)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME roctx)
+set(SDK_PACKAGE_NAME "${PROJECT_NAME}-sdk")
 set(PACKAGE_NAME "rocprofiler-sdk-roctx")
 
 install(
@@ -57,9 +58,10 @@ set(${PACKAGE_NAME}_BUILD_TREE
     CACHE BOOL "" FORCE)
 
 set(PROJECT_BUILD_TREE_TARGETS
-    ${PROJECT_NAME}::${PACKAGE_NAME}-shared-library
-    ${PROJECT_NAME}::${PROJECT_NAME}-headers ${PROJECT_NAME}::${PROJECT_NAME}-build-flags
-    ${PROJECT_NAME}::${PROJECT_NAME}-stack-protector)
+    ${SDK_PACKAGE_NAME}::${PACKAGE_NAME}-shared-library
+    ${SDK_PACKAGE_NAME}::${PROJECT_NAME}-headers
+    ${SDK_PACKAGE_NAME}::${PROJECT_NAME}-build-flags
+    ${SDK_PACKAGE_NAME}::${PROJECT_NAME}-stack-protector)
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/Templates/${PACKAGE_NAME}/build-config.cmake.in

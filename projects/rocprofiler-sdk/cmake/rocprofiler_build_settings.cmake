@@ -58,7 +58,7 @@ foreach(_TYPE dl rt)
     endif()
 endforeach()
 
-target_link_libraries(rocprofiler-build-flags INTERFACE rocprofiler::rocprofiler-dl)
+target_link_libraries(rocprofiler-build-flags INTERFACE rocprofiler-sdk::rocprofiler-dl)
 
 # ----------------------------------------------------------------------------------------#
 # set the compiler flags
@@ -94,7 +94,7 @@ endif()
 
 if(ROCPROFILER_BUILD_DEBUG)
     target_link_libraries(rocprofiler-build-flags
-                          INTERFACE rocprofiler::rocprofiler-debug-flags)
+                          INTERFACE rocprofiler-sdk::rocprofiler-debug-flags)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -115,7 +115,7 @@ rocprofiler_target_compile_options(
 
 if(ROCPROFILER_BUILD_STACK_PROTECTOR)
     target_link_libraries(rocprofiler-build-flags
-                          INTERFACE rocprofiler::rocprofiler-stack-protector)
+                          INTERFACE rocprofiler-sdk::rocprofiler-stack-protector)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -128,7 +128,7 @@ rocprofiler_target_compile_options(
 
 if(ROCPROFILER_BUILD_DEVELOPER)
     target_link_libraries(rocprofiler-build-flags
-                          INTERFACE rocprofiler::rocprofiler-developer-flags)
+                          INTERFACE rocprofiler-sdk::rocprofiler-developer-flags)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -142,7 +142,7 @@ rocprofiler_target_compile_options(
 
 if(ROCPROFILER_BUILD_RELEASE)
     target_link_libraries(rocprofiler-build-flags
-                          INTERFACE rocprofiler::rocprofiler-release-flags)
+                          INTERFACE rocprofiler-sdk::rocprofiler-release-flags)
 endif()
 
 # ----------------------------------------------------------------------------------------#
@@ -166,12 +166,12 @@ target_link_options(
 
 if(ROCPROFILER_BUILD_STATIC_LIBGCC)
     target_link_libraries(rocprofiler-build-flags
-                          INTERFACE rocprofiler::rocprofiler-static-libgcc)
+                          INTERFACE rocprofiler-sdk::rocprofiler-static-libgcc)
 endif()
 
 if(ROCPROFILER_BUILD_STATIC_LIBSTDCXX)
     target_link_libraries(rocprofiler-build-flags
-                          INTERFACE rocprofiler::rocprofiler-static-libstdcxx)
+                          INTERFACE rocprofiler-sdk::rocprofiler-static-libstdcxx)
 endif()
 
 if(ROCPROFILER_UNSAFE_NO_VERSION_CHECK)

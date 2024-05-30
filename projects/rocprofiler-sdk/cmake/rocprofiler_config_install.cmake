@@ -23,7 +23,7 @@ install(
 install(
     EXPORT ${PACKAGE_NAME}-targets
     FILE ${PACKAGE_NAME}-targets.cmake
-    NAMESPACE ${PROJECT_NAME}::
+    NAMESPACE ${PACKAGE_NAME}::
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
     COMPONENT development)
 
@@ -112,7 +112,7 @@ endif()
 
 export(
     EXPORT ${PACKAGE_NAME}-targets
-    NAMESPACE ${PROJECT_NAME}::
+    NAMESPACE ${PACKAGE_NAME}::
     FILE "${_BUILDTREE_EXPORT_DIR}/${PACKAGE_NAME}-targets.cmake")
 
 set(${PACKAGE_NAME}_DIR

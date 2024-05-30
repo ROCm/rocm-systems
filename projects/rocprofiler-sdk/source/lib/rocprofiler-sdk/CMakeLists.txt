@@ -31,7 +31,7 @@ set(ROCPROFILER_LIB_SOURCES
 # ----------------------------------------------------------------------------------------#
 
 add_library(rocprofiler-object-library OBJECT)
-add_library(rocprofiler::rocprofiler-object-library ALIAS rocprofiler-object-library)
+add_library(rocprofiler-sdk::rocprofiler-object-library ALIAS rocprofiler-object-library)
 
 target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_SOURCES}
                                                   ${ROCPROFILER_LIB_HEADERS})
@@ -52,15 +52,15 @@ add_subdirectory(details)
 
 target_link_libraries(
     rocprofiler-object-library
-    PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hip-nolink
-           rocprofiler::rocprofiler-hsa-runtime-nolink
-    PRIVATE rocprofiler::rocprofiler-build-flags
-            rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-amd-comgr
-            rocprofiler::rocprofiler-hsa-aql
-            rocprofiler::rocprofiler-drm
-            rocprofiler::rocprofiler-hsakmt-nolink)
+    PUBLIC rocprofiler-sdk::rocprofiler-headers rocprofiler-sdk::rocprofiler-hip-nolink
+           rocprofiler-sdk::rocprofiler-hsa-runtime-nolink
+    PRIVATE rocprofiler-sdk::rocprofiler-build-flags
+            rocprofiler-sdk::rocprofiler-memcheck
+            rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-amd-comgr
+            rocprofiler-sdk::rocprofiler-hsa-aql
+            rocprofiler-sdk::rocprofiler-drm
+            rocprofiler-sdk::rocprofiler-hsakmt-nolink)
 
 target_compile_definitions(rocprofiler-object-library PRIVATE rocprofiler_EXPORTS=1)
 
@@ -73,25 +73,26 @@ set_target_properties(rocprofiler-object-library PROPERTIES POSITION_INDEPENDENT
 # ----------------------------------------------------------------------------------------#
 
 add_library(rocprofiler-shared-library SHARED)
-add_library(rocprofiler::rocprofiler-shared-library ALIAS rocprofiler-shared-library)
+add_library(rocprofiler-sdk::rocprofiler-shared-library ALIAS rocprofiler-shared-library)
 
 target_sources(
     rocprofiler-shared-library
-    PRIVATE $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library> shared_library.cpp)
+    PRIVATE $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-object-library>
+            shared_library.cpp)
 target_link_libraries(
     rocprofiler-shared-library
-    INTERFACE rocprofiler::rocprofiler-headers
-              $<BUILD_INTERFACE:rocprofiler::rocprofiler-hsa-runtime-nolink>
-              $<BUILD_INTERFACE:rocprofiler::rocprofiler-hip-nolink>
-    PRIVATE rocprofiler::rocprofiler-hsa-runtime-nolink
-            rocprofiler::rocprofiler-hip-nolink
-            rocprofiler::rocprofiler-build-flags
-            rocprofiler::rocprofiler-memcheck
-            rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-cxx-filesystem
-            rocprofiler::rocprofiler-dl
-            rocprofiler::rocprofiler-amd-comgr
-            rocprofiler::rocprofiler-object-library)
+    INTERFACE rocprofiler-sdk::rocprofiler-headers
+              $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-hsa-runtime-nolink>
+              $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-hip-nolink>
+    PRIVATE rocprofiler-sdk::rocprofiler-hsa-runtime-nolink
+            rocprofiler-sdk::rocprofiler-hip-nolink
+            rocprofiler-sdk::rocprofiler-build-flags
+            rocprofiler-sdk::rocprofiler-memcheck
+            rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-cxx-filesystem
+            rocprofiler-sdk::rocprofiler-dl
+            rocprofiler-sdk::rocprofiler-amd-comgr
+            rocprofiler-sdk::rocprofiler-object-library)
 
 set_target_properties(
     rocprofiler-shared-library
@@ -102,7 +103,7 @@ set_target_properties(
                INSTALL_RPATH "\$ORIGIN"
                DEFINE_SYMBOL rocprofiler_EXPORTS)
 
-add_library(rocprofiler::rocprofiler-library ALIAS rocprofiler-shared-library)
+add_library(rocprofiler-sdk::rocprofiler-library ALIAS rocprofiler-shared-library)
 
 install(
     TARGETS rocprofiler-shared-library
@@ -117,16 +118,17 @@ install(
 # ----------------------------------------------------------------------------------------#
 
 add_library(rocprofiler-static-library EXCLUDE_FROM_ALL STATIC)
-add_library(rocprofiler::rocprofiler-static-library ALIAS rocprofiler-static-library)
+add_library(rocprofiler-sdk::rocprofiler-static-library ALIAS rocprofiler-static-library)
 
 target_sources(rocprofiler-static-library
-               PRIVATE $<TARGET_OBJECTS:rocprofiler::rocprofiler-object-library>)
+               PRIVATE $<TARGET_OBJECTS:rocprofiler-sdk::rocprofiler-object-library>)
 target_link_libraries(
     rocprofiler-static-library
-    PUBLIC rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-hsa-runtime-nolink
-           rocprofiler::rocprofiler-hip-nolink
-    PRIVATE rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-object-library)
+    PUBLIC rocprofiler-sdk::rocprofiler-headers
+           rocprofiler-sdk::rocprofiler-hsa-runtime-nolink
+           rocprofiler-sdk::rocprofiler-hip-nolink
+    PRIVATE rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-object-library)
 
 set_target_properties(
     rocprofiler-static-library PROPERTIES OUTPUT_NAME rocprofiler-sdk DEFINE_SYMBOL

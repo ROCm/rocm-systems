@@ -358,7 +358,12 @@ function(ROCPROFILER_ADD_INTERFACE_LIBRARY _TARGET _DESCRIPT)
     else()
         add_library(${_TARGET} INTERFACE)
     endif()
-    add_library(${PROJECT_NAME}::${_TARGET} ALIAS ${_TARGET})
+
+    if(NOT PACKAGE_NAME OR "${PACKAGE_NAME}" STREQUAL "")
+        message(FATAL_ERROR "Set PACKAGE_NAME")
+    endif()
+
+    add_library(${PACKAGE_NAME}::${_TARGET} ALIAS ${_TARGET})
     if(NOT "INTERNAL" IN_LIST _ARGS AND NOT "IMPORTED" IN_LIST _ARGS)
         install(
             TARGETS ${_TARGET}

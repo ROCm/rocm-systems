@@ -31,8 +31,8 @@ add_library(pc-sampling-client SHARED)
 target_sources(pc-sampling-client PRIVATE client.cpp pcs.hpp pcs.cpp utils.hpp utils.cpp)
 target_link_libraries(
     pc-sampling-client
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler::samples-build-flags
-            rocprofiler::samples-common-library)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-build-flags
+            rocprofiler-sdk::samples-common-library)
 
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 find_package(Threads REQUIRED)
@@ -40,7 +40,7 @@ find_package(Threads REQUIRED)
 add_executable(pc-sampling)
 target_sources(pc-sampling PRIVATE main.cpp)
 target_link_libraries(pc-sampling PRIVATE pc-sampling-client Threads::Threads
-                                          rocprofiler::samples-build-flags)
+                                          rocprofiler-sdk::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV pc-sampling-client)
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)

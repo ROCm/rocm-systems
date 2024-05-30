@@ -10,8 +10,8 @@ target_sources(parser-test PRIVATE ${ROCPROFILER_LIB_PARSER_TEST_SOURCES})
 
 target_link_libraries(
     parser-test
-    PRIVATE rocprofiler::rocprofiler-common-library
-            rocprofiler::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET parser-test

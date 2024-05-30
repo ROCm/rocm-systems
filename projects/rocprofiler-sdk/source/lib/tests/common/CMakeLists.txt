@@ -11,8 +11,8 @@ add_executable(common-tests)
 target_sources(common-tests PRIVATE ${common_sources})
 target_link_libraries(
     common-tests
-    PRIVATE rocprofiler::rocprofiler-headers rocprofiler::rocprofiler-common-library
-            GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-headers
+            rocprofiler-sdk::rocprofiler-common-library GTest::gtest GTest::gtest_main)
 
 gtest_add_tests(
     TARGET common-tests

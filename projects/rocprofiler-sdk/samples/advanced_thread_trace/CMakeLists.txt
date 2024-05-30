@@ -47,7 +47,7 @@ target_sources(advanced-thread-trace PRIVATE main.cpp client.cpp)
 target_link_libraries(
     advanced-thread-trace
     PRIVATE rocprofiler-sdk::rocprofiler-sdk amd_comgr
-            rocprofiler::samples-common-library rocprofiler::samples-build-flags)
+            rocprofiler-sdk::samples-common-library rocprofiler-sdk::samples-build-flags)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV advanced-thread-trace)
 
