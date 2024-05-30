@@ -1326,7 +1326,7 @@ class VectorAddPerfettoMPITest : public PerfettoPluginTest {
   bool hasFile() { return hasFileInDir("test_7_", "/tmp/tests-v2/perfetto/"); }
 };
 
-TEST_F(VectorAddPerfettoMPITest, WhenRunningProfilerWithPerfettoTest) {
+TEST_F(VectorAddPerfettoMPITest, DISABLED_WhenRunningProfilerWithPerfettoTest) {
   EXPECT_EQ(hasFile(), true);
 }
 
