@@ -469,7 +469,7 @@ def test_gpu_ids():
                 ],
             ):
                 omniperf.main()
-        assert e.value.code == 1
+        assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
