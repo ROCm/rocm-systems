@@ -14,9 +14,6 @@ baseline_opts = ["omniperf", "analyze"]
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
 
-indir1 = "tests/workloads/vcopy/MI100"
-indir2 = "tests/workloads/vcopy/MI200"
-
 indirs = [
     "tests/workloads/vcopy/MI100",
     "tests/workloads/vcopy/MI200",
