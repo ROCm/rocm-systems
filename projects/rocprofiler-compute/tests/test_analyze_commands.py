@@ -768,7 +768,7 @@ def test_decimal_2():
                     "omniperf",
                     "analyze",
                     "--path",
-                    indir1,
+                    workload_dir,
                     "--decimal",
                     "1",
                 ],
