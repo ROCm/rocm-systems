@@ -32,6 +32,7 @@
 #include <string_view>
 #include <utility>
 #include <thread>
+#include <unordered_set>
 
 #include <cxxabi.h>
 #include <fcntl.h>
@@ -141,6 +142,9 @@ class json_plugin_t {
  public:
   json_plugin_t() {
     is_valid_ = true;
+
+    const char* rocprofiler_trace_period = getenv("ROCPROFILER_TRACE_PERIOD");
+    if (rocprofiler_trace_period) trace_period_enabled_ = true;
 
     const char* enable_data_flow_str = getenv("ROCPROFILER_DISABLE_JSON_DATA_FLOWS");
     if (enable_data_flow_str) {
@@ -592,6 +596,7 @@ class json_plugin_t {
                     correlation_id);
         AddDataFlowEvent(start_timestamp, ROCPROFILER_DATA_FLOW_START, 1, thread_id,
                          correlation_id);
+        if (trace_period_enabled_) found_correlation_ids_.insert(correlation_id);
         break;
       }
       case ACTIVITY_DOMAIN_EXT_API: {
@@ -599,6 +604,9 @@ class json_plugin_t {
         break;
       }
       case ACTIVITY_DOMAIN_HIP_OPS: {
+        if (trace_period_enabled_ &&
+            found_correlation_ids_.find(correlation_id) == found_correlation_ids_.end())
+          break;
         std::size_t pos = std::string::npos;
         if (tracer_record.name) {
           auto kernel_name_it = kernel_names_map.find(tracer_record.name);
@@ -704,6 +712,9 @@ class json_plugin_t {
                                        {{"HIPBLITKERNELS"}, "M", 4, 3}};
   std::atomic<bool> trace_categories_check{false};
   bool enable_data_flow_ = true;
+
+  std::unordered_set<uint64_t> found_correlation_ids_;
+  bool trace_period_enabled_ = false;
 };
 
 json_plugin_t* json_plugin = nullptr;
