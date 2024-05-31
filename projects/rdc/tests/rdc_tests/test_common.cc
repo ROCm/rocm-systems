@@ -217,27 +217,28 @@ const char* GetErrStateNameStr(amdsmi_ras_err_state_t st) { return kErrStateName
 }*/
 
 const char* FreqEnumToStr(amdsmi_clk_type_t rsmi_clk) {
-  static_assert(CLK_TYPE__MAX == CLK_TYPE_DCLK1, "FreqEnumToStr() needs to be updated");
+  static_assert(AMDSMI_CLK_TYPE__MAX == AMDSMI_CLK_TYPE_DCLK1,
+                "FreqEnumToStr() needs to be updated");
   switch (rsmi_clk) {
-    case CLK_TYPE_SYS:
+    case AMDSMI_CLK_TYPE_SYS:
       return "System clock";
-    case CLK_TYPE_DF:
+    case AMDSMI_CLK_TYPE_DF:
       return "Data Fabric clock";
-    case CLK_TYPE_DCEF:
+    case AMDSMI_CLK_TYPE_DCEF:
       return "Display Controller Engine clock";
-    case CLK_TYPE_SOC:
+    case AMDSMI_CLK_TYPE_SOC:
       return "SOC clock";
-    case CLK_TYPE_MEM:
+    case AMDSMI_CLK_TYPE_MEM:
       return "Memory clock";
-    case CLK_TYPE_PCIE:
+    case AMDSMI_CLK_TYPE_PCIE:
       return "PCIe clock";
-    case CLK_TYPE_VCLK0:
+    case AMDSMI_CLK_TYPE_VCLK0:
       return "VCLK0 clock";
-    case CLK_TYPE_VCLK1:
+    case AMDSMI_CLK_TYPE_VCLK1:
       return "VCLK1 clock";
-    case CLK_TYPE_DCLK0:
+    case AMDSMI_CLK_TYPE_DCLK0:
       return "DCLK0 clock";
-    case CLK_TYPE_DCLK1:
+    case AMDSMI_CLK_TYPE_DCLK1:
       return "DCLK1 clock";
     default:
       return "Invalid Clock ID";

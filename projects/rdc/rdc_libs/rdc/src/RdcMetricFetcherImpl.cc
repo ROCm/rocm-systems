@@ -369,23 +369,23 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     }
 
     const std::unordered_map<rdc_field_t, uint64_t> rdc_field_to_gpu_metrics = {
-      {RDC_FI_XGMI_0_READ_KB, gpu_metrics.xgmi_read_data_acc[0]},
-      {RDC_FI_XGMI_1_READ_KB, gpu_metrics.xgmi_read_data_acc[1]},
-      {RDC_FI_XGMI_2_READ_KB, gpu_metrics.xgmi_read_data_acc[2]},
-      {RDC_FI_XGMI_3_READ_KB, gpu_metrics.xgmi_read_data_acc[3]},
-      {RDC_FI_XGMI_4_READ_KB, gpu_metrics.xgmi_read_data_acc[4]},
-      {RDC_FI_XGMI_5_READ_KB, gpu_metrics.xgmi_read_data_acc[5]},
-      {RDC_FI_XGMI_6_READ_KB, gpu_metrics.xgmi_read_data_acc[6]},
-      {RDC_FI_XGMI_7_READ_KB, gpu_metrics.xgmi_read_data_acc[7]},
-      {RDC_FI_XGMI_0_WRITE_KB, gpu_metrics.xgmi_write_data_acc[0]},
-      {RDC_FI_XGMI_1_WRITE_KB, gpu_metrics.xgmi_write_data_acc[1]},
-      {RDC_FI_XGMI_2_WRITE_KB, gpu_metrics.xgmi_write_data_acc[2]},
-      {RDC_FI_XGMI_3_WRITE_KB, gpu_metrics.xgmi_write_data_acc[3]},
-      {RDC_FI_XGMI_4_WRITE_KB, gpu_metrics.xgmi_write_data_acc[4]},
-      {RDC_FI_XGMI_5_WRITE_KB, gpu_metrics.xgmi_write_data_acc[5]},
-      {RDC_FI_XGMI_6_WRITE_KB, gpu_metrics.xgmi_write_data_acc[6]},
-      {RDC_FI_XGMI_7_WRITE_KB, gpu_metrics.xgmi_write_data_acc[7]},
-      {RDC_FI_PCIE_BANDWIDTH, gpu_metrics.pcie_bandwidth_inst},
+        {RDC_FI_XGMI_0_READ_KB, gpu_metrics.xgmi_read_data_acc[0]},
+        {RDC_FI_XGMI_1_READ_KB, gpu_metrics.xgmi_read_data_acc[1]},
+        {RDC_FI_XGMI_2_READ_KB, gpu_metrics.xgmi_read_data_acc[2]},
+        {RDC_FI_XGMI_3_READ_KB, gpu_metrics.xgmi_read_data_acc[3]},
+        {RDC_FI_XGMI_4_READ_KB, gpu_metrics.xgmi_read_data_acc[4]},
+        {RDC_FI_XGMI_5_READ_KB, gpu_metrics.xgmi_read_data_acc[5]},
+        {RDC_FI_XGMI_6_READ_KB, gpu_metrics.xgmi_read_data_acc[6]},
+        {RDC_FI_XGMI_7_READ_KB, gpu_metrics.xgmi_read_data_acc[7]},
+        {RDC_FI_XGMI_0_WRITE_KB, gpu_metrics.xgmi_write_data_acc[0]},
+        {RDC_FI_XGMI_1_WRITE_KB, gpu_metrics.xgmi_write_data_acc[1]},
+        {RDC_FI_XGMI_2_WRITE_KB, gpu_metrics.xgmi_write_data_acc[2]},
+        {RDC_FI_XGMI_3_WRITE_KB, gpu_metrics.xgmi_write_data_acc[3]},
+        {RDC_FI_XGMI_4_WRITE_KB, gpu_metrics.xgmi_write_data_acc[4]},
+        {RDC_FI_XGMI_5_WRITE_KB, gpu_metrics.xgmi_write_data_acc[5]},
+        {RDC_FI_XGMI_6_WRITE_KB, gpu_metrics.xgmi_write_data_acc[6]},
+        {RDC_FI_XGMI_7_WRITE_KB, gpu_metrics.xgmi_write_data_acc[7]},
+        {RDC_FI_PCIE_BANDWIDTH, gpu_metrics.pcie_bandwidth_inst},
     };
 
     // In gpu_metrics,the max value means not supported
@@ -398,7 +398,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         return;
       } else {
         RDC_LOG(RDC_DEBUG, "The gpu metrics return max value which indicate not supported:"
-                  << gpu_metrics_value_ite->second);
+                               << gpu_metrics_value_ite->second);
       }
     }
     value->status = AMDSMI_STATUS_NOT_SUPPORTED;
@@ -460,9 +460,9 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     }
     case RDC_FI_GPU_CLOCK:
     case RDC_FI_MEM_CLOCK: {
-      amdsmi_clk_type_t clk_type = CLK_TYPE_SYS;
+      amdsmi_clk_type_t clk_type = AMDSMI_CLK_TYPE_SYS;
       if (field_id == RDC_FI_MEM_CLOCK) {
-        clk_type = CLK_TYPE_MEM;
+        clk_type = AMDSMI_CLK_TYPE_MEM;
       }
       amdsmi_frequencies_t f = {};
       value->status = amdsmi_get_clk_freq(processor_handle, clk_type, &f);
@@ -493,16 +493,17 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     case RDC_FI_GPU_TEMP:
     case RDC_FI_MEMORY_TEMP: {
       int64_t i64 = 0;
-      amdsmi_temperature_type_t sensor_type = TEMPERATURE_TYPE_EDGE;
+      amdsmi_temperature_type_t sensor_type = AMDSMI_TEMPERATURE_TYPE_EDGE;
       if (field_id == RDC_FI_MEMORY_TEMP) {
-        sensor_type = TEMPERATURE_TYPE_VRAM;
+        sensor_type = AMDSMI_TEMPERATURE_TYPE_VRAM;
       }
       value->status =
           amdsmi_get_temp_metric(processor_handle, sensor_type, AMDSMI_TEMP_CURRENT, &i64);
 
       // fallback to hotspot temperature as some card may not have edge temperature.
-      if (sensor_type == TEMPERATURE_TYPE_EDGE && value->status == AMDSMI_STATUS_NOT_SUPPORTED) {
-        sensor_type = TEMPERATURE_TYPE_JUNCTION;
+      if (sensor_type == AMDSMI_TEMPERATURE_TYPE_EDGE &&
+          value->status == AMDSMI_STATUS_NOT_SUPPORTED) {
+        sensor_type = AMDSMI_TEMPERATURE_TYPE_JUNCTION;
         value->status =
             amdsmi_get_temp_metric(processor_handle, sensor_type, AMDSMI_TEMP_CURRENT, &i64);
       }
