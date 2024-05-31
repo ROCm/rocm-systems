@@ -41,6 +41,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "common/defines.hpp"
+#include "common/filesystem.hpp"
 
 #include <cassert>
 #include <chrono>
@@ -48,7 +49,6 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
-#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
