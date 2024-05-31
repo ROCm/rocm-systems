@@ -63,6 +63,18 @@ amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status) {
     return amdsmi_status;
 }
 
+amdsmi_vram_type_t vram_type_value(unsigned type) {
+    amdsmi_vram_type_t value = AMDSMI_VRAM_TYPE_UNKNOWN;
+
+    auto search = amd::smi::vram_type_map.find(type);
+    if (search != amd::smi::vram_type_map.end()) {
+        value = search->second;
+    }
+
+    return value;
+}
+
+
 #ifdef ENABLE_ESMI_LIB
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status) {
     amdsmi_status_t amdsmi_status = AMDSMI_STATUS_MAP_ERROR;

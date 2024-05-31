@@ -49,28 +49,28 @@
 #include "test_utils.h"
 
 static const std::map<amdsmi_fw_block_t, const char *> kDevFWNameMap = {
-    {FW_ID_ASD, "asd"},
-    {FW_ID_CP_CE, "ce"},
-    {FW_ID_DMCU_ERAM, "dmcu"},  // TODO(bliu): double check
-    {FW_ID_MC, "mc"},
-    {FW_ID_CP_ME, "me"},
-    {FW_ID_CP_MEC1, "mec1"},
-    {FW_ID_CP_MEC2, "mec2"},
-    {FW_ID_CP_MES, "mes"},
-    {FW_ID_MES_KIQ, "mes_kiq"}, // TODO: double check
-    {FW_ID_CP_PFP, "pfp"},
-    {FW_ID_RLC, "rlc"},
-    {FW_ID_RLC_SRLG, "rlc_srlg"},
-    {FW_ID_RLC_SRLS, "rlc_srls"},
-    {FW_ID_SDMA1, "sdma1"},
-    {FW_ID_SDMA2, "sdma2"},
-    {FW_ID_PM, "pm"},
-    {FW_ID_PSP_SOSDRV, "sos"},
-    {FW_ID_TA_RAS, "ta_ras"},
-    {FW_ID_TA_XGMI, "ta_xgmi"},
-    {FW_ID_UVD, "uvd"},
-    {FW_ID_VCE, "vce"},
-    {FW_ID_VCN, "vcn"},
+    {AMDSMI_FW_ID_ASD, "asd"},
+    {AMDSMI_FW_ID_CP_CE, "ce"},
+    {AMDSMI_FW_ID_DMCU_ERAM, "dmcu"},  // TODO(bliu): double check
+    {AMDSMI_FW_ID_MC, "mc"},
+    {AMDSMI_FW_ID_CP_ME, "me"},
+    {AMDSMI_FW_ID_CP_MEC1, "mec1"},
+    {AMDSMI_FW_ID_CP_MEC2, "mec2"},
+    {AMDSMI_FW_ID_CP_MES, "mes"},
+    {AMDSMI_FW_ID_MES_KIQ, "mes_kiq"}, // TODO: double check
+    {AMDSMI_FW_ID_CP_PFP, "pfp"},
+    {AMDSMI_FW_ID_RLC, "rlc"},
+    {AMDSMI_FW_ID_RLC_SRLG, "rlc_srlg"},
+    {AMDSMI_FW_ID_RLC_SRLS, "rlc_srls"},
+    {AMDSMI_FW_ID_SDMA1, "sdma1"},
+    {AMDSMI_FW_ID_SDMA2, "sdma2"},
+    {AMDSMI_FW_ID_PM, "pm"},
+    {AMDSMI_FW_ID_PSP_SOSDRV, "sos"},
+    {AMDSMI_FW_ID_TA_RAS, "ta_ras"},
+    {AMDSMI_FW_ID_TA_XGMI, "ta_xgmi"},
+    {AMDSMI_FW_ID_UVD, "uvd"},
+    {AMDSMI_FW_ID_VCE, "vce"},
+    {AMDSMI_FW_ID_VCN, "vcn"},
 };
 
 const char *

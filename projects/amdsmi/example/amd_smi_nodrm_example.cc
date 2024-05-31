@@ -113,12 +113,12 @@ int main() {
         // For each device of the socket, get name and temperature.
         for (uint32_t j = 0; j < device_count; j++) {
             // Get device type. Since the amdsmi is initialized with
-            // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMD_GPU.
+            // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
             processor_type_t processor_type = {};
             ret = amdsmi_get_processor_type(processor_handles[j], &processor_type);
             CHK_AMDSMI_RET(ret)
-            if (processor_type != AMD_GPU) {
-                std::cout << "Expect AMD_GPU device type!\n";
+            if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+                std::cout << "Expect AMDSMI_PROCESSOR_TYPE_AMD_GPU device type!\n";
                 return AMDSMI_STATUS_NOT_SUPPORTED;
             }
 
@@ -137,10 +137,10 @@ int main() {
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_device_bdf:\n");
             printf("\tDevice[%d] BDF %04lx:%02x:%02x.%d\n\n", i,
-                   bdf.fields.domain_number,
-                   bdf.fields.bus_number,
-                   bdf.fields.device_number,
-                   bdf.fields.function_number);
+                   bdf.domain_number,
+                   bdf.bus_number,
+                   bdf.device_number,
+                   bdf.function_number);
 
             amdsmi_asic_info_t asic_info = {};
             ret = amdsmi_get_gpu_asic_info(processor_handles[j], &asic_info);
@@ -183,63 +183,63 @@ int main() {
             printf("    Output of amdsmi_get_fw_info:\n");
             printf("\tFirmware version: %d\n", fw_information.num_fw_info);
             printf("\tSMU: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_SMU]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_SMU]
                        .fw_version);
             printf("\tPM: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_PM]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_PM]
                        .fw_version);
             printf("\tVCN: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_VCN]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_VCN]
                        .fw_version);
             printf("\tCP_ME: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_CP_ME]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_CP_ME]
                        .fw_version);
             printf("\tCP_PFP: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_CP_PFP]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_CP_PFP]
                        .fw_version);
             printf("\tCP_CE: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_CP_CE]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_CP_CE]
                        .fw_version);
             printf("\tRLC: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_RLC]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_RLC]
                        .fw_version);
             printf("\tCP_MEC1: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_CP_MEC1]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_CP_MEC1]
                        .fw_version);
             printf("\tCP_MEC2: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_CP_MEC2]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_CP_MEC2]
                        .fw_version);
             printf("\tSDMA0: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_SDMA0]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_SDMA0]
                        .fw_version);
             printf("\tMC: %ld\n",
-                   fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_MC]
+                   fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_MC]
                        .fw_version);
             printf("\tRLC RESTORE LIST CNTL: %ld\n",
                    fw_information
                        .fw_info_list
-                           [amdsmi_fw_block_t::FW_ID_RLC_RESTORE_LIST_CNTL]
+                           [amdsmi_fw_block_t::AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL]
                        .fw_version);
             printf("\tRLC RESTORE LIST GPM MEM: %ld\n",
                    fw_information
                        .fw_info_list
-                           [amdsmi_fw_block_t::FW_ID_RLC_RESTORE_LIST_GPM_MEM]
+                           [amdsmi_fw_block_t::AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM]
                        .fw_version);
             printf("\tRLC RESTORE LIST SRM MEM: %ld\n",
                    fw_information
                        .fw_info_list
-                           [amdsmi_fw_block_t::FW_ID_RLC_RESTORE_LIST_SRM_MEM]
+                           [amdsmi_fw_block_t::AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM]
                        .fw_version);
             printf(
                 "\tPSP SOSDRV: %ld\n\n",
-                fw_information.fw_info_list[amdsmi_fw_block_t::FW_ID_PSP_SOSDRV]
+                fw_information.fw_info_list[amdsmi_fw_block_t::AMDSMI_FW_ID_PSP_SOSDRV]
                     .fw_version);
 
             // Get temperature measurements
-            int64_t temp_measurements[TEMPERATURE_TYPE__MAX + 1];
+            int64_t temp_measurements[AMDSMI_TEMPERATURE_TYPE__MAX + 1];
             amdsmi_temperature_type_t temp_types[4] = {
-                TEMPERATURE_TYPE_EDGE, TEMPERATURE_TYPE_HOTSPOT,
-                TEMPERATURE_TYPE_VRAM, TEMPERATURE_TYPE_PLX};
+                AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
+                AMDSMI_TEMPERATURE_TYPE_VRAM, AMDSMI_TEMPERATURE_TYPE_PLX};
             for (const auto &temp_type : temp_types) {
                 ret = amdsmi_get_temp_metric(
                     processor_handles[j], temp_type,
@@ -249,13 +249,13 @@ int main() {
             }
             printf("    Output of amdsmi_get_temp_metric:\n");
             printf("\tGPU Edge temp measurement: %ld\n",
-                   temp_measurements[TEMPERATURE_TYPE_EDGE]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_EDGE]);
             printf("\tGPU Hotspot temp measurement: %ld\n",
-                   temp_measurements[TEMPERATURE_TYPE_HOTSPOT]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_HOTSPOT]);
             printf("\tGPU VRAM temp measurement: %ld\n",
-                   temp_measurements[TEMPERATURE_TYPE_VRAM]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_VRAM]);
             printf("\tGPU PLX temp measurement: %ld\n\n",
-                   temp_measurements[TEMPERATURE_TYPE_PLX]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_PLX]);
 
             // Get bad pages
             char bad_page_status_names[3][15] = {"RESERVED", "PENDING",
@@ -310,7 +310,7 @@ int main() {
 
             // Get temperature
             int64_t val_i64 = 0;
-            ret =  amdsmi_get_temp_metric(processor_handles[j], TEMPERATURE_TYPE_EDGE,
+            ret =  amdsmi_get_temp_metric(processor_handles[j], AMDSMI_TEMPERATURE_TYPE_EDGE,
                                              AMDSMI_TEMP_CURRENT, &val_i64);
             CHK_AMDSMI_RET(ret)
             printf("    Output of  amdsmi_get_temp_metric:\n");
@@ -333,10 +333,10 @@ int main() {
                       << "W\n\n";
 
             amdsmi_dpm_policy_t policy;
-            ret = amdsmi_get_dpm_policy(processor_handles[j], &policy);
+            ret = amdsmi_get_soc_pstate(processor_handles[j], &policy);
             if (ret != AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
-                std::cout << "\t amdsmi_get_dpm_policy total:" << policy.num_supported
+                std::cout << "\t amdsmi_get_soc_pstate total:" << policy.num_supported
                         <<" current:" << policy.current << "\n";
                 for (int x=0; x < policy.num_supported; x++) {
                     std::cout << x <<": (" << policy.policies[x].policy_id

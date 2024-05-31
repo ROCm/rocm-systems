@@ -82,16 +82,16 @@ class AmdSmiInitFlags(IntEnum):
 
 
 class AmdSmiContainerTypes(IntEnum):
-    LXC = amdsmi_wrapper.CONTAINER_LXC
-    DOCKER = amdsmi_wrapper.CONTAINER_DOCKER
+    LXC = amdsmi_wrapper.AMDSMI_CONTAINER_LXC
+    DOCKER = amdsmi_wrapper.AMDSMI_CONTAINER_DOCKER
 
 
 class AmdSmiDeviceType(IntEnum):
-    UNKNOWN_DEVICE = amdsmi_wrapper.UNKNOWN
-    AMD_GPU_DEVICE = amdsmi_wrapper.AMD_GPU
-    AMD_CPU_DEVICE = amdsmi_wrapper.AMD_CPU
-    NON_AMD_GPU_DEVICE = amdsmi_wrapper.NON_AMD_GPU
-    NON_AMD_CPU_DEVICE = amdsmi_wrapper.NON_AMD_CPU
+    UNKNOWN_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_UNKNOWN
+    AMD_GPU_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_GPU
+    AMD_CPU_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU
+    NON_AMD_GPU_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU
+    NON_AMD_CPU_DEVICE = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU
 
 
 class AmdSmiMmIp(IntEnum):
@@ -101,109 +101,109 @@ class AmdSmiMmIp(IntEnum):
 
 
 class AmdSmiFwBlock(IntEnum):
-    FW_ID_SMU = amdsmi_wrapper.FW_ID_SMU
-    FW_ID_CP_CE = amdsmi_wrapper.FW_ID_CP_CE
-    FW_ID_CP_PFP = amdsmi_wrapper.FW_ID_CP_PFP
-    FW_ID_CP_ME = amdsmi_wrapper.FW_ID_CP_ME
-    FW_ID_CP_MEC_JT1 = amdsmi_wrapper.FW_ID_CP_MEC_JT1
-    FW_ID_CP_MEC_JT2 = amdsmi_wrapper.FW_ID_CP_MEC_JT2
-    FW_ID_CP_MEC1 = amdsmi_wrapper.FW_ID_CP_MEC1
-    FW_ID_CP_MEC2 = amdsmi_wrapper.FW_ID_CP_MEC2
-    FW_ID_RLC = amdsmi_wrapper.FW_ID_RLC
-    FW_ID_SDMA0 = amdsmi_wrapper.FW_ID_SDMA0
-    FW_ID_SDMA1 = amdsmi_wrapper.FW_ID_SDMA1
-    FW_ID_SDMA2 = amdsmi_wrapper.FW_ID_SDMA2
-    FW_ID_SDMA3 = amdsmi_wrapper.FW_ID_SDMA3
-    FW_ID_SDMA4 = amdsmi_wrapper.FW_ID_SDMA4
-    FW_ID_SDMA5 = amdsmi_wrapper.FW_ID_SDMA5
-    FW_ID_SDMA6 = amdsmi_wrapper.FW_ID_SDMA6
-    FW_ID_SDMA7 = amdsmi_wrapper.FW_ID_SDMA7
-    FW_ID_VCN = amdsmi_wrapper.FW_ID_VCN
-    FW_ID_UVD = amdsmi_wrapper.FW_ID_UVD
-    FW_ID_VCE = amdsmi_wrapper.FW_ID_VCE
-    FW_ID_ISP = amdsmi_wrapper.FW_ID_ISP
-    FW_ID_DMCU_ERAM = amdsmi_wrapper.FW_ID_DMCU_ERAM
-    FW_ID_DMCU_ISR = amdsmi_wrapper.FW_ID_DMCU_ISR
-    FW_ID_RLC_RESTORE_LIST_GPM_MEM = amdsmi_wrapper.FW_ID_RLC_RESTORE_LIST_GPM_MEM
-    FW_ID_RLC_RESTORE_LIST_SRM_MEM = amdsmi_wrapper.FW_ID_RLC_RESTORE_LIST_SRM_MEM
-    FW_ID_RLC_RESTORE_LIST_CNTL = amdsmi_wrapper.FW_ID_RLC_RESTORE_LIST_CNTL
-    FW_ID_RLC_V = amdsmi_wrapper.FW_ID_RLC_V
-    FW_ID_MMSCH = amdsmi_wrapper.FW_ID_MMSCH
-    FW_ID_PSP_SYSDRV = amdsmi_wrapper.FW_ID_PSP_SYSDRV
-    FW_ID_PSP_SOSDRV = amdsmi_wrapper.FW_ID_PSP_SOSDRV
-    FW_ID_PSP_TOC = amdsmi_wrapper.FW_ID_PSP_TOC
-    FW_ID_PSP_KEYDB = amdsmi_wrapper.FW_ID_PSP_KEYDB
-    FW_ID_DFC = amdsmi_wrapper.FW_ID_DFC
-    FW_ID_PSP_SPL = amdsmi_wrapper.FW_ID_PSP_SPL
-    FW_ID_DRV_CAP = amdsmi_wrapper.FW_ID_DRV_CAP
-    FW_ID_MC = amdsmi_wrapper.FW_ID_MC
-    FW_ID_PSP_BL = amdsmi_wrapper.FW_ID_PSP_BL
-    FW_ID_CP_PM4 = amdsmi_wrapper.FW_ID_CP_PM4
-    FW_ID_RLC_P = amdsmi_wrapper.FW_ID_RLC_P
-    FW_ID_SEC_POLICY_STAGE2 = amdsmi_wrapper.FW_ID_SEC_POLICY_STAGE2
-    FW_ID_REG_ACCESS_WHITELIST = amdsmi_wrapper.FW_ID_REG_ACCESS_WHITELIST
-    FW_ID_IMU_DRAM = amdsmi_wrapper.FW_ID_IMU_DRAM
-    FW_ID_IMU_IRAM = amdsmi_wrapper.FW_ID_IMU_IRAM
-    FW_ID_SDMA_TH0 = amdsmi_wrapper.FW_ID_SDMA_TH0
-    FW_ID_SDMA_TH1 = amdsmi_wrapper.FW_ID_SDMA_TH1
-    FW_ID_CP_MES = amdsmi_wrapper.FW_ID_CP_MES
-    FW_ID_MES_STACK = amdsmi_wrapper.FW_ID_MES_STACK
-    FW_ID_MES_THREAD1 = amdsmi_wrapper.FW_ID_MES_THREAD1
-    FW_ID_MES_THREAD1_STACK = amdsmi_wrapper.FW_ID_MES_THREAD1_STACK
-    FW_ID_RLX6 = amdsmi_wrapper.FW_ID_RLX6
-    FW_ID_RLX6_DRAM_BOOT = amdsmi_wrapper.FW_ID_RLX6_DRAM_BOOT
-    FW_ID_RS64_ME = amdsmi_wrapper.FW_ID_RS64_ME
-    FW_ID_RS64_ME_P0_DATA = amdsmi_wrapper.FW_ID_RS64_ME_P0_DATA
-    FW_ID_RS64_ME_P1_DATA = amdsmi_wrapper.FW_ID_RS64_ME_P1_DATA
-    FW_ID_RS64_PFP = amdsmi_wrapper.FW_ID_RS64_PFP
-    FW_ID_RS64_PFP_P0_DATA = amdsmi_wrapper.FW_ID_RS64_PFP_P0_DATA
-    FW_ID_RS64_PFP_P1_DATA = amdsmi_wrapper.FW_ID_RS64_PFP_P1_DATA
-    FW_ID_RS64_MEC = amdsmi_wrapper.FW_ID_RS64_MEC
-    FW_ID_RS64_MEC_P0_DATA = amdsmi_wrapper.FW_ID_RS64_MEC_P0_DATA
-    FW_ID_RS64_MEC_P1_DATA = amdsmi_wrapper.FW_ID_RS64_MEC_P1_DATA
-    FW_ID_RS64_MEC_P2_DATA = amdsmi_wrapper.FW_ID_RS64_MEC_P2_DATA
-    FW_ID_RS64_MEC_P3_DATA = amdsmi_wrapper.FW_ID_RS64_MEC_P3_DATA
-    FW_ID_PPTABLE = amdsmi_wrapper.FW_ID_PPTABLE
-    FW_ID_PSP_SOC = amdsmi_wrapper.FW_ID_PSP_SOC
-    FW_ID_PSP_DBG = amdsmi_wrapper.FW_ID_PSP_DBG
-    FW_ID_PSP_INTF = amdsmi_wrapper.FW_ID_PSP_INTF
-    FW_ID_RLX6_CORE1 = amdsmi_wrapper.FW_ID_RLX6_CORE1
-    FW_ID_RLX6_DRAM_BOOT_CORE1 = amdsmi_wrapper.FW_ID_RLX6_DRAM_BOOT_CORE1
-    FW_ID_RLCV_LX7 = amdsmi_wrapper.FW_ID_RLCV_LX7
-    FW_ID_RLC_SAVE_RESTORE_LIST = amdsmi_wrapper.FW_ID_RLC_SAVE_RESTORE_LIST
-    FW_ID_ASD = amdsmi_wrapper.FW_ID_ASD
-    FW_ID_TA_RAS = amdsmi_wrapper.FW_ID_TA_RAS
-    FW_ID_TA_XGMI = amdsmi_wrapper.FW_ID_TA_XGMI
-    FW_ID_RLC_SRLG = amdsmi_wrapper.FW_ID_RLC_SRLG
-    FW_ID_RLC_SRLS = amdsmi_wrapper.FW_ID_RLC_SRLS
-    FW_ID_PM = amdsmi_wrapper.FW_ID_PM
-    FW_ID_DMCU = amdsmi_wrapper.FW_ID_DMCU
+    AMDSMI_FW_ID_SMU = amdsmi_wrapper.AMDSMI_FW_ID_SMU
+    AMDSMI_FW_ID_CP_CE = amdsmi_wrapper.AMDSMI_FW_ID_CP_CE
+    AMDSMI_FW_ID_CP_PFP = amdsmi_wrapper.AMDSMI_FW_ID_CP_PFP
+    AMDSMI_FW_ID_CP_ME = amdsmi_wrapper.AMDSMI_FW_ID_CP_ME
+    AMDSMI_FW_ID_CP_MEC_JT1 = amdsmi_wrapper.AMDSMI_FW_ID_CP_MEC_JT1
+    AMDSMI_FW_ID_CP_MEC_JT2 = amdsmi_wrapper.AMDSMI_FW_ID_CP_MEC_JT2
+    AMDSMI_FW_ID_CP_MEC1 = amdsmi_wrapper.AMDSMI_FW_ID_CP_MEC1
+    AMDSMI_FW_ID_CP_MEC2 = amdsmi_wrapper.AMDSMI_FW_ID_CP_MEC2
+    AMDSMI_FW_ID_RLC = amdsmi_wrapper.AMDSMI_FW_ID_RLC
+    AMDSMI_FW_ID_SDMA0 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA0
+    AMDSMI_FW_ID_SDMA1 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA1
+    AMDSMI_FW_ID_SDMA2 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA2
+    AMDSMI_FW_ID_SDMA3 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA3
+    AMDSMI_FW_ID_SDMA4 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA4
+    AMDSMI_FW_ID_SDMA5 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA5
+    AMDSMI_FW_ID_SDMA6 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA6
+    AMDSMI_FW_ID_SDMA7 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA7
+    AMDSMI_FW_ID_VCN = amdsmi_wrapper.AMDSMI_FW_ID_VCN
+    AMDSMI_FW_ID_UVD = amdsmi_wrapper.AMDSMI_FW_ID_UVD
+    AMDSMI_FW_ID_VCE = amdsmi_wrapper.AMDSMI_FW_ID_VCE
+    AMDSMI_FW_ID_ISP = amdsmi_wrapper.AMDSMI_FW_ID_ISP
+    AMDSMI_FW_ID_DMCU_ERAM = amdsmi_wrapper.AMDSMI_FW_ID_DMCU_ERAM
+    AMDSMI_FW_ID_DMCU_ISR = amdsmi_wrapper.AMDSMI_FW_ID_DMCU_ISR
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM = amdsmi_wrapper.AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM = amdsmi_wrapper.AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM
+    AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL = amdsmi_wrapper.AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL
+    AMDSMI_FW_ID_RLC_V = amdsmi_wrapper.AMDSMI_FW_ID_RLC_V
+    AMDSMI_FW_ID_MMSCH = amdsmi_wrapper.AMDSMI_FW_ID_MMSCH
+    AMDSMI_FW_ID_PSP_SYSDRV = amdsmi_wrapper.AMDSMI_FW_ID_PSP_SYSDRV
+    AMDSMI_FW_ID_PSP_SOSDRV = amdsmi_wrapper.AMDSMI_FW_ID_PSP_SOSDRV
+    AMDSMI_FW_ID_PSP_TOC = amdsmi_wrapper.AMDSMI_FW_ID_PSP_TOC
+    AMDSMI_FW_ID_PSP_KEYDB = amdsmi_wrapper.AMDSMI_FW_ID_PSP_KEYDB
+    AMDSMI_FW_ID_DFC = amdsmi_wrapper.AMDSMI_FW_ID_DFC
+    AMDSMI_FW_ID_PSP_SPL = amdsmi_wrapper.AMDSMI_FW_ID_PSP_SPL
+    AMDSMI_FW_ID_DRV_CAP = amdsmi_wrapper.AMDSMI_FW_ID_DRV_CAP
+    AMDSMI_FW_ID_MC = amdsmi_wrapper.AMDSMI_FW_ID_MC
+    AMDSMI_FW_ID_PSP_BL = amdsmi_wrapper.AMDSMI_FW_ID_PSP_BL
+    AMDSMI_FW_ID_CP_PM4 = amdsmi_wrapper.AMDSMI_FW_ID_CP_PM4
+    AMDSMI_FW_ID_RLC_P = amdsmi_wrapper.AMDSMI_FW_ID_RLC_P
+    AMDSMI_FW_ID_SEC_POLICY_STAGE2 = amdsmi_wrapper.AMDSMI_FW_ID_SEC_POLICY_STAGE2
+    AMDSMI_FW_ID_REG_ACCESS_WHITELIST = amdsmi_wrapper.AMDSMI_FW_ID_REG_ACCESS_WHITELIST
+    AMDSMI_FW_ID_IMU_DRAM = amdsmi_wrapper.AMDSMI_FW_ID_IMU_DRAM
+    AMDSMI_FW_ID_IMU_IRAM = amdsmi_wrapper.AMDSMI_FW_ID_IMU_IRAM
+    AMDSMI_FW_ID_SDMA_TH0 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA_TH0
+    AMDSMI_FW_ID_SDMA_TH1 = amdsmi_wrapper.AMDSMI_FW_ID_SDMA_TH1
+    AMDSMI_FW_ID_CP_MES = amdsmi_wrapper.AMDSMI_FW_ID_CP_MES
+    AMDSMI_FW_ID_MES_STACK = amdsmi_wrapper.AMDSMI_FW_ID_MES_STACK
+    AMDSMI_FW_ID_MES_THREAD1 = amdsmi_wrapper.AMDSMI_FW_ID_MES_THREAD1
+    AMDSMI_FW_ID_MES_THREAD1_STACK = amdsmi_wrapper.AMDSMI_FW_ID_MES_THREAD1_STACK
+    AMDSMI_FW_ID_RLX6 = amdsmi_wrapper.AMDSMI_FW_ID_RLX6
+    AMDSMI_FW_ID_RLX6_DRAM_BOOT = amdsmi_wrapper.AMDSMI_FW_ID_RLX6_DRAM_BOOT
+    AMDSMI_FW_ID_RS64_ME = amdsmi_wrapper.AMDSMI_FW_ID_RS64_ME
+    AMDSMI_FW_ID_RS64_ME_P0_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_ME_P0_DATA
+    AMDSMI_FW_ID_RS64_ME_P1_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_ME_P1_DATA
+    AMDSMI_FW_ID_RS64_PFP = amdsmi_wrapper.AMDSMI_FW_ID_RS64_PFP
+    AMDSMI_FW_ID_RS64_PFP_P0_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_PFP_P0_DATA
+    AMDSMI_FW_ID_RS64_PFP_P1_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_PFP_P1_DATA
+    AMDSMI_FW_ID_RS64_MEC = amdsmi_wrapper.AMDSMI_FW_ID_RS64_MEC
+    AMDSMI_FW_ID_RS64_MEC_P0_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_MEC_P0_DATA
+    AMDSMI_FW_ID_RS64_MEC_P1_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_MEC_P1_DATA
+    AMDSMI_FW_ID_RS64_MEC_P2_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_MEC_P2_DATA
+    AMDSMI_FW_ID_RS64_MEC_P3_DATA = amdsmi_wrapper.AMDSMI_FW_ID_RS64_MEC_P3_DATA
+    AMDSMI_FW_ID_PPTABLE = amdsmi_wrapper.AMDSMI_FW_ID_PPTABLE
+    AMDSMI_FW_ID_PSP_SOC = amdsmi_wrapper.AMDSMI_FW_ID_PSP_SOC
+    AMDSMI_FW_ID_PSP_DBG = amdsmi_wrapper.AMDSMI_FW_ID_PSP_DBG
+    AMDSMI_FW_ID_PSP_INTF = amdsmi_wrapper.AMDSMI_FW_ID_PSP_INTF
+    AMDSMI_FW_ID_RLX6_CORE1 = amdsmi_wrapper.AMDSMI_FW_ID_RLX6_CORE1
+    AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1 = amdsmi_wrapper.AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1
+    AMDSMI_FW_ID_RLCV_LX7 = amdsmi_wrapper.AMDSMI_FW_ID_RLCV_LX7
+    AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST = amdsmi_wrapper.AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST
+    AMDSMI_FW_ID_ASD = amdsmi_wrapper.AMDSMI_FW_ID_ASD
+    AMDSMI_FW_ID_TA_RAS = amdsmi_wrapper.AMDSMI_FW_ID_TA_RAS
+    AMDSMI_FW_ID_TA_XGMI = amdsmi_wrapper.AMDSMI_FW_ID_TA_XGMI
+    AMDSMI_FW_ID_RLC_SRLG = amdsmi_wrapper.AMDSMI_FW_ID_RLC_SRLG
+    AMDSMI_FW_ID_RLC_SRLS = amdsmi_wrapper.AMDSMI_FW_ID_RLC_SRLS
+    AMDSMI_FW_ID_PM = amdsmi_wrapper.AMDSMI_FW_ID_PM
+    AMDSMI_FW_ID_DMCU = amdsmi_wrapper.AMDSMI_FW_ID_DMCU
 
 
 class AmdSmiClkType(IntEnum):
-    SYS = amdsmi_wrapper.CLK_TYPE_SYS
-    GFX = amdsmi_wrapper.CLK_TYPE_GFX
-    DF = amdsmi_wrapper.CLK_TYPE_DF
-    DCEF = amdsmi_wrapper.CLK_TYPE_DCEF
-    SOC = amdsmi_wrapper.CLK_TYPE_SOC
-    MEM = amdsmi_wrapper.CLK_TYPE_MEM
-    PCIE = amdsmi_wrapper.CLK_TYPE_PCIE
-    VCLK0 = amdsmi_wrapper.CLK_TYPE_VCLK0
-    VCLK1 = amdsmi_wrapper.CLK_TYPE_VCLK1
-    DCLK0 = amdsmi_wrapper.CLK_TYPE_DCLK0
-    DCLK1 = amdsmi_wrapper.CLK_TYPE_DCLK1
+    SYS = amdsmi_wrapper.AMDSMI_CLK_TYPE_SYS
+    GFX = amdsmi_wrapper.AMDSMI_CLK_TYPE_GFX
+    DF = amdsmi_wrapper.AMDSMI_CLK_TYPE_DF
+    DCEF = amdsmi_wrapper.AMDSMI_CLK_TYPE_DCEF
+    SOC = amdsmi_wrapper.AMDSMI_CLK_TYPE_SOC
+    MEM = amdsmi_wrapper.AMDSMI_CLK_TYPE_MEM
+    PCIE = amdsmi_wrapper.AMDSMI_CLK_TYPE_PCIE
+    VCLK0 = amdsmi_wrapper.AMDSMI_CLK_TYPE_VCLK0
+    VCLK1 = amdsmi_wrapper.AMDSMI_CLK_TYPE_VCLK1
+    DCLK0 = amdsmi_wrapper.AMDSMI_CLK_TYPE_DCLK0
+    DCLK1 = amdsmi_wrapper.AMDSMI_CLK_TYPE_DCLK1
 
 
 class AmdSmiTemperatureType(IntEnum):
-    EDGE = amdsmi_wrapper.TEMPERATURE_TYPE_EDGE
-    HOTSPOT = amdsmi_wrapper.TEMPERATURE_TYPE_HOTSPOT
-    JUNCTION = amdsmi_wrapper.TEMPERATURE_TYPE_JUNCTION
-    VRAM = amdsmi_wrapper.TEMPERATURE_TYPE_VRAM
-    HBM_0 = amdsmi_wrapper.TEMPERATURE_TYPE_HBM_0
-    HBM_1 = amdsmi_wrapper.TEMPERATURE_TYPE_HBM_1
-    HBM_2 = amdsmi_wrapper.TEMPERATURE_TYPE_HBM_2
-    HBM_3 = amdsmi_wrapper.TEMPERATURE_TYPE_HBM_3
-    PLX = amdsmi_wrapper.TEMPERATURE_TYPE_PLX
+    EDGE = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_EDGE
+    HOTSPOT = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_HOTSPOT
+    JUNCTION = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_JUNCTION
+    VRAM = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_VRAM
+    HBM_0 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_HBM_0
+    HBM_1 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_HBM_1
+    HBM_2 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_HBM_2
+    HBM_3 = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_HBM_3
+    PLX = amdsmi_wrapper.AMDSMI_TEMPERATURE_TYPE_PLX
 
 
 class AmdSmiDevPerfLevel(IntEnum):
@@ -289,20 +289,20 @@ class AmdSmiVoltageType(IntEnum):
 
 
 class AmdSmiComputePartitionType(IntEnum):
-    CPX = amdsmi_wrapper.COMPUTE_PARTITION_CPX
-    SPX = amdsmi_wrapper.COMPUTE_PARTITION_SPX
-    DPX = amdsmi_wrapper.COMPUTE_PARTITION_DPX
-    TPX = amdsmi_wrapper.COMPUTE_PARTITION_TPX
-    QPX = amdsmi_wrapper.COMPUTE_PARTITION_QPX
-    INVALID = amdsmi_wrapper.COMPUTE_PARTITION_INVALID
+    CPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_CPX
+    SPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_SPX
+    DPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_DPX
+    TPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_TPX
+    QPX = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_QPX
+    INVALID = amdsmi_wrapper.AMDSMI_COMPUTE_PARTITION_INVALID
 
 
 class AmdSmiMemoryPartitionType(IntEnum):
-    NPS1 = amdsmi_wrapper.MEMORY_PARTITION_NPS1
-    NPS2 = amdsmi_wrapper.MEMORY_PARTITION_NPS2
-    NPS4 = amdsmi_wrapper.MEMORY_PARTITION_NPS4
-    NPS8 = amdsmi_wrapper.MEMORY_PARTITION_NPS8
-    UNKNOWN = amdsmi_wrapper.MEMORY_PARTITION_UNKNOWN
+    NPS1 = amdsmi_wrapper.AMDSMI_MEMORY_PARTITION_NPS1
+    NPS2 = amdsmi_wrapper.AMDSMI_MEMORY_PARTITION_NPS2
+    NPS4 = amdsmi_wrapper.AMDSMI_MEMORY_PARTITION_NPS4
+    NPS8 = amdsmi_wrapper.AMDSMI_MEMORY_PARTITION_NPS8
+    UNKNOWN = amdsmi_wrapper.AMDSMI_MEMORY_PARTITION_UNKNOWN
 
 
 class AmdSmiPowerProfilePresetMasks(IntEnum):
@@ -391,11 +391,11 @@ class AmdSmiUtilizationCounterType(IntEnum):
 
 
 class AmdSmiProcessorType(IntEnum):
-    UNKNOWN = amdsmi_wrapper.UNKNOWN
-    AMD_GPU = amdsmi_wrapper.AMD_GPU
-    AMD_CPU = amdsmi_wrapper.AMD_CPU
-    NON_AMD_GPU = amdsmi_wrapper.NON_AMD_GPU
-    NON_AMD_CPU = amdsmi_wrapper.NON_AMD_CPU
+    UNKNOWN = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_UNKNOWN
+    AMDSMI_PROCESSOR_TYPE_AMD_GPU = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_GPU
+    AMDSMI_PROCESSOR_TYPE_AMD_CPU = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU
+    AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU
+    AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU
 
 
 class AmdSmiEventReader:
@@ -421,7 +421,8 @@ class AmdSmiEventReader:
         self.processor_handle = processor_handle
         mask = 0
         for event_type in event_types:
-            mask |= (1 << (int(event_type) - 1))
+            if event_type != AmdSmiEvtNotificationType.NONE:
+                mask |= (1 << (int(event_type) - 1))
 
         _check_res(amdsmi_wrapper.amdsmi_init_gpu_event_notification(processor_handle))
         _check_res(amdsmi_wrapper.amdsmi_set_gpu_event_notification_mask(
@@ -513,10 +514,10 @@ def _format_bdf(amdsmi_bdf: amdsmi_wrapper.amdsmi_bdf_t) -> str:
     Returns:
         `str`: String containing BDF data in a readable format.
     """
-    domain = hex(amdsmi_bdf.fields.domain_number)[2:].zfill(4)
-    bus = hex(amdsmi_bdf.fields.bus_number)[2:].zfill(2)
-    device = hex(amdsmi_bdf.fields.device_number)[2:].zfill(2)
-    function = hex(amdsmi_bdf.fields.function_number)[2:]
+    domain = hex(amdsmi_bdf.struct_amdsmi_bdf_t.domain_number)[2:].zfill(4)
+    bus = hex(amdsmi_bdf.struct_amdsmi_bdf_t.bus_number)[2:].zfill(2)
+    device = hex(amdsmi_bdf.struct_amdsmi_bdf_t.device_number)[2:].zfill(2)
+    function = hex(amdsmi_bdf.struct_amdsmi_bdf_t.function_number)[2:]
 
     return domain + ":" + bus + ":" + device + "." + function
 
@@ -563,10 +564,10 @@ def _make_amdsmi_bdf_from_list(bdf):
     if len(bdf) != 4:
         return None
     amdsmi_bdf = amdsmi_wrapper.amdsmi_bdf_t()
-    amdsmi_bdf.fields.function_number = bdf[3]
-    amdsmi_bdf.fields.device_number = bdf[2]
-    amdsmi_bdf.fields.bus_number = bdf[1]
-    amdsmi_bdf.fields.domain_number = bdf[0]
+    amdsmi_bdf.struct_amdsmi_bdf_t.function_number = bdf[3]
+    amdsmi_bdf.struct_amdsmi_bdf_t.device_number = bdf[2]
+    amdsmi_bdf.struct_amdsmi_bdf_t.bus_number = bdf[1]
+    amdsmi_bdf.struct_amdsmi_bdf_t.domain_number = bdf[0]
     return amdsmi_bdf
 
 def _padHexValue(value, length):
@@ -626,7 +627,7 @@ def amdsmi_get_cpusocket_handles() -> List[amdsmi_wrapper.amdsmi_socket_handle]:
     """
     socket_handles = amdsmi_get_socket_handles()
     cpu_handles = []
-    type = amdsmi_wrapper.AMD_CPU
+    type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU
     for socket in socket_handles:
         cpu_count = ctypes.c_uint32()
         null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
@@ -719,7 +720,7 @@ def amdsmi_get_processor_handles() -> List[amdsmi_wrapper.amdsmi_processor_handl
 def amdsmi_get_cpucore_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
     socket_handles = amdsmi_get_socket_handles()
     core_handles = []
-    type = amdsmi_wrapper.AMD_CPU_CORE
+    type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE
 
     for socket in socket_handles:
         core_count = ctypes.c_uint32()
@@ -1709,7 +1710,7 @@ def amdsmi_get_gpu_vram_info(
     return {
         "vram_type": vram_info.vram_type,
         "vram_vendor": vram_info.vram_vendor,
-        "vram_size_mb": vram_info.vram_size_mb,
+        "vram_size": vram_info.vram_size,
     }
 
 
@@ -1835,10 +1836,11 @@ def amdsmi_get_clock_info(
     )
 
     return {
-        "cur_clk": clock_measure.cur_clk,
-        "max_clk": clock_measure.max_clk,
+        "clk": clock_measure.clk,
         "min_clk": clock_measure.min_clk,
-        "sleep_clk" : clock_measure.sleep_clk,
+        "max_clk": clock_measure.max_clk,
+        "clk_locked": clock_measure.clk_locked,
+        "clk_deep_sleep" : clock_measure.clk_deep_sleep,
     }
 
 
@@ -2119,14 +2121,14 @@ def amdsmi_get_fw_info(
     _check_res(amdsmi_wrapper.amdsmi_get_fw_info(
         processor_handle, ctypes.byref(fw_info)))
 
-    hex_format_fw = [AmdSmiFwBlock.FW_ID_PSP_SOSDRV,
-                     AmdSmiFwBlock.FW_ID_TA_RAS,
-                     AmdSmiFwBlock.FW_ID_TA_XGMI,
-                     AmdSmiFwBlock.FW_ID_UVD,
-                     AmdSmiFwBlock.FW_ID_VCE,
-                     AmdSmiFwBlock.FW_ID_VCN]
+    hex_format_fw = [AmdSmiFwBlock.AMDSMI_FW_ID_PSP_SOSDRV,
+                     AmdSmiFwBlock.AMDSMI_FW_ID_TA_RAS,
+                     AmdSmiFwBlock.AMDSMI_FW_ID_TA_XGMI,
+                     AmdSmiFwBlock.AMDSMI_FW_ID_UVD,
+                     AmdSmiFwBlock.AMDSMI_FW_ID_VCE,
+                     AmdSmiFwBlock.AMDSMI_FW_ID_VCN]
 
-    dec_format_fw = [AmdSmiFwBlock.FW_ID_PM]
+    dec_format_fw = [AmdSmiFwBlock.AMDSMI_FW_ID_PM]
 
     firmwares = []
     for i in range(0, fw_info.num_fw_info):
@@ -2784,7 +2786,7 @@ def amdsmi_set_clk_freq(
     )
 
 
-def amdsmi_set_dpm_policy(
+def amdsmi_set_soc_pstate(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
     policy_id: int,
 ):
@@ -2793,7 +2795,7 @@ def amdsmi_set_dpm_policy(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
     _check_res(
-        amdsmi_wrapper.amdsmi_set_dpm_policy(
+        amdsmi_wrapper.amdsmi_set_soc_pstate(
             processor_handle, policy_id
         )
     )
@@ -3403,7 +3405,7 @@ def amdsmi_get_clk_freq(
     }
 
 
-def amdsmi_get_dpm_policy(
+def amdsmi_get_soc_pstate(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
 ) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
@@ -3413,7 +3415,7 @@ def amdsmi_get_dpm_policy(
 
     policy = amdsmi_wrapper.amdsmi_dpm_policy_t()
     _check_res(
-        amdsmi_wrapper.amdsmi_get_dpm_policy(
+        amdsmi_wrapper.amdsmi_get_soc_pstate(
             processor_handle, ctypes.byref(policy)
         )
     )

@@ -2143,27 +2143,6 @@ rsmi_status_t rsmi_dev_gpu_clear_sram_data(uint32_t dv_ind,
 }
 
 rsmi_status_t
-rsmi_dev_dpm_policy_set(uint32_t dv_ind,
-                      uint32_t policy_id) {
-  rsmi_status_t ret;
-
-  TRY
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
-  LOG_TRACE(ss);
-  REQUIRE_ROOT_ACCESS
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-
-  std::string value("soc_pstate ");
-  value += std::to_string(policy_id);
-  int ret = dev->writeDevInfo(amd::smi::kDevDPMPolicy , value);
-  return amd::smi::ErrnoToRsmiStatus(ret);
-
-  CATCH
-}
-
-rsmi_status_t
 rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
                       rsmi_dpm_policy_t* policy) {
   rsmi_status_t ret;
@@ -2181,7 +2160,7 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
   LOG_TRACE(ss);
   DEVICE_MUTEX
 
-  ret = GetDevValueVec(amd::smi::kDevDPMPolicy, dv_ind, &val_vec);
+  ret = GetDevValueVec(amd::smi::kDevXgmiPlpd, dv_ind, &val_vec);
   if (ret == RSMI_STATUS_FILE_ERROR) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
        << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
@@ -2199,21 +2178,14 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
   /*
     It will reply on the number but no string as it may vary from soc to soc.
     The current xmgi plpd marked with *
-    xgmi plpd
-    0 : plpd_disallow
-    1 : plpd_default
-    2 : plpd_optimized*
+      0 : plpd_disallow
+      1 : plpd_default*
+      2 : plpd_optimized
   */
-  bool see_plpd_pstate = false;
   bool see_current = false;
   policy->num_supported = 0;
   for (uint32_t i = 0; i < val_vec.size(); ++i) {
     auto current_line = amd::smi::trim(val_vec[i]);
-    if (current_line == "xgmi plpd") {
-      see_plpd_pstate = true;
-      continue;
-    }
-    if (see_plpd_pstate == false) continue;
 
     // Get tokens: <integer> : <string *>
     std::vector<std::string> tokens;
@@ -2250,17 +2222,13 @@ rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
     policy->num_supported++;
   }  //  end for
 
-  if (!see_plpd_pstate) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
   if (!see_current) {
       ss << __PRETTY_FUNCTION__ << " | ======= end ======="
-          << ", Unexpected pstat data: cannot find the current plpd policy.";
+          << ", Unexpected pstat data: cannot find the current xgmi_plpd policy.";
           LOG_ERROR(ss);
           return RSMI_STATUS_UNEXPECTED_DATA;
   }
-  // Cannot find it
+
   return RSMI_STATUS_SUCCESS;
 
   CATCH
@@ -2279,16 +2247,15 @@ rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
   DEVICE_MUTEX
   GET_DEV_FROM_INDX
 
-  std::string value("xgmi ");
-  value += std::to_string(plpd_id);
-  int ret = dev->writeDevInfo(amd::smi::kDevDPMPolicy , value);
+  std::string value = std::to_string(plpd_id);
+  int ret = dev->writeDevInfo(amd::smi::kDevXgmiPlpd , value);
   return amd::smi::ErrnoToRsmiStatus(ret);
 
   CATCH
 }
 
 rsmi_status_t
-rsmi_dev_dpm_policy_get(uint32_t dv_ind,
+rsmi_dev_soc_pstate_get(uint32_t dv_ind,
                       rsmi_dpm_policy_t* policy) {
   rsmi_status_t ret;
   std::vector<std::string> val_vec;
@@ -2305,7 +2272,7 @@ rsmi_dev_dpm_policy_get(uint32_t dv_ind,
   LOG_TRACE(ss);
   DEVICE_MUTEX
 
-  ret = GetDevValueVec(amd::smi::kDevDPMPolicy, dv_ind, &val_vec);
+  ret = GetDevValueVec(amd::smi::kDevSocPstate, dv_ind, &val_vec);
   if (ret == RSMI_STATUS_FILE_ERROR) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======="
        << ", GetDevValueVec() ret was RSMI_STATUS_FILE_ERROR "
@@ -2323,22 +2290,15 @@ rsmi_dev_dpm_policy_get(uint32_t dv_ind,
   /*
     It will reply on the number but no string as it may vary from soc to soc.
     The current pstate marked with *
-    soc pstate
     0 : soc_pstate_default
     1 : soc_pstate_0
     2 : soc_pstate_1*
     3 : soc_pstate_2
   */
-  bool see_soc_pstate = false;
   bool see_current = false;
   policy->num_supported = 0;
   for (uint32_t i = 0; i < val_vec.size(); ++i) {
     auto current_line = amd::smi::trim(val_vec[i]);
-    if (current_line == "soc pstate") {
-      see_soc_pstate = true;
-      continue;
-    }
-    if (see_soc_pstate == false) continue;
 
     // Get tokens: <integer> : <string *>
     std::vector<std::string> tokens;
@@ -2375,10 +2335,6 @@ rsmi_dev_dpm_policy_get(uint32_t dv_ind,
     policy->num_supported++;
   }  //  end for
 
-  if (!see_soc_pstate) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
   if (!see_current) {
       ss << __PRETTY_FUNCTION__ << " | ======= end ======="
           << ", Unexpected pstat data: cannot find the current policy.";
@@ -2387,6 +2343,26 @@ rsmi_dev_dpm_policy_get(uint32_t dv_ind,
   }
   // Cannot find it
   return RSMI_STATUS_SUCCESS;
+
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_soc_pstate_set(uint32_t dv_ind,
+                      uint32_t policy_id) {
+  rsmi_status_t ret;
+
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+  REQUIRE_ROOT_ACCESS
+  DEVICE_MUTEX
+  GET_DEV_FROM_INDX
+
+  std::string value = std::to_string(policy_id);
+  int ret = dev->writeDevInfo(amd::smi::kDevSocPstate , value);
+  return amd::smi::ErrnoToRsmiStatus(ret);
 
   CATCH
 }

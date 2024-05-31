@@ -73,10 +73,22 @@ def parseArgument():
 def replace_line(full_path_file_name, string_to_repalce, new_string):
     fh, abs_path = tempfile.mkstemp()
     with os.fdopen(fh, 'w') as new_file:
-        new_file.write(HEADER)
         with open(full_path_file_name, 'r+', encoding='UTF-8') as old_file:
             for line in old_file:
                 new_file.write(line.replace(string_to_repalce, new_string))
+
+    shutil.copymode(full_path_file_name, abs_path)
+    os.remove(full_path_file_name)
+    shutil.move(abs_path, full_path_file_name)
+
+
+def write_header(full_path_file_name):
+    fh, abs_path = tempfile.mkstemp()
+    with os.fdopen(fh, 'w') as new_file:
+        new_file.write(HEADER)
+        with open(full_path_file_name, 'r+', encoding='UTF-8') as old_file:
+            for line in old_file:
+                new_file.write(line)
 
     shutil.copymode(full_path_file_name, abs_path)
     os.remove(full_path_file_name)
@@ -134,8 +146,41 @@ except OSError as error:
     arguments.append("--clang-args=-I" + clang_include_dir + clang_extra_args)
     clangToPy(arguments)
 
+    write_header(output_file)
     replace_line(output_file, line_to_replace, new_line)
 
+    # Custom handling for anonymous struct within amdsmi_bdf_t in Linux
+    if os_platform == "Linux":
+        # Get line number for anonymous error in struct_amdsmi_bdf_t
+        reference_line = "uint64_t function_number :"
+        line_number = -1
+        with open(input_file, 'r') as file:
+            for input_file_line_number, line in enumerate(file, 1):
+                if reference_line in line:
+                    line_number = input_file_line_number - 1 # Anonymous line will error on the line before this
+                    break
+
+        if line_number == -1:
+            print("Could not find reference line in amdsmi.h for amdsmi_bdf_t struct. Skipping anonymous struct replacement.")
+        else:
+            print(f"Found reference line in amdsmi.h for amdsmi_bdf_t struct at line {line_number}")
+            union_anon_line = "union_amdsmi_bdf_t._anonymous_ = ('_0',)"
+            replace_line(output_file, union_anon_line, "")
+
+            internal_union_anon_line = f"('_0', struct_struct (anonymous at amdsmi.h:{line_number}:3))"
+            internal_union_struct_line = "('struct_amdsmi_bdf_t', struct_amdsmi_bdf_t)"
+            replace_line(output_file, internal_union_anon_line, internal_union_struct_line)
+
+            struct_anon_line = f"struct_struct (anonymous at amdsmi.h:{line_number}:3)"
+            struct_amdsmi_bdf_t_line = "struct_amdsmi_bdf_t"
+            replace_line(output_file, struct_anon_line, struct_amdsmi_bdf_t_line)
+
+            struct_anon_all_line = "'struct_struct (anonymous at"
+            struct_amdsmi_bdf_t_line = "'struct_amdsmi_bdf_t',"
+            replace_line(output_file, struct_anon_all_line, struct_amdsmi_bdf_t_line)
+
+            struct_anon_all_line = f"amdsmi.h:{line_number}:3)', "
+            replace_line(output_file, struct_anon_all_line, "")
 
 if __name__ == "__main__":
     main()

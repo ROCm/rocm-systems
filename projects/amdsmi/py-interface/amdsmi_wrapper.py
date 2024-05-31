@@ -226,11 +226,11 @@ amdsmi_mm_ip_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_container_types_t'
 amdsmi_container_types_t__enumvalues = {
-    0: 'CONTAINER_LXC',
-    1: 'CONTAINER_DOCKER',
+    0: 'AMDSMI_CONTAINER_LXC',
+    1: 'AMDSMI_CONTAINER_DOCKER',
 }
-CONTAINER_LXC = 0
-CONTAINER_DOCKER = 1
+AMDSMI_CONTAINER_LXC = 0
+AMDSMI_CONTAINER_DOCKER = 1
 amdsmi_container_types_t = ctypes.c_uint32 # enum
 amdsmi_processor_handle = ctypes.POINTER(None)
 amdsmi_socket_handle = ctypes.POINTER(None)
@@ -238,21 +238,21 @@ amdsmi_cpusocket_handle = ctypes.POINTER(None)
 
 # values for enumeration 'processor_type_t'
 processor_type_t__enumvalues = {
-    0: 'UNKNOWN',
-    1: 'AMD_GPU',
-    2: 'AMD_CPU',
-    3: 'NON_AMD_GPU',
-    4: 'NON_AMD_CPU',
-    5: 'AMD_CPU_CORE',
-    6: 'AMD_APU',
+    0: 'AMDSMI_PROCESSOR_TYPE_UNKNOWN',
+    1: 'AMDSMI_PROCESSOR_TYPE_AMD_GPU',
+    2: 'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
+    3: 'AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU',
+    4: 'AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU',
+    5: 'AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE',
+    6: 'AMDSMI_PROCESSOR_TYPE_AMD_APU',
 }
-UNKNOWN = 0
-AMD_GPU = 1
-AMD_CPU = 2
-NON_AMD_GPU = 3
-NON_AMD_CPU = 4
-AMD_CPU_CORE = 5
-AMD_APU = 6
+AMDSMI_PROCESSOR_TYPE_UNKNOWN = 0
+AMDSMI_PROCESSOR_TYPE_AMD_GPU = 1
+AMDSMI_PROCESSOR_TYPE_AMD_CPU = 2
+AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU = 3
+AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU = 4
+AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE = 5
+AMDSMI_PROCESSOR_TYPE_AMD_APU = 6
 processor_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_status_t'
@@ -287,15 +287,15 @@ amdsmi_status_t__enumvalues = {
     42: 'AMDSMI_STATUS_UNEXPECTED_SIZE',
     43: 'AMDSMI_STATUS_UNEXPECTED_DATA',
     44: 'AMDSMI_STATUS_NON_AMD_CPU',
-    45: 'AMDSMI_NO_ENERGY_DRV',
-    46: 'AMDSMI_NO_MSR_DRV',
-    47: 'AMDSMI_NO_HSMP_DRV',
-    48: 'AMDSMI_NO_HSMP_SUP',
-    49: 'AMDSMI_NO_HSMP_MSG_SUP',
-    50: 'AMDSMI_HSMP_TIMEOUT',
-    51: 'AMDSMI_NO_DRV',
-    52: 'AMDSMI_FILE_NOT_FOUND',
-    53: 'AMDSMI_ARG_PTR_NULL',
+    45: 'AMDSMI_STATUS_NO_ENERGY_DRV',
+    46: 'AMDSMI_STATUS_NO_MSR_DRV',
+    47: 'AMDSMI_STATUS_NO_HSMP_DRV',
+    48: 'AMDSMI_STATUS_NO_HSMP_SUP',
+    49: 'AMDSMI_STATUS_NO_HSMP_MSG_SUP',
+    50: 'AMDSMI_STATUS_HSMP_TIMEOUT',
+    51: 'AMDSMI_STATUS_NO_DRV',
+    52: 'AMDSMI_STATUS_FILE_NOT_FOUND',
+    53: 'AMDSMI_STATUS_ARG_PTR_NULL',
     54: 'AMDSMI_STATUS_AMDGPU_RESTART_ERR',
     55: 'AMDSMI_STATUS_SETTING_UNAVAILABLE',
     4294967294: 'AMDSMI_STATUS_MAP_ERROR',
@@ -331,15 +331,15 @@ AMDSMI_STATUS_INSUFFICIENT_SIZE = 41
 AMDSMI_STATUS_UNEXPECTED_SIZE = 42
 AMDSMI_STATUS_UNEXPECTED_DATA = 43
 AMDSMI_STATUS_NON_AMD_CPU = 44
-AMDSMI_NO_ENERGY_DRV = 45
-AMDSMI_NO_MSR_DRV = 46
-AMDSMI_NO_HSMP_DRV = 47
-AMDSMI_NO_HSMP_SUP = 48
-AMDSMI_NO_HSMP_MSG_SUP = 49
-AMDSMI_HSMP_TIMEOUT = 50
-AMDSMI_NO_DRV = 51
-AMDSMI_FILE_NOT_FOUND = 52
-AMDSMI_ARG_PTR_NULL = 53
+AMDSMI_STATUS_NO_ENERGY_DRV = 45
+AMDSMI_STATUS_NO_MSR_DRV = 46
+AMDSMI_STATUS_NO_HSMP_DRV = 47
+AMDSMI_STATUS_NO_HSMP_SUP = 48
+AMDSMI_STATUS_NO_HSMP_MSG_SUP = 49
+AMDSMI_STATUS_HSMP_TIMEOUT = 50
+AMDSMI_STATUS_NO_DRV = 51
+AMDSMI_STATUS_FILE_NOT_FOUND = 52
+AMDSMI_STATUS_ARG_PTR_NULL = 53
 AMDSMI_STATUS_AMDGPU_RESTART_ERR = 54
 AMDSMI_STATUS_SETTING_UNAVAILABLE = 55
 AMDSMI_STATUS_MAP_ERROR = 4294967294
@@ -348,284 +348,294 @@ amdsmi_status_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_clk_type_t'
 amdsmi_clk_type_t__enumvalues = {
-    0: 'CLK_TYPE_SYS',
-    0: 'CLK_TYPE_FIRST',
-    0: 'CLK_TYPE_GFX',
-    1: 'CLK_TYPE_DF',
-    2: 'CLK_TYPE_DCEF',
-    3: 'CLK_TYPE_SOC',
-    4: 'CLK_TYPE_MEM',
-    5: 'CLK_TYPE_PCIE',
-    6: 'CLK_TYPE_VCLK0',
-    7: 'CLK_TYPE_VCLK1',
-    8: 'CLK_TYPE_DCLK0',
-    9: 'CLK_TYPE_DCLK1',
-    9: 'CLK_TYPE__MAX',
+    0: 'AMDSMI_CLK_TYPE_SYS',
+    0: 'AMDSMI_CLK_TYPE_FIRST',
+    0: 'AMDSMI_CLK_TYPE_GFX',
+    1: 'AMDSMI_CLK_TYPE_DF',
+    2: 'AMDSMI_CLK_TYPE_DCEF',
+    3: 'AMDSMI_CLK_TYPE_SOC',
+    4: 'AMDSMI_CLK_TYPE_MEM',
+    5: 'AMDSMI_CLK_TYPE_PCIE',
+    6: 'AMDSMI_CLK_TYPE_VCLK0',
+    7: 'AMDSMI_CLK_TYPE_VCLK1',
+    8: 'AMDSMI_CLK_TYPE_DCLK0',
+    9: 'AMDSMI_CLK_TYPE_DCLK1',
+    9: 'AMDSMI_CLK_TYPE__MAX',
 }
-CLK_TYPE_SYS = 0
-CLK_TYPE_FIRST = 0
-CLK_TYPE_GFX = 0
-CLK_TYPE_DF = 1
-CLK_TYPE_DCEF = 2
-CLK_TYPE_SOC = 3
-CLK_TYPE_MEM = 4
-CLK_TYPE_PCIE = 5
-CLK_TYPE_VCLK0 = 6
-CLK_TYPE_VCLK1 = 7
-CLK_TYPE_DCLK0 = 8
-CLK_TYPE_DCLK1 = 9
-CLK_TYPE__MAX = 9
+AMDSMI_CLK_TYPE_SYS = 0
+AMDSMI_CLK_TYPE_FIRST = 0
+AMDSMI_CLK_TYPE_GFX = 0
+AMDSMI_CLK_TYPE_DF = 1
+AMDSMI_CLK_TYPE_DCEF = 2
+AMDSMI_CLK_TYPE_SOC = 3
+AMDSMI_CLK_TYPE_MEM = 4
+AMDSMI_CLK_TYPE_PCIE = 5
+AMDSMI_CLK_TYPE_VCLK0 = 6
+AMDSMI_CLK_TYPE_VCLK1 = 7
+AMDSMI_CLK_TYPE_DCLK0 = 8
+AMDSMI_CLK_TYPE_DCLK1 = 9
+AMDSMI_CLK_TYPE__MAX = 9
 amdsmi_clk_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_compute_partition_type_t'
 amdsmi_compute_partition_type_t__enumvalues = {
-    0: 'COMPUTE_PARTITION_INVALID',
-    1: 'COMPUTE_PARTITION_CPX',
-    2: 'COMPUTE_PARTITION_SPX',
-    3: 'COMPUTE_PARTITION_DPX',
-    4: 'COMPUTE_PARTITION_TPX',
-    5: 'COMPUTE_PARTITION_QPX',
+    0: 'AMDSMI_COMPUTE_PARTITION_INVALID',
+    1: 'AMDSMI_COMPUTE_PARTITION_CPX',
+    2: 'AMDSMI_COMPUTE_PARTITION_SPX',
+    3: 'AMDSMI_COMPUTE_PARTITION_DPX',
+    4: 'AMDSMI_COMPUTE_PARTITION_TPX',
+    5: 'AMDSMI_COMPUTE_PARTITION_QPX',
 }
-COMPUTE_PARTITION_INVALID = 0
-COMPUTE_PARTITION_CPX = 1
-COMPUTE_PARTITION_SPX = 2
-COMPUTE_PARTITION_DPX = 3
-COMPUTE_PARTITION_TPX = 4
-COMPUTE_PARTITION_QPX = 5
+AMDSMI_COMPUTE_PARTITION_INVALID = 0
+AMDSMI_COMPUTE_PARTITION_CPX = 1
+AMDSMI_COMPUTE_PARTITION_SPX = 2
+AMDSMI_COMPUTE_PARTITION_DPX = 3
+AMDSMI_COMPUTE_PARTITION_TPX = 4
+AMDSMI_COMPUTE_PARTITION_QPX = 5
 amdsmi_compute_partition_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_memory_partition_type_t'
 amdsmi_memory_partition_type_t__enumvalues = {
-    0: 'MEMORY_PARTITION_UNKNOWN',
-    1: 'MEMORY_PARTITION_NPS1',
-    2: 'MEMORY_PARTITION_NPS2',
-    3: 'MEMORY_PARTITION_NPS4',
-    4: 'MEMORY_PARTITION_NPS8',
+    0: 'AMDSMI_MEMORY_PARTITION_UNKNOWN',
+    1: 'AMDSMI_MEMORY_PARTITION_NPS1',
+    2: 'AMDSMI_MEMORY_PARTITION_NPS2',
+    3: 'AMDSMI_MEMORY_PARTITION_NPS4',
+    4: 'AMDSMI_MEMORY_PARTITION_NPS8',
 }
-MEMORY_PARTITION_UNKNOWN = 0
-MEMORY_PARTITION_NPS1 = 1
-MEMORY_PARTITION_NPS2 = 2
-MEMORY_PARTITION_NPS4 = 3
-MEMORY_PARTITION_NPS8 = 4
+AMDSMI_MEMORY_PARTITION_UNKNOWN = 0
+AMDSMI_MEMORY_PARTITION_NPS1 = 1
+AMDSMI_MEMORY_PARTITION_NPS2 = 2
+AMDSMI_MEMORY_PARTITION_NPS4 = 3
+AMDSMI_MEMORY_PARTITION_NPS8 = 4
 amdsmi_memory_partition_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_temperature_type_t'
 amdsmi_temperature_type_t__enumvalues = {
-    0: 'TEMPERATURE_TYPE_EDGE',
-    0: 'TEMPERATURE_TYPE_FIRST',
-    1: 'TEMPERATURE_TYPE_HOTSPOT',
-    1: 'TEMPERATURE_TYPE_JUNCTION',
-    2: 'TEMPERATURE_TYPE_VRAM',
-    3: 'TEMPERATURE_TYPE_HBM_0',
-    4: 'TEMPERATURE_TYPE_HBM_1',
-    5: 'TEMPERATURE_TYPE_HBM_2',
-    6: 'TEMPERATURE_TYPE_HBM_3',
-    7: 'TEMPERATURE_TYPE_PLX',
-    7: 'TEMPERATURE_TYPE__MAX',
+    0: 'AMDSMI_TEMPERATURE_TYPE_EDGE',
+    0: 'AMDSMI_TEMPERATURE_TYPE_FIRST',
+    1: 'AMDSMI_TEMPERATURE_TYPE_HOTSPOT',
+    1: 'AMDSMI_TEMPERATURE_TYPE_JUNCTION',
+    2: 'AMDSMI_TEMPERATURE_TYPE_VRAM',
+    3: 'AMDSMI_TEMPERATURE_TYPE_HBM_0',
+    4: 'AMDSMI_TEMPERATURE_TYPE_HBM_1',
+    5: 'AMDSMI_TEMPERATURE_TYPE_HBM_2',
+    6: 'AMDSMI_TEMPERATURE_TYPE_HBM_3',
+    7: 'AMDSMI_TEMPERATURE_TYPE_PLX',
+    7: 'AMDSMI_TEMPERATURE_TYPE__MAX',
 }
-TEMPERATURE_TYPE_EDGE = 0
-TEMPERATURE_TYPE_FIRST = 0
-TEMPERATURE_TYPE_HOTSPOT = 1
-TEMPERATURE_TYPE_JUNCTION = 1
-TEMPERATURE_TYPE_VRAM = 2
-TEMPERATURE_TYPE_HBM_0 = 3
-TEMPERATURE_TYPE_HBM_1 = 4
-TEMPERATURE_TYPE_HBM_2 = 5
-TEMPERATURE_TYPE_HBM_3 = 6
-TEMPERATURE_TYPE_PLX = 7
-TEMPERATURE_TYPE__MAX = 7
+AMDSMI_TEMPERATURE_TYPE_EDGE = 0
+AMDSMI_TEMPERATURE_TYPE_FIRST = 0
+AMDSMI_TEMPERATURE_TYPE_HOTSPOT = 1
+AMDSMI_TEMPERATURE_TYPE_JUNCTION = 1
+AMDSMI_TEMPERATURE_TYPE_VRAM = 2
+AMDSMI_TEMPERATURE_TYPE_HBM_0 = 3
+AMDSMI_TEMPERATURE_TYPE_HBM_1 = 4
+AMDSMI_TEMPERATURE_TYPE_HBM_2 = 5
+AMDSMI_TEMPERATURE_TYPE_HBM_3 = 6
+AMDSMI_TEMPERATURE_TYPE_PLX = 7
+AMDSMI_TEMPERATURE_TYPE__MAX = 7
 amdsmi_temperature_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_fw_block_t'
 amdsmi_fw_block_t__enumvalues = {
-    1: 'FW_ID_SMU',
-    1: 'FW_ID_FIRST',
-    2: 'FW_ID_CP_CE',
-    3: 'FW_ID_CP_PFP',
-    4: 'FW_ID_CP_ME',
-    5: 'FW_ID_CP_MEC_JT1',
-    6: 'FW_ID_CP_MEC_JT2',
-    7: 'FW_ID_CP_MEC1',
-    8: 'FW_ID_CP_MEC2',
-    9: 'FW_ID_RLC',
-    10: 'FW_ID_SDMA0',
-    11: 'FW_ID_SDMA1',
-    12: 'FW_ID_SDMA2',
-    13: 'FW_ID_SDMA3',
-    14: 'FW_ID_SDMA4',
-    15: 'FW_ID_SDMA5',
-    16: 'FW_ID_SDMA6',
-    17: 'FW_ID_SDMA7',
-    18: 'FW_ID_VCN',
-    19: 'FW_ID_UVD',
-    20: 'FW_ID_VCE',
-    21: 'FW_ID_ISP',
-    22: 'FW_ID_DMCU_ERAM',
-    23: 'FW_ID_DMCU_ISR',
-    24: 'FW_ID_RLC_RESTORE_LIST_GPM_MEM',
-    25: 'FW_ID_RLC_RESTORE_LIST_SRM_MEM',
-    26: 'FW_ID_RLC_RESTORE_LIST_CNTL',
-    27: 'FW_ID_RLC_V',
-    28: 'FW_ID_MMSCH',
-    29: 'FW_ID_PSP_SYSDRV',
-    30: 'FW_ID_PSP_SOSDRV',
-    31: 'FW_ID_PSP_TOC',
-    32: 'FW_ID_PSP_KEYDB',
-    33: 'FW_ID_DFC',
-    34: 'FW_ID_PSP_SPL',
-    35: 'FW_ID_DRV_CAP',
-    36: 'FW_ID_MC',
-    37: 'FW_ID_PSP_BL',
-    38: 'FW_ID_CP_PM4',
-    39: 'FW_ID_RLC_P',
-    40: 'FW_ID_SEC_POLICY_STAGE2',
-    41: 'FW_ID_REG_ACCESS_WHITELIST',
-    42: 'FW_ID_IMU_DRAM',
-    43: 'FW_ID_IMU_IRAM',
-    44: 'FW_ID_SDMA_TH0',
-    45: 'FW_ID_SDMA_TH1',
-    46: 'FW_ID_CP_MES',
-    47: 'FW_ID_MES_KIQ',
-    48: 'FW_ID_MES_STACK',
-    49: 'FW_ID_MES_THREAD1',
-    50: 'FW_ID_MES_THREAD1_STACK',
-    51: 'FW_ID_RLX6',
-    52: 'FW_ID_RLX6_DRAM_BOOT',
-    53: 'FW_ID_RS64_ME',
-    54: 'FW_ID_RS64_ME_P0_DATA',
-    55: 'FW_ID_RS64_ME_P1_DATA',
-    56: 'FW_ID_RS64_PFP',
-    57: 'FW_ID_RS64_PFP_P0_DATA',
-    58: 'FW_ID_RS64_PFP_P1_DATA',
-    59: 'FW_ID_RS64_MEC',
-    60: 'FW_ID_RS64_MEC_P0_DATA',
-    61: 'FW_ID_RS64_MEC_P1_DATA',
-    62: 'FW_ID_RS64_MEC_P2_DATA',
-    63: 'FW_ID_RS64_MEC_P3_DATA',
-    64: 'FW_ID_PPTABLE',
-    65: 'FW_ID_PSP_SOC',
-    66: 'FW_ID_PSP_DBG',
-    67: 'FW_ID_PSP_INTF',
-    68: 'FW_ID_RLX6_CORE1',
-    69: 'FW_ID_RLX6_DRAM_BOOT_CORE1',
-    70: 'FW_ID_RLCV_LX7',
-    71: 'FW_ID_RLC_SAVE_RESTORE_LIST',
-    72: 'FW_ID_ASD',
-    73: 'FW_ID_TA_RAS',
-    74: 'FW_ID_TA_XGMI',
-    75: 'FW_ID_RLC_SRLG',
-    76: 'FW_ID_RLC_SRLS',
-    77: 'FW_ID_PM',
-    78: 'FW_ID_DMCU',
-    79: 'FW_ID__MAX',
+    1: 'AMDSMI_FW_ID_SMU',
+    1: 'AMDSMI_FW_ID_FIRST',
+    2: 'AMDSMI_FW_ID_CP_CE',
+    3: 'AMDSMI_FW_ID_CP_PFP',
+    4: 'AMDSMI_FW_ID_CP_ME',
+    5: 'AMDSMI_FW_ID_CP_MEC_JT1',
+    6: 'AMDSMI_FW_ID_CP_MEC_JT2',
+    7: 'AMDSMI_FW_ID_CP_MEC1',
+    8: 'AMDSMI_FW_ID_CP_MEC2',
+    9: 'AMDSMI_FW_ID_RLC',
+    10: 'AMDSMI_FW_ID_SDMA0',
+    11: 'AMDSMI_FW_ID_SDMA1',
+    12: 'AMDSMI_FW_ID_SDMA2',
+    13: 'AMDSMI_FW_ID_SDMA3',
+    14: 'AMDSMI_FW_ID_SDMA4',
+    15: 'AMDSMI_FW_ID_SDMA5',
+    16: 'AMDSMI_FW_ID_SDMA6',
+    17: 'AMDSMI_FW_ID_SDMA7',
+    18: 'AMDSMI_FW_ID_VCN',
+    19: 'AMDSMI_FW_ID_UVD',
+    20: 'AMDSMI_FW_ID_VCE',
+    21: 'AMDSMI_FW_ID_ISP',
+    22: 'AMDSMI_FW_ID_DMCU_ERAM',
+    23: 'AMDSMI_FW_ID_DMCU_ISR',
+    24: 'AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM',
+    25: 'AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM',
+    26: 'AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL',
+    27: 'AMDSMI_FW_ID_RLC_V',
+    28: 'AMDSMI_FW_ID_MMSCH',
+    29: 'AMDSMI_FW_ID_PSP_SYSDRV',
+    30: 'AMDSMI_FW_ID_PSP_SOSDRV',
+    31: 'AMDSMI_FW_ID_PSP_TOC',
+    32: 'AMDSMI_FW_ID_PSP_KEYDB',
+    33: 'AMDSMI_FW_ID_DFC',
+    34: 'AMDSMI_FW_ID_PSP_SPL',
+    35: 'AMDSMI_FW_ID_DRV_CAP',
+    36: 'AMDSMI_FW_ID_MC',
+    37: 'AMDSMI_FW_ID_PSP_BL',
+    38: 'AMDSMI_FW_ID_CP_PM4',
+    39: 'AMDSMI_FW_ID_RLC_P',
+    40: 'AMDSMI_FW_ID_SEC_POLICY_STAGE2',
+    41: 'AMDSMI_FW_ID_REG_ACCESS_WHITELIST',
+    42: 'AMDSMI_FW_ID_IMU_DRAM',
+    43: 'AMDSMI_FW_ID_IMU_IRAM',
+    44: 'AMDSMI_FW_ID_SDMA_TH0',
+    45: 'AMDSMI_FW_ID_SDMA_TH1',
+    46: 'AMDSMI_FW_ID_CP_MES',
+    47: 'AMDSMI_FW_ID_MES_KIQ',
+    48: 'AMDSMI_FW_ID_MES_STACK',
+    49: 'AMDSMI_FW_ID_MES_THREAD1',
+    50: 'AMDSMI_FW_ID_MES_THREAD1_STACK',
+    51: 'AMDSMI_FW_ID_RLX6',
+    52: 'AMDSMI_FW_ID_RLX6_DRAM_BOOT',
+    53: 'AMDSMI_FW_ID_RS64_ME',
+    54: 'AMDSMI_FW_ID_RS64_ME_P0_DATA',
+    55: 'AMDSMI_FW_ID_RS64_ME_P1_DATA',
+    56: 'AMDSMI_FW_ID_RS64_PFP',
+    57: 'AMDSMI_FW_ID_RS64_PFP_P0_DATA',
+    58: 'AMDSMI_FW_ID_RS64_PFP_P1_DATA',
+    59: 'AMDSMI_FW_ID_RS64_MEC',
+    60: 'AMDSMI_FW_ID_RS64_MEC_P0_DATA',
+    61: 'AMDSMI_FW_ID_RS64_MEC_P1_DATA',
+    62: 'AMDSMI_FW_ID_RS64_MEC_P2_DATA',
+    63: 'AMDSMI_FW_ID_RS64_MEC_P3_DATA',
+    64: 'AMDSMI_FW_ID_PPTABLE',
+    65: 'AMDSMI_FW_ID_PSP_SOC',
+    66: 'AMDSMI_FW_ID_PSP_DBG',
+    67: 'AMDSMI_FW_ID_PSP_INTF',
+    68: 'AMDSMI_FW_ID_RLX6_CORE1',
+    69: 'AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1',
+    70: 'AMDSMI_FW_ID_RLCV_LX7',
+    71: 'AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST',
+    72: 'AMDSMI_FW_ID_ASD',
+    73: 'AMDSMI_FW_ID_TA_RAS',
+    74: 'AMDSMI_FW_ID_TA_XGMI',
+    75: 'AMDSMI_FW_ID_RLC_SRLG',
+    76: 'AMDSMI_FW_ID_RLC_SRLS',
+    77: 'AMDSMI_FW_ID_PM',
+    78: 'AMDSMI_FW_ID_DMCU',
+    79: 'AMDSMI_FW_ID__MAX',
 }
-FW_ID_SMU = 1
-FW_ID_FIRST = 1
-FW_ID_CP_CE = 2
-FW_ID_CP_PFP = 3
-FW_ID_CP_ME = 4
-FW_ID_CP_MEC_JT1 = 5
-FW_ID_CP_MEC_JT2 = 6
-FW_ID_CP_MEC1 = 7
-FW_ID_CP_MEC2 = 8
-FW_ID_RLC = 9
-FW_ID_SDMA0 = 10
-FW_ID_SDMA1 = 11
-FW_ID_SDMA2 = 12
-FW_ID_SDMA3 = 13
-FW_ID_SDMA4 = 14
-FW_ID_SDMA5 = 15
-FW_ID_SDMA6 = 16
-FW_ID_SDMA7 = 17
-FW_ID_VCN = 18
-FW_ID_UVD = 19
-FW_ID_VCE = 20
-FW_ID_ISP = 21
-FW_ID_DMCU_ERAM = 22
-FW_ID_DMCU_ISR = 23
-FW_ID_RLC_RESTORE_LIST_GPM_MEM = 24
-FW_ID_RLC_RESTORE_LIST_SRM_MEM = 25
-FW_ID_RLC_RESTORE_LIST_CNTL = 26
-FW_ID_RLC_V = 27
-FW_ID_MMSCH = 28
-FW_ID_PSP_SYSDRV = 29
-FW_ID_PSP_SOSDRV = 30
-FW_ID_PSP_TOC = 31
-FW_ID_PSP_KEYDB = 32
-FW_ID_DFC = 33
-FW_ID_PSP_SPL = 34
-FW_ID_DRV_CAP = 35
-FW_ID_MC = 36
-FW_ID_PSP_BL = 37
-FW_ID_CP_PM4 = 38
-FW_ID_RLC_P = 39
-FW_ID_SEC_POLICY_STAGE2 = 40
-FW_ID_REG_ACCESS_WHITELIST = 41
-FW_ID_IMU_DRAM = 42
-FW_ID_IMU_IRAM = 43
-FW_ID_SDMA_TH0 = 44
-FW_ID_SDMA_TH1 = 45
-FW_ID_CP_MES = 46
-FW_ID_MES_KIQ = 47
-FW_ID_MES_STACK = 48
-FW_ID_MES_THREAD1 = 49
-FW_ID_MES_THREAD1_STACK = 50
-FW_ID_RLX6 = 51
-FW_ID_RLX6_DRAM_BOOT = 52
-FW_ID_RS64_ME = 53
-FW_ID_RS64_ME_P0_DATA = 54
-FW_ID_RS64_ME_P1_DATA = 55
-FW_ID_RS64_PFP = 56
-FW_ID_RS64_PFP_P0_DATA = 57
-FW_ID_RS64_PFP_P1_DATA = 58
-FW_ID_RS64_MEC = 59
-FW_ID_RS64_MEC_P0_DATA = 60
-FW_ID_RS64_MEC_P1_DATA = 61
-FW_ID_RS64_MEC_P2_DATA = 62
-FW_ID_RS64_MEC_P3_DATA = 63
-FW_ID_PPTABLE = 64
-FW_ID_PSP_SOC = 65
-FW_ID_PSP_DBG = 66
-FW_ID_PSP_INTF = 67
-FW_ID_RLX6_CORE1 = 68
-FW_ID_RLX6_DRAM_BOOT_CORE1 = 69
-FW_ID_RLCV_LX7 = 70
-FW_ID_RLC_SAVE_RESTORE_LIST = 71
-FW_ID_ASD = 72
-FW_ID_TA_RAS = 73
-FW_ID_TA_XGMI = 74
-FW_ID_RLC_SRLG = 75
-FW_ID_RLC_SRLS = 76
-FW_ID_PM = 77
-FW_ID_DMCU = 78
-FW_ID__MAX = 79
+AMDSMI_FW_ID_SMU = 1
+AMDSMI_FW_ID_FIRST = 1
+AMDSMI_FW_ID_CP_CE = 2
+AMDSMI_FW_ID_CP_PFP = 3
+AMDSMI_FW_ID_CP_ME = 4
+AMDSMI_FW_ID_CP_MEC_JT1 = 5
+AMDSMI_FW_ID_CP_MEC_JT2 = 6
+AMDSMI_FW_ID_CP_MEC1 = 7
+AMDSMI_FW_ID_CP_MEC2 = 8
+AMDSMI_FW_ID_RLC = 9
+AMDSMI_FW_ID_SDMA0 = 10
+AMDSMI_FW_ID_SDMA1 = 11
+AMDSMI_FW_ID_SDMA2 = 12
+AMDSMI_FW_ID_SDMA3 = 13
+AMDSMI_FW_ID_SDMA4 = 14
+AMDSMI_FW_ID_SDMA5 = 15
+AMDSMI_FW_ID_SDMA6 = 16
+AMDSMI_FW_ID_SDMA7 = 17
+AMDSMI_FW_ID_VCN = 18
+AMDSMI_FW_ID_UVD = 19
+AMDSMI_FW_ID_VCE = 20
+AMDSMI_FW_ID_ISP = 21
+AMDSMI_FW_ID_DMCU_ERAM = 22
+AMDSMI_FW_ID_DMCU_ISR = 23
+AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM = 24
+AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM = 25
+AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL = 26
+AMDSMI_FW_ID_RLC_V = 27
+AMDSMI_FW_ID_MMSCH = 28
+AMDSMI_FW_ID_PSP_SYSDRV = 29
+AMDSMI_FW_ID_PSP_SOSDRV = 30
+AMDSMI_FW_ID_PSP_TOC = 31
+AMDSMI_FW_ID_PSP_KEYDB = 32
+AMDSMI_FW_ID_DFC = 33
+AMDSMI_FW_ID_PSP_SPL = 34
+AMDSMI_FW_ID_DRV_CAP = 35
+AMDSMI_FW_ID_MC = 36
+AMDSMI_FW_ID_PSP_BL = 37
+AMDSMI_FW_ID_CP_PM4 = 38
+AMDSMI_FW_ID_RLC_P = 39
+AMDSMI_FW_ID_SEC_POLICY_STAGE2 = 40
+AMDSMI_FW_ID_REG_ACCESS_WHITELIST = 41
+AMDSMI_FW_ID_IMU_DRAM = 42
+AMDSMI_FW_ID_IMU_IRAM = 43
+AMDSMI_FW_ID_SDMA_TH0 = 44
+AMDSMI_FW_ID_SDMA_TH1 = 45
+AMDSMI_FW_ID_CP_MES = 46
+AMDSMI_FW_ID_MES_KIQ = 47
+AMDSMI_FW_ID_MES_STACK = 48
+AMDSMI_FW_ID_MES_THREAD1 = 49
+AMDSMI_FW_ID_MES_THREAD1_STACK = 50
+AMDSMI_FW_ID_RLX6 = 51
+AMDSMI_FW_ID_RLX6_DRAM_BOOT = 52
+AMDSMI_FW_ID_RS64_ME = 53
+AMDSMI_FW_ID_RS64_ME_P0_DATA = 54
+AMDSMI_FW_ID_RS64_ME_P1_DATA = 55
+AMDSMI_FW_ID_RS64_PFP = 56
+AMDSMI_FW_ID_RS64_PFP_P0_DATA = 57
+AMDSMI_FW_ID_RS64_PFP_P1_DATA = 58
+AMDSMI_FW_ID_RS64_MEC = 59
+AMDSMI_FW_ID_RS64_MEC_P0_DATA = 60
+AMDSMI_FW_ID_RS64_MEC_P1_DATA = 61
+AMDSMI_FW_ID_RS64_MEC_P2_DATA = 62
+AMDSMI_FW_ID_RS64_MEC_P3_DATA = 63
+AMDSMI_FW_ID_PPTABLE = 64
+AMDSMI_FW_ID_PSP_SOC = 65
+AMDSMI_FW_ID_PSP_DBG = 66
+AMDSMI_FW_ID_PSP_INTF = 67
+AMDSMI_FW_ID_RLX6_CORE1 = 68
+AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1 = 69
+AMDSMI_FW_ID_RLCV_LX7 = 70
+AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST = 71
+AMDSMI_FW_ID_ASD = 72
+AMDSMI_FW_ID_TA_RAS = 73
+AMDSMI_FW_ID_TA_XGMI = 74
+AMDSMI_FW_ID_RLC_SRLG = 75
+AMDSMI_FW_ID_RLC_SRLS = 76
+AMDSMI_FW_ID_PM = 77
+AMDSMI_FW_ID_DMCU = 78
+AMDSMI_FW_ID__MAX = 79
 amdsmi_fw_block_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_vram_type_t'
 amdsmi_vram_type_t__enumvalues = {
-    0: 'VRAM_TYPE_UNKNOWN',
-    1: 'VRAM_TYPE_GDDR1',
-    2: 'VRAM_TYPE_DDR2',
-    3: 'VRAM_TYPE_GDDR3',
-    4: 'VRAM_TYPE_GDDR4',
-    5: 'VRAM_TYPE_GDDR5',
-    6: 'VRAM_TYPE_HBM',
-    7: 'VRAM_TYPE_DDR3',
-    8: 'VRAM_TYPE_DDR4',
-    9: 'VRAM_TYPE_GDDR6',
-    9: 'VRAM_TYPE__MAX',
+    0: 'AMDSMI_VRAM_TYPE_UNKNOWN',
+    1: 'AMDSMI_VRAM_TYPE_HBM',
+    2: 'AMDSMI_VRAM_TYPE_HBM2',
+    3: 'AMDSMI_VRAM_TYPE_HBM2E',
+    4: 'AMDSMI_VRAM_TYPE_HBM3',
+    10: 'AMDSMI_VRAM_TYPE_DDR2',
+    11: 'AMDSMI_VRAM_TYPE_DDR3',
+    12: 'AMDSMI_VRAM_TYPE_DDR4',
+    17: 'AMDSMI_VRAM_TYPE_GDDR1',
+    18: 'AMDSMI_VRAM_TYPE_GDDR2',
+    19: 'AMDSMI_VRAM_TYPE_GDDR3',
+    20: 'AMDSMI_VRAM_TYPE_GDDR4',
+    21: 'AMDSMI_VRAM_TYPE_GDDR5',
+    22: 'AMDSMI_VRAM_TYPE_GDDR6',
+    23: 'AMDSMI_VRAM_TYPE_GDDR7',
+    23: 'AMDSMI_VRAM_TYPE__MAX',
 }
-VRAM_TYPE_UNKNOWN = 0
-VRAM_TYPE_GDDR1 = 1
-VRAM_TYPE_DDR2 = 2
-VRAM_TYPE_GDDR3 = 3
-VRAM_TYPE_GDDR4 = 4
-VRAM_TYPE_GDDR5 = 5
-VRAM_TYPE_HBM = 6
-VRAM_TYPE_DDR3 = 7
-VRAM_TYPE_DDR4 = 8
-VRAM_TYPE_GDDR6 = 9
-VRAM_TYPE__MAX = 9
+AMDSMI_VRAM_TYPE_UNKNOWN = 0
+AMDSMI_VRAM_TYPE_HBM = 1
+AMDSMI_VRAM_TYPE_HBM2 = 2
+AMDSMI_VRAM_TYPE_HBM2E = 3
+AMDSMI_VRAM_TYPE_HBM3 = 4
+AMDSMI_VRAM_TYPE_DDR2 = 10
+AMDSMI_VRAM_TYPE_DDR3 = 11
+AMDSMI_VRAM_TYPE_DDR4 = 12
+AMDSMI_VRAM_TYPE_GDDR1 = 17
+AMDSMI_VRAM_TYPE_GDDR2 = 18
+AMDSMI_VRAM_TYPE_GDDR3 = 19
+AMDSMI_VRAM_TYPE_GDDR4 = 20
+AMDSMI_VRAM_TYPE_GDDR5 = 21
+AMDSMI_VRAM_TYPE_GDDR6 = 22
+AMDSMI_VRAM_TYPE_GDDR7 = 23
+AMDSMI_VRAM_TYPE__MAX = 23
 amdsmi_vram_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_vram_vendor_type_t'
@@ -714,11 +724,11 @@ amdsmi_frequency_range_t = struct_amdsmi_frequency_range_t
 class union_amdsmi_bdf_t(Union):
     pass
 
-class struct_fields_(Structure):
+class struct_amdsmi_bdf_t(Structure):
     pass
 
-struct_fields_._pack_ = 1 # source:False
-struct_fields_._fields_ = [
+struct_amdsmi_bdf_t._pack_ = 1 # source:False
+struct_amdsmi_bdf_t._fields_ = [
     ('function_number', ctypes.c_uint64, 3),
     ('device_number', ctypes.c_uint64, 5),
     ('bus_number', ctypes.c_uint64, 8),
@@ -726,8 +736,9 @@ struct_fields_._fields_ = [
 ]
 
 union_amdsmi_bdf_t._pack_ = 1 # source:False
+
 union_amdsmi_bdf_t._fields_ = [
-    ('fields', struct_fields_),
+    ('struct_amdsmi_bdf_t', struct_amdsmi_bdf_t),
     ('as_uint', ctypes.c_uint64),
 ]
 
@@ -748,19 +759,6 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
-]
-
 class struct_pcie_metric_(Structure):
     pass
 
@@ -777,6 +775,19 @@ struct_pcie_metric_._fields_ = [
     ('pcie_nak_sent_count', ctypes.c_uint64),
     ('pcie_nak_received_count', ctypes.c_uint64),
     ('reserved', ctypes.c_uint64 * 13),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('reserved', ctypes.c_uint64 * 10),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -941,7 +952,8 @@ struct_amdsmi_vram_info_t._pack_ = 1 # source:False
 struct_amdsmi_vram_info_t._fields_ = [
     ('vram_type', amdsmi_vram_type_t),
     ('vram_vendor', amdsmi_vram_vendor_type_t),
-    ('vram_size_mb', ctypes.c_uint64),
+    ('vram_size', ctypes.c_uint64),
+    ('reserved', ctypes.c_uint64 * 6),
 ]
 
 amdsmi_vram_info_t = struct_amdsmi_vram_info_t
@@ -990,10 +1002,12 @@ class struct_amdsmi_clk_info_t(Structure):
 
 struct_amdsmi_clk_info_t._pack_ = 1 # source:False
 struct_amdsmi_clk_info_t._fields_ = [
-    ('cur_clk', ctypes.c_uint32),
+    ('clk', ctypes.c_uint32),
     ('min_clk', ctypes.c_uint32),
     ('max_clk', ctypes.c_uint32),
-    ('sleep_clk', ctypes.c_uint32),
+    ('clk_locked', ctypes.c_ubyte),
+    ('clk_deep_sleep', ctypes.c_ubyte),
+    ('PADDING_0', ctypes.c_ubyte * 2),
     ('reserved', ctypes.c_uint32 * 4),
 ]
 
@@ -1505,7 +1519,7 @@ struct_amdsmi_dpm_policy_entry_t._fields_ = [
     ('policy_description', ctypes.c_char * 32),
 ]
 
-amdsmi_dpm_policy_entry_t = struct_amdsmi_dpm_policy_entry_t
+struct_amdsmi_dpm_policy_entry_t = struct_amdsmi_dpm_policy_entry_t
 class struct_amdsmi_dpm_policy_t(Structure):
     pass
 
@@ -2068,12 +2082,12 @@ amdsmi_set_gpu_overdrive_level.argtypes = [amdsmi_processor_handle, uint32_t]
 amdsmi_set_clk_freq = _libraries['libamd_smi.so'].amdsmi_set_clk_freq
 amdsmi_set_clk_freq.restype = amdsmi_status_t
 amdsmi_set_clk_freq.argtypes = [amdsmi_processor_handle, amdsmi_clk_type_t, uint64_t]
-amdsmi_get_dpm_policy = _libraries['libamd_smi.so'].amdsmi_get_dpm_policy
-amdsmi_get_dpm_policy.restype = amdsmi_status_t
-amdsmi_get_dpm_policy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_dpm_policy_t)]
-amdsmi_set_dpm_policy = _libraries['libamd_smi.so'].amdsmi_set_dpm_policy
-amdsmi_set_dpm_policy.restype = amdsmi_status_t
-amdsmi_set_dpm_policy.argtypes = [amdsmi_processor_handle, uint32_t]
+amdsmi_get_soc_pstate = _libraries['libamd_smi.so'].amdsmi_get_soc_pstate
+amdsmi_get_soc_pstate.restype = amdsmi_status_t
+amdsmi_get_soc_pstate.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_dpm_policy_t)]
+amdsmi_set_soc_pstate = _libraries['libamd_smi.so'].amdsmi_set_soc_pstate
+amdsmi_set_soc_pstate.restype = amdsmi_status_t
+amdsmi_set_soc_pstate.argtypes = [amdsmi_processor_handle, uint32_t]
 amdsmi_get_xgmi_plpd = _libraries['libamd_smi.so'].amdsmi_get_xgmi_plpd
 amdsmi_get_xgmi_plpd.restype = amdsmi_status_t
 amdsmi_get_xgmi_plpd.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_dpm_policy_t)]
@@ -2364,16 +2378,28 @@ amdsmi_get_esmi_err_msg = _libraries['libamd_smi.so'].amdsmi_get_esmi_err_msg
 amdsmi_get_esmi_err_msg.restype = amdsmi_status_t
 amdsmi_get_esmi_err_msg.argtypes = [amdsmi_status_t, ctypes.POINTER(ctypes.POINTER(ctypes.c_char))]
 __all__ = \
-    ['AGG_BW0', 'AMDSMI_ARG_PTR_NULL', 'AMDSMI_AVERAGE_POWER',
+    ['AGG_BW0', 'AMDSMI_AVERAGE_POWER',
     'AMDSMI_CACHE_PROPERTY_CPU_CACHE',
     'AMDSMI_CACHE_PROPERTY_DATA_CACHE',
     'AMDSMI_CACHE_PROPERTY_ENABLED',
     'AMDSMI_CACHE_PROPERTY_INST_CACHE',
     'AMDSMI_CACHE_PROPERTY_SIMD_CACHE', 'AMDSMI_CARD_FORM_FACTOR_CEM',
     'AMDSMI_CARD_FORM_FACTOR_OAM', 'AMDSMI_CARD_FORM_FACTOR_PCIE',
-    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CNTR_CMD_START',
-    'AMDSMI_CNTR_CMD_STOP', 'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
-    'AMDSMI_COARSE_GRAIN_MEM_ACTIVITY', 'AMDSMI_CURRENT_POWER',
+    'AMDSMI_CARD_FORM_FACTOR_UNKNOWN', 'AMDSMI_CLK_TYPE_DCEF',
+    'AMDSMI_CLK_TYPE_DCLK0', 'AMDSMI_CLK_TYPE_DCLK1',
+    'AMDSMI_CLK_TYPE_DF', 'AMDSMI_CLK_TYPE_FIRST',
+    'AMDSMI_CLK_TYPE_GFX', 'AMDSMI_CLK_TYPE_MEM',
+    'AMDSMI_CLK_TYPE_PCIE', 'AMDSMI_CLK_TYPE_SOC',
+    'AMDSMI_CLK_TYPE_SYS', 'AMDSMI_CLK_TYPE_VCLK0',
+    'AMDSMI_CLK_TYPE_VCLK1', 'AMDSMI_CLK_TYPE__MAX',
+    'AMDSMI_CNTR_CMD_START', 'AMDSMI_CNTR_CMD_STOP',
+    'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
+    'AMDSMI_COARSE_GRAIN_MEM_ACTIVITY',
+    'AMDSMI_COMPUTE_PARTITION_CPX', 'AMDSMI_COMPUTE_PARTITION_DPX',
+    'AMDSMI_COMPUTE_PARTITION_INVALID',
+    'AMDSMI_COMPUTE_PARTITION_QPX', 'AMDSMI_COMPUTE_PARTITION_SPX',
+    'AMDSMI_COMPUTE_PARTITION_TPX', 'AMDSMI_CONTAINER_DOCKER',
+    'AMDSMI_CONTAINER_LXC', 'AMDSMI_CURRENT_POWER',
     'AMDSMI_DEV_PERF_LEVEL_AUTO', 'AMDSMI_DEV_PERF_LEVEL_DETERMINISM',
     'AMDSMI_DEV_PERF_LEVEL_FIRST', 'AMDSMI_DEV_PERF_LEVEL_HIGH',
     'AMDSMI_DEV_PERF_LEVEL_LAST', 'AMDSMI_DEV_PERF_LEVEL_LOW',
@@ -2399,8 +2425,45 @@ __all__ = \
     'AMDSMI_EVT_NOTIF_GPU_PRE_RESET', 'AMDSMI_EVT_NOTIF_LAST',
     'AMDSMI_EVT_NOTIF_NONE', 'AMDSMI_EVT_NOTIF_RING_HANG',
     'AMDSMI_EVT_NOTIF_THERMAL_THROTTLE', 'AMDSMI_EVT_NOTIF_VMFAULT',
-    'AMDSMI_FILE_NOT_FOUND', 'AMDSMI_FREQ_IND_INVALID',
-    'AMDSMI_FREQ_IND_MAX', 'AMDSMI_FREQ_IND_MIN',
+    'AMDSMI_FREQ_IND_INVALID', 'AMDSMI_FREQ_IND_MAX',
+    'AMDSMI_FREQ_IND_MIN', 'AMDSMI_FW_ID_ASD', 'AMDSMI_FW_ID_CP_CE',
+    'AMDSMI_FW_ID_CP_ME', 'AMDSMI_FW_ID_CP_MEC1',
+    'AMDSMI_FW_ID_CP_MEC2', 'AMDSMI_FW_ID_CP_MEC_JT1',
+    'AMDSMI_FW_ID_CP_MEC_JT2', 'AMDSMI_FW_ID_CP_MES',
+    'AMDSMI_FW_ID_CP_PFP', 'AMDSMI_FW_ID_CP_PM4', 'AMDSMI_FW_ID_DFC',
+    'AMDSMI_FW_ID_DMCU', 'AMDSMI_FW_ID_DMCU_ERAM',
+    'AMDSMI_FW_ID_DMCU_ISR', 'AMDSMI_FW_ID_DRV_CAP',
+    'AMDSMI_FW_ID_FIRST', 'AMDSMI_FW_ID_IMU_DRAM',
+    'AMDSMI_FW_ID_IMU_IRAM', 'AMDSMI_FW_ID_ISP', 'AMDSMI_FW_ID_MC',
+    'AMDSMI_FW_ID_MES_KIQ', 'AMDSMI_FW_ID_MES_STACK',
+    'AMDSMI_FW_ID_MES_THREAD1', 'AMDSMI_FW_ID_MES_THREAD1_STACK',
+    'AMDSMI_FW_ID_MMSCH', 'AMDSMI_FW_ID_PM', 'AMDSMI_FW_ID_PPTABLE',
+    'AMDSMI_FW_ID_PSP_BL', 'AMDSMI_FW_ID_PSP_DBG',
+    'AMDSMI_FW_ID_PSP_INTF', 'AMDSMI_FW_ID_PSP_KEYDB',
+    'AMDSMI_FW_ID_PSP_SOC', 'AMDSMI_FW_ID_PSP_SOSDRV',
+    'AMDSMI_FW_ID_PSP_SPL', 'AMDSMI_FW_ID_PSP_SYSDRV',
+    'AMDSMI_FW_ID_PSP_TOC', 'AMDSMI_FW_ID_REG_ACCESS_WHITELIST',
+    'AMDSMI_FW_ID_RLC', 'AMDSMI_FW_ID_RLCV_LX7', 'AMDSMI_FW_ID_RLC_P',
+    'AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL',
+    'AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM',
+    'AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM',
+    'AMDSMI_FW_ID_RLC_SAVE_RESTORE_LIST', 'AMDSMI_FW_ID_RLC_SRLG',
+    'AMDSMI_FW_ID_RLC_SRLS', 'AMDSMI_FW_ID_RLC_V',
+    'AMDSMI_FW_ID_RLX6', 'AMDSMI_FW_ID_RLX6_CORE1',
+    'AMDSMI_FW_ID_RLX6_DRAM_BOOT',
+    'AMDSMI_FW_ID_RLX6_DRAM_BOOT_CORE1', 'AMDSMI_FW_ID_RS64_ME',
+    'AMDSMI_FW_ID_RS64_MEC', 'AMDSMI_FW_ID_RS64_MEC_P0_DATA',
+    'AMDSMI_FW_ID_RS64_MEC_P1_DATA', 'AMDSMI_FW_ID_RS64_MEC_P2_DATA',
+    'AMDSMI_FW_ID_RS64_MEC_P3_DATA', 'AMDSMI_FW_ID_RS64_ME_P0_DATA',
+    'AMDSMI_FW_ID_RS64_ME_P1_DATA', 'AMDSMI_FW_ID_RS64_PFP',
+    'AMDSMI_FW_ID_RS64_PFP_P0_DATA', 'AMDSMI_FW_ID_RS64_PFP_P1_DATA',
+    'AMDSMI_FW_ID_SDMA0', 'AMDSMI_FW_ID_SDMA1', 'AMDSMI_FW_ID_SDMA2',
+    'AMDSMI_FW_ID_SDMA3', 'AMDSMI_FW_ID_SDMA4', 'AMDSMI_FW_ID_SDMA5',
+    'AMDSMI_FW_ID_SDMA6', 'AMDSMI_FW_ID_SDMA7',
+    'AMDSMI_FW_ID_SDMA_TH0', 'AMDSMI_FW_ID_SDMA_TH1',
+    'AMDSMI_FW_ID_SEC_POLICY_STAGE2', 'AMDSMI_FW_ID_SMU',
+    'AMDSMI_FW_ID_TA_RAS', 'AMDSMI_FW_ID_TA_XGMI', 'AMDSMI_FW_ID_UVD',
+    'AMDSMI_FW_ID_VCE', 'AMDSMI_FW_ID_VCN', 'AMDSMI_FW_ID__MAX',
     'AMDSMI_GPU_BLOCK_ATHUB', 'AMDSMI_GPU_BLOCK_DF',
     'AMDSMI_GPU_BLOCK_FIRST', 'AMDSMI_GPU_BLOCK_FUSE',
     'AMDSMI_GPU_BLOCK_GFX', 'AMDSMI_GPU_BLOCK_HDP',
@@ -2412,24 +2475,31 @@ __all__ = \
     'AMDSMI_GPU_BLOCK_RESERVED', 'AMDSMI_GPU_BLOCK_SDMA',
     'AMDSMI_GPU_BLOCK_SEM', 'AMDSMI_GPU_BLOCK_SMN',
     'AMDSMI_GPU_BLOCK_UMC', 'AMDSMI_GPU_BLOCK_VCN',
-    'AMDSMI_GPU_BLOCK_XGMI_WAFL', 'AMDSMI_HSMP_TIMEOUT',
-    'AMDSMI_INIT_ALL_PROCESSORS', 'AMDSMI_INIT_AMD_APUS',
-    'AMDSMI_INIT_AMD_CPUS', 'AMDSMI_INIT_AMD_GPUS',
-    'AMDSMI_INIT_NON_AMD_CPUS', 'AMDSMI_INIT_NON_AMD_GPUS',
-    'AMDSMI_INVALID_POWER', 'AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES',
+    'AMDSMI_GPU_BLOCK_XGMI_WAFL', 'AMDSMI_INIT_ALL_PROCESSORS',
+    'AMDSMI_INIT_AMD_APUS', 'AMDSMI_INIT_AMD_CPUS',
+    'AMDSMI_INIT_AMD_GPUS', 'AMDSMI_INIT_NON_AMD_CPUS',
+    'AMDSMI_INIT_NON_AMD_GPUS', 'AMDSMI_INVALID_POWER',
+    'AMDSMI_IOLINK_TYPE_NUMIOLINKTYPES',
     'AMDSMI_IOLINK_TYPE_PCIEXPRESS', 'AMDSMI_IOLINK_TYPE_SIZE',
     'AMDSMI_IOLINK_TYPE_UNDEFINED', 'AMDSMI_IOLINK_TYPE_XGMI',
     'AMDSMI_LINK_TYPE_NOT_APPLICABLE', 'AMDSMI_LINK_TYPE_PCIE',
     'AMDSMI_LINK_TYPE_UNKNOWN', 'AMDSMI_LINK_TYPE_XGMI',
+    'AMDSMI_MEMORY_PARTITION_NPS1', 'AMDSMI_MEMORY_PARTITION_NPS2',
+    'AMDSMI_MEMORY_PARTITION_NPS4', 'AMDSMI_MEMORY_PARTITION_NPS8',
+    'AMDSMI_MEMORY_PARTITION_UNKNOWN',
     'AMDSMI_MEM_PAGE_STATUS_PENDING',
     'AMDSMI_MEM_PAGE_STATUS_RESERVED',
     'AMDSMI_MEM_PAGE_STATUS_UNRESERVABLE', 'AMDSMI_MEM_TYPE_FIRST',
     'AMDSMI_MEM_TYPE_GTT', 'AMDSMI_MEM_TYPE_LAST',
     'AMDSMI_MEM_TYPE_VIS_VRAM', 'AMDSMI_MEM_TYPE_VRAM',
     'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE', 'AMDSMI_MM_VCN',
-    'AMDSMI_MM__MAX', 'AMDSMI_NO_DRV', 'AMDSMI_NO_ENERGY_DRV',
-    'AMDSMI_NO_HSMP_DRV', 'AMDSMI_NO_HSMP_MSG_SUP',
-    'AMDSMI_NO_HSMP_SUP', 'AMDSMI_NO_MSR_DRV',
+    'AMDSMI_MM__MAX', 'AMDSMI_PROCESSOR_TYPE_AMD_APU',
+    'AMDSMI_PROCESSOR_TYPE_AMD_CPU',
+    'AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE',
+    'AMDSMI_PROCESSOR_TYPE_AMD_GPU',
+    'AMDSMI_PROCESSOR_TYPE_NON_AMD_CPU',
+    'AMDSMI_PROCESSOR_TYPE_NON_AMD_GPU',
+    'AMDSMI_PROCESSOR_TYPE_UNKNOWN',
     'AMDSMI_PWR_PROF_PRST_3D_FULL_SCR_MASK',
     'AMDSMI_PWR_PROF_PRST_BOOTUP_DEFAULT',
     'AMDSMI_PWR_PROF_PRST_COMPUTE_MASK',
@@ -2445,9 +2515,11 @@ __all__ = \
     'AMDSMI_REG_USR', 'AMDSMI_REG_USR1', 'AMDSMI_REG_WAFL',
     'AMDSMI_REG_XGMI', 'AMDSMI_STATUS_ADDRESS_FAULT',
     'AMDSMI_STATUS_AMDGPU_RESTART_ERR', 'AMDSMI_STATUS_API_FAILED',
-    'AMDSMI_STATUS_BUSY', 'AMDSMI_STATUS_DRIVER_NOT_LOADED',
-    'AMDSMI_STATUS_DRM_ERROR', 'AMDSMI_STATUS_FAIL_LOAD_MODULE',
+    'AMDSMI_STATUS_ARG_PTR_NULL', 'AMDSMI_STATUS_BUSY',
+    'AMDSMI_STATUS_DRIVER_NOT_LOADED', 'AMDSMI_STATUS_DRM_ERROR',
+    'AMDSMI_STATUS_FAIL_LOAD_MODULE',
     'AMDSMI_STATUS_FAIL_LOAD_SYMBOL', 'AMDSMI_STATUS_FILE_ERROR',
+    'AMDSMI_STATUS_FILE_NOT_FOUND', 'AMDSMI_STATUS_HSMP_TIMEOUT',
     'AMDSMI_STATUS_INIT_ERROR', 'AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS',
     'AMDSMI_STATUS_INSUFFICIENT_SIZE',
     'AMDSMI_STATUS_INTERNAL_EXCEPTION', 'AMDSMI_STATUS_INTERRUPT',
@@ -2456,12 +2528,21 @@ __all__ = \
     'AMDSMI_STATUS_NOT_FOUND', 'AMDSMI_STATUS_NOT_INIT',
     'AMDSMI_STATUS_NOT_SUPPORTED',
     'AMDSMI_STATUS_NOT_YET_IMPLEMENTED', 'AMDSMI_STATUS_NO_DATA',
+    'AMDSMI_STATUS_NO_DRV', 'AMDSMI_STATUS_NO_ENERGY_DRV',
+    'AMDSMI_STATUS_NO_HSMP_DRV', 'AMDSMI_STATUS_NO_HSMP_MSG_SUP',
+    'AMDSMI_STATUS_NO_HSMP_SUP', 'AMDSMI_STATUS_NO_MSR_DRV',
     'AMDSMI_STATUS_NO_PERM', 'AMDSMI_STATUS_NO_SLOT',
     'AMDSMI_STATUS_OUT_OF_RESOURCES',
     'AMDSMI_STATUS_REFCOUNT_OVERFLOW', 'AMDSMI_STATUS_RETRY',
     'AMDSMI_STATUS_SETTING_UNAVAILABLE', 'AMDSMI_STATUS_SUCCESS',
     'AMDSMI_STATUS_TIMEOUT', 'AMDSMI_STATUS_UNEXPECTED_DATA',
     'AMDSMI_STATUS_UNEXPECTED_SIZE', 'AMDSMI_STATUS_UNKNOWN_ERROR',
+    'AMDSMI_TEMPERATURE_TYPE_EDGE', 'AMDSMI_TEMPERATURE_TYPE_FIRST',
+    'AMDSMI_TEMPERATURE_TYPE_HBM_0', 'AMDSMI_TEMPERATURE_TYPE_HBM_1',
+    'AMDSMI_TEMPERATURE_TYPE_HBM_2', 'AMDSMI_TEMPERATURE_TYPE_HBM_3',
+    'AMDSMI_TEMPERATURE_TYPE_HOTSPOT',
+    'AMDSMI_TEMPERATURE_TYPE_JUNCTION', 'AMDSMI_TEMPERATURE_TYPE_PLX',
+    'AMDSMI_TEMPERATURE_TYPE_VRAM', 'AMDSMI_TEMPERATURE_TYPE__MAX',
     'AMDSMI_TEMP_CRITICAL', 'AMDSMI_TEMP_CRITICAL_HYST',
     'AMDSMI_TEMP_CRIT_MIN', 'AMDSMI_TEMP_CRIT_MIN_HYST',
     'AMDSMI_TEMP_CURRENT', 'AMDSMI_TEMP_EMERGENCY',
@@ -2476,6 +2557,14 @@ __all__ = \
     'AMDSMI_VOLT_MAX_CRIT', 'AMDSMI_VOLT_MIN', 'AMDSMI_VOLT_MIN_CRIT',
     'AMDSMI_VOLT_TYPE_FIRST', 'AMDSMI_VOLT_TYPE_INVALID',
     'AMDSMI_VOLT_TYPE_LAST', 'AMDSMI_VOLT_TYPE_VDDGFX',
+    'AMDSMI_VRAM_TYPE_DDR2', 'AMDSMI_VRAM_TYPE_DDR3',
+    'AMDSMI_VRAM_TYPE_DDR4', 'AMDSMI_VRAM_TYPE_GDDR1',
+    'AMDSMI_VRAM_TYPE_GDDR2', 'AMDSMI_VRAM_TYPE_GDDR3',
+    'AMDSMI_VRAM_TYPE_GDDR4', 'AMDSMI_VRAM_TYPE_GDDR5',
+    'AMDSMI_VRAM_TYPE_GDDR6', 'AMDSMI_VRAM_TYPE_GDDR7',
+    'AMDSMI_VRAM_TYPE_HBM', 'AMDSMI_VRAM_TYPE_HBM2',
+    'AMDSMI_VRAM_TYPE_HBM2E', 'AMDSMI_VRAM_TYPE_HBM3',
+    'AMDSMI_VRAM_TYPE_UNKNOWN', 'AMDSMI_VRAM_TYPE__MAX',
     'AMDSMI_VRAM_VENDOR__ELPIDA', 'AMDSMI_VRAM_VENDOR__ESMT',
     'AMDSMI_VRAM_VENDOR__ETRON', 'AMDSMI_VRAM_VENDOR__HYNIX',
     'AMDSMI_VRAM_VENDOR__INFINEON', 'AMDSMI_VRAM_VENDOR__MICRON',
@@ -2488,68 +2577,22 @@ __all__ = \
     'AMDSMI_VRAM_VENDOR__PLACEHOLDER5', 'AMDSMI_VRAM_VENDOR__SAMSUNG',
     'AMDSMI_VRAM_VENDOR__WINBOND', 'AMDSMI_XGMI_STATUS_ERROR',
     'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
-    'AMDSMI_XGMI_STATUS_NO_ERRORS', 'AMD_APU', 'AMD_CPU',
-    'AMD_CPU_CORE', 'AMD_GPU', 'CLK_TYPE_DCEF', 'CLK_TYPE_DCLK0',
-    'CLK_TYPE_DCLK1', 'CLK_TYPE_DF', 'CLK_TYPE_FIRST', 'CLK_TYPE_GFX',
-    'CLK_TYPE_MEM', 'CLK_TYPE_PCIE', 'CLK_TYPE_SOC', 'CLK_TYPE_SYS',
-    'CLK_TYPE_VCLK0', 'CLK_TYPE_VCLK1', 'CLK_TYPE__MAX',
-    'COMPUTE_PARTITION_CPX', 'COMPUTE_PARTITION_DPX',
-    'COMPUTE_PARTITION_INVALID', 'COMPUTE_PARTITION_QPX',
-    'COMPUTE_PARTITION_SPX', 'COMPUTE_PARTITION_TPX',
-    'CONTAINER_DOCKER', 'CONTAINER_LXC', 'FW_ID_ASD', 'FW_ID_CP_CE',
-    'FW_ID_CP_ME', 'FW_ID_CP_MEC1', 'FW_ID_CP_MEC2',
-    'FW_ID_CP_MEC_JT1', 'FW_ID_CP_MEC_JT2', 'FW_ID_CP_MES',
-    'FW_ID_CP_PFP', 'FW_ID_CP_PM4', 'FW_ID_DFC', 'FW_ID_DMCU',
-    'FW_ID_DMCU_ERAM', 'FW_ID_DMCU_ISR', 'FW_ID_DRV_CAP',
-    'FW_ID_FIRST', 'FW_ID_IMU_DRAM', 'FW_ID_IMU_IRAM', 'FW_ID_ISP',
-    'FW_ID_MC', 'FW_ID_MES_KIQ', 'FW_ID_MES_STACK',
-    'FW_ID_MES_THREAD1', 'FW_ID_MES_THREAD1_STACK', 'FW_ID_MMSCH',
-    'FW_ID_PM', 'FW_ID_PPTABLE', 'FW_ID_PSP_BL', 'FW_ID_PSP_DBG',
-    'FW_ID_PSP_INTF', 'FW_ID_PSP_KEYDB', 'FW_ID_PSP_SOC',
-    'FW_ID_PSP_SOSDRV', 'FW_ID_PSP_SPL', 'FW_ID_PSP_SYSDRV',
-    'FW_ID_PSP_TOC', 'FW_ID_REG_ACCESS_WHITELIST', 'FW_ID_RLC',
-    'FW_ID_RLCV_LX7', 'FW_ID_RLC_P', 'FW_ID_RLC_RESTORE_LIST_CNTL',
-    'FW_ID_RLC_RESTORE_LIST_GPM_MEM',
-    'FW_ID_RLC_RESTORE_LIST_SRM_MEM', 'FW_ID_RLC_SAVE_RESTORE_LIST',
-    'FW_ID_RLC_SRLG', 'FW_ID_RLC_SRLS', 'FW_ID_RLC_V', 'FW_ID_RLX6',
-    'FW_ID_RLX6_CORE1', 'FW_ID_RLX6_DRAM_BOOT',
-    'FW_ID_RLX6_DRAM_BOOT_CORE1', 'FW_ID_RS64_ME', 'FW_ID_RS64_MEC',
-    'FW_ID_RS64_MEC_P0_DATA', 'FW_ID_RS64_MEC_P1_DATA',
-    'FW_ID_RS64_MEC_P2_DATA', 'FW_ID_RS64_MEC_P3_DATA',
-    'FW_ID_RS64_ME_P0_DATA', 'FW_ID_RS64_ME_P1_DATA',
-    'FW_ID_RS64_PFP', 'FW_ID_RS64_PFP_P0_DATA',
-    'FW_ID_RS64_PFP_P1_DATA', 'FW_ID_SDMA0', 'FW_ID_SDMA1',
-    'FW_ID_SDMA2', 'FW_ID_SDMA3', 'FW_ID_SDMA4', 'FW_ID_SDMA5',
-    'FW_ID_SDMA6', 'FW_ID_SDMA7', 'FW_ID_SDMA_TH0', 'FW_ID_SDMA_TH1',
-    'FW_ID_SEC_POLICY_STAGE2', 'FW_ID_SMU', 'FW_ID_TA_RAS',
-    'FW_ID_TA_XGMI', 'FW_ID_UVD', 'FW_ID_VCE', 'FW_ID_VCN',
-    'FW_ID__MAX', 'MEMORY_PARTITION_NPS1', 'MEMORY_PARTITION_NPS2',
-    'MEMORY_PARTITION_NPS4', 'MEMORY_PARTITION_NPS8',
-    'MEMORY_PARTITION_UNKNOWN', 'NON_AMD_CPU', 'NON_AMD_GPU',
-    'RD_BW0', 'TEMPERATURE_TYPE_EDGE', 'TEMPERATURE_TYPE_FIRST',
-    'TEMPERATURE_TYPE_HBM_0', 'TEMPERATURE_TYPE_HBM_1',
-    'TEMPERATURE_TYPE_HBM_2', 'TEMPERATURE_TYPE_HBM_3',
-    'TEMPERATURE_TYPE_HOTSPOT', 'TEMPERATURE_TYPE_JUNCTION',
-    'TEMPERATURE_TYPE_PLX', 'TEMPERATURE_TYPE_VRAM',
-    'TEMPERATURE_TYPE__MAX', 'UNKNOWN', 'VRAM_TYPE_DDR2',
-    'VRAM_TYPE_DDR3', 'VRAM_TYPE_DDR4', 'VRAM_TYPE_GDDR1',
-    'VRAM_TYPE_GDDR3', 'VRAM_TYPE_GDDR4', 'VRAM_TYPE_GDDR5',
-    'VRAM_TYPE_GDDR6', 'VRAM_TYPE_HBM', 'VRAM_TYPE_UNKNOWN',
-    'VRAM_TYPE__MAX', 'WR_BW0', 'amd_metrics_table_header_t',
-    'amdsmi_asic_info_t', 'amdsmi_bdf_t', 'amdsmi_bit_field_t',
-    'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
-    'amdsmi_card_form_factor_t', 'amdsmi_clk_info_t',
-    'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
-    'amdsmi_container_types_t', 'amdsmi_counter_command_t',
-    'amdsmi_counter_value_t', 'amdsmi_cpu_apb_disable',
-    'amdsmi_cpu_apb_enable', 'amdsmi_cpusocket_handle',
-    'amdsmi_ddr_bw_metrics_t', 'amdsmi_dev_perf_level_t',
-    'amdsmi_dimm_power_t', 'amdsmi_dimm_thermal_t',
-    'amdsmi_dpm_level_t', 'amdsmi_dpm_policy_entry_t',
-    'amdsmi_dpm_policy_t', 'amdsmi_driver_info_t',
-    'amdsmi_engine_usage_t', 'amdsmi_error_count_t',
-    'amdsmi_event_group_t', 'amdsmi_event_handle_t',
-    'amdsmi_event_type_t', 'amdsmi_evt_notification_data_t',
+    'AMDSMI_XGMI_STATUS_NO_ERRORS', 'RD_BW0', 'WR_BW0',
+    'amd_metrics_table_header_t', 'amdsmi_asic_info_t',
+    'amdsmi_bdf_t', 'amdsmi_bit_field_t', 'amdsmi_board_info_t',
+    'amdsmi_cache_property_type_t', 'amdsmi_card_form_factor_t',
+    'amdsmi_clk_info_t', 'amdsmi_clk_type_t',
+    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
+    'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
+    'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
+    'amdsmi_cpusocket_handle', 'amdsmi_ddr_bw_metrics_t',
+    'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
+    'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
+    'amdsmi_dpm_policy_entry_t', 'amdsmi_dpm_policy_t',
+    'amdsmi_driver_info_t', 'amdsmi_engine_usage_t',
+    'amdsmi_error_count_t', 'amdsmi_event_group_t',
+    'amdsmi_event_handle_t', 'amdsmi_event_type_t',
+    'amdsmi_evt_notification_data_t',
     'amdsmi_evt_notification_type_t',
     'amdsmi_first_online_core_on_cpu_socket', 'amdsmi_freq_ind_t',
     'amdsmi_freq_volt_region_t', 'amdsmi_frequencies_t',
@@ -2576,7 +2619,7 @@ __all__ = \
     'amdsmi_get_cpu_socket_power', 'amdsmi_get_cpu_socket_power_cap',
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature', 'amdsmi_get_cpucore_handles',
-    'amdsmi_get_cpusocket_handles', 'amdsmi_get_dpm_policy',
+    'amdsmi_get_cpusocket_handles', 'amdsmi_get_soc_pstate',
     'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
     'amdsmi_get_fw_info', 'amdsmi_get_gpu_activity',
     'amdsmi_get_gpu_asic_info', 'amdsmi_get_gpu_available_counters',
@@ -2660,7 +2703,7 @@ __all__ = \
     'amdsmi_set_cpu_socket_boostlimit',
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap', 'amdsmi_set_cpu_xgmi_width',
-    'amdsmi_set_dpm_policy', 'amdsmi_set_gpu_clear_sram_data',
+    'amdsmi_set_soc_pstate', 'amdsmi_set_gpu_clear_sram_data',
     'amdsmi_set_gpu_clk_range', 'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_event_notification_mask',
     'amdsmi_set_gpu_fan_speed', 'amdsmi_set_gpu_memory_partition',
@@ -2712,7 +2755,8 @@ __all__ = \
     'struct_amdsmi_vbios_info_t', 'struct_amdsmi_version_t',
     'struct_amdsmi_vram_info_t', 'struct_amdsmi_vram_usage_t',
     'struct_amdsmi_xgmi_info_t', 'struct_cache_',
-    'struct_engine_usage_', 'struct_fields_', 'struct_fw_info_list_',
+    'struct_engine_usage_', 'struct_fw_info_list_',
     'struct_memory_usage_', 'struct_pcie_metric_',
-    'struct_pcie_static_', 'uint32_t', 'uint64_t', 'uint8_t',
+    'struct_pcie_static_', 'struct_amdsmi_bdf_t',
+    'uint32_t', 'uint64_t', 'uint8_t',
     'union_amdsmi_bdf_t']

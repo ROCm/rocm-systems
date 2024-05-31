@@ -62,13 +62,13 @@ class AMDSmiSocket {
     uint32_t get_socket_index() { return sindex_;}
     void add_processor(AMDSmiProcessor* processor) {
         switch (processor->get_processor_type()) {
-        case AMD_GPU:
+        case AMDSMI_PROCESSOR_TYPE_AMD_GPU:
             processors_.push_back(processor);
             break;
-        case AMD_CPU:
+        case AMDSMI_PROCESSOR_TYPE_AMD_CPU:
             cpu_processors_.push_back(processor);
             break;
-        case AMD_CPU_CORE:
+        case AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE:
             cpu_core_processors_.push_back(processor);
             break;
         default:
@@ -78,11 +78,11 @@ class AMDSmiSocket {
     std::vector<AMDSmiProcessor*>& get_processors() { return processors_;}
     std::vector<AMDSmiProcessor*>& get_processors(processor_type_t type) {
       switch (type) {
-      case AMD_GPU:
+      case AMDSMI_PROCESSOR_TYPE_AMD_GPU:
           return processors_;
-      case AMD_CPU:
+      case AMDSMI_PROCESSOR_TYPE_AMD_CPU:
           return cpu_processors_;
-      case AMD_CPU_CORE:
+      case AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE:
           return cpu_core_processors_;
       default:
           return processors_;

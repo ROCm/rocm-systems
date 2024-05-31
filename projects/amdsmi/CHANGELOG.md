@@ -4,15 +4,103 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
-## amd_smi_lib for ROCm 6.1.2
+## amd_smi_lib for ROCm 6.2.0
 
 ### Additions
+
+- **Added Handling to detect VMs with passthrough configurations in CLI Tool**.  
+CLI Tool had only allowed a restricted set of options for Virtual Machines with passthrough GPUs. Now we offer an expanded set of functions availble to passthrough configured GPUs.
+
+- **Added Process Isolation and Clear SRAM functionality to the CLI Tool for VMs**.  
+VMs now have the ability to set the process isolation and clear the sram from the CLI tool. Using the following commands
+
+```shell
+amd-smi set --process-isolation <0 or 1>
+amd-smi reset --clear-sram-data
+```
 
 - **Added macros that were in `amdsmi.h` to the amdsmi Python library `amdsmi_interface.py`**.  
 Added macros to reference max size limitations for certain amdsmi functions such as max dpm policies and max fanspeed.
 
 - **Added Ring Hang event**.  
 Added `AMDSMI_EVT_NOTIF_RING_HANG` to the possible events in the `amdsmi_evt_notification_type_t` enum.
+
+### Optimizations
+
+- **Updated `amdsmi_clk_info_t` struct in amdsmi.h and amdsmi_interface.py to align with host/guest**.  
+Changed cur_clk to clk, changed sleep_clk to clk_deep_sleep, and added clk_locked value. New struct will be in the following format:
+
+```shell
+ typedef struct {
++  uint32_t clk;
+   uint32_t min_clk;
+   uint32_t max_clk;
++  uint8_t clk_locked;
++  uint8_t clk_deep_sleep;
+   uint32_t reserved[4];
+ } amdsmi_clk_info_t;
+```
+
+- **Multiple structure updates in amdsmi.h and amdsmi_interface.py to align with host/guest**.  
+Multiple structures used by APIs were changed for alignment unification:
+  - Changed `amdsmi_vram_info_t` `vram_size_mb` field changed to to `vram_size`
+  - Updated `amdsmi_vram_type_t` struct updated to include new enums and added `AMDSMI` prefix
+  - Updated `amdsmi_status_t` some enums were missing the `AMDSMI_STATUS` prefix
+  - Added `AMDSMI_PROCESSOR_TYPE` prefix to `processor_type_t` enums
+  - Removed the fields structure definition in favor for an anonymous definition in `amdsmi_bdf_t`
+
+- **Added `AMDSMI` prefix in amdsmi.h and amdsmi_interface.py to align with host/guest**.  
+Multiple structures used by APIs were changed for alignment unification. `AMDSMI` prefix was added to the following structures:
+  - Added AMDSMI prefix to `amdsmi_container_types_t` enums
+  - Added AMDSMI prefix to `amdsmi_clk_type_t` enums
+  - Added AMDSMI prefix to `amdsmi_compute_partition_type_t` enums
+  - Added AMDSMI prefix to `amdsmi_memory_partition_type_t` enums
+  - Added AMDSMI prefix to `amdsmi_clk_type_t` enums
+  - Added AMDSMI prefix to `amdsmi_temperature_type_t` enums
+  - Added AMDSMI prefix to `amdsmi_fw_block_t` enums
+
+- **Changed dpm_policy references to soc_pstate**.  
+The file structure referenced to dpm_policy changed to soc_pstate and we have changed the APIs and CLI tool to be inline with the current structure. `amdsmi_get_dpm_policy()` and `amdsmi_set_dpm_policy()` is no longer valid with the new API being `amdsmi_get_soc_pstate()` and `amdsmi_set_soc_pstate()`. The CLI tool has been changed from `--policy` to `--soc-pstate`
+
+- **Updated `amdsmi_get_gpu_board_info()` product_name to fallback to pciids**.  
+Previously on devices without a FRU we would not populate the product name in the `amdsmi_board_info_t` structure, now we will fallback to using the name listed according to the pciids file if available.
+
+- **Updated CLI voltage curve command output**.  
+The output for `amd-smi metric --voltage-curve` now splits the frequency and voltage output by curve point or outputs N/A if not applicable
+
+```shell
+GPU: 0
+    VOLTAGE_CURVE:
+        POINT_0_FREQUENCY: 872 Mhz
+        POINT_0_VOLTAGE: 736 mV
+        POINT_1_FREQUENCY: 1354 Mhz
+        POINT_1_VOLTAGE: 860 mV
+        POINT_2_FREQUENCY: 1837 Mhz
+        POINT_2_VOLTAGE: 1186 mV
+```
+
+- **Updated `amdsmi_get_gpu_board_info()` now has larger structure sizes for `amdsmi_board_info_t`**.  
+Updated sizes that work for retreiving relavant board information across AMD's
+ASIC products. This requires users to update any ABIs using this structure.
+
+### Fixes
+
+- **`amdsmi_get_gpu_board_info()` no longer returns junk char strings**.  
+Previously if there was a partial failure to retrieve character strings, we would return
+garbage output to users using the API. This fix intends to populate as many values as possible.
+Then any failure(s) found along the way, `\0` is provided to `amdsmi_board_info_t`
+structures data members which cannot be populated. Ensuring empty char string values.
+
+- **Fixed parsing of `pp_od_clk_voltage` within `amdsmi_get_gpu_od_volt_info`**.  
+The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropping of voltage curve support on MI series cards. This propagates down to correcting the CLI's output `amd-smi metric --voltage-curve` to N/A if voltage curve is not enabled.
+
+### Known Issues
+
+- N/A
+
+## amd_smi_lib for ROCm 6.1.2
+
+### Additions
 
 - **Added process isolation and clean shader APIs and CLI commands**.  
 Added APIs CLI and APIs to address LeftoverLocals security issues. Allowing clearing the sram data and setting process isolation on a per GPU basis. New APIs:
@@ -61,24 +149,6 @@ GPU   PCIE_BW
   0   26 Mb/s
 ```
 
-- **Updated CLI voltage curve command output**.  
-The output for `amd-smi metric --voltage-curve` now splits the frequency and voltage output by curve point or outputs N/A if not applicable
-
-```shell
-GPU: 0
-    VOLTAGE_CURVE:
-        POINT_0_FREQUENCY: 872 Mhz
-        POINT_0_VOLTAGE: 736 mV
-        POINT_1_FREQUENCY: 1354 Mhz
-        POINT_1_VOLTAGE: 860 mV
-        POINT_2_FREQUENCY: 1837 Mhz
-        POINT_2_VOLTAGE: 1186 mV
-```
-
-- **Updated `amdsmi_get_gpu_board_info()` now has larger structure sizes for `amdsmi_board_info_t`**.  
-Updated sizes that work for retreiving relavant board information across AMD's
-ASIC products. This requires users to update any ABIs using this structure.
-
 - **`amdsmi_get_power_cap_info` now returns values in uW instead of W**.  
 `amdsmi_get_power_cap_info` will return in uW as originally reflected by driver. Previously `amdsmi_get_power_cap_info` returned W values, this conflicts with our sets and modifies values retrieved from driver. We decided to keep the values returned from driver untouched (in original units, uW). Then in CLI we will convert to watts (as previously done - no changes here). Additionally, driver made updates to min power cap displayed for devices when overdrive is disabled which prompted for this change (in this case min_power_cap and max_power_cap are the same).
 
@@ -126,15 +196,6 @@ GPU: 0
 amdsmi_get_gpu_process_info was removed from the C library in an earlier build, but the API was still in the Python interface.
 
 ### Fixes
-
-- **`amdsmi_get_gpu_board_info()` no longer returns junk char strings**.  
-Previously if there was a partial failure to retrieve character strings, we would return
-garbage output to users using the API. This fix intends to populate as many values as possible.
-Then any failure(s) found along the way, `\0` is provided to `amdsmi_board_info_t`
-structures data members which cannot be populated. Ensuring empty char string values.
-
-- **Fixed parsing of `pp_od_clk_voltage` within `amdsmi_get_gpu_od_volt_info`**.  
-The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropping of voltage curve support on MI series cards. This propagates down to correcting the CLI's output `amd-smi metric --voltage-curve` to N/A if voltage curve is not enabled.
 
 - **Fixed `amd-smi metric --power` now provides power output for Navi2x/Navi3x/MI1x**.  
 These systems use an older version of gpu_metrics in amdgpu. This fix only updates what CLI outputs.

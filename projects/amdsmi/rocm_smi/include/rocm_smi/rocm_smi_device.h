@@ -101,6 +101,8 @@ enum DevKFDNodePropTypes {
 
 enum DevInfoTypes {
   kDevPerfLevel,
+  kDevSocPstate,
+  kDevXgmiPlpd,
   kDevProcessIsolation,
   kDevShaderClean,
   kDevOverDriveLevel,
@@ -175,7 +177,6 @@ enum DevInfoTypes {
   kDevNumaNode,
   kDevGpuMetrics,
   kDevPmMetrics,
-  kDevDPMPolicy,
   kDevRegMetrics,
   kDevGpuReset,
   kDevAvailableComputePartition,

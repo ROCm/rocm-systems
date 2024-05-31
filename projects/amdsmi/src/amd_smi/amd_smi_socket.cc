@@ -71,13 +71,13 @@ amdsmi_status_t AMDSmiSocket::get_processor_count(uint32_t* processor_count) con
 amdsmi_status_t AMDSmiSocket::get_processor_count(processor_type_t type, uint32_t* processor_count) const {
     amdsmi_status_t ret = AMDSMI_STATUS_SUCCESS;
     switch (type) {
-    case AMD_GPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_GPU:
         *processor_count = static_cast<uint32_t>(processors_.size());
         break;
-    case AMD_CPU:
+    case AMDSMI_PROCESSOR_TYPE_AMD_CPU:
         *processor_count = static_cast<uint32_t>(cpu_processors_.size());
         break;
-    case AMD_CPU_CORE:
+    case AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE:
         *processor_count = static_cast<uint32_t>(cpu_core_processors_.size());
         break;
     default:

@@ -3353,7 +3353,7 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_dpm_policy_get(uint32_t dv_ind,
+rsmi_status_t rsmi_dev_soc_pstate_get(uint32_t dv_ind,
                              rsmi_dpm_policy_t* policy);
 
 /**
@@ -3371,7 +3371,7 @@ rsmi_status_t rsmi_dev_dpm_policy_get(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_dpm_policy_set(uint32_t dv_ind,
+rsmi_status_t rsmi_dev_soc_pstate_set(uint32_t dv_ind,
                              uint32_t policy_id);
 
 /**
@@ -3406,7 +3406,7 @@ rsmi_status_t rsmi_dev_xgmi_plpd_get(uint32_t dv_ind,
  *  @param[in] processor_handle a processor handle
  *
  *  @param[in] xgmi_plpd_id the xgmi plpd id to set. The id is the id in
- *  rsmi_dpm_policy_entry_t, which can be obtained by calling
+ *  rsmi_soc_pstate_entry_t, which can be obtained by calling
  *  rsmi_dev_xgmi_plpd_get()
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail

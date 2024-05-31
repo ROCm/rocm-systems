@@ -134,7 +134,7 @@ from .amdsmi_interface import amdsmi_set_gpu_fan_speed
 from .amdsmi_interface import amdsmi_reset_gpu_fan
 from .amdsmi_interface import amdsmi_set_clk_freq
 from .amdsmi_interface import amdsmi_set_gpu_overdrive_level
-from .amdsmi_interface import amdsmi_set_dpm_policy
+from .amdsmi_interface import amdsmi_set_soc_pstate
 from .amdsmi_interface import amdsmi_set_xgmi_plpd
 from .amdsmi_interface import amdsmi_set_gpu_clear_sram_data
 from .amdsmi_interface import amdsmi_set_gpu_process_isolation

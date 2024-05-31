@@ -155,7 +155,7 @@ void TestIdInfoRead::Run(void) {
       std::cout << "\t**Device Vram vendor id: "
           << vram_info.vram_vendor << std::endl;
       std::cout << "\t**Device Vram size: "
-          << vram_info.vram_size_mb << std::endl;
+          << vram_info.vram_size << std::endl;
     }
 
     err = amdsmi_get_gpu_vendor_name(processor_handles_[i], buffer, kBufferLen);

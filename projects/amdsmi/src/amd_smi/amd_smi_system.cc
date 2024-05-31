@@ -162,12 +162,12 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
             socket = new AMDSmiSocket(cpu_socket_id);
             sockets_.push_back(socket);
         }
-        AMDSmiProcessor* cpusocket = new AMDSmiProcessor(AMD_CPU, i);
+        AMDSmiProcessor* cpusocket = new AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_CPU, i);
         socket->add_processor(cpusocket);
         processors_.insert(cpusocket);
 
        for (uint32_t k = 0; k < (cpus/threads)/sockets; k++) {
-            AMDSmiProcessor* core = new AMDSmiProcessor(AMD_CPU_CORE, k);
+            AMDSmiProcessor* core = new AMDSmiProcessor(AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE, k);
             socket->add_processor(core);
             processors_.insert(core);
        }
@@ -322,7 +322,7 @@ amdsmi_status_t AMDSmiSystem::gpu_index_to_handle(uint32_t gpu_index,
     auto iter = processors_.begin();
     for (; iter != processors_.end(); iter++) {
         auto cur_device = (*iter);
-        if (cur_device->get_processor_type() != AMD_GPU)
+        if (cur_device->get_processor_type() != AMDSMI_PROCESSOR_TYPE_AMD_GPU)
             continue;
         amd::smi::AMDSmiGPUDevice* gpu_device =
                 static_cast<amd::smi::AMDSmiGPUDevice*>(cur_device);

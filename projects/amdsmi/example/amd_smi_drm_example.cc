@@ -71,146 +71,146 @@
 
 void getFWNameFromId(int id, char *name)
 {
-	switch (id) {
-	case FW_ID_SMU:
-		strcpy(name, "SMU");
-		break;
-	case FW_ID_CP_CE:
-		strcpy(name, "CP_CE");
-		break;
-	case FW_ID_CP_PFP:
-		strcpy(name, "CP_PFP");
-		break;
-	case FW_ID_CP_ME:
-		strcpy(name, "CP_ME");
-		break;
-	case FW_ID_CP_MEC_JT1:
-		strcpy(name, "CP_MEC_JT1");
-		break;
-	case FW_ID_CP_MEC_JT2:
-		strcpy(name, "CP_MEC_JT2");
-		break;
-	case FW_ID_CP_MEC1:
-		strcpy(name, "CP_MEC1");
-		break;
-	case FW_ID_CP_MEC2:
-		strcpy(name, "CP_MEC2");
-		break;
-	case FW_ID_RLC:
-		strcpy(name, "RLC");
-		break;
-	case FW_ID_SDMA0:
-		strcpy(name, "SDMA0");
-		break;
-	case FW_ID_SDMA1:
-		strcpy(name, "SDMA1");
-		break;
-	case FW_ID_SDMA2:
-		strcpy(name, "SDMA2");
-		break;
-	case FW_ID_SDMA3:
-		strcpy(name, "SDMA3");
-		break;
-	case FW_ID_SDMA4:
-		strcpy(name, "SDMA4");
-		break;
-	case FW_ID_SDMA5:
-		strcpy(name, "SDMA5");
-		break;
-	case FW_ID_SDMA6:
-		strcpy(name, "SDMA6");
-		break;
-	case FW_ID_SDMA7:
-		strcpy(name, "SDMA7");
-		break;
-	case FW_ID_VCN:
-		strcpy(name, "VCN");
-		break;
-	case FW_ID_UVD:
-		strcpy(name, "UVD");
-		break;
-	case FW_ID_VCE:
-		strcpy(name, "VCE");
-		break;
-	case FW_ID_ISP:
-		strcpy(name, "ISP");
-		break;
-	case FW_ID_DMCU_ERAM:
-		strcpy(name, "DMCU_ERAM");
-		break;
-	case FW_ID_DMCU_ISR:
-		strcpy(name, "DMCU_ISR");
-		break;
-	case FW_ID_RLC_RESTORE_LIST_GPM_MEM:
-		strcpy(name, "RLC_RESTORE_LIST_GPM_MEM");
-		break;
-	case FW_ID_RLC_RESTORE_LIST_SRM_MEM:
-		strcpy(name, "RLC_RESTORE_LIST_SRM_MEM");
-		break;
-	case FW_ID_RLC_RESTORE_LIST_CNTL:
-		strcpy(name, "RLC_RESTORE_LIST_CNTL");
-		break;
-	case FW_ID_RLC_V:
-		strcpy(name, "RLC_V");
-		break;
-	case FW_ID_MMSCH:
-		strcpy(name, "MMSCH");
-		break;
-	case FW_ID_PSP_SYSDRV:
-		strcpy(name, "PSP_SYSDRV");
-		break;
-	case FW_ID_PSP_SOSDRV:
-		strcpy(name, "PSP_SOSDRV");
-		break;
-	case FW_ID_PSP_TOC:
-		strcpy(name, "PSP_TOC");
-		break;
-	case FW_ID_PSP_KEYDB:
-		strcpy(name, "PSP_KEYDB");
-		break;
-	case FW_ID_DFC:
-		strcpy(name, "DFC");
-		break;
-	case FW_ID_PSP_SPL:
-		strcpy(name, "PSP_SPL");
-		break;
-	case FW_ID_DRV_CAP:
-		strcpy(name, "DRV_CAP");
-		break;
-	case FW_ID_MC:
-		strcpy(name, "MC");
-		break;
-	case FW_ID_PSP_BL:
-		strcpy(name, "PSP_BL");
-		break;
-	case FW_ID_CP_PM4:
-		strcpy(name, "CP_PM4");
-		break;
-	case FW_ID_ASD:
-		strcpy(name, "ID_ASD");
-		break;
-	case FW_ID_TA_RAS:
-		strcpy(name, "ID_TA_RAS");
-		break;
-	case FW_ID_TA_XGMI:
-		strcpy(name, "ID_TA_XGMI");
-		break;
-	case FW_ID_RLC_SRLG:
-		strcpy(name, "ID_RLC_SRLG");
-		break;
-	case FW_ID_RLC_SRLS:
-		strcpy(name, "ID_RLC_SRLS");
-		break;
-	case FW_ID_PM:
-		strcpy(name, "ID_PM");
-		break;
-	case FW_ID_DMCU:
-		strcpy(name, "ID_DMCU");
-		break;
-	default:
-		strcpy(name, "");
-		break;
-	}
+    switch (id) {
+    case AMDSMI_FW_ID_SMU:
+        strcpy(name, "SMU");
+        break;
+    case AMDSMI_FW_ID_CP_CE:
+        strcpy(name, "CP_CE");
+        break;
+    case AMDSMI_FW_ID_CP_PFP:
+        strcpy(name, "CP_PFP");
+        break;
+    case AMDSMI_FW_ID_CP_ME:
+        strcpy(name, "CP_ME");
+        break;
+    case AMDSMI_FW_ID_CP_MEC_JT1:
+        strcpy(name, "CP_MEC_JT1");
+        break;
+    case AMDSMI_FW_ID_CP_MEC_JT2:
+        strcpy(name, "CP_MEC_JT2");
+        break;
+    case AMDSMI_FW_ID_CP_MEC1:
+        strcpy(name, "CP_MEC1");
+        break;
+    case AMDSMI_FW_ID_CP_MEC2:
+        strcpy(name, "CP_MEC2");
+        break;
+    case AMDSMI_FW_ID_RLC:
+        strcpy(name, "RLC");
+        break;
+    case AMDSMI_FW_ID_SDMA0:
+        strcpy(name, "SDMA0");
+        break;
+    case AMDSMI_FW_ID_SDMA1:
+        strcpy(name, "SDMA1");
+        break;
+    case AMDSMI_FW_ID_SDMA2:
+        strcpy(name, "SDMA2");
+        break;
+    case AMDSMI_FW_ID_SDMA3:
+        strcpy(name, "SDMA3");
+        break;
+    case AMDSMI_FW_ID_SDMA4:
+        strcpy(name, "SDMA4");
+        break;
+    case AMDSMI_FW_ID_SDMA5:
+        strcpy(name, "SDMA5");
+        break;
+    case AMDSMI_FW_ID_SDMA6:
+        strcpy(name, "SDMA6");
+        break;
+    case AMDSMI_FW_ID_SDMA7:
+        strcpy(name, "SDMA7");
+        break;
+    case AMDSMI_FW_ID_VCN:
+        strcpy(name, "VCN");
+        break;
+    case AMDSMI_FW_ID_UVD:
+        strcpy(name, "UVD");
+        break;
+    case AMDSMI_FW_ID_VCE:
+        strcpy(name, "VCE");
+        break;
+    case AMDSMI_FW_ID_ISP:
+        strcpy(name, "ISP");
+        break;
+    case AMDSMI_FW_ID_DMCU_ERAM:
+        strcpy(name, "DMCU_ERAM");
+        break;
+    case AMDSMI_FW_ID_DMCU_ISR:
+        strcpy(name, "DMCU_ISR");
+        break;
+    case AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM:
+        strcpy(name, "RLC_RESTORE_LIST_GPM_MEM");
+        break;
+    case AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM:
+        strcpy(name, "RLC_RESTORE_LIST_SRM_MEM");
+        break;
+    case AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL:
+        strcpy(name, "RLC_RESTORE_LIST_CNTL");
+        break;
+    case AMDSMI_FW_ID_RLC_V:
+        strcpy(name, "RLC_V");
+        break;
+    case AMDSMI_FW_ID_MMSCH:
+        strcpy(name, "MMSCH");
+        break;
+    case AMDSMI_FW_ID_PSP_SYSDRV:
+        strcpy(name, "PSP_SYSDRV");
+        break;
+    case AMDSMI_FW_ID_PSP_SOSDRV:
+        strcpy(name, "PSP_SOSDRV");
+        break;
+    case AMDSMI_FW_ID_PSP_TOC:
+        strcpy(name, "PSP_TOC");
+        break;
+    case AMDSMI_FW_ID_PSP_KEYDB:
+        strcpy(name, "PSP_KEYDB");
+        break;
+    case AMDSMI_FW_ID_DFC:
+        strcpy(name, "DFC");
+        break;
+    case AMDSMI_FW_ID_PSP_SPL:
+        strcpy(name, "PSP_SPL");
+        break;
+    case AMDSMI_FW_ID_DRV_CAP:
+        strcpy(name, "DRV_CAP");
+        break;
+    case AMDSMI_FW_ID_MC:
+        strcpy(name, "MC");
+        break;
+    case AMDSMI_FW_ID_PSP_BL:
+        strcpy(name, "PSP_BL");
+        break;
+    case AMDSMI_FW_ID_CP_PM4:
+        strcpy(name, "CP_PM4");
+        break;
+    case AMDSMI_FW_ID_ASD:
+        strcpy(name, "ID_ASD");
+        break;
+    case AMDSMI_FW_ID_TA_RAS:
+        strcpy(name, "ID_TA_RAS");
+        break;
+    case AMDSMI_FW_ID_TA_XGMI:
+        strcpy(name, "ID_TA_XGMI");
+        break;
+    case AMDSMI_FW_ID_RLC_SRLG:
+        strcpy(name, "ID_RLC_SRLG");
+        break;
+    case AMDSMI_FW_ID_RLC_SRLS:
+        strcpy(name, "ID_RLC_SRLS");
+        break;
+    case AMDSMI_FW_ID_PM:
+        strcpy(name, "ID_PM");
+        break;
+    case AMDSMI_FW_ID_DMCU:
+        strcpy(name, "ID_DMCU");
+        break;
+    default:
+        strcpy(name, "");
+        break;
+    }
 }
 
 template <typename T>
@@ -267,12 +267,12 @@ int main() {
         // For each device of the socket, get name and temperature.
         for (uint32_t j = 0; j < device_count; j++) {
             // Get device type. Since the amdsmi is initialized with
-            // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMD_GPU.
+            // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
             processor_type_t processor_type = {};
             ret = amdsmi_get_processor_type(processor_handles[j], &processor_type);
             CHK_AMDSMI_RET(ret)
-            if (processor_type != AMD_GPU) {
-                std::cout << "Expect AMD_GPU device type!\n";
+            if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+                std::cout << "Expect AMDSMI_PROCESSOR_TYPE_AMD_GPU device type!\n";
                 return AMDSMI_STATUS_NOT_SUPPORTED;
             }
 
@@ -282,10 +282,10 @@ int main() {
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_device_bdf:\n");
             printf("\tDevice[%d] BDF %04lx:%02x:%02x.%d\n\n", i,
-                   bdf.fields.domain_number,
-                   bdf.fields.bus_number,
-                   bdf.fields.device_number,
-                   bdf.fields.function_number);
+                   bdf.domain_number,
+                   bdf.bus_number,
+                   bdf.device_number,
+                   bdf.function_number);
 
             // Get handle from BDF
             amdsmi_processor_handle dev_handle;
@@ -383,20 +383,20 @@ int main() {
 
             // Get GFX clock measurements
             amdsmi_clk_info_t gfx_clk_values = {};
-            ret = amdsmi_get_clock_info(processor_handles[j], CLK_TYPE_GFX,
+            ret = amdsmi_get_clock_info(processor_handles[j], AMDSMI_CLK_TYPE_GFX,
                                            &gfx_clk_values);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_clock_info:\n");
             printf("\tGPU GFX Max Clock: %d\n", gfx_clk_values.max_clk);
-            printf("\tGPU GFX Current Clock: %d\n", gfx_clk_values.cur_clk);
+            printf("\tGPU GFX Current Clock: %d\n", gfx_clk_values.clk);
 
             // Get MEM clock measurements
             amdsmi_clk_info_t mem_clk_values = {};
-            ret = amdsmi_get_clock_info(processor_handles[j], CLK_TYPE_MEM,
+            ret = amdsmi_get_clock_info(processor_handles[j], AMDSMI_CLK_TYPE_MEM,
                                            &mem_clk_values);
             CHK_AMDSMI_RET(ret)
             printf("\tGPU MEM Max Clock: %d\n", mem_clk_values.max_clk);
-            printf("\tGPU MEM Current Clock: %d\n\n", mem_clk_values.cur_clk);
+            printf("\tGPU MEM Current Clock: %d\n\n", mem_clk_values.clk);
 
             // Get PCIe status
             amdsmi_pcie_info_t pcie_info = {};
@@ -422,7 +422,7 @@ int main() {
             // Get VRAM temperature limit
             int64_t temperature = 0;
             ret = amdsmi_get_temp_metric(
-                processor_handles[j], TEMPERATURE_TYPE_VRAM,
+                processor_handles[j], AMDSMI_TEMPERATURE_TYPE_VRAM,
                 AMDSMI_TEMP_CRITICAL, &temperature);
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_temp_metric:\n");
@@ -430,7 +430,7 @@ int main() {
 
             // Get GFX temperature limit
             ret = amdsmi_get_temp_metric(
-                processor_handles[j], TEMPERATURE_TYPE_EDGE,
+                processor_handles[j], AMDSMI_TEMPERATURE_TYPE_EDGE,
                 AMDSMI_TEMP_CRITICAL, &temperature);
             if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
@@ -440,10 +440,10 @@ int main() {
             // Get temperature measurements
             // amdsmi_temperature_t edge_temp, hotspot_temp, vram_temp,
             // plx_temp;
-            int64_t temp_measurements[TEMPERATURE_TYPE__MAX + 1];
+            int64_t temp_measurements[AMDSMI_TEMPERATURE_TYPE__MAX + 1];
             amdsmi_temperature_type_t temp_types[4] = {
-                TEMPERATURE_TYPE_EDGE, TEMPERATURE_TYPE_HOTSPOT,
-                TEMPERATURE_TYPE_VRAM, TEMPERATURE_TYPE_PLX};
+                AMDSMI_TEMPERATURE_TYPE_EDGE, AMDSMI_TEMPERATURE_TYPE_HOTSPOT,
+                AMDSMI_TEMPERATURE_TYPE_VRAM, AMDSMI_TEMPERATURE_TYPE_PLX};
             for (const auto &temp_type : temp_types) {
                 ret = amdsmi_get_temp_metric(
                     processor_handles[j], temp_type,
@@ -455,13 +455,13 @@ int main() {
             }
             printf("    Output of amdsmi_get_temp_metric:\n");
             printf("\tGPU Edge temp measurement: %ld\n",
-                   temp_measurements[TEMPERATURE_TYPE_EDGE]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_EDGE]);
             printf("\tGPU Hotspot temp measurement: %ld\n",
-                   temp_measurements[TEMPERATURE_TYPE_HOTSPOT]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_HOTSPOT]);
             printf("\tGPU VRAM temp measurement: %ld\n",
-                   temp_measurements[TEMPERATURE_TYPE_VRAM]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_VRAM]);
             printf("\tGPU PLX temp measurement: %ld\n\n",
-                   temp_measurements[TEMPERATURE_TYPE_PLX]);
+                   temp_measurements[AMDSMI_TEMPERATURE_TYPE_PLX]);
 
             // Get RAS features enabled
             char block_names[14][10] = {"UMC",   "SDMA",     "GFX", "MMHUB",
@@ -542,10 +542,10 @@ int main() {
                 uint64_t gfx = 0, enc = 0;
                 char bdf_str[20];
                 sprintf(bdf_str, "%04lx:%02x:%02x.%d",
-                        bdf.fields.domain_number,
-                        bdf.fields.bus_number,
-                        bdf.fields.device_number,
-                        bdf.fields.function_number);
+                        bdf.domain_number,
+                        bdf.bus_number,
+                        bdf.device_number,
+                        bdf.function_number);
                 int num = 0;
                 ret = amdsmi_get_gpu_process_list(processor_handles[j], &num_process, process_info_list);
                 std::cout << "Allocation size for process list: " << num_process << "\n";
@@ -635,7 +635,7 @@ int main() {
 
             // Get temperature
             int64_t val_i64 = 0;
-            ret =  amdsmi_get_temp_metric(processor_handles[j], TEMPERATURE_TYPE_EDGE,
+            ret =  amdsmi_get_temp_metric(processor_handles[j], AMDSMI_TEMPERATURE_TYPE_EDGE,
                                              AMDSMI_TEMP_CURRENT, &val_i64);
             if (ret != amdsmi_status_t::AMDSMI_STATUS_NOT_SUPPORTED) {
                 CHK_AMDSMI_RET(ret)
@@ -674,10 +674,10 @@ int main() {
             CHK_AMDSMI_RET(ret)
             printf("    Output of amdsmi_get_gpu_metrics_info:\n");
             printf("\tDevice[%d] BDF %04lx:%02x:%02x.%d\n\n", i,
-                   bdf.fields.domain_number,
-                   bdf.fields.bus_number,
-                   bdf.fields.device_number,
-                   bdf.fields.function_number);
+                   bdf.domain_number,
+                   bdf.bus_number,
+                   bdf.device_number,
+                   bdf.function_number);
 
             std::cout << "\t**.common_header.format_revision : "
                       << print_unsigned_int(gpu_metrics.common_header.format_revision) << "\n";

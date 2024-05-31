@@ -154,11 +154,11 @@ int main() {
     // For each device of the socket, get name and temperature.
     for (uint32_t j=0; j < device_count; j++) {
       // Get device type. Since the amdsmi is initialized with
-      // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMD_GPU.
+      // AMD_SMI_INIT_AMD_GPUS, the processor_type must be AMDSMI_PROCESSOR_TYPE_AMD_GPU.
       processor_type_t processor_type;
       ret = amdsmi_get_processor_type(processor_handles[j], &processor_type);
-      if (processor_type != AMD_GPU) {
-        std::cout << "Expect AMD_GPU device type!\n";
+      if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
+        std::cout << "Expect AMDSMI_PROCESSOR_TYPE_AMD_GPU device type!\n";
         return 1;
       }
 
@@ -170,7 +170,7 @@ int main() {
 
       // Get temperature
       int64_t val_i64 = 0;
-      ret =  amdsmi_get_temp_metric(processor_handles[j], TEMPERATURE_TYPE_EDGE,
+      ret =  amdsmi_get_temp_metric(processor_handles[j], AMDSMI_TEMPERATURE_TYPE_EDGE,
               AMDSMI_TEMP_CURRENT, &val_i64);
       std::cout << "\t\tTemperature: " << val_i64 << "C" << std::endl;
     }
@@ -212,8 +212,8 @@ int main(int argc, char **argv) {
     for (uint32_t i = 0; i < socket_count; i++) {
         uint32_t cpu_count = 0;
 
-        // Set processor type as AMD_CPU
-        processor_type_t processor_type = AMD_CPU;
+        // Set processor type as AMDSMI_PROCESSOR_TYPE_AMD_CPU
+        processor_type_t processor_type = AMDSMI_PROCESSOR_TYPE_AMD_CPU;
         ret = amdsmi_get_processor_handles_by_type(sockets[i], processor_type, nullptr, &cpu_count);
 
         // Allocate the memory for the cpus

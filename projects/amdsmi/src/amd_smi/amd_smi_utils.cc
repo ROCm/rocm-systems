@@ -256,22 +256,22 @@ amdsmi_status_t smi_amdgpu_get_ranges(amd::smi::AMDSmiGPUDevice* device, amdsmi_
         std::string fullpath = "/sys/class/drm/" + device->get_gpu_path() + "/device";
 
     switch (domain) {
-        case CLK_TYPE_GFX:
+        case AMDSMI_CLK_TYPE_GFX:
             fullpath += "/pp_dpm_sclk";
             break;
-        case CLK_TYPE_MEM:
+        case AMDSMI_CLK_TYPE_MEM:
             fullpath += "/pp_dpm_mclk";
             break;
-        case CLK_TYPE_VCLK0:
+        case AMDSMI_CLK_TYPE_VCLK0:
             fullpath += "/pp_dpm_vclk";
             break;
-        case CLK_TYPE_VCLK1:
+        case AMDSMI_CLK_TYPE_VCLK1:
             fullpath += "/pp_dpm_vclk1";
             break;
-        case CLK_TYPE_DCLK0:
+        case AMDSMI_CLK_TYPE_DCLK0:
             fullpath += "/pp_dpm_dclk";
             break;
-        case CLK_TYPE_DCLK1:
+        case AMDSMI_CLK_TYPE_DCLK1:
             fullpath += "/pp_dpm_dclk1";
             break;
         default:

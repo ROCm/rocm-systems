@@ -57,15 +57,15 @@
 
 
 static const std::map<uint32_t, std::string> kTempSensorNameMap = {
-    {TEMPERATURE_TYPE_VRAM, "Memory"},
-    {TEMPERATURE_TYPE_HOTSPOT, "Hotspot"},
-    {TEMPERATURE_TYPE_JUNCTION, "Junction"},
-    {TEMPERATURE_TYPE_EDGE, "Edge"},
-    {TEMPERATURE_TYPE_HBM_0, "HBM_0"},
-    {TEMPERATURE_TYPE_HBM_1, "HBM_1"},
-    {TEMPERATURE_TYPE_HBM_2, "HBM_2"},
-    {TEMPERATURE_TYPE_HBM_3, "HBM_3"},
-    {TEMPERATURE_TYPE_PLX, "PLX"}
+    {AMDSMI_TEMPERATURE_TYPE_VRAM, "Memory"},
+    {AMDSMI_TEMPERATURE_TYPE_HOTSPOT, "Hotspot"},
+    {AMDSMI_TEMPERATURE_TYPE_JUNCTION, "Junction"},
+    {AMDSMI_TEMPERATURE_TYPE_EDGE, "Edge"},
+    {AMDSMI_TEMPERATURE_TYPE_HBM_0, "HBM_0"},
+    {AMDSMI_TEMPERATURE_TYPE_HBM_1, "HBM_1"},
+    {AMDSMI_TEMPERATURE_TYPE_HBM_2, "HBM_2"},
+    {AMDSMI_TEMPERATURE_TYPE_HBM_3, "HBM_3"},
+    {AMDSMI_TEMPERATURE_TYPE_PLX, "PLX"}
 };
 TestTempRead::TestTempRead() : TestBase() {
   set_title("AMDSMI Temp Read Test");
@@ -141,7 +141,7 @@ void TestTempRead::Run(void) {
                                                              "C" << std::endl;
         }
       };
-      for (type = TEMPERATURE_TYPE_FIRST; type <= TEMPERATURE_TYPE__MAX; ++type) {
+      for (type = AMDSMI_TEMPERATURE_TYPE_FIRST; type <= AMDSMI_TEMPERATURE_TYPE__MAX; ++type) {
         IF_VERB(STANDARD) {
           std::cout << "\t** **********" << kTempSensorNameMap.at(type) <<
                                         " Temperatures **********" << std::endl;

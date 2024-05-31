@@ -49,6 +49,7 @@ class AMDSMIHelpers():
         self._is_hypervisor = False
         self._is_virtual_os = False
         self._is_baremetal = False
+        self._is_passthrough = False
 
         self._is_linux = False
         self._is_windows = False
@@ -62,6 +63,14 @@ class AMDSMIHelpers():
                 self._is_baremetal = True
             else:
                 self._is_virtual_os = True
+
+            # Check for passthrough system filtering by device id
+            output = run(["lspci", "-nn"], stdout=PIPE, stderr=STDOUT, encoding="UTF-8").stdout
+            passthrough_device_ids = ["7460", "73c8", "74a0", "74a1", "74a2"]
+            if any(device_id in output for device_id in passthrough_device_ids):
+                self._is_baremetal = True
+                self._is_virtual_os = False
+                self._is_passthrough = True
 
 
     def os_info(self, string_format=True):
@@ -88,6 +97,10 @@ class AMDSMIHelpers():
             operating_system_type = "Hypervisor"
         else:
             operating_system_type = "Unknown"
+
+        # Passthrough Override
+        if self._is_passthrough:
+            operating_system_type = "Guest (Passthrough)"
 
         if string_format:
             return f"{operating_system} {operating_system_type}"

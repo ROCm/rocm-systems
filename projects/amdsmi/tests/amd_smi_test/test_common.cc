@@ -220,19 +220,19 @@ const std::string GetVoltSensorNameStr(amdsmi_voltage_type_t st) {
   return kVoltSensorNameMap.at(st);
 }
 const char *FreqEnumToStr(amdsmi_clk_type_t amdsmi_clk) {
-  static_assert(CLK_TYPE__MAX == CLK_TYPE_DCLK1,
+  static_assert(AMDSMI_CLK_TYPE__MAX == AMDSMI_CLK_TYPE_DCLK1,
                                        "FreqEnumToStr() needs to be updated");
   switch (amdsmi_clk) {
-    case CLK_TYPE_SYS:  return "System clock";
-    case CLK_TYPE_DF:   return "Data Fabric clock";
-    case CLK_TYPE_DCEF: return "Display Controller Engine clock";
-    case CLK_TYPE_SOC:  return "SOC clock";
-    case CLK_TYPE_MEM:  return "Memory clock";
-    case CLK_TYPE_PCIE:  return "PCIE clock";
-    case CLK_TYPE_VCLK0:  return "VCLK0 clock";
-    case CLK_TYPE_VCLK1:  return "VCLK1 clock";
-    case CLK_TYPE_DCLK0:  return "DCLK0 clock";
-    case CLK_TYPE_DCLK1:  return "DCLK1 clock";
+    case AMDSMI_CLK_TYPE_SYS:  return "System clock";
+    case AMDSMI_CLK_TYPE_DF:   return "Data Fabric clock";
+    case AMDSMI_CLK_TYPE_DCEF: return "Display Controller Engine clock";
+    case AMDSMI_CLK_TYPE_SOC:  return "SOC clock";
+    case AMDSMI_CLK_TYPE_MEM:  return "Memory clock";
+    case AMDSMI_CLK_TYPE_PCIE:  return "PCIE clock";
+    case AMDSMI_CLK_TYPE_VCLK0:  return "VCLK0 clock";
+    case AMDSMI_CLK_TYPE_VCLK1:  return "VCLK1 clock";
+    case AMDSMI_CLK_TYPE_DCLK0:  return "DCLK0 clock";
+    case AMDSMI_CLK_TYPE_DCLK1:  return "DCLK1 clock";
     default: return "Invalid Clock ID";
   }
 }

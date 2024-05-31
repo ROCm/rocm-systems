@@ -86,7 +86,7 @@ When AMD SMI is no longer used, `amdsmi_shut_down()` should be called. This prov
                     
               // Get temperature
                  int64_t val_i64 = 0;
-                 ret =  amdsmi_get_temp_metric(processor_handles[j], TEMPERATURE_TYPE_EDGE,
+                 ret =  amdsmi_get_temp_metric(processor_handles[j], AMDSMI_TEMPERATURE_TYPE_EDGE,
                   AMDSMI_TEMP_CURRENT, &val_i64);
                           std::cout << "\t\tTemperature: " << val_i64 << "C" << std::endl;
                         }

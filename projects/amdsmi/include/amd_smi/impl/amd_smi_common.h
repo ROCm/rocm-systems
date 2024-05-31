@@ -77,7 +77,22 @@ const std::map<rsmi_status_t, amdsmi_status_t> rsmi_status_map = {
     {RSMI_STATUS_UNKNOWN_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR},
 };
 
+const std::map<unsigned, amdsmi_vram_type_t> vram_type_map = {
+    {0, AMDSMI_VRAM_TYPE_UNKNOWN},
+    {1, AMDSMI_VRAM_TYPE_GDDR1},
+    {2, AMDSMI_VRAM_TYPE_DDR2},
+    {3, AMDSMI_VRAM_TYPE_GDDR3},
+    {4, AMDSMI_VRAM_TYPE_GDDR4},
+    {5, AMDSMI_VRAM_TYPE_GDDR5},
+    {6, AMDSMI_VRAM_TYPE_HBM},
+    {7, AMDSMI_VRAM_TYPE_DDR3},
+    {8, AMDSMI_VRAM_TYPE_DDR4},
+    {9, AMDSMI_VRAM_TYPE_GDDR6},
+};
+
 amdsmi_status_t rsmi_to_amdsmi_status(rsmi_status_t status);
+
+amdsmi_vram_type_t vram_type_value(unsigned type);
 
 #ifdef ENABLE_ESMI_LIB
 // Define a map of esmi status codes to amdsmi status codes
@@ -95,15 +110,15 @@ const std::map<esmi_status_t, amdsmi_status_t> esmi_status_map = {
     {ESMI_NOT_INITIALIZED, AMDSMI_STATUS_NOT_INIT},
     {ESMI_UNEXPECTED_SIZE, AMDSMI_STATUS_UNEXPECTED_SIZE},
     {ESMI_UNKNOWN_ERROR, AMDSMI_STATUS_UNKNOWN_ERROR},
-    {ESMI_NO_ENERGY_DRV, AMDSMI_NO_ENERGY_DRV},
-    {ESMI_NO_MSR_DRV, AMDSMI_NO_MSR_DRV},
-    {ESMI_NO_HSMP_DRV, AMDSMI_NO_HSMP_DRV},
-    {ESMI_NO_HSMP_SUP, AMDSMI_NO_HSMP_SUP},
-    {ESMI_NO_DRV, AMDSMI_NO_DRV},
-    {ESMI_FILE_NOT_FOUND, AMDSMI_FILE_NOT_FOUND},
-    {ESMI_ARG_PTR_NULL, AMDSMI_ARG_PTR_NULL},
-    {ESMI_HSMP_TIMEOUT, AMDSMI_HSMP_TIMEOUT},
-    {ESMI_NO_HSMP_MSG_SUP, AMDSMI_NO_HSMP_MSG_SUP},
+    {ESMI_NO_ENERGY_DRV, AMDSMI_STATUS_NO_ENERGY_DRV},
+    {ESMI_NO_MSR_DRV, AMDSMI_STATUS_NO_MSR_DRV},
+    {ESMI_NO_HSMP_DRV, AMDSMI_STATUS_NO_HSMP_DRV},
+    {ESMI_NO_HSMP_SUP, AMDSMI_STATUS_NO_HSMP_SUP},
+    {ESMI_NO_DRV, AMDSMI_STATUS_NO_DRV},
+    {ESMI_FILE_NOT_FOUND, AMDSMI_STATUS_FILE_NOT_FOUND},
+    {ESMI_ARG_PTR_NULL, AMDSMI_STATUS_ARG_PTR_NULL},
+    {ESMI_HSMP_TIMEOUT, AMDSMI_STATUS_HSMP_TIMEOUT},
+    {ESMI_NO_HSMP_MSG_SUP, AMDSMI_STATUS_NO_HSMP_MSG_SUP},
 };
 
 amdsmi_status_t esmi_to_amdsmi_status(esmi_status_t status);
