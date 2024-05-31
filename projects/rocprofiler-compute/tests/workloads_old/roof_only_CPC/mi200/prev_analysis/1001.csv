@@ -1,9 +1,0 @@
-Metric,Count,Unit
-VALU - Vector,,Instr per wave
-VMEM,,Instr per wave
-LDS_Per_Workgroup,,Instr per wave
-VALU - MFMA,,Instr per wave
-SALU,,Instr per wave
-SMEM,,Instr per wave
-Branch,,Instr per wave
-GDS,,Instr per wave

@@ -1,5 +1,0 @@
-,GPU_ID,kernel_name,test_name
-0,2.0,"vecCopy(double*, double*, double*, int, int) ",logger
-0,,"vecCopy(double*, double*, double*, int, int) ",test_path
-0,,"vecCopy(double*, double*, double*, int, int) ",test_path
-0,,"vecCopy(double*, double*, double*, int, int) ",test_path

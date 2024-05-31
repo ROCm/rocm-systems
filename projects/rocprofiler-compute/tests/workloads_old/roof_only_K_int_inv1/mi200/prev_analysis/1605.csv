@@ -1,6 +1,0 @@
-Metric,Mean,Min,Max,Units
-Req,,,, per wave
-Hit Ratio,,,,Pct
-Hits,,,, per wave
-Misses (Translation),,,, per wave
-Misses (Permission),,,, per wave
