@@ -3,7 +3,7 @@ rocprofiler_deactivate_clang_tidy()
 include(GoogleTest)
 
 set(ROCPROFILER_LIB_PC_SAMPLING_TEST_SOURCES
-    configure_service.cpp
+    configure_service.cpp cid_manager.cpp
     # samples_processing.cpp
     query_configuration.cpp)
 set(ROCPROFILER_LIB_PC_SAMPLING_TEST_HEADERS pc_sampling_internals.hpp)
