@@ -153,11 +153,11 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_process_info(uint32_t gpu_index[RDC
 
 std::string RdcSmiDiagnosticImpl::get_temperature_string(amdsmi_temperature_type_t type) const {
   switch (type) {
-    case TEMPERATURE_TYPE_EDGE:
+    case AMDSMI_TEMPERATURE_TYPE_EDGE:
       return "Edge";
-    case TEMPERATURE_TYPE_JUNCTION:
+    case AMDSMI_TEMPERATURE_TYPE_JUNCTION:
       return "Junction";
-    case TEMPERATURE_TYPE_VRAM:
+    case AMDSMI_TEMPERATURE_TYPE_VRAM:
       return "Memory";
     default:
       return "Unknown";
@@ -244,8 +244,8 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_param_info(uint32_t gpu_index[RDC_M
 
   for (uint32_t i = 0; i < gpu_count; i++) {
     // temperature
-    for (amdsmi_temperature_type_t sensor_type = TEMPERATURE_TYPE_FIRST;
-         sensor_type < TEMPERATURE_TYPE__MAX;) {
+    for (amdsmi_temperature_type_t sensor_type = AMDSMI_TEMPERATURE_TYPE_FIRST;
+         sensor_type < AMDSMI_TEMPERATURE_TYPE__MAX;) {
       auto status = check_temperature_level(gpu_index[i], sensor_type, result->info,
                                             result->gpu_results[i].gpu_result.msg);
       // Set to higher error level

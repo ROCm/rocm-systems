@@ -99,7 +99,7 @@ amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
     for (auto& processor : processors) {
       processor_type_t processor_type = {};
       ret = amdsmi_get_processor_type(processor, &processor_type);
-      if (processor_type != AMD_GPU) {
+      if (processor_type != AMDSMI_PROCESSOR_TYPE_AMD_GPU) {
         RDC_LOG(RDC_ERROR, "Expect AMD_GPU device type!");
         return AMDSMI_STATUS_NOT_SUPPORTED;
       }
