@@ -17,12 +17,13 @@ config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
 indir1 = "tests/workloads/vcopy/MI100"
 indir2 = "tests/workloads/vcopy/MI200"
 
-indirs=[
+indirs = [
     "tests/workloads/vcopy/MI100",
     "tests/workloads/vcopy/MI200",
     "tests/workloads/vcopy/MI300A_A1",
-    "tests/workloads/vcopy/MI300X_A1"
+    "tests/workloads/vcopy/MI300X_A1",
 ]
+
 
 @pytest.mark.misc
 def test_valid_path():
@@ -110,7 +111,6 @@ def test_list_metrics_gfx906():
                 omniperf.main()
         assert e.value.code == 0
 
-    
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
 
