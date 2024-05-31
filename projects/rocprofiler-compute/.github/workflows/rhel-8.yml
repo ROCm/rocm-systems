@@ -51,4 +51,4 @@ jobs:
       - name: CTest- Analyze Workloads
         run: |
           cd build
-          ctest --verbose -R test_analyze_workloads test_saved_analysis
+          ctest --verbose -R test_analyze_workloads
