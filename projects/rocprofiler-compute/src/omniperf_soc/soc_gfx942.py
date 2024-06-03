@@ -69,6 +69,11 @@ class gfx942_soc(OmniSoC_Base):
         )
         # self.roofline_obj = Roofline(args, self._mspec)
 
+        # --showmclkrange is broken in MI308X, hardcode freq
+        if self._mspec.gpu_model == "MI308X":
+            self._mspec.max_mclk = 1300
+            self._mspec.cur_mclk = 1300
+
         # Set arch specific specs
         self._mspec._l2_banks = 16
         self._mspec.lds_banks_per_cu = 32
