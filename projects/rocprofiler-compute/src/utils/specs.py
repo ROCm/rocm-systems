@@ -37,7 +37,7 @@ from math import ceil
 from dataclasses import dataclass, field, fields
 from pathlib import Path as path
 from utils.utils import (
-    get_hbm_stack_num,
+    total_xcds,
     get_version,
     console_error,
     console_warning,
@@ -184,7 +184,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
     soc_obj = soc_class(args, specs)
     # Update arch specific specs
     specs.total_l2_chan: str = total_l2_banks(
-        specs.gpu_model, int(specs._l2_banks), specs.memory_partition
+        specs.gpu_model, int(specs._l2_banks), specs.compute_partition
     )
     specs.hbm_bw: str = str(int(specs.max_mclk) / 1000 * 32 * specs.get_hbm_channels())
     return specs
@@ -480,7 +480,7 @@ class MachineSpecs:
             "doc": "The peak theoretical HBM bandwidth for the accelerators/GPUs in the system. On systems with\n"
             "configurable partitioning, (e.g., MI300) this is the peak theoretical HBM bandwidth for a partition.",
             "name": "HBM BW",
-            "unit": "MB/s",
+            "unit": "GB/s",
         },
     )
     num_xcd: str = field(
@@ -489,17 +489,26 @@ class MachineSpecs:
             "doc": "The total number of accelerator complex dies in a compute partition on the accelerators/GPUs in the\n"
             "system.  For accelerators without partitioning (i.e., pre-MI300), this is considered to be one.",
             "name": "Num XCDs",
-            "unit": "MB/s",
+            "unit": "XCDs",
         },
     )
 
     def get_hbm_channels(self):
-        hbmchannels = int(self.total_l2_chan)
-        if (
-            self.gpu_model.lower() == "mi300a_a0" or self.gpu_model.lower() == "mi300a_a1"
-        ) and self.memory_partition.lower() == "nps1":
-            # we have an extra 32 channels for the CCD
-            hbmchannels += 32
+        # check MI300 has a valid compute partition
+        mi300a_archs = ["mi300a_a0", "mi300a_a1"]
+        mi300x_archs = ["mi300x_a0", "mi300x_a1"]
+        mi308x_archs = ["mi308x"]
+        if self.gpu_model.lower() in mi300a_archs + mi300x_archs + mi308x_archs:
+            hbmchannels = 128
+            if self.memory_partition.lower() == "nps2":
+                hbmchannels /= 2
+            elif self.memory_partition.lower() == "nps4":
+                hbmchannels /= 4
+            elif self.memory_partition.lower() == "nps8":
+                hbmchannels /= 8
+            return int(hbmchannels)
+        else:
+            hbmchannels = int(self.total_l2_chan)
         return hbmchannels
 
     def get_class_members(self):
@@ -618,17 +627,6 @@ def search(pattern, string):
     return None
 
 
-def total_l2_banks(archname, L2Banks, memory_partition):
-    # Fixme: support all supported partitioning mode
-    # Fixme: "name" is a bad name!
-    totalL2Banks = L2Banks
-    if archname.lower() == "mi300a_a0" or archname.lower() == "mi300a_a1":
-        totalL2Banks = L2Banks * get_hbm_stack_num(archname, memory_partition)
-    elif archname.lower() == "mi300x_a0" or archname.lower() == "mi300x_a1":
-        totalL2Banks = L2Banks * get_hbm_stack_num(archname, memory_partition)
-    return str(totalL2Banks)
-
-
 def total_sqc(archname, numCUs, numSEs):
     cu_per_se = float(numCUs) / float(numSEs)
     sq_per_se = cu_per_se / 2
@@ -638,38 +636,12 @@ def total_sqc(archname, numCUs, numSEs):
     return int(sq_per_se) * int(numSEs)
 
 
-def total_xcds(archname, compute_partition):
-    # check MI300 has a valid compute partition
-    mi300a_archs = ["mi300a_a0", "mi300a_a1"]
-    mi300x_archs = ["mi300x_a0", "mi300x_a1"]
-    if archname.lower() in mi300a_archs + mi300x_archs and compute_partition == "NA":
-        console_error("Invalid compute partition found for {}".format(archname))
-    if archname.lower() not in mi300a_archs + mi300x_archs:
-        return 1
-    # from the whitepaper
-    # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
-    if compute_partition.lower() == "spx":
-        if archname.lower() in mi300a_archs:
-            return 6
-        if archname.lower() in mi300x_archs:
-            return 8
-    if compute_partition.lower() == "tpx":
-        if archname.lower() in mi300a_archs:
-            return 2
-    if compute_partition.lower() == "dpx":
-        if archname.lower() in mi300x_archs:
-            return 4
-    if compute_partition.lower() == "qpx":
-        if archname.lower() in mi300x_archs:
-            return 2
-    if compute_partition.lower() == "cpx":
-        if archname.lower() in mi300x_archs:
-            return 2
-    console_error(
-        "Unknown compute partition / arch found for {} / {}".format(
-            compute_partition, archname
-        )
-    )
+def total_l2_banks(archname, L2Banks, compute_partition):
+    # Fixme: support all supported partitioning mode
+    # Fixme: "name" is a bad name!
+    totalL2Banks = L2Banks
+    xcds = total_xcds(archname, compute_partition)
+    return L2Banks * xcds
 
 
 if __name__ == "__main__":

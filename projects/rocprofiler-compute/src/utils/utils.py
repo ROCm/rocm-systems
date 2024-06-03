@@ -285,8 +285,8 @@ def run_prof(fname, profiler_options, workload_dir, mspec, loglevel):
     if new_env:
         # flatten tcc for applicable mi300 input
         f = path(workload_dir + "/out/pmc_1/results_" + fbase + ".csv")
-        hbm_stack_num = get_hbm_stack_num(mspec.gpu_model, mspec.memory_partition)
-        df = flatten_tcc_info_across_hbm_stacks(f, hbm_stack_num, int(mspec._l2_banks))
+        xcds = total_xcds(mspec.gpu_model, mspec.compute_partition)
+        df = flatten_tcc_info_across_xcds(f, xcds, int(mspec._l2_banks))
         df.to_csv(f, index=False)
 
     if os.path.exists(workload_dir + "/out"):
@@ -492,9 +492,9 @@ def mibench(args, mspec):
     )
 
 
-def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
+def flatten_tcc_info_across_xcds(file, xcds, tcc_channel_per_xcd):
     """
-    Flatten TCC per channel counters across all HBM stacks in used.
+    Flatten TCC per channel counters across all XCDs in partition.
     NB: This func highly depends on the default behavior of rocprofv2 on MI300,
         which might be broken anytime in the future!
     """
@@ -513,22 +513,22 @@ def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
 
     cols = non_tcc_cols_orig
     tcc_cols_in_group = {}
-    for i in range(0, stack_num):
+    for i in range(0, xcds):
         tcc_cols_in_group[i] = []
 
     for col in tcc_cols_orig:
-        for i in range(0, stack_num):
+        for i in range(0, xcds):
             # filter the channel index only
             p = re.compile(r"\[(\d+)\]")
             # pick up the 1st element only
             r = (
                 lambda match: "["
-                + str(int(match.group(1)) + i * tcc_channel_per_stack)
+                + str(int(match.group(1)) + i * tcc_channel_per_xcd)
                 + "]"
             )
             tcc_cols_in_group[i].append(re.sub(pattern=p, repl=r, string=col))
 
-    for i in range(0, stack_num):
+    for i in range(0, xcds):
         # print(tcc_cols_in_group[i])
         cols += tcc_cols_in_group[i]
     # print(cols)
@@ -537,7 +537,7 @@ def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
     ### Rearrange data with extended column names
 
     # print(len(df_orig.index))
-    for idx in range(0, len(df_orig.index), stack_num):
+    for idx in range(0, len(df_orig.index), xcds):
         # assume the front none TCC columns are the same for all XCCs
         df_non_tcc = df_orig.iloc[idx].filter(regex=r"^(?!.*TCC).*$")
         # display(df_non_tcc)
@@ -545,7 +545,7 @@ def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
 
         # extract all tcc from one dispatch
         # NB: assuming default contiguous order might not be safe!
-        df_tcc_all = df_orig.iloc[idx : (idx + stack_num)].filter(regex="TCC")
+        df_tcc_all = df_orig.iloc[idx : (idx + xcds)].filter(regex="TCC")
         # display(df_tcc_all)
 
         for idx, row in df_tcc_all.iterrows():
@@ -557,36 +557,46 @@ def flatten_tcc_info_across_hbm_stacks(file, stack_num, tcc_channel_per_stack):
     return df
 
 
-def get_hbm_stack_num(gpu_name, memory_partition):
-    """
-    Get total HBM stack numbers based on  memory partition for MI300.
-    """
-
-    # TODO:
-    # - better err log
-    if gpu_name.lower() == "mi300a_a0" or gpu_name.lower() == "mi300a_a1":
-        if memory_partition.lower() == "nps1":
+def total_xcds(archname, compute_partition):
+    # check MI300 has a valid compute partition
+    mi300a_archs = ["mi300a_a0", "mi300a_a1"]
+    mi300x_archs = ["mi300x_a0", "mi300x_a1"]
+    mi308x_archs = ["mi308x"]
+    if archname.lower() in mi300a_archs + mi300x_archs + mi308x_archs and compute_partition == "NA":
+        console_error("Invalid compute partition found for {}".format(archname))
+    if archname.lower() not in mi300a_archs + mi300x_archs + mi308x_archs:
+        return 1
+    # from the whitepaper
+    # https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
+    if compute_partition.lower() == "spx":
+        if archname.lower() in mi300a_archs:
             return 6
-        elif memory_partition.lower() == "nps4":
-            return 2
-        elif memory_partition.lower() == "nps8":
-            return 1
-        else:
-            console_error("Invalid MI300A memory partition mode!")
-    elif gpu_name.lower() == "mi300x_a0" or gpu_name.lower() == "mi300x_a1":
-        if memory_partition.lower() == "nps1":
+        if archname.lower() in mi300x_archs:
             return 8
-        elif memory_partition.lower() == "nps2":
+        if archname.lower() in mi308x_archs:
             return 4
-        elif memory_partition.lower() == "nps4":
+    if compute_partition.lower() == "tpx":
+        if archname.lower() in mi300a_archs:
             return 2
-        elif memory_partition.lower() == "nps8":
+    if compute_partition.lower() == "dpx":
+        if archname.lower() in mi300x_archs:
+            return 4
+        if archname.lower() in mi308x_archs:
+            return 2
+    if compute_partition.lower() == "qpx":
+        if archname.lower() in mi300x_archs:
+            return 2
+    if compute_partition.lower() == "cpx":
+        if archname.lower() in mi300x_archs:
+            return 2
+        if archname.lower() in mi308x_archs:
             return 1
-        else:
-            console_error("Invalid MI300X memory partition mode!")
-    else:
-        # Fixme: add proper numbers for other archs
-        return -1
+    # TODO implement other archs here as needed
+    console_error(
+        "Unknown compute partition / arch found for {} / {}".format(
+            compute_partition, archname
+        )
+    )
 
 
 def get_submodules(package_name):
