@@ -81,7 +81,7 @@ jobs:
           mkdir build
           cd build
           ml cmake
-          cmake -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=8 ..
+          cmake -DENABLE_TESTS=ON -DENABLE_COVERAGE=ON -DPYTEST_NUMPROCS=8 ..
       - name: Build tests and Run [profile] mode
         run: |
           cd build
