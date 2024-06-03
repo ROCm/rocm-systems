@@ -562,7 +562,10 @@ def total_xcds(archname, compute_partition):
     mi300a_archs = ["mi300a_a0", "mi300a_a1"]
     mi300x_archs = ["mi300x_a0", "mi300x_a1"]
     mi308x_archs = ["mi308x"]
-    if archname.lower() in mi300a_archs + mi300x_archs + mi308x_archs and compute_partition == "NA":
+    if (
+        archname.lower() in mi300a_archs + mi300x_archs + mi308x_archs
+        and compute_partition == "NA"
+    ):
         console_error("Invalid compute partition found for {}".format(archname))
     if archname.lower() not in mi300a_archs + mi300x_archs + mi308x_archs:
         return 1
