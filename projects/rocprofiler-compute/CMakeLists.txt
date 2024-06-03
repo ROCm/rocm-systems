@@ -27,11 +27,9 @@ string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3" OMNIPERF_V
 project(
     omniperf
     VERSION ${OMNIPERF_VERSION}
-    LANGUAGES HIP
+    LANGUAGES C
     DESCRIPTION "OmniPerf"
     HOMEPAGE_URL "https://github.com/ROCm/omniperf")
-
-set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 
 include(ExternalProject)
 include(GNUInstallDirs)
@@ -158,7 +156,14 @@ if(${GIT_CLONE})
 endif()
 
 # Setup testing collateral
-add_subdirectory(tests)
+
+option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
+if(${ENABLE_TESTS})
+    enable_language("C" "HIP")
+    add_subdirectory(tests)
+    set(CMAKE_HIP_FLAGS_RELEASE "-O2")
+endif()
+message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 
 enable_testing()
 
