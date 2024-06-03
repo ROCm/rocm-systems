@@ -158,10 +158,11 @@ endif()
 # Setup testing collateral
 
 option(ENABLE_TESTS "Enable compilation of testing collateral" OFF)
+set(CMAKE_HIP_FLAGS_RELEASE "-O2")
 if(${ENABLE_TESTS})
     enable_language("C" "HIP")
     add_subdirectory(tests)
-    set(CMAKE_HIP_FLAGS_RELEASE "-O2")
+
 endif()
 message(STATUS "Enable tests compilation: ${ENABLE_TESTS}")
 
