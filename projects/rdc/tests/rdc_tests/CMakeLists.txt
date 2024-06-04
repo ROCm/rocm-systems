@@ -13,15 +13,13 @@ option(INSTALL_GTEST "Install GTest (only useful if GTest is not already install
 # Hack to find libraries after installation
 # /opt/rocm/share/rdc/rdctst_tests/../../../ = /opt/rocm
 set(RDCTST_RPATH
+    "\$ORIGIN"
     "\$ORIGIN/../../../lib"
     "\$ORIGIN/../../../lib/rdc")
-# replace lib with lib64
-list(TRANSFORM RDCTST_RPATH REPLACE "lib" "lib64" OUTPUT_VARIABLE RDCTST_RPATH64)
 # combine lists
 set(CMAKE_INSTALL_RPATH
     ${CMAKE_INSTALL_RPATH}
-    ${RDCTST_RPATH}
-    ${RDCTST_RPATH64})
+    ${RDCTST_RPATH})
 
 #
 # Print out the build configuration being used:

@@ -16,7 +16,7 @@ docBin/
 docs/_doxygen/
 
 # VisualStudioCode
-.vscode/
+.vscode
 
 # do NOT ignore these files
 !.clang-format

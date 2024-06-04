@@ -105,8 +105,6 @@ int run() {
   }
   std::cout << "Created the GPU group " << group_id << std::endl;
 
-  // Only add one GPU
-  count = 1;
   for (uint32_t i = 0; i < count; i++) {
     result = rdc_group_gpu_add(rdc_handle, group_id, gpu_index_list[i]);  // Add GPU 0
     if (result != RDC_ST_OK) {
@@ -129,8 +127,19 @@ int run() {
 
   field_ids.push_back(RDC_FI_GPU_MEMORY_USAGE);
   field_ids.push_back(RDC_FI_POWER_USAGE);
-  field_ids.push_back(RDC_FI_PROF_CU_OCCUPANCY);
   field_ids.push_back(RDC_FI_PROF_CU_UTILIZATION);
+  field_ids.push_back(RDC_FI_PROF_CU_OCCUPANCY);
+  field_ids.push_back(RDC_FI_PROF_FLOPS_16);
+  field_ids.push_back(RDC_FI_PROF_FLOPS_32);
+  field_ids.push_back(RDC_FI_PROF_FLOPS_64);
+  field_ids.push_back(RDC_FI_PROF_ACTIVE_CYCLES);
+  field_ids.push_back(RDC_FI_PROF_ACTIVE_WAVES);
+  field_ids.push_back(RDC_FI_PROF_ELAPSED_CYCLES);
+  field_ids.push_back(RDC_FI_PROF_FETCH_SIZE);
+  field_ids.push_back(RDC_FI_PROF_WRITE_SIZE);
+  field_ids.push_back(RDC_FI_PROF_GRBM_COUNT);
+  field_ids.push_back(RDC_FI_PROF_SQ_WAVES);
+  field_ids.push_back(RDC_FI_PROF_TA_BUSY_AVR);
   result = rdc_group_field_create(rdc_handle, field_ids.size(), field_ids.data(), field_group_name,
                                   &field_group_id);
   if (result != RDC_ST_OK) {
@@ -146,7 +155,7 @@ int run() {
   // Let the RDC to watch the fields and groups. The fields will be updated
   // once per second, the max keep age is 1 minutes and only keep 10 samples.
   result = rdc_field_watch(rdc_handle, group_id, field_group_id,
-                           static_cast<uint64_t>(1) * 1000 * 1000, 60, 10);
+                           static_cast<uint64_t>(1) * 10 * 1000, 60, 10);
   if (result != RDC_ST_OK) {
     std::cout << "Error watch group fields. Return: " << rdc_status_string(result);
     return cleanup();
@@ -159,7 +168,7 @@ int run() {
   // all_fields() will be called periodically at background. If running as
   // RDC_OPERATION_MODE_MANUAL mode, we must call rdc_field_update_all()
   // periodically to take samples.
-  usleep(5 * 1000 * 1000);  // sleep 5 seconds before fetch the stats
+  usleep(5 * 10 * 1000);  // sleep 0.05 seconds before fetch the stats
 
   // Retreive the field and group information from RDC
   rdc_group_info_t group_info;
@@ -209,8 +218,8 @@ int run() {
   }
   std::cout << "Stop watch group:" << group_id << ", field_group:" << field_group_id << std::endl;
 
-  // Get the history data last 10 seconds
-  std::cout << "Get last 10 seconds metrics for group:" << group_id
+  // Get the history data last 0.1 seconds
+  std::cout << "Get last 0.1 seconds metrics for group:" << group_id
             << " field_group:" << field_group_id << std::endl;
   std::cout << "time_stamp\t"
             << "GPU_index\t"

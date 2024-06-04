@@ -24,14 +24,8 @@ THE SOFTWARE.
 #define RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
 #include <rocprofiler/rocprofiler.h>
 
-#include <chrono>
 #include <cstdint>
-#include <cstdio>
-#include <list>
 #include <map>
-#include <string>
-#include <typeinfo>
-#include <unordered_map>
 #include <vector>
 
 #include "rdc/rdc.h"
@@ -47,8 +41,7 @@ typedef struct {
 
 /// Common interface for RocP tests and samples
 class RdcRocpBase {
-  static const int dev_count = 1;
-  typedef std::pair<uint32_t, rdc_field_t> pair_gpu_field_t;
+  // typedef const char* rocp_metric_name_t;
 
  public:
   RdcRocpBase();
@@ -67,26 +60,26 @@ class RdcRocpBase {
    * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
    * successfully.
    */
-  rdc_status_t rocp_lookup(pair_gpu_field_t gpu_field, double* value);
+  rdc_status_t rocp_lookup(uint32_t gpu_index, rdc_field_t field, double* value);
   const char* get_field_id_from_name(rdc_field_t);
   const std::vector<rdc_field_t> get_field_ids();
 
  protected:
  private:
-  rocprofiler_t* contexts[dev_count] = {nullptr};
-  static const int features_count = 1;
-  std::map<const char*, double> metrics = {};
-  rocprofiler_feature_t features[dev_count][features_count] = {};
-  void read_features(rocprofiler_t* context, const unsigned feature_count);
-  int run_profiler(const char* feature_name);
-  hsa_queue_t* queues[dev_count] = {nullptr};
+  std::map<const char*, double> metric_to_value = {};
+  // array of features for each device
+  std::map<uint32_t, rocprofiler_feature_t> feature;
+  // rocprofiler_feature_t features[dev_count][features_count] = {};
+  void read_feature(rocprofiler_t* context, const unsigned feature_count);
+  int run_profiler(uint32_t gpu_index, rdc_field_t field);
+  std::vector<hsa_queue_t*> queues;
   hsa_agent_arr_t agent_arr = {};
-  std::map<rdc_field_t, const char*> counter_map_k = {};
+  std::map<rdc_field_t, const char*> field_to_metric = {};
 
   /**
    * @brief Convert from rocmtools status into RDC status
    */
-  rdc_status_t Rocp2RdcError(hsa_status_t rocm_status);
+  rdc_status_t Rocp2RdcError(hsa_status_t status);
 };
 
 }  // namespace rdc
