@@ -23,7 +23,8 @@
 
 #include <mutex>
 #include <cstdlib>
-#include <experimental/filesystem>
+
+#include "src/utils/filesystem.hpp"
 
 #include "rocprofiler.h"
 #include "rocprofiler_plugin.h"
@@ -49,8 +50,8 @@ class Plugin final {
   //
   // This constructor immediately adjusts and copies the metadata stream
   // file `metadata_stream_path` to the trace directory (`trace_dir`).
-  explicit Plugin(std::size_t packet_size, const std::experimental::filesystem::path& trace_dir,
-                  const std::experimental::filesystem::path& metadata_stream_path);
+  explicit Plugin(std::size_t packet_size, const rocprofiler::common::filesystem::path& trace_dir,
+                  const rocprofiler::common::filesystem::path& metadata_stream_path);
 
   // Handles a tracer record.
   void HandleTracerRecord(const rocprofiler_record_tracer_t& record,
@@ -127,8 +128,8 @@ class Plugin final {
   // adjusts the `offset` property of its single clock class, and writes
   // the result to the `metadata` file within the `trace_dir` directory.
   void CopyAdjustedMetadataStreamFile(
-      const std::experimental::filesystem::path& metadata_stream_path,
-      const std::experimental::filesystem::path& trace_dir);
+      const rocprofiler::common::filesystem::path& metadata_stream_path,
+      const rocprofiler::common::filesystem::path& trace_dir);
 
   // Dedicated tracers.
   BarectfTracer<RocTxPlatformDescr> roctx_tracer_;

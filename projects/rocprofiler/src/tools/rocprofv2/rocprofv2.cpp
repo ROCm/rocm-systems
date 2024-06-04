@@ -27,7 +27,6 @@ Copyright (c) 2022 Advanced Micro Devices, Inc.
 #include <atomic>
 #include <cstddef>
 #include <cstdlib>
-#include <filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -39,8 +38,10 @@ Copyright (c) 2022 Advanced Micro Devices, Inc.
 #include <fmt/core.h>
 #include <fmt/color.h>
 
+#include "src/utils/filesystem.hpp"
+
 // filesystem for path resolutions
-namespace fs = std::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 
 namespace rocprofiler {
 namespace src {

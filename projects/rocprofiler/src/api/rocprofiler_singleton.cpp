@@ -24,7 +24,6 @@
 #include <sys/syscall.h>
 #include <unistd.h>
 
-#include <experimental/filesystem>
 #include <atomic>
 #include <cassert>
 #include <optional>
@@ -36,8 +35,9 @@
 #include "src/utils/helper.h"
 #include "src/utils/logger.h"
 #include "src/core/memory/generic_buffer.h"
+#include "src/utils/filesystem.hpp"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 #define ASSERTM(exp, msg) assert(((void)msg, exp))
 
 extern std::mutex sessions_pending_signal_lock;

@@ -20,11 +20,11 @@
 
 #include "hsa_info.h"
 #include <fstream>
-#include <experimental/filesystem>
 
+#include "src/utils/filesystem.hpp"
 #include "src/utils/helper.h"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 
 #define CHECK_STATUS(msg, status)                                                                  \
   do {                                                                                             \

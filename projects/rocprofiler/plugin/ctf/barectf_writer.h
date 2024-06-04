@@ -27,7 +27,7 @@
 #include <cassert>
 #include <queue>
 #include <utility>
-#include <experimental/filesystem>
+#include "src/utils/filesystem.hpp"
 
 #include "barectf_platform.h"
 #include "barectf_event_record.h"
@@ -71,7 +71,7 @@ template <typename PlatformDescrT> class BarectfWriter final {
   // The built barectf writer manages an event record queue having a
   // maximum size of `max_queue_size`.
   explicit BarectfWriter(const std::size_t packet_size,
-                         const std::experimental::filesystem::path& data_stream_file_path,
+                         const rocprofiler::common::filesystem::path& data_stream_file_path,
                          const std::size_t max_queue_size)
       : platform_{packet_size, data_stream_file_path, clock_val_},
         max_queue_size_{max_queue_size} {}

@@ -46,7 +46,6 @@
 #include <cstdlib>
 #include <csetjmp>
 #include <exception>
-#include <experimental/filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -60,6 +59,7 @@
 #include "utils/helper.h"
 #include "trace_buffer.h"
 #include "core/session/att/att.h"
+#include "src/utils/filesystem.hpp"
 
 
 struct PluginHeaderPacket {
@@ -69,7 +69,7 @@ struct PluginHeaderPacket {
 
 #define SLEEP_CYCLE_LENGTH 100l
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 
 // Macro to check ROCProfiler calls status
 #define CHECK_ROCPROFILER(call)                                                                    \
@@ -439,7 +439,7 @@ void plugins_load(void* userdata) {
 
     if (out_path.size() && !bIsATT) {
       try {
-        std::experimental::filesystem::create_directories(out_path);
+        rocprofiler::common::filesystem::create_directories(out_path);
       } catch (...) {
       }
       out_path = out_path + '/';

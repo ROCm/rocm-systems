@@ -25,7 +25,6 @@
 #include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
-#include <experimental/filesystem>
 #include <fstream>
 #include <memory>
 #include <optional>
@@ -49,10 +48,12 @@
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
 
+#include "src/utils/filesystem.hpp"
+
 #define STREAM_CONSTANT 98736677
 #define QUEUE_CONSTANT 18746479
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 
 PERFETTO_DEFINE_CATEGORIES(
     perfetto::Category("GENERIC").SetDescription("GENERAL_CATEGORY"),
@@ -515,7 +516,7 @@ class perfetto_plugin_t {
           if (kernel_name_it == kernel_names_map.end())
           {
             kernel_name_it = kernel_names_map.emplace(tracer_record.name,
-              rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name))).first; 
+              rocprofiler::truncate_name(rocprofiler::cxx_demangle(tracer_record.name))).first;
           }
           TRACE_EVENT_BEGIN(
               "HIP_OPS", perfetto::DynamicString(kernel_name_it->second.c_str()),

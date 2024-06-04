@@ -25,7 +25,7 @@
 #include <memory>
 #include <vector>
 #include <string>
-#include <experimental/filesystem>
+#include "src/utils/filesystem.hpp"
 
 #include "barectf_event_record.h"
 #include "barectf_writer.h"
@@ -64,7 +64,7 @@ template <typename PlatformDescrT> class BarectfTracer final {
   // tracer, but may reduce the number of required CTF data stream files
   // to ensure time-ordered event records.
   explicit BarectfTracer(const std::size_t packet_size,
-                         std::experimental::filesystem::path trace_dir,
+                         rocprofiler::common::filesystem::path trace_dir,
                          const char* const data_stream_file_name_prefix,
                          const std::size_t max_writer_queue_size = 200)
       : packet_size_{packet_size},
@@ -107,7 +107,7 @@ template <typename PlatformDescrT> class BarectfTracer final {
   std::size_t packet_size_;
 
   // CTF trace directory.
-  std::experimental::filesystem::path trace_dir_;
+  rocprofiler::common::filesystem::path trace_dir_;
 
   // CTF data stream file name prefix.
   std::string data_stream_file_name_prefix_;

@@ -35,7 +35,6 @@ THE SOFTWARE.
 #include <map>
 #include <vector>
 #include <mutex>
-#include <experimental/filesystem>
 
 #include "types.h"
 #include "exception.h"
@@ -45,9 +44,10 @@ THE SOFTWARE.
 #include <unordered_set>
 #include "src/core/hardware/hsa_info.h"
 #include "src/core/hsa/hsa_support.h"
+#include "src/utils/filesystem.hpp"
 
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 namespace rocprofiler {
 struct counter_t {
   std::string name;

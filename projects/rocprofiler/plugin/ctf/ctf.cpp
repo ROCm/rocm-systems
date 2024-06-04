@@ -28,7 +28,7 @@
 #include <chrono>
 #include <regex>
 #include <unistd.h>
-#include <experimental/filesystem>
+#include "src/utils/filesystem.hpp"
 #include <type_traits>
 
 #include "rocprofiler.h"
@@ -39,7 +39,7 @@
 #include <rocm-core/rocm_getpath.h>
 #endif
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 
 namespace {
 

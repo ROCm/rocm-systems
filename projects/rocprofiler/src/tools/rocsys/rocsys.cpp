@@ -33,7 +33,8 @@
 
 #include <iostream>
 #include <algorithm>
-#include <experimental/filesystem>
+
+#include "src/utils/filesystem.hpp"
 
 /*
 mpiexec -n 16 rocsys --session-new test launch python app.py
@@ -47,7 +48,7 @@ struct shmd_t {
 struct shmd_t* shmd;
 }  // namespace
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 
 void report(const char* msg, int terminate) {
   std::cerr << msg << ": " << errno << std::endl;

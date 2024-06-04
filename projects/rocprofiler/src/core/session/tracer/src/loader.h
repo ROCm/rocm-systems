@@ -26,11 +26,10 @@
 #include <link.h>
 #include <unistd.h>
 
-#include <experimental/filesystem>
-
 #include "src/utils/helper.h"
+#include "src/utils/filesystem.hpp"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 
 namespace roctracer {
 

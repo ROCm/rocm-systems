@@ -31,8 +31,8 @@ THE SOFTWARE.
 #include <string>
 #include <thread>
 #include <array>
-#include <experimental/filesystem>
 
+#include "src/utils/filesystem.hpp"
 #include "src/utils/helper.h"
 #include "utils/csv_parser.h"
 #include "src/utils/logger.h"
@@ -1253,7 +1253,7 @@ void PluginTests::ProcessApplication(std::stringstream& ss) {
 }
 
 bool FilePluginTest::hasFileInDir(const std::string& filename, const char* directory) {
-  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+  for (const auto& entry : rocprofiler::common::filesystem::directory_iterator(directory)) {
     if (filename.size() == 0) return true;
     if (std::string(entry.path().filename()).find(filename) != std::string::npos) return true;
   }
@@ -1265,7 +1265,7 @@ class VectorAddFolderOnlyTest : public FilePluginTest {
   virtual void SetUp() {
     RunApplication("hip_vectoradd", " --hsa-activity --hip-activity -d /tmp/tests-v2/file/");
   }
-  virtual void TearDown() { std::experimental::filesystem::remove_all("/tmp/tests-v2/file/"); }
+  virtual void TearDown() { rocprofiler::common::filesystem::remove_all("/tmp/tests-v2/file/"); }
   bool hasFile() { return hasFileInDir(".csv", "/tmp/tests-v2/file/"); }
 };
 
@@ -1278,7 +1278,7 @@ class VectorAddFileAndFolderTest : public FilePluginTest {
   virtual void SetUp() {
     RunApplication("hip_vectoradd", " --hip-activity -d /tmp/tests-v2/file/ -o file_test");
   }
-  virtual void TearDown() { std::experimental::filesystem::remove_all("/tmp/tests-v2/file/"); }
+  virtual void TearDown() { rocprofiler::common::filesystem::remove_all("/tmp/tests-v2/file/"); }
   bool hasFile() { return hasFileInDir("file_test.csv", "/tmp/tests-v2/file/"); }
 };
 
@@ -1293,7 +1293,7 @@ class VectorAddFilenameMPITest : public FilePluginTest {
     RunApplication("hip_vectoradd", " --hip-activity -d /tmp/tests-v2/file/ -o test_%q{MPI_RANK}_");
   }
   virtual void TearDown() {
-    std::experimental::filesystem::remove_all("/tmp/tests-v2/file/");
+    rocprofiler::common::filesystem::remove_all("/tmp/tests-v2/file/");
     unsetenv("MPI_RANK");
   }
   bool hasFile() { return hasFileInDir("test_7_", "/tmp/tests-v2/file/"); }
@@ -1304,7 +1304,7 @@ TEST_F(VectorAddFilenameMPITest, WhenRunningProfilerWithFilePluginTest) {
 }
 
 bool PerfettoPluginTest::hasFileInDir(const std::string& filename, const char* directory) {
-  for (const auto& entry : std::experimental::filesystem::directory_iterator(directory)) {
+  for (const auto& entry : rocprofiler::common::filesystem::directory_iterator(directory)) {
     std::string entrypath = std::string(entry.path().filename());
     if (entrypath.find(".pftrace") == std::string::npos) continue;
     if (entrypath.substr(0, filename.size()) == filename) return true;
@@ -1320,7 +1320,7 @@ class VectorAddPerfettoMPITest : public PerfettoPluginTest {
                    " -d /tmp/tests-v2/perfetto/ -o test_%q{MPI_RANK}_ --plugin perfetto");
   }
   virtual void TearDown() {
-    std::experimental::filesystem::remove_all("/tmp/tests-v2/perfetto/");
+    rocprofiler::common::filesystem::remove_all("/tmp/tests-v2/perfetto/");
     unsetenv("MPI_RANK");
   }
   bool hasFile() { return hasFileInDir("test_7_", "/tmp/tests-v2/perfetto/"); }
@@ -1331,8 +1331,8 @@ TEST_F(VectorAddPerfettoMPITest, DISABLED_WhenRunningProfilerWithPerfettoTest) {
 }
 
 bool CTFPluginTest::hasMetadataInDir(const char* directory) {
-  auto path = std::experimental::filesystem::directory_iterator(directory)->path();
-  for (const auto& entry : std::experimental::filesystem::directory_iterator(path))
+  auto path = rocprofiler::common::filesystem::directory_iterator(directory)->path();
+  for (const auto& entry : rocprofiler::common::filesystem::directory_iterator(path))
     if (std::string(entry.path().filename()) == "metadata") return true;
   return false;
 }
@@ -1341,7 +1341,7 @@ class VectorAddCTFTest : public CTFPluginTest {
  protected:
   virtual void SetUp() { RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf --plugin ctf"); }
   virtual void TearDown() {
-    std::experimental::filesystem::remove_all("/tmp/tests-v2/");
+    rocprofiler::common::filesystem::remove_all("/tmp/tests-v2/");
     unsetenv("MPI_RANK");
   }
   bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf/"); }
@@ -1356,7 +1356,7 @@ class VectorAddCTFMPITest : public CTFPluginTest {
     RunApplication("hip_vectoradd", " -d /tmp/tests-v2/ctf_%q{MPI_RANK} --plugin ctf");
   }
   virtual void TearDown() {
-    std::experimental::filesystem::remove_all("/tmp/tests-v2/");
+    rocprofiler::common::filesystem::remove_all("/tmp/tests-v2/");
     unsetenv("MPI_RANK");
   }
   bool hasFile() { return hasMetadataInDir("/tmp/tests-v2/ctf_7/"); }

@@ -30,9 +30,10 @@ THE SOFTWARE.
  */
 
 #include "multiqueue_testapp.h"
+#include "src/utils/filesystem.hpp"
 #include "src/utils/exception.h"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 std::vector<hsa_agent_t> Device::all_devices;
 
 std::string GetRunningPath(std::string string_to_erase);

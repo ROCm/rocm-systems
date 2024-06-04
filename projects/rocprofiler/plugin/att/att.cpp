@@ -29,7 +29,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <experimental/filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -46,6 +45,8 @@
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
 #include "../../src/core/session/att/att_header.h"
+
+#include "src/utils/filesystem.hpp"
 
 #define ATT_FILENAME_MAXBYTES 90
 #define TEST_INVALID_KERNEL size_t(-1)
@@ -107,7 +108,7 @@ class att_plugin_t {
     if (!output_dir.size()) return;
 
     try {
-        std::experimental::filesystem::create_directories(output_dir);
+        rocprofiler::common::filesystem::create_directories(output_dir);
     } catch (...) {}
     output_dir += '/';
   }

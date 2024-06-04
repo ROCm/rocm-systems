@@ -23,7 +23,6 @@ THE SOFTWARE.
 #include "ctrl/test_hsa.h"
 
 #include <atomic>
-#include <experimental/filesystem>
 
 #include <dlfcn.h>  // for dladdr
 
@@ -31,7 +30,9 @@ THE SOFTWARE.
 #include "util/helper_funcs.h"
 #include "util/hsa_rsrc_factory.h"
 
-namespace fs = std::experimental::filesystem;
+#include "src/utils/filesystem.hpp"
+
+namespace fs = rocprofiler::common::filesystem;
 
 HsaRsrcFactory* TestHsa::hsa_rsrc_ = NULL;
 

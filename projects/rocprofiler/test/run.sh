@@ -84,7 +84,8 @@ export ROCP_METRICS=$BIN_DIR/metrics.xml
 ## C test
 eval_test "C test" $BIN_DIR/test/c_test
 
-export HSACO_OBJ_FILES_PATH="$BIN_DIR/test/"
+#export HSACO_OBJ_FILES_PATH="$BIN_DIR/test/"
+export HSACO_OBJ_FILES_PATH="$BIN_DIR/"
 
 if test -f "$BIN_DIR/test/librocprof-tool.so" ; then
   export ROCPROF_TOOL_PATH="$BIN_DIR/test/"

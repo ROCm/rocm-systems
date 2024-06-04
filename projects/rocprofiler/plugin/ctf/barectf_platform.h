@@ -26,7 +26,7 @@
 #include <fstream>
 #include <vector>
 #include <functional>
-#include <experimental/filesystem>
+#include "src/utils/filesystem.hpp"
 
 #include "barectf.h"
 
@@ -71,7 +71,7 @@ template <typename DescrT> class BarectfPlatform final {
   // For each event record to write, the platform reads `clock_val` to
   // know the current timestamp.
   explicit BarectfPlatform(const std::size_t packet_size,
-                           const std::experimental::filesystem::path& data_stream_file_path,
+                           const rocprofiler::common::filesystem::path& data_stream_file_path,
                            const std::uint64_t& clock_val)
       : clock_val_{&clock_val}, buffer_(packet_size) {
     // Initialize barectf callbacks.

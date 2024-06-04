@@ -24,11 +24,11 @@
 #include <mutex>
 #include <memory>
 
-#include <experimental/filesystem>
 #include "api/rocprofiler_singleton.h"
 #include "src/core/hsa/hsa_support.h"
+#include "src/utils/filesystem.hpp"
 
-namespace fs = std::experimental::filesystem;
+namespace fs = rocprofiler::common::filesystem;
 using namespace std::string_literals;
 
 #define MAX_THREADS 10000

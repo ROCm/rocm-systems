@@ -30,7 +30,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <experimental/filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -46,7 +45,9 @@
 #include "rocprofiler_plugin.h"
 #include "../utils.h"
 
-namespace fs = std::experimental::filesystem;
+#include "src/utils/filesystem.hpp"
+
+namespace fs = rocprofiler::common::filesystem;
 
 namespace {
 

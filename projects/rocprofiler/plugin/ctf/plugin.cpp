@@ -28,7 +28,6 @@
 #include <memory>
 #include <limits>
 #include <fstream>
-#include <experimental/filesystem>
 #include <time.h>
 
 #include <hsa/hsa.h>
@@ -47,7 +46,9 @@
 #include "barectf_tracer.h"
 #include "plugin.h"
 
-namespace fs = std::experimental::filesystem;
+#include "src/utils/filesystem.hpp"
+
+namespace fs = rocprofiler::common::filesystem;
 
 namespace rocm_ctf {
 namespace {

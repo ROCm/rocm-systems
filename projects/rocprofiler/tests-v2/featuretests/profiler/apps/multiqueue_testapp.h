@@ -32,7 +32,6 @@ THE SOFTWARE.
 #include <unistd.h>
 #include <cstdlib>
 
-#include <experimental/filesystem>
 #include <iostream>
 #include <string>
 #include <vector>
