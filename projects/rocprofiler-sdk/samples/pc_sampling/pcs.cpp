@@ -40,8 +40,40 @@ namespace client
 {
 namespace pcs
 {
-tool_agent_info_vec_t                gpu_agents;
-std::vector<rocprofiler_buffer_id_t> buffer_ids;
+// TODO: Since this is used only within the `tool_init`,
+// we are safe using static constructor.
+// It would be nice to make this consistent with the `buffer_ids`.
+tool_agent_info_vec_t gpu_agents;
+// The reason for using raw pointers is the following.
+// Sometimes, statically created objects of the client::pcs
+// namespace might be freed prior to the `tool_fini`,
+// meaning `buffer_ids` become unusable inside `tool_fini`.
+// Instead, use raw pointers to control objects deallocation time.
+// TODO: The approach with exporting raw pointers outside of the
+// `pcs` namespace is a temporary solution.
+// Instead, it would be better to encapsulate `buffer_ids` inside the
+// `pcs` namespace and export functions for registering/flushing/destroying buffers.
+pc_sampling_buffer_id_vec_t* buffer_ids = nullptr;
+
+void
+init()
+{
+    buffer_ids = new pc_sampling_buffer_id_vec_t();
+}
+
+void
+fini()
+{
+    // Clear the data
+    buffer_ids->clear();
+    delete buffer_ids;
+}
+
+pc_sampling_buffer_id_vec_t*
+get_pc_sampling_buffer_ids()
+{
+    return buffer_ids;
+}
 
 rocprofiler_status_t
 find_all_gpu_agents_supporting_pc_sampling_impl(rocprofiler_agent_version_t version,

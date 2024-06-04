@@ -35,8 +35,9 @@ constexpr size_t BUFFER_SIZE_BYTES = 8192;
 constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES / 4);
 
 struct tool_agent_info;
-using avail_configs_vec_t   = std::vector<rocprofiler_pc_sampling_configuration_t>;
-using tool_agent_info_vec_t = std::vector<std::unique_ptr<tool_agent_info>>;
+using avail_configs_vec_t         = std::vector<rocprofiler_pc_sampling_configuration_t>;
+using tool_agent_info_vec_t       = std::vector<std::unique_ptr<tool_agent_info>>;
+using pc_sampling_buffer_id_vec_t = std::vector<rocprofiler_buffer_id_t>;
 
 struct tool_agent_info
 {
@@ -50,8 +51,18 @@ struct tool_agent_info
 // meaning we were not able to enable PC sampling service.
 // Check the `tool_init` for more information.
 extern tool_agent_info_vec_t gpu_agents;
+
+// Must be called first (prior to any other function from this namespace)
+void
+init();
+
+// Must be called at the end of the `tool_fini`
+void
+fini();
+
 // Ids of the buffers used as containers for PC sampling records
-extern std::vector<rocprofiler_buffer_id_t> buffer_ids;
+pc_sampling_buffer_id_vec_t*
+get_pc_sampling_buffer_ids();
 
 void
 find_all_gpu_agents_supporting_pc_sampling();

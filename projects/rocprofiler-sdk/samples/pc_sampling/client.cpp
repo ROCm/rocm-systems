@@ -69,6 +69,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
 {
     client_fini_func = fini_func;
 
+    // Initialize necessary data structures
+    pcs::init();
+
     client::pcs::find_all_gpu_agents_supporting_pc_sampling();
 
     if(client::pcs::gpu_agents.empty())
@@ -85,6 +88,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
     // - a pc sampling service per agent/buffer
 
     ROCPROFILER_CHECK(rocprofiler_create_context(&client_ctx));
+
+    auto* buff_ids_vec = pcs::get_pc_sampling_buffer_ids();
 
     for(auto& gpu_agent : pcs::gpu_agents)
     {
@@ -108,7 +113,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)
 
         ROCPROFILER_CHECK(rocprofiler_assign_callback_thread(buffer_id, client_agent_thread));
 
-        client::pcs::buffer_ids.emplace_back(buffer_id);
+        buff_ids_vec->emplace_back(buffer_id);
     }
 
     int valid_ctx = 0;
@@ -138,12 +143,12 @@ tool_fini(void* /*tool_data*/)
         assert(state == 0);
 
         // No need to stop the context, since it has been stopped implicitly by the rocprofiler-SDK.
-        for(size_t i = 0; i < client::pcs::buffer_ids.size(); i++)
+        for(auto buff_id : *pcs::get_pc_sampling_buffer_ids())
         {
             // Flush the buffer explicitly
-            ROCPROFILER_CHECK(rocprofiler_flush_buffer(client::pcs::buffer_ids.at(i)));
+            ROCPROFILER_CHECK(rocprofiler_flush_buffer(buff_id));
             // Destroying the buffer
-            rocprofiler_status_t status = rocprofiler_destroy_buffer(client::pcs::buffer_ids.at(i));
+            rocprofiler_status_t status = rocprofiler_destroy_buffer(buff_id);
             if(status == ROCPROFILER_STATUS_ERROR_BUFFER_BUSY)
             {
                 *utils::get_output_stream()
@@ -155,6 +160,9 @@ tool_fini(void* /*tool_data*/)
             }
         }
     }
+
+    // deallocation
+    pcs::fini();
 }
 
 }  // namespace
