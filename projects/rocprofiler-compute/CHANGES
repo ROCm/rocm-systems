@@ -1,3 +1,10 @@
+Version 2.0.1 (03 Jun 2024)
+
+  * new option to force hardware target via OMNIPERF_ARCH_OVERRIDE global (#370)
+  * CI/CD support for MI300 hardware (#373)
+  * cmake build improvements (#374)
+  * support for MI308X hardware (#375)
+
 Version 2.0.0 (17 May 2024)
 
   * improved logging than spans all modes (#177) (#317) (#335) (#341)
