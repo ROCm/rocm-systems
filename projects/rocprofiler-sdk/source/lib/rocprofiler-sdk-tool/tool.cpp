@@ -941,11 +941,19 @@ counter_record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_da
 
     for(size_t count = 0; count < record_count; count++)
     {
+        // Unlikely to trigger, temporary until we move to buffered callbacks
+        if(count >= counter_record.records.size())
+        {
+            ROCP_WARNING << "Exceeded maximum counter capacity, skipping remaining";
+            break;
+        }
+
         auto _counter_id = rocprofiler_counter_id_t{};
         ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[count].id, &_counter_id),
                          "query record counter id");
-        counter_record.records.emplace_back(
-            rocprofiler_tool_record_counter_t{_counter_id, record_data[count]});
+        counter_record.records[count] =
+            rocprofiler_tool_record_counter_t{_counter_id, record_data[count]};
+        counter_record.counter_count++;
     }
 
     write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);

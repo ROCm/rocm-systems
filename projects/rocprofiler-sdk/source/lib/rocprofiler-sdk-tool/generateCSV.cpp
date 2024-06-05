@@ -30,6 +30,7 @@
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <unistd.h>
 
+#include <cstdint>
 #include <iomanip>
 #include <string_view>
 #include <utility>
@@ -553,8 +554,9 @@ generate_csv(tool_table*                                                     too
     {
         auto kernel_id          = record.dispatch_data.dispatch_info.kernel_id;
         auto counter_name_value = std::map<std::string, uint64_t>{};
-        for(const auto& count : record.records)
+        for(uint64_t i = 0; i < record.counter_count; i++)
         {
+            const auto& count        = record.records.at(i);
             auto        rec          = count.record_counter;
             std::string counter_name = tool_functions->tool_get_counter_info_name_fn(rec.id);
             auto        search       = counter_name_value.find(counter_name);

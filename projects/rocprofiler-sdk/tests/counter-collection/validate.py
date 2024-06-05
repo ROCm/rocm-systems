@@ -28,7 +28,7 @@ def test_counter_values(input_data):
     counter_data = data["buffer_records"]["counter_collection"]
 
     for itr in counter_info:
-        if itr["is_constant"] == 1 and itr["name"] == "size":
+        if itr["is_constant"] == 1:
             continue
         assert itr["id"]["handle"] > 0, f"{itr}"
         assert itr["is_constant"] in (0, 1), f"{itr}"

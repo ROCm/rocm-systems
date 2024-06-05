@@ -35,6 +35,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <cstdint>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/serialization.hpp>
 
@@ -270,18 +271,22 @@ struct rocprofiler_tool_record_counter_t
 
 struct rocprofiler_tool_counter_collection_record_t
 {
-    rocprofiler_profile_counting_dispatch_data_t   dispatch_data    = {};
-    std::vector<rocprofiler_tool_record_counter_t> records          = {};
-    uint64_t                                       thread_id        = 0;
-    uint64_t                                       arch_vgpr_count  = 0;
-    uint64_t                                       sgpr_count       = 0;
-    uint64_t                                       lds_block_size_v = 0;
+    rocprofiler_profile_counting_dispatch_data_t       dispatch_data    = {};
+    std::array<rocprofiler_tool_record_counter_t, 256> records          = {};
+    uint64_t                                           thread_id        = 0;
+    uint64_t                                           arch_vgpr_count  = 0;
+    uint64_t                                           sgpr_count       = 0;
+    uint64_t                                           lds_block_size_v = 0;
+    uint64_t                                           counter_count    = 0;
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
-        ar(cereal::make_nvp("records", records));
+        // should be removed when moving to buffered tracing
+        std::vector<rocprofiler_tool_record_counter_t> tmp{records.begin(),
+                                                           records.begin() + counter_count};
+        ar(cereal::make_nvp("records", tmp));
         ar(cereal::make_nvp("thread_id", thread_id));
         ar(cereal::make_nvp("arch_vgpr_count", arch_vgpr_count));
         ar(cereal::make_nvp("sgpr_count", sgpr_count));
