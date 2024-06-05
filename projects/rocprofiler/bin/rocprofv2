@@ -40,7 +40,7 @@ usage() {
   echo -e "${GREEN}--hsa-activity | --hsa-trace ${RESET} For Collecting HSA API Activities Traces"
   echo -e "${GREEN}--roctx-trace ${RESET}                For Collecting ROCTx Traces"
   echo -e "${GREEN}--kernel-trace ${RESET}               For Collecting Kernel dispatch Traces"
-  echo -e "${GREEN}--sys-trace ${RESET}                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX and Kernel Dispatch traces\n"
+  echo -e "${GREEN}--sys-trace ${RESET}                  For Collecting HIP and HSA APIs and their Activities Traces along ROCTX\n"
   echo -e "\t#${GREY}usage e.g: rocprofv2 --[hip-trace|hsa-trace|roctx-trace|kernel-trace|sys-trace]  <executable>\n"${RESET}
   echo -e "${GREEN}--plugin ${RESET} PLUGIN_NAME         For enabling a plugin (cli/file/perfetto/att/ctf/speedscope)"
   echo -e "\t#${GREY} usage(file/perfetto/ctf) e.g: rocprofv2 -i pmc.txt --plugin [file/perfetto/ctf/json] -d out_dir <executable>"

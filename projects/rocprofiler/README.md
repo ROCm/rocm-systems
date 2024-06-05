@@ -280,7 +280,7 @@ Different trace options are available while profiling an app:
 - HIP & HSA API and asynchronous activity and kernel dispatches tracing
 
   ```bash
-  rocprofv2 --sys-trace <app_relative_path> ## Same as combining --hip-trace & --hsa-trace & --kernel-trace
+  rocprofv2 --sys-trace <app_relative_path> ## Same as combining --hip-trace & --hsa-trace & ROCtx trace
   ```
 
 - For complete usage options, please run rocprofv2 help
