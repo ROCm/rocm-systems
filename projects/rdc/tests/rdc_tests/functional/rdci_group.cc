@@ -83,7 +83,7 @@ void TestRdciGroup::Run(void) {
     ASSERT_EQ(result, RDC_ST_OK);
   }
 
-  rdc_gpu_group_t group_id;
+  rdc_gpu_group_t group_id = 0;
   uint32_t count = 0;
   rdc_group_info_t group_info;
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];

@@ -102,18 +102,17 @@ FLD_DESC_ENT(RDC_FI_XGMI_7_WRITE_KB,     "XGMI7 accumulated data write size (KB)
 // This doesn't map to rocprofiler counters directly
 // See counter_map in rdc/include/rdc_libs/rdc_modules/rdc_rocp/RdcRocpBase.h
 // See metrics.xml in rocprofiler
-FLD_DESC_ENT(RDC_FI_PROF_CU_OCCUPANCY,                 "Active Waves / maximum Active Waves per CU", "CU_OCCUPANCY",                 false)
-FLD_DESC_ENT(RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU,        "Mean occupancy per CU",                      "MEAN_OCCUPANCY_PER_CU",        false)
-FLD_DESC_ENT(RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU, "Mean occupancy per active CU",               "MEAN_OCCUPANCY_PER_ACTIVE_CU", false)
-FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,                "Number of Active Cycles",                    "ACTIVE_CYCLES",                false)
-FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,                 "Number of Active Waves",                     "ACTIVE_WAVES",                 false)
-FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES,               "Number of Elapsed Cycles over all SMs",      "ELAPSED_CYCLES",               false)
+FLD_DESC_ENT(RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU,        "Mean occupancy per CU",                 "MN_OCC_PER_CU",     false)
+FLD_DESC_ENT(RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU, "Mean occupancy per active CU",          "MN_OCC_PER_ACT_CU", false)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_CYCLES,                "Number of Active Cycles",               "ACTIVE_CYCLES",     false)
+FLD_DESC_ENT(RDC_FI_PROF_ACTIVE_WAVES,                 "Number of Active Waves",                "ACTIVE_WAVES",      false)
+FLD_DESC_ENT(RDC_FI_PROF_ELAPSED_CYCLES,               "Number of Elapsed Cycles over all SMs", "ELAPSED_CYCLES",    false)
 // metrics below are divided by time passed
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_R_BW,                "kbps fetched from video memory",             "MEM_R_BW",                     false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,                "kbps written to video memory",               "MEM_W_BW",                     false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,                "Number of fp16 OPS / second",                "FLOPS_16",                     false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32,                "Number of fp32 OPS / second",                "FLOPS_32",                     false)
-FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64,                "Number of fp64 OPS / second",                "FLOPS_64",                     false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_R_BW,                "Fetched from video memory kb / ms",     "MEM_R_BW",          false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,                "Written to video memory kb / ms",       "MEM_W_BW",          false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,                "Number of fp16 OPS / ms",               "FLOPS_16",          false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32,                "Number of fp32 OPS / ms",               "FLOPS_32",          false)
+FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64,                "Number of fp64 OPS / ms",               "FLOPS_64",          false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)

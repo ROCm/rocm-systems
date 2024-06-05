@@ -243,7 +243,6 @@ RdcRocpBase::RdcRocpBase() {
 
   // all fields
   static const std::map<rdc_field_t, const char*> temp_field_map_k = {
-      {RDC_FI_PROF_CU_OCCUPANCY, "CU_OCCUPANCY"},
       {RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU, "MEAN_OCCUPANCY_PER_CU"},
       {RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU, "MEAN_OCCUPANCY_PER_ACTIVE_CU"},
       {RDC_FI_PROF_ACTIVE_CYCLES, "ACTIVE_CYCLES"},
