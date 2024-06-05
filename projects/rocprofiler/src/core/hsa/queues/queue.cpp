@@ -731,15 +731,15 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
 
       // Adding Stop and Read PM4 Packets
       if (session_data_count > 0 && is_counter_collection_mode && profiles.size() > 0 &&
-          profile.first && profile.first->stop_packet) {
+          profile.first && profile.first->read_packet) {
         hsa_signal_t dummy_signal{};
-        profile.first->stop_packet->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC
-            << HSA_PACKET_HEADER_TYPE;
-        Packet::AddVendorSpecificPacket(profile.first->stop_packet, &transformed_packets,
-                                        dummy_signal);
         profile.first->read_packet->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC
             << HSA_PACKET_HEADER_TYPE;
         Packet::AddVendorSpecificPacket(profile.first->read_packet, &transformed_packets,
+                                        dummy_signal);
+        profile.first->stop_packet->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC
+            << HSA_PACKET_HEADER_TYPE;
+        Packet::AddVendorSpecificPacket(profile.first->stop_packet, &transformed_packets,
                                         interrupt_signal);
 
         // Added Interrupt Signal with barrier and provided handler for it
