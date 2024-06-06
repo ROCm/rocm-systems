@@ -2123,7 +2123,7 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
   CATCH
 }
 
-rsmi_status_t rsmi_dev_gpu_clear_sram_data(uint32_t dv_ind,
+rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind,
     uint32_t sclean) {
   rsmi_status_t ret;
 

@@ -2100,9 +2100,9 @@ amdsmi_get_gpu_process_isolation.argtypes = [amdsmi_processor_handle, ctypes.POI
 amdsmi_set_gpu_process_isolation = _libraries['libamd_smi.so'].amdsmi_set_gpu_process_isolation
 amdsmi_set_gpu_process_isolation.restype = amdsmi_status_t
 amdsmi_set_gpu_process_isolation.argtypes = [amdsmi_processor_handle, uint32_t]
-amdsmi_set_gpu_clear_sram_data = _libraries['libamd_smi.so'].amdsmi_set_gpu_clear_sram_data
-amdsmi_set_gpu_clear_sram_data.restype = amdsmi_status_t
-amdsmi_set_gpu_clear_sram_data.argtypes = [amdsmi_processor_handle, uint32_t]
+amdsmi_set_gpu_run_cleaner_shader = _libraries['libamd_smi.so'].amdsmi_set_gpu_run_cleaner_shader
+amdsmi_set_gpu_run_cleaner_shader.restype = amdsmi_status_t
+amdsmi_set_gpu_run_cleaner_shader.argtypes = [amdsmi_processor_handle, uint32_t]
 amdsmi_get_lib_version = _libraries['libamd_smi.so'].amdsmi_get_lib_version
 amdsmi_get_lib_version.restype = amdsmi_status_t
 amdsmi_get_lib_version.argtypes = [ctypes.POINTER(struct_amdsmi_version_t)]
@@ -2703,7 +2703,7 @@ __all__ = \
     'amdsmi_set_cpu_socket_boostlimit',
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap', 'amdsmi_set_cpu_xgmi_width',
-    'amdsmi_set_soc_pstate', 'amdsmi_set_gpu_clear_sram_data',
+    'amdsmi_set_soc_pstate', 'amdsmi_set_gpu_run_cleaner_shader',
     'amdsmi_set_gpu_clk_range', 'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_event_notification_mask',
     'amdsmi_set_gpu_fan_speed', 'amdsmi_set_gpu_memory_partition',

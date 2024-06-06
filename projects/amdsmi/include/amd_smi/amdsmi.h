@@ -3509,12 +3509,12 @@ amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle process
                              uint32_t pisolate);
 
 /**
- * @brief Clear the GPU SRAM data
+ * @brief Run the cleaner shader to clean up data in LDS/GPRs
  *
  * @platform{gpu_bm_linux} @platform{guest_1vf}
  *
  * @details Given a processor handle @p processor_handle, and a sclean flag @p sclean,
- * this function will clear the SRAM data of this processor. This can be called between
+ * this function will clear the local data of this processor. This can be called between
  * user logins to prevent information leak.
  *
  *  @note This function requires root access
@@ -3526,7 +3526,7 @@ amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle process
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_clear_sram_data(amdsmi_processor_handle processor_handle,
+amdsmi_status_t amdsmi_set_gpu_run_cleaner_shader(amdsmi_processor_handle processor_handle,
                   uint32_t sclean);
 
 /** @} End PerfCont */

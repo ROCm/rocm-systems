@@ -2831,7 +2831,7 @@ def amdsmi_set_gpu_process_isolation(
     )
 
 
-def amdsmi_set_gpu_clear_sram_data(
+def amdsmi_set_gpu_run_cleaner_shader(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
     sclean: int,
 ):
@@ -2840,7 +2840,7 @@ def amdsmi_set_gpu_clear_sram_data(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
     _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_clear_sram_data(
+        amdsmi_wrapper.amdsmi_set_gpu_run_cleaner_shader(
             processor_handle, sclean
         )
     )

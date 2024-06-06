@@ -579,7 +579,7 @@ Reset Arguments:
   -C, --compute-partition     Reset compute partitions on the specified GPU
   -M, --memory-partition      Reset memory partitions on the specified GPU
   -o, --power-cap             Reset power capacity limit to max capable
-  -l, --clear-sram-data       Clear the GPU SRAM data
+  -l, --run-shader SHADER_NAME  Run the shader on processor. Only CLEANER shader can be used to clean up data in LDS/GPRs
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).

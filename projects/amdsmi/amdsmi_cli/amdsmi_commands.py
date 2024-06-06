@@ -3730,7 +3730,7 @@ class AMDSMICommands():
 
     def reset(self, args, multiple_devices=False, gpu=None, gpureset=None,
                 clocks=None, fans=None, profile=None, xgmierr=None, perf_determinism=None,
-                compute_partition=None, memory_partition=None, power_cap=None, clear_sram_data=None):
+                compute_partition=None, memory_partition=None, power_cap=None, run_shader=None):
         """Issue reset commands to target gpu(s)
 
         Args:
@@ -3746,7 +3746,7 @@ class AMDSMICommands():
             compute_partition (bool, optional): Value override for args.compute_partition. Defaults to None.
             memory_partition (bool, optional): Value override for args.memory_partition. Defaults to None.
             power_cap (bool, optional): Value override for args.power_cap. Defaults to None.
-            clear_sram_data (bool, optional): Value override for args.clear_sram_data. Defaults to None.
+            run_shader (bool, optional): Value override for args.run_cleaner_shader. Defaults to None.
 
         Raises:
             ValueError: Value error if no gpu value is provided
@@ -3776,8 +3776,8 @@ class AMDSMICommands():
             args.memory_partition = memory_partition
         if power_cap:
             args.power_cap = power_cap
-        if clear_sram_data:
-            args.clear_sram_data = clear_sram_data
+        if run_shader:
+            args.run_shader = run_shader
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -3796,7 +3796,7 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
                     args.perf_determinism, args.compute_partition, args.memory_partition, \
-                    args.power_cap, args.clear_sram_data]):
+                    args.power_cap, args.run_shader]):
             command = " ".join(sys.argv[1:])
             raise AmdSmiRequiredCommandException(command, self.logger.format)
 
@@ -3947,16 +3947,16 @@ class AMDSMICommands():
                         raise PermissionError('Command requires elevation') from e
                     raise ValueError(f"Unable to reset power cap to {default_power_cap_in_w} on GPU {gpu_id}") from e
                 self.logger.store_output(args.gpu, 'powercap', f"Successfully set power cap to {default_power_cap_in_w}")
-        if args.clear_sram_data:
+        if args.run_shader:
             try:
                 # Only 1 can be used for now.
-                amdsmi_interface.amdsmi_set_gpu_clear_sram_data(args.gpu, 1)
-                result = 'Successfully clear GPU SRAM data'
+                amdsmi_interface.amdsmi_set_gpu_run_cleaner_shader(args.gpu, 1)
+                result = 'Successfully clean GPU local data'
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                     raise PermissionError('Command requires elevation') from e
-                raise ValueError(f"Unable to clear SRAM data on GPU {gpu_id}") from e
-            self.logger.store_output(args.gpu, 'clear_sram_data', result)
+                raise ValueError(f"Unable to clean local data on GPU {gpu_id}") from e
+            self.logger.store_output(args.gpu, 'run_shader', result)
 
         if multiple_devices:
             self.logger.store_multiple_device_output()

@@ -106,7 +106,7 @@ The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropp
 Added APIs CLI and APIs to address LeftoverLocals security issues. Allowing clearing the sram data and setting process isolation on a per GPU basis. New APIs:
   - `amdsmi_get_gpu_process_isolation()`
   - `amdsmi_set_gpu_process_isolation()`
-  - `amdsmi_set_gpu_clear_sram_data()`
+  - `amdsmi_set_gpu_run_cleaner_shader()`
 
 - **Added `MIN_POWER` to output of `amd-smi static --limit`**.  
 This change helps users identify the range to which they can change the power cap of the GPU. The change is added to simplify why a device supports (or does not support) power capping (also known as overdrive). See `amd-smi set -g all --power-cap <value in W>` or `amd-smi reset -g all --power-cap`.

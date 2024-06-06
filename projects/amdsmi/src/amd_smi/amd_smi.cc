@@ -1457,11 +1457,11 @@ amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle process
                    pisolate);
 }
 
-amdsmi_status_t amdsmi_set_gpu_clear_sram_data(amdsmi_processor_handle processor_handle,
+amdsmi_status_t amdsmi_set_gpu_run_cleaner_shader(amdsmi_processor_handle processor_handle,
                   uint32_t sclean) {
     AMDSMI_CHECK_INIT();
 
-    return rsmi_wrapper(rsmi_dev_gpu_clear_sram_data, processor_handle,
+    return rsmi_wrapper(rsmi_dev_gpu_run_cleaner_shader, processor_handle,
                     sclean);
 }
 

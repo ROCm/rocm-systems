@@ -3451,10 +3451,10 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
                              uint32_t pisolate);
 
 /**
- * @brief Clear the GPU SRAM data
+ * @brief Run the cleaner shader to clean up data in LDS/GPRs
  *
  * @details Given a device index @p dv_ind, this function will clear the
- * GPU SRAM data  of this device. This can be called between user logins to prevent information leak.
+ * GPU local data  of this device. This can be called between user logins to prevent information leak.
  *
  *  @note This function requires root access
  *
@@ -3465,7 +3465,7 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
  *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_gpu_clear_sram_data(uint32_t dv_ind, uint32_t sclean);
+rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind, uint32_t sclean);
 
 /** @} */  // end of PerfCont
 
