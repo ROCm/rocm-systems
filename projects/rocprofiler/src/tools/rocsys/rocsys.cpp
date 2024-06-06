@@ -33,6 +33,7 @@
 
 #include <iostream>
 #include <algorithm>
+#include <vector>
 
 #include "src/utils/filesystem.hpp"
 
