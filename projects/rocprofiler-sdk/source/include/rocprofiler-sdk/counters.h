@@ -87,7 +87,6 @@ typedef rocprofiler_status_t (*rocprofiler_available_dimensions_cb_t)(
  * @param [in] user_data data to pass into the callback
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if dimension exists
- * @retval ROCPROFILER_STATUS_ERROR_HSA_NOT_LOADED if HSA is not loaded when this is called
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter is not found
  * @retval ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND if counter does not have this dimension
  */
@@ -115,11 +114,6 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
 
 /**
  * @brief This call returns the number of instances specific counter contains.
- *        WARNING: There is a restriction on this call in the alpha/beta release
- *        of rocprof. This call will not return correct instance information in
- *        tool_init and must be called as part of the dispatch callback for accurate
- *        instance counting information. The reason for this restriction is that HSA
- *        is not yet loaded on tool_init.
  *
  * @param [in] agent_id rocprofiler agent identifier
  * @param [in] counter_id counter id (obtained from iterate_agent_supported_counters)
