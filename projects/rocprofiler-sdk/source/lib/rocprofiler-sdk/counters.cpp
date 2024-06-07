@@ -26,6 +26,7 @@
 #include <fmt/core.h>
 
 #include "lib/common/container/small_vector.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -74,6 +75,7 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
         return ROCPROFILER_STATUS_SUCCESS;
     }
 
+    ROCP_ERROR << fmt::format("Could not find counter with id = {}", counter_id.handle);
     return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
 }
 

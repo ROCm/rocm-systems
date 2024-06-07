@@ -900,12 +900,13 @@ get_counter_info_name(uint64_t record_id)
     auto counter_id = rocprofiler_counter_id_t{};
     ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_id, &counter_id),
                      "query record counter id");
-    ROCPROFILER_CALL(rocprofiler_query_counter_info(rocprofiler_counter_id_t{counter_id},
-                                                    ROCPROFILER_COUNTER_INFO_VERSION_0,
-                                                    static_cast<void*>(&info)),
-                     "query counter info");
-    std::string counter_name = info.name;
-    return counter_name;
+    if(rocprofiler_query_counter_info(rocprofiler_counter_id_t{counter_id},
+                                      ROCPROFILER_COUNTER_INFO_VERSION_0,
+                                      static_cast<void*>(&info)) != ROCPROFILER_STATUS_SUCCESS)
+    {
+        ROCP_FATAL << "Could not find name for record id: " << record_id;
+    }
+    return {info.name};
 }
 
 void
