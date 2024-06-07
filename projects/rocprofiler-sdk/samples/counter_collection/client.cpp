@@ -75,6 +75,32 @@ get_buffer()
 }
 
 /**
+ * For a given counter, query the dimensions that it has. Typically you will
+ * want to call this function once to get the dimensions and cache them.
+ */
+std::vector<rocprofiler_record_dimension_info_t>
+counter_dimensions(rocprofiler_counter_id_t counter)
+{
+    std::vector<rocprofiler_record_dimension_info_t> dims;
+    rocprofiler_available_dimensions_cb_t            cb =
+        [](rocprofiler_counter_id_t,
+           const rocprofiler_record_dimension_info_t* dim_info,
+           size_t                                     num_dims,
+           void*                                      user_data) {
+            std::vector<rocprofiler_record_dimension_info_t>* vec =
+                static_cast<std::vector<rocprofiler_record_dimension_info_t>*>(user_data);
+            for(size_t i = 0; i < num_dims; i++)
+            {
+                vec->push_back(dim_info[i]);
+            }
+            return ROCPROFILER_STATUS_SUCCESS;
+        };
+    ROCPROFILER_CALL(rocprofiler_iterate_counter_dimensions(counter, cb, &dims),
+                     "Could not iterate counter dimensions");
+    return dims;
+}
+
+/**
  * buffered_callback (set in rocprofiler_create_buffer in tool_init) is called when the
  * buffer is full (or when the buffer is flushed). The callback is responsible for processing
  * the records in the buffer. The records are returned in the headers array. The headers
@@ -90,9 +116,6 @@ buffered_callback(rocprofiler_context_id_t,
                   void*                         user_data,
                   uint64_t)
 {
-    static int enter_count = 0;
-    enter_count++;
-    if(enter_count % 100 != 0) return;
     std::stringstream ss;
     // Iterate through the returned records
     for(size_t i = 0; i < num_headers; ++i)
@@ -113,8 +136,20 @@ buffered_callback(rocprofiler_context_id_t,
         {
             // Print the returned counter data.
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
-            ss << "  (Dispatch_Id: " << record->dispatch_id << " Id: " << record->id
-               << " Value [D]: " << record->counter_value << "),";
+            rocprofiler_counter_id_t counter_id = {.handle = 0};
+
+            rocprofiler_query_record_counter_id(record->id, &counter_id);
+
+            ss << "  (Dispatch_Id: " << record->dispatch_id << " Counter_Id: " << counter_id.handle
+               << " Record_Id: " << record->id << " Dimensions: [";
+
+            for(auto& dim : counter_dimensions(counter_id))
+            {
+                size_t pos = 0;
+                rocprofiler_query_record_dimension_position(record->id, dim.id, &pos);
+                ss << "{" << dim.name << ": " << pos << "},";
+            }
+            ss << "] Value [D]: " << record->counter_value << "),";
         }
     }
 

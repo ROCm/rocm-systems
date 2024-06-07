@@ -128,6 +128,12 @@ TEST(dimension, set_get)
         check_dim_pos(test_id, dim, i * 5);
         set_dim_in_rec(test_id, dim, i * 3);
         check_dim_pos(test_id, dim, i * 3);
+        for(size_t j = 1; j < 64; j++)
+        {
+            test_id = 0;
+            set_dim_in_rec(test_id, dim, j);
+            check_dim_pos(test_id, dim, j);
+        }
     }
 
     test_counter.handle = 123;
