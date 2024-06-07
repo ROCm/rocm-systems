@@ -150,7 +150,7 @@ typedef enum {
   RDC_FI_GPU_COUNT = 1,  //!< GPU count in the system
   RDC_FI_DEV_NAME,       //!< Name of the device
 
-  /*
+  /**
    * @brief Frequency related fields
    */
   RDC_FI_GPU_CLOCK = 100,  //!< The current clock for the GPU
@@ -163,7 +163,7 @@ typedef enum {
   RDC_FI_GPU_TEMP,           //!< Current temperature for the device
   RDC_FI_POWER_USAGE = 300,  //!< Power usage for the device
 
-  /*
+  /**
    * @brief PCIe related fields
    */
   RDC_FI_PCIE_TX = 400,  //!< PCIe Tx utilization information
@@ -172,7 +172,7 @@ typedef enum {
   // The RDC_FI_PCIE_BANDWIDTH should be used
   RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in GB/sec
 
-  /*
+  /**
    * @brief GPU usage related fields
    */
   RDC_FI_GPU_UTIL = 500,    //!< GPU Utilization
@@ -250,21 +250,19 @@ typedef enum {
   /**
    * @brief ROC-profiler related fields
    */
-  RDC_FI_PROF_CU_UTILIZATION = 800,
-  RDC_FI_PROF_CU_OCCUPANCY,
-  RDC_FI_PROF_FLOPS_16,
-  RDC_FI_PROF_FLOPS_32,
-  RDC_FI_PROF_FLOPS_64,
+  RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU = 800,
+  RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU,
   RDC_FI_PROF_ACTIVE_CYCLES,
   RDC_FI_PROF_ACTIVE_WAVES,
   RDC_FI_PROF_ELAPSED_CYCLES,
-  RDC_FI_PROF_FETCH_SIZE,
-  RDC_FI_PROF_WRITE_SIZE,
-  RDC_FI_PROF_GRBM_COUNT,
-  RDC_FI_PROF_SQ_WAVES,
-  RDC_FI_PROF_TA_BUSY_AVR,
+  // metrics below are divided by time passed
+  RDC_FI_PROF_EVAL_MEM_R_BW,
+  RDC_FI_PROF_EVAL_MEM_W_BW,
+  RDC_FI_PROF_EVAL_FLOPS_16,
+  RDC_FI_PROF_EVAL_FLOPS_32,
+  RDC_FI_PROF_EVAL_FLOPS_64,
 
-  /*
+  /**
    * @brief Raw XGMI counter events
    */
   RDC_EVNT_XGMI_0_NOP_TX = 1000,  //!< NOPs sent to neighbor 0

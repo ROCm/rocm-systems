@@ -28,6 +28,7 @@ THE SOFTWARE.
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdio>
@@ -71,25 +72,26 @@ static hsa_status_t get_agent_handle_cb(hsa_agent_t agent, void* agent_arr) {
   return HSA_STATUS_SUCCESS;
 }
 
-void RdcRocpBase::read_feature(rocprofiler_t* context, const unsigned feature_count) {
+void RdcRocpBase::read_feature(rocprofiler_t* context, const unsigned feature_count,
+                               uint32_t gpu_index) {
   hsa_status_t status = rocprofiler_read(context, 0);
   assert(status == HSA_STATUS_SUCCESS);
   status = rocprofiler_get_data(context, 0);
   assert(status == HSA_STATUS_SUCCESS);
   status = rocprofiler_get_metrics(context);
   assert(status == HSA_STATUS_SUCCESS);
-  switch (feature[0].data.kind) {
+  switch (feature[gpu_index].data.kind) {
     case ROCPROFILER_DATA_KIND_DOUBLE:
-      metric_to_value[feature[0].name] = feature[0].data.result_double;
+      metric_to_value[feature[gpu_index].name] = feature[gpu_index].data.result_double;
       break;
     case ROCPROFILER_DATA_KIND_INT32:
-      metric_to_value[feature[0].name] = feature[0].data.result_int32;
+      metric_to_value[feature[gpu_index].name] = feature[gpu_index].data.result_int32;
       break;
     case ROCPROFILER_DATA_KIND_INT64:
-      metric_to_value[feature[0].name] = feature[0].data.result_int64;
+      metric_to_value[feature[gpu_index].name] = feature[gpu_index].data.result_int64;
       break;
     default:
-      RDC_LOG(RDC_ERROR, "ERROR: Unexpected feature kind: " << feature[0].data.kind);
+      RDC_LOG(RDC_ERROR, "ERROR: Unexpected feature kind: " << feature[gpu_index].data.kind);
   }
 }
 
@@ -168,7 +170,7 @@ int RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
   status = rocprofiler_stop(contexts[gpu_index], 0);
   assert(status == HSA_STATUS_SUCCESS);
 
-  read_feature(contexts[gpu_index], 1);
+  read_feature(contexts[gpu_index], 1, gpu_index);
 
   usleep(100);
 
@@ -211,9 +213,14 @@ void check_metrics_supported(uint32_t node_id, std::vector<std::string>& metrics
   payload_t payload = {&metrics_all, &metrics_good, node_id};
   hsa_status_t status =
       rocprofiler_iterate_info(NULL, ROCPROFILER_INFO_KIND_METRIC, info_callback, &payload);
-
-  for (auto& iter : *(payload.metrics_good_)) {
-    RDC_LOG(RDC_DEBUG, iter << " : exists");
+  if (status != HSA_STATUS_SUCCESS) {
+    const char* errstr = nullptr;
+    hsa_status_string(status, &errstr);
+    RDC_LOG(RDC_ERROR, "hsa error: " << std::to_string(status) << " " << errstr);
+  } else {
+    for (auto& iter : *(payload.metrics_good_)) {
+      RDC_LOG(RDC_DEBUG, iter << " : exists");
+    }
   }
 }
 
@@ -226,6 +233,7 @@ const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
 }
 
 RdcRocpBase::RdcRocpBase() {
+  start_time = std::chrono::high_resolution_clock::now();
   hsa_status_t status = hsa_init();
   if (status != HSA_STATUS_SUCCESS) {
     const char* errstr = nullptr;
@@ -235,19 +243,17 @@ RdcRocpBase::RdcRocpBase() {
 
   // all fields
   static const std::map<rdc_field_t, const char*> temp_field_map_k = {
-      {RDC_FI_PROF_CU_UTILIZATION, "CU_UTILIZATION"},
-      {RDC_FI_PROF_CU_OCCUPANCY, "CU_OCCUPANCY"},
-      {RDC_FI_PROF_FLOPS_16, "FLOPS_16"},
-      {RDC_FI_PROF_FLOPS_32, "FLOPS_32"},
-      {RDC_FI_PROF_FLOPS_64, "FLOPS_64"},
+      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU, "MEAN_OCCUPANCY_PER_CU"},
+      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU, "MEAN_OCCUPANCY_PER_ACTIVE_CU"},
       {RDC_FI_PROF_ACTIVE_CYCLES, "ACTIVE_CYCLES"},
       {RDC_FI_PROF_ACTIVE_WAVES, "ACTIVE_WAVES"},
       {RDC_FI_PROF_ELAPSED_CYCLES, "ELAPSED_CYCLES"},
-      {RDC_FI_PROF_FETCH_SIZE, "FETCH_SIZE"},
-      {RDC_FI_PROF_WRITE_SIZE, "WRITE_SIZE"},
-      {RDC_FI_PROF_GRBM_COUNT, "GRBM_COUNT"},
-      {RDC_FI_PROF_SQ_WAVES, "SQ_WAVES"},
-      {RDC_FI_PROF_TA_BUSY_AVR, "TA_BUSY_avr"},
+      // metrics below are divided by time passed
+      {RDC_FI_PROF_EVAL_MEM_R_BW, "FETCH_SIZE"},
+      {RDC_FI_PROF_EVAL_MEM_W_BW, "WRITE_SIZE"},
+      {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
+      {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
+      {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
   };
 
   std::vector<std::string> unchecked_fields;
@@ -333,8 +339,17 @@ rdc_status_t RdcRocpBase::rocp_lookup(uint32_t gpu_index, rdc_field_t field, dou
   }
   switch (field) {
     default:
+      const auto stop_time = std::chrono::high_resolution_clock::now();
       run_profiler(gpu_index, field);
       *value = metric_to_value[field_to_metric[field]];
+      // extra processing required
+      if (eval_fields.find(field) != eval_fields.end()) {
+        const auto elapsed =
+            std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
+        RDC_LOG(RDC_DEBUG, "INDEX: " << gpu_index << " before[" << *value << "] after["
+                                     << (*value / elapsed) << "]");
+        *value = *value / elapsed;
+      }
       break;
   }
   return Rocp2RdcError(status);

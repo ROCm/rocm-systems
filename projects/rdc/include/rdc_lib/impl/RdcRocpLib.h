@@ -56,13 +56,15 @@ class RdcRocpLib : public RdcTelemetry {
                                               rdc_field_value_f callback, void* user_data);
   rdc_status_t (*telemetry_fields_watch_)(rdc_gpu_field_t* fields, uint32_t fields_count);
   rdc_status_t (*telemetry_fields_unwatch_)(rdc_gpu_field_t* fields, uint32_t fields_count);
+
+  rdc_status_t (*rdc_module_init_)(uint64_t);
+  rdc_status_t (*rdc_module_destroy_)();
   /**
    * @brief Extract current ROCM_PATH from library or the environment
    */
   std::string get_rocm_path();
   /**
-   * @brief Set ROCMTOOLS_METRICS_PATH environment variable needed by
-   * librocprofiler
+   * @brief Set ROCP_METRICS environment variable needed by rocprofiler
    */
   rdc_status_t set_rocprofiler_path();
 };

@@ -24,8 +24,10 @@ THE SOFTWARE.
 #define RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
 #include <rocprofiler/rocprofiler.h>
 
+#include <chrono>
 #include <cstdint>
 #include <map>
+#include <unordered_set>
 #include <vector>
 
 #include "rdc/rdc.h"
@@ -69,12 +71,17 @@ class RdcRocpBase {
   std::map<const char*, double> metric_to_value = {};
   // array of features for each device
   std::map<uint32_t, rocprofiler_feature_t> feature;
-  // rocprofiler_feature_t features[dev_count][features_count] = {};
-  void read_feature(rocprofiler_t* context, const unsigned feature_count);
+  void read_feature(rocprofiler_t* context, const unsigned feature_count, uint32_t gpu_index);
   int run_profiler(uint32_t gpu_index, rdc_field_t field);
   std::vector<hsa_queue_t*> queues;
   hsa_agent_arr_t agent_arr = {};
   std::map<rdc_field_t, const char*> field_to_metric = {};
+  // these fields must be divided by time passed
+  std::unordered_set<rdc_field_t> eval_fields = {
+      RDC_FI_PROF_EVAL_MEM_R_BW, RDC_FI_PROF_EVAL_MEM_W_BW, RDC_FI_PROF_EVAL_FLOPS_16,
+      RDC_FI_PROF_EVAL_FLOPS_32, RDC_FI_PROF_EVAL_FLOPS_64,
+  };
+  std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> start_time;
 
   /**
    * @brief Convert from rocmtools status into RDC status

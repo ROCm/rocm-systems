@@ -28,6 +28,7 @@ THE SOFTWARE.
 #include <string>
 
 #include "rdc_lib/RdcException.h"
+#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
@@ -37,7 +38,9 @@ RdcRocpLib::RdcRocpLib()
     : telemetry_fields_query_(nullptr),
       telemetry_fields_value_get_(nullptr),
       telemetry_fields_watch_(nullptr),
-      telemetry_fields_unwatch_(nullptr) {
+      telemetry_fields_unwatch_(nullptr),
+      rdc_module_init_(nullptr),
+      rdc_module_destroy_(nullptr) {
   rdc_status_t status = set_rocprofiler_path();
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
@@ -49,6 +52,24 @@ RdcRocpLib::RdcRocpLib()
   if (status != RDC_ST_OK) {
     RDC_LOG(RDC_ERROR, "Rocp related function will not work.");
     return;
+  }
+
+  status = lib_loader_.load_symbol(&rdc_module_init_, "rdc_module_init");
+  if (status != RDC_ST_OK) {
+    rdc_module_init_ = nullptr;
+    return;
+  }
+
+  status = rdc_module_init_(0);
+  if (status != RDC_ST_OK) {
+    RDC_LOG(RDC_ERROR, "Fail to init librdc_rocp.so:" << rdc_status_string(status)
+                                                      << ". ROCP related function will not work.");
+    return;
+  }
+
+  status = lib_loader_.load_symbol(&rdc_module_destroy_, "rdc_module_destroy");
+  if (status != RDC_ST_OK) {
+    rdc_module_destroy_ = nullptr;
   }
 
   status = lib_loader_.load_symbol(&telemetry_fields_query_, "rdc_telemetry_fields_query");
@@ -163,35 +184,29 @@ std::string RdcRocpLib::get_rocm_path() {
 }
 
 rdc_status_t RdcRocpLib::set_rocprofiler_path() {
-  // librocprofiler64 requires ROCPROFILER_METRICS_PATH to be set
+  // rocprofiler requires ROCP_METRICS to be set
   std::string rocprofiler_metrics_path =
       get_rocm_path() + "/libexec/rocprofiler/counters/derived_counters.xml";
 
   // set rocm prefix
-  int result = setenv("ROCPROFILER_METRICS_PATH", rocprofiler_metrics_path.c_str(), 0);
+  int result = setenv("ROCP_METRICS", rocprofiler_metrics_path.c_str(), 0);
   if (result != 0) {
-    RDC_LOG(RDC_ERROR, "setenv ROCPROFILER_METRICS_PATH failed! " << result);
+    RDC_LOG(RDC_ERROR, "setenv ROCP_METRICS failed! " << result);
     return RDC_ST_PERM_ERROR;
   }
 
   // check that env exists
-  const char* rocprofiler_metrics_env = getenv("ROCPROFILER_METRICS_PATH");
+  const char* rocprofiler_metrics_env = getenv("ROCP_METRICS");
   if (rocprofiler_metrics_env == nullptr) {
-    RDC_LOG(RDC_ERROR, "ROCPROFILER_METRICS_PATH is not set!");
+    RDC_LOG(RDC_ERROR, "ROCP_METRICS is not set!");
     return RDC_ST_NO_DATA;
   }
 
   // check that file can be accessed
   std::ifstream test_file(rocprofiler_metrics_env);
   if (!test_file.good()) {
-    RDC_LOG(RDC_ERROR, "failed to open ROCPROFILER_METRICS_PATH: " << rocprofiler_metrics_env);
+    RDC_LOG(RDC_ERROR, "failed to open ROCP_METRICS: " << rocprofiler_metrics_env);
     return RDC_ST_FILE_ERROR;
-  }
-
-  result = setenv("ROCP_METRICS", rocprofiler_metrics_path.c_str(), 0);
-  if (result != 0) {
-    RDC_LOG(RDC_ERROR, "setenv ROCP_METRICS failed! " << result);
-    return RDC_ST_PERM_ERROR;
   }
 
   return RDC_ST_OK;

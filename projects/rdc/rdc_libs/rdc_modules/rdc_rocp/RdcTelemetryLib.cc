@@ -36,14 +36,24 @@ THE SOFTWARE.
 #include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rocp/RdcRocpBase.h"
 
-amd::rdc::RdcRocpBase rocp;
+std::unique_ptr<amd::rdc::RdcRocpBase> rocp_p;
 
-rdc_status_t rdc_module_init(uint64_t flags) { return RDC_ST_OK; }
+rdc_status_t rdc_module_init(uint64_t flags) {
+  rocp_p = std::unique_ptr<amd::rdc::RdcRocpBase>(new amd::rdc::RdcRocpBase);
+  return RDC_ST_OK;
+}
+rdc_status_t rdc_module_destroy() {
+  rocp_p.reset();
+  return RDC_ST_OK;
+}
 
 // get supported field ids
 rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint32_t* field_count) {
   // extract all keys from counter_map
-  std::vector<rdc_field_t> fields = rocp.get_field_ids();
+  if (rocp_p == nullptr) {
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
+  std::vector<rdc_field_t> fields = rocp_p->get_field_ids();
   std::vector<uint32_t> counter_keys(fields.begin(), fields.end());
 
   *field_count = counter_keys.size();
@@ -56,7 +66,10 @@ rdc_status_t rdc_telemetry_fields_query(uint32_t field_ids[MAX_NUM_FIELDS], uint
 // Fetch
 rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint32_t fields_count,
                                             rdc_field_value_f callback, void* user_data) {
-  //
+  if (rocp_p == nullptr) {
+    return RDC_ST_FAIL_LOAD_MODULE;
+  }
+
   // Bulk fetch fields
   std::vector<rdc_gpu_field_value_t> bulk_results;
 
@@ -81,7 +94,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
       bulk_count = 0;
     }
 
-    status = rocp.rocp_lookup(fields[i].gpu_index, fields[i].field_id, &data);
+    status = rocp_p->rocp_lookup(fields[i].gpu_index, fields[i].field_id, &data);
     // get value
     values[bulk_count].gpu_index = fields[i].gpu_index;
     values[bulk_count].field_value.type = DOUBLE;
