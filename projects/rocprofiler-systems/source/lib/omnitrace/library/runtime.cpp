@@ -151,8 +151,16 @@ create_cpu_cid_entry(int64_t _tid)
     auto_lock_t _p_lk{ _p_mtx, std::defer_lock };
     if(!_p_lk.owns_lock()) _p_lk.lock();
 
-    auto&&     _cid        = get_cpu_cid()++;
-    auto&&     _parent_cid = get_cpu_cid_stack(_p_idx)->back();
+    auto&& _cid = get_cpu_cid()++;
+    // auto&&     _parent_cid = get_cpu_cid_stack(_p_idx)->back();
+    uint64_t _parent_cid = 0;
+    auto&    cid_stack   = get_cpu_cid_stack(_p_idx);
+
+    if(!cid_stack->empty())
+    {
+        _parent_cid = cid_stack->back();
+    }
+
     uint32_t&& _depth = get_cpu_cid_stack(_p_idx)->size() - ((_p_idx == _tid) ? 1 : 0);
 
     get_cpu_cid_parents(_tid)->emplace(_cid, std::make_tuple(_parent_cid, _depth));
