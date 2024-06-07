@@ -123,3 +123,29 @@ read_command_line(pid_t _pid)
 }
 }  // namespace common
 }  // namespace rocprofiler
+
+namespace
+{
+std::atomic<bool>&
+debugger_block()
+{
+    static std::atomic<bool> block = {true};
+    return block;
+}
+}  // namespace
+
+extern "C" {
+void
+rocprofiler_debugger_block()
+{
+    while(debugger_block().load() == true)
+    {};
+    // debugger_block().exchange(true);
+}
+
+void
+rocprofiler_debugger_continue()
+{
+    debugger_block().exchange(false);
+}
+}

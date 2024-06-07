@@ -265,3 +265,10 @@ yield(PredicateT&&                      predicate,
 }
 }  // namespace common
 }  // namespace rocprofiler
+
+extern "C" {
+void
+rocprofiler_debugger_block();
+void
+rocprofiler_debugger_continue();
+}
