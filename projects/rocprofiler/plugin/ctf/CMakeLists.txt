@@ -46,12 +46,10 @@ target_compile_definitions(
             CTF_PLUGIN_METADATA_FILE_PATH="${METADATA_STREAM_FILE_DIR}/metadata"
             CTF_PLUGIN_INSTALL_PREFIX="${CMAKE_INSTALL_PREFIX}")
 
-# Add definitions for getROCmInstallPath() API
-if(USE_GET_ROCM_PATH_API)
-    target_compile_definitions(
-        ctf_plugin
-        PRIVATE USE_GET_ROCM_PATH_API=1)
-endif()
+# Disabling this as it causes CI to fail, we need to make sure rocm-core is installed
+# before rocprofiler Add definitions for getROCmInstallPath() API
+# if(USE_GET_ROCM_PATH_API) target_compile_definitions( ctf_plugin PRIVATE
+# USE_GET_ROCM_PATH_API=1) endif()
 
 target_include_directories(
     ctf_plugin PRIVATE "${PROJECT_SOURCE_DIR}" "${CMAKE_BINARY_DIR}/src/api"
@@ -62,21 +60,22 @@ target_link_options(
 target_link_libraries(ctf_plugin PRIVATE rocprofiler-v2 hsa-runtime64::hsa-runtime64
                                          stdc++fs dl)
 
-# Add link dependencies for getROCmInstallPath() API
-if(USE_GET_ROCM_PATH_API)
-    find_library(ROCM_CORE_LIB rocm-core HINTS ${ROCM_PATH}/lib)
-    target_link_libraries(ctf_plugin PRIVATE ${ROCM_CORE_LIB})
-endif()
+# Disabling this as it causes CI to fail, we need to make sure rocm-core is installed
+# before rocprofiler Add link dependencies for getROCmInstallPath() API
+# if(USE_GET_ROCM_PATH_API) find_library(ROCM_CORE_LIB rocm-core HINTS ${ROCM_PATH}/lib)
+# target_link_libraries(ctf_plugin PRIVATE ${ROCM_CORE_LIB}) endif()
 
 install(TARGETS ctf_plugin LIBRARY DESTINATION "${CMAKE_INSTALL_LIBDIR}/${PROJECT_NAME}"
                                    COMPONENT plugins)
 
 # `gen_api_files.py` and `gen_env_yaml.py` require Python 3, CppHeaderParser, PyYAML, and
 # barectf.
-find_package(
-    Python3
-    COMPONENTS Interpreter
-    REQUIRED)
+if(NOT Python3_EXECUTABLE)
+    find_package(
+        Python3
+        COMPONENTS Interpreter
+        REQUIRED)
+endif()
 
 message("Python: ${Python3_EXECUTABLE})")
 
@@ -143,13 +142,16 @@ find_file(
 list(TRANSFORM HIP_INCLUDE_DIRS PREPEND -I)
 add_custom_command(
     OUTPUT hip_erts.yaml hip_begin.cpp.i hip_end.cpp.i
-    COMMAND ${CMAKE_C_COMPILER} ${HIP_INCLUDE_DIRS} -E "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h"
-            -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o hip_runtime_api.h.i
+    COMMAND
+        ${CMAKE_C_COMPILER} ${HIP_INCLUDE_DIRS} -E
+        "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h"
+        -D__HIP_PLATFORM_AMD__=1 -D__HIP_ROCclr__=1 -o hip_runtime_api.h.i
     COMMAND cat hip_runtime_api.h.i "${HIP_PROF_STR_H}" > hip_input.h
     BYPRODUCTS hip_runtime_api.h.i hip_input.h
     COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/gen_api_files.py" hip
             hip_input.h
-    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gen_api_files.py" "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h"
+    DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/gen_api_files.py"
+            "${PROJECT_SOURCE_DIR}/src/core/session/tracer/src/hip_full_api.h"
             "${HIP_PROF_STR_H}"
     COMMENT "Generating HIP API files for the `ctf` plugin...")
 

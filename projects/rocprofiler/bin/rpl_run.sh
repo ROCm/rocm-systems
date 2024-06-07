@@ -38,8 +38,14 @@ PROF_BIN_DIR=$ROOT_DIR/libexec/rocprofiler
 
 # check if rocprof is supportd on this gpu arch
 V1_SUPPORTED_GPU_ARCHS=("gfx80x","gfx90x","gfx94x")
-CURRENT_AGENTS_LIST=$($BIN_DIR/rocm_agent_enumerator)
 IS_SUPPORTED="false"
+if [ -f $BIN_DIR/rocm_agent_enumerator ]; then
+  CURRENT_AGENTS_LIST=$($BIN_DIR/rocm_agent_enumerator)
+else
+  IS_SUPPORTED="false"
+  echo -e "Warning: Missing rocm_agent_enumerator binary"
+  exit 0
+fi
 
 if [ -z "$ROCP_PYTHON_VERSION" ] ; then
   ROCP_PYTHON_VERSION=python3
