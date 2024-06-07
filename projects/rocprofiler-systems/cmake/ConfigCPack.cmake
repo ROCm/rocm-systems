@@ -180,7 +180,9 @@ string(REPLACE ";" ", " _DEBIAN_PACKAGE_DEPENDS "${_DEBIAN_PACKAGE_DEPENDS}")
 set(CPACK_DEBIAN_PACKAGE_DEPENDS
     "${_DEBIAN_PACKAGE_DEPENDS}"
     CACHE STRING "Debian package dependencies" FORCE)
+
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -198,8 +200,23 @@ string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_RPM_PACKAGE_RELEASE
                      "${CPACK_RPM_PACKAGE_RELEASE}")
 string(REPLACE "-" "~" CPACK_RPM_PACKAGE_RELEASE "${CPACK_RPM_PACKAGE_RELEASE}")
 
+set(_RPM_PACKAGE_PROVIDES "")
+
+if(OMNITRACE_BUILD_LIBUNWIND)
+    list(APPEND _RPM_PACKAGE_PROVIDES "libunwind.so.99()(64bit)")
+    list(APPEND _RPM_PACKAGE_PROVIDES "libunwind-x86_64.so.99()(64bit)")
+    list(APPEND _RPM_PACKAGE_PROVIDES "libunwind-setjmp.so.0()(64bit)")
+    list(APPEND _RPM_PACKAGE_PROVIDES "libunwind-ptrace.so.0()(64bit)")
+endif()
+
+string(REPLACE ";" ", " CPACK_RPM_PACKAGE_PROVIDES "${_RPM_PACKAGE_PROVIDES}")
+set(CPACK_RPM_PACKAGE_PROVIDES
+    "${CPACK_RPM_PACKAGE_PROVIDES}"
+    CACHE STRING "RPM package provides" FORCE)
+
 set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
 set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
+set(CPACK_RPM_PACKAGE_AUTOREQPROV ON)
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -230,9 +247,15 @@ omnitrace_add_feature(CPACK_PACKAGING_INSTALL_PREFIX "Package installation prefi
 omnitrace_add_feature(CPACK_DEBIAN_FILE_NAME "Debian file name")
 omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_RELEASE "Debian package release version")
 omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS "Debian package dependencies")
+omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_SHLIBDEPS
+                      "Debian package shared library dependencies")
 
 omnitrace_add_feature(CPACK_RPM_FILE_NAME "RPM file name")
 omnitrace_add_feature(CPACK_RPM_PACKAGE_RELEASE "RPM package release version")
 omnitrace_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package dependencies")
+omnitrace_add_feature(CPACK_RPM_PACKAGE_AUTOREQPROV
+                      "RPM package auto generate requires and provides")
+omnitrace_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package requires")
+omnitrace_add_feature(CPACK_RPM_PACKAGE_PROVIDES "RPM package provides")
 
 include(CPack)
