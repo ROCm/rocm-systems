@@ -240,7 +240,7 @@ class ScopeGuard {
   __forceinline ~ScopeGuard() {
     if (!dismiss_) release_();
   }
-  __forceinline ScopeGuard& operator=(const ScopeGuard& rhs) {
+  __forceinline ScopeGuard& operator=(ScopeGuard& rhs) {
     dismiss_ = rhs.dismiss_;
     release_ = rhs.release_;
     rhs.dismiss_ = true;
