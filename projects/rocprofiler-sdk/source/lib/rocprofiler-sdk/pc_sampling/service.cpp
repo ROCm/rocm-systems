@@ -162,6 +162,20 @@ configure_pc_sampling_service(context::context*                ctx,
                               uint64_t                         interval,
                               rocprofiler_buffer_id_t          buffer_id)
 {
+    // FIXME: PC Sampling cannot be used simultaneously with counter collection.
+    // PC sampling requires clock gating to be disabled on MI2xx and MI3xx,
+    // otherwise a weird GPU hang might appear and a machine must be rebooted.
+    // Current implementation of (dispatch) counter collection service assumes disabling
+    // the clock gating before dispatching a kernel and reenabling the clock gating
+    // after kernel completion. Consequently, if PC sampling is active, (dispatch)
+    // counter collection service can enable clock gating and hang might appear.
+    // As a workaround, PC sampling and (dispatch) counter collection service
+    // cannot coexist in the same context.
+    if(ctx->counter_collection || ctx->agent_counter_collection)
+    {
+        return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+    }
+
     if(!ctx->pc_sampler)
     {
         ctx->pc_sampler = std::make_unique<context::pc_sampling_service>();

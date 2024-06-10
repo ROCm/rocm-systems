@@ -90,6 +90,9 @@ ROCPROFILER_EXTERN_C_INIT
  *
  * Constraint4: PC sampling feature is not available within the ROCgdb.
  *
+ * Constraint5: PC sampling service cannot be used simultaneously with
+ * counter collection service.
+ *
  * @param [in] context_id - id of the context used for starting/stopping PC sampling service
  * @param [in] agent_id   - id of the agent on which caller tries using PC sampling capability
  * @param [in] method     - the type of PC sampling the caller tries to use on the agent.
@@ -105,7 +108,8 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ::ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL the amdgpu driver installed on the system
  * does not support the PC sampling feature
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
- *
+ * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT counter collection service already
+ * setup in the context
  */
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
