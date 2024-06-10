@@ -520,9 +520,9 @@ typedef struct
 } rocprofiler_correlation_id_t;
 
 /**
- * @brief The NULL correlation ID value.
+ * @brief The NULL value of an internal correlation ID.
  */
-#define ROCPROFILER_CORRELATION_ID_VALUE_NONE 0ULL
+#define ROCPROFILER_CORRELATION_ID_INTERNAL_NONE ROCPROFILER_UINT64_C(0)
 
 /**
  * @struct rocprofiler_buffer_id_t

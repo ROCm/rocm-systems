@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include <stdint.h>
+
 /**
  * @defgroup SYMBOL_VERSIONING_GROUP Symbol Versions
  *
@@ -128,4 +130,10 @@
 #    define ROCPROFILER_EXTERN_C_INIT
 #    define ROCPROFILER_EXTERN_C_FINI
 #    define ROCPROFILER_CXX_CODE(...)
+#endif
+
+#if __cplusplus
+#    define ROCPROFILER_UINT64_C(value) uint64_t(value)
+#else
+#    define ROCPROFILER_UINT64_C(value) UINT64_C(value)
 #endif

@@ -198,9 +198,9 @@ add_upcoming_samples(const device_handle               device,
             samples[p].correlation_id = corr_map->get(device, trap);
         } catch(std::exception& e)
         {
-            samples[p].correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_VALUE_NONE,
+            samples[p].correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE,
                                          .external = rocprofiler_user_data_t{
-                                             .value = ROCPROFILER_CORRELATION_ID_VALUE_NONE}};
+                                             .value = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE}};
             status                    = PCSAMPLE_STATUS_PARSER_ERROR;
         }
     }
