@@ -29,18 +29,18 @@ THE SOFTWARE.
 #include <algorithm>
 #include <cassert>
 #include <chrono>
-#include <csignal>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
-#include <exception>
+#include <numeric>
 #include <utility>
 #include <vector>
 
 // #include "hsa.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
-#include "rdc_lib/rdc_common.h"
+#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
@@ -72,27 +72,31 @@ static hsa_status_t get_agent_handle_cb(hsa_agent_t agent, void* agent_arr) {
   return HSA_STATUS_SUCCESS;
 }
 
-void RdcRocpBase::read_feature(rocprofiler_t* context, const unsigned feature_count,
-                               uint32_t gpu_index) {
+double RdcRocpBase::read_feature(rocprofiler_t* context, uint32_t gpu_index) {
   hsa_status_t status = rocprofiler_read(context, 0);
   assert(status == HSA_STATUS_SUCCESS);
   status = rocprofiler_get_data(context, 0);
   assert(status == HSA_STATUS_SUCCESS);
   status = rocprofiler_get_metrics(context);
   assert(status == HSA_STATUS_SUCCESS);
-  switch (feature[gpu_index].data.kind) {
+  switch (gpuid_to_feature[gpu_index].data.kind) {
     case ROCPROFILER_DATA_KIND_DOUBLE:
-      metric_to_value[feature[gpu_index].name] = feature[gpu_index].data.result_double;
+      return gpuid_to_feature[gpu_index].data.result_double;
       break;
     case ROCPROFILER_DATA_KIND_INT32:
-      metric_to_value[feature[gpu_index].name] = feature[gpu_index].data.result_int32;
+      return static_cast<double>(gpuid_to_feature[gpu_index].data.result_int32);
       break;
     case ROCPROFILER_DATA_KIND_INT64:
-      metric_to_value[feature[gpu_index].name] = feature[gpu_index].data.result_int64;
+      return static_cast<double>(gpuid_to_feature[gpu_index].data.result_int64);
+      break;
+    case ROCPROFILER_DATA_KIND_FLOAT:
+      return static_cast<double>(gpuid_to_feature[gpu_index].data.result_float);
       break;
     default:
-      RDC_LOG(RDC_ERROR, "ERROR: Unexpected feature kind: " << feature[gpu_index].data.kind);
+      RDC_LOG(RDC_ERROR,
+              "ERROR: Unexpected feature kind: " << gpuid_to_feature[gpu_index].data.kind);
   }
+  return 0.0;
 }
 
 static int get_agents(hsa_agent_arr_t* agent_arr) {
@@ -132,12 +136,12 @@ bool createHsaQueue(hsa_queue_t** queue, hsa_agent_t gpu_agent) {
   return (status == HSA_STATUS_SUCCESS);
 }
 
-int RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
+double RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
   // initialize hsa. hsa_init() will also load the profiler libs under the hood
   hsa_status_t status = HSA_STATUS_SUCCESS;
 
-  feature[gpu_index].kind = (rocprofiler_feature_kind_t)ROCPROFILER_FEATURE_KIND_METRIC;
-  feature[gpu_index].name = field_to_metric[field];
+  gpuid_to_feature[gpu_index].kind = (rocprofiler_feature_kind_t)ROCPROFILER_FEATURE_KIND_METRIC;
+  gpuid_to_feature[gpu_index].name = field_to_metric[field];
 
   // rocprofiler_t* contexts[agent_arr.count] = {0};
   std::vector<rocprofiler_t*> contexts;
@@ -149,7 +153,7 @@ int RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
       NULL,
   };
   int mode = (ROCPROFILER_MODE_STANDALONE | ROCPROFILER_MODE_SINGLEGROUP);
-  status = rocprofiler_open(agent_arr.agents[gpu_index], &feature[gpu_index], 1,
+  status = rocprofiler_open(agent_arr.agents[gpu_index], &gpuid_to_feature[gpu_index], 1,
                             &contexts[gpu_index], mode, &properties);
   const char* error_string = nullptr;
   rocprofiler_error_string(&error_string);
@@ -165,19 +169,19 @@ int RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
 
   // this is the duration for which the counter increments from zero.
   // TODO: Return error if sampling interval is lower than this value
-  usleep(10000);
+  usleep(collection_duration_us_k);
 
   status = rocprofiler_stop(contexts[gpu_index], 0);
   assert(status == HSA_STATUS_SUCCESS);
 
-  read_feature(contexts[gpu_index], 1, gpu_index);
+  double raw_value = read_feature(contexts[gpu_index], gpu_index);
 
   usleep(100);
 
   status = rocprofiler_close(contexts[gpu_index]);
   assert(status == HSA_STATUS_SUCCESS);
 
-  return 0;
+  return raw_value;
 }
 
 const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
@@ -233,7 +237,6 @@ const std::vector<rdc_field_t> RdcRocpBase::get_field_ids() {
 }
 
 RdcRocpBase::RdcRocpBase() {
-  start_time = std::chrono::high_resolution_clock::now();
   hsa_status_t status = hsa_init();
   if (status != HSA_STATUS_SUCCESS) {
     const char* errstr = nullptr;
@@ -256,11 +259,11 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
   };
 
-  std::vector<std::string> unchecked_fields;
+  std::vector<std::string> all_fields;
   std::vector<std::string> checked_fields;
 
   for (auto& [k, v] : temp_field_map_k) {
-    unchecked_fields.push_back(v);
+    all_fields.push_back(v);
   }
 
   // populate list of agents
@@ -282,33 +285,28 @@ RdcRocpBase::RdcRocpBase() {
     } else {
       RDC_LOG(RDC_DEBUG, "gpu_index[" << gpu_index << "] = node_id[" << driver_node_id << "]");
     }
-  }
-  // only check metrics for the last GPU
-  // TODO: add support for different metrics per GPU
-  // currently it's assumed that all GPUs are the same
-  check_metrics_supported(driver_node_id, unchecked_fields, checked_fields);
+    check_metrics_supported(driver_node_id, all_fields, checked_fields);
 
-  for (auto& [k, v] : temp_field_map_k) {
-    auto found = std::find(checked_fields.begin(), checked_fields.end(), v);
-    if (found != checked_fields.end()) {
-      field_to_metric.insert({k, v});
+    for (auto& [k, v] : temp_field_map_k) {
+      auto found = std::find(checked_fields.begin(), checked_fields.end(), v);
+      if (found != checked_fields.end()) {
+        field_to_metric.insert({k, v});
+        // initialize the buffer
+        const rdc_field_pair_t field_pair = {gpu_index, k};
+        const rdc_average_t avg = {std::vector<double>(), 0};
+        average.insert({field_pair, avg});
+      }
     }
   }
 
   RDC_LOG(RDC_DEBUG, "Rocprofiler supports " << field_to_metric.size() << " fields");
 
-  for (auto& [k, v] : field_to_metric) {
-    const char* str = v;
-    metric_to_value.insert({str, 0.0});
-  }
-  assert(metric_to_value.size() == field_to_metric.size());
-
   for (uint32_t gpu_index = 0; gpu_index < agent_arr.count; gpu_index++) {
-    for (auto& metric : metric_to_value) {
+    for (const auto& [k, v] : field_to_metric) {
       rocprofiler_feature_t temp_feature;
       temp_feature.kind = (rocprofiler_feature_kind_t)ROCPROFILER_FEATURE_KIND_METRIC;
-      temp_feature.name = metric.first;
-      feature.insert({gpu_index, temp_feature});
+      temp_feature.name = v;
+      gpuid_to_feature.insert({gpu_index, temp_feature});
     }
   }
 
@@ -328,7 +326,53 @@ RdcRocpBase::~RdcRocpBase() {
   assert(status == HSA_STATUS_ERROR_NOT_INITIALIZED);
 }
 
-rdc_status_t RdcRocpBase::rocp_lookup(uint32_t gpu_index, rdc_field_t field, double* value) {
+double RdcRocpBase::get_average(rdc_field_pair_t field_pair, double raw_value) {
+  // check if vector exists
+  if (average.find(field_pair) == average.end()) {
+    RDC_LOG(RDC_ERROR,
+            "gpu[" << field_pair.first << "]field[" << field_pair.second << "] not found");
+    return NAN;
+  }
+
+  if (average[field_pair].buffer.size() < buffer_length_k) {
+    // buffer not yet filled up
+    average[field_pair].buffer.push_back(raw_value);
+  } else {
+    // buffer is filled up
+    average[field_pair].buffer[average[field_pair].index] = raw_value;
+  }
+
+  // RDC_LOG(RDC_DEBUG, "gpu[" << field_pair.first << "]field[" << field_pair.second <<
+  // "]avg_index["
+  //                           << average[field_pair].index << "] = " << raw_value);
+
+  average[field_pair].index++;
+  // cap index at buffer_length_k
+  average[field_pair].index = average[field_pair].index % buffer_length_k;
+
+  double sum =
+      std::accumulate(average[field_pair].buffer.begin(), average[field_pair].buffer.end(), 0.0);
+  double avg = sum / static_cast<double>(average[field_pair].buffer.size());
+
+  return avg;
+}
+
+void RdcRocpBase::reset_average(rdc_gpu_field_t gpu_field) {
+  rdc_field_pair_t pair = {gpu_field.gpu_index, gpu_field.field_id};
+  // check if vector exists
+  if (average.find(pair) == average.end()) {
+    RDC_LOG(RDC_ERROR, "gpu[" << pair.first << "]field[" << pair.second << "] not found");
+    return;
+  }
+
+  average[pair].buffer.clear();
+  average[pair].index = 0;
+}
+
+rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) {
+  const auto& gpu_index = gpu_field.gpu_index;
+  const auto& field = gpu_field.field_id;
+
   if (value == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -337,20 +381,17 @@ rdc_status_t RdcRocpBase::rocp_lookup(uint32_t gpu_index, rdc_field_t field, dou
   if (status != HSA_STATUS_SUCCESS) {
     return Rocp2RdcError(status);
   }
-  switch (field) {
-    default:
-      const auto stop_time = std::chrono::high_resolution_clock::now();
-      run_profiler(gpu_index, field);
-      *value = metric_to_value[field_to_metric[field]];
-      // extra processing required
-      if (eval_fields.find(field) != eval_fields.end()) {
-        const auto elapsed =
-            std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
-        RDC_LOG(RDC_DEBUG, "INDEX: " << gpu_index << " before[" << *value << "] after["
-                                     << (*value / elapsed) << "]");
-        *value = *value / elapsed;
-      }
-      break;
+  const auto start_time = std::chrono::high_resolution_clock::now();
+  double raw_value = run_profiler(gpu_index, field);
+  const auto stop_time = std::chrono::high_resolution_clock::now();
+  *value = get_average({gpu_index, field}, raw_value);
+  // extra processing required
+  if (eval_fields.find(field) != eval_fields.end()) {
+    const auto elapsed =
+        std::chrono::duration_cast<std::chrono::milliseconds>(stop_time - start_time).count();
+    // RDC_LOG(RDC_DEBUG, "INDEX: " << gpu_index << " before[" << *value << "] after["
+    //                              << (*value / elapsed) << "]");
+    *value = *value / elapsed;
   }
   return Rocp2RdcError(status);
 }

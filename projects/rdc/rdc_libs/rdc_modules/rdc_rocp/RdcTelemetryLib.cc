@@ -94,7 +94,7 @@ rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, const uint3
       bulk_count = 0;
     }
 
-    status = rocp_p->rocp_lookup(fields[i].gpu_index, fields[i].field_id, &data);
+    status = rocp_p->rocp_lookup(fields[i], &data);
     // get value
     values[bulk_count].gpu_index = fields[i].gpu_index;
     values[bulk_count].field_value.type = DOUBLE;
@@ -131,6 +131,9 @@ rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields, uint32_t fiel
   rdc_status_t status = RDC_ST_OK;
   for (uint32_t i = 0; i < fields_count; i++) {
     RDC_LOG(RDC_DEBUG, "UNWATCH: " << fields[i].field_id);
+    if (rocp_p != nullptr) {
+      rocp_p->reset_average(fields[i]);
+    }
     const rdc_status_t temp_status = RDC_ST_OK;
     // return last non-ok status
     if (temp_status != RDC_ST_OK) {

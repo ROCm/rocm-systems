@@ -24,13 +24,14 @@ THE SOFTWARE.
 #define RDC_MODULES_RDC_ROCP_RDCROCPBASE_H_
 #include <rocprofiler/rocprofiler.h>
 
-#include <chrono>
 #include <cstdint>
 #include <map>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "rdc/rdc.h"
+#include "rdc_lib/RdcTelemetryLibInterface.h"
 
 namespace amd {
 namespace rdc {
@@ -43,8 +44,6 @@ typedef struct {
 
 /// Common interface for RocP tests and samples
 class RdcRocpBase {
-  // typedef const char* rocp_metric_name_t;
-
  public:
   RdcRocpBase();
   RdcRocpBase(const RdcRocpBase&) = default;
@@ -56,32 +55,49 @@ class RdcRocpBase {
   /**
    * @brief Lookup ROCProfiler counter
    *
-   * @param[in] field An existing field already added to sessions dictionary
+   * @param[in] gpu_field GPU_ID and FIELD_ID of requested metric
    * @param[out] value A pointer that will be populated with returned value
    *
    * @retval ::ROCMTOOLS_STATUS_SUCCESS The function has been executed
    * successfully.
    */
-  rdc_status_t rocp_lookup(uint32_t gpu_index, rdc_field_t field, double* value);
+  rdc_status_t rocp_lookup(rdc_gpu_field_t gpu_field, double* value);
   const char* get_field_id_from_name(rdc_field_t);
   const std::vector<rdc_field_t> get_field_ids();
 
+  /**
+   * @brief Reset average metrics for gpu_field
+   */
+  void reset_average(rdc_gpu_field_t gpu_field);
+
  protected:
  private:
-  std::map<const char*, double> metric_to_value = {};
-  // array of features for each device
-  std::map<uint32_t, rocprofiler_feature_t> feature;
-  void read_feature(rocprofiler_t* context, const unsigned feature_count, uint32_t gpu_index);
-  int run_profiler(uint32_t gpu_index, rdc_field_t field);
-  std::vector<hsa_queue_t*> queues;
+  typedef struct {
+    std::vector<double> buffer;
+    uint32_t index;
+  } rdc_average_t;
+  typedef std::pair<uint32_t, rdc_field_t> rdc_field_pair_t;
+  static const size_t buffer_length_k = 5;
+  /**
+   * @brief Tweak this to change for how long each metric is collected
+   */
+  static const uint32_t collection_duration_us_k = 10000;
+
+  double read_feature(rocprofiler_t* context, uint32_t gpu_index);
+  double run_profiler(uint32_t gpu_index, rdc_field_t field);
+  double get_average(rdc_field_pair_t field_pair, double raw_value);
+
   hsa_agent_arr_t agent_arr = {};
+  std::vector<hsa_queue_t*> queues;
+  std::map<uint32_t, rocprofiler_feature_t> gpuid_to_feature;
   std::map<rdc_field_t, const char*> field_to_metric = {};
+  std::map<rdc_field_pair_t, rdc_average_t> average = {};
+
   // these fields must be divided by time passed
   std::unordered_set<rdc_field_t> eval_fields = {
       RDC_FI_PROF_EVAL_MEM_R_BW, RDC_FI_PROF_EVAL_MEM_W_BW, RDC_FI_PROF_EVAL_FLOPS_16,
       RDC_FI_PROF_EVAL_FLOPS_32, RDC_FI_PROF_EVAL_FLOPS_64,
   };
-  std::chrono::time_point<std::chrono::system_clock, std::chrono::nanoseconds> start_time;
 
   /**
    * @brief Convert from rocmtools status into RDC status
