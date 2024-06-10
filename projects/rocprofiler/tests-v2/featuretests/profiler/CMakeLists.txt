@@ -421,10 +421,12 @@ install(
         ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/profiler/apps/goldentraces
     COMPONENT tests)
 
-find_package(
-    Python3
-    COMPONENTS Interpreter
-    REQUIRED)
+if(NOT Python3_EXECUTABLE)
+    find_package(
+        Python3
+        COMPONENTS Interpreter
+        REQUIRED)
+endif()
 
     execute_process(
         COMMAND ${Python3_EXECUTABLE} -c "import pandas"

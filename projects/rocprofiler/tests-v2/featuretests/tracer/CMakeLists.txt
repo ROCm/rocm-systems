@@ -130,10 +130,12 @@ install(
         ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/tests/featuretests/tracer/apps/goldentraces
     COMPONENT tests)
 
-find_package(
-    Python3
-    COMPONENTS Interpreter
-    REQUIRED)
+if(NOT Python3_EXECUTABLE)
+    find_package(
+        Python3
+        COMPONENTS Interpreter
+        REQUIRED)
+endif()
 
 # cmake based tests
 include(${CMAKE_CURRENT_LIST_DIR}/hiptrace_validation_tests.cmake)
