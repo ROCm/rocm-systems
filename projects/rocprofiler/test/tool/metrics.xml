@@ -213,6 +213,15 @@
   <metric name="TCC_ALL_TC_OP_INV_EVICT_sum"                            expr=sum(TCC_ALL_TC_OP_INV_EVICT,32) descr="Number of evictions due to all TC_OP invalidate requests. Sum over TCC instances."></metric>
   <metric name="TCC_EA_RDREQ_DRAM_sum"                                  expr=sum(TCC_EA_RDREQ_DRAM,32) descr="Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
   <metric name="TCC_EA_WRREQ_DRAM_sum"                                  expr=sum(TCC_EA_WRREQ_DRAM,32) descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
+  <metric name="FETCH_SIZE"                                             expr=(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024 descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="WRITE_SIZE"                                             expr=((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024 descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+  <metric name="CU_UTILIZATION"                                         expr=GRBM_GUI_ACTIVE/GRBM_COUNT descr="The total number of active cycles divided by total number of elapsed cycles"></metric>
+  <metric name="TOTAL_16_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512) descr="The number of 16 bits OPS executed"></metric>
+  <metric name="TOTAL_32_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512) descr="The number of 32 bits OPS executed"></metric>
+  <metric name="TOTAL_64_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512) descr="The number of 64 bits OPS executed"></metric>
+  <metric name="ACTIVE_CYCLES"                                          expr=GRBM_GUI_ACTIVE descr="Active Cycles"></metric>
+  <metric name="ELAPSED_CYCLES"                                         expr=GRBM_COUNT descr="Elapsed Cycles"></metric>
+  <metric name="ACTIVE_WAVES"                                           expr=SQ_WAVES descr="Active Waves"></metric>
 </gfx90a_expr>
 
 <gfx940_expr>
@@ -346,6 +355,9 @@
   <metric name="TOTAL_16_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F16*2+SQ_INSTS_VALU_ADD_F16+SQ_INSTS_VALU_MUL_F16+SQ_INSTS_VALU_TRANS_F16)*64+((SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16)*512) descr="The number of 16 bits OPS executed"></metric>
   <metric name="TOTAL_32_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F32*2+SQ_INSTS_VALU_INT32+SQ_INSTS_VALU_ADD_F32+SQ_INSTS_VALU_MUL_F32+SQ_INSTS_VALU_TRANS_F32)*64+(SQ_INSTS_VALU_MFMA_MOPS_F32*512) descr="The number of 32 bits OPS executed"></metric>
   <metric name="TOTAL_64_OPS"                                           expr=(SQ_INSTS_VALU_FMA_F64*2+SQ_INSTS_VALU_INT64+SQ_INSTS_VALU_ADD_F64+SQ_INSTS_VALU_MUL_F64)*64+(SQ_INSTS_VALU_MFMA_MOPS_F64*512) descr="The number of 64 bits OPS executed"></metric>
+  <metric name="ACTIVE_CYCLES"                                          expr=GRBM_GUI_ACTIVE/XCC_NUM descr="Active Cycles"></metric>
+  <metric name="ELAPSED_CYCLES"                                         expr=GRBM_COUNT/XCC_NUM descr="Elapsed Cycles"></metric>
+  <metric name="ACTIVE_WAVES"                                           expr=SQ_WAVES descr="Active Waves"></metric>
 </gfx940_expr>
 
 <gfx10_expr>
