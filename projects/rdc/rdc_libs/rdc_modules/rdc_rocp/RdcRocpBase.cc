@@ -246,11 +246,11 @@ RdcRocpBase::RdcRocpBase() {
 
   // all fields
   static const std::map<rdc_field_t, const char*> temp_field_map_k = {
-      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU, "MEAN_OCCUPANCY_PER_CU"},
-      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU, "MEAN_OCCUPANCY_PER_ACTIVE_CU"},
-      {RDC_FI_PROF_ACTIVE_CYCLES, "ACTIVE_CYCLES"},
-      {RDC_FI_PROF_ACTIVE_WAVES, "ACTIVE_WAVES"},
-      {RDC_FI_PROF_ELAPSED_CYCLES, "ELAPSED_CYCLES"},
+      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU, "MeanOccupancyPerCU"},
+      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
+      {RDC_FI_PROF_ACTIVE_CYCLES, "GRBM_GUI_ACTIVE"},
+      {RDC_FI_PROF_ACTIVE_WAVES, "SQ_WAVES"},
+      {RDC_FI_PROF_ELAPSED_CYCLES, "GRBM_COUNT"},
       // metrics below are divided by time passed
       {RDC_FI_PROF_EVAL_MEM_R_BW, "FETCH_SIZE"},
       {RDC_FI_PROF_EVAL_MEM_W_BW, "WRITE_SIZE"},
