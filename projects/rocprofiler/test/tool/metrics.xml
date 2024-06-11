@@ -216,8 +216,8 @@
 </gfx90a_expr>
 
 <gfx940_expr>
-  <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
-  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
+  <metric name="MeanOccupancyPerCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*XCC_NUM/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
+  <metric name="MeanOccupancyPerActiveCU" expr=SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4*XCC_NUM/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
 
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_sum" expr=sum(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Total number of TCP stalls TA data interface."></metric>
   <metric name="TCP_TCP_TA_DATA_STALL_CYCLES_max" expr=max(TCP_TCP_TA_DATA_STALL_CYCLES,16) descr="Maximum number of TCP stalls TA data interface."></metric>
