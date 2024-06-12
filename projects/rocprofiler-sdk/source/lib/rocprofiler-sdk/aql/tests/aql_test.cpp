@@ -20,57 +20,24 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <gtest/gtest.h>
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 
-#include <functional>
-#include <map>
 #include <unordered_set>
 
+#include <gtest/gtest.h>
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
-#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
-#include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+using namespace rocprofiler::counters::test_constants;
 
 namespace rocprofiler
 {
-AmdExtTable&
-get_ext_table()
-{
-    static auto _v = []() {
-        auto val                                  = AmdExtTable{};
-        val.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info;
-        val.hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools;
-        val.hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate;
-        val.hsa_amd_memory_pool_free_fn           = hsa_amd_memory_pool_free;
-        val.hsa_amd_agent_memory_pool_get_info_fn = hsa_amd_agent_memory_pool_get_info;
-        val.hsa_amd_agents_allow_access_fn        = hsa_amd_agents_allow_access;
-        return val;
-    }();
-    return _v;
-}
-
-CoreApiTable&
-get_api_table()
-{
-    static auto _v = []() {
-        auto val                       = CoreApiTable{};
-        val.hsa_iterate_agents_fn      = hsa_iterate_agents;
-        val.hsa_agent_get_info_fn      = hsa_agent_get_info;
-        val.hsa_queue_create_fn        = hsa_queue_create;
-        val.hsa_queue_destroy_fn       = hsa_queue_destroy;
-        val.hsa_signal_wait_relaxed_fn = hsa_signal_wait_relaxed;
-        return val;
-    }();
-    return _v;
-}
-
 auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {
@@ -164,7 +131,7 @@ TEST(aql_profile, packet_generation_single)
     {
         auto                   metrics = rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES"});
         CounterPacketConstruct pkt(agent.get_rocp_agent()->id, metrics);
-        auto                   test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
+        auto                   test_pkt = pkt.construct_packet(get_ext_table());
         EXPECT_TRUE(test_pkt);
     }
 
@@ -183,7 +150,7 @@ TEST(aql_profile, packet_generation_multi)
         auto metrics =
             rocprofiler::findDeviceMetrics(agent, {"SQ_WAVES", "TA_FLAT_READ_WAVEFRONTS"});
         CounterPacketConstruct pkt(agent.get_rocp_agent()->id, metrics);
-        auto                   test_pkt = pkt.construct_packet(rocprofiler::get_ext_table());
+        auto                   test_pkt = pkt.construct_packet(get_ext_table());
         EXPECT_TRUE(test_pkt);
     }
 

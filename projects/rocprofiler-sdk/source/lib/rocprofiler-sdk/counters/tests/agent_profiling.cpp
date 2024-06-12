@@ -20,19 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "lib/rocprofiler-sdk/counters/tests/agent_profiling.hpp"
-#include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk/counters/tests/code_object_loader.hpp"
-
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/rocprofiler-sdk/counters/dispatch_handlers.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/code_object_loader.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "rocprofiler-sdk/buffer.h"
@@ -53,6 +49,7 @@
 #include <sstream>
 #include <tuple>
 
+using namespace rocprofiler::counters::test_constants;
 using namespace rocprofiler::counters::testing;
 using namespace rocprofiler::counters;
 using namespace rocprofiler;
@@ -75,51 +72,6 @@ using namespace rocprofiler;
 
 namespace
 {
-AmdExtTable&
-get_ext_table()
-{
-    static auto _v = []() {
-        auto val                                  = AmdExtTable{};
-        val.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info;
-        val.hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools;
-        val.hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate;
-        val.hsa_amd_memory_pool_free_fn           = hsa_amd_memory_pool_free;
-        val.hsa_amd_agent_memory_pool_get_info_fn = hsa_amd_agent_memory_pool_get_info;
-        val.hsa_amd_agents_allow_access_fn        = hsa_amd_agents_allow_access;
-        val.hsa_amd_queue_set_priority_fn         = hsa_amd_queue_set_priority;
-        val.hsa_amd_signal_async_handler_fn       = hsa_amd_signal_async_handler;
-        return val;
-    }();
-    return _v;
-}
-
-CoreApiTable&
-get_api_table()
-{
-    static auto _v = []() {
-        auto val                                     = CoreApiTable{};
-        val.hsa_iterate_agents_fn                    = hsa_iterate_agents;
-        val.hsa_agent_get_info_fn                    = hsa_agent_get_info;
-        val.hsa_queue_create_fn                      = hsa_queue_create;
-        val.hsa_queue_destroy_fn                     = hsa_queue_destroy;
-        val.hsa_signal_create_fn                     = hsa_signal_create;
-        val.hsa_signal_destroy_fn                    = hsa_signal_destroy;
-        val.hsa_signal_store_screlease_fn            = hsa_signal_store_screlease;
-        val.hsa_signal_load_scacquire_fn             = hsa_signal_load_scacquire;
-        val.hsa_signal_add_relaxed_fn                = hsa_signal_add_relaxed;
-        val.hsa_signal_subtract_relaxed_fn           = hsa_signal_subtract_relaxed;
-        val.hsa_signal_wait_relaxed_fn               = hsa_signal_wait_relaxed;
-        val.hsa_queue_create_fn                      = hsa_queue_create;
-        val.hsa_queue_add_write_index_scacq_screl_fn = hsa_queue_add_write_index_scacq_screl;
-        val.hsa_queue_load_read_index_relaxed_fn     = hsa_queue_load_read_index_relaxed;
-        val.hsa_signal_store_relaxed_fn              = hsa_signal_store_relaxed;
-        val.hsa_signal_load_relaxed_fn               = hsa_signal_load_relaxed;
-
-        return val;
-    }();
-    return _v;
-}
-
 auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {

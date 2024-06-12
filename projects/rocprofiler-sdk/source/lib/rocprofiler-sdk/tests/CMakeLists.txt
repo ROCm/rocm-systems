@@ -20,7 +20,10 @@ target_link_libraries(
     rocprofiler-lib-tests
     PRIVATE rocprofiler-sdk::rocprofiler-static-library
             rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-hsa-runtime GTest::gtest GTest::gtest_main)
+            rocprofiler-sdk::counter-test-constants
+            rocprofiler-sdk::rocprofiler-hsa-runtime
+            GTest::gtest
+            GTest::gtest_main)
 
 gtest_add_tests(
     TARGET rocprofiler-lib-tests

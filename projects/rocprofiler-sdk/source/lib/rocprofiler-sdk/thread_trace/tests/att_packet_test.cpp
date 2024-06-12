@@ -19,27 +19,21 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <glog/logging.h>
 #include <gtest/gtest.h>
-
-#include <functional>
-#include <map>
-#include <unordered_set>
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
-#include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
-#include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+using namespace rocprofiler::counters::test_constants;
 
 #define ROCPROFILER_CALL(ARG, MSG)                                                                 \
     {                                                                                              \
@@ -49,40 +43,6 @@
 
 namespace rocprofiler
 {
-AmdExtTable&
-get_ext_table()
-{
-    static auto _v = []() {
-        auto val                                  = AmdExtTable{};
-        val.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info;
-        val.hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools;
-        val.hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate;
-        val.hsa_amd_memory_pool_free_fn           = hsa_amd_memory_pool_free;
-        val.hsa_amd_agent_memory_pool_get_info_fn = hsa_amd_agent_memory_pool_get_info;
-        val.hsa_amd_agents_allow_access_fn        = hsa_amd_agents_allow_access;
-        return val;
-    }();
-    return _v;
-}
-
-CoreApiTable&
-get_api_table()
-{
-    static auto _v = []() {
-        auto val                                 = CoreApiTable{};
-        val.hsa_iterate_agents_fn                = hsa_iterate_agents;
-        val.hsa_agent_get_info_fn                = hsa_agent_get_info;
-        val.hsa_queue_create_fn                  = hsa_queue_create;
-        val.hsa_queue_destroy_fn                 = hsa_queue_destroy;
-        val.hsa_signal_wait_relaxed_fn           = hsa_signal_wait_relaxed;
-        val.hsa_queue_load_read_index_relaxed_fn = hsa_queue_load_read_index_relaxed;
-        val.hsa_queue_add_write_index_relaxed_fn = hsa_queue_add_write_index_relaxed;
-        val.hsa_signal_store_screlease_fn        = hsa_signal_store_screlease;
-        return val;
-    }();
-    return _v;
-}
-
 void
 test_init()
 {

@@ -39,6 +39,21 @@ endforeach()
 
 add_custom_target(agent_hasco_targets DEPENDS ${HSACO_TARGET_LIST})
 
+add_library(counter_test_constants OBJECT)
+add_library(rocprofiler-sdk::counter-test-constants ALIAS counter_test_constants)
+set(ROCPROFILER_LIB_COUNTER_TEST_CONSTANTS_SOURCES hsa_tables.cpp)
+set(ROCPROFILER_LIB_COUNTER_TEST_CONSTANTS_HEADERS hsa_tables.hpp)
+target_sources(
+    counter_test_constants
+    PUBLIC ${ROCPROFILER_LIB_COUNTER_TEST_CONSTANTS_HEADERS}
+    PRIVATE ${ROCPROFILER_LIB_COUNTER_TEST_CONSTANTS_SOURCES})
+
+target_link_libraries(
+    counter_test_constants
+    PRIVATE rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-static-library rocprofiler-sdk::rocprofiler-hip
+            rocprofiler-sdk::rocprofiler-hsa-runtime)
+
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp init_order.cpp core.cpp
     code_object_loader.cpp agent_profiling.cpp)
@@ -53,9 +68,13 @@ add_dependencies(counter-test agent_hasco_targets)
 
 target_link_libraries(
     counter-test
-    PRIVATE rocprofiler-sdk::rocprofiler-hsa-runtime rocprofiler-sdk::rocprofiler-hip
+    PRIVATE rocprofiler-sdk::counter-test-constants
+            rocprofiler-sdk::rocprofiler-hsa-runtime
+            rocprofiler-sdk::rocprofiler-hip
             rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+            rocprofiler-sdk::rocprofiler-static-library
+            GTest::gtest
+            GTest::gtest_main)
 
 gtest_add_tests(
     TARGET counter-test

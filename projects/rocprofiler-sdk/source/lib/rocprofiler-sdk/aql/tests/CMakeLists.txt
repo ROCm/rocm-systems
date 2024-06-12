@@ -10,9 +10,14 @@ target_sources(aql-test PRIVATE ${ROCPROFILER_LIB_AQL_TEST_SOURCES})
 
 target_link_libraries(
     aql-test
-    PRIVATE rocprofiler-sdk::rocprofiler-static-library rocprofiler-sdk::rocprofiler-glog
-            rocprofiler-sdk::rocprofiler-hsa-runtime rocprofiler-sdk::rocprofiler-hip
-            rocprofiler-sdk::rocprofiler-common-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::counter-test-constants
+            rocprofiler-sdk::rocprofiler-static-library
+            rocprofiler-sdk::rocprofiler-glog
+            rocprofiler-sdk::rocprofiler-hsa-runtime
+            rocprofiler-sdk::rocprofiler-hip
+            rocprofiler-sdk::rocprofiler-common-library
+            GTest::gtest
+            GTest::gtest_main)
 
 gtest_add_tests(
     TARGET aql-test

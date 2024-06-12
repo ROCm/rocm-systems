@@ -1,3 +1,33 @@
+// MIT License
+//
+// Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved.
+//
+// Permission is hereby granted, free of charge, to any person obtaining a copy
+// of this software and associated documentation files (the "Software"), to deal
+// in the Software without restriction, including without limitation the rights
+// to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+// copies of the Software, and to permit persons to whom the Software is
+// furnished to do so, subject to the following conditions:
+//
+// The above copyright notice and this permission notice shall be included in all
+// copies or substantial portions of the Software.
+//
+// THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+// IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+// LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+// SOFTWARE.
+#include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
+#include "lib/rocprofiler-sdk/agent.hpp"
+#include "lib/rocprofiler-sdk/context/context.hpp"
+#include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <gtest/gtest.h>
 #include <algorithm>
 #include <random>
 
@@ -6,57 +36,12 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 
-#include <gtest/gtest.h>
-
-#include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/registration.hpp"
-
 using namespace rocprofiler;
 using namespace rocprofiler::hsa;
+using namespace rocprofiler::counters::test_constants;
 
 namespace
 {
-AmdExtTable&
-get_ext_table()
-{
-    static auto _v = []() {
-        auto val                                  = AmdExtTable{};
-        val.hsa_amd_memory_pool_get_info_fn       = hsa_amd_memory_pool_get_info;
-        val.hsa_amd_agent_iterate_memory_pools_fn = hsa_amd_agent_iterate_memory_pools;
-        val.hsa_amd_memory_pool_allocate_fn       = hsa_amd_memory_pool_allocate;
-        val.hsa_amd_memory_pool_free_fn           = hsa_amd_memory_pool_free;
-        val.hsa_amd_agent_memory_pool_get_info_fn = hsa_amd_agent_memory_pool_get_info;
-        val.hsa_amd_agents_allow_access_fn        = hsa_amd_agents_allow_access;
-        return val;
-    }();
-    return _v;
-}
-
-CoreApiTable&
-get_api_table()
-{
-    static auto _v = []() {
-        auto val                           = CoreApiTable{};
-        val.hsa_iterate_agents_fn          = hsa_iterate_agents;
-        val.hsa_agent_get_info_fn          = hsa_agent_get_info;
-        val.hsa_queue_create_fn            = hsa_queue_create;
-        val.hsa_queue_destroy_fn           = hsa_queue_destroy;
-        val.hsa_signal_create_fn           = hsa_signal_create;
-        val.hsa_signal_destroy_fn          = hsa_signal_destroy;
-        val.hsa_signal_store_screlease_fn  = hsa_signal_store_screlease;
-        val.hsa_signal_load_scacquire_fn   = hsa_signal_load_scacquire;
-        val.hsa_signal_add_relaxed_fn      = hsa_signal_add_relaxed;
-        val.hsa_signal_subtract_relaxed_fn = hsa_signal_subtract_relaxed;
-        val.hsa_signal_wait_relaxed_fn     = hsa_signal_wait_relaxed;
-        return val;
-    }();
-    return _v;
-}
-
 namespace rocprofiler
 {
 namespace hsa
