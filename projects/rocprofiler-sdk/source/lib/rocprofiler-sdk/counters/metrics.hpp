@@ -115,6 +115,13 @@ const MetricIdMap*
 getMetricIdMap();
 
 /**
+ * Get the metrics for perfcounters options in thread trace
+ * applicable only for GFX9 agents and SQ block counters
+ */
+const MetricIdMap*
+getPerfCountersIdMap();
+
+/**
  * Checks if a metric is valid for a given agent
  **/
 bool

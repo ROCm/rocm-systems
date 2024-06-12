@@ -21,41 +21,47 @@
 // SOFTWARE.
 
 #pragma once
+#define ROCPROFILER_VAR_NAME_COMBINE(X, Y) X##Y
+#define ROCPROFILER_VARIABLE(X, Y)         ROCPROFILER_VAR_NAME_COMBINE(X, Y)
 
 #define ROCPROFILER_WARN(result)                                                                   \
     {                                                                                              \
-        rocprofiler_status_t CHECKSTATUS = result;                                                 \
-        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) = result;                 \
+        if(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)              \
         {                                                                                          \
-            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::string status_msg =                                                               \
+                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__));        \
             std::cerr << "[" << __FILE__ << ":" << __LINE__ << "] " << #result                     \
-                      << " returned error code " << CHECKSTATUS << ": " << status_msg              \
-                      << ". This is just a warning!" << std::endl;                                 \
+                      << " returned error code " << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__)    \
+                      << ": " << status_msg << ". This is just a warning!" << std::endl;           \
         }                                                                                          \
     }
 
 #define ROCPROFILER_CHECK(result)                                                                  \
     {                                                                                              \
-        rocprofiler_status_t CHECKSTATUS = result;                                                 \
-        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) = result;                 \
+        if(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)              \
         {                                                                                          \
-            std::string       status_msg = rocprofiler_get_status_string(CHECKSTATUS);             \
+            std::string status_msg =                                                               \
+                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__));        \
             std::stringstream errmsg{};                                                            \
             errmsg << "[" << __FILE__ << ":" << __LINE__ << "] " << #result                        \
-                   << " failed with error code " << CHECKSTATUS << " :: " << status_msg;           \
+                   << " failed with error code " << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__)    \
+                   << " :: " << status_msg;                                                        \
             throw std::runtime_error(errmsg.str());                                                \
         }                                                                                          \
     }
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
     {                                                                                              \
-        rocprofiler_status_t CHECKSTATUS = result;                                                 \
-        if(CHECKSTATUS != ROCPROFILER_STATUS_SUCCESS)                                              \
+        rocprofiler_status_t ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) = result;                 \
+        if(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) != ROCPROFILER_STATUS_SUCCESS)              \
         {                                                                                          \
-            std::string status_msg = rocprofiler_get_status_string(CHECKSTATUS);                   \
+            std::string status_msg =                                                               \
+                rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__));        \
             std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
-                      << " failed with error code " << CHECKSTATUS << ": " << status_msg           \
-                      << std::endl;                                                                \
+                      << " failed with error code " << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) \
+                      << ": " << status_msg << std::endl;                                          \
             std::stringstream errmsg{};                                                            \
             errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
                    << status_msg << ")";                                                           \

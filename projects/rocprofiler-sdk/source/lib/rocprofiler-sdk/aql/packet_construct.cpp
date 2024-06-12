@@ -216,20 +216,34 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
     uint32_t shader_engine_mask = static_cast<uint32_t>(params.shader_engine_mask);
     uint32_t simd               = static_cast<uint32_t>(params.simd_select);
     uint32_t buffer_size        = static_cast<uint32_t>(params.buffer_size);
+    uint32_t perf_ctrl          = static_cast<uint32_t>(params.perfcounter_ctrl);
 
     aql_params.clear();
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_COMPUTE_UNIT_TARGET, cu});
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SE_MASK, shader_engine_mask});
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_SIMD_SELECTION, simd});
     aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_ATT_BUFFER_SIZE, buffer_size});
+    aql_params.push_back({HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_CTRL, perf_ctrl});
+    for(uint32_t perf_counter : params.perfcounters)
+    {
+        aql_params.push_back(
+            {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_NAME, perf_counter});
+    }
+}
+
+const std::vector<hsa_ven_amd_aqlprofile_parameter_t>&
+ThreadTraceAQLPacketFactory::get_aql_params()
+{
+    return aql_params;
 }
 
 std::unique_ptr<hsa::TraceControlAQLPacket>
 ThreadTraceAQLPacketFactory::construct_packet()
 {
-    uint32_t num_params = static_cast<uint32_t>(aql_params.size());
-    auto     profile = aqlprofile_att_profile_t{tracepool.gpu_agent, aql_params.data(), num_params};
-    auto     packet  = std::make_unique<hsa::TraceControlAQLPacket>(this->tracepool, profile);
+    uint32_t num_params = static_cast<uint32_t>(get_aql_params().size());
+    auto     profile =
+        aqlprofile_att_profile_t{tracepool.gpu_agent, get_aql_params().data(), num_params};
+    auto packet = std::make_unique<hsa::TraceControlAQLPacket>(this->tracepool, profile);
     packet->clear();
     return packet;
 }

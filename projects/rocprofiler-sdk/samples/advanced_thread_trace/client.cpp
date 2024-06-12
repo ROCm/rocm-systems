@@ -402,11 +402,11 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        tool_data),
         "code object tracing service configure");
 
-    std::vector<rocprofiler_att_parameter_t> parameters;
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, TARGET_CU});
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, SIMD_SELECT});
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, BUFFER_SIZE});
-    parameters.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, SE_MASK});
+    std::vector<rocprofiler_att_parameter_t> parameters = {
+        {ROCPROFILER_ATT_PARAMETER_TARGET_CU, {TARGET_CU}},
+        {ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {SIMD_SELECT}},
+        {ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {BUFFER_SIZE}},
+        {ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {SE_MASK}}};
 
     ROCPROFILER_CALL(rocprofiler_configure_thread_trace_service(client_ctx,
                                                                 parameters.data(),

@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
+#include <cstdint>
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -43,13 +44,23 @@ typedef enum
     ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE,               ///< Size of combined GPU buffer for ATT
     ROCPROFILER_ATT_PARAMETER_SIMD_SELECT,               ///< Bitmask (GFX9) or ID (Navi) of SIMDs
     ROCPROFILER_ATT_PARAMETER_CODE_OBJECT_TRACE_ENABLE,  ///< Enables Codeobj Markers IDs into ATT
+    ROCPROFILER_ATT_PARAMETER_PERFCOUNTER,  ///< Enables Perfcounter with simd mask (GFX9 only)
+    ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL,  ///< Defines the update period (GFX9 only)
     ROCPROFILER_ATT_PARAMETER_LAST
 } rocprofiler_att_parameter_type_t;
 
 typedef struct
 {
     rocprofiler_att_parameter_type_t type;
-    uint64_t                         value;
+    union
+    {
+        uint64_t value;
+        struct
+        {
+            rocprofiler_counter_id_t counter_id;
+            uint64_t                 simd_mask : 4;
+        };
+    };
 } rocprofiler_att_parameter_t;
 
 typedef enum

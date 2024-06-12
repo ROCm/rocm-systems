@@ -195,6 +195,26 @@ getMetricIdMap()
     return id_map;
 }
 
+const MetricIdMap*
+getPerfCountersIdMap()
+{
+    // Only GFX9 counters in SQ Block are supported
+    static MetricIdMap*& att_perf_counters_map =
+        common::static_object<MetricIdMap>::construct([]() {
+            MetricIdMap map;
+            std::string agent_prefix{"gfx9"};
+            auto        is_gfx9 = [&](auto& agent_name) {
+                return (agent_name.find(agent_prefix) != std::string::npos);
+            };
+            for(const auto& [agent_name, metrics] : *CHECK_NOTNULL(getMetricMap()))
+                if(is_gfx9(agent_name))
+                    for(const auto& metric : metrics)
+                        if(metric.block() == "SQ") map.emplace(metric.id(), metric);
+            return map;
+        }());
+    return att_perf_counters_map;
+}
+
 const MetricMap*
 getMetricMap()
 {

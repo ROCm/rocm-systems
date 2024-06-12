@@ -20,12 +20,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <glog/logging.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <cstdint>
 
 #include "lib/rocprofiler-sdk/aql/helpers.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "rocprofiler-sdk/amd_detail/thread_trace.h"
+
+namespace
+{
+uint32_t
+get_mask(const rocprofiler::counters::Metric* metric, uint64_t simds_selected)
+{
+    uint32_t mask = std::atoi(metric->event().c_str());
+    if(simds_selected == 0)
+        simds_selected = rocprofiler::thread_trace_parameter_pack::DEFAULT_PERFCOUNTER_SIMD_MASK;
+    mask |= simds_selected << rocprofiler::thread_trace_parameter_pack::PERFCOUNTER_SIMD_MASK_SHIFT;
+    return mask;
+}
+}  // namespace
 
 extern "C" {
 rocprofiler_status_t ROCPROFILER_API
@@ -51,6 +67,7 @@ rocprofiler_configure_thread_trace_service(rocprofiler_context_id_t             
     param_pack.callback_userdata = callback_userdata;
     bool bEnableCodeobj          = false;
 
+    const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getPerfCountersIdMap());
     for(size_t p = 0; p < num_parameters; p++)
     {
         const rocprofiler_att_parameter_t& param = parameters[p];
@@ -68,10 +85,16 @@ rocprofiler_configure_thread_trace_service(rocprofiler_context_id_t             
             case ROCPROFILER_ATT_PARAMETER_CODE_OBJECT_TRACE_ENABLE:
                 bEnableCodeobj = param.value != 0;
                 break;
+            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
+                if(const auto* metric_ptr =
+                       rocprofiler::common::get_val(id_map, param.counter_id.handle))
+                    param_pack.perfcounters.push_back(get_mask(metric_ptr, param.simd_mask));
+                break;
+            case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
+                param_pack.perfcounter_ctrl = param.value;
+                break;
             case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
-        // for(int i = 0; i < parameters.perfcounter_num; i++)
-        //    thread_tracer->perfcounters.emplace_back(parameters.perfcounter[i]);
     }
 
     ctx->thread_trace = std::make_shared<rocprofiler::GlobalThreadTracer>(param_pack);

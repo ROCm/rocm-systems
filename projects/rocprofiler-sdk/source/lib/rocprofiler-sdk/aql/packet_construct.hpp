@@ -91,10 +91,11 @@ public:
                                 const thread_trace_parameter_pack& params,
                                 const CoreApiTable&                coreapi,
                                 const AmdExtTable&                 ext);
-    std::unique_ptr<hsa::TraceControlAQLPacket>  construct_packet();
-    std::unique_ptr<hsa::CodeobjMarkerAQLPacket> construct_load_marker_packet(uint64_t id,
-                                                                              uint64_t addr,
-                                                                              uint64_t size);
+    const std::vector<hsa_ven_amd_aqlprofile_parameter_t>& get_aql_params();
+    std::unique_ptr<hsa::TraceControlAQLPacket>            construct_packet();
+    std::unique_ptr<hsa::CodeobjMarkerAQLPacket>           construct_load_marker_packet(uint64_t id,
+                                                                                        uint64_t addr,
+                                                                                        uint64_t size);
     std::unique_ptr<hsa::CodeobjMarkerAQLPacket> construct_unload_marker_packet(uint64_t id);
 
 private:

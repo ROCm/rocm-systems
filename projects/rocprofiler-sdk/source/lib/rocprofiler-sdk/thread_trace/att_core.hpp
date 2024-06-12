@@ -55,11 +55,13 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
 
     // GFX9 Only
-    std::vector<std::string> perfcounters;
+    std::vector<uint32_t> perfcounters;
 
-    static constexpr size_t DEFAULT_SIMD        = 0x7;
-    static constexpr size_t DEFAULT_SE_MASK     = 0x21;
-    static constexpr size_t DEFAULT_BUFFER_SIZE = 0x8000000;
+    static constexpr size_t DEFAULT_SIMD                  = 0x7;
+    static constexpr size_t DEFAULT_PERFCOUNTER_SIMD_MASK = 0xF;
+    static constexpr size_t DEFAULT_SE_MASK               = 0x21;
+    static constexpr size_t DEFAULT_BUFFER_SIZE           = 0x8000000;
+    static constexpr size_t PERFCOUNTER_SIMD_MASK_SHIFT   = 28;
 };
 
 namespace hsa
