@@ -27,6 +27,9 @@ Added `AMDSMI_EVT_NOTIF_RING_HANG` to the possible events in the `amdsmi_evt_not
 
 ### Optimizations
 
+- **Updated naming for `amdsmi_set_gpu_clear_sram_data()` to `amdsmi_set_gpu_run_cleaner_shader()`**.  
+Changed the naming to be more accurate to what the function was doing. This change also extends to the CLI where we changed the `clear-sram-data` command to `run-shader` that accepts a shader name to run.
+
 - **Updated `amdsmi_clk_info_t` struct in amdsmi.h and amdsmi_interface.py to align with host/guest**.  
 Changed cur_clk to clk, changed sleep_clk to clk_deep_sleep, and added clk_locked value. New struct will be in the following format:
 
@@ -66,7 +69,7 @@ The file structure referenced to dpm_policy changed to soc_pstate and we have ch
 Previously on devices without a FRU we would not populate the product name in the `amdsmi_board_info_t` structure, now we will fallback to using the name listed according to the pciids file if available.
 
 - **Updated CLI voltage curve command output**.  
-The output for `amd-smi metric --voltage-curve` now splits the frequency and voltage output by curve point or outputs N/A if not applicable
+The output for `amd-smi metric --voltage-curve` now splits the frequency and voltage output by curve point or outputs N/A for each curve point if not applicable
 
 ```shell
 GPU: 0
@@ -85,6 +88,43 @@ ASIC products. This requires users to update any ABIs using this structure.
 
 ### Fixes
 
+- **Fixed multiple processes not being registered in `amd-smi process` with json and csv format**.  
+Multiple process outputs in the CLI tool were not being registered correctly. The json output did not handle multiple processes and is now in a new valid json format:
+
+```shell
+[
+    {
+        "gpu": 0,
+        "process_list": [
+            {
+                "process_info": {
+                    "name": "TransferBench",
+                    "pid": 420157,
+                    "mem_usage": {
+                        "value": 0,
+                        "unit": "B"
+                    }
+                }
+            },
+            {
+                "process_info": {
+                    "name": "rvs",
+                    "pid": 420315,
+                    "mem_usage": {
+                        "value": 0,
+                        "unit": "B"
+                    }
+                }
+            }
+        ]
+    }
+]
+```
+
+
+- **Removed `throttle-status` from `amd-smi monitor` as it is no longer reliably supported**.  
+Throttle status may work for older ASICs, but will be replaced with PVIOL and TVIOL metrics for future ASIC support. It remains a field in the gpu_metrics API and in `amd-smi metric --power`.
+
 - **`amdsmi_get_gpu_board_info()` no longer returns junk char strings**.  
 Previously if there was a partial failure to retrieve character strings, we would return
 garbage output to users using the API. This fix intends to populate as many values as possible.
@@ -96,7 +136,7 @@ The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropp
 
 ### Known Issues
 
-- N/A
+- **Process isolation and run shader commands do no currently work and will be supported in a future release**.  
 
 ## amd_smi_lib for ROCm 6.1.2
 
@@ -106,7 +146,7 @@ The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropp
 Added APIs CLI and APIs to address LeftoverLocals security issues. Allowing clearing the sram data and setting process isolation on a per GPU basis. New APIs:
   - `amdsmi_get_gpu_process_isolation()`
   - `amdsmi_set_gpu_process_isolation()`
-  - `amdsmi_set_gpu_run_cleaner_shader()`
+  - `amdsmi_set_gpu_clear_sram_data()`
 
 - **Added `MIN_POWER` to output of `amd-smi static --limit`**.  
 This change helps users identify the range to which they can change the power cap of the GPU. The change is added to simplify why a device supports (or does not support) power capping (also known as overdrive). See `amd-smi set -g all --power-cap <value in W>` or `amd-smi reset -g all --power-cap`.

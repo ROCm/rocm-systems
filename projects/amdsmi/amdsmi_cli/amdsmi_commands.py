@@ -1328,8 +1328,8 @@ class AMDSMICommands():
                               'gfx_voltage': "N/A",
                               'soc_voltage': "N/A",
                               'mem_voltage': "N/A",
-                              'power_management': "N/A",
-                              'throttle_status': "N/A"}
+                              'throttle_status': "N/A",
+                              'power_management': "N/A"}
 
                 try:
                     voltage_unit = "mV"
@@ -1792,46 +1792,46 @@ class AMDSMICommands():
                 values_dict["fan"] = fan_dict
         if "voltage_curve" in current_platform_args:
             if args.voltage_curve:
+                # Populate N/A values per voltage point
+                voltage_point_dict = {}
+                for point in range(amdsmi_interface.AMDSMI_NUM_VOLTAGE_CURVE_POINTS):
+                    voltage_point_dict[f'point_{point}_frequency'] = "N/A"
+                    voltage_point_dict[f'point_{point}_voltage'] = "N/A"
+
                 try:
                     od_volt = amdsmi_interface.amdsmi_get_gpu_od_volt_info(args.gpu)
                     logging.debug(f"OD Voltage info: {od_volt}")
-
-                    # Populate N/A values per voltage point
-                    voltage_point_dict = {}
-                    for point in range(amdsmi_interface.AMDSMI_NUM_VOLTAGE_CURVE_POINTS):
-                        voltage_point_dict[f'point_{point}_frequency'] = "N/A"
-                        voltage_point_dict[f'point_{point}_voltage'] = "N/A"
-
-                    # Populate voltage point values
-                    for point in range(amdsmi_interface.AMDSMI_NUM_VOLTAGE_CURVE_POINTS):
-                        if isinstance(od_volt, dict):
-                            logging.debug(f"point_{point} frequency: {od_volt['curve.vc_points'][point].frequency}")
-                            logging.debug(f"point_{point} voltage:   {od_volt['curve.vc_points'][point].voltage}")
-                            frequency = int(od_volt["curve.vc_points"][point].frequency / 1000000)
-                            voltage = int(od_volt["curve.vc_points"][point].voltage)
-                        else:
-                            frequency = "N/A"
-                            voltage = "N/A"
-
-                        if frequency == 0:
-                            frequency = "N/A"
-
-                        if voltage == 0:
-                            voltage = "N/A"
-
-                        if frequency != "N/A":
-                            frequency = self.helpers.unit_format(self.logger, frequency, "Mhz")
-
-                        if voltage != "N/A":
-                            voltage = self.helpers.unit_format(self.logger, voltage, "mV")
-
-                        voltage_point_dict[f'point_{point}_frequency'] = frequency
-                        voltage_point_dict[f'point_{point}_voltage'] = voltage
-
-                    values_dict['voltage_curve'] = voltage_point_dict
                 except amdsmi_exception.AmdSmiLibraryException as e:
-                    values_dict['voltage_curve'] = "N/A"
+                    od_volt = "N/A" # Value not used, but needs to not be a dict
                     logging.debug("Failed to get voltage curve for gpu %s | %s", gpu_id, e.get_error_info())
+
+                # Populate voltage point values
+                for point in range(amdsmi_interface.AMDSMI_NUM_VOLTAGE_CURVE_POINTS):
+                    if isinstance(od_volt, dict):
+                        logging.debug(f"point_{point} frequency: {od_volt['curve.vc_points'][point].frequency}")
+                        logging.debug(f"point_{point} voltage:   {od_volt['curve.vc_points'][point].voltage}")
+                        frequency = int(od_volt["curve.vc_points"][point].frequency / 1000000)
+                        voltage = int(od_volt["curve.vc_points"][point].voltage)
+                    else:
+                        frequency = "N/A"
+                        voltage = "N/A"
+
+                    if frequency == 0:
+                        frequency = "N/A"
+
+                    if voltage == 0:
+                        voltage = "N/A"
+
+                    if frequency != "N/A":
+                        frequency = self.helpers.unit_format(self.logger, frequency, "Mhz")
+
+                    if voltage != "N/A":
+                        voltage = self.helpers.unit_format(self.logger, voltage, "mV")
+
+                    voltage_point_dict[f'point_{point}_frequency'] = frequency
+                    voltage_point_dict[f'point_{point}_voltage'] = voltage
+
+                values_dict['voltage_curve'] = voltage_point_dict
         if "overdrive" in current_platform_args:
             if args.overdrive:
                 try:
@@ -2706,47 +2706,47 @@ class AMDSMICommands():
                     process_names.append(process_info)
             filtered_process_values = process_names
 
+        # If the name or pid args filter processes out then insert an N/A placeholder
+        if not filtered_process_values:
+            filtered_process_values.append({'process_info': "N/A"})
+
         logging.debug(f"Process Info for GPU {gpu_id} | {filtered_process_values}")
 
-        multiple_devices_csv_override = False
-        # Convert and store output by pid for csv format
-        if self.logger.is_csv_format():
-            # Check for empty list first
-            if not filtered_process_values:
-                self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
-            else:
-                for process_info in filtered_process_values:
-                    if process_info['process_info'] == "N/A":
-                        self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
-                    else:
-                        for key, value in process_info['process_info'].items():
-                            multiple_devices_csv_override = True
-                            if watching_output:
-                                self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
-                            self.logger.store_output(args.gpu, key, value)
+        for index, process in enumerate(filtered_process_values):
+            if process['process_info'] == "N/A":
+                filtered_process_values[index]['process_info'] = "No running processes detected"
 
-                    self.logger.store_multiple_device_output()
-        else:
+        if self.logger.is_json_format():
             if watching_output:
                 self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
+            self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
 
-            # Store values in logger.output
-            if not filtered_process_values:
-                self.logger.store_output(args.gpu, 'process_info', 'No running processes detected')
-            else:
-                for process_info in filtered_process_values:
-                    if process_info['process_info'] == "N/A":
-                        process_info['process_info'] = 'No running processes detected'
-                    self.logger.store_output(args.gpu, 'process_info', process_info['process_info'])
+        if self.logger.is_human_readable_format():
+            if watching_output:
+                self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
+            # When we print out process_info we remove the index
+            # The removal is needed only for human readable process format to align with Host
+            for index, process in enumerate(filtered_process_values):
+                self.logger.store_output(args.gpu, f'process_info_{index}', process['process_info'])
+
+        multiple_devices_csv_override = False
+        if self.logger.is_csv_format():
+            multiple_devices_csv_override = True
+            for process in filtered_process_values:
+                if watching_output:
+                    self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
+                self.logger.store_output(args.gpu, 'process_info', process['process_info'])
+                self.logger.store_multiple_device_output()
 
         if multiple_devices:
             self.logger.store_multiple_device_output()
             return # Skip printing when there are multiple devices
 
-        self.logger.print_output(multiple_device_enabled=multiple_devices_csv_override, watching_output=watching_output)
+        multiple_devices = multiple_devices or multiple_devices_csv_override
+        self.logger.print_output(multiple_device_enabled=multiple_devices, watching_output=watching_output)
 
         if watching_output: # End of single gpu add to watch_output
-            self.logger.store_watch_output(multiple_device_enabled=multiple_devices_csv_override)
+            self.logger.store_watch_output(multiple_device_enabled=multiple_devices)
 
 
     def profile(self, args):
@@ -3968,7 +3968,7 @@ class AMDSMICommands():
     def monitor(self, args, multiple_devices=False, watching_output=False, gpu=None,
                   watch=None, watch_time=None, iterations=None, power_usage=None,
                   temperature=None, gfx_util=None, mem_util=None, encoder=None, decoder=None,
-                  throttle_status=None, ecc=None, vram_usage=None, pcie=None):
+                  ecc=None, vram_usage=None, pcie=None):
         """ Populate a table with each GPU as an index to rows of targeted data
 
         Args:
@@ -3984,7 +3984,6 @@ class AMDSMICommands():
             mem (bool, optional): Value override for args.mem. Defaults to None.
             encoder (bool, optional): Value override for args.encoder. Defaults to None.
             decoder (bool, optional): Value override for args.decoder. Defaults to None.
-            throttle_status (bool, optional): Value override for args.throttle_status. Defaults to None.
             ecc (bool, optional): Value override for args.ecc. Defaults to None.
             vram_usage (bool, optional): Value override for args.vram_usage. Defaults to None.
             pcie (bool, optional): Value override for args.pcie. Defaults to None.
@@ -4019,8 +4018,6 @@ class AMDSMICommands():
             args.encoder = encoder
         if decoder:
             args.decoder = decoder
-        if throttle_status:
-            args.throttle_status = throttle_status
         if ecc:
             args.ecc = ecc
         if vram_usage:
@@ -4034,10 +4031,10 @@ class AMDSMICommands():
 
         # If all arguments are False, the print all values
         if not any([args.power_usage, args.temperature, args.gfx, args.mem,
-                    args.encoder, args.decoder, args.throttle_status, args.ecc,
+                    args.encoder, args.decoder, args.ecc,
                     args.vram_usage, args.pcie]):
             args.power_usage = args.temperature = args.gfx = args.mem = \
-                args.encoder = args.decoder = args.throttle_status = args.ecc = \
+                args.encoder = args.decoder = args.ecc = \
                 args.vram_usage = args.pcie = True
 
         # Handle watch logic, will only enter this block once
@@ -4282,20 +4279,6 @@ class AMDSMICommands():
                 logging.debug("Failed to get decoder clock on gpu %s | %s", gpu_id, e.get_error_info())
 
             self.logger.table_header += 'DEC_CLOCK'.rjust(11)
-        if args.throttle_status:
-            try:
-                throttle_status = amdsmi_interface.amdsmi_get_gpu_metrics_info(args.gpu)['throttle_status']
-                if throttle_status != "N/A":
-                    if throttle_status:
-                        throttle_status = "THROTTLED"
-                    else:
-                        throttle_status = "UNTHROTTLED"
-                monitor_values['throttle_status'] = throttle_status
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                monitor_values['throttle_status'] = "N/A"
-                logging.debug("Failed to get throttle status on gpu %s | %s", gpu_id, e.get_error_info())
-
-            self.logger.table_header += 'THROTTLE'.rjust(13)
         if args.ecc:
             try:
                 ecc = amdsmi_interface.amdsmi_get_gpu_total_ecc_count(args.gpu)

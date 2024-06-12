@@ -104,8 +104,8 @@ class AMDSMIHelpers():
 
         if string_format:
             return f"{operating_system} {operating_system_type}"
-        else:
-            return (operating_system, operating_system_type)
+
+        return (operating_system, operating_system_type)
 
 
     def is_virtual_os(self):

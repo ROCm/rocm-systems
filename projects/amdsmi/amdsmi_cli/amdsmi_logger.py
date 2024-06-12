@@ -72,8 +72,10 @@ class AMDSMILogger():
     def is_human_readable_format(self):
         return self.format == self.LoggerFormat.human_readable.value
 
+
     def clear_multiple_devices_ouput(self):
         self.multiple_device_output.clear()
+
 
     def _capitalize_keys(self, input_dict):
         output_dict = {}
@@ -116,7 +118,7 @@ class AMDSMILogger():
                     table_values += value.rjust(11)
                 elif key == 'vram_total' or 'ecc' in key:
                     table_values += value.rjust(12)
-                elif key in ('throttle_status', 'pcie_replay'):
+                elif key in ['pcie_replay']:
                     table_values += value.rjust(13)
                 # Only for handling topology tables
                 elif 'gpu_' in key:
@@ -162,6 +164,9 @@ class AMDSMILogger():
         # Remove a key line if it is a spacer
         yaml_output = yaml_output.replace("AMDSMI_SPACING_REMOVAL:\n", "")
         yaml_output = yaml_output.replace("'", "") # Remove ''
+
+        # Remove process_info indicies for Host parity:
+        yaml_output = re.sub(r'PROCESS_INFO_[0-9]+:', 'PROCESS_INFO:', yaml_output)
 
         clean_yaml_output = ''
         for line in yaml_output.splitlines():

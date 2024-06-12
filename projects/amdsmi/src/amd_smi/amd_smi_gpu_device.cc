@@ -158,6 +158,12 @@ amdsmi_status_t AMDSmiGPUDevice::amdgpu_query_vbios(void *info) const {
 int32_t AMDSmiGPUDevice::get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                                        ComputeProcessListType_t list_type)
 {
+
+    /**
+     *  Clear the compute_process_list before starting.
+     */
+    compute_process_list.clear();
+
     /**
      *  The first call to GetProcessInfo() helps to find the size it needs,
      *  so we can create a tailored size list.

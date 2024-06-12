@@ -148,6 +148,16 @@ class AMDSMIParser(argparse.ArgumentParser):
         raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
 
 
+    def _is_valid_string(self, string_value):
+        # Argument type validator
+        # This is for triggering a cli exception if an empty string is detected
+        if string_value:
+            return string_value
+
+        outputformat = self.helpers.get_output_format()
+        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
+
+
     def _check_output_file_path(self):
         """ Argument action validator:
             Returns a path to a file from the output file path provided.
@@ -863,7 +873,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         process_parser.add_argument('-G', '--general', action='store_true', required=False, help=general_help)
         process_parser.add_argument('-e', '--engine', action='store_true', required=False, help=engine_help)
         process_parser.add_argument('-p', '--pid', action='store', type=self._not_negative_int, required=False, help=pid_help)
-        process_parser.add_argument('-n', '--name', action='store', required=False, help=name_help)
+        process_parser.add_argument('-n', '--name', action='store', type=self._is_valid_string, required=False, help=name_help)
 
 
     def _add_profile_parser(self, subparsers, func):
@@ -1113,7 +1123,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         mem_util_help = "Monitor memory utilization (%%) and clock (MHz)"
         encoder_util_help = "Monitor encoder utilization (%%) and clock (MHz)"
         decoder_util_help = "Monitor decoder utilization (%%) and clock (MHz)"
-        throttle_help = "Monitor thermal throttle status"
         ecc_help = "Monitor ECC single bit, ECC double bit, and PCIe replay error counts"
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
@@ -1136,7 +1145,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-m', '--mem', action='store_true', required=False, help=mem_util_help)
         monitor_parser.add_argument('-n', '--encoder', action='store_true', required=False, help=encoder_util_help)
         monitor_parser.add_argument('-d', '--decoder', action='store_true', required=False, help=decoder_util_help)
-        monitor_parser.add_argument('-s', '--throttle-status', action='store_true', required=False, help=throttle_help)
         monitor_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
         monitor_parser.add_argument('-v', '--vram-usage', action='store_true', required=False, help=mem_usage_help)
         monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_bandwidth_help)
