@@ -28,7 +28,6 @@ from utils.utils import (
     demarcate,
     console_log,
     replace_timestamps,
-    fixup_rocprofv2_dispatch_ids,
 )
 
 
@@ -48,10 +47,7 @@ class rocprof_v2_profiler(OmniProfiler_Base):
             # v2 requires output directory argument
             "-d",
             self.get_args().path + "/" + "out",
-            # v2 does not require csv extension
-            "-o",
-            fbase,
-            # v2 doen not require quotes on cmd
+            # v2 does not require quotes on cmd
             app_cmd,
         ]
         return args
@@ -87,7 +83,5 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         if self.ready_to_profile:
             # Manually join each pmc_perf*.csv output
             self.join_prof()
-            # Correct dispatch ids
-            fixup_rocprofv2_dispatch_ids(self.get_args().path)
             # Replace timestamp data to solve a known rocprof bug
             replace_timestamps(self.get_args().path)
