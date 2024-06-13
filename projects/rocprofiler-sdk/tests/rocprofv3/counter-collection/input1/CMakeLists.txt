@@ -15,7 +15,7 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 
 # pmc1
 add_test(
-    NAME rocprofv3-test-cc-txt-pmc1-execute
+    NAME rocprofv3-test-counter-collection-txt-pmc1-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input.txt -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1
@@ -27,19 +27,19 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 set(cc-env-pmc1 "${PRELOAD_ENV}")
 
 set_tests_properties(
-    rocprofv3-test-cc-txt-pmc1-execute
+    rocprofv3-test-counter-collection-txt-pmc1-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-env-pmc1}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(
-    NAME rocprofv3-test-cc-pmc1-validate
+    NAME rocprofv3-test-counter-collection-pmc1-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
         ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1/pmc_1/pmc1_counter_collection.csv
         --json-input ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1/pmc_1/pmc1_results.json)
 
 set_tests_properties(
-    rocprofv3-test-cc-pmc1-validate
+    rocprofv3-test-counter-collection-pmc1-validate
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-cc-txt-pmc1-execute" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+               "rocprofv3-test-counter-collection-txt-pmc1-execute"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

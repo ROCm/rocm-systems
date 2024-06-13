@@ -22,7 +22,7 @@ def test_agent_info(agent_info_input_data):
             assert int(row["Max_Waves_Per_Simd"]) > 0
 
 
-def test_validate_cc_yml_pmc(counter_input_data):
+def test_validate_counter_collection_yml_pmc(counter_input_data):
     counter_names = ["SQ_WAVES", "GRBM_COUNT", "GRBM_GUI_ACTIVE"]
     di_list = []
 

@@ -4,7 +4,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR I
 
-## Added
+## Additions
 
 - HSA API Tracing
 - Kernel Dispatch Tracing
@@ -14,7 +14,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR II
 
-## Added
+## Additions
 
 - HIP API Tracing
 - ROCTx Tracing
@@ -23,10 +23,9 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - ROCTx start/stop
 - Memory Copy Tracing
 
-
 ## ROCprofiler-SDK for AFAR III
 
-## Added
+## Additions
 
 - Kernel Dispatch Counter Collection – (includes serialization and multidimensional instances)
 - Kernel serialization
@@ -44,7 +43,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR IV
 
-## Added
+## Additions
 
 - Page Migration Reporting (API)
 - Scratch Memory Reporting (API)
@@ -56,22 +55,22 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR V
 
-## Added
+## Additions
 
 - Agent/Device Counter Collection (API)
-- JSON output format support (tool)
+- Single JSON output format support (tool)
 - Perfetto output format support(.pftrace) (tool)
 - Input YAML support for counter collection (tool)
 - Input JSON support for counter collection (tool)
+- Application Replay (Counter collection)
 - PC Sampling (Beta)(API)
 - ROCProf V3 Multi-GPU Support:
-  - Merged files
   - Multi-process (multiple files)
 
-## Fixed
+## Fixes
 
 - SQ_ACCUM_PREV and SQ_ACCUM_PREV_HIRE overwriting issue
 
-## Changed
+## Changes
 
 - rocprofv3 tool now needs `--` in front of application. For detailed uses, please [Click Here](source/docs/rocprofv3.md)
