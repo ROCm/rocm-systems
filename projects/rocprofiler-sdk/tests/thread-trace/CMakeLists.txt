@@ -108,6 +108,7 @@ set_source_files_properties(kernel_branch.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
 set_source_files_properties(kernel_branch.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(kernel_lds.cpp PROPERTIES COMPILE_FLAGS "-g -O2")
 set_source_files_properties(kernel_lds.cpp PROPERTIES LANGUAGE HIP)
+set_source_files_properties(agent_test.cpp PROPERTIES LANGUAGE HIP)
 set_source_files_properties(main.cpp PROPERTIES LANGUAGE HIP)
 
 # Single dispatch test
@@ -153,5 +154,27 @@ add_test(NAME thread-trace-api-multi-test
 
 set_tests_properties(
     thread-trace-api-multi-test
+    PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT "${PRELOAD_ENV}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# Agent profiling test
+add_executable(thread-trace-api-agent-test)
+target_sources(thread-trace-api-agent-test PRIVATE agent_test.cpp)
+
+target_link_libraries(thread-trace-api-agent-test
+                      PRIVATE rocprofiler-sdk::rocprofiler-sdk)
+
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV)
+    set(PRELOAD_ENV
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}:$<TARGET_FILE:thread-trace-api-agent-test>")
+else()
+    set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:thread-trace-api-agent-test>")
+endif()
+
+add_test(NAME thread-trace-api-agent-test
+         COMMAND $<TARGET_FILE:thread-trace-api-agent-test>)
+
+set_tests_properties(
+    thread-trace-api-agent-test
     PROPERTIES TIMEOUT 10 LABELS "integration-tests" ENVIRONMENT "${PRELOAD_ENV}"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

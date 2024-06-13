@@ -138,8 +138,8 @@ struct context
     std::unique_ptr<dispatch_counter_collection_service> counter_collection       = {};
     std::unique_ptr<agent_counter_collection_service>    agent_counter_collection = {};
     std::unique_ptr<pc_sampling_service>                 pc_sampler               = {};
-    // TODO: Make a unique pointer instead
-    std::shared_ptr<GlobalThreadTracer> thread_trace = {};
+
+    std::unique_ptr<thread_trace::ThreadTracerInterface> thread_trace = {};
 };
 
 // set the client index needs to be called before allocate_context()

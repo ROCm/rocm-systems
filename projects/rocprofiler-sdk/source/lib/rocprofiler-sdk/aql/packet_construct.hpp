@@ -86,21 +86,25 @@ protected:
 
 class ThreadTraceAQLPacketFactory
 {
+    using thread_trace_parameter_pack = thread_trace::thread_trace_parameter_pack;
+
 public:
     ThreadTraceAQLPacketFactory(const hsa::AgentCache&             agent,
                                 const thread_trace_parameter_pack& params,
                                 const CoreApiTable&                coreapi,
                                 const AmdExtTable&                 ext);
-    const std::vector<hsa_ven_amd_aqlprofile_parameter_t>& get_aql_params();
-    std::unique_ptr<hsa::TraceControlAQLPacket>            construct_packet();
-    std::unique_ptr<hsa::CodeobjMarkerAQLPacket>           construct_load_marker_packet(uint64_t id,
-                                                                                        uint64_t addr,
-                                                                                        uint64_t size);
+
+    std::unique_ptr<hsa::TraceControlAQLPacket>  construct_control_packet();
+    std::unique_ptr<hsa::CodeobjMarkerAQLPacket> construct_load_marker_packet(uint64_t id,
+                                                                              uint64_t addr,
+                                                                              uint64_t size);
+
     std::unique_ptr<hsa::CodeobjMarkerAQLPacket> construct_unload_marker_packet(uint64_t id);
 
+    std::vector<aqlprofile_att_parameter_t> aql_params;
+
 private:
-    hsa::TraceMemoryPool                            tracepool;
-    std::vector<hsa_ven_amd_aqlprofile_parameter_t> aql_params;
+    hsa::TraceMemoryPool tracepool;
 };
 
 }  // namespace aql

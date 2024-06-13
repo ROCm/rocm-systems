@@ -87,7 +87,10 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                               void* callback_data);
 
 void
-shader_data_callback(int64_t se_id, void* se_data, size_t data_size, void* userdata);
+shader_data_callback(int64_t                 se_id,
+                     void*                   se_data,
+                     size_t                  data_size,
+                     rocprofiler_user_data_t userdata);
 
 void
 callbacks_init();

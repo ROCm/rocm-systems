@@ -184,14 +184,29 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
                         aqlprofile_pmc_info_type_t      attribute,
                         void*                           value);
 
+// Profile parameter object
+typedef struct
+{
+    hsa_ven_amd_aqlprofile_parameter_name_t parameter_name;
+    union
+    {
+        uint32_t value;
+        struct
+        {
+            uint32_t counter_id : 28;
+            uint32_t simd_mask  : 4;
+        };
+    };
+} aqlprofile_att_parameter_t;
+
 /**
  * @brief AQLprofile struct containing information for Advanced Thread Trace
  */
 typedef struct
 {
-    hsa_agent_t                               agent;
-    const hsa_ven_amd_aqlprofile_parameter_t* parameters;
-    uint32_t                                  parameter_count;
+    hsa_agent_t                       agent;
+    const aqlprofile_att_parameter_t* parameters;
+    uint32_t                          parameter_count;
 } aqlprofile_att_profile_t;
 
 /**

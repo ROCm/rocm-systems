@@ -183,58 +183,53 @@ struct source_location
 
 struct trace_data_t
 {
-    int64_t   id;
-    uint8_t*  data;
-    uint64_t  size;
-    ToolData* tool;
+    int64_t  id;
+    uint8_t* data;
+    uint64_t size;
 };
+
+auto* tool = new ToolData{};
 
 void
 tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                              rocprofiler_user_data_t*              user_data,
-                              void*                                 callback_data)
+                              rocprofiler_user_data_t* /* user_data */,
+                              void* /* callback_data */)
 {
     C_API_BEGIN
     if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
     if(record.phase != ROCPROFILER_CALLBACK_PHASE_LOAD) return;
 
-    assert(callback_data && "Shader callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(callback_data);
-
     if(record.operation == ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER)
     {
-        std::unique_lock<std::shared_mutex> lg(tool.isa_map_mut);
+        std::unique_lock<std::shared_mutex> lg(tool->isa_map_mut);
         auto* data = static_cast<kernel_symbol_data_t*>(record.payload);
-        tool.kernel_id_to_kernel_name.emplace(data->kernel_id, data->kernel_name);
+        tool->kernel_id_to_kernel_name.emplace(data->kernel_id, data->kernel_name);
     }
 
     if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
 
-    std::unique_lock<std::shared_mutex> lg(tool.isa_map_mut);
+    std::unique_lock<std::shared_mutex> lg(tool->isa_map_mut);
     auto*                               data = static_cast<code_obj_load_data_t*>(record.payload);
 
     if(std::string_view(data->uri).find("file:///") == 0)
     {
-        tool.codeobjTranslate.addDecoder(
+        tool->codeobjTranslate.addDecoder(
             data->uri, data->code_object_id, data->load_delta, data->load_size);
-        auto symbolmap = tool.codeobjTranslate.getSymbolMap(data->code_object_id);
+        auto symbolmap = tool->codeobjTranslate.getSymbolMap(data->code_object_id);
         for(auto& [vaddr, symbol] : symbolmap)
-            tool.kernels_in_codeobj[vaddr] = symbol;
+            tool->kernels_in_codeobj[vaddr] = symbol;
     }
     else if(COPY_MEMORY_CODEOBJ)
     {
-        tool.codeobjTranslate.addDecoder(reinterpret_cast<const void*>(data->memory_base),
-                                         data->memory_size,
-                                         data->code_object_id,
-                                         data->load_delta,
-                                         data->load_size);
-        auto symbolmap = tool.codeobjTranslate.getSymbolMap(data->code_object_id);
+        tool->codeobjTranslate.addDecoder(reinterpret_cast<const void*>(data->memory_base),
+                                          data->memory_size,
+                                          data->code_object_id,
+                                          data->load_delta,
+                                          data->load_size);
+        auto symbolmap = tool->codeobjTranslate.getSymbolMap(data->code_object_id);
         for(auto& [vaddr, symbol] : symbolmap)
-            tool.kernels_in_codeobj[vaddr] = symbol;
+            tool->kernels_in_codeobj[vaddr] = symbol;
     }
-
-    (void) user_data;
-    (void) callback_data;
     C_API_END
 }
 
@@ -243,20 +238,20 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
                   const rocprofiler_agent_t* /* agent  */,
                   rocprofiler_correlation_id_t /* correlation_id  */,
                   rocprofiler_kernel_id_t kernel_id,
-                  void*                   userdata)
+                  rocprofiler_dispatch_id_t /* dispatch_id */,
+                  rocprofiler_user_data_t* /* userdata */,
+                  void* /* userdata */)
 {
     C_API_BEGIN
-    assert(userdata && "Dispatch callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(userdata);
 
-    std::shared_lock<std::shared_mutex> lg(tool.isa_map_mut);
+    std::shared_lock<std::shared_mutex> lg(tool->isa_map_mut);
 
     static std::atomic<int> call_id{0};
     static std::string_view desired_func_name = "transposeLds";
 
     try
     {
-        auto& kernel_name = tool.kernel_id_to_kernel_name.at(kernel_id);
+        auto& kernel_name = tool->kernel_id_to_kernel_name.at(kernel_id);
         if(kernel_name.find(desired_func_name) == std::string::npos)
             return ROCPROFILER_ATT_CONTROL_NONE;
 
@@ -276,29 +271,26 @@ get_trace_data(rocprofiler_att_parser_data_type_t type, void* att_data, void* us
 {
     C_API_BEGIN
     assert(userdata && "ISA callback passed null!");
-    trace_data_t& trace_data = *reinterpret_cast<trace_data_t*>(userdata);
-    assert(trace_data.tool && "ISA callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(trace_data.tool);
 
-    std::shared_lock<std::shared_mutex> shared_lock(tool.isa_map_mut);
+    std::shared_lock<std::shared_mutex> shared_lock(tool->isa_map_mut);
 
-    if(type == ROCPROFILER_ATT_PARSER_DATA_TYPE_OCCUPANCY) tool.num_waves++;
+    if(type == ROCPROFILER_ATT_PARSER_DATA_TYPE_OCCUPANCY) tool->num_waves++;
 
     if(type != ROCPROFILER_ATT_PARSER_DATA_TYPE_ISA) return;
 
     auto& event = *reinterpret_cast<rocprofiler_att_data_type_isa_t*>(att_data);
 
     pcinfo_t pc{event.marker_id, event.offset};
-    auto     it = tool.isa_map.find(pc);
-    if(it == tool.isa_map.end())
+    auto     it = tool->isa_map.find(pc);
+    if(it == tool->isa_map.end())
     {
         shared_lock.unlock();
         {
-            std::unique_lock<std::shared_mutex> unique_lock(tool.isa_map_mut);
+            std::unique_lock<std::shared_mutex> unique_lock(tool->isa_map_mut);
             auto                                ptr = std::make_unique<isa_map_elem_t>();
             try
             {
-                ptr->code_line = tool.codeobjTranslate.get(pc.marker_id, pc.addr);
+                ptr->code_line = tool->codeobjTranslate.get(pc.marker_id, pc.addr);
             } catch(std::exception& e)
             {
                 std::cerr << pc.marker_id << ":" << pc.addr << ' ' << e.what() << std::endl;
@@ -308,7 +300,7 @@ get_trace_data(rocprofiler_att_parser_data_type_t type, void* att_data, void* us
                 std::cerr << "Could not fetch: " << pc.marker_id << ':' << pc.addr << std::endl;
                 return;
             }
-            it = tool.isa_map.emplace(pc, std::move(ptr)).first;
+            it = tool->isa_map.emplace(pc, std::move(ptr)).first;
         }
         shared_lock.lock();
     }
@@ -339,15 +331,12 @@ isa_callback(char*     isa_instruction,
 {
     C_API_BEGIN
     assert(userdata && "ISA callback passed null!");
-    trace_data_t& trace_data = *reinterpret_cast<trace_data_t*>(userdata);
-    assert(trace_data.tool && "ISA callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(trace_data.tool);
 
     std::shared_ptr<Instruction> instruction;
 
     {
-        std::unique_lock<std::shared_mutex> unique_lock(tool.isa_map_mut);
-        instruction = tool.codeobjTranslate.get(marker_id, offset);
+        std::unique_lock<std::shared_mutex> unique_lock(tool->isa_map_mut);
+        instruction = tool->codeobjTranslate.get(marker_id, offset);
     }
 
     if(!instruction.get()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
@@ -364,23 +353,25 @@ isa_callback(char*     isa_instruction,
 
     auto ptr       = std::make_unique<isa_map_elem_t>();
     ptr->code_line = std::move(instruction);
-    tool.isa_map.emplace(pcinfo_t{marker_id, offset}, std::move(ptr));
-    C_API_END
+    tool->isa_map.emplace(pcinfo_t{marker_id, offset}, std::move(ptr));
     return ROCPROFILER_STATUS_SUCCESS;
+    C_API_END
+    return ROCPROFILER_STATUS_ERROR;
 }
 
 void
-shader_data_callback(int64_t se_id, void* se_data, size_t data_size, void* userdata)
+shader_data_callback(int64_t se_id,
+                     void*   se_data,
+                     size_t  data_size,
+                     rocprofiler_user_data_t /* userdata */)
 {
     C_API_BEGIN
-    assert(userdata && "Shader callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(userdata);
 
     {
-        std::unique_lock<std::mutex> lk(tool.output_mut);
-        tool.output() << "SE ID: " << se_id << " with size " << data_size << std::hex << '\n';
+        std::unique_lock<std::mutex> lk(tool->output_mut);
+        tool->output() << "SE ID: " << se_id << " with size " << data_size << std::hex << '\n';
     }
-    trace_data_t data{.id = se_id, .data = (uint8_t*) se_data, .size = data_size, .tool = &tool};
+    trace_data_t data{.id = se_id, .data = (uint8_t*) se_data, .size = data_size};
     auto status = rocprofiler_att_parse_data(copy_trace_data, get_trace_data, isa_callback, &data);
     if(status != ROCPROFILER_STATUS_SUCCESS)
         std::cerr << "shader_data_callback failed with status " << status << std::endl;
@@ -408,12 +399,12 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         {ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {BUFFER_SIZE}},
         {ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {SE_MASK}}};
 
-    ROCPROFILER_CALL(rocprofiler_configure_thread_trace_service(client_ctx,
-                                                                parameters.data(),
-                                                                parameters.size(),
-                                                                dispatch_callback,
-                                                                shader_data_callback,
-                                                                tool_data),
+    ROCPROFILER_CALL(rocprofiler_configure_dispatch_thread_trace_service(client_ctx,
+                                                                         parameters.data(),
+                                                                         parameters.size(),
+                                                                         dispatch_callback,
+                                                                         shader_data_callback,
+                                                                         tool_data),
                      "thread trace service configure");
 
     int valid_ctx = 0;
@@ -434,17 +425,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 }
 
 void
-tool_fini(void* tool_data)
+tool_fini(void* /* data */)
 {
-    assert(tool_data && "tool_fini callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(tool_data);
-
-    std::unique_lock<std::shared_mutex> isa_lk(tool.isa_map_mut);
-    std::unique_lock<std::mutex>        out_lk(tool.output_mut);
+    std::unique_lock<std::shared_mutex> isa_lk(client::tool->isa_map_mut);
+    std::unique_lock<std::mutex>        out_lk(client::tool->output_mut);
 
     // Find largest instruction
     size_t max_inst_size = 0;
-    for(auto& [addr, lines] : tool.isa_map)
+    for(auto& [addr, lines] : client::tool->isa_map)
         if(lines.get()) max_inst_size = std::max(max_inst_size, lines->code_line->inst.size());
 
     std::string empty_space;
@@ -460,16 +448,16 @@ tool_fini(void* tool_data)
     size_t vector_exec = 0;
     size_t other_exec  = 0;
 
-    for(auto& [addr, line] : tool.isa_map)
+    for(auto& [addr, line] : client::tool->isa_map)
         if(line.get())
         {
             size_t hitcount  = line->hitcount.load(std::memory_order_relaxed);
             size_t latency   = line->latency.load(std::memory_order_relaxed);
             auto&  code_line = line->code_line->inst;
 
-            tool.output() << std::hex << "0x" << addr.addr << std::dec << ' ' << code_line
-                          << empty_space.substr(0, max_inst_size - code_line.size())
-                          << " Hit: " << hitcount << " - Latency: " << latency << '\n';
+            client::tool->output() << std::hex << "0x" << addr.addr << std::dec << ' ' << code_line
+                                   << empty_space.substr(0, max_inst_size - code_line.size())
+                                   << " Hit: " << hitcount << " - Latency: " << latency << '\n';
 
             if(code_line.find("s_waitcnt") == 0)
             {
@@ -502,14 +490,17 @@ tool_fini(void* tool_data)
     float  vmc_fraction   = 100 * vmc_latency / float(total_latency);
     float  lgk_fraction   = 100 * lgk_latency / float(total_latency);
 
-    tool.output() << "Total executed instructions: " << total_exec << '\n'
-                  << "Total executed vector instructions: " << vector_exec << " with average "
-                  << vector_latency / float(vector_exec) << " cycles.\n"
-                  << "Total executed scalar instructions: " << scalar_exec << " with average "
-                  << scalar_latency / float(scalar_exec) << " cycles.\n"
-                  << "Vector memory ops occupied: " << vmc_fraction << "% of cycles.\n"
-                  << "Scalar and LDS memory ops occupied: " << lgk_fraction << "% of cycles.\n"
-                  << "Num waves created: " << (tool.num_waves / 2) << std::endl;
+    client::tool->output() << "Total executed instructions: " << total_exec << '\n'
+                           << "Total executed vector instructions: " << vector_exec
+                           << " with average " << vector_latency / float(vector_exec)
+                           << " cycles.\n"
+                           << "Total executed scalar instructions: " << scalar_exec
+                           << " with average " << scalar_latency / float(scalar_exec)
+                           << " cycles.\n"
+                           << "Vector memory ops occupied: " << vmc_fraction << "% of cycles.\n"
+                           << "Scalar and LDS memory ops occupied: " << lgk_fraction
+                           << "% of cycles.\n"
+                           << "Num waves created: " << (client::tool->num_waves / 2) << std::endl;
 }
 
 }  // namespace client
@@ -538,14 +529,12 @@ rocprofiler_configure(uint32_t                 version,
 
     std::clog << info.str() << std::endl;
 
-    auto* data = new client::ToolData{};
-
     // create configure data
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                             &client::tool_init,
                                             &client::tool_fini,
-                                            reinterpret_cast<void*>(data)};
+                                            nullptr};
 
     // return pointer to configure data
     return &cfg;

@@ -86,11 +86,11 @@ TEST(thread_trace, resource_creation)
     ASSERT_GT(agents.size(), 0);
     for(const auto& [_, agent] : agents)
     {
-        auto params = thread_trace_parameter_pack{};
+        auto params = thread_trace::thread_trace_parameter_pack{};
 
         aql::ThreadTraceAQLPacketFactory factory(agent, params, get_api_table(), get_ext_table());
 
-        auto packet = factory.construct_packet();
+        auto packet = factory.construct_control_packet();
         packet->populate_before();
         packet->populate_after();
 
@@ -102,8 +102,8 @@ TEST(thread_trace, resource_creation)
     }
 
     {
-        thread_trace_parameter_pack params{};
-        GlobalThreadTracer          tracer(std::move(params));
+        thread_trace::thread_trace_parameter_pack params{};
+        thread_trace::DispatchThreadTracer        tracer(std::move(params));
 
         for(const auto& [_, agent] : agents)
         {
@@ -145,7 +145,7 @@ TEST(thread_trace, configure_test)
     params.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {0x1000000}});
     params.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {0xF}});
 
-    rocprofiler_configure_thread_trace_service(
+    rocprofiler_configure_dispatch_thread_trace_service(
         ctx,
         params.data(),
         params.size(),
@@ -153,8 +153,10 @@ TEST(thread_trace, configure_test)
            const rocprofiler_agent_t*,
            rocprofiler_correlation_id_t,
            rocprofiler_kernel_id_t,
+           rocprofiler_dispatch_id_t,
+           rocprofiler_user_data_t*,
            void*) { return ROCPROFILER_ATT_CONTROL_NONE; },
-        [](int64_t, void*, size_t, void*) {},
+        [](int64_t, void*, size_t, rocprofiler_user_data_t) {},
         nullptr);
 
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
@@ -194,7 +196,7 @@ TEST(thread_trace, perfcounters_configure_test)
                 expected.insert(std::atoi(metric.event().c_str()) | (simd_mask << 28));
             }
 
-    rocprofiler_configure_thread_trace_service(
+    rocprofiler_configure_dispatch_thread_trace_service(
         ctx,
         params.data(),
         params.size(),
@@ -202,16 +204,19 @@ TEST(thread_trace, perfcounters_configure_test)
            const rocprofiler_agent_t*,
            rocprofiler_correlation_id_t,
            rocprofiler_kernel_id_t,
+           rocprofiler_dispatch_id_t,
+           rocprofiler_user_data_t*,
            void*) { return ROCPROFILER_ATT_CONTROL_NONE; },
-        [](int64_t, void*, size_t, void*) {},
+        [](int64_t, void*, size_t, rocprofiler_user_data_t) {},
         nullptr);
 
-    auto*                       context = rocprofiler::context::get_mutable_registered_context(ctx);
-    thread_trace_parameter_pack _params = context->thread_trace->params;
+    auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
+    auto* tracer  = dynamic_cast<thread_trace::DispatchThreadTracer*>(context->thread_trace.get());
 
-    ASSERT_EQ(_params.perfcounter_ctrl, 1);
-    ASSERT_EQ(_params.perfcounters.size(), 3);
-    for(uint32_t param : _params.perfcounters)
+    ASSERT_NE(tracer, nullptr);
+    ASSERT_EQ(tracer->params.perfcounter_ctrl, 1);
+    ASSERT_EQ(tracer->params.perfcounters.size(), 3);
+    for(uint32_t param : tracer->params.perfcounters)
         EXPECT_TRUE(expected.find(param) != expected.end())
             << "valid AQLprofile mask not generated for perfcounters";
     context::pop_client(1);
@@ -230,8 +235,8 @@ TEST(thread_trace, perfcounters_aql_options_test)
     const std::uint8_t sqtt_default_num_options = 5;
     auto               agents = hsa::get_queue_controller()->get_supported_agents();
 
-    thread_trace_parameter_pack _params = {};
-    auto                        metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
+    thread_trace::thread_trace_parameter_pack _params = {};
+    auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
     std::vector<std::pair<std::string, uint64_t>> perf_counters = {
         {"SQ_WAVES", 0x1}, {"SQ_WAVES", 0x2}, {"GRBM_COUNT", 0x3}};
     for(auto& [counter_name, simd_mask] : perf_counters)
@@ -240,10 +245,10 @@ TEST(thread_trace, perfcounters_aql_options_test)
                 _params.perfcounters.push_back(std::atoi(metric.event().c_str()) |
                                                (simd_mask << 28));
     _params.perfcounter_ctrl = 2;
-    auto new_tracer          = std::make_unique<AgentThreadTracer>(
+    auto new_tracer          = std::make_unique<thread_trace::ThreadTracerQueue>(
         _params, begin(agents)->second, get_api_table(), get_ext_table());
 
-    ASSERT_EQ(new_tracer->factory->get_aql_params().size(),
+    ASSERT_EQ(new_tracer->factory->aql_params.size(),
               sqtt_default_num_options + perf_counters.size());
     context::pop_client(1);
     hsa_shut_down();

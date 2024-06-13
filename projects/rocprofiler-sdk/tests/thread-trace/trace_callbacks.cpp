@@ -210,11 +210,14 @@ isa_callback(char*     isa_instruction,
 }
 
 void
-shader_data_callback(int64_t se_id, void* se_data, size_t data_size, void* userdata)
+shader_data_callback(int64_t                 se_id,
+                     void*                   se_data,
+                     size_t                  data_size,
+                     rocprofiler_user_data_t userdata)
 {
     C_API_BEGIN
-    assert(userdata && "Shader callback passed null!");
-    ToolData& tool = *reinterpret_cast<ToolData*>(userdata);
+    assert(userdata.ptr && "Shader callback passed null!");
+    ToolData& tool = *reinterpret_cast<ToolData*>(userdata.ptr);
 
     trace_data_t data{.id = se_id, .data = (uint8_t*) se_data, .size = data_size, .tool = &tool};
     auto status = rocprofiler_att_parse_data(copy_trace_data, get_trace_data, isa_callback, &data);
