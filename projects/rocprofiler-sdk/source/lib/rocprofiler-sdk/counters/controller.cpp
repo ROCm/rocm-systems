@@ -92,10 +92,11 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
             std::make_unique<rocprofiler::context::agent_counter_collection_service>();
     }
 
-    ctx.agent_counter_collection->agent_id  = agent_id;
-    ctx.agent_counter_collection->cb        = cb;
-    ctx.agent_counter_collection->user_data = user_data;
-    ctx.agent_counter_collection->buffer    = buffer_id;
+    ctx.agent_counter_collection->agent_data.emplace_back();
+    ctx.agent_counter_collection->agent_data.back().callback_data = {.ptr = user_data};
+    ctx.agent_counter_collection->agent_data.back().agent_id      = agent_id;
+    ctx.agent_counter_collection->agent_data.back().cb            = cb;
+    ctx.agent_counter_collection->agent_data.back().buffer        = buffer_id;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

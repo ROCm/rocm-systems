@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/counters/agent_profiling.hpp"
 #include <cstdint>
+#include <unordered_map>
 
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
@@ -111,23 +112,22 @@ construct_aql_pkt(const hsa::AgentCache& agent, std::shared_ptr<profile_config>&
 bool
 agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
 {
-    const auto* ctx = context::get_registered_context({.handle = (uint64_t) data});
-    if(!ctx) return false;
+    if(!data) return false;
+    const auto& callback_data = *static_cast<rocprofiler::counters::agent_callback_data*>(data);
 
-    const auto& agent_ctx   = *ctx->agent_counter_collection;
-    const auto& prof_config = agent_ctx.profile;
+    const auto& prof_config = callback_data.profile;
 
     // Decode the AQL packet data
     auto decoded_pkt =
-        EvaluateAST::read_pkt(prof_config->pkt_generator.get(), *agent_ctx.callback_data.packet);
+        EvaluateAST::read_pkt(prof_config->pkt_generator.get(), *callback_data.packet);
     EvaluateAST::read_special_counters(
         *prof_config->agent, prof_config->required_special_counters, decoded_pkt);
 
-    auto* buf = buffer::get_buffer(agent_ctx.buffer.handle);
+    auto* buf = buffer::get_buffer(callback_data.buffer.handle);
     if(!buf)
     {
         ROCP_FATAL << fmt::format("Buffer {} destroyed before record was written",
-                                  agent_ctx.buffer.handle);
+                                  callback_data.buffer.handle);
         return false;
     }
 
@@ -139,62 +139,65 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
         ast.set_out_id(*ret);
         for(auto& val : *ret)
         {
-            val.user_data = agent_ctx.callback_data.user_data;
+            val.user_data = callback_data.user_data;
             buf->emplace(
                 ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, val);
         }
     }
 
     // reset the signal to allow another sample to start
-    agent_ctx.callback_data.table.hsa_signal_store_relaxed_fn(agent_ctx.callback_data.completion,
-                                                              1);
+    callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, 1);
     return true;
 }
 
+/**
+ * Setup the agent for handling profiling. This includes setting up the AQL packet,
+ * setting up the async handler, and (if this is the first time profiling) setting
+ * the profiling register on the queue. This function should only be called when
+ * the context is in the LOCKED status.
+ */
 void
-init_callback_data(const rocprofiler::context::context& ctx, const hsa::AgentCache& agent)
+init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
+                   const hsa::AgentCache&                      agent)
 {
-    // Note: Calls to this function should be protected by agent_ctx.status being set
-    // to LOCKED by the caller. This is to prevent multiple threads from trying to
-    // setup the same agent at the same time.
-    auto& agent_ctx = *ctx.agent_counter_collection;
-    if(agent_ctx.callback_data.packet) return;
+    // we have already setup this ctx
+    if(callback_data.packet) return;
 
-    agent_ctx.callback_data.packet = construct_aql_pkt(agent, agent_ctx.profile);
+    callback_data.packet = construct_aql_pkt(agent, callback_data.profile);
+    callback_data.queue  = agent.profile_queue();
+    callback_data.table  = CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table();
 
-    if(agent_ctx.callback_data.completion.handle != 0) return;
-
-    // If we do not have a completion handle, this is our first time profiling this agent.
-    // Setup our shared data structures.
-    agent_ctx.callback_data.queue = agent.profile_queue();
-
-    agent_ctx.callback_data.table = CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table();
+    if(callback_data.completion.handle != 0) return;
 
     // Tri-state signal
     //   1: allow next sample to start
     //   0: sample in progress
     //  -1: sample complete
-    CHECK_EQ(agent_ctx.callback_data.table.hsa_signal_create_fn(
-                 1, 0, nullptr, &agent_ctx.callback_data.completion),
+    CHECK_EQ(callback_data.table.hsa_signal_create_fn(1, 0, nullptr, &callback_data.completion),
              HSA_STATUS_SUCCESS);
 
     // Signal to manage the startup of the context. Allows us to ensure that
     // the AQL packet we inject with start_context() completes before returning
-    CHECK_EQ(
-        agent_ctx.callback_data.table.hsa_signal_create_fn(1, 0, nullptr, &agent_ctx.start_signal),
-        HSA_STATUS_SUCCESS);
+    CHECK_EQ(callback_data.table.hsa_signal_create_fn(1, 0, nullptr, &callback_data.start_signal),
+             HSA_STATUS_SUCCESS);
 
     // Setup callback
     // NOLINTBEGIN(performance-no-int-to-ptr)
     CHECK_EQ(CHECK_NOTNULL(hsa::get_queue_controller())
                  ->get_ext_table()
-                 .hsa_amd_signal_async_handler_fn(agent_ctx.callback_data.completion,
+                 .hsa_amd_signal_async_handler_fn(callback_data.completion,
                                                   HSA_SIGNAL_CONDITION_LT,
                                                   0,
                                                   agent_async_handler,
-                                                  (void*) ctx.context_idx),
+                                                  (void*) &callback_data),
              HSA_STATUS_SUCCESS);
     // NOLINTEND(performance-no-int-to-ptr)
+
+    // If we do not have a completion handle, this is our first time profiling this agent.
+    // Setup our shared data structures.
+    static std::unordered_set<hsa_queue_t*> queues_init;
+    if(queues_init.find(callback_data.queue) != queues_init.end()) return;
+    queues_init.insert(callback_data.queue);
 
     // Set state of the queue to allow profiling (may not be needed since AQL
     // may do this in the future).
@@ -206,54 +209,48 @@ init_callback_data(const rocprofiler::context::context& ctx, const hsa::AgentCac
         agent.cpu_pool(),
         agent.get_hsa_agent(),
         [&](hsa::rocprofiler_packet pkt) {
-            pkt.ext_amd_aql_pm4.completion_signal = agent_ctx.callback_data.completion;
-            submitPacket(
-                agent_ctx.callback_data.table, agent_ctx.callback_data.queue, (void*) &pkt);
-            if(agent_ctx.callback_data.table.hsa_signal_wait_relaxed_fn(
-                   agent_ctx.callback_data.completion,
-                   HSA_SIGNAL_CONDITION_EQ,
-                   0,
-                   20000000,
-                   HSA_WAIT_STATE_ACTIVE) != 0)
+            pkt.ext_amd_aql_pm4.completion_signal = callback_data.completion;
+            submitPacket(callback_data.table, callback_data.queue, (void*) &pkt);
+            if(callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                              HSA_SIGNAL_CONDITION_EQ,
+                                                              0,
+                                                              20000000,
+                                                              HSA_WAIT_STATE_ACTIVE) != 0)
             {
                 ROCP_FATAL << "Could not set agent to be profiled";
             }
-            agent_ctx.callback_data.table.hsa_signal_store_relaxed_fn(
-                agent_ctx.callback_data.completion, 1);
+            callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, 1);
         });
 }
 }  // namespace
 
+/**
+ * Read the previously started profiling registers for each agent. Injects both the read packet
+ * and the stop packet (a sidestep to the AQL issues) into the queue and optionally waits for the
+ * return. A small note here is that this function should avoid allocations to be signal safe.
+ *
+ * Special Case: If the counters the user requests are purely constants, skip packet injection
+ * and trigger the async handler manually.
+ */
 rocprofiler_status_t
 read_agent_ctx(const context::context*    ctx,
                rocprofiler_user_data_t    user_data,
                rocprofiler_counter_flag_t flags)
 {
-    if(!ctx->agent_counter_collection || !ctx->agent_counter_collection->profile)
+    rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
+    if(!ctx->agent_counter_collection)
     {
-        if(!ctx->agent_counter_collection)
-        {
-            ROCP_ERROR << fmt::format("Context {} has no agent counter collection",
-                                      ctx->context_idx);
-        }
-        else
-        {
-            ROCP_ERROR << fmt::format("Context {} has no profile", ctx->context_idx);
-        }
+        ROCP_ERROR << fmt::format("Context {} has no agent counter collection", ctx->context_idx);
         return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
     }
 
     auto& agent_ctx = *ctx->agent_counter_collection;
 
+    // If we have not initiualized HSA yet, nothing to read, return;
     if(hsa_inited().load() == false)
     {
         return ROCPROFILER_STATUS_ERROR;
     }
-
-    const auto* agent = agent::get_agent_cache(agent_ctx.profile->agent);
-
-    // If the agent no longer exists or we don't have a profile queue, reading is an error
-    if(!agent || !agent->profile_queue()) return ROCPROFILER_STATUS_ERROR;
 
     // Set the state to LOCKED to prevent other calls to start/stop/read.
     auto expected = rocprofiler::context::agent_counter_collection_service::state::ENABLED;
@@ -263,48 +260,89 @@ read_agent_ctx(const context::context*    ctx,
         return ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR;
     }
 
-    CHECK(agent_ctx.callback_data.packet);
-
-    ROCP_TRACE << fmt::format("Agent Infor for Running Counter: Name = {}, XCC = {}, "
-                              "SE = {}, CU = {}, SIMD = {}",
-                              agent->get_rocp_agent()->name,
-                              agent->get_rocp_agent()->num_xcc,
-                              agent->get_rocp_agent()->num_shader_banks,
-                              agent->get_rocp_agent()->cu_count,
-                              agent->get_rocp_agent()->simd_arrays_per_engine);
-
-    // Submit the read packet to the queue
-    submitPacket(agent_ctx.callback_data.table,
-                 agent->profile_queue(),
-                 (void*) &agent_ctx.callback_data.packet->read);
-
-    // Submit a barrier packet. This is needed to flush hardware caches. Without this
-    // the read packet may not have the correct data.
-    rocprofiler::hsa::rocprofiler_packet barrier{};
-    barrier.barrier_and.header            = header_pkt(HSA_PACKET_TYPE_BARRIER_AND);
-    barrier.barrier_and.completion_signal = agent_ctx.callback_data.completion;
-    agent_ctx.callback_data.table.hsa_signal_store_relaxed_fn(agent_ctx.callback_data.completion,
-                                                              0);
-    agent_ctx.callback_data.user_data = user_data;
-    submitPacket(
-        agent_ctx.callback_data.table, agent->profile_queue(), (void*) &barrier.barrier_and);
-
-    // Wait for the barrier/read packet to complete
-    if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
+    for(auto& callback_data : agent_ctx.agent_data)
     {
-        // Wait for any inprogress samples to complete before returning
-        agent_ctx.callback_data.table.hsa_signal_wait_relaxed_fn(agent_ctx.callback_data.completion,
-                                                                 HSA_SIGNAL_CONDITION_EQ,
-                                                                 1,
-                                                                 UINT64_MAX,
-                                                                 HSA_WAIT_STATE_ACTIVE);
+        const auto* agent = agent::get_agent_cache(callback_data.profile->agent);
+
+        // If the agent no longer exists or we don't have a profile queue, reading is an error
+        if(!agent || !agent->profile_queue())
+        {
+            status = ROCPROFILER_STATUS_ERROR;
+            break;
+        }
+
+        // No AQL packet, nothing to do here.
+        if(!callback_data.packet) continue;
+
+        // If we have no hardware counters but a packet. The caller is expecting
+        // non-hardware based counter values to be returned. We can skip packet injection
+        // and trigger the async handler directly
+        if(callback_data.profile->reqired_hw_counters.empty())
+        {
+            callback_data.user_data = user_data;
+            callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, -1);
+            // Wait for the barrier/read packet to complete
+            if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
+            {
+                // Wait for any inprogress samples to complete before returning
+                callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                               HSA_SIGNAL_CONDITION_EQ,
+                                                               1,
+                                                               UINT64_MAX,
+                                                               HSA_WAIT_STATE_ACTIVE);
+            }
+            continue;
+        }
+
+        ROCP_TRACE << fmt::format("Agent Info for Running Counter: Name = {}, XCC = {}, "
+                                  "SE = {}, CU = {}, SIMD = {}",
+                                  agent->get_rocp_agent()->name,
+                                  agent->get_rocp_agent()->num_xcc,
+                                  agent->get_rocp_agent()->num_shader_banks,
+                                  agent->get_rocp_agent()->cu_count,
+                                  agent->get_rocp_agent()->simd_arrays_per_engine);
+
+        // Submit the read packet to the queue
+        submitPacket(
+            callback_data.table, agent->profile_queue(), (void*) &callback_data.packet->read);
+
+        // Submit a barrier packet. This is needed to flush hardware caches. Without this
+        // the read packet may not have the correct data.
+        rocprofiler::hsa::rocprofiler_packet barrier{};
+        barrier.barrier_and.header            = header_pkt(HSA_PACKET_TYPE_BARRIER_AND);
+        barrier.barrier_and.completion_signal = callback_data.completion;
+        callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, 0);
+        callback_data.user_data = user_data;
+        submitPacket(callback_data.table, agent->profile_queue(), (void*) &barrier.barrier_and);
+
+        // Wait for the barrier/read packet to complete
+        if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
+        {
+            // Wait for any inprogress samples to complete before returning
+            callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                           HSA_SIGNAL_CONDITION_EQ,
+                                                           1,
+                                                           UINT64_MAX,
+                                                           HSA_WAIT_STATE_ACTIVE);
+        }
     }
 
     agent_ctx.status.exchange(
         rocprofiler::context::agent_counter_collection_service::state::ENABLED);
-    return ROCPROFILER_STATUS_SUCCESS;
+    return status;
 }
 
+/**
+ * Start the agent profiling for the context. For each agent that this context is
+ * enabled for, we will call the tool to get the profile config. This config will
+ * will then be used to generate the AQL packet (if it differs from the previous
+ * profile used). init_callback_data does this initialization. If a tool does not
+ * supply a profile, we skip this agent. We then submit the start packet to the
+ * profile queue. This call is synchronous.
+ *
+ * Special Case: if constants are the only counters being collected, we skip
+ * packet injection.
+ */
 rocprofiler_status_t
 start_agent_ctx(const context::context* ctx)
 {
@@ -321,17 +359,6 @@ start_agent_ctx(const context::context* ctx)
         return ROCPROFILER_STATUS_SUCCESS;
     }
 
-    const auto* agent = agent::get_agent_cache(agent::get_agent(agent_ctx.agent_id));
-    // Note: we may not have an AgentCache yet if HSA is not started.
-    // This is not an error and the startup will happen on hsa registration.
-    if(!agent) return ROCPROFILER_STATUS_ERROR;
-
-    // But if we have an agent cache, we need a profile queue.
-    if(!agent->profile_queue())
-    {
-        return ROCPROFILER_STATUS_ERROR_NO_PROFILE_QUEUE;
-    }
-
     // Set the state to LOCKED to prevent other calls to start/stop/read.
     auto expected = rocprofiler::context::agent_counter_collection_service::state::DISABLED;
     if(!agent_ctx.status.compare_exchange_strong(
@@ -340,94 +367,121 @@ start_agent_ctx(const context::context* ctx)
         return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
     }
 
-    // Ask the tool what profile we should use for this agent
-    agent_ctx.cb(
-        {.handle = ctx->context_idx},
-        agent_ctx.agent_id,
-        [](rocprofiler_context_id_t        context_id,
-           rocprofiler_profile_config_id_t config_id) -> rocprofiler_status_t {
-            auto* cb_ctx = rocprofiler::context::get_mutable_registered_context(context_id);
-            if(!cb_ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
+    for(auto& callback_data : agent_ctx.agent_data)
+    {
+        const auto* agent = agent::get_agent_cache(agent::get_agent(callback_data.agent_id));
 
-            auto config = rocprofiler::counters::get_profile_config(config_id);
-            if(!config) return ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND;
+        if(!agent)
+        {
+            ROCP_ERROR << "No agent found for context: " << ctx->context_idx;
+            status = ROCPROFILER_STATUS_ERROR;
+            break;
+        }
 
-            if(!cb_ctx->agent_counter_collection)
-            {
-                return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
-            }
+        // But if we have an agent cache, we need a profile queue.
+        if(!agent->profile_queue())
+        {
+            ROCP_ERROR << "No profile queue found for context: " << ctx->context_idx;
+            status = ROCPROFILER_STATUS_ERROR_NO_PROFILE_QUEUE;
+            break;
+        }
 
-            // Only allow profiles to be set in the locked state
-            if(cb_ctx->agent_counter_collection->status.load() !=
-               rocprofiler::context::agent_counter_collection_service::state::LOCKED)
-            {
-                return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
-            }
+        // Ask the tool what profile we should use for this agent
+        callback_data.cb(
+            {.handle = ctx->context_idx},
+            callback_data.agent_id,
+            [](rocprofiler_context_id_t        context_id,
+               rocprofiler_profile_config_id_t config_id) -> rocprofiler_status_t {
+                auto* cb_ctx = rocprofiler::context::get_mutable_registered_context(context_id);
+                if(!cb_ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-            // Only update the profile if it has changed. Avoids packet regeneration.
-            if(!cb_ctx->agent_counter_collection->profile ||
-               cb_ctx->agent_counter_collection->profile->id.handle != config_id.handle)
-            {
-                if(cb_ctx->agent_counter_collection->agent_id.handle != config->agent->id.handle)
+                auto config = rocprofiler::counters::get_profile_config(config_id);
+                if(!config) return ROCPROFILER_STATUS_ERROR_PROFILE_NOT_FOUND;
+
+                if(!cb_ctx->agent_counter_collection)
                 {
-                    return ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH;
+                    return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
                 }
 
-                cb_ctx->agent_counter_collection->profile = config;
-                cb_ctx->agent_counter_collection->callback_data.packet.reset();
-            }
-            return ROCPROFILER_STATUS_SUCCESS;
-        },
-        agent_ctx.user_data);
+                // Only allow profiles to be set in the locked state
+                if(cb_ctx->agent_counter_collection->status.load() !=
+                   rocprofiler::context::agent_counter_collection_service::state::LOCKED)
+                {
+                    return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
+                }
 
-    // User didn't set a profile
-    if(!agent_ctx.profile)
-    {
-        agent_ctx.status.exchange(
-            rocprofiler::context::agent_counter_collection_service::state::DISABLED);
-        return status;
+                for(auto& agent_data : cb_ctx->agent_counter_collection->agent_data)
+                {
+                    // Find the agent that this profile is for and set it.
+                    if(agent_data.agent_id.handle == config->agent->id.handle)
+                    {
+                        // If the profile config has changed, reset the packet
+                        // and swap the profile.
+                        if(agent_data.profile != config)
+                        {
+                            agent_data.profile = config;
+                            agent_data.packet.reset();
+                        }
+                        // A flag to state that we set a profile
+                        agent_data.set_profile = true;
+                        return ROCPROFILER_STATUS_SUCCESS;
+                    }
+                }
+
+                return ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH;
+            },
+            callback_data.callback_data.ptr);
+
+        // If we did not set a profile, we have nothing to do.
+        if(!callback_data.set_profile)
+        {
+            callback_data.packet.reset();
+            continue;
+        }
+
+        callback_data.set_profile = false;
+        CHECK(callback_data.profile);
+
+        // Generate necessary structures in the context (packet gen, etc) to process
+        // this packet.
+        init_callback_data(callback_data, *agent);
+
+        // No hardware counters were actually asked for (i.e. all constants)
+        if(callback_data.profile->reqired_hw_counters.empty())
+        {
+            continue;
+        }
+
+        callback_data.packet->start.completion_signal = callback_data.start_signal;
+        callback_data.table.hsa_signal_store_relaxed_fn(callback_data.start_signal, 1);
+        submitPacket(
+            callback_data.table, agent->profile_queue(), (void*) &callback_data.packet->start);
+
+        // Wait for startup to finish before continuing
+        callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.start_signal,
+                                                       HSA_SIGNAL_CONDITION_EQ,
+                                                       0,
+                                                       UINT64_MAX,
+                                                       HSA_WAIT_STATE_ACTIVE);
     }
-
-    // Generate necessary structures in the context (packet gen, etc) to process
-    // this packet.
-    init_callback_data(*ctx, *agent);
-
-    // No hardware counters were actually asked for (i.e. all constants)
-    if(agent_ctx.profile->reqired_hw_counters.empty())
-    {
-        agent_ctx.status.exchange(
-            rocprofiler::context::agent_counter_collection_service::state::DISABLED);
-        return ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS;
-    }
-
-    // We could not generate AQL packets for some reason
-    if(!agent_ctx.callback_data.packet)
-    {
-        agent_ctx.status.exchange(
-            rocprofiler::context::agent_counter_collection_service::state::DISABLED);
-        return ROCPROFILER_STATUS_ERROR_AST_GENERATION_FAILED;
-    }
-
-    agent_ctx.callback_data.packet->start.completion_signal = agent_ctx.start_signal;
-    agent_ctx.callback_data.table.hsa_signal_store_relaxed_fn(agent_ctx.start_signal, 1);
-    submitPacket(agent_ctx.callback_data.table,
-                 agent->profile_queue(),
-                 (void*) &agent_ctx.callback_data.packet->start);
-
-    // Wait for startup to finish before continuing
-    agent_ctx.callback_data.table.hsa_signal_wait_relaxed_fn(
-        agent_ctx.start_signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
 
     agent_ctx.status.exchange(
         rocprofiler::context::agent_counter_collection_service::state::ENABLED);
-    return ROCPROFILER_STATUS_SUCCESS;
+    return status;
 }
 
+/**
+ * Issue the stop packet for all active agents in this context. This call is
+ * synchronous.
+ *
+ * Special Case: if no hardware counters are being collected, skip issuing the
+ * stop packet.
+ */
 rocprofiler_status_t
 stop_agent_ctx(const context::context* ctx)
 {
     auto status = ROCPROFILER_STATUS_SUCCESS;
-    if(!ctx->agent_counter_collection || !ctx->agent_counter_collection->profile)
+    if(!ctx->agent_counter_collection)
     {
         return status;
     }
@@ -439,9 +493,6 @@ stop_agent_ctx(const context::context* ctx)
         return ROCPROFILER_STATUS_SUCCESS;
     }
 
-    const auto* agent = agent::get_agent_cache(agent_ctx.profile->agent);
-    if(!agent || !agent->profile_queue()) return status;
-
     auto expected = rocprofiler::context::agent_counter_collection_service::state::ENABLED;
     if(!agent_ctx.status.compare_exchange_strong(
            expected, rocprofiler::context::agent_counter_collection_service::state::LOCKED))
@@ -450,24 +501,35 @@ stop_agent_ctx(const context::context* ctx)
         return ROCPROFILER_STATUS_SUCCESS;
     }
 
-    CHECK(agent_ctx.callback_data.packet);
+    for(auto& callback_data : agent_ctx.agent_data)
+    {
+        if(!callback_data.packet) continue;
 
-    submitPacket(agent_ctx.callback_data.table,
-                 agent->profile_queue(),
-                 (void*) &agent_ctx.callback_data.packet->stop);
+        const auto* agent = agent::get_agent_cache(callback_data.profile->agent);
+        if(!agent || !agent->profile_queue()) continue;
 
-    // Wait for any inprogress samples to complete before returning
-    agent_ctx.callback_data.table.hsa_signal_wait_relaxed_fn(agent_ctx.callback_data.completion,
-                                                             HSA_SIGNAL_CONDITION_EQ,
-                                                             1,
-                                                             UINT64_MAX,
-                                                             HSA_WAIT_STATE_ACTIVE);
+        if(!callback_data.profile->reqired_hw_counters.empty())
+        {
+            // Remove when AQL is updated to not require stop to be called first
+            submitPacket(
+                callback_data.table, agent->profile_queue(), (void*) &callback_data.packet->stop);
+        }
 
+        // Wait for the stop packet to complete
+        callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                       HSA_SIGNAL_CONDITION_EQ,
+                                                       1,
+                                                       UINT64_MAX,
+                                                       HSA_WAIT_STATE_ACTIVE);
+    }
+
+    agent_ctx.status.exchange(
+        rocprofiler::context::agent_counter_collection_service::state::DISABLED);
     return status;
 }
 
 // If we have ctx's that were started before HSA was initialized, we need to
-// actually start those contexts now.
+// actually start those contexts now that we have an HSA instance.
 rocprofiler_status_t
 agent_profile_hsa_registration()
 {

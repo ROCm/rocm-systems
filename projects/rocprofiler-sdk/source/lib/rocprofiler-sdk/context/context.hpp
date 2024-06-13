@@ -91,18 +91,7 @@ struct dispatch_counter_collection_service
 
 struct agent_counter_collection_service
 {
-    rocprofiler::counters::agent_callback_data callback_data;
-    // Signal to manage the startup of the context. Allows us to ensure that
-    // the AQL packet we inject with start_context() completes before returning
-    hsa_signal_t                                           start_signal;
-    std::shared_ptr<rocprofiler::counters::profile_config> profile;
-    rocprofiler_buffer_id_t                                buffer;
-    rocprofiler_agent_id_t                                 agent_id;
-    rocprofiler_agent_profile_callback_t                   cb;
-    void*                                                  user_data;
-    // A flag to state wether or not the counter set is currently enabled. This is primarily
-    // to protect against multithreaded calls to enable a context (and enabling already
-    // enabled counters).
+    std::vector<rocprofiler::counters::agent_callback_data> agent_data;
 
     enum class state
     {
