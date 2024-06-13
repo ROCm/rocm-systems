@@ -198,6 +198,9 @@ init_callback_data(const rocprofiler::context::context& ctx, const hsa::AgentCac
 
     // Set state of the queue to allow profiling (may not be needed since AQL
     // may do this in the future).
+    CHECK(agent.cpu_pool().handle != 0);
+    CHECK(agent.get_hsa_agent().handle != 0);
+
     aql::set_profiler_active_on_queue(
         CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table(),
         agent.cpu_pool(),
@@ -269,11 +272,6 @@ read_agent_ctx(const context::context*    ctx,
                               agent->get_rocp_agent()->num_shader_banks,
                               agent->get_rocp_agent()->cu_count,
                               agent->get_rocp_agent()->simd_arrays_per_engine);
-
-    // Remove when AQL is updated to not require stop to be called first
-    submitPacket(agent_ctx.callback_data.table,
-                 agent->profile_queue(),
-                 (void*) &agent_ctx.callback_data.packet->stop);
 
     // Submit the read packet to the queue
     submitPacket(agent_ctx.callback_data.table,

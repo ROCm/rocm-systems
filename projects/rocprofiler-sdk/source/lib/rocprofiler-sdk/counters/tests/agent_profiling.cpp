@@ -93,7 +93,6 @@ findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::st
             ret.push_back(counter);
         }
     }
-    ROCP_ERROR << "No counters found for " << std::string(agent.name());
     return ret;
 }
 
@@ -281,8 +280,37 @@ protected:
                                       &queue),
                      HSA_STATUS_SUCCESS);
 
+            // We don't use the queue interceptor, need to enabling profiling manually
+            hsa_amd_profiling_set_profiler_enabled(queue, 1);
+
+            hsa_signal_t completion_signal;
+            hsa_signal_create(1, 0, nullptr, &completion_signal);
+
+            CHECK(agent.cpu_pool().handle != 0);
+            CHECK(agent.get_hsa_agent().handle != 0);
+            // Set state of the queue to allow profiling (may not be needed since AQL
+            // may do this in the future).
+            aql::set_profiler_active_on_queue(
+                get_ext_table(),
+                agent.cpu_pool(),
+                agent.get_hsa_agent(),
+                [&](hsa::rocprofiler_packet pkt) {
+                    pkt.ext_amd_aql_pm4.completion_signal = completion_signal;
+                    submitPacket(queue, (void*) &pkt);
+
+                    if(hsa_signal_wait_relaxed(completion_signal,
+                                               HSA_SIGNAL_CONDITION_EQ,
+                                               0,
+                                               20000000,
+                                               HSA_WAIT_STATE_BLOCKED) != 0)
+                    {
+                        ROCP_FATAL << "Failed to set profiling mode on queue";
+                    }
+                    hsa_signal_store_relaxed(completion_signal, 1);
+                });
+
             rocprofiler::hsa::rocprofiler_packet barrier{};
-            hsa_signal_t                         completion_signal;
+
             hsa_signal_create(1, 0, nullptr, &completion_signal);
             barrier.barrier_and.header            = packet_header(HSA_PACKET_TYPE_BARRIER_AND);
             barrier.barrier_and.completion_signal = completion_signal;
@@ -421,6 +449,22 @@ TEST_F(agent_profile_test, sync_grbm_verify)
 TEST_F(agent_profile_test, sync_gpu_util_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
+    ROCP_ERROR << global_recs().size();
+
+    for(const auto& val : global_recs())
+    {
+        rocprofiler_counter_id_t id;
+        rocprofiler_query_record_counter_id(val.id, &id);
+        rocprofiler_counter_info_v0_t info;
+        rocprofiler_query_counter_info(id, ROCPROFILER_COUNTER_INFO_VERSION_0, &info);
+        ROCP_ERROR << fmt::format("Name: {} Counter value: {}", info.name, val.counter_value);
+        EXPECT_GT(val.counter_value, 0.0);
+    }
+}
+
+TEST_F(agent_profile_test, sync_sq_waves_verify)
+{
+    test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000);
     ROCP_ERROR << global_recs().size();
 
     for(const auto& val : global_recs())

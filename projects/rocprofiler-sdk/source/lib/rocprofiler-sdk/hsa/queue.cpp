@@ -495,6 +495,28 @@ Queue::Queue(const AgentCache&  agent,
                HSA_STATUS_SUCCESS)
         << "Could not setup intercept profiler";
 
+    CHECK(_agent.cpu_pool().handle != 0);
+    CHECK(_agent.get_hsa_agent().handle != 0);
+    // Set state of the queue to allow profiling
+    aql::set_profiler_active_on_queue(
+        CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table(),
+        _agent.cpu_pool(),
+        _agent.get_hsa_agent(),
+        [&](hsa::rocprofiler_packet pkt) {
+            hsa_signal_t completion;
+            create_signal(0, &completion);
+            pkt.ext_amd_aql_pm4.completion_signal = completion;
+            counters::submitPacket(CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
+                                   _intercept_queue,
+                                   (void*) &pkt);
+            if(core_api.hsa_signal_wait_relaxed_fn(
+                   completion, HSA_SIGNAL_CONDITION_EQ, 0, 20000000, HSA_WAIT_STATE_ACTIVE) != 0)
+            {
+                ROCP_FATAL << "Could not set agent to be profiled";
+            }
+            core_api.hsa_signal_destroy_fn(completion);
+        });
+
     LOG_IF(FATAL,
            _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
         << "Could not register interceptor";

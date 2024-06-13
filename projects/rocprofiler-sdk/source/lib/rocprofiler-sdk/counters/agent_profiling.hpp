@@ -82,5 +82,8 @@ read_agent_ctx(const context::context*    ctx,
                rocprofiler_user_data_t    user_data,
                rocprofiler_counter_flag_t flags);
 
+uint64_t
+submitPacket(const CoreApiTable& table, hsa_queue_t* queue, const void* packet);
+
 }  // namespace counters
 }  // namespace rocprofiler
