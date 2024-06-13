@@ -186,8 +186,11 @@ TEST(thread_trace, perfcounters_configure_test)
         for(auto& metric : metrics)
             if(metric.name() == counter_name)
             {
-                params.push_back({ROCPROFILER_ATT_PARAMETER_PERFCOUNTER,
-                                  {.counter_id = {metric.id()}, .simd_mask = simd_mask}});
+                rocprofiler_att_parameter_t att_param;
+                att_param.type       = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER;
+                att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
+                att_param.simd_mask  = simd_mask;
+                params.push_back(att_param);
                 expected.insert(std::atoi(metric.event().c_str()) | (simd_mask << 28));
             }
 
