@@ -76,6 +76,11 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
     auto& ctx = *ctx_p;
 
     if(ctx.counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+
+    // FIXME: Due to the clock gating issue, counter collection and PC sampling service
+    // cannot coexist in the same context for now.
+    if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
+
     if(!rocprofiler::buffer::get_buffer(buffer_id.handle))
     {
         return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
@@ -114,6 +119,10 @@ CounterController::configure_dispatch(
     auto& ctx = *ctx_p;
 
     if(ctx.agent_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+
+    // FIXME: Due to the clock gating issue, counter collection and PC sampling service
+    // cannot coexist in the same context for now.
+    if(ctx.pc_sampler) return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
 
     if(!ctx.counter_collection)
     {
