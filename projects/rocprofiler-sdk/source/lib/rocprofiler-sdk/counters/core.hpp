@@ -66,11 +66,9 @@ struct counter_callback_info
         std::unordered_map<rocprofiler::hsa::AQLPacket*, std::shared_ptr<profile_config>>>
         packet_return_map{};
 
-    static rocprofiler_status_t setup_profile_config(const hsa::AgentCache&,
-                                                     std::shared_ptr<profile_config>&);
+    static rocprofiler_status_t setup_profile_config(std::shared_ptr<profile_config>&);
 
     rocprofiler_status_t get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>&,
-                                    const hsa::AgentCache&,
                                     std::shared_ptr<profile_config>&);
 };
 

@@ -38,8 +38,7 @@ namespace rocprofiler
 namespace counters
 {
 rocprofiler_status_t
-counter_callback_info::setup_profile_config(const hsa::AgentCache&           agent,
-                                            std::shared_ptr<profile_config>& profile)
+counter_callback_info::setup_profile_config(std::shared_ptr<profile_config>& profile)
 {
     if(profile->pkt_generator || !profile->reqired_hw_counters.empty())
     {
@@ -104,7 +103,7 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
     }
 
     profile->pkt_generator = std::make_unique<rocprofiler::aql::CounterPacketConstruct>(
-        agent.get_rocp_agent()->id,
+        config.agent->id,
         std::vector<counters::Metric>{profile->reqired_hw_counters.begin(),
                                       profile->reqired_hw_counters.end()});
     return ROCPROFILER_STATUS_SUCCESS;
@@ -112,13 +111,12 @@ counter_callback_info::setup_profile_config(const hsa::AgentCache&           age
 
 rocprofiler_status_t
 counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& ret_pkt,
-                                  const hsa::AgentCache&                        agent,
                                   std::shared_ptr<profile_config>&              profile)
 {
     rocprofiler_status_t status;
     // Check packet cache
     profile->packets.wlock([&](auto& pkt_vector) {
-        status = counter_callback_info::setup_profile_config(agent, profile);
+        status = counter_callback_info::setup_profile_config(profile);
         if(!pkt_vector.empty() && status == ROCPROFILER_STATUS_SUCCESS)
         {
             ret_pkt = std::move(pkt_vector.back());

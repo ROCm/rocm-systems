@@ -138,7 +138,7 @@ queue_cb(const context::context*                                         ctx,
     CHECK(prof_config);
 
     std::unique_ptr<rocprofiler::hsa::AQLPacket> ret_pkt;
-    auto status = info->get_packet(ret_pkt, queue.get_agent(), prof_config);
+    auto                                         status = info->get_packet(ret_pkt, prof_config);
     CHECK_EQ(status, ROCPROFILER_STATUS_SUCCESS) << rocprofiler_get_status_string(status);
 
     maybe_add_serialization(ret_pkt);

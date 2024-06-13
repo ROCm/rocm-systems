@@ -227,7 +227,7 @@ TEST(core, check_packet_generation)
                 "Unable to create profile");
             auto profile = counters::get_profile_config(cfg_id);
             ASSERT_TRUE(profile);
-            EXPECT_EQ(counters::counter_callback_info::setup_profile_config(agent, profile),
+            EXPECT_EQ(counters::counter_callback_info::setup_profile_config(profile),
                       ROCPROFILER_STATUS_SUCCESS)
                 << fmt::format("Could not build profile for {}", metric.name());
 
@@ -244,7 +244,7 @@ TEST(core, check_packet_generation)
              */
             counters::counter_callback_info cb_info;
             std::unique_ptr<hsa::AQLPacket> pkt;
-            EXPECT_EQ(cb_info.get_packet(pkt, agent, profile), ROCPROFILER_STATUS_SUCCESS)
+            EXPECT_EQ(cb_info.get_packet(pkt, profile), ROCPROFILER_STATUS_SUCCESS)
                 << "Unable to generate packet";
             EXPECT_TRUE(pkt) << "Expected a packet to be generated";
             cb_info.packet_return_map.wlock([&](const auto& data) {

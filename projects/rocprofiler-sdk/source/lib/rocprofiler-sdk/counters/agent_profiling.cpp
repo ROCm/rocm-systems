@@ -92,9 +92,9 @@ header_pkt(hsa_packet_type_t type)
 }
 
 std::unique_ptr<hsa::CounterAQLPacket>
-construct_aql_pkt(const hsa::AgentCache& agent, std::shared_ptr<profile_config>& profile)
+construct_aql_pkt(std::shared_ptr<profile_config>& profile)
 {
-    if(counter_callback_info::setup_profile_config(agent, profile) != ROCPROFILER_STATUS_SUCCESS)
+    if(counter_callback_info::setup_profile_config(profile) != ROCPROFILER_STATUS_SUCCESS)
     {
         return nullptr;
     }
@@ -163,7 +163,7 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
     // we have already setup this ctx
     if(callback_data.packet) return;
 
-    callback_data.packet = construct_aql_pkt(agent, callback_data.profile);
+    callback_data.packet = construct_aql_pkt(callback_data.profile);
     callback_data.queue  = agent.profile_queue();
     callback_data.table  = CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table();
 
