@@ -338,7 +338,7 @@ main(int argc, char** argv)
                                  << itr.description << "\n";
                     }
                 }
-                std::cout << _msg.str();
+                std::cout << _msg.str() << std::flush;
             }
         });
     parser
@@ -521,12 +521,12 @@ main(int argc, char** argv)
         {
             verbprintf(0, "Retrieving the GPU HW counters failed: %s", _e.what());
         }
-        verbprintf(0, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
+        verbprintf(1, "Found %i HIP devices and %zu GPU HW counters\n", gpu_count,
                    _num_metrics);
     }
     else
     {
-        verbprintf(0, "No HIP devices found. GPU HW counters will not be available\n");
+        verbprintf(1, "No HIP devices found. GPU HW counters will not be available\n");
     }
 #endif
 
