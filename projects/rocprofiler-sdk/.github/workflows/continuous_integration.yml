@@ -74,6 +74,11 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') }}
       shell: bash
       run: |
+          # This workaround is to enable PC Sampling for kfd_ioctl 1.16 on CI machines, please refer to SWDEV-467721
+          git config --global --add safe.directory '*'
+          git config user.name ${{ github.actor }}
+          git config user.email "${{ github.actor_id }}+${{ github.actor }}@users.noreply.github.com"
+          git fetch -a; git cherry-pick 5805f7a6c6c7ca47bd602e7b94b9dcda390f0c2e
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
