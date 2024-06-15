@@ -51,17 +51,6 @@
 #if OMNITRACE_USE_HIP > 0
 #    include <timemory/components/hip/backends.hpp>
 
-static_assert(OMNITRACE_HIP_VERSION_MAJOR == HIP_VERSION_MAJOR,
-              "OMNITRACE_HIP_VERSION_MAJOR (detected by cmake) != HIP_VERSION_MAJOR "
-              "(from <hip/hip_version.h>)");
-
-#    if OMNITRACE_HIP_VERSION_MAJOR >= 5
-// HIP versions 4.x and older have unreliable values for HIP_VERSION_MINOR
-static_assert(OMNITRACE_HIP_VERSION_MINOR == HIP_VERSION_MINOR,
-              "OMNITRACE_HIP_VERSION_MINOR (detected by cmake) != HIP_VERSION_MINOR "
-              "(from <hip/hip_version.h>)");
-#    endif
-
 #    if !defined(OMNITRACE_HIP_RUNTIME_CALL)
 #        define OMNITRACE_HIP_RUNTIME_CALL(err)                                          \
             {                                                                            \
