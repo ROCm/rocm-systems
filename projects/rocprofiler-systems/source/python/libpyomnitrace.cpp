@@ -526,8 +526,11 @@ profiler_function(py::object pframe, const char* swhat, py::object arg)
 
     // stop function
     auto _profiler_return = [&]() {
-        _config.records.back()();
-        _config.records.pop_back();
+        if(!_config.records.empty())
+        {
+            _config.records.back()();
+            _config.records.pop_back();
+        }
     };
 
     // process what
