@@ -166,7 +166,52 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
 
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>> derived_gfx908 =
     {{"gfx908",
-      {{"GPU_UTIL",
+      {{"GPUBusy",
+        "",
+        "",
+        "100*GRBM_GUI_ACTIVE/GRBM_COUNT",
+        "The percentage of time GPU was busy."},
+       {"Wavefronts", "", "", "SQ_WAVES", "Total wavefronts."},
+       {"VALUInsts",
+        "",
+        "",
+        "SQ_INSTS_VALU/SQ_WAVES",
+        "The average number of vector ALU instructions executed per work-item (affected by flow "
+        "control)."},
+       {"SALUInsts",
+        "",
+        "",
+        "SQ_INSTS_SALU/SQ_WAVES",
+        "The average number of scalar ALU instructions executed per work-item (affected by flow "
+        "control)."},
+       {"SFetchInsts",
+        "",
+        "",
+        "SQ_INSTS_SMEM/SQ_WAVES",
+        "The average number of scalar fetch instructions from the video memory executed per "
+        "work-item (affected by flow control)."},
+       {"GDSInsts",
+        "",
+        "",
+        "SQ_INSTS_GDS/SQ_WAVES",
+        "The average number of GDS read or GDS write instructions executed per work item "
+        "(affected by flow control)."},
+       {"MemUnitBusy",
+        "",
+        "",
+        "100*reduce(TA_TA_BUSY,max)/GRBM_GUI_ACTIVE/SE_NUM",
+        "The percentage of GPUTime the memory unit is active. The result includes the stall "
+        "time (MemUnitStalled). This is measured with all extra fetches and writes and any "
+        "cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound)."},
+       {"ALUStalledByLDS",
+        "",
+        "",
+        "400*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE",
+        "The percentage of GPUTime ALU units are stalled by the LDS input queue being full or "
+        "the output queue being not ready. If there are LDS bank conflicts, reduce them. "
+        "Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% "
+        "(optimal) to 100% (bad)."},
+       {"GPU_UTIL",
         "",
         "",
         "100*GRBM_GUI_ACTIVE/GRBM_COUNT",
@@ -175,7 +220,8 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
         "",
         "",
         "reduce(SQ_WAVES,sum)",
-        "Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."},
+        "Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ "
+        "instances."},
        {"TCC_HIT_sum",
         "",
         "",

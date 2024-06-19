@@ -1,4 +1,63 @@
-<gfx8>
+<common_derived>
+  # GPUBusy         The percentage of time GPU was busy.
+  <metric
+    name="GPUBusy"
+    descr="The percentage of time GPU was busy."
+    expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT
+  ></metric>
+
+  # Wavefronts      Total wavefronts.
+  <metric
+    name="Wavefronts"
+    descr="Total wavefronts."
+    expr=SQ_WAVES
+  ></metric>
+
+  # VALUInsts       The average number of vector ALU instructions executed per work-item (affected by flow control).
+  <metric
+    name="VALUInsts"
+    descr="The average number of vector ALU instructions executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_VALU/SQ_WAVES
+  ></metric>
+
+  # SALUInsts       The average number of scalar ALU instructions executed per work-item (affected by flow control).
+  <metric
+    name="SALUInsts"
+    descr="The average number of scalar ALU instructions executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_SALU/SQ_WAVES
+  ></metric>
+
+  # SFetchInsts     The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control).
+  <metric
+    name="SFetchInsts"
+    descr="The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control)."
+    expr=SQ_INSTS_SMEM/SQ_WAVES
+  ></metric>
+
+  # GDSInsts        The average number of GDS read or GDS write instructions executed per work item (affected by flow control).
+  <metric
+    name="GDSInsts"
+    descr="The average number of GDS read or GDS write instructions executed per work item (affected by flow control)."
+    expr=SQ_INSTS_GDS/SQ_WAVES
+  ></metric>
+
+  # MemUnitBusy     The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).
+  <metric
+    name="MemUnitBusy"
+    descr="The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound)."
+    expr=100*reduce(TA_TA_BUSY,max)/GRBM_GUI_ACTIVE/SE_NUM
+  ></metric>
+
+  # ALUStalledByLDS The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
+  <metric
+    name="ALUStalledByLDS"
+    descr="The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad)."
+    expr=400*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE
+  ></metric>
+
+</common_derived>
+
+<gfx8 base="common_derived">
   <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
@@ -33,7 +92,7 @@
   <metric name="LDSBankConflict" expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
 </gfx8>
 
-<gfx9>
+<gfx9 base="common_derived">
   <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="TA_BUSY_avr" expr=reduce(TA_TA_BUSY,avr) descr="TA block is busy. Average over TA instances."></metric>
   <metric name="TA_BUSY_max" expr=reduce(TA_TA_BUSY,max) descr="TA block is busy. Max over TA instances."></metric>
@@ -428,7 +487,7 @@
   <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
 </gfx940>
 
-<gfx10>
+<gfx10 base="common_derived">
   <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="MeanOccupancyPerCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM descr="Mean occupancy per compute unit."></metric>
   <metric name="MeanOccupancyPerActiveCU" expr=GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM descr="Mean occupancy per active compute unit."></metric>
@@ -476,7 +535,7 @@
 <gfx1032 base="gfx10">
 </gfx1032>
 
-<gfx11>
+<gfx11 base="common_derived">
   <metric name="SQ_WAVES_sum" expr=reduce(SQ_WAVES,sum) descr="Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ instances."></metric>
   <metric name="GPU_UTIL" expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>
   <metric name="WAVE_DEP_WAIT" expr=100*SQ_WAIT_ANY/SQ_WAVE_CYCLES descr="Percentage of the SQ_WAVE_CYCLE time spent waiting for anything."></metric>
@@ -517,63 +576,3 @@
 <gfx942 base="gfx940"></gfx942>
 #Navi21
 <gfx1032 base="gfx1032"></gfx1032>
-
-
-<global>
-  # GPUBusy         The percentage of time GPU was busy.
-  <metric
-    name="GPUBusy"
-    descr="The percentage of time GPU was busy."
-    expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT
-  ></metric>
-
-  # Wavefronts      Total wavefronts.
-  <metric
-    name="Wavefronts"
-    descr="Total wavefronts."
-    expr=SQ_WAVES
-  ></metric>
-
-  # VALUInsts       The average number of vector ALU instructions executed per work-item (affected by flow control).
-  <metric
-    name="VALUInsts"
-    descr="The average number of vector ALU instructions executed per work-item (affected by flow control)."
-    expr=SQ_INSTS_VALU/SQ_WAVES
-  ></metric>
-
-  # SALUInsts       The average number of scalar ALU instructions executed per work-item (affected by flow control).
-  <metric
-    name="SALUInsts"
-    descr="The average number of scalar ALU instructions executed per work-item (affected by flow control)."
-    expr=SQ_INSTS_SALU/SQ_WAVES
-  ></metric>
-
-  # SFetchInsts     The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control).
-  <metric
-    name="SFetchInsts"
-    descr="The average number of scalar fetch instructions from the video memory executed per work-item (affected by flow control)."
-    expr=SQ_INSTS_SMEM/SQ_WAVES
-  ></metric>
-
-  # GDSInsts        The average number of GDS read or GDS write instructions executed per work item (affected by flow control).
-  <metric
-    name="GDSInsts"
-    descr="The average number of GDS read or GDS write instructions executed per work item (affected by flow control)."
-    expr=SQ_INSTS_GDS/SQ_WAVES
-  ></metric>
-
-  # MemUnitBusy     The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).
-  <metric
-    name="MemUnitBusy"
-    descr="The percentage of GPUTime the memory unit is active. The result includes the stall time (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound)."
-    expr=100*reduce(TA_TA_BUSY,max)/GRBM_GUI_ACTIVE/SE_NUM
-  ></metric>
-
-  # ALUStalledByLDS The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).
-  <metric
-    name="ALUStalledByLDS"
-    descr="The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad)."
-    expr=100*SQ_WAIT_INST_LDS*4/SQ_WAVES/GRBM_GUI_ACTIVE
-  ></metric>
-
-</global>

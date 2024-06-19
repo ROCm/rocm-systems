@@ -101,7 +101,7 @@ loadXml(const std::string& filename, bool load_constants = false)
          * respec the XML (which we should...).
          */
         if(gfx_name.find("metric") == std::string::npos ||
-           gfx_name.find("top.") == std::string::npos)
+           gfx_name.find("top.") == std::string::npos || gfx_name.find("gfx") == std::string::npos)
             continue;
 
         auto& metricVec =
