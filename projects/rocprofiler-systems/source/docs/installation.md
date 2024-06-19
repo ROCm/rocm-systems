@@ -6,24 +6,29 @@
    :maxdepth: 4
 ```
 
+## Release Links
+
+- [Latest Omnitrace Release](https://github.com/ROCm/omnitrace/releases/latest)
+- [All Omnitrace Releases](https://github.com/ROCm/omnitrace/releases)
+
 ## Quick Start (Latest Release, Binary Installer)
 
-Download the `omnitrace-install.py` and specify `--prefix <install-directory>`. This script
-will attempt to auto-detect the appropriate OS distribution and OS version.
-If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major version and `Y`
-is the ROCm minor version, e.g. `--rocm 5.4`.
+Download the [omnitrace-install.py](https://github.com/ROCm/omnitrace/releases/latest/download/omnitrace-install.py)
+and specify `--prefix <install-directory>`. This script will attempt to auto-detect the appropriate OS
+distribution and OS version. If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major
+version and `Y` is the ROCm minor version, e.g. `--rocm 6.0`.
 
-```console
+```shell
 wget https://github.com/ROCm/omnitrace/releases/latest/download/omnitrace-install.py
-python3 ./omnitrace-install.py --prefix /opt/omnitrace --rocm 5.4
+python3 ./omnitrace-install.py --prefix /opt/omnitrace --rocm 6.0
 ```
 
 This script supports installation on Ubuntu, OpenSUSE, RedHat, Debian, CentOS, and Fedora.
-If the target OS is compatible with one of the [operating system versions](#operating-system) below,
+If the target OS is compatible with one of the [operating system versions](#operating-system-support) below,
 specify `-d <DISTRO> -v <VERSION>`, e.g. if the OS is compatible with Ubuntu 18.04, pass
 `-d ubuntu -v 18.04` to the script.
 
-## Operating System
+## Operating System Support
 
 OmniTrace is only supported on Linux. The following distributions are tested:
 
@@ -41,8 +46,7 @@ Other OS distributions may be supported but are not tested.
 
 ### Identifying the Operating System
 
-If you are unsure of the operating system and version, the `/etc/os-release` and `/usr/lib/os-release` files contain
-operating system identification data for Linux systems.
+If you are unsure of the operating system and version, the `/etc/os-release` and `/usr/lib/os-release` files contain operating system identification data for Linux systems.
 
 ```shell
 $ cat /etc/os-release
