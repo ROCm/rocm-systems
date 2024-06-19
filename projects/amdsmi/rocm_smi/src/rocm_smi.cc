@@ -2247,7 +2247,8 @@ rsmi_dev_xgmi_plpd_set(uint32_t dv_ind,
   DEVICE_MUTEX
   GET_DEV_FROM_INDX
 
-  std::string value = std::to_string(plpd_id);
+  // Need to add new line character
+  std::string value = std::to_string(plpd_id) + "\n";
   int ret = dev->writeDevInfo(amd::smi::kDevXgmiPlpd , value);
   return amd::smi::ErrnoToRsmiStatus(ret);
 
@@ -2360,7 +2361,8 @@ rsmi_dev_soc_pstate_set(uint32_t dv_ind,
   DEVICE_MUTEX
   GET_DEV_FROM_INDX
 
-  std::string value = std::to_string(policy_id);
+  // need to add new line character
+  std::string value = std::to_string(policy_id) + "\n";
   int ret = dev->writeDevInfo(amd::smi::kDevSocPstate , value);
   return amd::smi::ErrnoToRsmiStatus(ret);
 

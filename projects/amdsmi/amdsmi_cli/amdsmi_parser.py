@@ -1071,7 +1071,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_compute_help = "Reset compute partitions on the specified GPU"
         reset_memory_help = "Reset memory partitions on the specified GPU"
         reset_power_cap_help = "Reset power capacity limit to max capable"
-        reset_gpu_run_cleaner_shader_help = "Run the shader on processor. Only CLEANER shader can be used to clean up data in LDS/GPRs"
+        reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs"
 
         # Create reset subparser
         reset_parser = subparsers.add_parser('reset', help=reset_help, description=reset_subcommand_help)
@@ -1097,7 +1097,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             reset_parser.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
 
         # Add Baremetal and Virtual OS reset arguments
-        reset_parser.add_argument('-l', '--run-shader', action='store', choices=["CLEANER"], type=str.upper, required=False, help=reset_gpu_run_cleaner_shader_help, metavar='SHADER_NAME')
+        reset_parser.add_argument('-l', '--clean-local-data', action='store_true', required=False, help=reset_gpu_clean_local_data_help)
 
 
     def _add_monitor_parser(self, subparsers, func):

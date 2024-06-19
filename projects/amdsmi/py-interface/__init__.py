@@ -136,7 +136,7 @@ from .amdsmi_interface import amdsmi_set_clk_freq
 from .amdsmi_interface import amdsmi_set_gpu_overdrive_level
 from .amdsmi_interface import amdsmi_set_soc_pstate
 from .amdsmi_interface import amdsmi_set_xgmi_plpd
-from .amdsmi_interface import amdsmi_set_gpu_run_cleaner_shader
+from .amdsmi_interface import amdsmi_clean_gpu_local_data
 from .amdsmi_interface import amdsmi_set_gpu_process_isolation
 
 # # Physical State Queries

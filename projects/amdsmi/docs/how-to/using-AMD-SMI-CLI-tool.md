@@ -6,7 +6,7 @@ AMD-SMI reports the version and current platform detected when running the comma
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.6.0.0 | ROCm version: 6.2.0 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 24.6.1.0 | ROCm version: 6.2.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -36,25 +36,24 @@ Each command will have detailed information via `amd-smi [command] --help`
 
 For convenience, here is the help output for each command
 
-``` bash
+```bash
 ~$ amd-smi list --help
 usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                     [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
 
-- Lists all the devices on the system and the links between devices.
-- Lists all the sockets and for each socket, GPUs and/or CPUs associated to that socket alongside some basic information for each device.
-
-.. NOTE::
-
-In virtualization environments, it can also list VFs associated to each GPU with some basic information for each VF.
+Lists all the devices on the system and the links between devices.
+Lists all the sockets and for each socket, GPUs and/or CPUs associated to
+that socket alongside some basic information for each device.
+In virtualization environments, it can also list VFs associated to each
+GPU with some basic information for each VF.
 
 options:
   -h, --help                  show this help message and exit
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -76,20 +75,20 @@ Command Modifiers:
 
 ```bash
 ~$ amd-smi static --help
-usage: amd-smi static [-h] [-g GPU [GPU ...]] [-a] [-b] [-V] [-d] [-v] [-c] [-B] [-r] [-p]
-                      [-l] [-P] [-x] [-s] [-u] [--json | --csv] [--file FILE]
-                      [--loglevel LEVEL]
+usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
+                      [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
+                      [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
-- If no GPU is specified, returns static information for all GPUs on the system.
-- If no static argument is provided, all static information will be displayed.
+If no GPU is specified, returns static information for all GPUs on the system.
+If no static argument is provided, all static information will be displayed.
 
 Static Arguments:
   -h, --help               show this help message and exit
   -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
-                           ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                           ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                           ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                           ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                           ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                           ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                           ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                           ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                              all | Selects all devices
   -U, --cpu CPU [CPU ...]  Select a CPU ID from the possible choices:
                            ID: 0
@@ -104,10 +103,12 @@ Static Arguments:
   -v, --vram               All vram information
   -c, --cache              All cache information
   -B, --board              All board information
+  -R, --process-isolation  The process isolation status
   -r, --ras                Displays RAS features information
   -p, --partition          Partition information
   -l, --limit              All limit metric values (i.e. power and thermal limits)
-  -s, --process-isolation  The process isolation status
+  -P, --policy             The available DPM policy
+  -x, --xgmi-plpd          The available XGMI per-link power down policy
   -u, --numa               All numa node information
 
 CPU Arguments:
@@ -122,7 +123,7 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-``` bash
+```bash
 ~$ amd-smi firmware --help
 usage: amd-smi firmware [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                         [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-f]
@@ -132,10 +133,10 @@ If no GPU is specified, return firmware information for all GPUs on the system.
 Firmware Arguments:
   -h, --help                   show this help message and exit
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
                                ID: 0
@@ -167,10 +168,10 @@ If no GPU is specified, return bad page information for all GPUs on the system.
 Bad Pages Arguments:
   -h, --help                  show this help message and exit
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -209,18 +210,18 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [--core-curr-active-freq-core-limit] [--core-energy]
                       [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
-- If no GPU is specified, returns metric information for all GPUs on the system.
-- If no metric argument is provided all metric information will be displayed.
+If no GPU is specified, returns metric information for all GPUs on the system.
+If no metric argument is provided all metric information will be displayed.
 
 Metric arguments:
   -h, --help                                show this help message and exit
   -g, --gpu GPU [GPU ...]                   Select a GPU ID, BDF, or UUID from the possible choices:
-                                            ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                                            ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                                            ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                                            ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                                            ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                                            ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                                            ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                                            ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                               all | Selects all devices
-  -U, --cpu CPU [CPU ...]                          Select a CPU ID from the possible choices:
+  -U, --cpu CPU [CPU ...]                   Select a CPU ID from the possible choices:
                                             ID: 0
                                             ID: 1
                                             ID: 2
@@ -290,16 +291,16 @@ usage: amd-smi process [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                        [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-G] [-e] [-p PID]
                        [-n NAME]
 
-- If no GPU is specified, returns information for all GPUs on the system.
-- If no process argument is provided all process information will be displayed.
+If no GPU is specified, returns information for all GPUs on the system.
+If no process argument is provided all process information will be displayed.
 
 Process arguments:
   -h, --help                   show this help message and exit
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                               ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                               ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                               ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
                                ID: 0
@@ -337,10 +338,10 @@ If no GPU is specified, returns event information for all GPUs on the system.
 Event Arguments:
   -h, --help                  show this help message and exit
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -366,16 +367,16 @@ usage: amd-smi topology [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                         [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-a]
                         [-w] [-o] [-t] [-b]
 
-- If no GPU is specified, returns information for all GPUs on the system.
-- If no topology argument is provided all topology information will be displayed.
+If no GPU is specified, returns information for all GPUs on the system.
+If no topology argument is provided all topology information will be displayed.
 
 Topology arguments:
   -h, --help                  show this help message and exit
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -401,27 +402,28 @@ Command Modifiers:
 ```
 
 ```bash
+~$ amd-smi set --help
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
-                   [-o WATTS] [-p POLICY] [-i STATUS] [--cpu-pwr-limit PWR_LIMIT]
-                   [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
+                   [-o WATTS] [-p POLICY_ID] [-x POLICY_ID] [-R STATUS]
+                   [--cpu-pwr-limit PWR_LIMIT] [--cpu-xgmi-link-width MIN_WIDTH MAX_WIDTH]
                    [--cpu-lclk-dpm-level NBIOID MIN_DPM MAX_DPM] [--cpu-pwr-eff-mode MODE]
                    [--cpu-gmi3-link-width MIN_LW MAX_LW] [--cpu-pcie-link-rate LINK_RATE]
                    [--cpu-df-pstate-range MAX_PSTATE MIN_PSTATE] [--cpu-enable-apb]
                    [--cpu-disable-apb DF_PSTATE] [--soc-boost-limit BOOST_LIMIT]
-                   [--core-boost-limit BOOST_LIMIT] [-c] [--json | --csv] [--file FILE]
+                   [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
                    [--loglevel LEVEL]
 
-- A GPU must be specified to set a configuration.
-- A set argument must be provided; Multiple set arguments are accepted
+A GPU must be specified to set a configuration.
+A set argument must be provided; Multiple set arguments are accepted
 
 Set Arguments:
   -h, --help                                   show this help message and exit
   -g, --gpu GPU [GPU ...]                      Select a GPU ID, BDF, or UUID from the possible choices:
-                                               ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                                               ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                                               ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                                               ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                                               ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                                               ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                                               ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                                               ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]                      Select a CPU ID from the possible choices:
                                                ID: 0
@@ -443,8 +445,7 @@ Set Arguments:
   -o, --power-cap WATTS                        Set power capacity limit
   -p, --dpm-policy POLICY_ID                   Set the GPU DPM policy using policy id
   -x, --xgmi-plpd POLICY_ID                    Set the GPU XGMI per-link power down policy using policy id
-  -i, --process-isolation STATUS               Enable or disable the GPU process isolation: 0 for disable and 1 for enable.
-  -c, --clear-sram-data                        Clear the GPU SRAM data
+  -R, --process-isolation STATUS               Enable or disable the GPU process isolation: 0 for disable and 1 for enable.
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                    Set power limit for the given socket. Input parameter is power limit value.
@@ -474,18 +475,18 @@ Command Modifiers:
 ~$ amd-smi reset --help
 usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                      (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-G] [-c]
-                     [-f] [-p] [-x] [-d] [-C] [-M] [-o]
+                     [-f] [-p] [-x] [-d] [-C] [-M] [-o] [-l]
 
-- A GPU must be specified to reset a configuration.
-- A reset argument must be provided; Multiple reset arguments are accepted
+A GPU must be specified to reset a configuration.
+A reset argument must be provided; Multiple reset arguments are accepted
 
 Reset Arguments:
   -h, --help                  show this help message and exit
   -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
-                              ID: 0 | BDF: 0000:01:00.0 | UUID: 71ff74a0-0000-1000-8066-0a3c71d5f817
-                              ID: 1 | BDF: 0001:01:00.0 | UUID: b4ff74a0-0000-1000-80b2-fa0be8628b1a
-                              ID: 2 | BDF: 0002:01:00.0 | UUID: a9ff74a0-0000-1000-8007-3066a98ba4a6
-                              ID: 3 | BDF: 0003:01:00.0 | UUID: 53ff74a0-0000-1000-80a0-a1ff3830f499
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
                                 all | Selects all devices
   -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
                               ID: 0
@@ -505,6 +506,91 @@ Reset Arguments:
   -C, --compute-partition     Reset compute partitions on the specified GPU
   -M, --memory-partition      Reset memory partitions on the specified GPU
   -o, --power-cap             Reset power capacity limit to max capable
+  -l, --run-shader SHADER_NAME  Run the shader on processor. Only CLEANER shader can be used to clean up data in LDS/GPRs
+
+Command Modifiers:
+  --json                      Displays output in JSON format (human readable by default).
+  --csv                       Displays output in CSV format (human readable by default).
+  --file FILE                 Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL            Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+```bash
+~$ amd-smi monitor --help
+usage: amd-smi monitor [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                       [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
+                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-p] [-t] [-u] [-m] [-n]
+                       [-d] [-e] [-v] [-r]
+
+Monitor a target device for the specified arguments.
+If no arguments are provided, all arguments will be enabled.
+Use the watch arguments to run continuously
+
+Monitor Arguments:
+  -h, --help                   show this help message and exit
+  -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                               ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                               ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                               ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
+                                 all | Selects all devices
+  -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
+                               ID: 0
+                               ID: 1
+                               ID: 2
+                               ID: 3
+                                 all | Selects all devices
+  -O, --core CORE [CORE ...]   Select a Core ID from the possible choices:
+                               ID: 0 - 95
+                                 all  | Selects all devices
+  -w, --watch INTERVAL         Reprint the command in a loop of INTERVAL seconds
+  -W, --watch_time TIME        The total TIME to watch the given command
+  -i, --iterations ITERATIONS  Total number of ITERATIONS to loop on the given command
+  -p, --power-usage            Monitor power usage in Watts
+  -t, --temperature            Monitor temperature in Celsius
+  -u, --gfx                    Monitor graphics utilization (%) and clock (MHz)
+  -m, --mem                    Monitor memory utilization (%) and clock (MHz)
+  -n, --encoder                Monitor encoder utilization (%) and clock (MHz)
+  -d, --decoder                Monitor decoder utilization (%) and clock (MHz)
+  -e, --ecc                    Monitor ECC single bit, ECC double bit, and PCIe replay error counts
+  -v, --vram-usage             Monitor memory usage in MB
+  -r, --pcie                   Monitor PCIe bandwidth in Mb/s
+
+Command Modifiers:
+  --json                       Displays output in JSON format (human readable by default).
+  --csv                        Displays output in CSV format (human readable by default).
+  --file FILE                  Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL             Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+```bash
+~$ amd-smi xgmi --help
+usage: amd-smi xgmi [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                    [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-m]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no xgmi argument is provided all xgmi information will be displayed.
+
+XGMI arguments:
+  -h, --help                  show this help message and exit
+  -g, --gpu GPU [GPU ...]     Select a GPU ID, BDF, or UUID from the possible choices:
+                              ID: 0 | BDF: 0000:01:00.0 | UUID: 7eff74a0-0000-1000-808f-7e20764e2714
+                              ID: 1 | BDF: 0001:01:00.0 | UUID: b6ff74a0-0000-1000-80ae-7c8cefe1f084
+                              ID: 2 | BDF: 0002:01:00.0 | UUID: 36ff74a0-0000-1000-8071-25d815189854
+                              ID: 3 | BDF: 0003:01:00.0 | UUID: f4ff74a0-0000-1000-80c4-4c2be5e66537
+                                all | Selects all devices
+  -U, --cpu CPU [CPU ...]     Select a CPU ID from the possible choices:
+                              ID: 0
+                              ID: 1
+                              ID: 2
+                              ID: 3
+                                all | Selects all devices
+  -O, --core CORE [CORE ...]  Select a Core ID from the possible choices:
+                              ID: 0 - 95
+                                all  | Selects all devices
+  -m, --metric                Metric XGMI information
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).
@@ -521,28 +607,29 @@ Here is some example output from the tool:
 ```bash
 ~$ amd-smi static
 CPU: 0
-  SMU:
-      FW_VERSION: 85:81:0
-  INTERFACE_VERSION:
-      PROTO VERSION: 6
+    SMU:
+        FW_VERSION: 85.90.0
+    INTERFACE_VERSION:
+        PROTO VERSION: 6
 
 CPU: 1
-  SMU:
-      FW_VERSION: 85:81:0
-  INTERFACE_VERSION:
-      PROTO VERSION: 6
+    SMU:
+        FW_VERSION: 85.90.0
+    INTERFACE_VERSION:
+        PROTO VERSION: 6
 
 CPU: 2
-  SMU:
-      FW_VERSION: 85:81:0
-  INTERFACE_VERSION:
-      PROTO VERSION: 6
+    SMU:
+        FW_VERSION: 85.90.0
+    INTERFACE_VERSION:
+        PROTO VERSION: 6
 
 CPU: 3
-  SMU:
-      FW_VERSION: 85:81:0
-  INTERFACE_VERSION:
-      PROTO VERSION: 6
+    SMU:
+        FW_VERSION: 85.90.0
+    INTERFACE_VERSION:
+        PROTO VERSION: 6
+
 
 GPU: 0
     ASIC:
@@ -551,8 +638,8 @@ GPU: 0
         VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
-        REV_ID: 0x0
-        ASIC_SERIAL: 0x71660A3C71D5F817
+        REV_ID: 0x00
+        ASIC_SERIAL: 0x7E8F7E20764E2714
         OAM_ID: 0
     BUS:
         BDF: 0000:01:00.0
@@ -564,25 +651,26 @@ GPU: 0
         NAME: N/A
         BUILD_DATE: N/A
         PART_NUMBER: N/A
-          VERSION: N/A
+        VERSION: N/A
     LIMIT:
         MAX_POWER: 550 W
+        MIN_POWER: 0 W
         SOCKET_POWER: 550 W
         SLOWDOWN_EDGE_TEMPERATURE: N/A
         SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
-        SLOWDOWN_VRAM_TEMPERATURE: 95 °C
+        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
         SHUTDOWN_EDGE_TEMPERATURE: N/A
         SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
-        SHUTDOWN_VRAM_TEMPERATURE: 105 °C
+        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.7.0
+        VERSION: 6.9.0-rc5+
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A
         FRU_ID: N/A
-        PRODUCT_NAME: N/A
-        MANUFACTURER_NAME: N/A
+        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
+        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
     RAS:
         EEPROM_VERSION: 0x0
         PARITY_SCHEMA: DISABLED
@@ -604,6 +692,11 @@ GPU: 0
             MP0: DISABLED
             MP1: DISABLED
             FUSE: DISABLED
+            MCA: DISABLED
+            VCN: DISABLED
+            JPEG: DISABLED
+            IH: DISABLED
+            MPIO: DISABLED
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
@@ -629,38 +722,39 @@ GPU: 0
             POLICY_DESCRIPTION: plpd_default
             POLICY_ID: 2
             POLICY_DESCRIPTION: plpd_optimized
+    PROCESS_ISOLATION: N/A
     NUMA:
         NODE: 0
         AFFINITY: 0
     VRAM:
         TYPE: HBM
         VENDOR: N/A
-        SIZE: 96432 MB
-  CACHE_INFO:
-      CACHE_0:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 464
-      CACHE_1:
-          CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-          CACHE_SIZE: 64 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 160
-      CACHE_2:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32768 KB
-          CACHE_LEVEL: 2
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
-      CACHE_3:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 262144 KB
-          CACHE_LEVEL: 3
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
+        SIZE: 64289 MB
+    CACHE_INFO:
+        CACHE_0:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 32 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 348
+        CACHE_1:
+            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
+            CACHE_SIZE: 64 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 120
+        CACHE_2:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 4096 KB
+            CACHE_LEVEL: 2
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
+        CACHE_3:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 262144 KB
+            CACHE_LEVEL: 3
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
 
 GPU: 1
     ASIC:
@@ -669,8 +763,8 @@ GPU: 1
         VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
-        REV_ID: 0x0
-        ASIC_SERIAL: 0xB4B2FA0BE8628B1A
+        REV_ID: 0x00
+        ASIC_SERIAL: 0xB6AE7C8CEFE1F084
         OAM_ID: 1
     BUS:
         BDF: 0001:01:00.0
@@ -682,25 +776,26 @@ GPU: 1
         NAME: N/A
         BUILD_DATE: N/A
         PART_NUMBER: N/A
-          VERSION: N/A
+        VERSION: N/A
     LIMIT:
         MAX_POWER: 550 W
+        MIN_POWER: 0 W
         SOCKET_POWER: 550 W
         SLOWDOWN_EDGE_TEMPERATURE: N/A
         SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
-        SLOWDOWN_VRAM_TEMPERATURE: 95 °C
+        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
         SHUTDOWN_EDGE_TEMPERATURE: N/A
         SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
-        SHUTDOWN_VRAM_TEMPERATURE: 105 °C
+        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.7.0
+        VERSION: 6.9.0-rc5+
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A
         FRU_ID: N/A
-        PRODUCT_NAME: N/A
-        MANUFACTURER_NAME: N/A
+        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
+        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
     RAS:
         EEPROM_VERSION: 0x0
         PARITY_SCHEMA: DISABLED
@@ -722,6 +817,11 @@ GPU: 1
             MP0: DISABLED
             MP1: DISABLED
             FUSE: DISABLED
+            MCA: DISABLED
+            VCN: DISABLED
+            JPEG: DISABLED
+            IH: DISABLED
+            MPIO: DISABLED
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
@@ -747,38 +847,39 @@ GPU: 1
             POLICY_DESCRIPTION: plpd_default
             POLICY_ID: 2
             POLICY_DESCRIPTION: plpd_optimized
+    PROCESS_ISOLATION: N/A
     NUMA:
         NODE: 1
         AFFINITY: 1
     VRAM:
         TYPE: HBM
         VENDOR: N/A
-        SIZE: 96432 MB
-  CACHE_INFO:
-      CACHE_0:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 464
-      CACHE_1:
-          CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-          CACHE_SIZE: 64 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 160
-      CACHE_2:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32768 KB
-          CACHE_LEVEL: 2
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
-      CACHE_3:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 262144 KB
-          CACHE_LEVEL: 3
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
+        SIZE: 64289 MB
+    CACHE_INFO:
+        CACHE_0:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 32 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 348
+        CACHE_1:
+            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
+            CACHE_SIZE: 64 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 120
+        CACHE_2:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 4096 KB
+            CACHE_LEVEL: 2
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
+        CACHE_3:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 262144 KB
+            CACHE_LEVEL: 3
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
 
 GPU: 2
     ASIC:
@@ -787,8 +888,8 @@ GPU: 2
         VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
-        REV_ID: 0x0
-        ASIC_SERIAL: 0xA9073066A98BA4A6
+        REV_ID: 0x00
+        ASIC_SERIAL: 0x367125D815189854
         OAM_ID: 2
     BUS:
         BDF: 0002:01:00.0
@@ -800,25 +901,26 @@ GPU: 2
         NAME: N/A
         BUILD_DATE: N/A
         PART_NUMBER: N/A
-          VERSION: N/A
+        VERSION: N/A
     LIMIT:
         MAX_POWER: 550 W
+        MIN_POWER: 0 W
         SOCKET_POWER: 550 W
         SLOWDOWN_EDGE_TEMPERATURE: N/A
         SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
-        SLOWDOWN_VRAM_TEMPERATURE: 95 °C
+        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
         SHUTDOWN_EDGE_TEMPERATURE: N/A
         SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
-        SHUTDOWN_VRAM_TEMPERATURE: 105 °C
+        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.7.0
+        VERSION: 6.9.0-rc5+
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A
         FRU_ID: N/A
-        PRODUCT_NAME: N/A
-        MANUFACTURER_NAME: N/A
+        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
+        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
     RAS:
         EEPROM_VERSION: 0x0
         PARITY_SCHEMA: DISABLED
@@ -840,6 +942,11 @@ GPU: 2
             MP0: DISABLED
             MP1: DISABLED
             FUSE: DISABLED
+            MCA: DISABLED
+            VCN: DISABLED
+            JPEG: DISABLED
+            IH: DISABLED
+            MPIO: DISABLED
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
@@ -865,38 +972,39 @@ GPU: 2
             POLICY_DESCRIPTION: plpd_default
             POLICY_ID: 2
             POLICY_DESCRIPTION: plpd_optimized
+    PROCESS_ISOLATION: N/A
     NUMA:
         NODE: 2
         AFFINITY: 2
     VRAM:
         TYPE: HBM
         VENDOR: N/A
-        SIZE: 96432 MB
-  CACHE_INFO:
-      CACHE_0:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 464
-      CACHE_1:
-          CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-          CACHE_SIZE: 64 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 160
-      CACHE_2:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32768 KB
-          CACHE_LEVEL: 2
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
-      CACHE_3:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 262144 KB
-          CACHE_LEVEL: 3
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
+        SIZE: 64289 MB
+    CACHE_INFO:
+        CACHE_0:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 32 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 348
+        CACHE_1:
+            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
+            CACHE_SIZE: 64 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 120
+        CACHE_2:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 4096 KB
+            CACHE_LEVEL: 2
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
+        CACHE_3:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 262144 KB
+            CACHE_LEVEL: 3
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
 
 GPU: 3
     ASIC:
@@ -905,8 +1013,8 @@ GPU: 3
         VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
-        REV_ID: 0x0
-        ASIC_SERIAL: 0x53A0A1FF3830F499
+        REV_ID: 0x00
+        ASIC_SERIAL: 0xF4C44C2BE5E66537
         OAM_ID: 3
     BUS:
         BDF: 0003:01:00.0
@@ -918,25 +1026,26 @@ GPU: 3
         NAME: N/A
         BUILD_DATE: N/A
         PART_NUMBER: N/A
-          VERSION: N/A
+        VERSION: N/A
     LIMIT:
         MAX_POWER: 550 W
+        MIN_POWER: 0 W
         SOCKET_POWER: 550 W
         SLOWDOWN_EDGE_TEMPERATURE: N/A
         SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
-        SLOWDOWN_VRAM_TEMPERATURE: 95 °C
+        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
         SHUTDOWN_EDGE_TEMPERATURE: N/A
         SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
-        SHUTDOWN_VRAM_TEMPERATURE: 105 °C
+        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
     DRIVER:
         NAME: amdgpu
-        VERSION: 6.7.0
+        VERSION: 6.9.0-rc5+
     BOARD:
         MODEL_NUMBER: N/A
         PRODUCT_SERIAL: N/A
         FRU_ID: N/A
-        PRODUCT_NAME: N/A
-        MANUFACTURER_NAME: N/A
+        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
+        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
     RAS:
         EEPROM_VERSION: 0x0
         PARITY_SCHEMA: DISABLED
@@ -958,6 +1067,11 @@ GPU: 3
             MP0: DISABLED
             MP1: DISABLED
             FUSE: DISABLED
+            MCA: DISABLED
+            VCN: DISABLED
+            JPEG: DISABLED
+            IH: DISABLED
+            MPIO: DISABLED
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
@@ -983,38 +1097,38 @@ GPU: 3
             POLICY_DESCRIPTION: plpd_default
             POLICY_ID: 2
             POLICY_DESCRIPTION: plpd_optimized
+    PROCESS_ISOLATION: N/A
     NUMA:
         NODE: 3
         AFFINITY: 3
     VRAM:
         TYPE: HBM
         VENDOR: N/A
-        SIZE: 96432 MB
-  CACHE_INFO:
-      CACHE_0:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 464
-      CACHE_1:
-          CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-          CACHE_SIZE: 64 KB
-          CACHE_LEVEL: 1
-          MAX_NUM_CU_SHARED: 2
-          NUM_CACHE_INSTANCE: 160
-      CACHE_2:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 32768 KB
-          CACHE_LEVEL: 2
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
-      CACHE_3:
-          CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-          CACHE_SIZE: 262144 KB
-          CACHE_LEVEL: 3
-          MAX_NUM_CU_SHARED: 304
-          NUM_CACHE_INSTANCE: 1
+        SIZE: 64289 MB
+    CACHE_INFO:
+        CACHE_0:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 32 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 348
+        CACHE_1:
+            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
+            CACHE_SIZE: 64 KB
+            CACHE_LEVEL: 1
+            MAX_NUM_CU_SHARED: 2
+            NUM_CACHE_INSTANCE: 120
+        CACHE_2:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 4096 KB
+            CACHE_LEVEL: 2
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
+        CACHE_3:
+            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
+            CACHE_SIZE: 262144 KB
+            CACHE_LEVEL: 3
+            MAX_NUM_CU_SHARED: 228
+            NUM_CACHE_INSTANCE: 1
 
 ```
-

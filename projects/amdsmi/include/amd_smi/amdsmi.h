@@ -154,7 +154,7 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_MAJOR 6
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 0
+#define AMDSMI_LIB_VERSION_MINOR 1
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
 #define AMDSMI_LIB_VERSION_RELEASE 0
@@ -587,8 +587,8 @@ typedef struct {
   uint64_t device_id;   //< The device id of a GPU
   uint32_t rev_id;
   char asic_serial[AMDSMI_NORMAL_STRING_LENGTH];
-  uint16_t oam_id;   //< 0xFFFF if not supported
-  uint16_t reserved[37];
+  uint32_t oam_id;   //< 0xFFFF if not supported
+  uint32_t reserved[18];
 } amdsmi_asic_info_t;
 
 typedef enum {
@@ -3509,25 +3509,22 @@ amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle process
                              uint32_t pisolate);
 
 /**
- * @brief Run the cleaner shader to clean up data in LDS/GPRs
+ * @brief Clean up local data in LDS/GPRs
  *
  * @platform{gpu_bm_linux} @platform{guest_1vf}
  *
- * @details Given a processor handle @p processor_handle, and a sclean flag @p sclean,
- * this function will clear the local data of this processor. This can be called between
+ * @details Given a processor handle @p processor_handle,
+ * this function will clean the local data of this processor. This can be called between
  * user logins to prevent information leak.
  *
  *  @note This function requires root access
  *
  *  @param[in] processor_handle a processor handle
  *
- *  @param[in] sclean the clean flag. Only 1 will take effect and other number
- *  are reserved for future usage.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_set_gpu_run_cleaner_shader(amdsmi_processor_handle processor_handle,
-                  uint32_t sclean);
+amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_handle);
 
 /** @} End PerfCont */
 

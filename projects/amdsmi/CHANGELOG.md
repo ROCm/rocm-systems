@@ -16,7 +16,7 @@ VMs now have the ability to set the process isolation and clear the sram from th
 
 ```shell
 amd-smi set --process-isolation <0 or 1>
-amd-smi reset --clear-sram-data
+amd-smi reset --clean_local_data
 ```
 
 - **Added macros that were in `amdsmi.h` to the amdsmi Python library `amdsmi_interface.py`**.  
@@ -27,8 +27,8 @@ Added `AMDSMI_EVT_NOTIF_RING_HANG` to the possible events in the `amdsmi_evt_not
 
 ### Optimizations
 
-- **Updated naming for `amdsmi_set_gpu_clear_sram_data()` to `amdsmi_set_gpu_run_cleaner_shader()`**.  
-Changed the naming to be more accurate to what the function was doing. This change also extends to the CLI where we changed the `clear-sram-data` command to `run-shader` that accepts a shader name to run.
+- **Updated naming for `amdsmi_set_gpu_clear_sram_data()` to `amdsmi_clean_gpu_local_data()`**.  
+Changed the naming to be more accurate to what the function was doing. This change also extends to the CLI where we changed the `clear-sram-data` command to `clean_local_data`.
 
 - **Updated `amdsmi_clk_info_t` struct in amdsmi.h and amdsmi_interface.py to align with host/guest**.  
 Changed cur_clk to clk, changed sleep_clk to clk_deep_sleep, and added clk_locked value. New struct will be in the following format:
@@ -121,7 +121,6 @@ Multiple process outputs in the CLI tool were not being registered correctly. Th
 ]
 ```
 
-
 - **Removed `throttle-status` from `amd-smi monitor` as it is no longer reliably supported**.  
 Throttle status may work for older ASICs, but will be replaced with PVIOL and TVIOL metrics for future ASIC support. It remains a field in the gpu_metrics API and in `amd-smi metric --power`.
 
@@ -136,7 +135,7 @@ The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropp
 
 ### Known Issues
 
-- **Process isolation and run shader commands do no currently work and will be supported in a future release**.  
+- **`amdsmi_get_gpu_process_isolation` and `amdsmi_clean_gpu_local_data` commands do no currently work and will be supported in a future release**.  
 
 ## amd_smi_lib for ROCm 6.1.2
 

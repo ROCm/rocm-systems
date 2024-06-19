@@ -2831,17 +2831,16 @@ def amdsmi_set_gpu_process_isolation(
     )
 
 
-def amdsmi_set_gpu_run_cleaner_shader(
+def amdsmi_clean_gpu_local_data(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-    sclean: int,
 ):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
     _check_res(
-        amdsmi_wrapper.amdsmi_set_gpu_run_cleaner_shader(
-            processor_handle, sclean
+        amdsmi_wrapper.amdsmi_clean_gpu_local_data(
+            processor_handle
         )
     )
 

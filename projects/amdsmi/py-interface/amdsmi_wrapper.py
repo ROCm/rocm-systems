@@ -900,8 +900,8 @@ struct_amdsmi_asic_info_t._fields_ = [
     ('device_id', ctypes.c_uint64),
     ('rev_id', ctypes.c_uint32),
     ('asic_serial', ctypes.c_char * 32),
-    ('oam_id', ctypes.c_uint16),
-    ('reserved', ctypes.c_uint16 * 37),
+    ('oam_id', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 18),
 ]
 
 amdsmi_asic_info_t = struct_amdsmi_asic_info_t
@@ -1519,7 +1519,7 @@ struct_amdsmi_dpm_policy_entry_t._fields_ = [
     ('policy_description', ctypes.c_char * 32),
 ]
 
-struct_amdsmi_dpm_policy_entry_t = struct_amdsmi_dpm_policy_entry_t
+amdsmi_dpm_policy_entry_t = struct_amdsmi_dpm_policy_entry_t
 class struct_amdsmi_dpm_policy_t(Structure):
     pass
 
@@ -2100,9 +2100,9 @@ amdsmi_get_gpu_process_isolation.argtypes = [amdsmi_processor_handle, ctypes.POI
 amdsmi_set_gpu_process_isolation = _libraries['libamd_smi.so'].amdsmi_set_gpu_process_isolation
 amdsmi_set_gpu_process_isolation.restype = amdsmi_status_t
 amdsmi_set_gpu_process_isolation.argtypes = [amdsmi_processor_handle, uint32_t]
-amdsmi_set_gpu_run_cleaner_shader = _libraries['libamd_smi.so'].amdsmi_set_gpu_run_cleaner_shader
-amdsmi_set_gpu_run_cleaner_shader.restype = amdsmi_status_t
-amdsmi_set_gpu_run_cleaner_shader.argtypes = [amdsmi_processor_handle, uint32_t]
+amdsmi_clean_gpu_local_data = _libraries['libamd_smi.so'].amdsmi_clean_gpu_local_data
+amdsmi_clean_gpu_local_data.restype = amdsmi_status_t
+amdsmi_clean_gpu_local_data.argtypes = [amdsmi_processor_handle]
 amdsmi_get_lib_version = _libraries['libamd_smi.so'].amdsmi_get_lib_version
 amdsmi_get_lib_version.restype = amdsmi_status_t
 amdsmi_get_lib_version.argtypes = [ctypes.POINTER(struct_amdsmi_version_t)]
@@ -2581,18 +2581,18 @@ __all__ = \
     'amd_metrics_table_header_t', 'amdsmi_asic_info_t',
     'amdsmi_bdf_t', 'amdsmi_bit_field_t', 'amdsmi_board_info_t',
     'amdsmi_cache_property_type_t', 'amdsmi_card_form_factor_t',
-    'amdsmi_clk_info_t', 'amdsmi_clk_type_t',
-    'amdsmi_compute_partition_type_t', 'amdsmi_container_types_t',
-    'amdsmi_counter_command_t', 'amdsmi_counter_value_t',
-    'amdsmi_cpu_apb_disable', 'amdsmi_cpu_apb_enable',
-    'amdsmi_cpusocket_handle', 'amdsmi_ddr_bw_metrics_t',
-    'amdsmi_dev_perf_level_t', 'amdsmi_dimm_power_t',
-    'amdsmi_dimm_thermal_t', 'amdsmi_dpm_level_t',
-    'amdsmi_dpm_policy_entry_t', 'amdsmi_dpm_policy_t',
-    'amdsmi_driver_info_t', 'amdsmi_engine_usage_t',
-    'amdsmi_error_count_t', 'amdsmi_event_group_t',
-    'amdsmi_event_handle_t', 'amdsmi_event_type_t',
-    'amdsmi_evt_notification_data_t',
+    'amdsmi_clean_gpu_local_data', 'amdsmi_clk_info_t',
+    'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
+    'amdsmi_container_types_t', 'amdsmi_counter_command_t',
+    'amdsmi_counter_value_t', 'amdsmi_cpu_apb_disable',
+    'amdsmi_cpu_apb_enable', 'amdsmi_cpusocket_handle',
+    'amdsmi_ddr_bw_metrics_t', 'amdsmi_dev_perf_level_t',
+    'amdsmi_dimm_power_t', 'amdsmi_dimm_thermal_t',
+    'amdsmi_dpm_level_t', 'amdsmi_dpm_policy_entry_t',
+    'amdsmi_dpm_policy_t', 'amdsmi_driver_info_t',
+    'amdsmi_engine_usage_t', 'amdsmi_error_count_t',
+    'amdsmi_event_group_t', 'amdsmi_event_handle_t',
+    'amdsmi_event_type_t', 'amdsmi_evt_notification_data_t',
     'amdsmi_evt_notification_type_t',
     'amdsmi_first_online_core_on_cpu_socket', 'amdsmi_freq_ind_t',
     'amdsmi_freq_volt_region_t', 'amdsmi_frequencies_t',
@@ -2619,10 +2619,10 @@ __all__ = \
     'amdsmi_get_cpu_socket_power', 'amdsmi_get_cpu_socket_power_cap',
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature', 'amdsmi_get_cpucore_handles',
-    'amdsmi_get_cpusocket_handles', 'amdsmi_get_soc_pstate',
-    'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
-    'amdsmi_get_fw_info', 'amdsmi_get_gpu_activity',
-    'amdsmi_get_gpu_asic_info', 'amdsmi_get_gpu_available_counters',
+    'amdsmi_get_cpusocket_handles', 'amdsmi_get_energy_count',
+    'amdsmi_get_esmi_err_msg', 'amdsmi_get_fw_info',
+    'amdsmi_get_gpu_activity', 'amdsmi_get_gpu_asic_info',
+    'amdsmi_get_gpu_available_counters',
     'amdsmi_get_gpu_bad_page_info', 'amdsmi_get_gpu_bdf_id',
     'amdsmi_get_gpu_board_info', 'amdsmi_get_gpu_cache_info',
     'amdsmi_get_gpu_compute_partition',
@@ -2666,11 +2666,11 @@ __all__ = \
     'amdsmi_get_processor_handles',
     'amdsmi_get_processor_handles_by_type',
     'amdsmi_get_processor_info', 'amdsmi_get_processor_type',
-    'amdsmi_get_socket_handles', 'amdsmi_get_socket_info',
-    'amdsmi_get_temp_metric', 'amdsmi_get_utilization_count',
-    'amdsmi_get_xgmi_info', 'amdsmi_get_xgmi_plpd',
-    'amdsmi_gpu_block_t', 'amdsmi_gpu_cache_info_t',
-    'amdsmi_gpu_control_counter',
+    'amdsmi_get_soc_pstate', 'amdsmi_get_socket_handles',
+    'amdsmi_get_socket_info', 'amdsmi_get_temp_metric',
+    'amdsmi_get_utilization_count', 'amdsmi_get_xgmi_info',
+    'amdsmi_get_xgmi_plpd', 'amdsmi_gpu_block_t',
+    'amdsmi_gpu_cache_info_t', 'amdsmi_gpu_control_counter',
     'amdsmi_gpu_counter_group_supported', 'amdsmi_gpu_create_counter',
     'amdsmi_gpu_destroy_counter', 'amdsmi_gpu_metrics_t',
     'amdsmi_gpu_read_counter', 'amdsmi_gpu_xgmi_error_status',
@@ -2703,7 +2703,6 @@ __all__ = \
     'amdsmi_set_cpu_socket_boostlimit',
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap', 'amdsmi_set_cpu_xgmi_width',
-    'amdsmi_set_soc_pstate', 'amdsmi_set_gpu_run_cleaner_shader',
     'amdsmi_set_gpu_clk_range', 'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_event_notification_mask',
     'amdsmi_set_gpu_fan_speed', 'amdsmi_set_gpu_memory_partition',
@@ -2712,10 +2711,10 @@ __all__ = \
     'amdsmi_set_gpu_perf_determinism_mode',
     'amdsmi_set_gpu_perf_level', 'amdsmi_set_gpu_power_profile',
     'amdsmi_set_gpu_process_isolation', 'amdsmi_set_power_cap',
-    'amdsmi_set_xgmi_plpd', 'amdsmi_shut_down',
-    'amdsmi_smu_fw_version_t', 'amdsmi_socket_handle',
-    'amdsmi_status_code_to_string', 'amdsmi_status_t',
-    'amdsmi_stop_gpu_event_notification',
+    'amdsmi_set_soc_pstate', 'amdsmi_set_xgmi_plpd',
+    'amdsmi_shut_down', 'amdsmi_smu_fw_version_t',
+    'amdsmi_socket_handle', 'amdsmi_status_code_to_string',
+    'amdsmi_status_t', 'amdsmi_stop_gpu_event_notification',
     'amdsmi_temp_range_refresh_rate_t', 'amdsmi_temperature_metric_t',
     'amdsmi_temperature_type_t', 'amdsmi_topo_get_link_type',
     'amdsmi_topo_get_link_weight', 'amdsmi_topo_get_numa_node_number',

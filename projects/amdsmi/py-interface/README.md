@@ -2084,17 +2084,16 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_set_gpu_run_cleaner_shader
+### amdsmi_clean_gpu_local_data
 Description: Clear the SRAM data of the given device. This can be called between user logins to prevent information leak.
 
 Input parameters:
 
 * `processor_handle` handle for the given device
-* `sclean` the clean flag. Only 1 will take effect and other number are reserved for future usage.
 
 Output: None
 
-Exceptions that can be thrown by `amdsmi_set_gpu_run_cleaner_shader` function:
+Exceptions that can be thrown by `amdsmi_clean_gpu_local_data` function:
 
 * `AmdSmiLibraryException`
 * `AmdSmiRetryException`
@@ -2109,7 +2108,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            amdsmi_set_gpu_run_cleaner_shader(device, 1)
+            amdsmi_clean_gpu_local_data(device)
 except AmdSmiException as e:
     print(e)
 ```

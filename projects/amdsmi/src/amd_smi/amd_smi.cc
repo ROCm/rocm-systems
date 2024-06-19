@@ -750,9 +750,11 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     }
 
     // default to 0xffff as not supported
-    info->oam_id = std::numeric_limits<uint16_t>::max();
+    info->oam_id = std::numeric_limits<uint32_t>::max();
+    uint16_t tmp_oam_id = 0;
     status =  rsmi_wrapper(rsmi_dev_oam_id_get, processor_handle,
-                    &(info->oam_id));
+                    &(tmp_oam_id));
+    info->oam_id = tmp_oam_id;
 
     return AMDSMI_STATUS_SUCCESS;
 }
@@ -1457,12 +1459,11 @@ amdsmi_status_t amdsmi_set_gpu_process_isolation(amdsmi_processor_handle process
                    pisolate);
 }
 
-amdsmi_status_t amdsmi_set_gpu_run_cleaner_shader(amdsmi_processor_handle processor_handle,
-                  uint32_t sclean) {
+amdsmi_status_t amdsmi_clean_gpu_local_data(amdsmi_processor_handle processor_handle) {
     AMDSMI_CHECK_INIT();
 
     return rsmi_wrapper(rsmi_dev_gpu_run_cleaner_shader, processor_handle,
-                    sclean);
+                    1);
 }
 
 amdsmi_status_t
