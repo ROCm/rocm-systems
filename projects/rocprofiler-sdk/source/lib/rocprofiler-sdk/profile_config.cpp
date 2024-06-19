@@ -22,15 +22,14 @@
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <cstdint>
+#include <unordered_set>
 
-#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
-#include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 extern "C" {
 /**
@@ -39,7 +38,9 @@ extern "C" {
  * @param [in] agent Agent identifier
  * @param [in] counters_list List of GPU counters
  * @param [in] counters_count Size of counters list
- * @param [out] config_id Identifier for GPU counters group
+ * @param [in/out] config_id Identifier for GPU counters group. If an existing
+                   profile is supplied, that profiles counters will be copied
+                   over to a new profile (returned via this id).
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
@@ -48,7 +49,8 @@ rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
                                   size_t                           counters_count,
                                   rocprofiler_profile_config_id_t* config_id)
 {
-    const auto* agent = ::rocprofiler::agent::get_agent(agent_id);
+    std::unordered_set<uint64_t> already_added;
+    const auto*                  agent = ::rocprofiler::agent::get_agent(agent_id);
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
     std::shared_ptr<rocprofiler::counters::profile_config> config =
@@ -61,6 +63,9 @@ rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
 
         const auto* metric_ptr = rocprofiler::common::get_val(id_map, counter_id.handle);
         if(!metric_ptr) return ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND;
+        // Don't add duplicates
+        if(!already_added.emplace(metric_ptr->id()).second) continue;
+
         if(!rocprofiler::counters::checkValidMetric(std::string(agent->name), *metric_ptr))
         {
             return ROCPROFILER_STATUS_ERROR_METRIC_NOT_VALID_FOR_AGENT;
@@ -68,8 +73,26 @@ rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
         config->metrics.push_back(*metric_ptr);
     }
 
-    config->agent     = agent;
-    config_id->handle = rocprofiler::counters::create_counter_profile(std::move(config));
+    if(config_id->handle != 0)
+    {
+        // Copy existing counters from previous config
+        if(auto existing = rocprofiler::counters::get_profile_config(*config_id))
+        {
+            for(const auto& metric : existing->metrics)
+            {
+                if(!already_added.emplace(metric.id()).second) continue;
+                config->metrics.push_back(metric);
+            }
+        }
+    }
+
+    config->agent = agent;
+    if(auto status = rocprofiler::counters::create_counter_profile(config);
+       status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        return status;
+    }
+    *config_id = config->id;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }

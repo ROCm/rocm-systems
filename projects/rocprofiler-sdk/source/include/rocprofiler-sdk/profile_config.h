@@ -40,12 +40,18 @@ ROCPROFILER_EXTERN_C_INIT
  *        be used across many contexts. The profile has a fixed set of counters
  *        that are collected (and specified by counter_list). The available
  *        counters for an agent can be queried using
- *        @ref rocprofiler_iterate_agent_supported_counters.
+ *        @ref rocprofiler_iterate_agent_supported_counters. An existing profile
+ *        may be supplied via config_id to use as a base for the new profile.
+ *        All counters in the existing profile will be copied over to the new
+ *        profile. The existing profile will remain unmodified and usable with
+ *        the new profile id being returned in config_id.
  *
  * @param [in] agent_id Agent identifier
  * @param [in] counters_list List of GPU counters
  * @param [in] counters_count Size of counters list
- * @param [out] config_id Identifier for GPU counters group
+ * @param [in/out] config_id Identifier for GPU counters group. If an existing
+                   profile is supplied, that profiles counters will be copied
+                   over to a new profile (returned via this id)
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if profile created
  * @retval ROCPROFILER_STATUS_ERROR if profile could not be created

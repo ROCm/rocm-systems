@@ -672,6 +672,68 @@ TEST(core, start_stop_callback_ctx)
     context::pop_client(1);
 }
 
+TEST(core, test_profile_incremental)
+{
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+    ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    ASSERT_GT(agents.size(), 0);
+    for(const auto& [_, agent] : agents)
+    {
+        auto metrics = findDeviceMetrics(agent, {});
+        ASSERT_FALSE(metrics.empty());
+        ASSERT_TRUE(agent.get_rocp_agent());
+
+        std::map<std::string, std::vector<counters::Metric>> metric_blocks;
+        for(const auto& metric : metrics)
+        {
+            if(!metric.block().empty())
+            {
+                metric_blocks[metric.block()].push_back(metric);
+            }
+        }
+
+        rocprofiler_profile_config_id_t cfg_id = {};
+
+        // Add one counter from each block to incrementally to make sure we can
+        // add them incrementally
+        for(const auto& [block_name, block_metrics] : metric_blocks)
+        {
+            rocprofiler_profile_config_id_t old_id = cfg_id;
+            rocprofiler_counter_id_t        id     = {.handle = block_metrics.front().id()};
+            ROCPROFILER_CALL(
+                rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
+                "Unable to create profile incrementally when we should be able to");
+            EXPECT_NE(old_id.handle, cfg_id.handle)
+                << "We expect that the handle changes this is due to the existing profile being "
+                   "unmodifiable after creation: "
+                << block_name;
+        }
+
+        // Check that we encounter an error of exceeds hardware limits eventually
+        auto status = ROCPROFILER_STATUS_SUCCESS;
+        for(const auto& metric : metrics)
+        {
+            /**
+             * Check profile construction
+             */
+            rocprofiler_counter_id_t id = {.handle = metric.id()};
+            if(status =
+                   rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id);
+               status != ROCPROFILER_STATUS_SUCCESS)
+            {
+                break;
+            }
+        }
+        EXPECT_EQ(status, ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT);
+    }
+
+    registration::set_init_status(1);
+
+    registration::finalize();
+}
+
 TEST(core, public_api_iterate_agents)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);

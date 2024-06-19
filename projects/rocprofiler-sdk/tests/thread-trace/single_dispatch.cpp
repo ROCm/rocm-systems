@@ -65,7 +65,6 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
     ToolData& tool         = *reinterpret_cast<ToolData*>(userdata);
     dispatch_userdata->ptr = userdata;
 
-    static std::atomic<int> call_id{0};
     static std::string_view desired_func_name = "branching_kernel";
 
     try

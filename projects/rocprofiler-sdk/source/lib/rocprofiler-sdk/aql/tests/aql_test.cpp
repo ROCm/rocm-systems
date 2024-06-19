@@ -26,6 +26,7 @@
 #include "lib/rocprofiler-sdk/counters/tests/hsa_tables.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 #include <unordered_set>
 
@@ -104,18 +105,8 @@ TEST(aql_profile, too_many_counters)
         ROCP_INFO << fmt::format("Found Agent: {}", agent.get_hsa_agent().handle);
 
         auto metrics = rocprofiler::findDeviceMetrics(agent, {});
-        EXPECT_THROW(
-            {
-                try
-                {
-                    CounterPacketConstruct(agent.get_rocp_agent()->id, metrics);
-                } catch(const std::exception& e)
-                {
-                    EXPECT_NE(e.what(), nullptr) << e.what();
-                    throw;
-                }
-            },
-            std::runtime_error);
+        EXPECT_NE(CounterPacketConstruct(agent.get_rocp_agent()->id, metrics).can_collect(),
+                  ROCPROFILER_STATUS_SUCCESS);
     }
     hsa_shut_down();
 }

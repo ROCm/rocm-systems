@@ -105,6 +105,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE,         ///< The service is not available.
                                              ///< Please refer to API functions that return this
                                              ///< status code for more information.
+    ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,  ///< Exceeds hardware limits for collection
     ROCPROFILER_STATUS_LAST,
 } rocprofiler_status_t;
 

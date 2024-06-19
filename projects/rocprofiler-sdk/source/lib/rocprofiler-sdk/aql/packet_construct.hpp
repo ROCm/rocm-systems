@@ -36,6 +36,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 namespace rocprofiler
 {
@@ -62,6 +63,8 @@ public:
 
     rocprofiler_agent_id_t agent() const { return _agent; }
 
+    rocprofiler_status_t can_collect();
+
 private:
     static constexpr size_t MEM_PAGE_ALIGN = 0x1000;
     static constexpr size_t MEM_PAGE_MASK  = MEM_PAGE_ALIGN - 1;
@@ -74,8 +77,6 @@ protected:
         std::vector<hsa_ven_amd_aqlprofile_event_t> instances;
         std::vector<aqlprofile_pmc_event_t>         events;
     };
-
-    void can_collect();
 
     rocprofiler_agent_id_t                      _agent;
     std::vector<AQLProfileMetric>               _metrics;

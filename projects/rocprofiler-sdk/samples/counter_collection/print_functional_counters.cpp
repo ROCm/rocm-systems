@@ -4,12 +4,11 @@
 #include <map>
 #include <mutex>
 #include <optional>
-#include <set>
 #include <shared_mutex>
 #include <sstream>
-#include <unordered_map>
 #include <vector>
 
+#include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -308,13 +307,14 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     rocprofiler_profile_config_id_t profile;
 
     // Select the next counter to collect.
-    ROCPROFILER_CALL(
-        rocprofiler_create_profile_config(
-            dispatch_data.dispatch_info.agent_id, &(cap.remaining.back()), 1, &profile),
-        "Could not construct profile cfg");
+    if(rocprofiler_create_profile_config(
+           dispatch_data.dispatch_info.agent_id, &(cap.remaining.back()), 1, &profile) ==
+       ROCPROFILER_STATUS_SUCCESS)
+    {
+        *config = profile;
+    }
 
     cap.remaining.pop_back();
-    *config = profile;
 }
 
 int

@@ -101,8 +101,8 @@ private:
 CounterController&
 get_controller();
 
-uint64_t
-create_counter_profile(std::shared_ptr<profile_config>&& config);
+rocprofiler_status_t
+create_counter_profile(std::shared_ptr<profile_config> config);
 
 void
 destroy_counter_profile(uint64_t id);

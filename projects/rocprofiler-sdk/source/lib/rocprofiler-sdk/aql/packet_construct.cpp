@@ -27,6 +27,7 @@
 #include <fmt/core.h>
 #include <hsa/hsa_ext_amd.h>
 #include "glog/logging.h"
+#include "rocprofiler-sdk/fwd.h"
 
 #define CHECK_HSA(fn, message)                                                                     \
     {                                                                                              \
@@ -91,9 +92,6 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
                 event_id)] = x;
         }
     }
-    // Check that we can collect all of the metrics in a single execution
-    // with a single AQL packet
-    can_collect();
     _events = get_all_events();
 }
 
@@ -293,7 +291,7 @@ CounterPacketConstruct::get_counter_events(const counters::Metric& metric) const
     throw std::runtime_error(fmt::format("Cannot Find Events for {}", metric));
 }
 
-void
+rocprofiler_status_t
 CounterPacketConstruct::can_collect()
 {
     // Verify that the counters fit within harrdware limits
@@ -318,13 +316,10 @@ CounterPacketConstruct::can_collect()
     {
         if(auto* max = CHECK_NOTNULL(common::get_val(max_allowed, block_name)); count > *max)
         {
-            throw std::runtime_error(
-                fmt::format("Block {} exceeds max number of hardware counters ({} > {})",
-                            static_cast<int64_t>(block_name.first),
-                            count,
-                            *max));
+            return ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT;
         }
     }
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }  // namespace aql
 }  // namespace rocprofiler

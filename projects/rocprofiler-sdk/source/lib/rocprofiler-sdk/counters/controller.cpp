@@ -164,10 +164,24 @@ get_controller()
     return controller;
 }
 
-uint64_t
-create_counter_profile(std::shared_ptr<profile_config>&& config)
+rocprofiler_status_t
+create_counter_profile(std::shared_ptr<profile_config> config)
 {
-    return get_controller().add_profile(std::move(config));
+    auto status = ROCPROFILER_STATUS_SUCCESS;
+    if(status = counters::counter_callback_info::setup_profile_config(config);
+       status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    if(status = config->pkt_generator->can_collect(); status != ROCPROFILER_STATUS_SUCCESS)
+    {
+        return status;
+    }
+
+    get_controller().add_profile(std::move(config));
+
+    return status;
 }
 
 void
