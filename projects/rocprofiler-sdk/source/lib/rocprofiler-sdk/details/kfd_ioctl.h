@@ -23,8 +23,8 @@
 #ifndef KFD_IOCTL_H_INCLUDED
 #define KFD_IOCTL_H_INCLUDED
 
+#include <drm/drm.h>
 #include <linux/ioctl.h>
-#include <linux/types.h>
 
 /*
  * - 1.1 - initial version
@@ -42,10 +42,9 @@
  * - 1.14 - Update kfd_event_data
  * - 1.15 - Enable managing mappings in compute VMs with GEM_VA ioctl
  * - 1.16 - Add contiguous VRAM allocation flag
- * - 1.17 - Add PC Sampling ioctl
  */
 #define KFD_IOCTL_MAJOR_VERSION 1
-#define KFD_IOCTL_MINOR_VERSION 17
+#define KFD_IOCTL_MINOR_VERSION 16
 
 struct kfd_ioctl_get_version_args
 {
@@ -1724,7 +1723,7 @@ struct kfd_ioctl_pc_sample_args
     __u32 gpu_id;
     __u32 trace_id;
     __u32 flags; /* kfd_ioctl_pcs_query flags */
-    __u32 reserved;
+    __u32 version;
 };
 
 #define AMDKFD_IOCTL_BASE     'K'

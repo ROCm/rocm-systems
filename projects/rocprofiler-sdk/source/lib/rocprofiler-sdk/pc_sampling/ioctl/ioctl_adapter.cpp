@@ -42,21 +42,62 @@ namespace pc_sampling
 {
 namespace ioctl
 {
-// forward declaration
+namespace
+{
+/**
+ * @brief Used to determine the version of PC sampling
+ * IOCTL implementation in the driver.
+ *
+ * @todo Remove this once the KFD IOCTL is upstreamed
+ */
+struct pc_sampling_ioctl_version_t
+{
+    uint32_t major_version;  /// PC sampling IOCTL major version
+    uint32_t minor_version;  /// PC sampling IOCTL minor version
+};
+
+// forward declarations
 rocprofiler_ioctl_version_info_t&
 get_ioctl_version();
 
-// IOCTL 1.17 is the first one supporting PC sampling.
+rocprofiler_status_t
+get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pc_sampling_ioctl_version_t& pcs_ioctl_version);
+
+// IOCTL 1.16 is the first one supporting PC sampling.
 #define CHECK_IOCTL_VERSION                                                                        \
     do                                                                                             \
     {                                                                                              \
         auto ioctl_version = get_ioctl_version();                                                  \
-        if(ioctl_version.major_version < 1 || ioctl_version.minor_version < 17)                    \
+        if(ioctl_version.major_version < 1 || ioctl_version.minor_version < 16)                    \
         {                                                                                          \
             LOG(ERROR) << "PC sampling unavailable\n";                                             \
             return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;                                   \
         }                                                                                          \
     } while(0)
+
+// PC Sampling IOCTL 0.1 is the initial implementaiton of PC sampling in KFD.
+#define CHECK_PC_SAMPLING_IOCTL_VERSION(kfd_gpu_id)                                                \
+    do                                                                                             \
+    {                                                                                              \
+        pc_sampling_ioctl_version_t pcs_ioctl_version = {.major_version = 0, .minor_version = 0};  \
+        auto status = get_pc_sampling_ioctl_version(kfd_gpu_id, pcs_ioctl_version);                \
+        if(status == ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE)                                       \
+        {                                                                                          \
+            ROCP_ERROR << "PC sampling unavailable\n";                                             \
+            return status;                                                                         \
+        }                                                                                          \
+        else if(status != ROCPROFILER_STATUS_SUCCESS)                                              \
+        {                                                                                          \
+            return status;                                                                         \
+        }                                                                                          \
+        else if(pcs_ioctl_version.major_version < 1 && pcs_ioctl_version.minor_version < 1)        \
+        {                                                                                          \
+            ROCP_ERROR << "PC sampling unavailable\n";                                             \
+            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;                                   \
+        }                                                                                          \
+    } while(0)
+
+#define PC_SAMPLING_IOCTL_BITMASK 0xFFFF
 
 int
 kfd_open()
@@ -130,6 +171,64 @@ get_ioctl_version()
 {
     static auto v = query_ioctl_version();
     return v;
+}
+
+/**
+ * @brief KFD IOCTL PC Sampling API version is provided via
+ * the `kfd_ioctl_pc_sample_args.version` field by
+ * @ref ::KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES` IOCTL function.
+ * The latter function requires @p kfd_gpu_id
+ * This mechanism is used for internal versioning of the PC sampling
+ * implementation.
+ *
+ * @todo: Remove once KFD IOCTL is upstreamed.
+ *
+ * @param[in] kfd_gpu_id - KFD GPU identifier
+ * @param[out] pcs_ioctl_version - The PC sampling IOCTL version. Invalid if
+ * the return value is different than ::ROCPROFILER_STATUS_SUCCESS
+ * @return ::rocprofiler_status_t
+ */
+rocprofiler_status_t
+get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pc_sampling_ioctl_version_t& pcs_ioctl_version)
+{
+    struct kfd_ioctl_pc_sample_args args;
+    args.op              = KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES;
+    args.gpu_id          = kfd_gpu_id;
+    args.sample_info_ptr = 0;
+    args.num_sample_info = 0;
+    args.flags           = 0;
+    args.version         = 0;
+
+    auto ret = ioctl(get_kfd_fd(), AMDKFD_IOC_PC_SAMPLE, &args);
+
+    if(ret == -EBUSY)
+    {
+        // The ROCProfiler-SDK is used inside the ROCgdb.
+        // The `KFD_IOCTL_PCS_OP_QUERY_CAPABILITIES` is not executed,
+        // so the value of the args.version is irrelevant.
+        // Report that PC sampling cannot be used from within the ROCgdb.
+        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
+    else if(ret == -EOPNOTSUPP)
+    {
+        // The GPU does not support PC sampling.
+        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
+    else if(ret != 0)
+    {
+        // An unexpected error occured, so we cannot be sure if the
+        // context of the `version` is valid.
+        return ROCPROFILER_STATUS_ERROR;
+    }
+
+    // `version` field contains PC Sampling IOCTL version
+    auto version = args.version;
+    // Lower 16 bits represent minor version
+    pcs_ioctl_version.minor_version = version & PC_SAMPLING_IOCTL_BITMASK;
+    // Upper 16 bits represent major version
+    pcs_ioctl_version.major_version = (version >> 16) & PC_SAMPLING_IOCTL_BITMASK;
+
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 /**
@@ -231,12 +330,15 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
+}  // namespace
 
 rocprofiler_status_t
 ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& rocp_configs)
 {
     // Assert the IOCTL version
     CHECK_IOCTL_VERSION;
+    // Verify the PC Sampling IOCTL version
+    CHECK_PC_SAMPLING_IOCTL_VERSION(agent->gpu_id);
 
     uint32_t kfd_gpu_id = agent->gpu_id;
 
@@ -339,6 +441,8 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
 {
     // Assert the IOCTL version
     CHECK_IOCTL_VERSION;
+    // Verify the PC Sampling IOCTL version
+    CHECK_PC_SAMPLING_IOCTL_VERSION(agent->gpu_id);
 
     rocprofiler_ioctl_pc_sampling_info_t ioctl_cfg;
     auto ret = create_ioctl_pcs_config_from_rocp(ioctl_cfg, method, unit, interval);
