@@ -1,9 +1,7 @@
 # ROCprofiler-SDK:  Application Profiling, Tracing, and Performance Analysis
 
-***
-Note: rocprofiler-sdk is currently `not` supported as part of the public ROCm software stack and is only distributed as a beta
-release to customers.
-***
+> [!NOTE]
+Note: rocprofiler-sdk is currently considered a beta version and is subject to change in future releases
 
 ## Overview
 
@@ -80,3 +78,6 @@ Please report in the Github Issues.
 - Timestamps in PC sampling records might not be 100% accurate.
 
 - Using PC sampling on multi-threaded applications might fail with `HSA_STATUS_ERROR_EXCEPTION`.Furthermore, if three or more threads launch operations to the same agent, and if PC sampling is enabled, the `HSA_STATUS_ERROR_EXCEPTION` might appear.
+
+> [!WARNING]
+> The latest mainline version of AQLprofile can be found at [https://repo.radeon.com/rocm/misc/aqlprofile/](https://repo.radeon.com/rocm/misc/aqlprofile/). However, it's important to note that updates to the public AQLProfile may not occur as frequently as updates to the rocprofiler-sdk. This discrepancy could lead to a potential mismatch between the AQLprofile binary and the rocprofiler-sdk source.
