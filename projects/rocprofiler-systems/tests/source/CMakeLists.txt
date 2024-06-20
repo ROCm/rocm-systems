@@ -9,7 +9,7 @@ target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${OMNITRACE_MAX_THRE
 target_link_libraries(thread-limit PRIVATE Threads::Threads tests-compile-options)
 
 set(_thread_limit_environment
-    "${_base_environment}" "OMNITRACE_USE_PERFETTO=ON" "OMNITRACE_USE_TIMEMORY=ON"
+    "${_base_environment}" "OMNITRACE_TRACE=ON" "OMNITRACE_PROFILE=ON"
     "OMNITRACE_COUT_OUTPUT=ON" "OMNITRACE_USE_SAMPLING=ON" "OMNITRACE_SAMPLING_FREQ=250"
     "OMNITRACE_VERBOSE=2" "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss")
 

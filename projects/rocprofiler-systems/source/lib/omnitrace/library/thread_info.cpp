@@ -35,6 +35,8 @@
 #include <timemory/components/timing/backends.hpp>
 #include <timemory/process/threading.hpp>
 
+#include <cstdint>
+
 namespace omnitrace
 {
 namespace
@@ -105,8 +107,9 @@ init_index_data(int64_t _tid, bool _offset = false)
     return itr;
 }
 
-const auto unknown_thread   = std::optional<thread_info>{};
-int64_t    peak_num_threads = max_supported_threads;
+thread_local int64_t offset_causal_count = 0;
+const auto           unknown_thread      = std::optional<thread_info>{};
+int64_t              peak_num_threads    = max_supported_threads;
 }  // namespace
 
 std::string
@@ -187,8 +190,13 @@ thread_info::init(bool _offset)
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
-        _info->causal_count   = &causal::delay::get_local();
         _info->lifetime.first = tim::get_clock_real_now<uint64_t, std::nano>();
+
+        const auto _sequent_tid = _info->index_data->sequent_value;
+        _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)
+                                      ? &causal::delay::get_local(_sequent_tid)
+                                      : &offset_causal_count;
+
         if(_info->is_offset) set_thread_state(ThreadState::Disabled);
     }
 

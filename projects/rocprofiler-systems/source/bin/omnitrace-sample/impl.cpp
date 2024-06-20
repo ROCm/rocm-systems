@@ -562,7 +562,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
     parser.add_argument({ "--profile-format" }, "Data formats for profiling results")
         .min_count(1)
         .max_count(3)
-        .requires({ "profile|flat-profile" })
+        .required({ "profile|flat-profile" })
         .choices({ "text", "json", "console" })
         .action([&](parser_t& p) {
             auto _v = p.get<std::set<std::string>>("profile");
@@ -624,7 +624,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .add_argument({ "--cpus" },
                       "CPU IDs for frequency sampling. Supports integers and/or ranges")
         .dtype("int or range")
-        .requires({ "host" })
+        .required({ "host" })
         .action([&](parser_t& p) {
             update_env(
                 _env, "OMNITRACE_SAMPLING_CPUS",
@@ -634,7 +634,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
         .add_argument({ "--gpus" },
                       "GPU IDs for SMI queries. Supports integers and/or ranges")
         .dtype("int or range")
-        .requires({ "device" })
+        .required({ "device" })
         .action([&](parser_t& p) {
             update_env(
                 _env, "OMNITRACE_SAMPLING_GPUS",
@@ -709,7 +709,7 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
 
     parser.add_argument({ "--realtime" }, _realtime_desc)
         .min_count(0)
-        .requires(std::move(_realtime_reqs))
+        .required(std::move(_realtime_reqs))
         .action([&](parser_t& p) {
             auto _v = p.get<std::deque<std::string>>("realtime");
             update_env(_env, "OMNITRACE_SAMPLING_REALTIME", true);
