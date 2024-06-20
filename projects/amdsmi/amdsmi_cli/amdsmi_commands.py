@@ -2646,23 +2646,23 @@ class AMDSMICommands():
 
             if self.logger.is_human_readable_format():
                 process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
-
-                for usage_metric in process_info['usage']:
-                    process_info['usage'][usage_metric] = f"{process_info['usage'][usage_metric]} {engine_usage_unit}"
-
                 for usage_metric in process_info['memory_usage']:
-                    process_info['memory_usage'][usage_metric] = self.helpers.convert_bytes_to_readable(process_info['memory_usage'][usage_metric])
-            elif self.logger.is_json_format():
-                process_info['mem_usage'] = {"value" : process_info['mem_usage'],
-                                             "unit" : memory_usage_unit}
+                    process_info["memory_usage"][usage_metric] = self.helpers.convert_bytes_to_readable(process_info["memory_usage"][usage_metric])
+                memory_usage_unit = ""
 
-                for usage_metric in process_info['usage']:
-                    process_info['usage'][usage_metric] = {"value" : process_info['usage'][usage_metric],
-                                                           "unit" : engine_usage_unit}
+            process_info['mem_usage'] = self.helpers.unit_format(self.logger,
+                                                                 process_info['mem_usage'],
+                                                                 memory_usage_unit)
 
-                for usage_metric in process_info['memory_usage']:
-                    process_info['memory_usage'][usage_metric] = {"value" : process_info['memory_usage'][usage_metric],
-                                                                  "unit" : memory_usage_unit}
+            for usage_metric in process_info['usage']:
+                process_info['usage'][usage_metric] = self.helpers.unit_format(self.logger,
+                                                                               process_info['usage'][usage_metric],
+                                                                               engine_usage_unit)
+
+            for usage_metric in process_info['memory_usage']:
+                process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
+                                                                                      process_info['memory_usage'][usage_metric],
+                                                                                      memory_usage_unit)
 
             filtered_process_values.append({'process_info': process_info})
 
@@ -3967,7 +3967,7 @@ class AMDSMICommands():
     def monitor(self, args, multiple_devices=False, watching_output=False, gpu=None,
                   watch=None, watch_time=None, iterations=None, power_usage=None,
                   temperature=None, gfx_util=None, mem_util=None, encoder=None, decoder=None,
-                  ecc=None, vram_usage=None, pcie=None):
+                  ecc=None, vram_usage=None, pcie=None, process=None):
         """ Populate a table with each GPU as an index to rows of targeted data
 
         Args:
@@ -3986,6 +3986,7 @@ class AMDSMICommands():
             ecc (bool, optional): Value override for args.ecc. Defaults to None.
             vram_usage (bool, optional): Value override for args.vram_usage. Defaults to None.
             pcie (bool, optional): Value override for args.pcie. Defaults to None.
+            process (bool, optional): Value override for args.process. Defaults to None.
 
         Raises:
             ValueError: Value error if no gpu value is provided
@@ -4023,12 +4024,15 @@ class AMDSMICommands():
             args.vram_usage = vram_usage
         if pcie:
             args.pcie = pcie
+        if process:
+            args.process = process
 
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
 
         # If all arguments are False, the print all values
+        # Don't include process in this logic as it's an optional edge case
         if not any([args.power_usage, args.temperature, args.gfx, args.mem,
                     args.encoder, args.decoder, args.ecc,
                     args.vram_usage, args.pcie]):
@@ -4049,22 +4053,27 @@ class AMDSMICommands():
                 for gpu in args.gpu:
                     stored_gpus.append(gpu)
 
-                # Store output from multiple devices
+                # Store output from multiple devices without printing to console
                 for device_handle in args.gpu:
                     self.monitor(args, multiple_devices=True, watching_output=watching_output, gpu=device_handle)
 
                 # Reload original gpus
                 args.gpu = stored_gpus
 
-                # Print multiple device output
-                self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output, tabular=True)
+                dual_csv_output = False
+                if args.process:
+                    if self.logger.is_csv_format():
+                        dual_csv_output = True
+
+                # Flush the output
+                self.logger.print_output(multiple_device_enabled=True,
+                                          watching_output=watching_output,
+                                          tabular=True,
+                                          dual_csv_output=dual_csv_output)
 
                 # Add output to total watch output and clear multiple device output
                 if watching_output:
                     self.logger.store_watch_output(multiple_device_enabled=True)
-
-                    # Flush the watching output
-                    self.logger.print_output(multiple_device_enabled=True, watching_output=watching_output, tabular=True)
 
                 return
             elif len(args.gpu) == 1:
@@ -4077,15 +4086,11 @@ class AMDSMICommands():
         # Get gpu_id for logging
         gpu_id = self.helpers.get_gpu_id_from_device_handle(args.gpu)
 
-        # Clear the table header
-        self.logger.table_header = ''
-
-        # Store timestamp for watch output
+        # Reset the table header and store the timestamp if watch output is enabled
+        self.logger.table_header = 'GPU'
         if watching_output:
             self.logger.store_output(args.gpu, 'timestamp', int(time.time()))
-            self.logger.table_header += 'TIMESTAMP'.rjust(10) + '  '
-
-        self.logger.table_header += 'GPU'
+            self.logger.table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.table_header
 
         if args.power_usage:
             try:
@@ -4332,14 +4337,96 @@ class AMDSMICommands():
 
         self.logger.store_output(args.gpu, 'values', monitor_values)
 
+        # intialize dual_csv_format; applicable to process only
+        dual_csv_output = False
+
+        # Store process list seperately
+        if args.process:
+            # Populate initial processes
+            try:
+                process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
+            except amdsmi_exception.AmdSmiLibraryException as e:
+                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                    raise PermissionError('Command requires elevation') from e
+                logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
+                raise e
+
+            # Clean processes dictionary
+            filtered_process_values = []
+            for process_info in process_list:
+                process_info['mem_usage'] = process_info.pop('mem')
+                process_info['usage'] = process_info.pop('engine_usage')
+
+                engine_usage_unit = "ns"
+                memory_usage_unit = "B"
+
+                if self.logger.is_human_readable_format():
+                    process_info['mem_usage'] = self.helpers.convert_bytes_to_readable(process_info['mem_usage'])
+                    for usage_metric in process_info['memory_usage']:
+                        process_info["memory_usage"][usage_metric] = self.helpers.convert_bytes_to_readable(process_info["memory_usage"][usage_metric])
+                    memory_usage_unit = ""
+
+                process_info['mem_usage'] = self.helpers.unit_format(self.logger,
+                                                                     process_info['mem_usage'],
+                                                                     memory_usage_unit)
+
+                for usage_metric in process_info['usage']:
+                    process_info['usage'][usage_metric] = self.helpers.unit_format(self.logger,
+                                                                                   process_info['usage'][usage_metric],
+                                                                                   engine_usage_unit)
+
+                for usage_metric in process_info['memory_usage']:
+                    process_info['memory_usage'][usage_metric] = self.helpers.unit_format(self.logger,
+                                                                                          process_info['memory_usage'][usage_metric],
+                                                                                          memory_usage_unit)
+
+                filtered_process_values.append({'process_info': process_info})
+
+            # If no processes are populated then we populate an N/A placeholder
+            if not filtered_process_values:
+                logging.debug("Monitor - Failed to detect any process on gpu %s", gpu_id)
+                filtered_process_values.append({'process_info': "N/A"})
+
+            for index, process in enumerate(filtered_process_values):
+                if process['process_info'] == "N/A":
+                    filtered_process_values[index]['process_info'] = "No running processes detected"
+
+            # Build the process table's title and header
+            self.logger.secondary_table_title = "PROCESS INFO"
+            self.logger.secondary_table_header = 'GPU'.rjust(3) + "NAME".rjust(22) + "PID".rjust(9) + "GTT_MEM".rjust(10) + \
+                                                "CPU_MEM".rjust(10) + "VRAM_MEM".rjust(10) + "MEM_USAGE".rjust(11) + \
+                                                "GFX".rjust(8) + "ENC".rjust(8)
+
+            if watching_output:
+                self.logger.secondary_table_header = 'TIMESTAMP'.rjust(10) + '  ' + self.logger.secondary_table_header
+
+            logging.debug(f"Monitor - Process Info for GPU {gpu_id} | {filtered_process_values}")
+
+            if self.logger.is_json_format():
+                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
+
+            if self.logger.is_human_readable_format():
+                # Print out process in flattened format
+                # The logger detects if process list is present and pulls it out and prints
+                #  that table with timestamp, gpu, and prints headers separately
+                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
+
+            if self.logger.is_csv_format():
+                dual_csv_output = True
+                # The logger detects if process list is present and pulls it out and prints
+                #  that table with timestamp, gpu, and prints headers separately
+                self.logger.store_output(args.gpu, 'process_list', filtered_process_values)
+
+        # Now handling the single gpu case only
         if multiple_devices:
             self.logger.store_multiple_device_output()
-            return # Skip printing when there are multiple devices
+            return
 
-        self.logger.print_output(watching_output=watching_output, tabular=True)
-
-        if watching_output: # End of single gpu add to watch_output
+        if watching_output and not self.logger.destination == "stdout": # End of single gpu add to watch_output
             self.logger.store_watch_output(multiple_device_enabled=False)
+
+
+        self.logger.print_output(multiple_device_enabled=False, watching_output=watching_output, tabular=True, dual_csv_output=dual_csv_output)
 
 
     def rocm_smi(self, args):

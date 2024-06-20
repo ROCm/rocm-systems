@@ -8,6 +8,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Additions
 
+- **Added optional process table under `amd-smi monitor -q`**.  
+The monitor subcommand within the CLI Tool now has the `-q` option to enable an optional process table underneath the original monitored output.
+
+```shell
+$ amd-smi monitor -q
+GPU  POWER  GPU_TEMP  MEM_TEMP  GFX_UTIL  GFX_CLOCK  MEM_UTIL  MEM_CLOCK  ENC_UTIL  ENC_CLOCK  DEC_UTIL  DEC_CLOCK  SINGLE_ECC  DOUBLE_ECC  PCIE_REPLAY  VRAM_USED  VRAM_TOTAL   PCIE_BW
+  0  199 W    103 °C     84 °C      99 %   1920 MHz      31 %   1000 MHz       N/A      0 MHz       N/A      0 MHz           0           0            0    1235 MB    16335 MB  N/A Mb/s
+
+PROCESS INFO:
+GPU                  NAME      PID  GTT_MEM  CPU_MEM  VRAM_MEM  MEM_USAGE     GFX     ENC
+  0                   rvs  1564865    0.0 B    0.0 B    1.1 GB      0.0 B    0 ns    0 ns
+```
+
 - **Added Handling to detect VMs with passthrough configurations in CLI Tool**.  
 CLI Tool had only allowed a restricted set of options for Virtual Machines with passthrough GPUs. Now we offer an expanded set of functions availble to passthrough configured GPUs.
 

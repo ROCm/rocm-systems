@@ -738,7 +738,7 @@ class AMDSMIHelpers():
         if logger.is_json_format():
             return {"value": value, "unit": unit}
         if logger.is_human_readable_format():
-            return f"{value} {unit}"
+            return f"{value} {unit}".rstrip()
         return f"{value}"
 
     class SI_Unit(float, Enum):

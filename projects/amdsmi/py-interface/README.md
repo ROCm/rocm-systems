@@ -677,8 +677,11 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
+`current_socket_power` | current socket power
 `average_socket_power` | average socket power
 `gfx_voltage` | voltage gfx
+`soc_voltage` | voltage soc
+`mem_voltage` | voltage mem
 `power_limit` | power limit
 
 Exceptions that can be thrown by `amdsmi_get_power_info` function:
@@ -697,8 +700,11 @@ try:
     else:
         for device in devices:
             power_measure = amdsmi_get_power_info(device)
+            print(power_measure['current_socket_power'])
             print(power_measure['average_socket_power'])
             print(power_measure['gfx_voltage'])
+            print(power_measure['soc_voltage'])
+            print(power_measure['mem_voltage'])
             print(power_measure['power_limit'])
 except AmdSmiException as e:
     print(e)

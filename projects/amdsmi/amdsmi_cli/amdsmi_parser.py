@@ -1126,6 +1126,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         ecc_help = "Monitor ECC single bit, ECC double bit, and PCIe replay error counts"
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
+        process_help = "Enable Process information table below monitor output"
 
         # Create monitor subparser
         monitor_parser = subparsers.add_parser('monitor', help=monitor_help, description=monitor_subcommand_help)
@@ -1148,6 +1149,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
         monitor_parser.add_argument('-v', '--vram-usage', action='store_true', required=False, help=mem_usage_help)
         monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_bandwidth_help)
+        monitor_parser.add_argument('-q', '--process', action='store_true', required=False, help=process_help)
 
 
     def _add_rocm_smi_parser(self, subparsers, func):
