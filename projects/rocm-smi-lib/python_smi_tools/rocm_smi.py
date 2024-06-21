@@ -1939,7 +1939,7 @@ def showAllConcise(deviceList):
     """
     global PRINT_JSON, appWidth
     if PRINT_JSON:
-        print('ERROR: Cannot print JSON/CSV output for concise output')
+        print('NOT_SUPPORTED: Cannot print JSON/CSV output for concise output')
         sys.exit(1)
 
     silent = True
@@ -2043,7 +2043,7 @@ def showAllConciseHw(deviceList):
     """
     global PRINT_JSON
     if PRINT_JSON:
-        print('ERROR: Cannot print JSON/CSV output for concise hardware output')
+        print('NOT_SUPPORTED: Cannot print JSON/CSV output for concise hardware output')
         sys.exit(1)
     header = ['GPU', 'NODE', 'DID', 'GUID', 'GFX VER', 'GFX RAS', 'SDMA RAS', 'UMC RAS', 'VBIOS', 'BUS'
                , 'PARTITION ID']
