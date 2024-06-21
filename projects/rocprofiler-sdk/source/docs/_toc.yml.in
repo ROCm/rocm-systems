@@ -1,0 +1,23 @@
+# Anywhere {branch} is used, the branch name will be substituted.
+# These comments will also be removed.
+defaults:
+  numbered: True
+  maxdepth: 4
+
+root: index
+subtrees:
+  - caption: Table of Contents
+    entries: 
+    - file: features
+    - file: installation
+    - file: tool_library_overview
+    - file: callback_services
+    - file: buffered_services
+    - file: pc_sampling
+    - file: intercept_table
+    - file: _doxygen/html/index
+    - file: samples
+    - file: rocprofv3
+  - caption: License
+    entries:
+    - file: license

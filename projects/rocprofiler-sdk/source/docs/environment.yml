@@ -127,16 +127,4 @@ dependencies:
   - zlib=1.2.13=hd590300_5
   - zstd=1.5.5=hfc55251_0
   - pip:
-      - click==8.1.7
-      - click-log==0.4.0
-      - doxysphinx==3.3.4
-      - libsass==0.22.0
-      - lxml==4.9.3
-      - mpire==2.8.0
-      - pyjson5==1.6.4
-      - pyparsing==3.1.1
-      - python-dateutil==2.8.2
-      - six==1.16.0
-      - sphinx-markdown==1.0.2
-      - sphinxcontrib-doxylink==1.12.2
-      - tqdm==4.66.1
+      - -r ./sphinx/requirements.txt

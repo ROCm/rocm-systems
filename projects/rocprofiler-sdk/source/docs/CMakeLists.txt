@@ -94,7 +94,7 @@ conda activate rocprofiler-docs
 
 which python
 
-python -m pip install -r ${CMAKE_CURRENT_LIST_DIR}/requirements.txt
+python -m pip install -r ${CMAKE_CURRENT_LIST_DIR}/sphinx/requirements.txt
 
 WORK_DIR=${PROJECT_SOURCE_DIR}/source/docs
 SOURCE_DIR=${PROJECT_SOURCE_DIR}

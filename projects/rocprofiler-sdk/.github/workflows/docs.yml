@@ -101,7 +101,7 @@ jobs:
           python3 -m pip install -r requirements.txt
 
       - name: Configure, Build, Install, and Package
-        timeout-minutes: 30
+        timeout-minutes: 60
         shell: bash
         run:
           export CMAKE_PREFIX_PATH=/opt/rocm:${CMAKE_PREFIX_PATH};

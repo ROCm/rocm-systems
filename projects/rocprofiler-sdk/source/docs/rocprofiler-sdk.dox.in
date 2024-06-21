@@ -4,7 +4,7 @@
 # Project related configuration options
 #---------------------------------------------------------------------------
 DOXYFILE_ENCODING      = UTF-8
-PROJECT_NAME           = @PROJECT_NAME@
+PROJECT_NAME           = @PROJECT_NAME@ Developer API
 PROJECT_NUMBER         = @ROCPROFILER_VERSION@
 PROJECT_BRIEF          = "ROCm Profiling API and tools"
 PROJECT_LOGO           =
@@ -172,7 +172,7 @@ INPUT_FILTER           =
 FILTER_PATTERNS        =
 FILTER_SOURCE_FILES    = NO
 FILTER_SOURCE_PATTERNS =
-USE_MDFILE_AS_MAINPAGE = @SOURCE_DIR@/README.md
+USE_MDFILE_AS_MAINPAGE = 
 FORTRAN_COMMENT_AFTER  = 72
 #---------------------------------------------------------------------------
 # Configuration options related to source browsing
@@ -197,10 +197,10 @@ IGNORE_PREFIX          =
 GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 HTML_FILE_EXTENSION    = .html
-HTML_HEADER            =
-HTML_FOOTER            =
-HTML_STYLESHEET        =
-HTML_EXTRA_STYLESHEET  = ../../external/doxygen-awesome-css/doxygen-awesome.css
+HTML_HEADER            = 
+HTML_FOOTER            = 
+HTML_STYLESHEET        = 
+HTML_EXTRA_STYLESHEET  = 
 HTML_EXTRA_FILES       =
 HTML_COLORSTYLE        = LIGHT
 HTML_COLORSTYLE_HUE    = 220
@@ -235,7 +235,7 @@ QHG_LOCATION           =
 GENERATE_ECLIPSEHELP   = NO
 ECLIPSE_DOC_ID         = org.doxygen.rocprofiler
 DISABLE_INDEX          = NO
-GENERATE_TREEVIEW      = YES
+GENERATE_TREEVIEW      = NO
 FULL_SIDEBAR           = NO
 ENUM_VALUES_PER_LINE   = 1
 TREEVIEW_WIDTH         = 300
@@ -298,7 +298,7 @@ MAN_LINKS              = YES
 #---------------------------------------------------------------------------
 # Configuration options related to the XML output
 #---------------------------------------------------------------------------
-GENERATE_XML           = NO
+GENERATE_XML           = YES
 XML_OUTPUT             = xml
 XML_PROGRAMLISTING     = YES
 XML_NS_MEMB_FILE_SCOPE = YES
@@ -355,7 +355,7 @@ SKIP_FUNCTION_MACROS   = NO
 # Configuration options related to external references
 #---------------------------------------------------------------------------
 TAGFILES               =
-GENERATE_TAGFILE       = _doxygen/tagfile.xml
+GENERATE_TAGFILE       = _doxygen/html/tagfile.xml
 ALLEXTERNALS           = NO
 EXTERNAL_GROUPS        = YES
 EXTERNAL_PAGES         = YES
@@ -385,7 +385,7 @@ GRAPHICAL_HIERARCHY    = YES
 DIRECTORY_GRAPH        = YES
 DIR_GRAPH_MAX_DEPTH    = 1
 DOT_IMAGE_FORMAT       = svg
-INTERACTIVE_SVG        = NO
+INTERACTIVE_SVG        = YES
 DOT_PATH               = @DOT_EXECUTABLE@
 DOTFILE_DIRS           =
 DIA_PATH               =

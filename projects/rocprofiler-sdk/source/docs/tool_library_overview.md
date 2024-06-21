@@ -1,11 +1,5 @@
 # Tool Library
 
-```eval_rst
-.. toctree::
-   :glob:
-   :maxdepth: 4
-```
-
 ## Rocprofiler and ROCm Runtimes Design
 
 The ROCm runtimes are now designed to directly communicate with a new library called rocprofiler-register during their initialization. This library does cursory checks

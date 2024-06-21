@@ -178,7 +178,7 @@ To trace HIP runtime APIs, use:
 rocprofv3 --hip-trace -- < app_relative_path >
 ```
 
-**Note: The tracing and counter colleciton options generates an additional agent info file. See** [Agent Info](#agent-info)
+**Note: The tracing and counter colleciton options generates an additional agent info file.
 
 The above command generates a `hip_api_trace.csv` file prefixed with the process ID.
 

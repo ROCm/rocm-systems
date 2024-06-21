@@ -3,3 +3,5 @@
 /_doxygen
 /.gitinfo
 /*.dox
+/.sass-cache
+/_toc.yml

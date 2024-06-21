@@ -1,11 +1,5 @@
 # Features
 
-```eval_rst
-.. toctree::
-   :glob:
-   :maxdepth: 4
-```
-
 ## Overview
 
 - Improved tool initialization

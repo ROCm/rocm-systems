@@ -1,11 +1,5 @@
 # Installation
 
-```eval_rst
-.. toctree::
-   :glob:
-   :maxdepth: 4
-```
-
 ## Operating System
 
 ROCprofiler is only supported on Linux. The following distributions are tested:

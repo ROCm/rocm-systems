@@ -2,12 +2,6 @@
 
 ## Running Samples
 
-```eval_rst
-.. toctree::
-   :glob:
-   :maxdepth: 4
-```
-
 Samples and tool can be run in order to see the profiler in action. This section covers on how to build these samples and run the tool.
 Once the rocm build is installed, samples are installed under:
 

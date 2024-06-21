@@ -1,0 +1,21 @@
+# Read the Docs configuration file
+# See https://docs.readthedocs.io/en/stable/config-file/v2.html for details
+
+version: 2
+
+sphinx:
+  configuration: source/docs/conf.py
+
+formats: [htmlzip, pdf, epub]
+
+python:
+  install:
+  - requirements: source/docs/sphinx/requirements.txt
+
+build:
+  os: ubuntu-22.04
+  tools:
+    python: "mambaforge-22.9"
+
+conda:
+   environment: source/docs/environment.yml
