@@ -134,7 +134,7 @@ struct table_size;
 
 // latest version of hsa runtime that has been updated for support by rocprofiler
 // and the current version of hsa runtime during this compilation
-constexpr size_t latest_version  = ROCPROFILER_COMPUTE_VERSION(1, 13, 0);
+constexpr size_t latest_version  = ROCPROFILER_COMPUTE_VERSION(1, 14, 0);
 constexpr size_t current_version = ROCPROFILER_HSA_RUNTIME_VERSION;
 
 // aliases to the template specializations providing the table size info
@@ -173,8 +173,25 @@ struct table_size<ROCPROFILER_COMPUTE_VERSION(1, 13, 0)>
     static constexpr size_t amd_ext = 552;
 #            elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x1
     static constexpr size_t amd_ext = 560;
-#            else
+#            elif HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x2
     static constexpr size_t amd_ext = 568;
+#            elif HSA_AMD_EXT_API_TABLE_STEP_VERSION > 0x2
+    static constexpr size_t amd_ext = 576;
+#            endif
+};
+
+// specialization for v1.14
+template <>
+struct table_size<ROCPROFILER_COMPUTE_VERSION(1, 14, 0)>
+{
+    static constexpr size_t finalizer_ext = 64;
+    static constexpr size_t image_ext     = 120;
+    static constexpr size_t core_api_ext  = 1016;
+    static constexpr size_t amd_tool      = 64;
+#            if HSA_AMD_EXT_API_TABLE_STEP_VERSION == 0x2
+    static constexpr size_t amd_ext       = 568;
+#            elif HSA_AMD_EXT_API_TABLE_STEP_VERSION > 0x2
+    static constexpr size_t amd_ext = 576;
 #            endif
 };
 

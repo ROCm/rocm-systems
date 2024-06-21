@@ -1397,6 +1397,16 @@ typedef union rocprofiler_hsa_api_args_t
         void*                      value;
     } hsa_amd_queue_get_info;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x03
+    struct
+    {
+        void**   ptr;
+        size_t   size;
+        uint64_t address;
+        uint64_t alignment;
+        uint64_t flags;
+    } hsa_amd_vmem_address_reserve_align;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 
