@@ -54,6 +54,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "20.04"
             rocm-version: "6.0"
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "6.1"
           # ubuntu 22.04
           - os-distro: "ubuntu"
             os-version: "22.04"
@@ -73,6 +76,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "6.0"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.1"
           # opensuse 15.3
           - os-distro: "opensuse"
             os-version: "15.3"
@@ -114,6 +120,9 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.4"
             rocm-version: "6.0"
+          - os-distro: "opensuse"
+            os-version: "15.4"
+            rocm-version: "6.1"
           # opensuse 15.5
           - os-distro: "opensuse"
             os-version: "15.5"
@@ -121,6 +130,9 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.5"
             rocm-version: "6.0"
+          - os-distro: "opensuse"
+            os-version: "15.5"
+            rocm-version: "6.1"
           # RHEL 8.7
           - os-distro: "rhel"
             os-version: "8.7"
@@ -153,6 +165,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "8.8"
             rocm-version: "6.0"
+          - os-distro: "rhel"
+            os-version: "8.8"
+            rocm-version: "6.1"
           # RHEL 8.9
           - os-distro: "rhel"
             os-version: "8.9"
@@ -160,6 +175,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "8.9"
             rocm-version: "6.0"
+          - os-distro: "rhel"
+            os-version: "8.9"
+            rocm-version: "6.1"
           # RHEL 9.1
           - os-distro: "rhel"
             os-version: "9.1"
@@ -183,6 +201,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.2"
             rocm-version: "6.0"
+          - os-distro: "rhel"
+            os-version: "9.2"
+            rocm-version: "6.1"
           # RHEL 9.3
           - os-distro: "rhel"
             os-version: "9.3"
@@ -190,6 +211,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.3"
             rocm-version: "6.0"
+          - os-distro: "rhel"
+            os-version: "9.3"
+            rocm-version: "6.1"
 
     steps:
       - name: Free Disk Space
