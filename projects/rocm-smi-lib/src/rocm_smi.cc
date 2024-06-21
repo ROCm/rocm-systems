@@ -5846,6 +5846,9 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value)
   auto status_code = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
     for (const auto& gfxclk : gpu_metrics.current_gfxclks) {
+      if (gfxclk == UINT16_MAX) {
+        break;
+      }
       if ((gfxclk != 0) && (gfxclk != UINT16_MAX)) {
         xcd_counter++;
       }

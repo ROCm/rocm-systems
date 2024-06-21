@@ -4,22 +4,68 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+
+## rocm_smi_lib for ROCm 6.3
+
+### Changes
+
+- **Added support for GPU metrics 1.6 to `rsmi_dev_gpu_metrics_info_get()`**  
+Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for PVIOL / TVIOL,  XCP (Graphics Compute Partitions) stats, and pcie_lc_perf_other_end_recovery:  
+  - `uint64_t accumulation_counter` - used for all throttled calculations
+  - `uint64_t prochot_residency_acc` - Processor hot accumulator
+  - `uint64_t ppt_residency_acc` - Package Power Tracking (PPT) accumulator (used in PVIOL calculations)
+  - `uint64_t socket_thm_residency_acc` - Socket thermal accumulator - (used in TVIOL calculations)
+  - `uint64_t vr_thm_residency_acc` - Voltage Rail (VR) thermal accumulator
+  - `uint64_t hbm_thm_residency_acc` - High Bandwidth Memory (HBM) thermal accumulator 
+  - `uint16_t num_partition` - corresponds to the current total number of partitions
+  - `struct amdgpu_xcp_metrics_t xcp_stats[MAX_NUM_XCP]` - for each partition associated with current GPU, provides gfx busy & accumulators, jpeg, and decoder (VCN) engine utilizations
+    - `uint32_t gfx_busy_inst[MAX_NUM_XCC]` - graphic engine utilization (%)
+    - `uint16_t jpeg_busy[MAX_NUM_JPEG_ENGS]` - jpeg engine utilization (%)
+    - `uint16_t vcn_busy[MAX_NUM_VCNS]` - decoder (VCN) engine utilization (%)
+    - `uint64_t gfx_busy_acc[MAX_NUM_XCC]` - graphic engine utilization accumulated (%)
+  - `uint32_t pcie_lc_perf_other_end_recovery` - corresponds to the pcie other end recovery counter
+
+- **Added ability to view raw GPU metrics`rocm-smi --showmetrics`**  
+Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD SMI (or other ROCM-SMI interfaces), these values are ***not*** converted into applicable units as users may see in `amd-smi metric`. Units listed display as indicated by the driver, they are not converted (eg. in other AMD SMI/ROCm SMI interfaces which use the data provided). It is important to note, that fields displaying `N/A` data mean this ASIC does not support or backward compatibility was not provided in a newer ASIC's GPU metric structure.   
+
+### Removals
+
+- N/A
+
+### Optimizations
+
+- N/A
+
+### Resolved issues
+
+- N/A
+
+
+### Known Issues
+
+- N/A
+
+### Upcoming changes
+
+- N/A
+
+
 ## rocm_smi_lib for ROCm 6.2.1
 
-### Added
+### Changes
 
 - N/A
 
-### Changed
+### Removals
 
 - N/A
 
-### Optimized
+### Optimizations
 
 - **Improved handling of UnicodeEncodeErrors with non UTF-8 locales**  
 Non UTF-8 locales were causing crashing on UTF-8 special characters
 
-### Fixed
+### Resolved issues
 
 - **Fixed rsmitstReadWrite.TestComputePartitionReadWrite segfault**  
 Segfault was caused due to unhandled start conditions:
@@ -36,28 +82,33 @@ c. reload amgpu - `sudo modprobe amdgpu`
 Test needed to keep track of total number of devices, in order to ensure test comes back to the original configuration.
 The test segfault could be seen on all MI3x ASICs, if brought up in a non-SPX configuration upon boot.
 
+
 ### Known Issues
+
+- N/A
+
+### Upcoming changes
 
 - N/A
 
 ## rocm_smi_lib for ROCm 6.2
 
-### Added
+### Changes
 
 - **Added Partition ID API (`rsmi_dev_partition_id_get(..)`)**  
 Previously `rsmi_dev_partition_id_get` could only be retrived by querying through `rsmi_dev_pci_id_get()`
 and parsing optional bits in our python CLI/API. We are now making this available directly through API.
 As well as added testing, in our compute partitioning tests verifing partition IDs update accordingly. 
 
-### Changed
+### Removals
 
 - N/A
 
-### Optimized
+### Optimizations
 
 - N/A
 
-### Fixed
+### Resolved issues
 
 - **Partition ID CLI output**  
 Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `rsmi_dev_partition_id_get(..)`, we provided this fallback to properly retreive partition ID. We
@@ -71,6 +122,10 @@ plan to eventually remove partition ID from the function portion of the BDF (Bus
   - bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
 
 ### Known Issues
+
+- N/A
+
+### Upcoming changes
 
 - N/A
 

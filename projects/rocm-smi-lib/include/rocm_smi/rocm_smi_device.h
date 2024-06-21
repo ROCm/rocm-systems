@@ -242,6 +242,8 @@ class Device {
     AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
 
     static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
+    void set_smi_device_id(uint32_t i) { m_device_id = i; }
+    void set_smi_partition_id(uint32_t i) { m_partition_id = i; }
 
  private:
     std::shared_ptr<Monitor> monitor_;
@@ -278,6 +280,8 @@ class Device {
     GpuMetricsBasePtr m_gpu_metrics_ptr;
     AMDGpuMetricsHeader_v1_t m_gpu_metrics_header;
     uint64_t m_gpu_metrics_updated_timestamp;
+    uint32_t m_device_id;
+    uint32_t m_partition_id;
 };
 
 

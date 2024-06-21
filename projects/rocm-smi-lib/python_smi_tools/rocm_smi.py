@@ -24,6 +24,7 @@ import trace
 from io import StringIO
 from time import ctime
 from subprocess import check_output
+from enum import IntEnum
 from typing import TYPE_CHECKING
 
 # only used for type checking
@@ -48,9 +49,9 @@ except ImportError:
 # Minor version - Increment when adding a new feature, set to 0 when major is incremented
 # Patch version - Increment when adding a fix, set to 0 when minor is incremented
 # Hash  version - Shortened commit hash. Print here and not with lib for consistency with amd-smi
-SMI_MAJ = 2
-SMI_MIN = 3
-SMI_PAT = 1
+SMI_MAJ = 3
+SMI_MIN = 0
+SMI_PAT = 0
 # SMI_HASH is provided by rsmiBindings
 __version__ = '%s.%s.%s+%s' % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
 
@@ -856,7 +857,7 @@ def printEventList(device, delay, eventList):
             print2DArray([['\rGPU[%d]:\t' % (data.dv_ind), ctime().split()[3], notification_type_names[data.event.value - 1],
                            data.message.decode('utf8') + '\r']])
 
-def printLog(device, metricName, value=None, extraSpace=False, useItalics=False):
+def printLog(device, metricName, value=None, extraSpace=False, useItalics=False, xcp=None):
     """ Print out to the SMI log
 
     :param device: DRM device identifier
@@ -878,7 +879,10 @@ def printLog(device, metricName, value=None, extraSpace=False, useItalics=False)
             formatJson(device, str(metricName))
         return
     if value is not None:
-        logstr = 'GPU[%s]\t\t: %s: %s' % (device, metricName, value)
+        if xcp == None:
+            logstr = 'GPU[%s]\t\t: %s: %s' % (device, metricName, value)
+        else:
+           logstr = 'GPU[%s] XCP[%s]\t: %s: %s' % (device, xcp, metricName, value)
     else:
         logstr = 'GPU[%s]\t\t: %s' % (device, metricName)
     if device is None:
@@ -3544,6 +3548,318 @@ def showMemoryPartition(deviceList):
             printErrLog(device, 'Failed to retrieve current memory partition, even though device supports it.')
     printLogSpacer()
 
+class UIntegerTypes(IntEnum):
+    UINT8_T  = 0xFF
+    UINT16_T = 0xFFFF
+    UINT32_T = 0xFFFFFFFF
+    UINT64_T = 0xFFFFFFFFFFFFFFFF
+
+def validateIfMaxUint(valToCheck, uintType: UIntegerTypes):
+    return_val = "N/A"
+    if not isinstance(valToCheck, list):
+        if valToCheck == uintType:
+            return return_val
+        else:
+            return valToCheck
+    else:
+        return_val = valToCheck
+        for idx, v in enumerate(valToCheck):
+            if v == uintType:
+                return_val[idx] = "N/A"
+    return return_val
+
+def showGPUMetrics(deviceList):
+    """ Returns the gpu metrics for a list of devices
+
+    :param deviceList: List of DRM devices (can be a single-item list)
+    """
+    printLogSpacer(' GPU Metrics ')
+    gpu_metrics = rsmi_gpu_metrics_t()
+    temp_unit="C"
+    power_unit="W"
+    energy_unit="15.259uJ (2^-16)"
+    volt_unit="mV"
+    clock_unit="MHz"
+    fan_speed="rpm"
+    percent_unit="%"
+    pcie_acc_unit="GB/s"
+    pcie_lanes_unit="Lanes"
+    pcie_speed_unit="0.1 GT/s"
+    xgmi_speed="Gbps"
+    xgmi_data_sz="kB"
+    time_unit="ns"
+    time_unit_10="10ns resolution"
+    count="Count"
+    no_unit = None
+
+    for device in deviceList:
+        ret = rocmsmi.rsmi_dev_gpu_metrics_info_get(device, byref(gpu_metrics))
+        metrics = {
+            "common_header": "N/A"
+        }
+        if rsmi_ret_ok(ret, device, 'rsmi_dev_gpu_metrics_info_get',silent=True):
+            metrics = {
+            "common_header": {
+                "version": float(str(gpu_metrics.common_header.format_revision) + "."
+                              + str(gpu_metrics.common_header.content_revision)),
+                "size": gpu_metrics.common_header.structure_size
+            }, "temperature_edge": {
+                "value": validateIfMaxUint(gpu_metrics.temperature_edge, UIntegerTypes.UINT16_T),
+                "unit": temp_unit,
+            }, "temperature_hotspot": {
+                "value": validateIfMaxUint(gpu_metrics.temperature_hotspot, UIntegerTypes.UINT16_T),
+                "unit": temp_unit,
+            }, "temperature_mem": {
+                "value": validateIfMaxUint(gpu_metrics.temperature_mem, UIntegerTypes.UINT16_T),
+                "unit": temp_unit,
+            }, "temperature_vrgfx": {
+                "value": validateIfMaxUint(gpu_metrics.temperature_vrgfx, UIntegerTypes.UINT16_T),
+                "unit": temp_unit,
+            }, "temperature_vrsoc": {
+                "value": validateIfMaxUint(gpu_metrics.temperature_vrsoc, UIntegerTypes.UINT16_T),
+                "unit": temp_unit,
+            }, "temperature_vrmem": {
+                "value": validateIfMaxUint(gpu_metrics.temperature_vrmem, UIntegerTypes.UINT16_T),
+                "unit": temp_unit,
+            }, "average_gfx_activity": {
+                "value": validateIfMaxUint(gpu_metrics.average_gfx_activity, UIntegerTypes.UINT16_T),
+                "unit": percent_unit,
+            }, "average_umc_activity": {
+                "value": validateIfMaxUint(gpu_metrics.average_umc_activity, UIntegerTypes.UINT16_T),
+                "unit": percent_unit,
+            }, "average_mm_activity": {
+                "value": validateIfMaxUint(gpu_metrics.average_mm_activity, UIntegerTypes.UINT16_T),
+                "unit": percent_unit,
+            }, "average_socket_power": {
+                "value": validateIfMaxUint(gpu_metrics.average_socket_power, UIntegerTypes.UINT16_T),
+                "unit": power_unit,
+            }, "energy_accumulator": {
+                "value": validateIfMaxUint(gpu_metrics.energy_accumulator, UIntegerTypes.UINT64_T),
+                "unit": energy_unit,
+            }, "system_clock_counter": {
+                "value": validateIfMaxUint(gpu_metrics.system_clock_counter, UIntegerTypes.UINT64_T),
+                "unit": time_unit,
+            }, "average_gfxclk_frequency": {
+                "value": validateIfMaxUint(gpu_metrics.average_gfxclk_frequency, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "average_socclk_frequency": {
+                "value": validateIfMaxUint(gpu_metrics.average_socclk_frequency, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "average_uclk_frequency": {
+                "value": validateIfMaxUint(gpu_metrics.average_uclk_frequency, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "average_vclk0_frequency": {
+                "value": validateIfMaxUint(gpu_metrics.average_vclk0_frequency, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "average_dclk0_frequency": {
+                "value": validateIfMaxUint(gpu_metrics.average_dclk0_frequency, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "average_vclk1_frequency": {
+                "value": validateIfMaxUint(gpu_metrics.average_vclk1_frequency, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "average_dclk1_frequency": {
+                "value": validateIfMaxUint(gpu_metrics.average_dclk1_frequency, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_gfxclk": {
+                "value": validateIfMaxUint(gpu_metrics.current_gfxclk, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_socclk": {
+                "value": validateIfMaxUint(gpu_metrics.current_socclk, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_uclk": {
+                "value": validateIfMaxUint(gpu_metrics.current_uclk, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_vclk0": {
+                "value": validateIfMaxUint(gpu_metrics.current_vclk0, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_dclk0": {
+                "value": validateIfMaxUint(gpu_metrics.current_dclk0, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_vclk1": {
+                "value": validateIfMaxUint(gpu_metrics.current_vclk1, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_dclk1": {
+                "value": validateIfMaxUint(gpu_metrics.current_dclk1, UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "throttle_status": {
+                "value": validateIfMaxUint(gpu_metrics.throttle_status, UIntegerTypes.UINT32_T),
+                "unit": no_unit,
+            }, "current_fan_speed": {
+                "value": validateIfMaxUint(gpu_metrics.current_fan_speed, UIntegerTypes.UINT16_T),
+                "unit": fan_speed,
+            }, "pcie_link_width": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_link_width, UIntegerTypes.UINT16_T),
+                "unit": pcie_lanes_unit,
+            }, "pcie_link_speed": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_link_speed, UIntegerTypes.UINT16_T),
+                "unit": pcie_speed_unit,
+            }, "gfx_activity_acc": {
+                "value": validateIfMaxUint(gpu_metrics.gfx_activity_acc, UIntegerTypes.UINT32_T),
+                "unit": percent_unit,
+            }, "mem_activity_acc": {
+                "value": validateIfMaxUint(gpu_metrics.mem_activity_acc, UIntegerTypes.UINT32_T),
+                "unit": percent_unit,
+            }, "temperature_hbm": {
+                "value": validateIfMaxUint(list(gpu_metrics.temperature_hbm), UIntegerTypes.UINT16_T),
+                "unit": temp_unit,
+            }, "firmware_timestamp": {
+                "value": validateIfMaxUint(gpu_metrics.firmware_timestamp, UIntegerTypes.UINT64_T),
+                "unit": time_unit_10,
+            }, "voltage_soc": {
+                "value": validateIfMaxUint(gpu_metrics.voltage_soc, UIntegerTypes.UINT16_T),
+                "unit": volt_unit,
+            }, "voltage_gfx": {
+                "value": validateIfMaxUint(gpu_metrics.voltage_gfx, UIntegerTypes.UINT16_T),
+                "unit": volt_unit,
+            }, "voltage_mem": {
+                "value": validateIfMaxUint(gpu_metrics.voltage_mem, UIntegerTypes.UINT16_T),
+                "unit": volt_unit,
+            }, "indep_throttle_status": {
+                "value": validateIfMaxUint(gpu_metrics.indep_throttle_status, UIntegerTypes.UINT64_T),
+                "unit": no_unit,
+            }, "current_socket_power": {
+                "value": validateIfMaxUint(gpu_metrics.current_socket_power, UIntegerTypes.UINT16_T),
+                "unit": power_unit,
+            }, "vcn_activity": {
+                "value": validateIfMaxUint(list(gpu_metrics.vcn_activity), UIntegerTypes.UINT16_T),
+                "unit": percent_unit,
+            }, "gfxclk_lock_status": {
+                "value": validateIfMaxUint(gpu_metrics.gfxclk_lock_status, UIntegerTypes.UINT32_T),
+                "unit": no_unit,
+            }, "xgmi_link_width": {
+                "value": validateIfMaxUint(gpu_metrics.xgmi_link_width, UIntegerTypes.UINT16_T),
+                "unit": no_unit,
+            }, "xgmi_link_speed": {
+                "value": validateIfMaxUint(gpu_metrics.xgmi_link_speed, UIntegerTypes.UINT16_T),
+                "unit": xgmi_speed,
+            }, "pcie_bandwidth_acc": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_bandwidth_acc, UIntegerTypes.UINT64_T),
+                "unit": pcie_acc_unit,
+            }, "pcie_bandwidth_inst": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_bandwidth_inst, UIntegerTypes.UINT64_T),
+                "unit": pcie_acc_unit,
+            }, "pcie_l0_to_recov_count_acc": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_l0_to_recov_count_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "pcie_replay_count_acc": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_replay_count_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "pcie_replay_rover_count_acc": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_replay_rover_count_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "xgmi_read_data_acc": {
+                "value": validateIfMaxUint(list(gpu_metrics.xgmi_read_data_acc), UIntegerTypes.UINT64_T),
+                "unit": xgmi_data_sz,
+            }, "xgmi_write_data_acc": {
+                "value": validateIfMaxUint(list(gpu_metrics.xgmi_write_data_acc), UIntegerTypes.UINT64_T),
+                "unit": xgmi_data_sz,
+            }, "current_gfxclks": {
+                "value": validateIfMaxUint(list(gpu_metrics.current_gfxclks), UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_socclks": {
+                "value": validateIfMaxUint(list(gpu_metrics.current_socclks), UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_vclk0s": {
+                "value": validateIfMaxUint(list(gpu_metrics.current_vclk0s), UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "current_dclk0s": {
+                "value": validateIfMaxUint(list(gpu_metrics.current_dclk0s), UIntegerTypes.UINT16_T),
+                "unit": clock_unit,
+            }, "jpeg_activity": {
+                "value": validateIfMaxUint(list(gpu_metrics.jpeg_activity), UIntegerTypes.UINT16_T),
+                "unit": percent_unit,
+            }, "pcie_nak_sent_count_acc": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_nak_sent_count_acc, UIntegerTypes.UINT32_T),
+                "unit": count,
+            }, "pcie_nak_rcvd_count_acc": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_nak_rcvd_count_acc, UIntegerTypes.UINT32_T),
+                "unit": count,
+            }, "accumulation_counter": {
+                "value": validateIfMaxUint(gpu_metrics.accumulation_counter, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "prochot_residency_acc": {
+                "value": validateIfMaxUint(gpu_metrics.prochot_residency_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "ppt_residency_acc": {
+                "value": validateIfMaxUint(gpu_metrics.ppt_residency_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "socket_thm_residency_acc": {
+                "value": validateIfMaxUint(gpu_metrics.socket_thm_residency_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "vr_thm_residency_acc": {
+                "value": validateIfMaxUint(gpu_metrics.vr_thm_residency_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            }, "hbm_thm_residency_acc": {
+                "value": validateIfMaxUint(gpu_metrics.hbm_thm_residency_acc, UIntegerTypes.UINT64_T),
+                "unit": count,
+            },
+            "pcie_lc_perf_other_end_recovery": {
+                "value": validateIfMaxUint(gpu_metrics.pcie_lc_perf_other_end_recovery, UIntegerTypes.UINT32_T),
+                "unit": count,
+            },
+            "num_partition": {
+                "value": validateIfMaxUint(gpu_metrics.num_partition, UIntegerTypes.UINT16_T),
+                "unit": no_unit,
+            },
+            "xcp_stats.gfx_busy_inst": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+            "xcp_stats.jpeg_busy": {
+            "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+            "xcp_stats.vcn_busy": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+            "xcp_stats.gfx_busy_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+        }
+
+            printLog(device, 'Metric Version and Size (Bytes)',
+                     str(metrics["common_header"]["version"]) + " " + str(metrics["common_header"]["size"]))
+            for k,v in metrics.items():
+                if k != "common_header" and 'xcp_stats' not in k:
+                    if v["unit"] != None:
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(v["value"]))
+                    elif v["unit"] == None:
+                       printLog(device, k, str(v["value"]))
+                if 'xcp_stats.gfx_busy_inst' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.gfx_busy_inst):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT32_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.jpeg_busy' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.jpeg_busy):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT16_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.vcn_busy' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.vcn_busy):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT16_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.gfx_busy_acc' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.gfx_busy_acc):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+
+            if int(device) < (len(deviceList) - 1):
+                printLogSpacer()
+        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
+            printLog(device, 'Not supported on the given system', None)
+        else:
+            rsmi_ret_ok(ret, device, 'get_gpu_metrics')
+            printErrLog(device, 'Failed to retrieve GPU metrics, metric version may not be supported for this device.')
+    printLogSpacer()
 
 def checkAmdGpus(deviceList):
     """ Check if there are any AMD GPUs being queried,
@@ -3913,6 +4229,7 @@ if __name__ == '__main__':
     groupDisplay.add_argument('--shownodesbw', help='Shows the numa nodes ', action='store_true')
     groupDisplay.add_argument('--showcomputepartition', help='Shows current compute partitioning ', action='store_true')
     groupDisplay.add_argument('--showmemorypartition', help='Shows current memory partition ', action='store_true')
+    groupDisplay.add_argument('--showmetrics', help='Show current gpu metric data ', action='store_true')
 
     groupActionReset.add_argument('-r', '--resetclocks', help='Reset clocks and OverDrive to default',
                                   action='store_true')
@@ -4079,6 +4396,7 @@ if __name__ == '__main__':
         args.showvc = True
         args.showcomputepartition = True
         args.showmemorypartition = True
+        args.showmetrics = True
 
         if not PRINT_JSON:
             args.showprofile = True
@@ -4209,6 +4527,8 @@ if __name__ == '__main__':
         showComputePartition(deviceList)
     if args.showmemorypartition:
         showMemoryPartition(deviceList)
+    if args.showmetrics:
+       showGPUMetrics(deviceList)
     if args.setclock:
         setClocks(deviceList, args.setclock[0], [int(args.setclock[1])])
     if args.setsclk:
