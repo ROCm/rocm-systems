@@ -4,6 +4,41 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 6.2
+
+### Added
+
+- **Added Partition ID API (`rsmi_dev_partition_id_get(..)`)**  
+Previously `rsmi_dev_partition_id_get` could only be retrived by querying through `rsmi_dev_pci_id_get()`
+and parsing optional bits in our python CLI/API. We are now making this available directly through API.
+As well as added testing, in our compute partitioning tests verifing partition IDs update accordingly. 
+
+### Changed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Fixed
+
+- **Partition ID CLI output**  
+Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `rsmi_dev_partition_id_get(..)`, we provided this fallback to properly retreive partition ID. We
+plan to eventually remove partition ID from the function portion of the BDF (Bus Device Function). See below for PCI ID description.
+
+  - bits [63:32] = domain
+  - bits [31:28] or bits [2:0] = partition id 
+  - bits [27:16] = reserved
+  - bits [15:8]  = Bus
+  - bits [7:3] = Device
+  - bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
+
+### Known Issues
+
+- N/A
+
+
 ## rocm_smi_lib for ROCm 6.1.2
 
 ### Added

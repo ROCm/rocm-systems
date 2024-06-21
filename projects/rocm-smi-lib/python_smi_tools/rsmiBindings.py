@@ -583,19 +583,19 @@ class rsmi_func_id_value_t(Union):
 
 class rsmi_compute_partition_type_t(c_int):
     RSMI_COMPUTE_PARTITION_INVALID = 0
-    RSMI_COMPUTE_PARTITION_CPX = 1
-    RSMI_COMPUTE_PARTITION_SPX = 2
-    RSMI_COMPUTE_PARTITION_DPX = 3
-    RSMI_COMPUTE_PARTITION_TPX = 4
-    RSMI_COMPUTE_PARTITION_QPX = 5
+    RSMI_COMPUTE_PARTITION_SPX = 1
+    RSMI_COMPUTE_PARTITION_DPX = 2
+    RSMI_COMPUTE_PARTITION_TPX = 3
+    RSMI_COMPUTE_PARTITION_QPX = 4
+    RSMI_COMPUTE_PARTITION_CPX = 5
 
 rsmi_compute_partition_type_dict = {
     #'RSMI_COMPUTE_PARTITION_INVALID': 0,
-    'CPX': 1,
-    'SPX': 2,
-    'DPX': 3,
-    'TPX': 4,
-    'QPX': 5
+    'SPX': 1,
+    'DPX': 2,
+    'TPX': 3,
+    'QPX': 4,
+    'CPX': 5,
 }
 
 rsmi_compute_partition_type = rsmi_compute_partition_type_t
@@ -604,7 +604,7 @@ rsmi_compute_partition_type = rsmi_compute_partition_type_t
 # Usage example to get corresponding names:
 # compute_partition_type_l[rsmi_compute_partition_type_t.RSMI_COMPUTE_PARTITION_CPX]
 # will return string 'CPX'
-compute_partition_type_l = ['CPX', 'SPX', 'DPX', 'TPX', 'QPX']
+compute_partition_type_l = ['SPX', 'DPX', 'TPX', 'QPX', 'CPX']
 
 class rsmi_memory_partition_type_t(c_int):
     RSMI_MEMORY_PARTITION_UNKNOWN = 0

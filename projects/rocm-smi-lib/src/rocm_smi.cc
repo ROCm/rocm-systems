@@ -754,13 +754,18 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
 
   kfd_node->get_property_value("domain", &domain);
 
-  // Add domain to full pci_id:
-  // BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) |
-  // ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
-  // bits [63:32] = domain
-  // bits [31:28] = partition id in multi partition system
-  // bits [27:16] = reserved
-  // bits [15: 0] = pci bus/device/function
+  /**
+   * Add domain to full pci_id:
+   * BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) |
+   * ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
+   * 
+   * bits [63:32] = domain
+   * bits [31:28] or bits [2:0] = partition id
+   * bits [27:16] = reserved
+   * bits [15:8]  = Bus
+   * bits [7:3] = Device
+   * bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
+   */
   assert((domain & 0xFFFFFFFF00000000) == 0);
   (*bdfid) &= 0xFFFFFFFF;  // keep bottom 32 bits of pci_id
   *bdfid |= (domain & 0xFFFFFFFF) << 32;  // Add domain to top of pci_id
@@ -4575,9 +4580,12 @@ rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
   CATCH
 }
 
-static rsmi_status_t
-get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
+static rsmi_status_t get_compute_partition(uint32_t dv_ind,
+                                          std::string &compute_partition) {
   TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(compute_partition.c_str())
   std::string compute_partition_str;
 
@@ -4601,6 +4609,8 @@ get_compute_partition(uint32_t dv_ind, std::string &compute_partition) {
       return RSMI_STATUS_UNEXPECTED_DATA;
   }
   compute_partition = compute_partition_str;
+  ss << __PRETTY_FUNCTION__ << " | ======= END =======, " << dv_ind;
+  LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -4610,7 +4620,7 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
                                uint32_t len) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind = "
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, dv_ind = "
      << dv_ind;
   LOG_TRACE(ss);
   if ((len == 0) || (compute_partition == nullptr)) {
@@ -4646,7 +4656,7 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
     return ret;
   }
 
-  std::size_t length = returning_compute_partition.copy(compute_partition, len);
+  std::size_t length = returning_compute_partition.copy(compute_partition, len-1);
   compute_partition[length]='\0';
 
   if (len < (returning_compute_partition.size() + 1)) {
@@ -4680,20 +4690,47 @@ static rsmi_status_t
 is_available_compute_partition(uint32_t dv_ind,
                                std::string new_compute_partition) {
   TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
   DEVICE_MUTEX
   std::string availableComputePartitions;
   rsmi_status_t ret =
       get_dev_value_line(amd::smi::kDevAvailableComputePartition,
                          dv_ind, &availableComputePartitions);
   if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | FAIL "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << devInfoTypesStrings.at(amd::smi::kDevAvailableComputePartition)
+       << " | Data: could not retrieve requested data"
+       << " | Returning = "
+       << getRSMIStatusString(ret) << " |";
+    LOG_ERROR(ss);
     return ret;
   }
 
   bool isComputePartitionAvailable =
       amd::smi::containsString(availableComputePartitions,
                                new_compute_partition);
-  return (isComputePartitionAvailable) ? RSMI_STATUS_SUCCESS :
-                                         RSMI_STATUS_SETTING_UNAVAILABLE;
+
+  ret = ((isComputePartitionAvailable) ? RSMI_STATUS_SUCCESS :
+                                         RSMI_STATUS_SETTING_UNAVAILABLE);
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << devInfoTypesStrings.at(amd::smi::kDevAvailableComputePartition)
+     << " | Data: available_partitions = " << availableComputePartitions
+     << " | Data: isComputePartitionAvailable = "
+     << (isComputePartitionAvailable ? "True" : "False")
+     << " | Returning = "
+     << getRSMIStatusString(ret) << " |";
+  LOG_INFO(ss);
+  return ret;
   CATCH
 }
 
@@ -4702,16 +4739,14 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
                               rsmi_compute_partition_type_t compute_partition) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   if (!amd::smi::is_sudo_user()) {
     return RSMI_STATUS_PERMISSION;
   }
-  DEVICE_MUTEX
-  std::string newComputePartitionStr
-              = mapRSMIToStringComputePartitionTypes.at(compute_partition);
-  std::string currentComputePartition;
+  std::string currentComputePartition = "";
+  std::string newComputePartitionStr = "";
 
   switch (compute_partition) {
     case RSMI_COMPUTE_PARTITION_CPX:
@@ -4719,9 +4754,13 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
     case RSMI_COMPUTE_PARTITION_DPX:
     case RSMI_COMPUTE_PARTITION_TPX:
     case RSMI_COMPUTE_PARTITION_QPX:
+      newComputePartitionStr =
+        mapRSMIToStringComputePartitionTypes.at(compute_partition);
       break;
     case RSMI_COMPUTE_PARTITION_INVALID:
     default:
+      newComputePartitionStr =
+        mapRSMIToStringComputePartitionTypes.at(RSMI_COMPUTE_PARTITION_INVALID);
       ss << __PRETTY_FUNCTION__
          << " | ======= end ======= "
          << " | Fail "
@@ -4798,8 +4837,8 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
      << "| sizeof string = " << std::dec
      << sizeof(newComputePartitionStr);
   LOG_DEBUG(ss);
-
   GET_DEV_FROM_INDX
+  DEVICE_MUTEX
   int ret = dev->writeDevInfo(amd::smi::kDevComputePartition,
                               newComputePartitionStr);
   rsmi_status_t returnResponse = amd::smi::ErrnoToRsmiStatus(ret);
@@ -4814,7 +4853,6 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
      << getRSMIStatusString(returnResponse) << " |";
   LOG_TRACE(ss);
 
-  // TODO(charpoag): investigate providing GPU busy state occured with
   return returnResponse;
   CATCH
 }
@@ -4822,6 +4860,9 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
 static rsmi_status_t get_memory_partition(uint32_t dv_ind,
                                           std::string &memory_partition) {
   TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(memory_partition.c_str())
   std::string val_str;
 
@@ -4845,6 +4886,8 @@ static rsmi_status_t get_memory_partition(uint32_t dv_ind,
       return RSMI_STATUS_UNEXPECTED_DATA;
   }
   memory_partition = val_str;
+  ss << __PRETTY_FUNCTION__ << " | ======= END =======, " << dv_ind;
+  LOG_TRACE(ss);
   return RSMI_STATUS_SUCCESS;
   CATCH
 }
@@ -4854,7 +4897,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
                               rsmi_memory_partition_type_t memory_partition) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
@@ -4989,7 +5032,7 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
                                uint32_t len) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   if ((len == 0) || (memory_partition == nullptr)) {
     ss << __PRETTY_FUNCTION__
@@ -5059,7 +5102,7 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
 rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
@@ -5098,7 +5141,7 @@ rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
 rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
   TRY
   std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======";
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
@@ -5130,6 +5173,72 @@ rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
      << " | Returning = "
      << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
+rsmi_status_t
+rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id) {
+  TRY
+  std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, " << dv_ind;
+  LOG_TRACE(ss);
+  if (partition_id == nullptr) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | FAIL"
+       << " | Device #: " << dv_ind
+       << " | Type: partition_id"
+       << " | Data: nullptr"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  DEVICE_MUTEX
+  std::string strCompPartition = "UNKNOWN";
+  const uint32_t PARTITION_LEN = 10;
+  char compute_partition[PARTITION_LEN];
+  rsmi_status_t ret = rsmi_dev_compute_partition_get(dv_ind, compute_partition, PARTITION_LEN);
+  if (ret == RSMI_STATUS_SUCCESS) {
+    strCompPartition = compute_partition;
+  }
+  uint64_t pci_id = UINT64_MAX;
+  *partition_id = UINT32_MAX;
+  ret = rsmi_dev_pci_id_get(dv_ind, &pci_id);
+  if (ret == RSMI_STATUS_SUCCESS) {
+    *partition_id = static_cast<uint32_t>((pci_id >> 28) & 0xf);
+  }
+
+  /**
+   * Fall back is required due to driver changes within KFD.
+   * Some devices may report bits [31:28] or [2:0].
+   * With the newly added rsmi_dev_partition_id_get(..),
+   * we provided this fallback to properly retrieve the partition ID. We
+   * plan to eventually remove partition ID from the function portion of the
+   * BDF (Bus Device Function). See below for PCI ID description.
+   *
+   * bits [63:32] = domain
+   * bits [31:28] or bits [2:0] = partition id
+   * bits [27:16] = reserved
+   * bits [15:8]  = Bus
+   * bits [7:3] = Device
+   * bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
+   */
+  if (*partition_id != UINT32_MAX && *partition_id == 0 &&
+     (strCompPartition == "DPX" || strCompPartition == "TPX"
+     || strCompPartition == "CPX" || strCompPartition == "QPX")) {
+    *partition_id = static_cast<uint32_t>(pci_id & 0x7);
+  }
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success"
+     << " | Device #: " << dv_ind
+     << " | Type: partition_id"
+     << " | Data: " << *partition_id
+     << " | Returning = "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+  LOG_INFO(ss);
   return ret;
   CATCH
 }

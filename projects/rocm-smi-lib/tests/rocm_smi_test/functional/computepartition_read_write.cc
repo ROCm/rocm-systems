@@ -88,6 +88,13 @@ void TestComputePartitionReadWrite::Close() {
   TestBase::Close();
 }
 
+const uint32_t MAX_UNSUPPORTED_PARTITIONS = 0;
+const uint32_t MAX_SPX_PARTITIONS = 1;
+const uint32_t MAX_DPX_PARTITIONS = 2;
+const uint32_t MAX_TPX_PARTITIONS = 3;
+const uint32_t MAX_QPX_PARTITIONS = 4;
+const uint32_t MAX_CPX_PARTITIONS = 8;
+
 static const std::string
 computePartitionString(rsmi_compute_partition_type computeParitionType) {
   /**
@@ -139,50 +146,186 @@ static void system_wait(int seconds) {
 
 static const std::map<std::string, rsmi_compute_partition_type_t>
 mapStringToRSMIComputePartitionTypes {
-  {"CPX", RSMI_COMPUTE_PARTITION_CPX},
-  {"SPX", RSMI_COMPUTE_PARTITION_SPX},
   {"DPX", RSMI_COMPUTE_PARTITION_DPX},
   {"TPX", RSMI_COMPUTE_PARTITION_TPX},
-  {"QPX", RSMI_COMPUTE_PARTITION_QPX}
+  {"QPX", RSMI_COMPUTE_PARTITION_QPX},
+  {"CPX", RSMI_COMPUTE_PARTITION_CPX},
+  {"SPX", RSMI_COMPUTE_PARTITION_SPX}
 };
 
-void TestComputePartitionReadWrite::Run(void) {
-  rsmi_status_t ret, err;
-  char orig_char_computePartition[255];
-  char current_char_computePartition[255];
+static void checkPartitionIdChanges(
+  uint32_t dev, const std::string current_partition, bool isVerbose,
+  bool reinitialize) {
+  uint32_t max_loop = MAX_SPX_PARTITIONS;
 
-  TestBase::Run();
-  if (setup_failed_) {
-    std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
-    return;
+  // re-initialize to ensure new device ordering is followed
+  if (reinitialize) {
+    if (isVerbose) {
+      std::cout << "\t**Reinitializing device list due to parition changes.\n";
+    }
+    rsmi_shut_down();
+    rsmi_init(0);
   }
 
-  // Confirm system supports compute partition, before executing wait
-  ret = rsmi_dev_compute_partition_get(0, orig_char_computePartition, 255);
-  if (ret == RSMI_STATUS_SUCCESS) {
-    system_wait(25);
-  }
-
-  for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
-    if (dv_ind != 0) {
-      IF_VERB(STANDARD) {
-        std::cout << std::endl;
+  if (current_partition == "DPX") {
+    max_loop = MAX_DPX_PARTITIONS;
+  } else if (current_partition == "TPX") {
+    max_loop = MAX_TPX_PARTITIONS;
+  } else if (current_partition == "QPX") {
+    max_loop = MAX_QPX_PARTITIONS;
+  } else if (current_partition == "CPX") {
+    max_loop = MAX_CPX_PARTITIONS;
+    uint16_t num_xcd;
+    rsmi_status_t ret = rsmi_dev_metrics_xcd_counter_get(dev, &num_xcd);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      max_loop = num_xcd;
+      if (isVerbose) {
+        std::cout << "\t**Expecting num_xcd = " << num_xcd << " to equal "
+                      "total CPX nodes\n";
       }
     }
-    PrintDeviceHeader(dv_ind);
-    bool devicePartitionUpdated = false;
+  }
 
-    // Standard checks to see if API is supported, before running full tests
-    ret = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition,
-                                          255);
-    if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-       IF_VERB(STANDARD) {
-          std::cout << "\t**" <<  ": "
-                    << "Not supported on this device" << std::endl;
+  for (uint32_t i = dev; i < dev + max_loop; i++) {
+    uint32_t partition_id;
+    rsmi_status_t ret = rsmi_dev_partition_id_get(i, &partition_id);
+    std::cout << "\t** Checking Partition ID | Device: " << std::to_string(i)
+              << "; Current Partition: " << current_partition
+              << " ; Max partition IDs to check: " << max_loop << "\n";
+    ASSERT_EQ(ret, RSMI_STATUS_SUCCESS);
+    if (ret == RSMI_STATUS_SUCCESS && current_partition == "SPX") {
+      ASSERT_LT(partition_id, max_loop);
+      if (isVerbose) {
+        std::cout << "\n\t**Confirmed partition_id < " << max_loop
+                  << " for SPX"
+                  << "\n\t**rsmi_dev_partition_id_get(" + std::to_string(i) +
+                         ", &partition_id); partition_id = "
+                  << static_cast<uint32_t>(partition_id) << std::endl;
+      }
+    } else if (ret == RSMI_STATUS_SUCCESS && current_partition == "DPX") {
+      ASSERT_LT(partition_id, max_loop);
+      if (isVerbose) {
+        std::cout << "\n\t**Confirmed partition_id < " << max_loop
+                  << " for DPX"
+                  << "\n\t**rsmi_dev_partition_id_get(" + std::to_string(i) +
+                         ", &partition_id); partition_id = "
+                  << static_cast<uint32_t>(partition_id) << std::endl;
+      }
+    } else if (ret == RSMI_STATUS_SUCCESS && current_partition == "TPX") {
+      ASSERT_LT(partition_id, max_loop);
+      if (isVerbose) {
+        std::cout << "\n\t**Confirmed partition_id < "
+                  << max_loop << " for TPX"
+                  << "\n\t**rsmi_dev_partition_id_get(" + std::to_string(i) +
+                         ", &partition_id); partition_id = "
+                  << static_cast<uint32_t>(partition_id) << std::endl;
+      }
+    } else if (ret == RSMI_STATUS_SUCCESS && current_partition == "QPX") {
+      ASSERT_LT(partition_id, max_loop);
+      if (isVerbose) {
+        std::cout << "\n\t**Confirmed partition_id < "
+                  << max_loop << " for QPX"
+                  << "\n\t**rsmi_dev_partition_id_get(" + std::to_string(i) +
+                         ", &partition_id); partition_id = "
+                  << static_cast<uint32_t>(partition_id) << std::endl;
+      }
+    } else if (ret == RSMI_STATUS_SUCCESS && current_partition == "CPX") {
+      ASSERT_LT(partition_id, max_loop);
+      if (isVerbose) {
+        std::cout << "\n\t**Confirmed partition_id < "
+                  << max_loop << " for CPX"
+                  << "\n\t**rsmi_dev_partition_id_get(" + std::to_string(i) +
+                         ", &partition_id); partition_id = "
+                  << static_cast<uint32_t>(partition_id) << std::endl;
+      }
+    } else if (ret == RSMI_STATUS_SUCCESS && current_partition == "UNKNOWN") {
+      ASSERT_EQ(partition_id, max_loop - 1);
+      if (isVerbose) {
+        std::cout << "\n\t**Confirmed partition_id = "
+                  << (max_loop - 1)
+                  << " for current_partition = UNKNOWN"
+                  << "\n\t**rsmi_dev_partition_id_get(" + std::to_string(i) +
+                         ", &partition_id); partition_id = "
+                  << static_cast<uint32_t>(partition_id) << std::endl;
+      }
+    }
+  }
+}
+
+void TestComputePartitionReadWrite::Run(void) {
+    rsmi_status_t ret, err;
+    char orig_char_computePartition[255];
+    orig_char_computePartition[0] = '\0';
+    char current_char_computePartition[255];
+    current_char_computePartition[0] = '\0';
+
+    TestBase::Run();
+    if (setup_failed_) {
+      std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl;
+      return;
+    }
+    bool isVerbose = (this->verbosity() &&
+          this->verbosity() >= (this->TestBase::VERBOSE_STANDARD)) ? true: false;
+
+    // Confirm system supports compute partition, before executing wait
+    ret = rsmi_dev_compute_partition_get(0, orig_char_computePartition, 255);
+    if (ret == RSMI_STATUS_SUCCESS) {
+      system_wait(15);
+    }
+
+    // initial_num_devices - keep this value static, due to parition changes
+    // fluctuating # of devices. We should end up with same # of devices at
+    // end of test.
+    uint32_t initial_num_devices = num_monitor_devs();
+    for (uint32_t dv_ind = 0; dv_ind < initial_num_devices; ++dv_ind) {
+      if (dv_ind >= 0) {
+        IF_VERB(STANDARD) {
+          std::cout << std::endl;
+          std::cout << "\t**"
+                    << "=========  LOOP THROUGH DEVICES - DEVICE #"
+                    << std::to_string(dv_ind) << "  =============="
+                    << std::endl;
         }
+      }
+      PrintDeviceHeader(dv_ind);
+      bool devicePartitionUpdated = false;
+
+      ret = rsmi_dev_partition_id_get(dv_ind, nullptr);
+      ASSERT_EQ(ret, RSMI_STATUS_INVALID_ARGS);
+      IF_VERB(STANDARD) {
+        if (ret == RSMI_STATUS_INVALID_ARGS) {
+          std::cout << "\t**" << "Confirmed rsmi_dev_partition_id_get(..,nullptr): "
+                    << "RSMI_STATUS_INVALID_ARGS" << std::endl;
+        }
+      }
+
+      std::string partitionStr = "";
+      ret = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition, 255);
+      if (ret == RSMI_STATUS_NOT_SUPPORTED) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**rsmi_dev_compute_partition_get(): "
+                  << "Not supported on this device"
+                  << std::endl;
+        }
+        partitionStr = orig_char_computePartition;
+        if (partitionStr.empty()) {
+          partitionStr = computePartitionString(
+            rsmi_compute_partition_type_t::RSMI_COMPUTE_PARTITION_INVALID);
+        }
+        // Regardless of partition support - no changes made, so no device
+        // refresh needed (ie. rsmi_dev_compute_partition_set(..))
+        checkPartitionIdChanges(dv_ind, partitionStr, isVerbose, false);
         continue;
     } else {
         CHK_ERR_ASRT(ret)
+        std::string partitionStr = orig_char_computePartition;
+        if (partitionStr.empty()) {
+          partitionStr = computePartitionString(
+            rsmi_compute_partition_type_t::RSMI_COMPUTE_PARTITION_INVALID);
+        }
+        // Regardless of partition support - no changes made, so no device
+        // refresh needed (ie. rsmi_dev_compute_partition_set(..))
+        checkPartitionIdChanges(dv_ind, partitionStr, isVerbose, false);
     }
     IF_VERB(STANDARD) {
       std::cout << std::endl << "\t**"
@@ -236,32 +379,12 @@ void TestComputePartitionReadWrite::Run(void) {
       }
     }
 
-    // Verify api support checking functionality is working
-    rsmi_compute_partition_type_t breakMe;
-    err = rsmi_dev_compute_partition_set(dv_ind, breakMe);
-    std::cout << "\t**rsmi_dev_compute_partition_set(null ptr): "
-              << amd::smi::getRSMIStatusString(err, false) << "\n";
-    ASSERT_TRUE((err == RSMI_STATUS_INVALID_ARGS) ||
-                (err == RSMI_STATUS_NOT_SUPPORTED) ||
-                (err == RSMI_STATUS_PERMISSION));
-    IF_VERB(STANDARD) {
-      if (err == RSMI_STATUS_INVALID_ARGS) {
-        std::cout << "\t**"
-                  << "Confirmed RSMI_STATUS_INVALID_ARGS was returned."
-                  << std::endl;
-      } else if (err == RSMI_STATUS_PERMISSION) {
-        DISPLAY_RSMI_ERR(err)
-        // tests should not continue if err is a permission issue
-        ASSERT_FALSE(err == RSMI_STATUS_PERMISSION);
-      } else {
-        DISPLAY_RSMI_ERR(err)
-      }
-    }
-
     // Re-run original get, so we can reset to later
     ret = rsmi_dev_compute_partition_get(dv_ind, orig_char_computePartition,
                                           255);
     ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
+    std::cout << "\t**rsmi_dev_compute_partition_get(" << dv_ind
+    << ", " << orig_char_computePartition << ")\n";
 
     /**
      * RSMI_COMPUTE_PARTITION_INVALID = 0,
@@ -277,8 +400,27 @@ void TestComputePartitionReadWrite::Run(void) {
      *                                  //!< work together with shared memory
      */
 
-    for (int partition = static_cast<int>(RSMI_COMPUTE_PARTITION_CPX);
-         partition <= static_cast<int>(RSMI_COMPUTE_PARTITION_QPX);
+    /**
+     * General Loop Logic:
+     * [0:SPX, 1:SPX, 2:SPX, 3:SPX]
+     * [0:DPX, 1:DPX, 2: SPX, 3:SPX, 4:SPX] <- set 0 to DPX
+     * [0:TPX, 1:TPX, 2:TPX, 3:SPX, 4:SPX, 5:SPX] <- set 0 to TPX
+     * [0:QPX, 1:QPX, 2:QPX, 3:QPX, 4:SPX, 5:SPX, 6:SPX] <- set 0 to TPX
+     * [0:CPX, 1:CPX, 2:CPX, 3:CPX, 4:CPX, 5:SPX, 6:SPX, 7:SPX] <- set 0 to CPX
+     * [0:SPX, 1:SPX, 2:SPX, 3:SPX] <- reset(0)
+     * +1 index
+     * [0:SPX, 1:SPX, 2:SPX, 3:SPX]
+     * [0:SPX, 1:DPX, 2: DPX, 3:SPX, 4:SPX] <- set 1 to DPX
+     * [0:SPX, 1:TPX, 2:TPX, 3:TPX, 4:SPX, 5:SPX] <- set 1 to TPX
+     * [0:SPX, 1:QPX, 2:QPX, 3:QPX, 4:QPX, 5:SPX, 6:SPX] <- set 1 to TPX
+     * [0:SPX, 1:CPX, 2:CPX, 3:CPX, 4:CPX, 5:CPX, 6:SPX, 7:SPX] <- set 1 to CPX
+     * [0:SPX, 1:SPX, 2:SPX, 3:SPX] <- reset(1)
+     * ...
+     * 
+     */
+    std::string final_partition_state = "UNKNOWN";
+    for (int partition = static_cast<int>(RSMI_COMPUTE_PARTITION_SPX);
+         partition <= static_cast<int>(RSMI_COMPUTE_PARTITION_CPX);
          partition++) {
       rsmi_compute_partition_type_t updatePartition
         = static_cast<rsmi_compute_partition_type_t>(partition);
@@ -292,7 +434,8 @@ void TestComputePartitionReadWrite::Run(void) {
       ret = rsmi_dev_compute_partition_set(dv_ind, updatePartition);
       IF_VERB(STANDARD) {
         std::cout << "\t**"
-                  << "rsmi_dev_compute_partition_set(dv_ind, updatePartition): "
+                  << "rsmi_dev_compute_partition_set(" << dv_ind
+                  << ", updatePartition): "
                   << amd::smi::getRSMIStatusString(ret, false) << "\n"
                   << "\t**New Partition (set): "
                   << computePartitionString(updatePartition) << "\n";
@@ -341,6 +484,7 @@ void TestComputePartitionReadWrite::Run(void) {
         if (strcmp(orig_char_computePartition, current_char_computePartition) !=
         0) {
           devicePartitionUpdated = true;
+          final_partition_state = current_char_computePartition;
         } else {
           devicePartitionUpdated = false;
         }
@@ -356,8 +500,13 @@ void TestComputePartitionReadWrite::Run(void) {
                     << computePartitionString(updatePartition) << ")"
                     << std::endl;
         }
+
+        checkPartitionIdChanges(dv_ind, computePartitionString(updatePartition),
+                                isVerbose, true);
       }
     }   // END looping through partition changes
+    std::cout << "\t**=========== END PARTITION LOOP (dev = "
+              << std::to_string(dv_ind) << ") ===========\n";
 
      /* TEST RETURN TO BOOT COMPUTE PARTITION SETTING */
     IF_VERB(STANDARD) {
@@ -371,7 +520,7 @@ void TestComputePartitionReadWrite::Run(void) {
     ret = rsmi_dev_compute_partition_reset(dv_ind);
     IF_VERB(STANDARD) {
       std::cout << "\t**"
-                << "rsmi_dev_compute_partition_reset(dv_ind): "
+                << "rsmi_dev_compute_partition_reset(" << dv_ind << "): "
                 << amd::smi::getRSMIStatusString(ret, false) << "\n";
     }
     ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
@@ -393,6 +542,14 @@ void TestComputePartitionReadWrite::Run(void) {
                 << "\t**" << "Partitions Updated: "
                 << (devicePartitionUpdated ? "TRUE" : "FALSE") << "\n";
     }
+
+    if (final_partition_state != std::string(current_char_computePartition)) {
+      checkPartitionIdChanges(dv_ind, std::string(current_char_computePartition),
+                            isVerbose, true);
+    } else {
+      checkPartitionIdChanges(dv_ind, std::string(current_char_computePartition),
+                            isVerbose, false);
+    }
     if (wasResetSuccess && devicePartitionUpdated) {
       ASSERT_STRNE(oldPartition.c_str(), current_char_computePartition);
       IF_VERB(STANDARD) {
@@ -401,6 +558,7 @@ void TestComputePartitionReadWrite::Run(void) {
                 << "equal to current\n\t  partition ("
                 << current_char_computePartition << ")" << std::endl;
       }
+      final_partition_state = std::string(current_char_computePartition);
     } else {
       ASSERT_STREQ(oldPartition.c_str(), current_char_computePartition);
       IF_VERB(STANDARD) {
@@ -424,7 +582,12 @@ void TestComputePartitionReadWrite::Run(void) {
     ret = rsmi_dev_compute_partition_set(dv_ind, newPartition);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
-      std::cout << "\t**" << "Returning compute partition to: "
+      std::cout << "\t**"
+                << "rsmi_dev_compute_partition_set("
+                << std::to_string(dv_ind) << ", "
+                << std::string(orig_char_computePartition) << ")" << std::endl;
+      std::cout << "\t**"
+                << "Returning compute partition to: "
                 << computePartitionString(newPartition) << std::endl;
     }
     ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition,
@@ -440,5 +603,20 @@ void TestComputePartitionReadWrite::Run(void) {
     ASSERT_EQ(RSMI_STATUS_SUCCESS, ret);
     ASSERT_STREQ(computePartitionString(newPartition).c_str(),
                  current_char_computePartition);
+
+    // only refresh (rsmi_shut_down() -> rsmi_init(0)) device list
+    // if there was a partition change
+    if (final_partition_state != std::string(current_char_computePartition)) {
+      checkPartitionIdChanges(dv_ind, computePartitionString(newPartition),
+                            isVerbose, true);
+    } else {
+      checkPartitionIdChanges(dv_ind, computePartitionString(newPartition),
+                            isVerbose, false);
+    }
+    std::cout << "\t**"
+                    << "========= END LOOP THROUGH DEVICES - DEVICE #"
+                    << std::to_string(dv_ind) << "  =============="
+                    << std::endl;
   }  // END looping through devices
+  std::cout << "\t**=========== END TEST ===========\n";
 }

@@ -196,9 +196,11 @@ def getBus(device, silent=False):
     # BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) | ((BUS & 0xFF) << 8) |
     # ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
     # bits [63:32] = domain
-    # bits [31:28] = partition id
+    # bits [31:28] or bits [2:0] = partition id 
     # bits [27:16] = reserved
-    # bits [15: 0] = pci bus/device/function
+    # bits [15:8]  = Bus
+    # bits [7:3] = Device
+    # bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
     domain = (bdfid.value >> 32) & 0xffffffff
     bus = (bdfid.value >> 8) & 0xff
     device = (bdfid.value >> 3) & 0x1f
@@ -215,19 +217,19 @@ def getPartitionId(device, silent=False):
     :param silent: Turn on to silence error output
         (you plan to handle manually). Default is off.
     """
-    bdfid = c_uint64(0)
-    ret = rocmsmi.rsmi_dev_pci_id_get(device, byref(bdfid))
+    partition_id = c_uint32(0)
+    ret = rocmsmi.rsmi_dev_partition_id_get(device, byref(partition_id))
 
     # BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) | ((BUS & 0xFF) << 8) |
     # ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
     # bits [63:32] = domain
-    # bits [31:28] = partition id
-    # bits [27:16]  = reserved
-    # bits [15: 0]  = pci bus/device/function
-    partition_num = (bdfid.value >> 28) & 0xf
-    pci_id = bdfid.value
-    partition_id = '{:d}'.format(partition_num)
-    if rsmi_ret_ok(ret, device, 'get_pci_id', silent):
+    # bits [31:28] or bits [2:0] = partition id 
+    # bits [27:16] = reserved
+    # bits [15:8]  = Bus
+    # bits [7:3] = Device
+    # bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
+    partition_id = '{:d}'.format(partition_id.value)
+    if rsmi_ret_ok(ret, device, 'rsmi_dev_partition_id_get', silent):
         return partition_id
 
 
