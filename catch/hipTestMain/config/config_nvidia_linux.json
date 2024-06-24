@@ -1,7 +1,6 @@
 {
     "DisabledTests": [
         "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/85 ===",
-        "Unit_hipFuncSetAttribute_Negative_Parameters",
         "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 ===",
         "Unit_ChannelDescriptor_Positive_Basic_1D - long",
         "Unit_ChannelDescriptor_Positive_Basic_1D - unsigned long",

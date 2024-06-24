@@ -181,7 +181,7 @@ TEST_CASE("Unit_hipFuncSetAttribute_Negative_Parameters") {
     // The sum of this value and the function attribute sharedSizeBytes cannot exceed the device
     // attribute cudaDevAttrMaxSharedMemoryPerBlockOptin
     int max_shared;
-    HIP_CHECK(hipDeviceGetAttribute(&max_shared, hipDeviceAttributeMaxSharedMemoryPerBlock, 0));
+    HIP_CHECK(hipDeviceGetAttribute(&max_shared, hipDeviceAttributeSharedMemPerBlockOptin, 0));
 
     hipFuncAttributes attributes;
     HIP_CHECK(hipFuncGetAttributes(&attributes, reinterpret_cast<void*>(kernel)));
