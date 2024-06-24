@@ -114,8 +114,9 @@ typedef rocprofiler_status_t (*rocprofiler_att_parser_isa_callback_t)(char*     
  * @param[in] userdata Arbitrary data pointer to be sent back to the user via callback.
  * @returns Number of bytes remaining in shader engine.
  * @retval 0 if no more SE data is available. Parsing will stop.
+ * @retval ret Where 0 > ret > buffer_size for partially filled buffer, and caller moves over to
+ * next SE.
  * @retval buffer_size if the buffer does not hold enough data for the current shader engine.
- * @retval 0 > ret > buffer_size for partially filled buffer, and caller moves over to next SE.
  */
 typedef uint64_t (*rocprofiler_att_parser_se_data_callback_t)(int*      shader_engine_id,
                                                               uint8_t** buffer,

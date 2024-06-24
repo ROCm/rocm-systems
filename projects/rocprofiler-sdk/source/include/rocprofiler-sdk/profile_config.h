@@ -49,7 +49,7 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [in] agent_id Agent identifier
  * @param [in] counters_list List of GPU counters
  * @param [in] counters_count Size of counters list
- * @param [in/out] config_id Identifier for GPU counters group. If an existing
+ * @param [in,out] config_id Identifier for GPU counters group. If an existing
                    profile is supplied, that profiles counters will be copied
                    over to a new profile (returned via this id)
  * @return ::rocprofiler_status_t

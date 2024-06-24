@@ -142,7 +142,7 @@ typedef struct
     /// @brief A unit used to specify the interval of the @ref method for samples generation.
     /// @var min_interval
     /// @brief the highest possible frequencey for generating samples using @ref method.
-    /// @var max_interva
+    /// @var max_interval
     /// @brief the lowest possible frequency for generating samples using @ref method
 
 } rocprofiler_pc_sampling_configuration_t;
@@ -248,25 +248,25 @@ typedef struct
 {
     uint64_t                            size;  ///< Size of this struct
     rocprofiler_pc_sampling_header_v1_t flags;
-    uint8_t                             chiplet;  /// chiplet index
-    uint8_t                             wave_id;  /// wave identifier within the workgroup
+    uint8_t                             chiplet;  ///< chiplet index
+    uint8_t                             wave_id;  ///< wave identifier within the workgroup
     uint8_t                             wave_issued : 1;
-    uint8_t                             reserved    : 7;  /// reserved 7 bits, must be zero
-    uint32_t                            hw_id;            /// compute unit identifier
-    uint64_t                     pc;  /// Program counter of the wave of the moment of interruption
+    uint8_t                             reserved    : 7;  ///< reserved 7 bits, must be zero
+    uint32_t                            hw_id;            ///< compute unit identifier
+    uint64_t                     pc;  ///< Program counter of the wave of the moment of interruption
     uint64_t                     exec_mask;
-    rocprofiler_dim3_t           workgroup_id;  /// wave coordinates within the workgroup
+    rocprofiler_dim3_t           workgroup_id;  ///< wave coordinates within the workgroup
     uint32_t                     wave_count;
-    uint64_t                     timestamp;  /// timestamp when sample is generated
+    uint64_t                     timestamp;  ///< timestamp when sample is generated
     rocprofiler_correlation_id_t correlation_id;
     rocprofiler_pc_sampling_snapshot_v1_t
-             snapshot;   /// @see ::rocprofiler_pc_sampling_snapshot_v1_t
-    uint32_t reserved2;  /// for future use
+             snapshot;   ///< @see ::rocprofiler_pc_sampling_snapshot_v1_t
+    uint32_t reserved2;  ///< for future use
 
     /// @var flags
     /// @brief indicates what fields of this struct are meaningful for the represented sample.
     /// The values depend on what the underlying GPU agent architecture supports.
-    /// @var wave_issue
+    /// @var wave_issued
     /// @brief indicates whether the wave is issueing the instruction represented by the @ref pc
     /// @var exec_mask
     /// @brief shows how many SIMD lanes of the wave were executing the instruction

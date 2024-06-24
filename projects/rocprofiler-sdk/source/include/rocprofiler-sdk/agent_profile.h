@@ -81,7 +81,6 @@ typedef void (*rocprofiler_agent_profile_callback_t)(
  * @param [in] cb Callback called when the context is started for the tool to specify what
  * counters to collect (rocprofiler_profile_config_id_t).
  * @param [in] user_data User supplied data to be passed to the callback cb when triggered
- * @param [in] config_id Profile config detailing the counters to collect for this kernel
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist.
  * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Returned if the buffer is not found.
