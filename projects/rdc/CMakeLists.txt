@@ -44,10 +44,6 @@ message("Package version: ${VERSION_STRING}")
 # which requires the gRPC
 option(BUILD_STANDALONE "Build targets for rdci and rdcd" ON)
 
-# When cmake -DBUILD_RASLIB=off, it will not build the raslib
-# which requires the ROCT-Thunk-Interface.
-option(BUILD_RASLIB "Build targets for raslib" OFF)
-
 # When cmake -DBUILD_RUNTIME=off, it will not build the librdc_rocr.so
 # which requires the Rocm run time.
 option(BUILD_RUNTIME "Build targets for librdc_rocr.so" ON)
@@ -149,12 +145,6 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     Continuing without gRPC install")
 endif()
 
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/raslib/.git" AND BUILD_RASLIB)
-    message(FATAL_ERROR "The git submodule raslib is not available. Please run
-    git submodule update --init --recursive
-    If you do not want to build raslib, use cmake -DBUILD_RASLIB=off")
-endif()
-
 find_package(SMI
     NAMES amd_smi
     HINTS ${ROCM_DIR}/lib/cmake
@@ -165,12 +155,6 @@ set(SMI_LIB_DIR "${AMD_SMI_LIB_DIR}" CACHE INTERNAL "AMD SMI library directory."
 if(NOT EXISTS "${SMI_INC_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
     message(FATAL_ERROR "amd_smi not found in ${SMI_INC_DIR}. Please
     make sure amd_smi is installed and present in ${SMI_INC_DIR}.")
-endif()
-
-if(BUILD_RASLIB AND NOT DEFINED HSA_DIR)
-    message(FATAL_ERROR "Please specify libhsakmt directory which is required by raslib
-    cmake -DHSA_DIR=<libhsakmt directory>
-    If you do not want to build raslib, use cmake -DBUILD_RASLIB=off")
 endif()
 
 set(${RDC}_VERSION_MAJOR "${VERSION_MAJOR}")
@@ -315,20 +299,6 @@ if(BUILD_STANDALONE)
     endif()
 endif()
 
-# Raslib
-if(BUILD_RASLIB)
-    message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-    message("                    Build raslib")
-    message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-
-    add_subdirectory("raslib")
-else()
-    add_library(rdc_ras INTERFACE
-        ${PROJECT_SOURCE_DIR}/ras_prebuild/librdc_ras.so)
-    # needed for copying the pre-built library
-    get_target_property(RAS_SOURCES rdc_ras SOURCES)
-endif()
-
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
 
@@ -376,24 +346,6 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/authentication
 install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
     DESTINATION ${RDC_SHARE_INSTALL_PREFIX}
     COMPONENT dev)
-
-# Prebuild packages to install
-install(PROGRAMS ${RAS_SOURCES}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/config
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
-# Don't sp3 grpc install because it floods the terminal
-set(OLD_CMAKE_INSTALL_MESSAGE ${CMAKE_INSTALL_MESSAGE})
-set(CMAKE_INSTALL_MESSAGE NEVER)
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/sp3
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
-# Restore printing verbosity
-set(CMAKE_INSTALL_MESSAGE ${OLD_CMAKE_INSTALL_MESSAGE})
-unset(OLD_CMAKE_INSTALL_MESSAGE)
-
 
 #Identify between SLES and Centos for setting symlink for rdc.service
 #SLES need serice file in /usr/lib/systemd/system/rdc.service

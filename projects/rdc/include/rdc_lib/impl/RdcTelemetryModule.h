@@ -29,7 +29,6 @@ THE SOFTWARE.
 
 #include "rdc_lib/RdcMetricFetcher.h"
 #include "rdc_lib/RdcTelemetry.h"
-#include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 
 namespace amd {

@@ -91,7 +91,116 @@ uint64_t RdcMetricFetcherImpl::now() {
   return static_cast<uint64_t>(tv.tv_sec) * 1000 + tv.tv_usec / 1000;
 }
 
-void RdcMetricFetcherImpl::get_ecc_error(uint32_t gpu_index, rdc_field_t field_id,
+void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
+                                   rdc_field_value* value) {
+  amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
+  amdsmi_ras_err_state_t err_state;
+
+  amdsmi_processor_handle processor_handle;
+  err = get_processor_handle_from_id(gpu_index, &processor_handle);
+
+  // because RDC already had an established order that is different from amd-smi : map blocks to
+  // fields manually
+  auto field_to_block_ = [](rdc_field_t field) -> amdsmi_gpu_block_t {
+    switch (field) {
+      case RDC_FI_ECC_SDMA_CE:
+      case RDC_FI_ECC_SDMA_UE:
+        return AMDSMI_GPU_BLOCK_SDMA;
+      case RDC_FI_ECC_GFX_CE:
+      case RDC_FI_ECC_GFX_UE:
+        return AMDSMI_GPU_BLOCK_GFX;
+      case RDC_FI_ECC_MMHUB_CE:
+      case RDC_FI_ECC_MMHUB_UE:
+        return AMDSMI_GPU_BLOCK_MMHUB;
+      case RDC_FI_ECC_ATHUB_CE:
+      case RDC_FI_ECC_ATHUB_UE:
+        return AMDSMI_GPU_BLOCK_ATHUB;
+      case RDC_FI_ECC_PCIE_BIF_CE:
+      case RDC_FI_ECC_PCIE_BIF_UE:
+        return AMDSMI_GPU_BLOCK_PCIE_BIF;
+      case RDC_FI_ECC_HDP_CE:
+      case RDC_FI_ECC_HDP_UE:
+        return AMDSMI_GPU_BLOCK_HDP;
+      case RDC_FI_ECC_XGMI_WAFL_CE:
+      case RDC_FI_ECC_XGMI_WAFL_UE:
+        return AMDSMI_GPU_BLOCK_XGMI_WAFL;
+      case RDC_FI_ECC_DF_CE:
+      case RDC_FI_ECC_DF_UE:
+        return AMDSMI_GPU_BLOCK_DF;
+      case RDC_FI_ECC_SMN_CE:
+      case RDC_FI_ECC_SMN_UE:
+        return AMDSMI_GPU_BLOCK_SMN;
+      case RDC_FI_ECC_SEM_CE:
+      case RDC_FI_ECC_SEM_UE:
+        return AMDSMI_GPU_BLOCK_SEM;
+      case RDC_FI_ECC_MP0_CE:
+      case RDC_FI_ECC_MP0_UE:
+        return AMDSMI_GPU_BLOCK_MP0;
+      case RDC_FI_ECC_MP1_CE:
+      case RDC_FI_ECC_MP1_UE:
+        return AMDSMI_GPU_BLOCK_MP1;
+      case RDC_FI_ECC_FUSE_CE:
+      case RDC_FI_ECC_FUSE_UE:
+        return AMDSMI_GPU_BLOCK_FUSE;
+      case RDC_FI_ECC_UMC_CE:
+      case RDC_FI_ECC_UMC_UE:
+        return AMDSMI_GPU_BLOCK_UMC;
+      case RDC_FI_ECC_MCA_CE:
+      case RDC_FI_ECC_MCA_UE:
+        return AMDSMI_GPU_BLOCK_MCA;
+      case RDC_FI_ECC_VCN_CE:
+      case RDC_FI_ECC_VCN_UE:
+        return AMDSMI_GPU_BLOCK_VCN;
+      case RDC_FI_ECC_JPEG_CE:
+      case RDC_FI_ECC_JPEG_UE:
+        return AMDSMI_GPU_BLOCK_JPEG;
+      case RDC_FI_ECC_IH_CE:
+      case RDC_FI_ECC_IH_UE:
+        return AMDSMI_GPU_BLOCK_IH;
+      case RDC_FI_ECC_MPIO_CE:
+      case RDC_FI_ECC_MPIO_UE:
+        return AMDSMI_GPU_BLOCK_MPIO;
+      default:
+        return AMDSMI_GPU_BLOCK_INVALID;
+    }
+  };
+
+  const bool is_correctable = (field_id % 2 == 0);
+
+  if (!value) {
+    return;
+  }
+
+  auto gpu_block = field_to_block_(field_id);
+  if (gpu_block == AMDSMI_GPU_BLOCK_INVALID) {
+    value->status = AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS;
+  }
+
+  err = amdsmi_get_gpu_ecc_status(processor_handle, gpu_block, &err_state);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_INFO, "Error in ecc status [" << gpu_block << "]:" << err);
+    value->status = err;
+    return;
+  }
+
+  amdsmi_error_count_t ec;
+  err = amdsmi_get_gpu_ecc_count(processor_handle, gpu_block, &ec);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    RDC_LOG(RDC_ERROR, "Error in ecc count [" << gpu_block << "]:" << err);
+    value->status = err;
+    return;
+  }
+
+  value->status = AMDSMI_STATUS_SUCCESS;
+  value->type = INTEGER;
+  if (is_correctable) {
+    value->value.l_int = ec.correctable_count;
+  } else {
+    value->value.l_int = ec.uncorrectable_count;
+  }
+}
+
+void RdcMetricFetcherImpl::get_ecc_total(uint32_t gpu_index, rdc_field_t field_id,
                                          rdc_field_value* value) {
   amdsmi_status_t err = AMDSMI_STATUS_SUCCESS;
   uint64_t correctable_count = 0;
@@ -516,7 +625,47 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     }
     case RDC_FI_ECC_CORRECT_TOTAL:
     case RDC_FI_ECC_UNCORRECT_TOTAL:
-      get_ecc_error(gpu_index, field_id, value);
+      get_ecc_total(gpu_index, field_id, value);
+      break;
+    case RDC_FI_ECC_SDMA_CE:
+    case RDC_FI_ECC_SDMA_UE:
+    case RDC_FI_ECC_GFX_CE:
+    case RDC_FI_ECC_GFX_UE:
+    case RDC_FI_ECC_MMHUB_CE:
+    case RDC_FI_ECC_MMHUB_UE:
+    case RDC_FI_ECC_ATHUB_CE:
+    case RDC_FI_ECC_ATHUB_UE:
+    case RDC_FI_ECC_PCIE_BIF_CE:
+    case RDC_FI_ECC_PCIE_BIF_UE:
+    case RDC_FI_ECC_HDP_CE:
+    case RDC_FI_ECC_HDP_UE:
+    case RDC_FI_ECC_XGMI_WAFL_CE:
+    case RDC_FI_ECC_XGMI_WAFL_UE:
+    case RDC_FI_ECC_DF_CE:
+    case RDC_FI_ECC_DF_UE:
+    case RDC_FI_ECC_SMN_CE:
+    case RDC_FI_ECC_SMN_UE:
+    case RDC_FI_ECC_SEM_CE:
+    case RDC_FI_ECC_SEM_UE:
+    case RDC_FI_ECC_MP0_CE:
+    case RDC_FI_ECC_MP0_UE:
+    case RDC_FI_ECC_MP1_CE:
+    case RDC_FI_ECC_MP1_UE:
+    case RDC_FI_ECC_FUSE_CE:
+    case RDC_FI_ECC_FUSE_UE:
+    case RDC_FI_ECC_UMC_CE:
+    case RDC_FI_ECC_UMC_UE:
+    case RDC_FI_ECC_MCA_CE:
+    case RDC_FI_ECC_MCA_UE:
+    case RDC_FI_ECC_VCN_CE:
+    case RDC_FI_ECC_VCN_UE:
+    case RDC_FI_ECC_JPEG_CE:
+    case RDC_FI_ECC_JPEG_UE:
+    case RDC_FI_ECC_IH_CE:
+    case RDC_FI_ECC_IH_UE:
+    case RDC_FI_ECC_MPIO_CE:
+    case RDC_FI_ECC_MPIO_UE:
+      get_ecc(gpu_index, field_id, value);
       break;
     case RDC_FI_PCIE_TX:
     case RDC_FI_PCIE_RX:

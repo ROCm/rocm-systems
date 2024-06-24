@@ -30,7 +30,6 @@ THE SOFTWARE.
 #include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/impl/RdcDiagnosticModule.h"
 #include "rdc_lib/impl/RdcRVSLib.h"
-#include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcRocpLib.h"
 #include "rdc_lib/impl/RdcRocrLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
@@ -89,7 +88,7 @@ RdcModuleMgrImpl::RdcModuleMgrImpl(const RdcMetricFetcherPtr& fetcher) : fetcher
   }
 
   // all other modules get initialized by insert_modules
-  insert_modules<RdcRasLib, RdcRVSLib, RdcRocrLib, RdcRocpLib>();
+  insert_modules<RdcRVSLib, RdcRocrLib, RdcRocpLib>();
 }
 
 RdcTelemetryPtr RdcModuleMgrImpl::get_telemetry_module() {

@@ -84,7 +84,8 @@ class RdcMetricFetcherImpl final : public RdcMetricFetcher {
   std::shared_ptr<FieldSMIData> get_smi_data(RdcFieldKey key);
 
   uint64_t now();
-  void get_ecc_error(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+  void get_ecc(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
+  void get_ecc_total(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
 
   //!< return true if starting async_get
   bool async_get_pcie_throughput(uint32_t gpu_index, rdc_field_t field_id, rdc_field_value* value);
