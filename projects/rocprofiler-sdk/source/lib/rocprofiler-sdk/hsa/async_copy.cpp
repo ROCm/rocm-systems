@@ -239,7 +239,7 @@ active_signals::create()
     if(m_signal.handle != 0) return;
 
     // function pointer may be null during unit testing
-    if(get_core_table()->hsa_signal_create_fn)
+    if(hsa::get_hsa_ref_count() > 0 && get_core_table()->hsa_signal_create_fn)
     {
         ROCP_HSA_TABLE_CALL(ERROR,
                             get_core_table()->hsa_signal_create_fn(0, 0, nullptr, &m_signal));
@@ -252,7 +252,7 @@ active_signals::destroy()
     if(m_signal.handle == 0) return;
 
     // function pointer may be null during unit testing
-    if(get_core_table()->hsa_signal_destroy_fn)
+    if(hsa::get_hsa_ref_count() > 0 && get_core_table()->hsa_signal_destroy_fn)
     {
         ROCP_HSA_TABLE_CALL(ERROR, get_core_table()->hsa_signal_destroy_fn(m_signal));
         m_signal.handle = 0;
@@ -853,11 +853,19 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
 }
 
 void
-async_copy_fini()
+async_copy_sync()
 {
     if(!async_copy::get_active_signals()) return;
 
     async_copy::get_active_signals()->sync();
+}
+
+void
+async_copy_fini()
+{
+    if(!async_copy::get_active_signals()) return;
+
+    async_copy_sync();
     async_copy::get_active_signals()->destroy();
 }
 }  // namespace hsa

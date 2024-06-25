@@ -393,6 +393,13 @@ queue_controller_init(HsaApiTable* table)
 }
 
 void
+queue_controller_sync()
+{
+    if(get_queue_controller())
+        get_queue_controller()->iterate_queues([](const Queue* _queue) { _queue->sync(); });
+}
+
+void
 queue_controller_fini()
 {
     if(get_queue_controller())

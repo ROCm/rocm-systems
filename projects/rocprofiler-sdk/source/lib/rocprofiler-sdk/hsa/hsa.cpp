@@ -536,6 +536,31 @@ should_wrap_functor(const context::context_array_t&     _contexts,
     return false;
 }
 
+auto hsa_reference_count_value = std::atomic<int>{0};
+
+hsa_status_t
+hsa_init_refcnt_impl()
+{
+    struct scoped_dtor
+    {
+        scoped_dtor() = default;
+        ~scoped_dtor() { ++hsa_reference_count_value; }
+    };
+    auto _dtor = scoped_dtor{};
+    return get_core_table()->hsa_init_fn();
+}
+
+hsa_status_t
+hsa_shut_down_refcnt_impl()
+{
+    if(hsa_reference_count_value > 0)
+    {
+        --hsa_reference_count_value;
+        return get_core_table()->hsa_shut_down_fn();
+    }
+    return HSA_STATUS_SUCCESS;
+}
+
 template <size_t TableIdx, typename LookupT = internal_table, typename Tp, size_t OpIdx>
 void
 copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpIdx>)
@@ -572,6 +597,20 @@ copy_table(Tp* _orig, uint64_t _tbl_instance, std::integral_constant<size_t, OpI
         {
             ROCP_TRACE << "skipping copying table entry for " << _info.name
                        << " from table instance " << _tbl_instance;
+        }
+
+        if constexpr(TableIdx == ROCPROFILER_HSA_TABLE_ID_Core &&
+                     OpIdx == ROCPROFILER_HSA_CORE_API_ID_hsa_init)
+        {
+            auto& _func = _info.get_table_func(_info.get_table(_orig));
+            _func       = hsa_init_refcnt_impl;
+            if(get_hsa_ref_count() == 0) ++hsa_reference_count_value;
+        }
+        else if constexpr(TableIdx == ROCPROFILER_HSA_TABLE_ID_Core &&
+                          OpIdx == ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down)
+        {
+            auto& _func = _info.get_table_func(_info.get_table(_orig));
+            _func       = hsa_shut_down_refcnt_impl;
         }
     }
 }
@@ -769,5 +808,13 @@ copy_table<hsa_pc_sampling_ext_table_t>(hsa_pc_sampling_ext_table_t* _tbl, uint6
 
 #endif
 #undef INSTANTIATE_HSA_TABLE_FUNC
+
+int
+get_hsa_ref_count()
+{
+    auto _val = hsa_reference_count_value.load();
+    ROCP_TRACE << "hsa reference count: " << _val;
+    return _val;
+}
 }  // namespace hsa
 }  // namespace rocprofiler

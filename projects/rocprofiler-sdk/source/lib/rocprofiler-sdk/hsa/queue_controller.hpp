@@ -122,6 +122,9 @@ void
 queue_controller_fini();
 
 void
+queue_controller_sync();
+
+void
 profiler_serializer_kernel_completion_signal(hsa_signal_t queue_block_signal);
 
 }  // namespace hsa

@@ -228,11 +228,8 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
 
     static auto& cb_data = get_client_callback_data();
 
-    static auto cfg_result =
-        rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-                                            tool_init,
-                                            tool_fini,
-                                            static_cast<void*>(&cb_data)};
+    static auto cfg_result = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t), tool_init, tool_fini, &cb_data};
 
     static rocprofiler_configure_func_t rocp_init =
         [](uint32_t                 version,
@@ -251,7 +248,7 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
         {
             ROCPROFILER_CALL_EXPECT(
                 rocprofiler_at_intercept_table_registration(
-                    api_registration_callback, itr, static_cast<void*>(&cb_data)),
+                    api_registration_callback, itr, &cb_data),
                 "test should be updated if new (non-HSA, non-HIP) intercept table is supported",
                 ROCPROFILER_STATUS_SUCCESS);
         }
@@ -274,8 +271,10 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
     };
 
     hsa_init();
+    hsa_init();
     auto         _agent_data = agent_data{};
-    hsa_status_t itr_status  = hsa_iterate_agents(agent_cb, static_cast<void*>(&_agent_data));
+    hsa_status_t itr_status  = hsa_iterate_agents(agent_cb, &_agent_data);
+    hsa_shut_down();
     hsa_shut_down();
 
     EXPECT_EQ(itr_status, HSA_STATUS_SUCCESS);
@@ -300,16 +299,7 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
         EXPECT_EQ(itr.second.first, itr.second.second)
             << "mismatched wrap counts for " << itr.first
             << " (lhs=tool_wrapper, rhs=rocprofiler_wrapper)";
-        if(itr.first != "hsa_init")
-        {
-            EXPECT_GT(itr.second.first, 0) << itr.first << " not wrapped";
-        }
-        else
-        {
-            EXPECT_EQ(itr.second.first, 0) << itr.first
-                                           << " was wrapped. If hsa runtime has been updated to "
-                                              "include first call to hsa_init, update this test";
-        }
+        EXPECT_GT(itr.second.first, 0) << itr.first << " not wrapped";
     }
 
     auto get_count = [](std::string_view func_name) {
@@ -317,10 +307,10 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
         return cb_data.client_callback_count.at(func_name).first;
     };
 
-    EXPECT_EQ(get_count("hsa_init"), 0);
+    EXPECT_EQ(get_count("hsa_init"), 1);
     EXPECT_EQ(get_count("hsa_iterate_agents"), 1);
     EXPECT_EQ(get_count("hsa_agent_get_info"), _agent_data.agent_count);
-    EXPECT_EQ(get_count("hsa_shut_down"), 1);
+    EXPECT_EQ(get_count("hsa_shut_down"), 2);
 }
 
 TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
@@ -392,11 +382,8 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
     static auto& cb_data = get_client_callback_data();
     cb_data              = callback_data_ext{};
 
-    static auto cfg_result =
-        rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
-                                            tool_init,
-                                            tool_fini,
-                                            static_cast<void*>(&cb_data)};
+    static auto cfg_result = rocprofiler_tool_configure_result_t{
+        sizeof(rocprofiler_tool_configure_result_t), tool_init, tool_fini, &cb_data};
 
     static rocprofiler_configure_func_t rocp_init =
         [](uint32_t                 version,
@@ -415,7 +402,7 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
         {
             ROCPROFILER_CALL_EXPECT(
                 rocprofiler_at_intercept_table_registration(
-                    api_registration_callback, itr, static_cast<void*>(&cb_data)),
+                    api_registration_callback, itr, &cb_data),
                 "test should be updated if new (non-HSA, non-HIP) intercept table is supported",
                 ROCPROFILER_STATUS_SUCCESS);
         }

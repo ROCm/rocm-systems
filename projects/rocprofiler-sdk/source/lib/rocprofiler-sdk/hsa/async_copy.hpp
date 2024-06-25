@@ -49,6 +49,9 @@ void
 async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance);
 
 void
+async_copy_sync();
+
+void
 async_copy_fini();
 }  // namespace hsa
 }  // namespace rocprofiler
