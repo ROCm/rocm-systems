@@ -103,9 +103,11 @@ TEST(rocprofiler_lib, agent_abi)
     EXPECT_EQ(offsetof(rocprofiler_agent_t, model_name), 272) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, node_id), 280) << msg;
     EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_id), 284) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, logical_node_type_id), 288) << msg;
+    EXPECT_EQ(offsetof(rocprofiler_agent_t, reserved_padding0), 292) << msg;
     // Add test for offset of new field above this. Do NOT change any existing values!
 
-    constexpr auto expected_rocp_agent_size = 288;
+    constexpr auto expected_rocp_agent_size = 296;
     // If a new field is added, increase this value by the size of the new field(s)
     EXPECT_EQ(sizeof(rocprofiler_agent_t), expected_rocp_agent_size)
         << "ABI break. If you added a new field, make sure that this is the only new check that "

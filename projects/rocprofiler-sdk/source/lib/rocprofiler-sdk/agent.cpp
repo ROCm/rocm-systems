@@ -369,6 +369,9 @@ read_topology()
     auto        data       = std::vector<unique_agent_t>{};
     uint64_t    idcount    = 0;
     uint64_t    nodecount  = 0;
+    uint64_t    cpucount   = 0;
+    uint64_t    gpucount   = 0;
+    uint64_t    unkcount   = 0;
 
     while(true)
     {
@@ -398,11 +401,12 @@ read_topology()
         // we may have been able to open the properties file but if it was empty, we ignore it
         if(properties.empty()) continue;
 
-        auto agent_info            = common::init_public_api_struct(rocprofiler_agent_t{});
-        agent_info.type            = ROCPROFILER_AGENT_TYPE_NONE;
-        agent_info.logical_node_id = idcount++;
-        agent_info.node_id         = node_id;
-        agent_info.id.handle       = (agent_info.logical_node_id) + get_agent_offset();
+        auto agent_info                 = common::init_public_api_struct(rocprofiler_agent_t{});
+        agent_info.type                 = ROCPROFILER_AGENT_TYPE_NONE;
+        agent_info.logical_node_id      = idcount++;
+        agent_info.node_id              = node_id;
+        agent_info.id.handle            = (agent_info.logical_node_id) + get_agent_offset();
+        agent_info.logical_node_type_id = -1;
 
         if(!name_prop.empty())
             agent_info.model_name =
@@ -419,6 +423,15 @@ read_topology()
             agent_info.type = ROCPROFILER_AGENT_TYPE_CPU;
         else if(agent_info.simd_count > 0)
             agent_info.type = ROCPROFILER_AGENT_TYPE_GPU;
+        else
+            ROCP_WARNING << "agent " << agent_info.node_id << " is neither a CPU nor a GPU";
+
+        if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
+            agent_info.logical_node_type_id = cpucount++;
+        else if(agent_info.type == ROCPROFILER_AGENT_TYPE_GPU)
+            agent_info.logical_node_type_id = gpucount++;
+        else
+            agent_info.logical_node_type_id = unkcount++;
 
         read_property(properties, "mem_banks_count", agent_info.mem_banks_count);
         read_property(properties, "caches_count", agent_info.caches_count);

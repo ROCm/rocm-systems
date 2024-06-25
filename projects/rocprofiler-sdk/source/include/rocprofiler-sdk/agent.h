@@ -191,6 +191,22 @@ typedef struct rocprofiler_agent_v0_t
                                ///< HSA_AMD_AGENT_INFO_DRIVER_NODE_ID property
     int32_t logical_node_id;   ///< Logical sequence number. This will always be [0..N) where N is
                                ///< the total number of agents
+    int32_t logical_node_type_id;
+    int32_t reserved_padding0;  ///< padding logical_node_id to 64 bytes
+
+    /// @var logical_node_type_id
+    /// @brief Logical sequence number with respect to other agents of same type. This will always
+    /// be [0..N) where N is the total number of X agents (where X is a ::rocprofiler_agent_type_t
+    /// value). This field is intended to help with environment variable indexing used to mask GPUs
+    /// at runtime (i.e. HIP_VISIBLE_DEVICES and ROCR_VISIBLE_DEVICES) which start at zero and only
+    /// apply to GPUs, e.g., logical_node_type_id value for first GPU will be 0, second GPU will
+    /// have value of 1, etc., regardless of however many agents of a different type preceeded (and
+    /// thus increased the ::node_id or ::logical_node_id).
+    ///
+    /// Example: a system with 2 CPUs and 2 GPUs, where the node ids are 0=CPU, 1=GPU, 2=CPU, 3=GPU,
+    /// then then CPU node_ids 0 and 2 would have logical_node_type_id values of 0 and 1,
+    /// respectively, and GPU node_ids 1 and 3 would also have logical_node_type_id values of 0
+    /// and 1.
 } rocprofiler_agent_v0_t;
 
 typedef rocprofiler_agent_v0_t rocprofiler_agent_t;
