@@ -762,6 +762,7 @@ rocprofiler_set_api_table(const char* name,
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::code_object::initialize(hsa_api_table);
+        rocprofiler::thread_trace::code_object::initialize(hsa_api_table);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
 #endif

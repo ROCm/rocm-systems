@@ -62,12 +62,12 @@ rocprofiler_configure_dispatch_thread_trace_service(
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
     if(ctx->thread_trace) return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
-    auto param_pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
+    auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
 
-    param_pack.context_id        = context_id;
-    param_pack.dispatch_cb_fn    = dispatch_callback;
-    param_pack.shader_cb_fn      = shader_callback;
-    param_pack.callback_userdata = callback_userdata;
+    pack.context_id        = context_id;
+    pack.dispatch_cb_fn    = dispatch_callback;
+    pack.shader_cb_fn      = shader_callback;
+    pack.callback_userdata = callback_userdata;
 
     const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getPerfCountersIdMap());
     for(size_t p = 0; p < num_parameters; p++)
@@ -78,39 +78,26 @@ rocprofiler_configure_dispatch_thread_trace_service(
 
         switch(param.type)
         {
-            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: param_pack.target_cu = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: pack.target_cu = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK:
-                param_pack.shader_engine_mask = param.value;
+                pack.shader_engine_mask = param.value;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: param_pack.buffer_size = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: param_pack.simd_select = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: pack.buffer_size = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: pack.simd_select = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
                 if(const auto* metric_ptr =
                        rocprofiler::common::get_val(id_map, param.counter_id.handle))
-                    param_pack.perfcounters.push_back(get_mask(metric_ptr, param.simd_mask));
+                    pack.perfcounters.push_back(get_mask(metric_ptr, param.simd_mask));
                 break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
-                param_pack.perfcounter_ctrl = param.value;
+                pack.perfcounter_ctrl = param.value;
                 break;
             case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
 
-    auto tracer = std::make_unique<rocprofiler::thread_trace::DispatchThreadTracer>(param_pack);
-
-    rocprofiler_status_t status = rocprofiler_create_context(&tracer->codeobj_client_ctx);
-    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
-
-    status = rocprofiler_configure_callback_tracing_service(
-        tracer->codeobj_client_ctx,
-        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-        nullptr,
-        0,
-        rocprofiler::thread_trace::DispatchThreadTracer::codeobj_tracing_callback,
-        tracer.get());
-
-    ctx->thread_trace = std::move(tracer);
-    return status;
+    ctx->thread_trace = std::make_unique<rocprofiler::thread_trace::DispatchThreadTracer>(pack);
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 
 rocprofiler_status_t ROCPROFILER_API
@@ -122,18 +109,20 @@ rocprofiler_configure_agent_thread_trace_service(
     rocprofiler_att_shader_data_callback_t shader_callback,
     void*                                  callback_userdata)
 {
+    using AgentThreadTracer = rocprofiler::thread_trace::AgentThreadTracer;
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
-    if(ctx->thread_trace) return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
-    auto param_pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
+    if(!ctx->thread_trace) ctx->thread_trace = std::make_unique<AgentThreadTracer>();
 
-    param_pack.context_id        = context_id;
-    param_pack.shader_cb_fn      = shader_callback;
-    param_pack.callback_userdata = callback_userdata;
+    auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
+
+    pack.context_id        = context_id;
+    pack.shader_cb_fn      = shader_callback;
+    pack.callback_userdata = callback_userdata;
 
     const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getPerfCountersIdMap());
     for(size_t p = 0; p < num_parameters; p++)
@@ -144,38 +133,29 @@ rocprofiler_configure_agent_thread_trace_service(
 
         switch(param.type)
         {
-            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: param_pack.target_cu = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_TARGET_CU: pack.target_cu = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK:
-                param_pack.shader_engine_mask = param.value;
+                pack.shader_engine_mask = param.value;
                 break;
-            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: param_pack.buffer_size = param.value; break;
-            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: param_pack.simd_select = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: pack.buffer_size = param.value; break;
+            case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: pack.simd_select = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
                 if(const auto* metric_ptr =
                        rocprofiler::common::get_val(id_map, param.counter_id.handle))
-                    param_pack.perfcounters.push_back(get_mask(metric_ptr, param.simd_mask));
+                    pack.perfcounters.push_back(get_mask(metric_ptr, param.simd_mask));
                 break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
-                param_pack.perfcounter_ctrl = param.value;
+                pack.perfcounter_ctrl = param.value;
                 break;
             case ROCPROFILER_ATT_PARAMETER_LAST: return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
         }
     }
 
-    auto tracer = std::make_unique<rocprofiler::thread_trace::AgentThreadTracer>(param_pack, agent);
+    auto* agent_tracer = dynamic_cast<AgentThreadTracer*>(ctx->thread_trace.get());
+    if(agent_tracer == nullptr || agent_tracer->has_agent(agent))
+        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
 
-    rocprofiler_status_t status = rocprofiler_create_context(&tracer->codeobj_client_ctx);
-    if(status != ROCPROFILER_STATUS_SUCCESS) return status;
-
-    status = rocprofiler_configure_callback_tracing_service(
-        tracer->codeobj_client_ctx,
-        ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
-        nullptr,
-        0,
-        rocprofiler::thread_trace::AgentThreadTracer::codeobj_tracing_callback,
-        tracer.get());
-
-    ctx->thread_trace = std::move(tracer);
-    return status;
+    agent_tracer->add_agent(agent, pack);
+    return ROCPROFILER_STATUS_SUCCESS;
 }
 }

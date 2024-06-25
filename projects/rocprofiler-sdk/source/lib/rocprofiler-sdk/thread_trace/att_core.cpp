@@ -100,6 +100,7 @@ ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
                                      const CoreApiTable&         coreapi,
                                      const AmdExtTable&          ext)
 : params(std::move(_params))
+, agent_id(cache.get_rocp_agent()->id)
 {
     factory = std::make_unique<aql::ThreadTraceAQLPacketFactory>(cache, this->params, coreapi, ext);
     control_packet = factory->construct_control_packet();
@@ -122,6 +123,14 @@ ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
     signal_store_screlease_fn  = coreapi.hsa_signal_store_screlease_fn;
     add_write_index_relaxed_fn = coreapi.hsa_queue_add_write_index_relaxed_fn;
     load_read_index_relaxed_fn = coreapi.hsa_queue_load_read_index_relaxed_fn;
+
+    codeobj_reg = std::make_unique<code_object::CodeobjCallbackRegistry>(
+        [this](rocprofiler_agent_id_t agent, uint64_t codeobj_id, uint64_t addr, uint64_t size) {
+            if(agent == this->agent_id) this->load_codeobj(codeobj_id, addr, size);
+        },
+        [this](uint64_t codeobj_id) { this->unload_codeobj(codeobj_id); });
+
+    codeobj_reg->IterateLoaded();
 }
 
 ThreadTracerQueue::~ThreadTracerQueue()
@@ -203,8 +212,7 @@ ThreadTracerQueue::unload_codeobj(code_object_id_t id)
 {
     std::unique_lock<std::mutex> lk(trace_resources_mut);
 
-    control_packet->remove_codeobj(id);
-
+    if(!control_packet->remove_codeobj(id)) return;
     if(!queue || active_traces.load() < 1) return;
 
     auto packet   = factory->construct_unload_marker_packet(id);
@@ -212,33 +220,6 @@ ThreadTracerQueue::unload_codeobj(code_object_id_t id)
 
     if(!bSuccess)  // If something went wrong, don't delete packet to avoid CP memory access fault
         packet.release();
-}
-
-// TODO: make this a wrapper on HSA load instead of registering
-void
-DispatchThreadTracer::codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                               rocprofiler_user_data_t* /* user_data */,
-                                               void* callback_data)
-{
-    if(!callback_data) return;
-    if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
-    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
-
-    auto* rec = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-    assert(rec);
-
-    DispatchThreadTracer& tracer = *static_cast<DispatchThreadTracer*>(callback_data);
-    auto                  agent  = rec->hsa_agent;
-
-    std::shared_lock<std::shared_mutex> lk(tracer.agents_map_mut);
-
-    auto tracer_it = tracer.agents.find(agent);
-    if(tracer_it == tracer.agents.end()) return;
-
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
-        tracer_it->second->load_codeobj(rec->code_object_id, rec->load_delta, rec->load_size);
-    else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
-        tracer_it->second->unload_codeobj(rec->code_object_id);
 }
 
 void
@@ -377,12 +358,6 @@ void
 DispatchThreadTracer::start_context()
 {
     using corr_id_map_t = hsa::Queue::queue_info_session_t::external_corr_id_map_t;
-    if(codeobj_client_ctx.handle != 0)
-    {
-        auto status = rocprofiler_start_context(codeobj_client_ctx);
-        if(status != ROCPROFILER_STATUS_SUCCESS) throw std::exception();
-    }
-
     CHECK_NOTNULL(hsa::get_queue_controller())->enable_serialization();
 
     // Only one thread should be attempting to enable/disable this context
@@ -427,82 +402,75 @@ AgentThreadTracer::resource_init(const hsa::AgentCache& cache,
                                  const CoreApiTable&    coreapi,
                                  const AmdExtTable&     ext)
 {
-    if(cache.get_rocp_agent()->id != this->agent_id) return;
+    auto                         id = cache.get_rocp_agent()->id;
+    std::unique_lock<std::mutex> lk(agent_mut);
 
-    std::unique_lock<std::mutex> lk(mut);
+    if(params.find(id) == params.end()) return;
 
-    if(tracer != nullptr)
+    if(tracers.find(id) != tracers.end())
     {
-        tracer->active_queues.fetch_add(1);
+        tracers.at(id)->active_queues.fetch_add(1);
         return;
     }
-
-    tracer = std::make_unique<ThreadTracerQueue>(this->params, cache, coreapi, ext);
+    tracers.emplace(id, std::make_unique<ThreadTracerQueue>(params.at(id), cache, coreapi, ext));
 }
 
 void
 AgentThreadTracer::resource_deinit(const hsa::AgentCache& cache)
 {
-    if(cache.get_rocp_agent()->id != this->agent_id) return;
+    auto                         id = cache.get_rocp_agent()->id;
+    std::unique_lock<std::mutex> lk(agent_mut);
 
-    std::unique_lock<std::mutex> lk(mut);
-    if(tracer == nullptr) return;
+    if(params.find(id) == params.end()) return;
+    if(tracers.find(id) == tracers.end()) return;
 
-    if(tracer->active_queues.fetch_sub(1) == 1) tracer.reset();
+    auto& tracer = *tracers.at(id);
+    if(tracer.active_queues.fetch_sub(1) == 1) tracers.erase(id);
 }
 
 void
 AgentThreadTracer::start_context()
 {
-    std::unique_lock<std::mutex> lk(mut);
+    std::unique_lock<std::mutex> lk(agent_mut);
 
-    if(tracer == nullptr)
+    if(tracers.empty())
     {
         ROCP_FATAL << "Thread trace context not present for agent!";
         return;
     }
 
-    auto packet = tracer->get_control(true);
-    packet->populate_before();
+    for(auto& [_, tracer] : tracers)
+    {
+        auto packet = tracer->get_control(true);
+        packet->populate_before();
 
-    for(auto& start : packet->before_krn_pkt)
-        tracer->Submit(&start);
+        for(auto& start : packet->before_krn_pkt)
+            tracer->Submit(&start);
+    }
 }
 
 void
 AgentThreadTracer::stop_context()
 {
-    std::unique_lock<std::mutex> lk(mut);
+    std::unique_lock<std::mutex> lk(agent_mut);
 
-    auto packet = tracer->get_control(false);
-    packet->populate_after();
+    if(tracers.empty())
+    {
+        ROCP_FATAL << "Thread trace context not present for agent!";
+        return;
+    }
 
-    for(auto& stop : packet->after_krn_pkt)
-        tracer->Submit(&stop);
+    for(auto& [_, tracer] : tracers)
+    {
+        auto packet = tracer->get_control(false);
+        packet->populate_after();
 
-    rocprofiler_user_data_t userdata{.ptr = params.callback_userdata};
-    tracer->iterate_data(packet->GetHandle(), userdata);
-}
+        for(auto& stop : packet->after_krn_pkt)
+            tracer->Submit(&stop);
 
-void
-AgentThreadTracer::codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                            rocprofiler_user_data_t* /* user_data */,
-                                            void* callback_data)
-{
-    if(!callback_data) return;
-    if(record.kind != ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT) return;
-    if(record.operation != ROCPROFILER_CODE_OBJECT_LOAD) return;
-
-    auto* rec = static_cast<rocprofiler_callback_tracing_code_object_load_data_t*>(record.payload);
-    assert(rec);
-
-    AgentThreadTracer&           tracer = *static_cast<AgentThreadTracer*>(callback_data);
-    std::unique_lock<std::mutex> lk(tracer.mut);
-
-    if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
-        tracer.tracer->load_codeobj(rec->code_object_id, rec->load_delta, rec->load_size);
-    else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
-        tracer.tracer->unload_codeobj(rec->code_object_id);
+        rocprofiler_user_data_t userdata{.ptr = tracer->params.callback_userdata};
+        tracer->iterate_data(packet->GetHandle(), userdata);
+    }
 }
 
 }  // namespace thread_trace

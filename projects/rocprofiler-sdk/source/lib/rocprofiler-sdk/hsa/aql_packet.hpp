@@ -212,7 +212,7 @@ public:
         loaded_codeobj[id] =
             std::make_shared<CodeobjMarkerAQLPacket>(*tracepool, id, addr, size, true, false);
     }
-    void remove_codeobj(code_object_id_t id) { loaded_codeobj.erase(id); }
+    bool remove_codeobj(code_object_id_t id) { return loaded_codeobj.erase(id) != 0; }
 
 protected:
     std::shared_ptr<TraceMemoryPool>     tracepool;

@@ -22,9 +22,11 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
+
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 
 #include <rocprofiler-sdk/amd_detail/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
@@ -100,6 +102,10 @@ public:
     bool Submit(hsa_ext_amd_aql_pm4_packet_t* packet);
 
 private:
+    std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
+
+    rocprofiler_agent_id_t agent_id;
+
     decltype(hsa_queue_load_read_index_relaxed)* load_read_index_relaxed_fn{nullptr};
     decltype(hsa_queue_add_write_index_relaxed)* add_write_index_relaxed_fn{nullptr};
     decltype(hsa_signal_store_screlease)*        signal_store_screlease_fn{nullptr};
@@ -135,10 +141,6 @@ public:
     void resource_init(const hsa::AgentCache&, const CoreApiTable&, const AmdExtTable&) override;
     void resource_deinit(const hsa::AgentCache&) override;
 
-    static void codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                         rocprofiler_user_data_t*              user_data,
-                                         void*                                 callback_data);
-
     std::unique_ptr<hsa::AQLPacket> pre_kernel_call(const hsa::Queue&              queue,
                                                     uint64_t                       kernel_id,
                                                     rocprofiler_dispatch_id_t      dispatch_id,
@@ -153,16 +155,12 @@ public:
     std::atomic<int>  post_move_data{0};
 
     thread_trace_parameter_pack params;
-    rocprofiler_context_id_t    codeobj_client_ctx{0};
 };
 
 class AgentThreadTracer : public ThreadTracerInterface
 {
 public:
-    AgentThreadTracer(thread_trace_parameter_pack _params, rocprofiler_agent_id_t _id)
-    : agent_id(_id)
-    , params(std::move(_params))
-    {}
+    AgentThreadTracer()           = default;
     ~AgentThreadTracer() override = default;
 
     void start_context() override;
@@ -170,16 +168,21 @@ public:
     void resource_init(const hsa::AgentCache&, const CoreApiTable&, const AmdExtTable&) override;
     void resource_deinit(const hsa::AgentCache&) override;
 
-    static void codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
-                                         rocprofiler_user_data_t*              user_data,
-                                         void*                                 callback_data);
+    void add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack _params)
+    {
+        std::unique_lock<std::mutex> lk(agent_mut);
+        params[id] = std::move(_params);
+    }
+    bool has_agent(rocprofiler_agent_id_t id)
+    {
+        std::unique_lock<std::mutex> lk(agent_mut);
+        return params.find(id) != params.end();
+    }
 
-    rocprofiler_agent_id_t             agent_id;
-    std::mutex                         mut;
-    std::unique_ptr<ThreadTracerQueue> tracer{nullptr};
+    std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerQueue>> tracers{};
+    std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params;
 
-    thread_trace_parameter_pack params;
-    rocprofiler_context_id_t    codeobj_client_ctx{0};
+    std::mutex agent_mut;
 };
 
 };  // namespace thread_trace

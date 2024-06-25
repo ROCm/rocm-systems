@@ -277,14 +277,10 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
              itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH));
 
         if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           itr->agent_counter_collection)
+           itr->agent_counter_collection || itr->thread_trace)
         {
             enable_intercepter = true;
             break;
-        }
-        else if(itr->thread_trace)
-        {
-            enable_intercepter = true;
         }
     }
 
