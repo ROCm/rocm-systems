@@ -177,7 +177,7 @@ public:
         return {};
     };
 
-    std::shared_ptr<Instruction> disassemble_instruction(uint64_t faddr, uint64_t vaddr)
+    std::unique_ptr<Instruction> disassemble_instruction(uint64_t faddr, uint64_t vaddr)
     {
         if(!disassembly) throw std::exception();
 
@@ -191,7 +191,7 @@ public:
         {}
 
         auto pair   = disassembly->ReadInstruction(faddr);
-        auto inst   = std::make_shared<Instruction>(std::move(pair.first), pair.second);
+        auto inst   = std::make_unique<Instruction>(std::move(pair.first), pair.second);
         inst->faddr = faddr;
         inst->vaddr = vaddr;
 
@@ -215,7 +215,7 @@ public:
     : load_addr(_load_addr)
     , load_end(_load_addr + _memsize)
     {
-        if(!filepath) throw "Empty filepath.";
+        if(!filepath) throw std::runtime_error("Empty filepath.");
 
         std::string_view fpath(filepath);
 
@@ -223,7 +223,7 @@ public:
         {
             std::ifstream file(filepath, std::ios::in | std::ios::binary);
 
-            if(!file.is_open()) throw "Invalid filename " + std::string(filepath);
+            if(!file.is_open()) throw std::runtime_error("Invalid file " + std::string(filepath));
 
             std::vector<char> buffer;
             file.seekg(0, file.end);
@@ -247,33 +247,19 @@ public:
         decoder =
             std::make_unique<CodeobjDecoderComponent>(reinterpret_cast<const char*>(data), size);
     }
-    std::shared_ptr<Instruction> add_to_map(uint64_t ld_addr)
+    std::unique_ptr<Instruction> get(uint64_t ld_addr)
     {
-        if(!decoder || ld_addr < load_addr) throw std::out_of_range("Addr not in decoder");
+        if(!decoder || ld_addr < load_addr) return nullptr;
 
         uint64_t voffset = ld_addr - load_addr;
         auto     faddr   = decoder->va2fo(voffset);
-        if(!faddr) throw std::out_of_range("Could not find file offset");
+        if(!faddr) return nullptr;
 
-        auto shared          = decoder->disassemble_instruction(*faddr, voffset);
-        shared->ld_addr      = ld_addr;
-        decoded_map[ld_addr] = shared;
-        return shared;
+        auto unique     = decoder->disassemble_instruction(*faddr, voffset);
+        unique->ld_addr = ld_addr;
+        return unique;
     }
 
-    std::shared_ptr<Instruction> get(uint64_t addr)
-    {
-        if(decoded_map.find(addr) != decoded_map.end()) return decoded_map[addr];
-        try
-        {
-            return add_to_map(addr);
-        } catch(std::exception& e)
-        {
-            std::cerr << e.what() << " at addr " << std::hex << addr << std::dec << std::endl;
-        }
-        throw std::out_of_range("Invalid address");
-        return nullptr;
-    }
     uint64_t begin() const { return load_addr; };
     uint64_t end() const { return load_end; }
     uint64_t size() const { return load_end - load_addr; }
@@ -299,8 +285,7 @@ public:
 private:
     uint64_t load_end = 0;
 
-    std::unordered_map<uint64_t, std::shared_ptr<Instruction>> decoded_map;
-    std::unique_ptr<CodeobjDecoderComponent>                   decoder{nullptr};
+    std::unique_ptr<CodeobjDecoderComponent> decoder{nullptr};
 };
 
 /**
@@ -332,7 +317,7 @@ public:
 
     virtual bool removeDecoderbyId(codeobj_marker_id_t id) { return decoders.erase(id) != 0; }
 
-    std::shared_ptr<Instruction> get(codeobj_marker_id_t id, uint64_t offset)
+    std::unique_ptr<Instruction> get(codeobj_marker_id_t id, uint64_t offset)
     {
         auto& decoder = decoders.at(id);
         return decoder->get(decoder->begin() + offset);
@@ -387,13 +372,13 @@ public:
         return table.remove(load_addr) && this->Super::removeDecoderbyId(id);
     }
 
-    std::shared_ptr<Instruction> get(uint64_t vaddr)
+    std::unique_ptr<Instruction> get(uint64_t vaddr)
     {
         auto& addr_range = table.find_codeobj_in_range(vaddr);
         return this->Super::get(addr_range.id, vaddr - addr_range.vbegin);
     }
 
-    std::shared_ptr<Instruction> get(codeobj_marker_id_t id, uint64_t offset)
+    std::unique_ptr<Instruction> get(codeobj_marker_id_t id, uint64_t offset)
     {
         if(id == 0)
             return get(offset);

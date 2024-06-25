@@ -117,7 +117,7 @@ struct isa_map_elem_t
 {
     std::atomic<size_t>          hitcount{0};
     std::atomic<size_t>          latency{0};
-    std::shared_ptr<Instruction> code_line{nullptr};
+    std::unique_ptr<Instruction> code_line{nullptr};
 };
 
 struct ToolData
@@ -332,7 +332,7 @@ isa_callback(char*     isa_instruction,
     C_API_BEGIN
     assert(userdata && "ISA callback passed null!");
 
-    std::shared_ptr<Instruction> instruction;
+    std::unique_ptr<Instruction> instruction;
 
     {
         std::unique_lock<std::shared_mutex> unique_lock(tool->isa_map_mut);

@@ -152,10 +152,11 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
                         << std::dec << ". Printing first 64 bytes:" << std::endl;
 
         std::unordered_set<std::string> references{};
-        int                             num_waitcnts = 0;
-        int                             num_scalar   = 0;
-        int                             num_vector   = 0;
-        int                             num_other    = 0;
+
+        int num_waitcnts = 0;
+        int num_scalar   = 0;
+        int num_vector   = 0;
+        int num_other    = 0;
 
         size_t vaddr = begin_end.first;
         while(vaddr < begin_end.second)

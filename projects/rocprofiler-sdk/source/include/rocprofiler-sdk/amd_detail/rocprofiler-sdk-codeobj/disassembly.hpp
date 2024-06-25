@@ -154,10 +154,10 @@ public:
             if(!(size = std::stoul(size_it->second, nullptr, 0))) return;
         }
 
-        if(protocol == "memory") throw protocol + " protocol not supported!";
+        if(protocol == "memory") throw std::runtime_error(protocol + " protocol not supported!");
 
         std::ifstream file(decoded_path, std::ios::in | std::ios::binary);
-        if(!file || !file.is_open()) throw "could not open " + decoded_path;
+        if(!file || !file.is_open()) throw std::runtime_error("could not open " + decoded_path);
 
         if(!size)
         {
@@ -165,7 +165,7 @@ public:
             size_t bytes = file.gcount();
             file.clear();
 
-            if(bytes < offset) throw "invalid uri " + decoded_path + " (file size < offset)";
+            if(bytes < offset) throw std::runtime_error("invalid uri " + decoded_path);
 
             size = bytes - offset;
         }

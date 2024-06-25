@@ -138,9 +138,9 @@ get_trace_data(rocprofiler_att_parser_data_type_t type, void* att_data, void* us
         auto ptr = std::make_unique<TrackedIsa>();
         try
         {
-            auto shared_inst = codeobjTranslate->get(pc.marker_id, pc.addr);
-            if(shared_inst == nullptr) return;
-            ptr->inst = shared_inst->inst;
+            auto unique_inst = codeobjTranslate->get(pc.marker_id, pc.addr);
+            if(unique_inst == nullptr) return;
+            ptr->inst = unique_inst->inst;
         } catch(...)
         {
             return;
@@ -178,7 +178,7 @@ isa_callback(char*     isa_instruction,
     assert(trace_data.tool && "ISA callback passed null!");
     ToolData& tool = *reinterpret_cast<ToolData*>(trace_data.tool);
 
-    std::shared_ptr<Instruction> instruction;
+    std::unique_ptr<Instruction> instruction;
 
     try
     {
