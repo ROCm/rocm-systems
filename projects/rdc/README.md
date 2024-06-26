@@ -9,7 +9,11 @@ The ROCm™ Data Center Tool simplifies the administration and addresses key inf
 
 For up-to-date document and how to start using RDC from pre-built packages, please refer to the [**ROCm DataCenter Tool User Guide**](https://rocm.docs.amd.com/projects/rdc/en/latest/)
 
-For certificate generation, please refer to [**RDC Developer Handbook**#generate-files-for-authentication](https://rocm.docs.amd.com/projects/rdc/en/latest/install/handbook.html#generate-files-for-authentication)
+## Certificate generation
+
+For certificate generation, please refer to
+[**RDC Developer Handbook**#generate-files-for-authentication](https://rocm.docs.amd.com/projects/rdc/en/latest/install/handbook.html#generate-files-for-authentication)  
+Or read the concise guide under authentication/readme.txt
 
 ## Supported platforms
 
@@ -45,9 +49,9 @@ The following tools are required for gRPC build & installation
 
 ### Download and build gRPC
 
-By default (without using CMAKE_INSTALL_PREFIX option), gRPC will install to /usr/local lib, include and bin directories.  
+By default (without using CMAKE_INSTALL_PREFIX option), gRPC will install to `/usr/local` lib, include and bin directories.  
 It is highly recommended to install gRPC into a unique directory.
-Below example installs gRPC into /opt/grpc
+Below example installs gRPC into `/opt/grpc`
 
     git clone -b v1.61.0 https://github.com/grpc/grpc --depth=1 --shallow-submodules --recurse-submodules
     cd grpc
@@ -69,9 +73,13 @@ Clone the RDC source code from GitHub and use CMake to build and install
 
     git clone https://github.com/ROCm/rdc
     cd rdc
-    mkdir -p build
     # default installation location is /opt/rocm, specify with -DROCM_DIR or -DCMAKE_INSTALL_PREFIX
     cmake -B build -DGRPC_ROOT="$GRPC_ROOT"
+    # enable rocprofiler (optional)
+    cmake -B build -DBUILD_PROFILER=ON
+    # enable RVS (optional)
+    cmake -B build -DBUILD_RVS=ON
+    # build and install
     make -C build -j $(nproc)
     make -C build install
 
@@ -89,10 +97,10 @@ The user can choose to not build RDC diagnostic ROCM Run time. This will elimina
 
 ## Update System Library Path
 
-    RDC_LIB_DIR=/opt/rocm/rdc/lib
-    GRPC_LIB_DIR=/opt/grpc/lib
-    echo -e "${GRPC_LIB_DIR}\n${GRPC_LIB_DIR}64" | sudo tee /etc/ld.so.conf.d/x86_64-librdc_client.conf
-    echo -e "${RDC_LIB_DIR}\n${RDC_LIB_DIR}64" | sudo tee -a /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    RDC_LIB_DIR=/opt/rocm/lib/rdc
+    GRPC_LIB_DIR="${RDC_LIB_DIR}/grpc/lib\n/opt/grpc/lib"
+    echo -e "${RDC_LIB_DIR}" | sudo tee /etc/ld.so.conf.d/x86_64-librdc_client.conf
+    echo -e "${GRPC_LIB_DIR}" | sudo tee -a /etc/ld.so.conf.d/x86_64-librdc_client.conf
     ldconfig
 
 ## Running RDC
@@ -111,25 +119,36 @@ When *rdcd* is started from a command-line the *capabilities* are determined by 
     ## NOTE: Replace /opt/rocm with specific rocm version if needed
 
     ## To run with authentication. Ensure SSL keys are setup properly
-    ## version will be the version number(ex:3.10.0) of ROCm where RDC was packaged with
-    /opt/rocm/rdc/bin/rdcd           ## rdcd is started with monitor-only capabilities
-    sudo /opt/rocm/rdc/bin/rdcd      ## rdcd is started will full-capabilities
+    /opt/rocm/bin/rdcd           ## rdcd is started with monitor-only capabilities
+    sudo /opt/rocm/bin/rdcd      ## rdcd is started will full-capabilities
 
     ## To run without authentication. SSL key & certificates are not required.
-    ## version will be the version number(ex:3.10.0) of ROCm where RDC was packaged with
-    /opt/rocm/rdc/bin/rdcd -u        ## rdcd is started with monitor-only capabilities
-    sudo /opt/rocm/rdc/bin/rdcd -u   ## rdcd is started will full-capabilities
+    /opt/rocm/bin/rdcd -u        ## rdcd is started with monitor-only capabilities
+    sudo /opt/rocm/bin/rdcd -u   ## rdcd is started will full-capabilities
 
 ### Start RDCD using systemd
 
-*rdcd* can be started by using the systemctl command. You can copy /opt/rocm/rdc/lib/rdc.service, which is installed with RDC, to the systemd folder. This file has 2 lines that control what *capabilities* with which *rdcd* will run. If left uncommented, rdcd will run with full-capabilities.
+*rdcd* can be started by using the systemctl command. You can copy `/opt/rocm/libexec/rdc/rdc.service`, which is installed with RDC, to the systemd folder. This file has 2 lines that control what *capabilities* with which *rdcd* will run. If left uncommented, rdcd will run with full-capabilities.
 
-    ## file: /opt/rocm/rdc/lib/rdc.service
+    ## file: /opt/rocm/libexec/rdc/rdc.service
     ## Comment the following two lines to run with monitor-only capabilities
     CapabilityBoundingSet=CAP_DAC_OVERRIDE
     AmbientCapabilities=CAP_DAC_OVERRIDE
 
     systemctl start rdc         ## start rdc as systemd service
+
+Additional options can be passed to *rdcd* by modifying `/opt/rocm/etc/rdc_options`
+
+    ## file: /opt/rocm/etc/rdc_options
+    # Append 'rdc' daemon parameters here
+    RDC_OPTS="-p 50051 -u -d"
+
+Example above does the following:
+
+- Use port 50051
+- Use unauthenticated mode
+- Enable debug messages
+- **NOTE:** You must add `-u` flag to `rdci` calls as well
 
 ## Invoke RDC using ROCm™ Data Center Interface (RDCI)
 
@@ -140,7 +159,7 @@ RDCI provides command-line interface to all RDC features. This CLI can be run lo
     ## NOTE: option -u (for unauthenticated) is required if rdcd was started in this mode
     ## Assuming that rdc is installed into /opt/rocm
 
-    cd /opt/rocm/rdc/bin
+    cd /opt/rocm/bin
     ./rdci discovery -l <-u>                    ## list available GPUs in localhost
     ./rdci discovery <host> -l <-u>             ## list available GPUs in host machine
     ./rdci dmon <host> <-u> -l                  ## list most GPU counters
@@ -160,8 +179,10 @@ If rdcd was started as a systemd service, then use journalctl to view rdcd logs
 To run rdcd with debug log from command-line use
 version will be the version number(ex:3.10.0) of ROCm where RDC was packaged with
 
-    RDC_LOG=DEBUG /opt/rocm/rdc/bin/rdcd
+    RDC_LOG=DEBUG /opt/rocm/bin/rdcd
 
 RDC_LOG=DEBUG also works on rdci
 
 ERROR, INFO, DEBUG logging levels are supported
+
+Additional logging messages can be enabled with `RSMI_LOGGING=3`
