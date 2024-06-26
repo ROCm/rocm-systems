@@ -24,8 +24,8 @@ THE SOFTWARE.
 #include <memory>
 
 #include "rdc_lib/RdcException.h"
+#include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcMetricFetcher.h"
-#include "rdc_lib/impl/RdcRasLib.h"
 #include "rdc_lib/impl/RdcSmiLib.h"
 
 namespace amd {

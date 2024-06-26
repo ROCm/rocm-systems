@@ -26,8 +26,17 @@ cmake_minimum_required(VERSION 3.15)
 set(RDC "rdc" CACHE INTERNAL "")
 set(RDC_PACKAGE ${RDC} CACHE STRING "")
 
+# ROCM_DIR should be passed in via command line
+set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm directory.")
+if(DEFINED ROCM_PATH)
+    message(WARNING "ROCM_PATH is not used by the build process! Did you mean to set ROCM_DIR instead?")
+endif()
+
 # Default libdir to "lib", this skips GNUInstallDirs from trying to take a guess if it's unset:
 set(CMAKE_INSTALL_LIBDIR "lib" CACHE STRING "Library install directory")
+
+# Usually ROCM tools are installed into /opt/rocm
+set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE PATH "Default installation directory.")
 
 set(CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake_modules/" CACHE INTERNAL "Default module path.")
 # Include common cmake modules
@@ -43,10 +52,6 @@ message("Package version: ${VERSION_STRING}")
 # When cmake -DBUILD_STANDALONE=off, it will not build rdcd and rdci
 # which requires the gRPC
 option(BUILD_STANDALONE "Build targets for rdci and rdcd" ON)
-
-# When cmake -DBUILD_RASLIB=off, it will not build the raslib
-# which requires the ROCT-Thunk-Interface.
-option(BUILD_RASLIB "Build targets for raslib" OFF)
 
 # When cmake -DBUILD_RUNTIME=off, it will not build the librdc_rocr.so
 # which requires the Rocm run time.
@@ -73,9 +78,6 @@ if(DEFINED ENV{ADDRESS_SANITIZER})
 endif()
 option(ADDRESS_SANITIZER "Enable address sanitizer" ${ADDRESS_SANITIZER_DEFAULT})
 
-# File reorganization enable/disable
-option(FILE_REORG_BACKWARD_COMPATIBILITY "Enable File Reorg with backward compatibility" OFF)
-
 option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" OFF)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
@@ -92,19 +94,12 @@ project(${RDC}
 # this must go after project()
 include(GNUInstallDirs)
 
-# ROCM_DIR should be passed in via command line; it will be used
-# in sub-projects. Override with -DROCM_DIR=
-set(ROCM_DIR "/opt/rocm" CACHE PATH "ROCm directory.")
-set(ROCM_PATH "${ROCM_DIR}" CACHE PATH "ROCm directory.")
-
 set(COMMON_DIR "${CMAKE_CURRENT_SOURCE_DIR}/common")
 
 set(GRPC_ROOT_DEFAULT "/usr")
-set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE STRING "GRPC installation directory.")
+set(GRPC_ROOT ${GRPC_ROOT_DEFAULT} CACHE PATH "GRPC installation directory.")
 set(GRPC_DESIRED_VERSION 1.61.0 CACHE STRING "GRPC desired package version.")
 set(RDC_SHARE_INSTALL_PREFIX "share/${RDC}" CACHE INTERNAL "Tests and Example install directory")
-
-set(CMAKE_INSTALL_PREFIX ${ROCM_DIR} CACHE STRING "Default installation directory.")
 
 # add package search paths
 list(APPEND CMAKE_PREFIX_PATH
@@ -124,7 +119,7 @@ set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc." CACHE STRING "")
 set(CPACK_PACKAGE_CONTACT "RDC Support <rdc.support@amd.com>" CACHE STRING "")
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Radeon Data Center Tools" CACHE STRING "")
 set(CPACK_PACKAGE_DESCRIPTION "This package contains the AMD ${CPACK_PACKAGE_DESCRIPTION_SUMMARY}." CACHE STRING "")
-set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE STRING "Default packaging prefix.")
+set(CPACK_PACKAGING_INSTALL_PREFIX "${CMAKE_INSTALL_PREFIX}" CACHE PATH "Default packaging prefix.")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE" CACHE INTERNAL "")
 set(CPACK_RPM_PACKAGE_LICENSE "MIT" CACHE INTERNAL "")
 set(CPACK_GENERATOR "DEB;RPM" CACHE STRING "Default packaging generators.")
@@ -149,12 +144,6 @@ if(BUILD_STANDALONE AND GRPC_ROOT STREQUAL GRPC_ROOT_DEFAULT)
     Continuing without gRPC install")
 endif()
 
-if(NOT EXISTS "${CMAKE_SOURCE_DIR}/raslib/.git" AND BUILD_RASLIB)
-    message(FATAL_ERROR "The git submodule raslib is not available. Please run
-    git submodule update --init --recursive
-    If you do not want to build raslib, use cmake -DBUILD_RASLIB=off")
-endif()
-
 find_package(SMI
     NAMES amd_smi
     HINTS ${ROCM_DIR}/lib/cmake
@@ -165,12 +154,6 @@ set(SMI_LIB_DIR "${AMD_SMI_LIB_DIR}" CACHE INTERNAL "AMD SMI library directory."
 if(NOT EXISTS "${SMI_INC_DIR}" OR NOT EXISTS "${SMI_LIB_DIR}")
     message(FATAL_ERROR "amd_smi not found in ${SMI_INC_DIR}. Please
     make sure amd_smi is installed and present in ${SMI_INC_DIR}.")
-endif()
-
-if(BUILD_RASLIB AND NOT DEFINED HSA_DIR)
-    message(FATAL_ERROR "Please specify libhsakmt directory which is required by raslib
-    cmake -DHSA_DIR=<libhsakmt directory>
-    If you do not want to build raslib, use cmake -DBUILD_RASLIB=off")
 endif()
 
 set(${RDC}_VERSION_MAJOR "${VERSION_MAJOR}")
@@ -315,20 +298,6 @@ if(BUILD_STANDALONE)
     endif()
 endif()
 
-# Raslib
-if(BUILD_RASLIB)
-    message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-    message("                    Build raslib")
-    message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
-
-    add_subdirectory("raslib")
-else()
-    add_library(rdc_ras INTERFACE
-        ${PROJECT_SOURCE_DIR}/ras_prebuild/librdc_ras.so)
-    # needed for copying the pre-built library
-    get_target_property(RAS_SOURCES rdc_ras SOURCES)
-endif()
-
 # Folders for both standalone and embedded
 add_subdirectory("rdc_libs")
 
@@ -377,24 +346,6 @@ install(DIRECTORY ${PROJECT_SOURCE_DIR}/example
     DESTINATION ${RDC_SHARE_INSTALL_PREFIX}
     COMPONENT dev)
 
-# Prebuild packages to install
-install(PROGRAMS ${RAS_SOURCES}
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/config
-    DESTINATION ${CMAKE_INSTALL_DATADIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
-# Don't sp3 grpc install because it floods the terminal
-set(OLD_CMAKE_INSTALL_MESSAGE ${CMAKE_INSTALL_MESSAGE})
-set(CMAKE_INSTALL_MESSAGE NEVER)
-install(DIRECTORY ${PROJECT_SOURCE_DIR}/ras_prebuild/sp3
-    DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}
-    COMPONENT ${CLIENT_COMPONENT})
-# Restore printing verbosity
-set(CMAKE_INSTALL_MESSAGE ${OLD_CMAKE_INSTALL_MESSAGE})
-unset(OLD_CMAKE_INSTALL_MESSAGE)
-
-
 #Identify between SLES and Centos for setting symlink for rdc.service
 #SLES need serice file in /usr/lib/systemd/system/rdc.service
 #CENTOS/RHEL Require file in /lib/systemd/system/rdc.service
@@ -423,25 +374,6 @@ configure_file(
 configure_file(
     "${PROJECT_SOURCE_DIR}/src/RPM_postun.in"
     "${PROJECT_SOURCE_DIR}/RPM/rpm_postun" FILE_PERMISSIONS ${INST_SCR_PERM})
-#backward compatibility for file reorganization
-if(FILE_REORG_BACKWARD_COMPATIBILITY)
-# To enable/disable #error in wrapper header files
-   if(NOT DEFINED ROCM_HEADER_WRAPPER_WERROR)
-        if(DEFINED ENV{ROCM_HEADER_WRAPPER_WERROR})
-            set(ROCM_HEADER_WRAPPER_WERROR "$ENV{ROCM_HEADER_WRAPPER_WERROR}"
-                  CACHE STRING "Header wrapper warnings as errors.")
-        else()
-            set(ROCM_HEADER_WRAPPER_WERROR "OFF" CACHE STRING "Header wrapper warnings as errors.")
-        endif()
-    endif()
-    if(ROCM_HEADER_WRAPPER_WERROR)
-        set(deprecated_error 1)
-    else()
-        set(deprecated_error 0)
-    endif()
-
-    include(rdc-backward-compat)
-endif()
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
     set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
     message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")

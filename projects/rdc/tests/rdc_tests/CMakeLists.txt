@@ -76,7 +76,6 @@ target_include_directories(
 target_link_libraries(${RDCTST}
     PUBLIC rdc_bootstrap
     PUBLIC rdc
-    PUBLIC rdc_ras
     PUBLIC GTest::gtest_main
     PUBLIC c
     PUBLIC stdc++

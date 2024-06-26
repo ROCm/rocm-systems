@@ -22,7 +22,7 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
 #define INCLUDE_RDC_LIB_RDCDIAGNOSTICLIBINTERFACE_H_
 
-// The telemetry interface for libraries, for example, RAS.
+// The telemetry interface for libraries, for example, AMD-SMI.
 #include <rdc/rdc.h>
 
 extern "C" {

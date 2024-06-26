@@ -185,47 +185,46 @@ typedef enum {
   RDC_FI_ECC_CORRECT_TOTAL = 600,  //!< Accumulated correctable ECC errors
   RDC_FI_ECC_UNCORRECT_TOTAL,      //!< Accumulated uncorrectable ECC errors
 
-  RDC_FI_ECC_SDMA_SEC,  //!< SDMA Single Error Correction
-  RDC_FI_ECC_SDMA_DED,  //!< SDMA Double Error Detection
-
-  RDC_FI_ECC_GFX_SEC,  //!< GFX Single Error Correction
-  RDC_FI_ECC_GFX_DED,  //!< GFX Double Error Detection
-
-  RDC_FI_ECC_MMHUB_SEC,  //!< MMHUB Single Error Correction
-  RDC_FI_ECC_MMHUB_DED,  //!< MMHUB Double Error Detection
-
-  RDC_FI_ECC_ATHUB_SEC,  //!< ATHUB Single Error Correction
-  RDC_FI_ECC_ATHUB_DED,  //!< ATHUB Double Error Detection
-
-  RDC_FI_ECC_BIF_SEC,  //!< BIF Single Error Correction
-  RDC_FI_ECC_BIF_DED,  //!< BIF Double Error Detection
-
-  RDC_FI_ECC_HDP_SEC,  //!< HDP Single Error Correction
-  RDC_FI_ECC_HDP_DED,  //!< HDP Double Error Detection
-
-  RDC_FI_ECC_XGMI_WAFL_SEC,  //!< XGMI WAFL Single Error Correction
-  RDC_FI_ECC_XGMI_WAFL_DED,  //!< XGMI WAFL Double Error Detection
-
-  RDC_FI_ECC_DF_SEC,  //!< DF Single Error Correction
-  RDC_FI_ECC_DF_DED,  //!< DF Double Error Detection
-
-  RDC_FI_ECC_SMN_SEC,  //!< SMN Single Error Correction
-  RDC_FI_ECC_SMN_DED,  //!< SMN Double Error Detection
-
-  RDC_FI_ECC_SEM_SEC,  //!< SEM Single Error Correction
-  RDC_FI_ECC_SEM_DED,  //!< SEM Double Error Detection
-
-  RDC_FI_ECC_MP0_SEC,  //!< MP0 Single Error Correction
-  RDC_FI_ECC_MP0_DED,  //!< MP0 Double Error Detection
-
-  RDC_FI_ECC_MP1_SEC,  //!< MP1 Single Error Correction
-  RDC_FI_ECC_MP1_DED,  //!< MP1 Double Error Detection
-
-  RDC_FI_ECC_FUSE_SEC,  //!< FUSE Single Error Correction
-  RDC_FI_ECC_FUSE_DED,  //!< FUSE Double Error Detection
-
-  RDC_FI_ECC_UMC_SEC,  //!< UMC Single Error Correction
-  RDC_FI_ECC_UMC_DED,  //!< UMC Double Error Detection
+  RDC_FI_ECC_FIRST = 602,  //!< FIRST Error Correction and Detection field
+  RDC_FI_ECC_SDMA_CE = RDC_FI_ECC_FIRST,
+  RDC_FI_ECC_SDMA_UE,
+  RDC_FI_ECC_GFX_CE,
+  RDC_FI_ECC_GFX_UE,
+  RDC_FI_ECC_MMHUB_CE,
+  RDC_FI_ECC_MMHUB_UE,
+  RDC_FI_ECC_ATHUB_CE,
+  RDC_FI_ECC_ATHUB_UE,
+  RDC_FI_ECC_PCIE_BIF_CE,
+  RDC_FI_ECC_PCIE_BIF_UE,
+  RDC_FI_ECC_HDP_CE,
+  RDC_FI_ECC_HDP_UE,
+  RDC_FI_ECC_XGMI_WAFL_CE,
+  RDC_FI_ECC_XGMI_WAFL_UE,
+  RDC_FI_ECC_DF_CE,
+  RDC_FI_ECC_DF_UE,
+  RDC_FI_ECC_SMN_CE,
+  RDC_FI_ECC_SMN_UE,
+  RDC_FI_ECC_SEM_CE,
+  RDC_FI_ECC_SEM_UE,
+  RDC_FI_ECC_MP0_CE,
+  RDC_FI_ECC_MP0_UE,
+  RDC_FI_ECC_MP1_CE,
+  RDC_FI_ECC_MP1_UE,
+  RDC_FI_ECC_FUSE_CE,
+  RDC_FI_ECC_FUSE_UE,
+  RDC_FI_ECC_UMC_CE,
+  RDC_FI_ECC_UMC_UE,
+  RDC_FI_ECC_MCA_CE,
+  RDC_FI_ECC_MCA_UE,
+  RDC_FI_ECC_VCN_CE,
+  RDC_FI_ECC_VCN_UE,
+  RDC_FI_ECC_JPEG_CE,
+  RDC_FI_ECC_JPEG_UE,
+  RDC_FI_ECC_IH_CE,
+  RDC_FI_ECC_IH_UE,
+  RDC_FI_ECC_MPIO_CE,
+  RDC_FI_ECC_MPIO_UE,
+  RDC_FI_ECC_LAST = RDC_FI_ECC_MPIO_UE,
 
   // In new ASCI, such as MI300, the XGMI events is not supported
   // Using below XGMI related fields to calculate the bandwidth.
@@ -320,6 +319,13 @@ typedef enum {
 
   RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_RING_HANG,
 } rdc_field_t;
+
+// even and odd numbers are used for correctable and uncorrectable errors
+static_assert(RDC_FI_ECC_SDMA_CE % 2 == 0, "Correctable Error enum is not even");
+static_assert(RDC_FI_ECC_SDMA_UE % 2 == 1, "Uncorrectable Error enum is not odd");
+static_assert(RDC_FI_ECC_MPIO_CE % 2 == 0, "Correctable Error enum is not even");
+static_assert(RDC_FI_ECC_MPIO_UE % 2 == 1, "Uncorrectable Error enum is not odd");
+
 #define RDC_EVNT_IS_NOTIF_FIELD(FIELD) \
   ((FIELD) >= RDC_EVNT_NOTIF_FIRST && (FIELD) <= RDC_EVNT_NOTIF_LAST)
 /**
