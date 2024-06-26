@@ -6,6 +6,9 @@ The information presented in this document is for informational purposes only an
 
 © 2022 Advanced Micro Devices, Inc. All Rights Reserved.
 
+[![Build Status](
+https://dev.azure.com/ROCm-CI/ROCm-CI/_apis/build/status%2Frocprofiler?repoName=ROCm%2Frocprofiler&branchName=amd-staging)](https://dev.azure.com/ROCm-CI/ROCm-CI/_build/latest?definitionId=143&repoName=ROCm%2Frocprofiler&branchName=amd-staging)
+
 ## Introduction
 
 ROCProfiler is AMD’s tooling infrastructure that provides a hardware specific low level performance analysis interface for the profiling and the tracing of GPU compute applications.
