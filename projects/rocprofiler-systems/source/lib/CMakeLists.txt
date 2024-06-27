@@ -77,4 +77,5 @@ add_subdirectory(binary)
 
 add_subdirectory(omnitrace)
 add_subdirectory(omnitrace-dl)
+add_subdirectory(omnitrace-rt)
 add_subdirectory(omnitrace-user)

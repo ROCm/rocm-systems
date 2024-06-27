@@ -22,6 +22,7 @@
 
 #include "omnitrace-instrument.hpp"
 #include "common/defines.h"
+#include "common/join.hpp"
 #include "dl/dl.hpp"
 #include "fwd.hpp"
 #include "internal_libs.hpp"
@@ -187,18 +188,26 @@ strset_t                                   print_formats        = { "txt", "json
 std::string                                modfunc_dump_dir     = {};
 auto regex_opts = std::regex_constants::egrep | std::regex_constants::optimize;
 
-strvec_t lib_search_paths =
-    tim::delimit(JOIN(':', tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
-                      tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
-                      tim::get_env<std::string>("LD_LIBRARY_PATH")),
-                 ":");
+std::string
+get_internal_libpath()
+{
+    auto _exe = std::string_view{ ::realpath("/proc/self/exe", nullptr) };
+    auto _pos = _exe.find_last_of('/');
+    auto _dir = std::string{ "./" };
+    if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
+    return omnitrace::common::join("/", _dir, "..", "lib");
+}
+
+strvec_t lib_search_paths = tim::delimit(
+    JOIN(':', get_internal_libpath(), tim::get_env<std::string>("DYNINSTAPI_RT_LIB"),
+         tim::get_env<std::string>("DYNINST_REWRITER_PATHS"),
+         tim::get_env<std::string>("LD_LIBRARY_PATH")),
+    ":");
 strvec_t bin_search_paths = tim::delimit(tim::get_env<std::string>("PATH"), ":");
 
-#if defined(DYNINST_API_RT)
-auto _dyn_api_rt_paths = tim::delimit(DYNINST_API_RT, ":");
-#else
-auto _dyn_api_rt_paths = std::vector<std::string>{};
-#endif
+auto _dyn_api_rt_paths = tim::delimit(
+    JOIN(":", get_internal_libpath(), JOIN("/", get_internal_libpath(), "omnitrace")),
+    ":");
 
 std::string
 get_absolute_filepath(std::string _name, const strvec_t& _paths);

@@ -17,11 +17,6 @@ endif()
 
 omnitrace_message(STATUS "OS release: ${_OS_RELEASE}")
 
-if(NOT OMNITRACE_DYNINST_API_RT_DIR AND OMNITRACE_DYNINST_API_RT)
-    get_filename_component(OMNITRACE_DYNINST_API_RT_DIR "${OMNITRACE_DYNINST_API_RT}"
-                           DIRECTORY)
-endif()
-
 include(ProcessorCount)
 if(NOT DEFINED NUM_PROCS_REAL)
     processorcount(NUM_PROCS_REAL)
@@ -46,15 +41,8 @@ if(MAX_CAUSAL_ITERATIONS GREATER 100)
     set(MAX_CAUSAL_ITERATIONS 100)
 endif()
 
-if(OMNITRACE_BUILD_DYNINST)
-    set(OMNITRACE_DYNINST_API_RT_DIR
-        "${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT:${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI"
-        )
-endif()
-
 set(_test_library_path
-    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
-    )
+    "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
 set(_test_openmp_env "OMP_PROC_BIND=spread" "OMP_PLACES=threads" "OMP_NUM_THREADS=2")
 
 set(_base_environment

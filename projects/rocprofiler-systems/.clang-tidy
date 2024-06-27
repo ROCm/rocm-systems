@@ -23,6 +23,7 @@ performance-*,\
 readability-*,\
 -readability-function-size,\
 -readability-identifier-naming,\
+-readability-identifier-length,\
 -readability-implicit-bool-cast,\
 -readability-inconsistent-declaration-parameter-name,\
 -readability-named-parameter,\

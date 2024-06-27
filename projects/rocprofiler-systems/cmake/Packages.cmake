@@ -291,6 +291,7 @@ if(OMNITRACE_BUILD_DYNINST)
 
     set(DYNINST_OPTION_PREFIX ON)
     set(DYNINST_BUILD_DOCS OFF)
+    set(DYNINST_BUILD_RTLIB OFF)
     set(DYNINST_QUIET_CONFIG
         ON
         CACHE BOOL "Suppress dyninst cmake messages")
@@ -344,7 +345,6 @@ if(OMNITRACE_BUILD_DYNINST)
         dynDwarf
         dynElf
         dyninstAPI
-        dyninstAPI_RT
         instructionAPI
         parseAPI
         patchAPI
@@ -360,9 +360,6 @@ if(OMNITRACE_BUILD_DYNINST)
         endif()
     endforeach()
 
-    omnitrace_install_tpl(dyninstAPI_RT omnitrace-rt
-                          "${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}" core)
-
     # for packaging
     install(
         DIRECTORY ${DYNINST_TPL_STAGING_PREFIX}/lib/
@@ -373,35 +370,11 @@ if(OMNITRACE_BUILD_DYNINST)
 
     target_link_libraries(omnitrace-dyninst INTERFACE Dyninst::Dyninst)
 
-    set(OMNITRACE_DYNINST_API_RT
-        ${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT/libdyninstAPI_RT${CMAKE_SHARED_LIBRARY_SUFFIX}
-        )
-
-    if(OMNITRACE_DYNINST_API_RT)
-        omnitrace_target_compile_definitions(
-            omnitrace-dyninst
-            INTERFACE
-                DYNINST_API_RT="${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}:$<TARGET_FILE_DIR:Dyninst::dyninstAPI_RT>:${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}/$<TARGET_FILE_NAME:Dyninst::dyninstAPI_RT>:$<TARGET_FILE:Dyninst::dyninstAPI_RT>"
-            )
-    endif()
-
 else()
     find_package(Dyninst ${omnitrace_FIND_QUIETLY} REQUIRED
                  COMPONENTS dyninstAPI parseAPI instructionAPI symtabAPI)
 
     if(TARGET Dyninst::Dyninst) # updated Dyninst CMake system was found
-        # useful for defining the location of the runtime API
-        find_library(
-            OMNITRACE_DYNINST_API_RT dyninstAPI_RT
-            HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
-            PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
-            PATH_SUFFIXES lib NO_CACHE)
-
-        if(OMNITRACE_DYNINST_API_RT)
-            omnitrace_target_compile_definitions(
-                omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
-        endif()
-
         target_link_libraries(omnitrace-dyninst INTERFACE Dyninst::Dyninst)
     else() # updated Dyninst CMake system was not found
         set(_BOOST_COMPONENTS atomic system thread date_time)
@@ -424,13 +397,6 @@ else()
                 PATH_SUFFIXES include)
         endif()
 
-        # useful for defining the location of the runtime API
-        find_library(
-            OMNITRACE_DYNINST_API_RT dyninstAPI_RT
-            HINTS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
-            PATHS ${Dyninst_ROOT_DIR} ${Dyninst_DIR}
-            PATH_SUFFIXES lib)
-
         # try to find TBB
         find_package(TBB QUIET)
 
@@ -445,11 +411,6 @@ else()
                 TBB_INCLUDE_DIR
                 NAMES tbb/tbb.h
                 PATH_SUFFIXES include)
-        endif()
-
-        if(OMNITRACE_DYNINST_API_RT)
-            omnitrace_target_compile_definitions(
-                omnitrace-dyninst INTERFACE DYNINST_API_RT="${OMNITRACE_DYNINST_API_RT}")
         endif()
 
         target_link_libraries(omnitrace-dyninst INTERFACE ${DYNINST_LIBRARIES}

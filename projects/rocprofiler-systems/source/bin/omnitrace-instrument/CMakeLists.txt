@@ -45,6 +45,8 @@ if(OMNITRACE_BUILD_DYNINST)
     target_compile_definitions(omnitrace-instrument PRIVATE OMNITRACE_BUILD_DYNINST=1)
 endif()
 
+add_target_flag_if_avail(omnitrace-instrument "-Wno-deprecated-declarations")
+
 omnitrace_strip_target(omnitrace-instrument)
 
 if(CMAKE_BUILD_TYPE MATCHES "^(DEBUG|Debug)")

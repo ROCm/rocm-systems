@@ -18,11 +18,6 @@ add_subdirectory(library)
 target_link_libraries(omnitrace-object-library
                       PRIVATE omnitrace::omnitrace-interface-library)
 
-if(OMNITRACE_DYNINST_API_RT)
-    get_filename_component(OMNITRACE_DYNINST_API_RT_DIR "${OMNITRACE_DYNINST_API_RT}"
-                           DIRECTORY)
-endif()
-
 # ------------------------------------------------------------------------------#
 #
 # omnitrace static library

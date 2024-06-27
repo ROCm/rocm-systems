@@ -16,16 +16,6 @@ function(OMNITRACE_ADD_BIN_TEST)
     if(NOT TEST_WORKING_DIRECTORY)
         set(TEST_WORKING_DIRECTORY ${PROJECT_BINARY_DIR})
     endif()
-    if(NOT OMNITRACE_DYNINST_API_RT_DIR AND OMNITRACE_DYNINST_API_RT)
-        get_filename_component(OMNITRACE_DYNINST_API_RT_DIR "${OMNITRACE_DYNINST_API_RT}"
-                               DIRECTORY)
-    endif()
-
-    if(OMNITRACE_BUILD_DYNINST)
-        set(OMNITRACE_DYNINST_API_RT_DIR
-            "${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI_RT:${PROJECT_BINARY_DIR}/external/dyninst/dyninstAPI"
-            )
-    endif()
 
     if(NOT TEST_ENVIRONMENT)
         set(TEST_ENVIRONMENT
@@ -33,7 +23,7 @@ function(OMNITRACE_ADD_BIN_TEST)
             "OMNITRACE_PROFILE=ON"
             "OMNITRACE_USE_SAMPLING=ON"
             "OMNITRACE_TIME_OUTPUT=OFF"
-            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:${OMNITRACE_DYNINST_API_RT_DIR}:$ENV{LD_LIBRARY_PATH}"
+            "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
             )
     endif()
 
