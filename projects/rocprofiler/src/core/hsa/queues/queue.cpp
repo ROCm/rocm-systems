@@ -56,7 +56,9 @@
 
 #define __NR_gettid 186
 
-std::mutex sessions_pending_signal_lock;
+#define SIGNAL_DELAY_THRESHOLD 3
+std::atomic<uint32_t> ACTIVE_INTERRUPT_SIGNAL_COUNT{0};
+
 
 namespace rocprofiler {
 
@@ -360,7 +362,7 @@ bool AsyncSignalReadyHandler(hsa_signal_value_t signal_value, void* data) {
       queue->state = done_destroy;
       hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(queue->GetReadySignal());
     }
-    queue->cv_ready_signal.notify_one();
+    queue->cv_ready_signal.notify_all();
     return false;
   }
   hsasupport_singleton.GetCoreApiTable().hsa_signal_store_screlease_fn(queue->GetReadySignal(), 1);
@@ -471,6 +473,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
       auto* profile = pending->profile ? pending->profile->profile.get() : nullptr;
       if (pending->counters_count > 0 && profile && profile->events)
       {
+        ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_sub(1);
         Packet::AQLPacketProfile::MoveToCache(queue_info_session->agent, std::move(pending->profile));
 
         profiler_serializer_t& serializer =
@@ -484,7 +487,6 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
         Queue* queue = serializer.dispatch_ready.front();
         serializer.dispatch_ready.erase(serializer.dispatch_ready.begin());
         enable_dispatch(queue);
-
       }
 
       if (pending->new_signal.handle)
@@ -613,7 +615,7 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
   }
 
   auto& queue_info = *reinterpret_cast<Queue*>(data);
-  std::lock_guard<std::mutex> lk(queue_info.qw_mutex);
+  std::unique_lock<std::mutex> lk(queue_info.qw_mutex);
 
   if (session_id.handle > 0 && pkt_count > 0 &&
       (is_counter_collection_mode || is_timestamp_collection_mode ||
@@ -641,6 +643,13 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
         if (!profile_packet)
           profile_packet = Packet::InitializeAqlPackets(
             queue_info.GetCPUAgent(), queue_info.GetGPUAgent(), session_data, session_id);
+
+        if (ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_add(1) >= SIGNAL_DELAY_THRESHOLD)
+        {
+          queue_info.cv_ready_signal.wait_for(lk, std::chrono::microseconds(1), [] {
+            return ACTIVE_INTERRUPT_SIGNAL_COUNT.load() <= SIGNAL_DELAY_THRESHOLD;
+          });
+        }
       }
 
       if (profile_packet.get())
