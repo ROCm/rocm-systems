@@ -2,12 +2,12 @@
 
 ## Requirements
 
-* python 3.6+ 64-bit
-* driver must be loaded for amdsmi_init() to pass
+* Python 3.6+ 64-bit
+* Driver must be loaded for amdsmi_init() to pass
 
 ## Overview
 
-## Folder structure
+### Folder structure
 
 File Name | Note
 ---|---
@@ -17,7 +17,7 @@ File Name | Note
 `amdsmi_exception.py` | Amdsmi exceptions python file
 `README.md` | Documentation
 
-## Usage
+### Usage
 
 `amdsmi` folder should be copied and placed next to importing script. It should be imported as:
 
@@ -42,7 +42,7 @@ To initialize amdsmi lib, amdsmi_init() must be called before all other calls to
 
 To close connection to driver, amdsmi_shut_down() must be the last call.
 
-## Exceptions
+### Exceptions
 
 All exceptions are in `amdsmi_exception.py` file.
 Exceptions that can be thrown are:
@@ -192,6 +192,7 @@ except AmdSmiException as e:
 ### amdsmi_get_socket_handles
 
 **Note: CURRENTLY HARDCODED TO RETURN DUMMY DATA**
+
 Description: Returns list of socket device handle objects on current machine
 
 Input parameters: `None`
@@ -215,6 +216,7 @@ except AmdSmiException as e:
 ### amdsmi_get_socket_info
 
 **Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
 Description: Return socket name
 
 Input parameters:
@@ -939,7 +941,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_gpu_process_list
 
-Description: Returns the list of processes running on the target GPU; May require root level access
+Description: Returns the list of processes running on the target GPU; Requires root level access to display root process names; otherwise will return "N/A"
 
 Input parameters:
 
@@ -949,7 +951,7 @@ Output: List of Dictionaries with the corresponding fields; empty list if no run
 
 Field | Description
 ---|---
-`name` | Name of process
+`name` | Name of process. If user does not have permission this will be "N/A"
 `pid` | Process ID
 `mem` | Process memory usage
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
@@ -3799,6 +3801,7 @@ except AmdSmiException as e:
 ### amdsmi_get_processor_info
 
 **Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
 Description: Return processor name
 
 Input parameters:

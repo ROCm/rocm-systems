@@ -69,6 +69,7 @@ class AmdSmiException(Exception):
         self.stdout_message = ''
         self.message = ''
         self.output_format = ''
+        self.device_type = ''
 
     def __str__(self):
         # Return message according to the current output format
@@ -83,7 +84,7 @@ class AmdSmiException(Exception):
 
 
 class AmdSmiInvalidCommandException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -1
         self.command = command
@@ -98,7 +99,7 @@ class AmdSmiInvalidCommandException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -2
         self.command = command
@@ -113,13 +114,22 @@ class AmdSmiInvalidParameterException(AmdSmiException):
 
 
 class AmdSmiDeviceNotFoundException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str, gpu: bool, cpu: bool, core: bool):
         super().__init__()
         self.value = -3
         self.command = command
         self.output_format = outputformat
 
-        common_message = f"Can not find a device with the corresponding identifier: '{self.command}'"
+        # Handle different devices
+        self.device_type = ""
+        if gpu:
+            self.device_type = "GPU"
+        elif cpu:
+            self.device_type = "CPU"
+        elif core:
+            self.device_type = "CPU CORE"
+
+        common_message = f"Can not find a device: {self.device_type} '{self.command}'"
 
         self.json_message["error"] = common_message
         self.json_message["code"] = self.value
@@ -128,7 +138,7 @@ class AmdSmiDeviceNotFoundException(AmdSmiException):
 
 
 class AmdSmiInvalidFilePathException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -4
         self.command = command
@@ -143,7 +153,7 @@ class AmdSmiInvalidFilePathException(AmdSmiException):
 
 
 class AmdSmiInvalidParameterValueException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -5
         self.command = command
@@ -158,7 +168,7 @@ class AmdSmiInvalidParameterValueException(AmdSmiException):
 
 
 class AmdSmiMissingParameterValueException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -6
         self.command = command
@@ -172,8 +182,23 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
         self.stdout_message = f"{common_message} Error code: {self.value}"
 
 
+class AmdSmiNotSupportedCommandException(AmdSmiException):
+    def __init__(self, command, outputformat: str):
+        super().__init__()
+        self.value = -7
+        self.command = command
+        self.output_format = outputformat
+
+        common_message = f"Command '{self.command}' is not supported on the system. Run '--help' for more info."
+
+        self.json_message["error"] = common_message
+        self.json_message["code"] = self.value
+        self.csv_message = f"error,code\n{common_message}, {self.value}"
+        self.stdout_message = f"{common_message} Error code: {self.value}"
+
+
 class AmdSmiParameterNotSupportedException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -8
         self.command = command
@@ -188,7 +213,7 @@ class AmdSmiParameterNotSupportedException(AmdSmiException):
 
 
 class AmdSmiRequiredCommandException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -9
         self.command = command
@@ -203,7 +228,7 @@ class AmdSmiRequiredCommandException(AmdSmiException):
 
 
 class AmdSmiUnknownErrorException(AmdSmiException):
-    def __init__(self, command, outputformat):
+    def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -100
         self.command = command
@@ -218,7 +243,7 @@ class AmdSmiUnknownErrorException(AmdSmiException):
 
 
 class AmdSmiAMDSMIErrorException(AmdSmiException):
-    def __init__(self, outputformat, error_code):
+    def __init__(self, outputformat: str, error_code):
         super().__init__()
         self.value = -1000 - abs(error_code)
         self.smilibcode = error_code

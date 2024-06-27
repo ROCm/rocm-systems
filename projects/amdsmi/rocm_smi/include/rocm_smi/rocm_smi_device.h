@@ -261,6 +261,7 @@ class Device {
     AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
 
     static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
+    static const char* get_type_string(DevInfoTypes type);
 
  private:
     std::shared_ptr<Monitor> monitor_;

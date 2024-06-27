@@ -746,7 +746,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   if (ret != 0) {
     ss << __PRETTY_FUNCTION__ << " | Issue: File did not exist - SYSFS file ("
        << sysfs_path
-       << ") for DevInfoInfoType (" << devInfoTypesStrings.at(type)
+       << ") for DevInfoInfoType (" << get_type_string(type)
        << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -755,7 +755,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
     ss << __PRETTY_FUNCTION__
        << " | Issue: File is not a regular file - SYSFS file ("
        << sysfs_path << ") for "
-       << "DevInfoInfoType (" << devInfoTypesStrings.at(type) << "),"
+       << "DevInfoInfoType (" << get_type_string(type) << "),"
        << " returning ENOENT (" << std::strerror(ENOENT) << ")";
     LOG_ERROR(ss);
     return ENOENT;
@@ -766,7 +766,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
   if (!fs->is_open()) {
     ss << __PRETTY_FUNCTION__
        << " | Issue: Could not open - SYSFS file (" << sysfs_path << ") for "
-       << "DevInfoInfoType (" << devInfoTypesStrings.at(type) << "), "
+       << "DevInfoInfoType (" << get_type_string(type) << "), "
        << ", returning " << std::to_string(errno) << " ("
        << std::strerror(errno) << ")";
     LOG_ERROR(ss);
@@ -775,7 +775,7 @@ int Device::openSysfsFileStream(DevInfoTypes type, T *fs, const char *str) {
 
   ss << __PRETTY_FUNCTION__ << " | Successfully opened SYSFS file ("
      << sysfs_path
-     << ") for DevInfoInfoType (" << devInfoTypesStrings.at(type)
+     << ") for DevInfoInfoType (" << get_type_string(type)
      << ")";
   LOG_INFO(ss);
   return 0;
@@ -792,7 +792,7 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   ret = openDebugFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read debugInfoStr for DevInfoType ("
-     << devInfoTypesStrings.at(type)<< "), returning "
+     << get_type_string(type)<< "), returning "
      << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -806,7 +806,7 @@ int Device::readDebugInfoStr(DevInfoTypes type, std::string *retStr) {
   fs.close();
 
   ss << "Successfully read debugInfoStr for DevInfoType ("
-     << devInfoTypesStrings.at(type)<< "), retString= " << *retStr;
+     << get_type_string(type)<< "), retString= " << *retStr;
   LOG_INFO(ss);
 
   return 0;
@@ -822,7 +822,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read device info string for DevInfoType ("
-     << devInfoTypesStrings.at(type) << "), returning "
+     << get_type_string(type) << "), returning "
      << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -832,7 +832,7 @@ int Device::readDevInfoStr(DevInfoTypes type, std::string *retStr) {
   fs.close();
   ss << __PRETTY_FUNCTION__
      << "Successfully read device info string for DevInfoType (" <<
-            devInfoTypesStrings.at(type) << "): " + *retStr
+            get_type_string(type) << "): " + *retStr
      << " | "
      << (fs.is_open() ? " File stream is opened" : " File stream is closed")
      << " | " << (fs.bad() ? "[ERROR] Bad read operation" :
@@ -867,7 +867,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
     fs.close();
     ss << __PRETTY_FUNCTION__ << " | Issue: Could not open fileStream; "
        << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << devInfoTypesStrings.at(type)
+       << ") for DevInfoType (" << get_type_string(type)
        << "), returning " << std::to_string(ret);
     LOG_ERROR(ss);
     return ret;
@@ -878,7 +878,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
     fs.flush();
     fs.close();
     ss << "Successfully wrote device info string (" << valStr
-       << ") for DevInfoType (" << devInfoTypesStrings.at(type)
+       << ") for DevInfoType (" << get_type_string(type)
        << "), returning RSMI_STATUS_SUCCESS";
     LOG_INFO(ss);
     ret = RSMI_STATUS_SUCCESS;
@@ -892,7 +892,7 @@ int Device::writeDevInfoStr(DevInfoTypes type, std::string valStr,
     fs.close();
     ss << __PRETTY_FUNCTION__ << " | Issue: Could not write to file; "
        << "Could not write device info string (" << valStr
-       << ") for DevInfoType (" << devInfoTypesStrings.at(type)
+       << ") for DevInfoType (" << get_type_string(type)
        << "), returning " << getRSMIStatusString(ErrnoToRsmiStatus(ret));
     ss << " | "
        << (fs.is_open() ? "[ERROR] File stream open" :
@@ -983,20 +983,29 @@ int Device::readDevInfoLine(DevInfoTypes type, std::string *line) {
   ret = openSysfsFileStream(type, &fs);
   if (ret != 0) {
     ss << "Could not read DevInfoLine for DevInfoType ("
-       << devInfoTypesStrings.at(type) << ")";
+       << get_type_string(type) << ")";
     LOG_ERROR(ss);
     return ret;
   }
 
   std::getline(fs, *line);
   ss << "Successfully read DevInfoLine for DevInfoType ("
-     << devInfoTypesStrings.at(type) << "), returning *line = "
+     << get_type_string(type) << "), returning *line = "
      << *line;
   LOG_INFO(ss);
 
   return 0;
 }
 
+const char* Device::get_type_string(DevInfoTypes type) {
+  auto ite = devInfoTypesStrings.find(type);
+  if (ite != devInfoTypesStrings.end()) {
+    return ite->second;
+  }
+
+  return "Unknown";
+
+}
 int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
                                 void *p_binary_data) {
   auto sysfs_path = path_;
@@ -1009,7 +1018,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   ptr = fopen(sysfs_path.c_str(), "rb");
   if (!ptr) {
     ss << "Could not read DevInfoBinary for DevInfoType ("
-       << devInfoTypesStrings.at(type) << ")"
+       << get_type_string(type) << ")"
        << " - SYSFS (" << sysfs_path << ")"
        << ", returning " << std::to_string(errno) << " ("
        << std::strerror(errno) << ")";
@@ -1021,7 +1030,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
   fclose(ptr);
   if ((num*b_size) != b_size) {
     ss << "Could not read DevInfoBinary for DevInfoType ("
-       << devInfoTypesStrings.at(type) << ") - SYSFS ("
+       << get_type_string(type) << ") - SYSFS ("
        << sysfs_path << "), binary size error; "
        << "[buff: "
        << p_binary_data
@@ -1035,7 +1044,7 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size,
     return ENOENT;
   }
   ss << "Successfully read DevInfoBinary for DevInfoType ("
-     << devInfoTypesStrings.at(type) << ") - SYSFS ("
+     << get_type_string(type) << ") - SYSFS ("
      << sysfs_path << "), returning binaryData = " << p_binary_data
      << "; byte_size = " << std::dec << static_cast<int>(b_size);
 
@@ -1067,7 +1076,7 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
 
   if (retVec->empty()) {
     ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << devInfoTypesStrings.at(type) << ")"
+       << get_type_string(type) << ")"
        << ", but contained no string lines";
     LOG_ERROR(ss);
     return ENXIO;
@@ -1085,12 +1094,12 @@ int Device::readDevInfoMultiLineStr(DevInfoTypes type,
 
   if (!allLines.empty()) {
     ss << "Successfully read devInfoMultiLineStr for DevInfoType ("
-       << devInfoTypesStrings.at(type) << ") "
+       << get_type_string(type) << ") "
        << ", returning lines read = " << allLines;
     LOG_INFO(ss);
   } else {
     ss << "Read devInfoMultiLineStr for DevInfoType ("
-       << devInfoTypesStrings.at(type) << ")"
+       << get_type_string(type) << ")"
        << ", but lines were empty";
     LOG_INFO(ss);
     return ENXIO;

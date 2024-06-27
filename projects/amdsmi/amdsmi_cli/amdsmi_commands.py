@@ -115,9 +115,15 @@ class AMDSMICommands():
         self.logger.output['rocm_version'] = f'{rocm_version_str}'
 
         if self.logger.is_human_readable_format():
-            print(f'AMDSMI Tool: {__version__} | '\
-                    f'AMDSMI Library version: {amdsmi_lib_version_str} | ' \
-                    f'ROCm version: {rocm_version_str}')
+            human_readable_output = f"AMDSMI Tool: {__version__} | " \
+                                    f"AMDSMI Library version: {amdsmi_lib_version_str} | " \
+                                    f"ROCm version: {rocm_version_str}"
+            # Custom human readable handling for version
+            if self.logger.destination == 'stdout':
+                print(human_readable_output)
+            else:
+                with self.logger.destination.open('a') as output_file:
+                    output_file.write(human_readable_output + '\n')
         elif self.logger.is_json_format() or self.logger.is_csv_format():
             self.logger.print_output()
 
@@ -2631,8 +2637,6 @@ class AMDSMICommands():
         try:
             process_list = amdsmi_interface.amdsmi_get_gpu_process_list(args.gpu)
         except amdsmi_exception.AmdSmiLibraryException as e:
-            if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                raise PermissionError('Command requires elevation') from e
             logging.debug("Failed to get process list for gpu %s | %s", gpu_id, e.get_error_info())
             raise e
 

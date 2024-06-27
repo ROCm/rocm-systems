@@ -83,7 +83,6 @@ using amd::smi::monitorTypesToString;
 using amd::smi::getRSMIStatusString;
 using amd::smi::AMDGpuMetricsUnitType_t;
 using amd::smi::AMDGpuMetricTypeId_t;
-auto &devInfoTypesStrings = amd::smi::Device::devInfoTypesStrings;
 
 static const uint32_t kMaxOverdriveLevel = 20;
 static const float kEnergyCounterResolution = 15.3F;
@@ -3849,7 +3848,7 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
       ss << __PRETTY_FUNCTION__
          << " | inside success fallback... "
          << " | Device #: " << std::to_string(dv_ind)
-         << " | Type = " << devInfoTypesStrings.at(mem_type_file)
+         << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
          << " | Data: total = " << std::to_string(*total)
          << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
       LOG_DEBUG(ss);
@@ -3860,7 +3859,7 @@ rsmi_dev_memory_total_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   ss << __PRETTY_FUNCTION__
      << " | after fallback... "
      << " | Device #: " << std::to_string(dv_ind)
-     << " | Type = " << devInfoTypesStrings.at(mem_type_file)
+     << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
      << " | Data: total = " << std::to_string(*total)
      << " | ret = " << getRSMIStatusString(ret);
   LOG_DEBUG(ss);
@@ -3929,7 +3928,7 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
       ss << __PRETTY_FUNCTION__
          << " no fallback needed! - "
          << " | Device #: " << std::to_string(dv_ind)
-         << " | Type = " << devInfoTypesStrings.at(mem_type_file)
+         << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
          << " | Data: Used = " << std::to_string(*used)
          << " | Data: total = " << std::to_string(total)
          << " | ret = " << getRSMIStatusString(ret);
@@ -3940,7 +3939,7 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
       ss << __PRETTY_FUNCTION__
          << " | in fallback == success ..."
          << " | Device #: " << std::to_string(dv_ind)
-         << " | Type = " << devInfoTypesStrings.at(mem_type_file)
+         << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
          << " | Data: Used = " << std::to_string(*used)
          << " | Data: total = " << std::to_string(total)
          << " | ret = " << getRSMIStatusString(RSMI_STATUS_SUCCESS);
@@ -3951,7 +3950,7 @@ rsmi_dev_memory_usage_get(uint32_t dv_ind, rsmi_memory_type_t mem_type,
   ss << __PRETTY_FUNCTION__
      << " | at end!!!! after fallback ..."
      << " | Device #: " << std::to_string(dv_ind)
-     << " | Type = " << devInfoTypesStrings.at(mem_type_file)
+     << " | Type = " << amd::smi::Device::get_type_string(mem_type_file)
      << " | Data: Used = " << std::to_string(*used)
      << " | ret = " << getRSMIStatusString(ret);
   LOG_DEBUG(ss);
@@ -5234,7 +5233,7 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Cause: len was 0 or compute_partition variable was null"
        << " | Returning = "
        << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
@@ -5253,7 +5252,7 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Cause: could not retrieve current compute partition"
        << " | Returning = "
        << getRSMIStatusString(ret) << " |";
@@ -5270,7 +5269,7 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Cause: requested size was insufficient"
        << " | Returning = "
        << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE) << " |";
@@ -5282,7 +5281,7 @@ rsmi_dev_compute_partition_get(uint32_t dv_ind, char *compute_partition,
      << " | Success "
      << " | Device #: " << dv_ind
      << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+     << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
      << " | Data: " << compute_partition
      << " | Returning = "
      << getRSMIStatusString(ret) << " |";
@@ -5342,7 +5341,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
          << " | Fail "
          << " | Device #: " << dv_ind
          << " | Type: "
-         << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+         << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
          << " | Data: " << newComputePartitionStr
          << " | Cause: requested setting was invalid"
          << " | Returning = "
@@ -5361,7 +5360,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Data: " << newComputePartitionStr
        << " | Cause: not an available compute partition setting"
        << " | Returning = "
@@ -5381,7 +5380,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Cause: could retrieve current compute partition or retrieved"
        << " unexpected data"
        << " | Returning = "
@@ -5397,7 +5396,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
        << " | Success - compute partition was already set at requested value"
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
        << " | Data: " << newComputePartitionStr
        << " | Returning = "
        << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
@@ -5423,7 +5422,7 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
      << " | Success "
      << " | Device #: " << dv_ind
      << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+     << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
      << " | Data: " << newComputePartitionStr
      << " | Returning = "
      << getRSMIStatusString(returnResponse) << " |";
@@ -5495,7 +5494,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
          << " | Fail "
          << " | Device #: " << dv_ind
          << " | Type: "
-         << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+         << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
          << " | Cause: device board name does not support this action"
          << " | Returning = "
          << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
@@ -5516,7 +5515,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
          << " | Fail "
          << " | Device #: " << dv_ind
          << " | Type: "
-         << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+         << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
          << " | Cause: requested setting was invalid"
          << " | Returning = "
          << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
@@ -5537,7 +5536,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: could retrieve current memory partition or retrieved"
        << " unexpected data"
        << " | Returning = "
@@ -5554,7 +5553,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
      << " setting"
      << " | Device #: " << dv_ind
      << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << newMemoryPartition
      << " | Returning = "
      << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
@@ -5576,7 +5575,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: issue writing reqested setting of " + newMemoryPartition
        << " | Returning = "
        << getRSMIStatusString(err) << " |";
@@ -5590,7 +5589,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
      << " | Success - if restart completed successfully"
      << " | Device #: " << dv_ind
      << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << newMemoryPartition
      << " | Returning = "
      << getRSMIStatusString(restartRet) << " |";
@@ -5612,7 +5611,7 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: user sent invalid arguments, len = 0 or memory partition"
        << " was a null ptr"
        << " | Returning = "
@@ -5632,7 +5631,7 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: could not successfully retrieve current memory partition "
        << " | Returning = "
        << getRSMIStatusString(ret) << " |";
@@ -5650,7 +5649,7 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
        << " | Fail "
        << " | Device #: " << dv_ind
        << " | Type: "
-       << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: could not successfully retrieve current memory partition "
        << " | Returning = "
        << getRSMIStatusString(ret) << " |";
@@ -5662,7 +5661,7 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
      << " | Success "
      << " | Device #: " << dv_ind
      << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << memory_partition
      << " | Returning = "
      << getRSMIStatusString(ret) << " |";
@@ -5701,7 +5700,7 @@ rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
      << " | Success - if original boot state was not unknown or valid setting"
      << " | Device #: " << dv_ind
      << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
+     << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
      << " | Data: " << bootState
      << " | Returning = "
      << getRSMIStatusString(ret) << " |";
@@ -5740,7 +5739,7 @@ rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
      << " | Success - if original boot state was not unknown or valid setting"
      << " | Device #: " << dv_ind
      << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
+     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << bootState
      << " | Returning = "
      << getRSMIStatusString(ret) << " |";

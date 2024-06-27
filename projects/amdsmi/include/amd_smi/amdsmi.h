@@ -4830,10 +4830,6 @@ amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle, amdsmi_vram_
  *                  Holding a copy of max_process before it is passed in will be helpful for monitoring
  *                  the allocations done upon each call since the max_process will permanently be changed
  *                  to reflect the actual number of processes running.
- *                  Note: For the specific cases where the return status is AMDSMI_STATUS_NO_PERM only.
- *                        The list of process and size are AMDSMI_STATUS_SUCCESS, however there are
- *                        processes details not fully retrieved due to permissions.
- *
  *
  *  @param[out]     list Reference to a user-provided buffer where the process
  *                  list will be returned. This buffer must contain at least
@@ -4841,17 +4837,16 @@ amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle, amdsmi_vram_
  *                  by user.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
- *                            | ::AMDSMI_STATUS_NO_PERM on success, but not all details from process retrieved,
  *                            | ::AMDSMI_STATUS_OUT_OF_RESOURCES, filled list buffer with data, but number of
  *                                actual running processes is larger than the size provided.
  *
  */
-    //  Note: If the reserved size for processes is smaller than the number of
-    //        actual processes running. The AMDSMI_STATUS_OUT_OF_RESOURCES is
-    //        an indication the caller should handle the situation (resize).
-    //        The max_processes is always changed to reflect the actual size of
-    //        list of processes running, so the caller knows where it is at.
-    //
+  //  Note: If the reserved size for processes is smaller than the number of
+  //        actual processes running. The AMDSMI_STATUS_OUT_OF_RESOURCES is
+  //        an indication the caller should handle the situation (resize).
+  //        The max_processes is always changed to reflect the actual size of
+  //        list of processes running, so the caller knows where it is at.
+  //
 amdsmi_status_t
 amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle, uint32_t *max_processes, amdsmi_proc_info_t *list);
 
@@ -4922,6 +4917,17 @@ amdsmi_status_t amdsmi_get_cpu_socket_energy(amdsmi_processor_handle processor_h
 /**  @defgroup systemstatistics     HSMP system statistics
  *  @{
  */
+
+/**
+ *  @brief Get Number of threads Per Core.
+ *
+ *  @platform{cpu_bm}
+ *
+ *  @param[in,out]    threads_per_core - Input buffer to return the Number of threads Per Core
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_threads_per_core(uint32_t *threads_per_core);
 
 /**
  *  @brief Get SMU Firmware Version.

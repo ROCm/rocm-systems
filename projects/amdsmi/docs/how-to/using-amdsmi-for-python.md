@@ -1,8 +1,6 @@
-
 # AMD SMI Python Library
 
 ## Requirements
-
 
 * Python 3.6+ 64-bit
 * Driver must be loaded for amdsmi_init() to pass
@@ -10,7 +8,6 @@
 ## Overview
 
 ### Folder structure
-
 
 File Name | Note
 ---|---
@@ -20,7 +17,7 @@ File Name | Note
 `amdsmi_exception.py` | Amdsmi exceptions python file
 `README.md` | Documentation
 
-## Usage
+### Usage
 
 `amdsmi` folder should be copied and placed next to importing script. It should be imported as:
 
@@ -45,17 +42,15 @@ To initialize amdsmi lib, amdsmi_init() must be called before all other calls to
 
 To close connection to driver, amdsmi_shut_down() must be the last call.
 
-## Exceptions
+### Exceptions
 
 All exceptions are in `amdsmi_exception.py` file.
 Exceptions that can be thrown are:
 
 * `AmdSmiException`: base amdsmi exception class
 * `AmdSmiLibraryException`: derives base `AmdSmiException` class and represents errors that can occur in amdsmi-lib.
-  
 When this exception is thrown, `err_code` and `err_info` are set. `err_code` is an integer that corresponds to errors that can occur
 in amdsmi-lib and `err_info` is a string that explains the error that occurred.
-
 Example:
 
 ```python
@@ -123,7 +118,6 @@ except AmdSmiException as e:
 ```
 
 ### amdsmi_shut_down
-
 
 Description: Finalize and close connection to driver
 
@@ -226,7 +220,6 @@ except AmdSmiException as e:
 Description: Return socket name
 
 Input parameters:
-
 `socket_handle` socket handle
 
 Output: Socket name
@@ -423,13 +416,13 @@ Input parameters:
 
 Output: Dictionary with fields
 
-Field | Description
----|---
-`power_cap` |  power capability
-`dpm_cap` |  dynamic power management capability
-`default_power_cap` |  default power capability
-`min_power_cap` | min power capability
-`max_power_cap` | max power capability
+Field | Description | Units
+---|---|---
+`power_cap` |  power capability | uW
+`dpm_cap` |  dynamic power management capability | MHz
+`default_power_cap` |  default power capability | uW
+`min_power_cap` | min power capability | uW
+`max_power_cap` | max power capability | uW
 
 Exceptions that can be thrown by `amdsmi_get_power_cap_info` function:
 
@@ -504,10 +497,9 @@ Input parameters:
 * `processor_handle` device which to query
 
 Output: List of Dictionaries containing cache information following the schema below:
-
 Schema:
 
-```
+```JSON
 {
     cache_properties:
         {
@@ -519,7 +511,6 @@ Schema:
     max_num_cu_shared: {"type" : "number"},
     num_cache_instance: {"type" : "number"}
 }
-
 ```
 
 Field | Description
@@ -688,8 +679,11 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
+`current_socket_power` | current socket power
 `average_socket_power` | average socket power
 `gfx_voltage` | voltage gfx
+`soc_voltage` | voltage soc
+`mem_voltage` | voltage mem
 `power_limit` | power limit
 
 Exceptions that can be thrown by `amdsmi_get_power_info` function:
@@ -708,8 +702,11 @@ try:
     else:
         for device in devices:
             power_measure = amdsmi_get_power_info(device)
+            print(power_measure['current_socket_power'])
             print(power_measure['average_socket_power'])
             print(power_measure['gfx_voltage'])
+            print(power_measure['soc_voltage'])
+            print(power_measure['mem_voltage'])
             print(power_measure['power_limit'])
 except AmdSmiException as e:
     print(e)
@@ -780,9 +777,11 @@ Output: Dictionary with fields
 
 Field | Description
 ---|---
-`cur_clk` | Current clock for given clock type
-`max_clk` | Maximum clock for given clock type
+`clk` | Current clock for given clock type
 `min_clk` | Minimum clock for given clock type
+`max_clk` | Maximum clock for given clock type
+`clk_locked` | flag only supported on GFX clock domain
+`clk_deep_sleep` | clock deep sleep mode flag
 
 Exceptions that can be thrown by `amdsmi_get_clock_info` function:
 
@@ -800,9 +799,11 @@ try:
     else:
         for device in devices:
             clock_measure = amdsmi_get_clock_info(device, AmdSmiClkType.GFX)
-            print(clock_measure['cur_clk'])
+            print(clock_measure['clk'])
             print(clock_measure['min_clk'])
             print(clock_measure['max_clk'])
+            print(clock_measure['clk_locked'])
+            print(clock_measure['clk_deep_sleep'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -854,7 +855,7 @@ Input parameters:
 
 * `processor_handle` device which to query
 
-Output: List consisting of dictionaries with fields for each bad page found
+Output: List consisting of dictionaries with fields for each bad page found; can be an empty list
 
 Field | Description
 ---|---
@@ -879,7 +880,7 @@ try:
     else:
         for device in devices:
             bad_page_info = amdsmi_get_gpu_bad_page_info(device)
-            if not len(bad_page_info):
+            if not bad_page_info: # Can be empty list
                 print("No bad pages found")
                 continue
             for bad_page in bad_page_info:
@@ -891,9 +892,56 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_gpu_memory_reserved_pages
+
+Description: Returns reserved memory page info for the given GPU.
+It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: List consisting of dictionaries with fields for each reserved memory page found; can be an empty list
+
+Field | Description
+---|---
+`value` | Value of memory reserved page
+`page_address` | Address of memory reserved page
+`page_size` | Size of memory reserved page
+`status` | Status of memory reserved page
+
+Exceptions that can be thrown by `amdsmi_get_gpu_memory_reserved_pages` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            reserved_memory_page_info = amdsmi_get_gpu_memory_reserved_pages(device)
+            if not reserved_memory_page_info: # Can be empty list
+                print("No memory reserved pages found")
+                continue
+            for reserved_memory_page in reserved_memory_page_info:
+                print(reserved_memory_page["value"])
+                print(reserved_memory_page["page_address"])
+                print(reserved_memory_page["page_size"])
+                print(reserved_memory_page["status"])
+except AmdSmiException as e:
+    print(e)
+```
+
+
 ### amdsmi_get_gpu_process_list
 
-Description: Returns the list of processes running on the target GPU; May require root level access
+Description: Returns the list of processes running on the target GPU; Requires root level access to display root process names; otherwise will return "N/A"
 
 Input parameters:
 
@@ -903,7 +951,7 @@ Output: List of Dictionaries with the corresponding fields; empty list if no run
 
 Field | Description
 ---|---
-`name` | Name of process
+`name` | Name of process. If user does not have permission this will be "N/A"
 `pid` | Process ID
 `mem` | Process memory usage
 `engine_usage` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`gfx`</td><td>GFX engine usage in ns</td></tr><tr><td>`enc`</td><td>Encode engine usage in ns</td></tr></tbody></table>
@@ -1109,8 +1157,9 @@ Event Type | Description
 ---|------
 `VMFAULT` | VM page fault
 `THERMAL_THROTTLE` | thermal throttle
-`GPU_PRE_RESET`   | gpu pre reset
+`GPU_PRE_RESET` | gpu pre reset
 `GPU_POST_RESET` | gpu post reset
+`RING_HANG` | ring hang event
 
 #### read
 
@@ -1187,7 +1236,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_set_gpu_pci_bandwidth(device, 0)
+            amdsmi_set_gpu_pci_bandwidth(device, 0)
 except AmdSmiException as e:
     print(e)
 ```
@@ -1547,8 +1596,12 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            memory = amdsmi_get_gpu_memory_total(device)
-            print(memory)
+            vram_memory_total = amdsmi_get_gpu_memory_total(device, amdsmi_interface.AmdSmiMemoryType.VRAM)
+            print(vram_memory_total)
+            vis_vram_memory_total = amdsmi_get_gpu_memory_total(device, amdsmi_interface.AmdSmiMemoryType.VIS_VRAM)
+            print(vis_vram_memory_total)
+            gtt_memory_total = amdsmi_get_gpu_memory_total(device, amdsmi_interface.AmdSmiMemoryType.GTT)
+            print(gtt_memory_total)
 except AmdSmiException as e:
     print(e)
 ```
@@ -1583,7 +1636,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_set_gpu_od_clk_info(
+            amdsmi_set_gpu_od_clk_info(
                 device,
                 AmdSmiFreqInd.AMDSMI_FREQ_IND_MAX,
                 1000,
@@ -1619,8 +1672,12 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            memory = amdsmi_get_gpu_memory_usage(device)
-            print(memory)
+            vram_memory_usage = amdsmi_get_gpu_memory_usage(device, amdsmi_interface.AmdSmiMemoryType.VRAM)
+            print(vram_memory_usage)
+            vis_vram_memory_usage = amdsmi_get_gpu_memory_usage(device, amdsmi_interface.AmdSmiMemoryType.VIS_VRAM)
+            print(vis_vram_memory_usage)
+            gtt_memory_usage = amdsmi_get_gpu_memory_usage(device, amdsmi_interface.AmdSmiMemoryType.GTT)
+            print(gtt_memory_usage)
 except AmdSmiException as e:
     print(e)
 ```
@@ -1654,7 +1711,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_set_gpu_od_volt_info(device, 1, 1000, 980)
+            amdsmi_set_gpu_od_volt_info(device, 1, 1000, 980)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2036,7 +2093,7 @@ except AmdSmiException as e:
 ```
 
 ### amdsmi_clean_gpu_local_data
-Description: Clear the local data of the given device. This can be called between user logins to prevent information leak.
+Description: Clear the SRAM data of the given device. This can be called between user logins to prevent information leak.
 
 Input parameters:
 
@@ -2130,15 +2187,16 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_get_clk_freq(device, AmdSmiClkType.SYS)
+            amdsmi_get_clk_freq(device, AmdSmiClkType.SYS)
 except AmdSmiException as e:
     print(e)
 ```
 
 ### amdsmi_get_gpu_od_volt_info
 
-Description: This function retrieves the voltage/frequency curve information
-It is not supported on virtual machine guest
+Description: This function retrieves the voltage/frequency curve information.
+If the num_regions is 0 then the voltage curve is not supported.
+It is not supported on virtual machine guest.
 
 Input parameters:
 
@@ -2152,8 +2210,8 @@ Field | Description
 `curr_mclk_range` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range</td></tr></tbody></table>
 `sclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound sclk range limt</td></tr><tr><td>`upper_bound`</td><td>upper bound sclk range limit</td></tr></tbody></table>
 `mclk_freq_limits` |  <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`lower_bound`</td><td>lower bound mclk range limit</td></tr><tr><td>`upper_bound`</td><td>upper bound mclk range limit</td></tr></tbody></table>
-`curve.vc_points` | The number of supported frequencies
-`num_regions` | The current frequency index
+`curve.vc_points` | List of voltage curve points
+`num_regions` | The number of voltage curve regions
 
 Exceptions that can be thrown by `amdsmi_get_gpu_od_volt_info` function:
 
@@ -2170,7 +2228,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_get_gpu_od_volt_info(dev)
+            amdsmi_get_gpu_od_volt_info(dev)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2214,7 +2272,7 @@ Output: Dictionary with fields
 `current_dclk0` | Current dclk0 | MHz
 `current_vclk1` | Current vclk1 | MHz
 `current_dclk1` | Current dclk1 | MHz
-`throttle_status` | Current throttle status | MHz
+`throttle_status` | Current throttle status | bool
 `current_fan_speed` | Current fan speed | RPM
 `pcie_link_width` | PCIe link width (number of lanes) | lanes
 `pcie_link_speed` | PCIe link speed in 0.1 GT/s (Giga Transfers per second) | GT/s
@@ -2262,7 +2320,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_get_gpu_metrics_info(dev)
+            amdsmi_get_gpu_metrics_info(dev)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2299,7 +2357,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_get_gpu_od_volt_curve_regions(device, 3)
+            amdsmi_get_gpu_od_volt_curve_regions(device, 3)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2337,7 +2395,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_get_gpu_power_profile_presets(device, 0)
+            amdsmi_get_gpu_power_profile_presets(device, 0)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2566,7 +2624,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_set_gpu_perf_level(device, AmdSmiDevPerfLevel.STABLE_PEAK)
+            amdsmi_set_gpu_perf_level(device, AmdSmiDevPerfLevel.STABLE_PEAK)
 except AmdSmiException as e:
     print(e)
 ```
@@ -2869,7 +2927,7 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-             amdsmi_set_gpu_overdrive_level(device, 0)
+            amdsmi_set_gpu_overdrive_level(device, 0)
 except AmdSmiException as e:
     print(e)
 ```
@@ -3330,13 +3388,8 @@ Example:
 
 ```python
 try:
-    devices = amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            version = amdsmi_get_lib_version()
-            print(version)
+    version = amdsmi_get_lib_version()
+    print(version)
 except AmdSmiException as e:
     print(e)
 ```
@@ -3748,6 +3801,7 @@ except AmdSmiException as e:
 ### amdsmi_get_processor_info
 
 **Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
 Description: Return processor name
 
 Input parameters:

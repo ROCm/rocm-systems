@@ -1991,8 +1991,7 @@ def amdsmi_get_gpu_process_list(
     # This will get populated with the number of processes found
     max_processes = ctypes.c_uint32(MAX_NUM_PROCESSES)
 
-    process_list = (amdsmi_wrapper.amdsmi_proc_info_t *
-                    max_processes.value)()
+    process_list = (amdsmi_wrapper.amdsmi_proc_info_t * max_processes.value)()
     _check_res(
         amdsmi_wrapper.amdsmi_get_gpu_process_list(
             processor_handle, ctypes.byref(max_processes), process_list
@@ -2001,8 +2000,11 @@ def amdsmi_get_gpu_process_list(
 
     result = []
     for index in range(max_processes.value):
+        process_name = process_list[index].name.decode("utf-8").strip()
+        if process_name == "":
+            process_name = "N/A"
         result.append({
-            "name": process_list[index].name.decode("utf-8"),
+            "name": process_name,
             "pid": process_list[index].pid,
             "mem": process_list[index].mem,
             "engine_usage": {

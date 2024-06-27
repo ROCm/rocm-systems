@@ -2259,6 +2259,9 @@ amdsmi_get_cpu_core_energy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(c
 amdsmi_get_cpu_socket_energy = _libraries['libamd_smi.so'].amdsmi_get_cpu_socket_energy
 amdsmi_get_cpu_socket_energy.restype = amdsmi_status_t
 amdsmi_get_cpu_socket_energy.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint64)]
+amdsmi_get_threads_per_core = _libraries['libamd_smi.so'].amdsmi_get_threads_per_core
+amdsmi_get_threads_per_core.restype = amdsmi_status_t
+amdsmi_get_threads_per_core.argtypes = [ctypes.POINTER(ctypes.c_uint32)]
 amdsmi_get_cpu_smu_fw_version = _libraries['libamd_smi.so'].amdsmi_get_cpu_smu_fw_version
 amdsmi_get_cpu_smu_fw_version.restype = amdsmi_status_t
 amdsmi_get_cpu_smu_fw_version.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_smu_fw_version_t)]
@@ -2610,6 +2613,7 @@ __all__ = \
     'amdsmi_get_cpu_fclk_mclk', 'amdsmi_get_cpu_hsmp_proto_ver',
     'amdsmi_get_cpu_model', 'amdsmi_get_cpu_prochot_status',
     'amdsmi_get_cpu_pwr_svi_telemetry_all_rails',
+    'amdsmi_get_threads_per_core',
     'amdsmi_get_cpu_smu_fw_version',
     'amdsmi_get_cpu_socket_c0_residency',
     'amdsmi_get_cpu_socket_current_active_freq_limit',

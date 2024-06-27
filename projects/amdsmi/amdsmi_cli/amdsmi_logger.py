@@ -465,7 +465,7 @@ class AMDSMILogger():
                 self._print_tabular_output(multiple_device_enabled=multiple_device_enabled, watching_output=watching_output)
             else:
                 self._print_human_readable_output(multiple_device_enabled=multiple_device_enabled,
-                                            watching_output=watching_output)
+                                                   watching_output=watching_output)
 
 
     def _print_json_output(self, multiple_device_enabled=False, watching_output=False):
