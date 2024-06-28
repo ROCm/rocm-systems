@@ -163,17 +163,17 @@ def show_all(args, runs, archConfigs, output):
                                             + "%)"
                                         )
                                         df = pd.concat([df, t_df], axis=1)
-                                        df["Abs Diff"] = absolute_diff
 
                                         # DEBUG: When in a CI setting and flag is set,
                                         #       then verify metrics meet threshold requirement
-                                        if args.report_diff:
-                                            if (
-                                                header in ["Value", "Count", "Avg"]
-                                                and t_df_pretty.abs()
-                                                .gt(args.report_diff)
-                                                .any()
-                                            ):
+                                        if (
+                                            header in ["Value", "Count", "Avg"]
+                                            and t_df_pretty.abs()
+                                            .gt(args.report_diff)
+                                            .any()
+                                        ):
+                                            df["Abs Diff"] = absolute_diff
+                                            if args.report_diff:
                                                 violation_idx = t_df_pretty.index[
                                                     t_df_pretty.abs() > args.report_diff
                                                 ]
