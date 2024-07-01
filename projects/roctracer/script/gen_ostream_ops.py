@@ -225,9 +225,17 @@ def gen_cppheader(infilepath, outfilepath, rank):
       output_filename_h.write(header_basic)
       output_filename_h.write("// End of basic ostream ops\n\n")
 
+    for c in cppHeader.classes.copy():
+        # Types defined inside of unions are incorrectly prepended with "union " after parsing by CppHeaderParser
+        # Remove "union " from the beginning of the full class name to correct the eventual output
+        if "union " in c[0:6] and "::union" not in c[-8:]:
+            new_name = c[6:]
+            cppHeader.classes[new_name] = cppHeader.classes[c]
+            del cppHeader.classes[c]
+
     for c in cppHeader.classes:
         if c[-2] == ':' and c[-1] == ':': continue #ostream operator cannot be overloaded for anonymous struct therefore it is skipped
-        if "union" in c:
+        if "::union" in c:
             continue
         if c in structs_analyzed:
             continue
