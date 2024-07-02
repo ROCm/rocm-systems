@@ -72,7 +72,7 @@ queue_cb(const context::context*                                         ctx,
     // Packet generated when no instrumentation is performed. May contain serialization
     // packets/barrier packets (and can be empty).
     auto no_instrumentation = [&]() {
-        auto ret_pkt = std::make_unique<rocprofiler::hsa::CounterAQLPacket>(nullptr);
+        auto ret_pkt = std::make_unique<rocprofiler::hsa::EmptyAQLPacket>();
         // If we have a counter collection context but it is not enabled, we still might need
         // to add barrier packets to transition from serialized -> unserialized execution. This
         // transition is coordinated by the serializer.
@@ -147,13 +147,10 @@ queue_cb(const context::context*                                         ctx,
         return ret_pkt;
     }
 
-    ret_pkt->before_krn_pkt.push_back(ret_pkt->start);
-    ret_pkt->after_krn_pkt.push_back(ret_pkt->read);
-    ret_pkt->after_krn_pkt.push_back(ret_pkt->stop);
+    ret_pkt->populate_before();
+    ret_pkt->populate_after();
     for(auto& aql_pkt : ret_pkt->after_krn_pkt)
-    {
         aql_pkt.completion_signal.handle = 0;
-    }
 
     return ret_pkt;
 }

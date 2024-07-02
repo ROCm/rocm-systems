@@ -33,36 +33,48 @@ TEST(parser, base_ops)
 {
     std::map<std::string, std::string> expressionToExpected = {
         {"AB * BA",
-         "{\"Type\":\"MULTIPLY_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"BA\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "{\"Type\":\"MULTIPLY_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"BA\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}"},
         {"AB + BA",
-         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"BA\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"BA\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}"},
         {"CD - ZX",
-         "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"CD\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"ZX\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"ZX\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}"},
         {"NM / DB",
-         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"NM\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"DB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"NM\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"DB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}"}};
 
     for(auto [op, expected] : expressionToExpected)
@@ -81,51 +93,70 @@ TEST(parser, order_of_ops)
 {
     std::map<std::string, std::string> expressionToExpected = {
         {"(AB + BA) / CD",
-         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", "
+         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"BA\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"BA\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[],"
+         " \"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
         {"(AB / BA) - BN",
-         "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", "
+         "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"BA\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"BA\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"BN\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
         {"AD / (CD - ZX)",
-         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AD\", "
+         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"AD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CD\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"CD\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"ZX\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", "
+         "\"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", \"Value\":\"ZX\", \"Counter_Set\":[], "
+         "\"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
         {"MN * (NM / DB)",
-         "{\"Type\":\"MULTIPLY_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"MN\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"NM\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Value\":\"DB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "{\"Type\":\"MULTIPLY_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"MN\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"NM\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},"
+         "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Value\":\"DB\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}"}};
 
@@ -145,29 +176,37 @@ TEST(parser, reduction)
 {
     std::vector<std::tuple<std::string, std::string>> expressionToExpected = {
         {"reduce(AB, SUM, [DIMENSION_XCC,DIMENSION_SHADER_ENGINE])",
-         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
+         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Set\":[]}"},
         {"reduce(AB+CD, SUM, [DIMENSION_XCC,DIMENSION_SHADER_ENGINE])",
-         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
+         "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
          "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[\"3\",\"1\"], "
          "\"Select_Dimension_Set\":[]}"},
         {"reduce(AB,DIV, [DIMENSION_XCC,DIMENSION_SHADER_ENGINE])+reduce(DC,SUM, "
          "[DIMENSION_XCC,DIMENSION_SHADER_ENGINE])",
-         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", "
+         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"DIV\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[\"3\",\"1\"], "
          "\"Select_Dimension_Set\":[]},{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"DC\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"DC\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"}};
@@ -188,25 +227,30 @@ TEST(parser, DISABLED_selection)
 {
     std::map<std::string, std::string> expressionToExpected = {
         {"select(AB, [SE=1,XCC=0])+select(DC,[SE=2])",
-         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", "
+         "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
+         "\"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"XCC\", 0)\",\"(\"SE\", "
-         "1)\"]},{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"DC\", "
+         "1)\"]},{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"DC\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"SE\", 2)\"]}], "
          "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
         {"select(AB, [SE=2,XCC=1,WGP=3])",
-         "{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
+         "{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"WGP\", 3)\",\"(\"XCC\", "
          "1)\",\"(\"SE\", 2)\"]}"},
         {"select(AB, [XCC=0])",
-         "{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", "
-         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"Value\":\"AB\", "
+         "{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
          "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"XCC\", 0)\"]}"}};
 
@@ -216,6 +260,7 @@ TEST(parser, DISABLED_selection)
         auto*   buf = yy_scan_string(op.c_str());
         yyparse(&ast);
         ASSERT_TRUE(ast);
+        auto exp = fmt::format("{}", *ast);
         EXPECT_EQ(fmt::format("{}", *ast), expected);
         yy_delete_buffer(buf);
         delete ast;
@@ -238,6 +283,71 @@ TEST(parser, parse_derived_counters)
             yy_delete_buffer(buf);
             delete ast;
         }
+    }
+}
+
+TEST(parser, parse_accum_counter)
+{
+    std::map<std::string, std::string> expressionToExpected = {
+        {"accumulate(SQ_WAVES,NONE)",
+         "{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", \"Value\""
+         ":\"SQ_WAVES\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]}"},
+        {"accumulate(SQ_WAVES,HIGH_RES)",
+         "{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"HIGH_RES\", "
+         "\"Value"
+         "\":\"SQ_WAVES\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]}"},
+        {"accumulate(SQ_WAVES,LOW_RES)",
+         "{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"LOW_RES\", "
+         "\"Value\""
+         ":\"SQ_WAVES\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]}"}};
+
+    for(auto [op, expected] : expressionToExpected)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(op.c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast);
+        auto exp = fmt::format("{}", *ast);
+        EXPECT_EQ(fmt::format("{}", *ast), expected);
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+}
+
+TEST(parser, parse_nested_accum_counter)
+{
+    std::map<std::string, std::string> expressionToExpected = {
+        {"reduce(accumulate(SQ_LEVEL_WAVES,HIGH_RES),sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM",
+         "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Counter_Set\":[{\"Type\":\"REDUCE_NODE\", "
+         "\"REDUCE_OP\":\"sum\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"HIGH_RES\", \"Value\":\"SQ_LEVEL_WAVES\", \"Counter_Set\":[], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"max\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", "
+         "\"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", \"Value\":\"GRBM_GUI_ACTIVE\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CU_NUM\", \"Counter_Set\":[], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Set\":[]}"}};
+
+    for(auto [op, expected] : expressionToExpected)
+    {
+        RawAST* ast = nullptr;
+        auto*   buf = yy_scan_string(op.c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast);
+        auto exp = fmt::format("{}", *ast);
+        EXPECT_EQ(fmt::format("{}", *ast), expected);
+        yy_delete_buffer(buf);
+        delete ast;
     }
 }
 

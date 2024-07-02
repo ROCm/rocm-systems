@@ -272,7 +272,7 @@ checkValidMetric(const std::string& agent, const Metric& metric)
 bool
 operator<(Metric const& lhs, Metric const& rhs)
 {
-    return lhs.id() < rhs.id();
+    return std::tie(lhs.id_, lhs.flags_) < std::tie(rhs.id_, rhs.flags_);
 }
 
 bool
@@ -286,7 +286,8 @@ operator==(Metric const& lhs, Metric const& rhs)
                         x.expression_,
                         x.special_,
                         x.id_,
-                        x.empty_);
+                        x.empty_,
+                        x.flags_);
     };
     return get_tie(lhs) == get_tie(rhs);
 }

@@ -15,6 +15,7 @@ subtrees:
     - file: buffered_services
     - file: pc_sampling
     - file: intercept_table
+    - file: counter_collection_services
     - file: _doxygen/html/index
     - file: samples
     - file: rocprofv3

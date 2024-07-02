@@ -68,21 +68,17 @@ public:
         before_krn_pkt.clear();
         after_krn_pkt.clear();
     }
+    bool isEmpty() const { return empty; }
 
     virtual void populate_before() = 0;
     virtual void populate_after()  = 0;
 
-    aqlprofile_handle_t pkt_handle = {.handle = 0};
+    aqlprofile_handle_t GetHandle() const { return handle; }
+    aqlprofile_handle_t handle = {.handle = 0};
+    bool                empty  = {true};
 
-    bool                             empty   = {true};
-    hsa_ven_amd_aqlprofile_profile_t profile = {};
-    hsa_ext_amd_aql_pm4_packet_t     start   = null_amd_aql_pm4_packet;
-    hsa_ext_amd_aql_pm4_packet_t     stop    = null_amd_aql_pm4_packet;
-    hsa_ext_amd_aql_pm4_packet_t     read    = null_amd_aql_pm4_packet;
     common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 3> before_krn_pkt = {};
     common::container::small_vector<hsa_ext_amd_aql_pm4_packet_t, 2> after_krn_pkt  = {};
-
-    bool isEmpty() const { return empty; }
 };
 
 class EmptyAQLPacket : public AQLPacket
@@ -100,22 +96,46 @@ class CounterAQLPacket : public AQLPacket
     friend class rocprofiler::aql::CounterPacketConstruct;
     using memory_pool_free_func_t = decltype(::hsa_amd_memory_pool_free)*;
 
-public:
-    CounterAQLPacket(memory_pool_free_func_t func)
-    : free_func{func} {};
-    ~CounterAQLPacket() override;
-
-    void populate_before() override { before_krn_pkt.push_back(start); };
-    void populate_after() override
+    struct CounterMemoryPool
     {
-        after_krn_pkt.push_back(stop);
-        after_krn_pkt.push_back(read);
+        using desc_t = aqlprofile_buffer_desc_flags_t;
+
+        hsa_agent_t                             gpu_agent;
+        hsa_amd_memory_pool_t                   cpu_pool_;
+        hsa_amd_memory_pool_t                   kernarg_pool_;
+        decltype(hsa_amd_memory_pool_allocate)* allocate_fn;
+        decltype(hsa_amd_agents_allow_access)*  allow_access_fn;
+        decltype(hsa_amd_memory_pool_free)*     free_fn;
+        decltype(hsa_amd_memory_fill)*          fill_fn;
+        decltype(hsa_memory_copy)*              api_copy_fn;
+        bool                                    bIgnoreKernArg;
+
+        static void         Free(void* ptr, void* data);
+        static hsa_status_t Alloc(void** ptr, size_t size, desc_t flags, void* data);
+        static hsa_status_t Copy(void* dst, const void* src, size_t size, void* data);
     };
 
+public:
+    CounterAQLPacket(aqlprofile_agent_handle_t                  agent,
+                     CounterMemoryPool                          pool,
+                     const std::vector<aqlprofile_pmc_event_t>& events);
+    ~CounterAQLPacket() override { aqlprofile_pmc_delete_packets(this->handle); };
+
+    void populate_before() override
+    {
+        if(!empty) before_krn_pkt.push_back(packets.start_packet);
+    };
+    void populate_after() override
+    {
+        if(empty) return;
+        after_krn_pkt.push_back(packets.read_packet);
+        after_krn_pkt.push_back(packets.stop_packet);
+    };
+
+    aqlprofile_pmc_aql_packets_t packets{};
+
 protected:
-    bool                    command_buf_mallocd    = false;
-    bool                    output_buffer_malloced = false;
-    memory_pool_free_func_t free_func              = nullptr;
+    CounterMemoryPool pool{};
 };
 
 struct TraceMemoryPool

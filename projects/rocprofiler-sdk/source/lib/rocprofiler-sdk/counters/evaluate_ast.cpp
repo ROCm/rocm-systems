@@ -207,11 +207,15 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
 , _reduce_dimension_set(ast.reduce_dimension_set)
 , _out_id(out_id)
 {
-    if(_type == NodeType::REFERENCE_NODE)
+    if(_type == NodeType::REFERENCE_NODE || _type == NodeType::ACCUMULATE_NODE)
     {
         try
         {
             _metric = metrics.at(std::get<std::string>(ast.value));
+            if(_type == NodeType::ACCUMULATE_NODE)
+            {
+                _metric.setflags(static_cast<int>(ast.accumulate_op));
+            }
         } catch(std::exception& e)
         {
             throw std::runtime_error(
@@ -277,6 +281,7 @@ EvaluateAST::set_dimensions()
             _dimension_types = first.size() > second.size() ? first : second;
         }
         break;
+        case ACCUMULATE_NODE:
         case REFERENCE_NODE:
         {
             _dimension_types = get_dim_types(_metric);
@@ -377,6 +382,11 @@ EvaluateAST::validate_raw_ast(const std::unordered_map<std::string, Metric>& met
                 // Dimensionindex values should be within limits for this metric and GPU.
             }
             break;
+            case ACCUMULATE_NODE:
+            {
+                // Future todo only to be applied on sq metric
+            }
+            break;
         }
     } catch(std::exception& e)
     {
@@ -466,39 +476,36 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
     {
         std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>>* data;
         const aql::CounterPacketConstruct*                                       pkt_gen;
-        hsa_agent_t                                                              agent;
+        aqlprofile_agent_handle_t                                                agent;
     };
 
-    auto agent = CHECK_NOTNULL(rocprofiler::agent::get_agent_cache(
-                                   CHECK_NOTNULL(rocprofiler::agent::get_agent(pkt_gen->agent()))))
-                     ->get_hsa_agent();
+    auto aql_agent = *CHECK_NOTNULL(rocprofiler::agent::get_aql_agent(pkt_gen->agent()));
+
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> ret;
     if(pkt.empty) return ret;
-    it_data aql_data{.data = &ret, .pkt_gen = pkt_gen, .agent = agent};
-    ;
-    hsa_status_t status = hsa_ven_amd_aqlprofile_iterate_data(
-        &pkt.profile,
-        [](hsa_ven_amd_aqlprofile_info_type_t  info_type,
-           hsa_ven_amd_aqlprofile_info_data_t* info_data,
-           void*                               data) {
+    it_data aql_data{.data = &ret, .pkt_gen = pkt_gen, .agent = aql_agent};
+
+    hsa_status_t status = aqlprofile_pmc_iterate_data(
+        pkt.handle,
+        [](aqlprofile_pmc_event_t event, uint64_t counter_id, uint64_t counter_value, void* data) {
             CHECK(data);
-            auto& it = *static_cast<it_data*>(data);
-            if(info_type != HSA_VEN_AMD_AQLPROFILE_INFO_PMC_DATA) return HSA_STATUS_SUCCESS;
-            const auto* metric = it.pkt_gen->event_to_metric(info_data->pmc_data.event);
+            auto&       it     = *static_cast<it_data*>(data);
+            const auto* metric = it.pkt_gen->event_to_metric(event);
+
             if(!metric) return HSA_STATUS_SUCCESS;
+
             auto& vec = it.data->emplace(metric->id(), std::vector<rocprofiler_record_counter_t>{})
                             .first->second;
             auto& next_rec = vec.emplace_back();
             set_counter_in_rec(next_rec.id, {.handle = metric->id()});
             // Actual dimension info needs to be used here in the future
-            auto aql_status = aql::set_dim_id_from_sample(
-                next_rec.id, it.agent, info_data->pmc_data.event, info_data->sample_id);
+            auto aql_status = aql::set_dim_id_from_sample(next_rec.id, it.agent, event, counter_id);
             CHECK_EQ(aql_status, ROCPROFILER_STATUS_SUCCESS)
                 << rocprofiler_get_status_string(aql_status);
 
             // set_dim_in_rec(next_rec.id, ROCPROFILER_DIMENSION_NONE, vec.size() - 1);
             // Note: in the near future we need to use hw_counter here instead
-            next_rec.counter_value = info_data->pmc_data.result;
+            next_rec.counter_value = counter_value;
             return HSA_STATUS_SUCCESS;
         },
         &aql_data);
@@ -522,6 +529,7 @@ EvaluateAST::expand_derived(std::unordered_map<std::string, EvaluateAST>& asts)
     _expanded = true;
     for(auto& child : _children)
     {
+        if(child._type == NodeType::ACCUMULATE_NODE) continue;
         if(auto* ptr = rocprofiler::common::get_val(asts, child.metric().name()))
         {
             ptr->expand_derived(asts);
@@ -629,6 +637,8 @@ EvaluateAST::evaluate(
                     .dispatch_id   = a.dispatch_id,
                     .user_data     = {.value = 0}};
             });
+        case ACCUMULATE_NODE:
+        // todo update how to read the hybrid metric
         case REFERENCE_NODE:
         {
             auto* result = rocprofiler::common::get_val(results_map, _metric.id());

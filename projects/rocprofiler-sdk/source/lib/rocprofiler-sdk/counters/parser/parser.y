@@ -39,6 +39,7 @@ void yyerror(rocprofiler::counters::RawAST**, const char *s) { ROCP_ERROR << s; 
 %token NUMBER RANGE              /* set data type for numbers */
 %token NAME                      /* set data type for variables and user-defined functions */
 %token REDUCE SELECT             /* set data type for special functions */
+%token ACCUMULATE
 %type <a> exp                    /* set data type for expressions */
 %type <s> NAME
 %type <d> NUMBER
@@ -63,6 +64,11 @@ exp: NUMBER                               { $$ = new RawAST(NUMBER_NODE, $1); }
   | OP exp CP                             { $$ = $2; }
   | NAME                                  { $$ = new RawAST(REFERENCE_NODE, $1);
                                             free($1);
+                                          }
+  | ACCUMULATE OP NAME CM NAME CP          {
+                                            $$ = new RawAST(ACCUMULATE_NODE, $3, $5);
+                                            free($3);
+                                            free($5);
                                           }
   | REDUCE OP exp CM NAME CP              {
                                             $$ = new RawAST(REDUCE_NODE, $3, $5, NULL);

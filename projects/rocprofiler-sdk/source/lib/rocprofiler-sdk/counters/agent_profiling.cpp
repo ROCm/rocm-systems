@@ -100,12 +100,14 @@ construct_aql_pkt(std::shared_ptr<profile_config>& profile)
     }
 
     auto pkts = profile->pkt_generator->construct_packet(
+        CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
         CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
 
-    pkts->start.header                   = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
-    pkts->start.completion_signal.handle = 0;
-    pkts->stop.header                    = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
-    pkts->read.header                    = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
+    pkts->packets.start_packet.header = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
+    pkts->packets.stop_packet.header  = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
+    pkts->packets.read_packet.header  = header_pkt(HSA_PACKET_TYPE_VENDOR_SPECIFIC);
+
+    pkts->packets.start_packet.completion_signal.handle = 0;
     return pkts;
 }
 
@@ -303,8 +305,9 @@ read_agent_ctx(const context::context*    ctx,
                                   agent->get_rocp_agent()->simd_arrays_per_engine);
 
         // Submit the read packet to the queue
-        submitPacket(
-            callback_data.table, agent->profile_queue(), (void*) &callback_data.packet->read);
+        submitPacket(callback_data.table,
+                     agent->profile_queue(),
+                     (void*) &callback_data.packet->packets.read_packet);
 
         // Submit a barrier packet. This is needed to flush hardware caches. Without this
         // the read packet may not have the correct data.
@@ -452,10 +455,11 @@ start_agent_ctx(const context::context* ctx)
             continue;
         }
 
-        callback_data.packet->start.completion_signal = callback_data.start_signal;
+        callback_data.packet->packets.start_packet.completion_signal = callback_data.start_signal;
         callback_data.table.hsa_signal_store_relaxed_fn(callback_data.start_signal, 1);
-        submitPacket(
-            callback_data.table, agent->profile_queue(), (void*) &callback_data.packet->start);
+        submitPacket(callback_data.table,
+                     agent->profile_queue(),
+                     (void*) &callback_data.packet->packets.start_packet);
 
         // Wait for startup to finish before continuing
         callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.start_signal,
@@ -511,8 +515,9 @@ stop_agent_ctx(const context::context* ctx)
         if(!callback_data.profile->reqired_hw_counters.empty())
         {
             // Remove when AQL is updated to not require stop to be called first
-            submitPacket(
-                callback_data.table, agent->profile_queue(), (void*) &callback_data.packet->stop);
+            submitPacket(callback_data.table,
+                         agent->profile_queue(),
+                         (void*) &callback_data.packet->packets.stop_packet);
         }
 
         // Wait for the stop packet to complete

@@ -64,7 +64,10 @@ public:
     const std::string& expression() const { return expression_; }
     const std::string& special() const { return special_; }
     uint64_t           id() const { return id_; }
+    uint32_t           flags() const { return flags_; }
     bool               empty() const { return empty_; }
+
+    void setflags(uint32_t flags) { this->flags_ = flags; }
 
     friend bool operator<(Metric const& lhs, Metric const& rhs);
     friend bool operator==(Metric const& lhs, Metric const& rhs);
@@ -78,6 +81,7 @@ private:
     std::string special_     = {};
     int64_t     id_          = -1;
     bool        empty_       = false;
+    uint32_t    flags_       = 0;
 };
 
 using MetricMap   = std::unordered_map<std::string, std::vector<Metric>>;

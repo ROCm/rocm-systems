@@ -129,11 +129,11 @@ counter_callback_info::get_packet(std::unique_ptr<rocprofiler::hsa::AQLPacket>& 
     {
         // If we do not have a packet in the cache, create one.
         ret_pkt = profile->pkt_generator->construct_packet(
+            CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
             CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table());
     }
 
-    ret_pkt->before_krn_pkt.clear();
-    ret_pkt->after_krn_pkt.clear();
+    ret_pkt->clear();
     packet_return_map.wlock([&](auto& data) { data.emplace(ret_pkt.get(), profile); });
 
     return ROCPROFILER_STATUS_SUCCESS;

@@ -45,7 +45,7 @@ enum rocprofiler_profile_counter_instance_types
     ROCPROFILER_DIMENSION_SHADER_ENGINE,  ///< SE dimension of result
     ROCPROFILER_DIMENSION_AGENT,          ///< Agent dimension
     ROCPROFILER_DIMENSION_SHADER_ARRAY,   ///< Number of shader arrays
-    ROCPROFILER_DIMENSION_CU,             ///< Number of compute units
+    ROCPROFILER_DIMENSION_WGP,            ///< Number of workgroup processors
     ROCPROFILER_DIMENSION_INSTANCE,       ///< Number of instances
     ROCPROFILER_DIMENSION_LAST
 };

@@ -43,7 +43,7 @@ dimension_map()
         {ROCPROFILER_DIMENSION_SHADER_ENGINE, std::string_view("DIMENSION_SHADER_ENGINE")},
         {ROCPROFILER_DIMENSION_AGENT, std::string_view("DIMENSION_AGENT")},
         {ROCPROFILER_DIMENSION_SHADER_ARRAY, std::string_view("DIMENSION_SHADER_ARRAY")},
-        {ROCPROFILER_DIMENSION_CU, std::string_view("DIMENSION_CU")},
+        {ROCPROFILER_DIMENSION_WGP, std::string_view("DIMENSION_WGP")},
         {ROCPROFILER_DIMENSION_INSTANCE, std::string_view("DIMENSION_INSTANCE")},
     });
     return *_v;
@@ -67,7 +67,7 @@ aqlprofile_id_to_rocprof_instance()
                             {"AID", ROCPROFILER_DIMENSION_AID},
                             {"SE", ROCPROFILER_DIMENSION_SHADER_ENGINE},
                             {"SA", ROCPROFILER_DIMENSION_SHADER_ARRAY},
-                            {"CU", ROCPROFILER_DIMENSION_CU},
+                            {"WGP", ROCPROFILER_DIMENSION_WGP},
                             {"INSTANCE", ROCPROFILER_DIMENSION_INSTANCE},
                         };
 

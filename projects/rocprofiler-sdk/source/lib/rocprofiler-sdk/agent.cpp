@@ -795,6 +795,8 @@ construct_agent_cache(::HsaApiTable* table)
                "{}",
                fmt::join(rocp_hsa_agent_node_ids.begin(), rocp_hsa_agent_node_ids.end(), ", "));
 
+    get_agent_caches().clear();
+    get_agent_mapping().clear();
     get_agent_mapping().reserve(get_agent_mapping().size() + rocp_agents.size());
 
     auto hsa_agent_node_map = std::unordered_map<uint32_t, hsa_agent_t>{};

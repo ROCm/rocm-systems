@@ -54,6 +54,14 @@ enum NodeType
     SELECT_NODE,
     SUBTRACTION_NODE,
     CONSTANT_NODE,
+    ACCUMULATE_NODE
+};
+
+enum class ACCUMULATE_OP_TYPE
+{
+    NONE = 0,
+    LOW_RESOLUTION,
+    HIGH_RESOLUTION
 };
 
 struct LinkedList
@@ -75,8 +83,9 @@ struct LinkedList
 struct RawAST
 {
     // Node type
-    NodeType    type{NONE};  // Operation to perform on the counter set
-    std::string reduce_op{};
+    NodeType           type{NONE};  // Operation to perform on the counter set
+    std::string        reduce_op{};
+    ACCUMULATE_OP_TYPE accumulate_op{ACCUMULATE_OP_TYPE::NONE};
 
     // Stores either the name or digit dependening on whether this
     // is a name or number
@@ -164,6 +173,20 @@ struct RawAST
         }
     }
 
+    RawAST(NodeType t, const char* v, const char* op)
+    : type(t)
+    , value(std::string{CHECK_NOTNULL(v)})
+    {
+        CHECK_NOTNULL(op);
+        static std::unordered_map<std::string_view, ACCUMULATE_OP_TYPE> map = {
+            {"NONE", ACCUMULATE_OP_TYPE::NONE},
+            {"LOW_RES", ACCUMULATE_OP_TYPE::LOW_RESOLUTION},
+            {"HIGH_RES", ACCUMULATE_OP_TYPE::HIGH_RESOLUTION},
+        };
+        accumulate_op = map.at(static_cast<std::string_view>(op));
+        CHECK_EQ(t, ACCUMULATE_NODE);
+    }
+
     // Select operation constructor. Counter is the counter AST
     // to use for the reduce op, refs is the reference set AST.
     // dimensions contains the mapping for selecting dimensions
@@ -227,16 +250,26 @@ struct formatter<rocprofiler::counters::RawAST>
             {rocprofiler::counters::MULTIPLY_NODE, "MULTIPLY_NODE"},
             {rocprofiler::counters::NUMBER_NODE, "NUMBER_NODE"},
             {rocprofiler::counters::RANGE_NODE, "RANGE_NODE"},
+            {rocprofiler::counters::ACCUMULATE_NODE, "ACCUMULATE_NODE"},
             {rocprofiler::counters::REDUCE_NODE, "REDUCE_NODE"},
             {rocprofiler::counters::REFERENCE_NODE, "REFERENCE_NODE"},
             {rocprofiler::counters::SELECT_NODE, "SELECT_NODE"},
             {rocprofiler::counters::SUBTRACTION_NODE, "SUBTRACTION_NODE"},
         };
 
-        auto out = fmt::format_to(ctx.out(),
-                                  "{{\"Type\":\"{}\", \"REDUCE_OP\":\"{}\",",
-                                  NodeTypeToString.at(ast.type),
-                                  ast.reduce_op);
+        static std::unordered_map<rocprofiler::counters::ACCUMULATE_OP_TYPE, std::string_view>
+            AccumulateTypeToString = {
+                {rocprofiler::counters::ACCUMULATE_OP_TYPE::NONE, "NONE"},
+                {rocprofiler::counters::ACCUMULATE_OP_TYPE::HIGH_RESOLUTION, "HIGH_RES"},
+                {rocprofiler::counters::ACCUMULATE_OP_TYPE::LOW_RESOLUTION, "LOW_RES"},
+            };
+
+        auto out =
+            fmt::format_to(ctx.out(),
+                           "{{\"Type\":\"{}\", \"REDUCE_OP\":\"{}\", \"ACCUMULATE_OP\":\"{}\",",
+                           NodeTypeToString.at(ast.type),
+                           ast.reduce_op,
+                           AccumulateTypeToString.at(ast.accumulate_op));
 
         if(const auto* string_val = std::get_if<std::string>(&ast.value))
         {

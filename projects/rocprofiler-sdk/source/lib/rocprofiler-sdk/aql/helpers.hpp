@@ -57,9 +57,9 @@ get_dim_info(rocprofiler_agent_id_t   agent,
 // Set dimension ids into id for sample
 rocprofiler_status_t
 set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
-                       hsa_agent_t                        agent,
-                       hsa_ven_amd_aqlprofile_event_t     event,
-                       uint32_t                           sample_id);
+                       aqlprofile_agent_handle_t          agent,
+                       aqlprofile_pmc_event_t             event,
+                       size_t                             sample_id);
 
 rocprofiler_status_t
 set_profiler_active_on_queue(const AmdExtTable&                api,

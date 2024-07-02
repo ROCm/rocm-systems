@@ -254,6 +254,7 @@ protected:
         registration::set_init_status(-1);
         context::push_client(1);
         test_init();
+        // rocprofiler_debugger_block();
         counters::agent_profile_hsa_registration();
 
         std::string kernel_name = "null_kernel";

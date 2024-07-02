@@ -66,14 +66,15 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
         for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
         {
             _metrics.back().instances.push_back(
-                {static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id),
-                 block_index,
-                 event_id});
+                {.block_index = block_index,
+                 .event_id    = event_id,
+                 .flags       = aqlprofile_pmc_event_flags_t{x.flags()},
+                 .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
 
             _metrics.back().events.push_back(
                 {.block_index = block_index,
                  .event_id    = event_id,
-                 .flags       = aqlprofile_pmc_event_flags_t{0},
+                 .flags       = aqlprofile_pmc_event_flags_t{x.flags()},
                  .block_name  = static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id)});
 
             bool validate_event_result;
@@ -86,114 +87,45 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
                                                  &validate_event_result) != HSA_STATUS_SUCCESS);
             ROCP_FATAL_IF(!validate_event_result)
                 << "Invalid Metric: " << block_index << " " << event_id;
-            _event_to_metric[std::make_tuple(
-                static_cast<hsa_ven_amd_aqlprofile_block_name_t>(query_info.id),
-                block_index,
-                event_id)] = x;
+            _event_to_metric[_metrics.back().events.back()] = x;
         }
     }
     _events = get_all_events();
 }
 
 std::unique_ptr<hsa::CounterAQLPacket>
-CounterPacketConstruct::construct_packet(const AmdExtTable& ext)
+CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdExtTable& ext)
 {
-    auto  pkt_ptr = std::make_unique<hsa::CounterAQLPacket>(ext.hsa_amd_memory_pool_free_fn);
-    auto& pkt     = *pkt_ptr;
-    if(_events.empty())
-    {
-        ROCP_TRACE << "No events for pkt";
-        return pkt_ptr;
-    }
-    pkt.empty = false;
-
-    const auto* agent_cache =
+    const auto* agent =
         rocprofiler::agent::get_agent_cache(CHECK_NOTNULL(rocprofiler::agent::get_agent(_agent)));
-    if(!agent_cache)
-    {
-        ROCP_FATAL << "No agent cache for agent id: " << _agent.handle;
-    }
-
-    pkt.profile = hsa_ven_amd_aqlprofile_profile_t{
-        agent_cache->get_hsa_agent(),
-        HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,  // SPM?
-        _events.data(),
-        static_cast<uint32_t>(_events.size()),
-        nullptr,
-        0u,
-        hsa_ven_amd_aqlprofile_descriptor_t{.ptr = nullptr, .size = 0},
-        hsa_ven_amd_aqlprofile_descriptor_t{.ptr = nullptr, .size = 0}};
-    auto& profile = pkt.profile;
+    if(!agent) ROCP_FATAL << "No agent cache for agent id: " << _agent.handle;
 
     hsa_amd_memory_pool_access_t _access = HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED;
-    ext.hsa_amd_agent_memory_pool_get_info_fn(agent_cache->get_hsa_agent(),
-                                              agent_cache->kernarg_pool(),
+    ext.hsa_amd_agent_memory_pool_get_info_fn(agent->get_hsa_agent(),
+                                              agent->kernarg_pool(),
                                               HSA_AMD_AGENT_MEMORY_POOL_INFO_ACCESS,
                                               static_cast<void*>(&_access));
-    // Memory is accessable by both the GPU and CPU, unlock the command buffer for
-    // sharing.
-    if(_access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED)
-    {
-        throw std::runtime_error(
-            fmt::format("Agent {} does not allow memory pool access for counter collection",
-                        agent_cache->get_hsa_agent().handle));
-    }
 
-    CHECK_HSA(hsa_ven_amd_aqlprofile_start(&profile, nullptr), "could not generate packet sizes");
+    hsa::CounterAQLPacket::CounterMemoryPool pool;
 
-    if(profile.command_buffer.size == 0 || profile.output_buffer.size == 0)
-    {
-        throw std::runtime_error(
-            fmt::format("No command or output buffer size set. CMD_BUF={} PROFILE_BUF={}",
-                        profile.command_buffer.size,
-                        profile.output_buffer.size));
-    }
+    if(_access == HSA_AMD_MEMORY_POOL_ACCESS_NEVER_ALLOWED) pool.bIgnoreKernArg = true;
 
-    // Allocate buffers and check the results
-    auto alloc_and_check = [&](auto& pool, auto** mem_loc, auto size) -> bool {
-        bool   malloced     = false;
-        size_t page_aligned = getPageAligned(size);
-        if(ext.hsa_amd_memory_pool_allocate_fn(
-               pool, page_aligned, 0, static_cast<void**>(mem_loc)) != HSA_STATUS_SUCCESS)
-        {
-            *mem_loc = malloc(page_aligned);
-            malloced = true;
-        }
-        else
-        {
-            CHECK(*mem_loc);
-            hsa_agent_t agent = agent_cache->get_hsa_agent();
-            // Memory is accessable by both the GPU and CPU, unlock the command buffer for
-            // sharing.
-            LOG_IF(FATAL,
-                   ext.hsa_amd_agents_allow_access_fn(1, &agent, nullptr, *mem_loc) !=
-                       HSA_STATUS_SUCCESS)
-                << "Error: Allowing access to Command Buffer";
-        }
-        return malloced;
-    };
+    pool.allocate_fn     = ext.hsa_amd_memory_pool_allocate_fn;
+    pool.allow_access_fn = ext.hsa_amd_agents_allow_access_fn;
+    pool.free_fn         = ext.hsa_amd_memory_pool_free_fn;
+    pool.api_copy_fn     = coreapi.hsa_memory_copy_fn;
+    pool.fill_fn         = ext.hsa_amd_memory_fill_fn;
 
-    // Build command and output buffers
-    pkt.command_buf_mallocd = alloc_and_check(
-        agent_cache->cpu_pool(), &profile.command_buffer.ptr, profile.command_buffer.size);
-    pkt.output_buffer_malloced = alloc_and_check(
-        agent_cache->kernarg_pool(), &profile.output_buffer.ptr, profile.output_buffer.size);
-    memset(profile.output_buffer.ptr, 0x0, profile.output_buffer.size);
+    pool.gpu_agent     = agent->get_hsa_agent();
+    pool.cpu_pool_     = agent->cpu_pool();
+    pool.kernarg_pool_ = agent->kernarg_pool();
 
-    CHECK_HSA(hsa_ven_amd_aqlprofile_start(&profile, &pkt.start), "failed to create start packet");
-    CHECK_HSA(hsa_ven_amd_aqlprofile_stop(&profile, &pkt.stop), "failed to create stop packet");
-    CHECK_HSA(hsa_ven_amd_aqlprofile_read(&profile, &pkt.read), "failed to create read packet");
-    pkt.start.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    pkt.stop.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    pkt.read.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    ROCP_TRACE << fmt::format("Following Packets Generated (output_buffer={}, output_size={}). "
-                              "Start Pkt: {}, Read Pkt: {}, Stop Pkt: {}",
-                              profile.output_buffer.ptr,
-                              profile.output_buffer.size,
-                              pkt.start,
-                              pkt.read,
-                              pkt.stop);
-    return pkt_ptr;
+    const auto* aql_agent = rocprofiler::agent::get_aql_agent(agent->get_rocp_agent()->id);
+    if(aql_agent == nullptr) throw std::runtime_error("Could not get AQL agent!");
+
+    if(_events.empty()) ROCP_TRACE << "No events for pkt";
+
+    return std::make_unique<hsa::CounterAQLPacket>(*aql_agent, pool, _events);
 }
 
 ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache&             agent,
@@ -255,10 +187,10 @@ ThreadTraceAQLPacketFactory::construct_unload_marker_packet(uint64_t id)
     return std::make_unique<hsa::CodeobjMarkerAQLPacket>(tracepool, id, 0, 0, false, true);
 }
 
-std::vector<hsa_ven_amd_aqlprofile_event_t>
+std::vector<aqlprofile_pmc_event_t>
 CounterPacketConstruct::get_all_events() const
 {
-    std::vector<hsa_ven_amd_aqlprofile_event_t> ret;
+    std::vector<aqlprofile_pmc_event_t> ret;
     for(const auto& metric : _metrics)
     {
         ret.insert(ret.end(), metric.instances.begin(), metric.instances.end());
@@ -267,11 +199,9 @@ CounterPacketConstruct::get_all_events() const
 }
 
 const counters::Metric*
-CounterPacketConstruct::event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const
+CounterPacketConstruct::event_to_metric(const aqlprofile_pmc_event_t& event) const
 {
-    if(const auto* ptr = rocprofiler::common::get_val(
-           _event_to_metric,
-           std::make_tuple(event.block_name, event.block_index, event.counter_id)))
+    if(const auto* ptr = rocprofiler::common::get_val(_event_to_metric, event))
     {
         return ptr;
     }

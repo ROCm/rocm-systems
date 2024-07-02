@@ -35,8 +35,8 @@
    especially those whose name start with YY_ or yy_.  They are
    private implementation details that can be changed or removed.  */
 
-#ifndef YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_COUNTERS_PARSER_PARSER_H_INCLUDED
-#define YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_COUNTERS_PARSER_PARSER_H_INCLUDED
+#ifndef YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_SDK_COUNTERS_PARSER_PARSER_H_INCLUDED
+#define YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_SDK_COUNTERS_PARSER_PARSER_H_INCLUDED
 /* Debug traces.  */
 #ifndef YYDEBUG
 #    define YYDEBUG 1
@@ -81,8 +81,9 @@ enum yytokentype
     NAME            = 274, /* NAME  */
     REDUCE          = 275, /* REDUCE  */
     SELECT          = 276, /* SELECT  */
-    LOWER_THAN_ELSE = 277, /* LOWER_THAN_ELSE  */
-    ELSE            = 278  /* ELSE  */
+    ACCUMULATE      = 277, /* ACCUMULATE  */
+    LOWER_THAN_ELSE = 278, /* LOWER_THAN_ELSE  */
+    ELSE            = 279  /* ELSE  */
 };
 typedef enum yytokentype yytoken_kind_t;
 #endif
@@ -98,7 +99,7 @@ union YYSTYPE
     int64_t     d;
     char*       s;
 
-#    line 102 "parser.h"
+#    line 103 "parser.h"
 };
 typedef union YYSTYPE YYSTYPE;
 #    define YYSTYPE_IS_TRIVIAL  1
@@ -110,4 +111,4 @@ extern YYSTYPE yylval;
 int
 yyparse(RawAST** result);
 
-#endif /* !YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_COUNTERS_PARSER_PARSER_H_INCLUDED  */
+#endif /* !YY_YY_ROCPROFILER_SOURCE_LIB_ROCPROFILER_SDK_COUNTERS_PARSER_PARSER_H_INCLUDED  */

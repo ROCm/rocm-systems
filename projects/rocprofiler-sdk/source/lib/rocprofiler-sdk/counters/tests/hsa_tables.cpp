@@ -109,7 +109,9 @@ get_ext_table()
         val.hsa_amd_vmem_get_alloc_properties_from_handle_fn =
             hsa_amd_vmem_get_alloc_properties_from_handle;
         val.hsa_amd_agent_set_async_scratch_limit_fn = hsa_amd_agent_set_async_scratch_limit;
-        val.hsa_amd_queue_get_info_fn                = hsa_amd_queue_get_info;
+#if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x02
+        val.hsa_amd_queue_get_info_fn = hsa_amd_queue_get_info;
+#endif
         return val;
     }();
     return _v;

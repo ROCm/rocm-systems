@@ -66,9 +66,9 @@ get_block_counters(rocprofiler_agent_id_t agent, const aqlprofile_pmc_event_t& e
 
 rocprofiler_status_t
 set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
-                       hsa_agent_t                        agent,
-                       hsa_ven_amd_aqlprofile_event_t     event,
-                       uint32_t                           sample_id)
+                       aqlprofile_agent_handle_t          agent,
+                       aqlprofile_pmc_event_t             event,
+                       size_t                             sample_id)
 {
     auto callback =
         [](int, int sid, int, int coordinate, const char*, void* userdata) -> hsa_status_t {
@@ -82,8 +82,8 @@ set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
         return HSA_STATUS_SUCCESS;
     };
 
-    if(hsa_ven_amd_aqlprofile_iterate_event_coord(
-           agent, event, sample_id, callback, static_cast<void*>(&id)) != HSA_STATUS_SUCCESS)
+    if(aqlprofile_iterate_event_coord(agent, event, sample_id, callback, static_cast<void*>(&id)) !=
+       HSA_STATUS_SUCCESS)
     {
         return ROCPROFILER_STATUS_ERROR_AQL_NO_EVENT_COORD;
     }

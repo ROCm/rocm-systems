@@ -48,8 +48,7 @@ enum DimensionTypes
     DIMENSION_SHADER_ENGINE = 1 << 2,
     DIMENSION_AGENT         = 1 << 3,
     DIMENSION_PMC_CHANNEL   = 1 << 4,
-    DIMENSION_CU            = 1 << 5,
-    DIMENSION_LAST          = 1 << 6,
+    DIMENSION_LAST          = 1 << 5,
 };
 
 enum ReduceOperation

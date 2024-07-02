@@ -38,6 +38,24 @@
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
 #include "rocprofiler-sdk/fwd.h"
 
+inline bool
+operator==(aqlprofile_pmc_event_t lhs, aqlprofile_pmc_event_t rhs)
+{
+    if(lhs.block_name != rhs.block_name) return false;
+    if(lhs.block_index != rhs.block_index) return false;
+    if(lhs.event_id != rhs.event_id) return false;
+    return lhs.flags.raw == rhs.flags.raw;
+}
+
+inline bool
+operator<(aqlprofile_pmc_event_t lhs, aqlprofile_pmc_event_t rhs)
+{
+    if(lhs.block_name != rhs.block_name) return lhs.block_name < rhs.block_name;
+    if(lhs.block_index != rhs.block_index) return lhs.block_index < rhs.block_index;
+    if(lhs.event_id != rhs.event_id) return lhs.event_id < rhs.event_id;
+    return lhs.flags.raw < rhs.flags.raw;
+}
+
 namespace rocprofiler
 {
 namespace aql
@@ -55,11 +73,12 @@ class CounterPacketConstruct
 public:
     CounterPacketConstruct(rocprofiler_agent_id_t               agent,
                            const std::vector<counters::Metric>& metrics);
-    std::unique_ptr<hsa::CounterAQLPacket> construct_packet(const AmdExtTable&);
+    std::unique_ptr<hsa::CounterAQLPacket> construct_packet(const CoreApiTable&,
+                                                            const AmdExtTable&);
 
-    const counters::Metric* event_to_metric(const hsa_ven_amd_aqlprofile_event_t& event) const;
-    std::vector<hsa_ven_amd_aqlprofile_event_t> get_all_events() const;
-    const std::vector<aqlprofile_pmc_event_t>&  get_counter_events(const counters::Metric&) const;
+    const counters::Metric*             event_to_metric(const aqlprofile_pmc_event_t& event) const;
+    std::vector<aqlprofile_pmc_event_t> get_all_events() const;
+    const std::vector<aqlprofile_pmc_event_t>& get_counter_events(const counters::Metric&) const;
 
     rocprofiler_agent_id_t agent() const { return _agent; }
 
@@ -73,16 +92,15 @@ private:
 protected:
     struct AQLProfileMetric
     {
-        counters::Metric                            metric;
-        std::vector<hsa_ven_amd_aqlprofile_event_t> instances;
-        std::vector<aqlprofile_pmc_event_t>         events;
+        counters::Metric                    metric;
+        std::vector<aqlprofile_pmc_event_t> instances;
+        std::vector<aqlprofile_pmc_event_t> events;
     };
 
-    rocprofiler_agent_id_t                      _agent;
-    std::vector<AQLProfileMetric>               _metrics;
-    std::vector<hsa_ven_amd_aqlprofile_event_t> _events;
-    std::map<std::tuple<hsa_ven_amd_aqlprofile_block_name_t, uint32_t, uint32_t>, counters::Metric>
-        _event_to_metric;
+    rocprofiler_agent_id_t                             _agent;
+    std::vector<AQLProfileMetric>                      _metrics;
+    std::vector<aqlprofile_pmc_event_t>                _events;
+    std::map<aqlprofile_pmc_event_t, counters::Metric> _event_to_metric;
 };
 
 class ThreadTraceAQLPacketFactory

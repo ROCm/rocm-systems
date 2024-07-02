@@ -116,28 +116,14 @@ get_client_ctx()
     return ctx;
 }
 
-struct buf_check
-{
-    size_t expected_size{0};
-    bool   is_special{false};
-    double special_val{0.0};
-};
-
 void
 buffered_callback(rocprofiler_context_id_t,
                   rocprofiler_buffer_id_t,
                   rocprofiler_record_header_t** headers,
                   size_t                        num_headers,
-                  void*                         user_data,
+                  void* /* user_data */,
                   uint64_t)
 {
-    buf_check& expected = *static_cast<buf_check*>(user_data);
-    if(expected.is_special)
-    {
-        // Special values are single value constants (from agent_t)
-        expected.expected_size = 1;
-    }
-
     std::set<double>   seen_data;
     std::set<uint64_t> seen_dims;
     for(size_t i = 0; i < num_headers; ++i)
@@ -457,32 +443,16 @@ TEST(core, check_callbacks)
                                                 metric.name());
 
             /**
-             * Fake some data for the counter
-             */
-            size_t* fake_data = static_cast<size_t*>(ret_pkt->profile.output_buffer.ptr);
-            for(size_t i = 0; i < (ret_pkt->profile.output_buffer.size / sizeof(size_t)); i++)
-            {
-                fake_data[i] = i + 1;
-            }
-
-            /**
              * Create the buffer and run test
              */
             rocprofiler_buffer_id_t opt_buff_id = {.handle = 0};
-            buf_check               check       = {
-                .expected_size = ret_pkt->profile.output_buffer.size / sizeof(size_t),
-                .is_special    = !metric.special().empty(),
-                .special_val   = (metric.special().empty() ? 0.0
-                                                                               : double(counters::get_agent_property(
-                                                               std::string_view(metric.name()),
-                                                               *agent.get_rocp_agent())))};
 
             ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
                                                        500 * sizeof(size_t),
                                                        500 * sizeof(size_t),
                                                        ROCPROFILER_BUFFER_POLICY_LOSSLESS,
                                                        buffered_callback,
-                                                       &check,
+                                                       nullptr,
                                                        &opt_buff_id),
                              "Could not create buffer");
             cb_info->buffer = opt_buff_id;
