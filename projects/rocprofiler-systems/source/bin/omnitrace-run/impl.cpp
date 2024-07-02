@@ -191,6 +191,7 @@ prepare_environment_for_run(parser_data_t& _data)
     if(_data.launcher.empty())
     {
         omnitrace::argparse::add_ld_preload(_data);
+        omnitrace::argparse::add_ld_library_path(_data);
     }
 }
 

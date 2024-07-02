@@ -31,6 +31,7 @@
 #include <timemory/log/color.hpp>
 #include <timemory/utility/argparse.hpp>
 #include <timemory/utility/console.hpp>
+#include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
 #include <array>
@@ -129,13 +130,11 @@ get_initial_environment()
         }
     }
 
-    update_env(_env, "LD_PRELOAD",
-               get_realpath(get_internal_libpath("libomnitrace-dl.so")), true);
+    auto _dl_libpath   = get_realpath(get_internal_libpath("libomnitrace-dl.so"));
+    auto _omni_libpath = get_realpath(get_internal_libpath("libomnitrace.so"));
 
-    auto* _dl_libpath =
-        realpath(get_internal_libpath("libomnitrace-dl.so").c_str(), nullptr);
-    auto* _omni_libpath =
-        realpath(get_internal_libpath("libomnitrace.so").c_str(), nullptr);
+    update_env(_env, "LD_PRELOAD", _dl_libpath, UPD_APPEND);
+    update_env(_env, "LD_LIBRARY_PATH", tim::filepath::dirname(_dl_libpath), UPD_APPEND);
 
     auto _mode = get_env<std::string>("OMNITRACE_MODE", "sampling", false);
 
@@ -154,11 +153,8 @@ get_initial_environment()
 
 #if defined(OMNITRACE_USE_OMPT)
     if(!getenv("OMP_TOOL_LIBRARIES"))
-        update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, true);
+        update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
 #endif
-
-    free(_dl_libpath);
-    free(_omni_libpath);
 
     return _env;
 }
@@ -223,9 +219,13 @@ print_updated_environment(std::vector<char*> _env)
 template <typename Tp>
 void
 update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
-           bool _append)
+           update_mode&& _mode, std::string_view _join_delim)
 {
     updated_envs.emplace(_env_var);
+
+    auto _prepend  = (_mode & UPD_PREPEND) == UPD_PREPEND;
+    auto _append   = (_mode & UPD_APPEND) == UPD_APPEND;
+    auto _weak_upd = (_mode & UPD_WEAK) == UPD_WEAK;
 
     auto _key = join("", _env_var, "=");
     for(auto& itr : _environ)
@@ -233,19 +233,28 @@ update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_va
         if(!itr) continue;
         if(std::string_view{ itr }.find(_key) == 0)
         {
-            if(_append)
+            if(_weak_upd)
+            {
+                // if the value has changed, do not update but allow overridding the value
+                // inherited from the initial env
+                if(original_envs.find(std::string{ itr }) == original_envs.end()) return;
+            }
+
+            if(_prepend || _append)
             {
                 if(std::string_view{ itr }.find(join("", _env_val)) ==
                    std::string_view::npos)
                 {
                     auto _val = std::string{ itr }.substr(_key.length());
                     free(itr);
-                    if(_env_var == "LD_PRELOAD")
-                        itr = strdup(
-                            join('=', _env_var, join(":", _val, _env_val)).c_str());
+                    if(_prepend)
+                        itr =
+                            strdup(join('=', _env_var, join(_join_delim, _val, _env_val))
+                                       .c_str());
                     else
-                        itr = strdup(
-                            join('=', _env_var, join(":", _env_val, _val)).c_str());
+                        itr =
+                            strdup(join('=', _env_var, join(_join_delim, _env_val, _val))
+                                       .c_str());
                 }
             }
             else
@@ -783,10 +792,10 @@ parse_args(int argc, char** argv, std::vector<char*>& _env)
             _update("OMNITRACE_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
             if(_v.count("all") > 0 || _v.count("ompt") > 0)
-                update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, true);
+                update_env(_env, "OMP_TOOL_LIBRARIES", _dl_libpath, UPD_APPEND);
 
             if(_v.count("all") > 0 || _v.count("kokkosp") > 0)
-                update_env(_env, "KOKKOS_PROFILE_LIBRARY", _omni_libpath, true);
+                update_env(_env, "KOKKOS_PROFILE_LIBRARY", _omni_libpath, UPD_APPEND);
         });
 
     parser.add_argument({ "-E", "--exclude" }, "Exclude data from these backends")

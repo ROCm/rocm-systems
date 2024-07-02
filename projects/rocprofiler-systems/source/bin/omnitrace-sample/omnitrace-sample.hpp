@@ -26,13 +26,22 @@
 #include <string_view>
 #include <vector>
 
+enum update_mode : int
+{
+    UPD_REPLACE = 0x1,
+    UPD_PREPEND = 0x2,
+    UPD_APPEND  = 0x3,
+    UPD_WEAK    = 0x4,
+};
+
 std::string
-get_realpath(const std::string&);
+get_realpath(const std::string& _fpath);
 
 void
 print_command(const std::vector<char*>& _argv);
 
-void print_updated_environment(std::vector<char*>);
+void
+print_updated_environment(std::vector<char*> _env);
 
 std::vector<char*>
 get_initial_environment();
@@ -42,10 +51,11 @@ get_internal_libpath(const std::string& _lib);
 
 template <typename Tp>
 void
-update_env(std::vector<char*>&, std::string_view, Tp&&, bool _append = false);
+update_env(std::vector<char*>& _environ, std::string_view _env_var, Tp&& _env_val,
+           update_mode&& _mode = UPD_REPLACE, std::string_view _join_delim = ":");
 
 void
-remove_env(std::vector<char*>&, std::string_view);
+remove_env(std::vector<char*>& _environ, std::string_view _env_var);
 
 std::vector<char*>
-parse_args(int argc, char** argv, std::vector<char*>&);
+parse_args(int argc, char** argv, std::vector<char*>& envp);

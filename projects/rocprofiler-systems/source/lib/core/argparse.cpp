@@ -249,6 +249,15 @@ add_ld_preload(parser_data& _data)
 }
 
 parser_data&
+add_ld_library_path(parser_data& _data)
+{
+    auto _libdir = filepath::dirname(_data.dl_libpath);
+    if(filepath::exists(_libdir))
+        update_env(_data, "LD_LIBRARY_PATH", _libdir, UPD_APPEND);
+    return _data;
+}
+
+parser_data&
 add_core_arguments(parser_t& _parser, parser_data& _data)
 {
     const auto* _cputime_desc =

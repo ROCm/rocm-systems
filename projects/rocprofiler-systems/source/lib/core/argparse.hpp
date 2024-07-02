@@ -82,6 +82,9 @@ parser_data&
 add_ld_preload(parser_data&);
 
 parser_data&
+add_ld_library_path(parser_data&);
+
+parser_data&
 add_core_arguments(parser_t&, parser_data&);
 
 parser_data&
