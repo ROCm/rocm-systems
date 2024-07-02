@@ -60,6 +60,16 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_barrier_or_packet_t, completion_signal),
               "unexpected ABI incompatibility");
 
+#define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
+    auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
+    ROCP_##SEVERITY##_IF(ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) !=                   \
+                         HSA_STATUS_SUCCESS)                                                       \
+        << #EXPR << " returned non-zero status code "                                              \
+        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
+        << ::rocprofiler::hsa::get_hsa_status_string(                                              \
+               ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
+        << ". "
+
 namespace rocprofiler
 {
 namespace hsa
@@ -281,11 +291,17 @@ WriteInterceptor(const void* packets,
             internal_corr_id);
 
         queue.async_started();
+
+        const auto     original_completion_signal = original_packet.completion_signal;
+        const bool     existing_completion_signal = (original_completion_signal.handle != 0);
+        const uint64_t kernel_id = code_object::get_kernel_id(original_packet.kernel_object);
+
         // Copy kernel pkt, copy is to allow for signal to be modified
         rocprofiler_packet kernel_pkt = packets_arr[i];
-        uint64_t kernel_id = code_object::get_kernel_id(kernel_pkt.kernel_dispatch.kernel_object);
-        queue.create_signal(HSA_AMD_SIGNAL_AMD_GPU_ONLY,
-                            &kernel_pkt.ext_amd_aql_pm4.completion_signal);
+        // create our own signal that we can get a callback on. if there is an original completion
+        // signal we will create a barrier packet, assign the original completion signal that that
+        // barrier packet, and add it right after the kernel packet
+        queue.create_signal(0, &kernel_pkt.kernel_dispatch.completion_signal);
 
         // computes the "size" based on the offset of reserved_padding field
         constexpr auto kernel_dispatch_info_rt_size =
@@ -379,22 +395,18 @@ WriteInterceptor(const void* packets,
         }
 #endif
 
+        // emplace the kernel packet
         transformed_packets.emplace_back(kernel_pkt);
 
-        // Make a copy of the original packet, adding its signal to a barrier
-        // packet and create a new signal for it to get timestamps
-        if(original_packet.completion_signal.handle != 0u)
+        // if the original completion signal exists, trigger it via a barrier packet
+        if(existing_completion_signal)
         {
-            hsa_barrier_and_packet_t barrier{};
+            auto barrier   = hsa_barrier_and_packet_t{};
             barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-            barrier.header |= 1 << HSA_PACKET_HEADER_BARRIER;
-            barrier.completion_signal = original_packet.completion_signal;
+            barrier.header |= (1 << HSA_PACKET_HEADER_BARRIER);
+            barrier.completion_signal = original_completion_signal;
             transformed_packets.emplace_back(barrier);
         }
-
-        hsa_signal_t interrupt_signal{};
-        // Adding a barrier packet with the original packet's completion signal.
-        queue.create_signal(0, &interrupt_signal);
 
         bool injected_end_pkt = false;
         for(const auto& pkt_injection : inst_pkt)
@@ -406,20 +418,20 @@ WriteInterceptor(const void* packets,
             }
         }
 
+        auto completion_signal = hsa_signal_t{.handle = 0};
+        auto interrupt_signal  = hsa_signal_t{.handle = 0};
         if(injected_end_pkt)
         {
+            // Adding a barrier packet with the original packet's completion signal.
+            queue.create_signal(0, &interrupt_signal);
+            completion_signal                                            = interrupt_signal;
             transformed_packets.back().ext_amd_aql_pm4.completion_signal = interrupt_signal;
             CreateBarrierPacket(&interrupt_signal, &interrupt_signal, transformed_packets);
         }
         else
         {
-            get_core_table()->hsa_signal_store_screlease_fn(interrupt_signal, 0);
-            hsa_barrier_and_packet_t barrier{};
-            barrier.header = HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE;
-            barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCACQUIRE_FENCE_SCOPE;
-            barrier.header |= HSA_FENCE_SCOPE_SYSTEM << HSA_PACKET_HEADER_SCRELEASE_FENCE_SCOPE;
-            barrier.completion_signal = interrupt_signal;
-            transformed_packets.emplace_back(barrier);
+            completion_signal = kernel_pkt.kernel_dispatch.completion_signal;
+            get_core_table()->hsa_signal_store_screlease_fn(completion_signal, 0);
         }
 
         ROCP_FATAL_IF(packet_type != HSA_PACKET_TYPE_KERNEL_DISPATCH)
@@ -428,7 +440,7 @@ WriteInterceptor(const void* packets,
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.
         queue.signal_async_handler(
-            interrupt_signal,
+            completion_signal,
             new Queue::queue_info_session_t{.queue            = queue,
                                             .inst_pkt         = std::move(inst_pkt),
                                             .interrupt_signal = interrupt_signal,
@@ -479,20 +491,19 @@ Queue::Queue(const AgentCache&  agent,
 , _ext_api(ext_api)
 , _agent(agent)
 {
-    LOG_IF(FATAL,
-           _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_hsa_agent(),
-                                                      size,
-                                                      type,
-                                                      callback,
-                                                      data,
-                                                      private_segment_size,
-                                                      group_segment_size,
-                                                      &_intercept_queue) != HSA_STATUS_SUCCESS)
+    ROCP_HSA_TABLE_CALL(FATAL,
+                        _ext_api.hsa_amd_queue_intercept_create_fn(_agent.get_hsa_agent(),
+                                                                   size,
+                                                                   type,
+                                                                   callback,
+                                                                   data,
+                                                                   private_segment_size,
+                                                                   group_segment_size,
+                                                                   &_intercept_queue))
         << "Could not create intercept queue";
 
-    LOG_IF(FATAL,
-           _ext_api.hsa_amd_profiling_set_profiler_enabled_fn(_intercept_queue, true) !=
-               HSA_STATUS_SUCCESS)
+    ROCP_HSA_TABLE_CALL(FATAL,
+                        _ext_api.hsa_amd_profiling_set_profiler_enabled_fn(_intercept_queue, true))
         << "Could not setup intercept profiler";
 
     CHECK(_agent.cpu_pool().handle != 0);
@@ -508,17 +519,23 @@ Queue::Queue(const AgentCache&  agent,
             pkt.ext_amd_aql_pm4.completion_signal = completion;
             counters::submitPacket(CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
                                    _intercept_queue,
-                                   (void*) &pkt);
-            if(core_api.hsa_signal_wait_relaxed_fn(
-                   completion, HSA_SIGNAL_CONDITION_EQ, 0, 20000000, HSA_WAIT_STATE_ACTIVE) != 0)
+                                   &pkt);
+            constexpr auto timeout_hint =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
+            if(core_api.hsa_signal_wait_relaxed_fn(completion,
+                                                   HSA_SIGNAL_CONDITION_EQ,
+                                                   0,
+                                                   timeout_hint.count(),
+                                                   HSA_WAIT_STATE_ACTIVE) != 0)
             {
                 ROCP_FATAL << "Could not set agent to be profiled";
             }
             core_api.hsa_signal_destroy_fn(completion);
         });
 
-    LOG_IF(FATAL,
-           _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
+    ROCP_HSA_TABLE_CALL(
+        FATAL,
+        _ext_api.hsa_amd_queue_intercept_register_fn(_intercept_queue, WriteInterceptor, this))
         << "Could not register interceptor";
 
     create_signal(0, &ready_signal);
@@ -544,9 +561,10 @@ Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_sessio
     });
 #endif
     hsa_status_t status = _ext_api.hsa_amd_signal_async_handler_fn(
-        signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, static_cast<void*>(data));
+        signal, HSA_SIGNAL_CONDITION_EQ, -1, AsyncSignalHandler, data);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: hsa_amd_signal_async_handler failed";
+        << "Error: hsa_amd_signal_async_handler failed with error code " << status
+        << " :: " << hsa::get_hsa_status_string(status);
 }
 
 void
@@ -554,7 +572,8 @@ Queue::create_signal(uint32_t attribute, hsa_signal_t* signal) const
 {
     hsa_status_t status = _ext_api.hsa_amd_signal_create_fn(1, 0, nullptr, attribute, signal);
     ROCP_FATAL_IF(status != HSA_STATUS_SUCCESS && status != HSA_STATUS_INFO_BREAK)
-        << "Error: hsa_amd_signal_create failed";
+        << "Error: hsa_amd_signal_create failed with error code " << status
+        << " :: " << hsa::get_hsa_status_string(status);
 }
 
 void
@@ -563,7 +582,7 @@ Queue::sync() const
     if(_active_kernels.handle != 0u)
     {
         _core_api.hsa_signal_wait_relaxed_fn(
-            _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, -1, HSA_WAIT_STATE_ACTIVE);
+            _active_kernels, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
     }
 }
 

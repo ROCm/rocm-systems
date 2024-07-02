@@ -27,7 +27,7 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-hsa-multiqueue-execute
-    PROPERTIES LABELS "integration-tests" ENVIRONMENT "${tracing-env}"
+    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${tracing-env}"
                FAIL_REGULAR_EXPRESSION "HSA_API|HIP_API")
 
 add_test(

@@ -213,10 +213,12 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
         [&](hsa::rocprofiler_packet pkt) {
             pkt.ext_amd_aql_pm4.completion_signal = callback_data.completion;
             submitPacket(callback_data.table, callback_data.queue, (void*) &pkt);
+            constexpr auto timeout_hint =
+                std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
             if(callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
                                                               HSA_SIGNAL_CONDITION_EQ,
                                                               0,
-                                                              20000000,
+                                                              timeout_hint.count(),
                                                               HSA_WAIT_STATE_ACTIVE) != 0)
             {
                 ROCP_FATAL << "Could not set agent to be profiled";
