@@ -447,7 +447,7 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
         if (pending->session_id.handle == 0) {
           pending->session_id = rocprofiler_singleton.GetCurrentSessionId();
         }
-        if (pending->counters_count > 0)
+        if (pending->counters_count > 0 && pending->profile != nullptr)
         {
           auto* context = pending->profile->context.get();
           auto* profile = pending->profile->profile.get();
@@ -542,6 +542,12 @@ void Queue::ResetSessionID(rocprofiler_session_id_t id)
 bool Queue::CheckNeededProfileConfigs()
 {
   std::unique_lock<std::shared_mutex> session_id_lock(session_id_mutex);
+  is_counter_collection_mode = false;
+  is_timestamp_collection_mode = false;
+  is_timestamp_collection_mode = false;
+  is_att_collection_mode = false;
+  is_pc_sampling_collection_mode = false;
+  session_data_count = 0;
 
   // Getting Session ID
   rocprofiler::ROCProfiler_Singleton& rocprofiler_singleton =

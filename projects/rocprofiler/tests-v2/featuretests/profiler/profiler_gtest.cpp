@@ -546,6 +546,160 @@ TEST_F(LoadUnloadTest, WhenLoadingSecondTimeThenToolLoadsUnloadsSuccessfully) {
   EXPECT_EQ(HSA_STATUS_SUCCESS, status);
 }
 
+
+/*
+ * ###################################################
+ * ############ MultiThreaded API Tests ################
+ * ###################################################
+ */
+
+class ProfilerAPITest : public ::testing::Test {
+ protected:
+  void SetUp() {
+    std::string app_path = GetRunningPath(running_path);
+    std::stringstream gfx_path;
+    gfx_path << app_path << metrics_path;
+    setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
+    setenv("ROCPROFILER_MAX_ATT_PROFILES", "2", 1);
+  }
+  // function to check profiler API status
+  static void CheckApi(rocprofiler_status_t status) {
+    ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
+  };
+
+  // callback function to dump profiler data
+  static void FlushCallback(const rocprofiler_record_header_t* record,
+                            const rocprofiler_record_header_t* end_record,
+                            rocprofiler_session_id_t session_id,
+                            rocprofiler_buffer_id_t buffer_id) {
+    while (record < end_record) {
+      if (!record) break;
+      if (record->kind == ROCPROFILER_PROFILER_RECORD) {
+        const rocprofiler_record_profiler_t* profiler_record =
+            reinterpret_cast<const rocprofiler_record_profiler_t*>(record);
+        size_t name_length;
+        CheckApi(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
+                                                    profiler_record->kernel_id, &name_length));
+        const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
+        CheckApi(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
+                                               &kernel_name_c));
+
+        if (profiler_record->counters && !bSkipCounterNoneZeroCheck)
+          for (uint64_t i = 0; i < profiler_record->counters_count.value; i++)
+            if (profiler_record->counters[i].counter_handler.handle > 0)
+              EXPECT_NE(profiler_record->counters[i].value.value, 0);
+      }
+      CheckApi(rocprofiler_next_record(record, &record, session_id, buffer_id));
+    }
+  }
+};
+
+TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
+  // set global path
+  init_test_path();
+
+  // Get the system cores
+  int num_cpu_cores = GetNumberOfCores();
+
+  // create as many threads as number of cores in system
+  std::vector<std::thread> threads(num_cpu_cores);
+
+  // initialize profiler by creating rocprofiler object
+  CheckApi(rocprofiler_initialize());
+
+  // Counter Collection with timestamps
+  rocprofiler_session_id_t session_id;
+  std::vector<const char*> counters;
+  counters.emplace_back("SQ_WAVES");
+
+  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
+
+  rocprofiler_buffer_id_t buffer_id;
+  CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));
+
+  rocprofiler_filter_id_t filter_id;
+  rocprofiler_filter_property_t property = {};
+  CheckApi(rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
+                                     rocprofiler_filter_data_t{.counters_names = &counters[0]},
+                                     counters.size(), &filter_id, property));
+
+  CheckApi(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
+
+  // activating profiler session
+  CheckApi(rocprofiler_start_session(session_id));
+
+  // launch kernel on each thread
+  for (int n = 0; n < num_cpu_cores; ++n) {
+    threads[n] = std::thread(KernelLaunch);
+  }
+
+  // wait for all kernel launches to complete
+  for (int n = 0; n < num_cpu_cores; ++n) {
+    threads[n].join();
+  }
+
+  // deactivate session
+  CheckApi(rocprofiler_terminate_session(session_id));
+
+  // dump profiler data
+  CheckApi(rocprofiler_flush_data(session_id, buffer_id));
+
+  // destroy session
+  CheckApi(rocprofiler_destroy_session(session_id));
+
+  // finalize profiler by destroying rocprofiler object
+  CheckApi(rocprofiler_finalize());
+}
+
+TEST_F(ProfilerAPITest, WhenRunningMultipleStreamsSerializationWorksFine) {
+  // set global path
+  init_test_path();
+
+  // Get the system cores
+  int num_cpu_cores = GetNumberOfCores();
+
+  // create as many threads as number of cores in system
+  std::vector<std::thread> threads(num_cpu_cores);
+
+  // initialize profiler by creating rocprofiler object
+  CheckApi(rocprofiler_initialize());
+
+  // Counter Collection with timestamps
+  rocprofiler_session_id_t session_id;
+  std::vector<const char*> counters;
+  counters.emplace_back("SQ_WAVES");
+
+  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
+
+  rocprofiler_buffer_id_t buffer_id;
+  CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));
+
+  rocprofiler_filter_id_t filter_id;
+  rocprofiler_filter_property_t property = {};
+  CheckApi(rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
+                                     rocprofiler_filter_data_t{.counters_names = &counters[0]},
+                                     counters.size(), &filter_id, property));
+
+  CheckApi(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
+
+  // activating profiler session
+  CheckApi(rocprofiler_start_session(session_id));
+
+  LaunchMultiStreamKernels();
+  // deactivate session
+  CheckApi(rocprofiler_terminate_session(session_id));
+
+  // dump profiler data
+  CheckApi(rocprofiler_flush_data(session_id, buffer_id));
+
+  // destroy session
+  CheckApi(rocprofiler_destroy_session(session_id));
+
+  // finalize profiler by destroying rocprofiler object
+  CheckApi(rocprofiler_finalize());
+}
+
+
 /*
  * ###################################################
  * ############ Codeobj capture tests ################
@@ -859,159 +1013,6 @@ TEST_F(ATTCollection, WhenRunningATTItCollectsTraceDataWithNewAPI) {
   // check if we got data from any shader engine
   EXPECT_EQ(bCollected, true);
 }
-
-/*
- * ###################################################
- * ############ MultiThreaded API Tests ################
- * ###################################################
- */
-
-class ProfilerAPITest : public ::testing::Test {
- protected:
-  void SetUp() {
-    std::string app_path = GetRunningPath(running_path);
-    std::stringstream gfx_path;
-    gfx_path << app_path << metrics_path;
-    setenv("ROCPROFILER_METRICS_PATH", gfx_path.str().c_str(), true);
-    setenv("ROCPROFILER_MAX_ATT_PROFILES", "2", 1);
-  }
-  // function to check profiler API status
-  static void CheckApi(rocprofiler_status_t status) {
-    ASSERT_EQ(status, ROCPROFILER_STATUS_SUCCESS);
-  };
-
-  // callback function to dump profiler data
-  static void FlushCallback(const rocprofiler_record_header_t* record,
-                            const rocprofiler_record_header_t* end_record,
-                            rocprofiler_session_id_t session_id,
-                            rocprofiler_buffer_id_t buffer_id) {
-    while (record < end_record) {
-      if (!record) break;
-      if (record->kind == ROCPROFILER_PROFILER_RECORD) {
-        const rocprofiler_record_profiler_t* profiler_record =
-            reinterpret_cast<const rocprofiler_record_profiler_t*>(record);
-        size_t name_length;
-        CheckApi(rocprofiler_query_kernel_info_size(ROCPROFILER_KERNEL_NAME,
-                                                    profiler_record->kernel_id, &name_length));
-        const char* kernel_name_c = static_cast<const char*>(malloc(name_length * sizeof(char)));
-        CheckApi(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME, profiler_record->kernel_id,
-                                               &kernel_name_c));
-
-        if (profiler_record->counters && !bSkipCounterNoneZeroCheck)
-          for (uint64_t i = 0; i < profiler_record->counters_count.value; i++)
-            if (profiler_record->counters[i].counter_handler.handle > 0)
-              EXPECT_NE(profiler_record->counters[i].value.value, 0);
-      }
-      CheckApi(rocprofiler_next_record(record, &record, session_id, buffer_id));
-    }
-  }
-};
-
-TEST_F(ProfilerAPITest, WhenRunningMultipleThreadsProfilerAPIsWorkFine) {
-  // set global path
-  init_test_path();
-
-  // Get the system cores
-  int num_cpu_cores = GetNumberOfCores();
-
-  // create as many threads as number of cores in system
-  std::vector<std::thread> threads(num_cpu_cores);
-
-  // initialize profiler by creating rocprofiler object
-  CheckApi(rocprofiler_initialize());
-
-  // Counter Collection with timestamps
-  rocprofiler_session_id_t session_id;
-  std::vector<const char*> counters;
-  counters.emplace_back("SQ_WAVES");
-
-  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
-
-  rocprofiler_buffer_id_t buffer_id;
-  CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));
-
-  rocprofiler_filter_id_t filter_id;
-  rocprofiler_filter_property_t property = {};
-  CheckApi(rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
-                                     rocprofiler_filter_data_t{.counters_names = &counters[0]},
-                                     counters.size(), &filter_id, property));
-
-  CheckApi(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
-
-  // activating profiler session
-  CheckApi(rocprofiler_start_session(session_id));
-
-  // launch kernel on each thread
-  for (int n = 0; n < num_cpu_cores; ++n) {
-    threads[n] = std::thread(KernelLaunch);
-  }
-
-  // wait for all kernel launches to complete
-  for (int n = 0; n < num_cpu_cores; ++n) {
-    threads[n].join();
-  }
-
-  // deactivate session
-  CheckApi(rocprofiler_terminate_session(session_id));
-
-  // dump profiler data
-  CheckApi(rocprofiler_flush_data(session_id, buffer_id));
-
-  // destroy session
-  CheckApi(rocprofiler_destroy_session(session_id));
-
-  // finalize profiler by destroying rocprofiler object
-  CheckApi(rocprofiler_finalize());
-}
-
-TEST_F(ProfilerAPITest, WhenRunningMultipleStreamsSerializationWorksFine) {
-  // set global path
-  init_test_path();
-
-  // Get the system cores
-  int num_cpu_cores = GetNumberOfCores();
-
-  // create as many threads as number of cores in system
-  std::vector<std::thread> threads(num_cpu_cores);
-
-  // initialize profiler by creating rocprofiler object
-  CheckApi(rocprofiler_initialize());
-
-  // Counter Collection with timestamps
-  rocprofiler_session_id_t session_id;
-  std::vector<const char*> counters;
-  counters.emplace_back("SQ_WAVES");
-
-  CheckApi(rocprofiler_create_session(ROCPROFILER_NONE_REPLAY_MODE, &session_id));
-
-  rocprofiler_buffer_id_t buffer_id;
-  CheckApi(rocprofiler_create_buffer(session_id, FlushCallback, 0x9999, &buffer_id));
-
-  rocprofiler_filter_id_t filter_id;
-  rocprofiler_filter_property_t property = {};
-  CheckApi(rocprofiler_create_filter(session_id, ROCPROFILER_COUNTERS_COLLECTION,
-                                     rocprofiler_filter_data_t{.counters_names = &counters[0]},
-                                     counters.size(), &filter_id, property));
-
-  CheckApi(rocprofiler_set_filter_buffer(session_id, filter_id, buffer_id));
-
-  // activating profiler session
-  CheckApi(rocprofiler_start_session(session_id));
-
-  LaunchMultiStreamKernels();
-  // deactivate session
-  CheckApi(rocprofiler_terminate_session(session_id));
-
-  // dump profiler data
-  CheckApi(rocprofiler_flush_data(session_id, buffer_id));
-
-  // destroy session
-  CheckApi(rocprofiler_destroy_session(session_id));
-
-  // finalize profiler by destroying rocprofiler object
-  CheckApi(rocprofiler_finalize());
-}
-
 
 
 /*
