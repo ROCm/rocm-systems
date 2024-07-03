@@ -300,7 +300,7 @@ class OmniProfiler_Base:
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
             console_error(
-                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy 1048576 256"
+                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy -n 1048576 -b 256"
             )
 
         # verify name meets MongoDB length requirements and no illegal chars
@@ -329,7 +329,8 @@ class OmniProfiler_Base:
         else:
             console_log("Hardware Blocks: " + str(self.__args.ipblocks))
 
-        print_status("Collecting Performance Counters")
+        msg = "Collecting Performance Counters"
+        print_status(msg) if not self.__args.roof_only else print_status(msg + " (Roofline Only)")
 
         # show status bar in error-only mode
         disable_tqdm = True
