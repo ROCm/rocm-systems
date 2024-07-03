@@ -330,7 +330,11 @@ class OmniProfiler_Base:
             console_log("Hardware Blocks: " + str(self.__args.ipblocks))
 
         msg = "Collecting Performance Counters"
-        print_status(msg) if not self.__args.roof_only else print_status(msg + " (Roofline Only)")
+        (
+            print_status(msg)
+            if not self.__args.roof_only
+            else print_status(msg + " (Roofline Only)")
+        )
 
         # show status bar in error-only mode
         disable_tqdm = True
