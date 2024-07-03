@@ -23,6 +23,7 @@
 ##############################################################################el
 
 import os
+import shlex
 from omniperf_profile.profiler_base import OmniProfiler_Base
 from utils.utils import (
     demarcate,
@@ -42,14 +43,13 @@ class rocprof_v2_profiler(OmniProfiler_Base):
 
     def get_profiler_options(self, fname):
         fbase = os.path.splitext(os.path.basename(fname))[0]
-        app_cmd = self.get_args().remaining
+        app_cmd = shlex.split(self.get_args().remaining)
         args = [
             # v2 requires output directory argument
             "-d",
             self.get_args().path + "/" + "out",
-            # v2 does not require quotes on cmd
-            app_cmd,
         ]
+        args.extend(app_cmd)
         return args
 
     # -----------------------
