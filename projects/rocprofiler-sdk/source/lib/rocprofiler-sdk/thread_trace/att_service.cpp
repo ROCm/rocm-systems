@@ -30,21 +30,6 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "rocprofiler-sdk/amd_detail/thread_trace.h"
 
-namespace
-{
-uint32_t
-get_mask(const rocprofiler::counters::Metric* metric, uint64_t simds_selected)
-{
-    uint32_t mask = std::atoi(metric->event().c_str());
-    if(simds_selected == 0)
-        simds_selected =
-            rocprofiler::thread_trace::thread_trace_parameter_pack::DEFAULT_PERFCOUNTER_SIMD_MASK;
-    mask |= simds_selected
-            << rocprofiler::thread_trace::thread_trace_parameter_pack::PERFCOUNTER_SIMD_MASK_SHIFT;
-    return mask;
-}
-}  // namespace
-
 extern "C" {
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_configure_dispatch_thread_trace_service(
@@ -69,7 +54,7 @@ rocprofiler_configure_dispatch_thread_trace_service(
     pack.shader_cb_fn      = shader_callback;
     pack.callback_userdata = callback_userdata;
 
-    const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getPerfCountersIdMap());
+    auto id_map = rocprofiler::counters::getPerfCountersIdMap();
     for(size_t p = 0; p < num_parameters; p++)
     {
         const rocprofiler_att_parameter_t& param = parameters[p];
@@ -85,10 +70,12 @@ rocprofiler_configure_dispatch_thread_trace_service(
             case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: pack.buffer_size = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: pack.simd_select = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
-                if(const auto* metric_ptr =
-                       rocprofiler::common::get_val(id_map, param.counter_id.handle))
-                    pack.perfcounters.push_back(get_mask(metric_ptr, param.simd_mask));
-                break;
+            {
+                auto event_it = id_map.find(param.counter_id.handle);
+                if(event_it != id_map.end())
+                    pack.perfcounters.push_back({event_it->second, param.simd_mask});
+            }
+            break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
                 pack.perfcounter_ctrl = param.value;
                 break;
@@ -124,7 +111,7 @@ rocprofiler_configure_agent_thread_trace_service(
     pack.shader_cb_fn      = shader_callback;
     pack.callback_userdata = callback_userdata;
 
-    const auto& id_map = *CHECK_NOTNULL(rocprofiler::counters::getPerfCountersIdMap());
+    auto id_map = rocprofiler::counters::getPerfCountersIdMap();
     for(size_t p = 0; p < num_parameters; p++)
     {
         const rocprofiler_att_parameter_t& param = parameters[p];
@@ -140,10 +127,12 @@ rocprofiler_configure_agent_thread_trace_service(
             case ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE: pack.buffer_size = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_SIMD_SELECT: pack.simd_select = param.value; break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTER:
-                if(const auto* metric_ptr =
-                       rocprofiler::common::get_val(id_map, param.counter_id.handle))
-                    pack.perfcounters.push_back(get_mask(metric_ptr, param.simd_mask));
-                break;
+            {
+                auto event_it = id_map.find(param.counter_id.handle);
+                if(event_it != id_map.end())
+                    pack.perfcounters.push_back({event_it->second, param.simd_mask});
+            }
+            break;
             case ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL:
                 pack.perfcounter_ctrl = param.value;
                 break;

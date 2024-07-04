@@ -157,11 +157,19 @@ ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(const hsa::AgentCache& 
 
     if(perf_ctrl != 0 && !params.perfcounters.empty())
     {
-        aql_params.push_back(
-            {HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_CTRL, {perf_ctrl - 1}});
-        auto perf_param = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_NAME;
-        for(uint32_t perf_counter : params.perfcounters)
-            aql_params.push_back({perf_param, {perf_counter}});
+        for(const auto& perf_counter : params.perfcounters)
+        {
+            aqlprofile_att_parameter_t param{};
+            param.parameter_name = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_NAME;
+            param.counter_id     = perf_counter.first;
+            param.simd_mask      = perf_counter.second;
+            aql_params.push_back(param);
+        }
+
+        aqlprofile_att_parameter_t param{};
+        param.parameter_name = HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_PERFCOUNTER_CTRL;
+        param.value          = perf_ctrl - 1;
+        aql_params.push_back(param);
     }
 }
 

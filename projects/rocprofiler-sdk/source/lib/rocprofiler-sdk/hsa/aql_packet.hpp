@@ -158,22 +158,6 @@ struct TraceMemoryPool
     static hsa_status_t Copy(void* dst, const void* src, size_t size, void* data);
 };
 
-class BaseTTAQLPacket : public AQLPacket
-{
-    friend class rocprofiler::aql::ThreadTraceAQLPacketFactory;
-
-public:
-    BaseTTAQLPacket(std::shared_ptr<TraceMemoryPool>& _tracepool)
-    : tracepool(_tracepool){};
-    ~BaseTTAQLPacket() override = default;
-
-    aqlprofile_handle_t GetHandle() const { return tracepool->handle; }
-    hsa_agent_t         GetAgent() const { return tracepool->gpu_agent; }
-
-protected:
-    std::shared_ptr<TraceMemoryPool> tracepool;
-};
-
 class CodeobjMarkerAQLPacket : public AQLPacket
 {
     friend class rocprofiler::aql::ThreadTraceAQLPacketFactory;
@@ -209,7 +193,8 @@ public:
                           const aqlprofile_att_profile_t& profile);
     ~TraceControlAQLPacket() override = default;
 
-    explicit TraceControlAQLPacket(TraceControlAQLPacket& other)
+    explicit TraceControlAQLPacket(const TraceControlAQLPacket& other)
+    : AQLPacket()
     {
         this->tracepool      = other.tracepool;
         this->packets        = other.packets;

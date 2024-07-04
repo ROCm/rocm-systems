@@ -195,24 +195,22 @@ getMetricIdMap()
     return id_map;
 }
 
-const MetricIdMap*
+std::unordered_map<uint64_t, int>
 getPerfCountersIdMap()
 {
-    // Only GFX9 counters in SQ Block are supported
-    static MetricIdMap*& att_perf_counters_map =
-        common::static_object<MetricIdMap>::construct([]() {
-            MetricIdMap map;
-            std::string agent_prefix{"gfx9"};
-            auto        is_gfx9 = [&](auto& agent_name) {
-                return (agent_name.find(agent_prefix) != std::string::npos);
-            };
-            for(const auto& [agent_name, metrics] : *CHECK_NOTNULL(getMetricMap()))
-                if(is_gfx9(agent_name))
-                    for(const auto& metric : metrics)
-                        if(metric.block() == "SQ") map.emplace(metric.id(), metric);
-            return map;
-        }());
-    return att_perf_counters_map;
+    std::unordered_map<uint64_t, int> map;
+
+    for(const auto& [agent, list] : *CHECK_NOTNULL(getMetricMap()))
+    {
+        if(agent.find("gfx9") == std::string::npos) continue;
+        for(const auto& metric : list)
+        {
+            if(metric.name().find("SQ_") == 0 && !metric.event().empty())
+                map.emplace(metric.id(), std::stoi(metric.event()));
+        }
+    }
+
+    return map;
 }
 
 const MetricMap*

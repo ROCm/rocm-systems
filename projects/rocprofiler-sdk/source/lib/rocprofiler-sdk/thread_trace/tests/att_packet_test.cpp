@@ -179,7 +179,7 @@ TEST(thread_trace, perfcounters_configure_test)
     // Only GFX9 SQ Block counters are supported
     std::vector<std::pair<std::string, uint64_t>> perf_counters = {
         {"SQ_WAVES", 0x1}, {"SQ_WAVES", 0x2}, {"SQ_WAVES", 0x2}, {"GRBM_COUNT", 0x3}};
-    std::set<uint32_t>                       expected;
+    std::set<std::pair<uint32_t, uint32_t>>  expected;
     std::vector<rocprofiler_att_parameter_t> params;
     params.push_back({ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL, {1}});
     auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
@@ -193,7 +193,7 @@ TEST(thread_trace, perfcounters_configure_test)
                 att_param.counter_id = rocprofiler_counter_id_t{.handle = metric.id()};
                 att_param.simd_mask  = simd_mask;
                 params.push_back(att_param);
-                expected.insert(std::atoi(metric.event().c_str()) | (simd_mask << 28));
+                expected.insert({std::atoi(metric.event().c_str()), simd_mask});
             }
 
     rocprofiler_configure_dispatch_thread_trace_service(
@@ -216,7 +216,7 @@ TEST(thread_trace, perfcounters_configure_test)
     ASSERT_NE(tracer, nullptr);
     ASSERT_EQ(tracer->params.perfcounter_ctrl, 1);
     ASSERT_EQ(tracer->params.perfcounters.size(), 3);
-    for(uint32_t param : tracer->params.perfcounters)
+    for(const auto& param : tracer->params.perfcounters)
         EXPECT_TRUE(expected.find(param) != expected.end())
             << "valid AQLprofile mask not generated for perfcounters";
     context::pop_client(1);
@@ -242,8 +242,7 @@ TEST(thread_trace, perfcounters_aql_options_test)
     for(auto& [counter_name, simd_mask] : perf_counters)
         for(auto& metric : metrics)
             if(metric.name() == counter_name)
-                _params.perfcounters.push_back(std::atoi(metric.event().c_str()) |
-                                               (simd_mask << 28));
+                _params.perfcounters.push_back({std::atoi(metric.event().c_str()), simd_mask});
     _params.perfcounter_ctrl = 2;
     auto new_tracer          = std::make_unique<thread_trace::ThreadTracerQueue>(
         _params, begin(agents)->second, get_api_table(), get_ext_table());

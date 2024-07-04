@@ -64,7 +64,7 @@ struct thread_trace_parameter_pack
     uint64_t buffer_size        = DEFAULT_BUFFER_SIZE;
 
     // GFX9 Only
-    std::vector<uint32_t> perfcounters;
+    std::vector<std::pair<uint32_t, uint32_t>> perfcounters;
 
     static constexpr size_t DEFAULT_SIMD                  = 0x7;
     static constexpr size_t DEFAULT_PERFCOUNTER_SIMD_MASK = 0xF;

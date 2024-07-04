@@ -119,10 +119,10 @@ const MetricIdMap*
 getMetricIdMap();
 
 /**
- * Get the metrics for perfcounters options in thread trace
+ * Get the metric event ids for perfcounters options in thread trace
  * applicable only for GFX9 agents and SQ block counters
  */
-const MetricIdMap*
+std::unordered_map<uint64_t, int>
 getPerfCountersIdMap();
 
 /**
