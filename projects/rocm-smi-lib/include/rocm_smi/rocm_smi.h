@@ -367,8 +367,6 @@ typedef rsmi_clk_type_t rsmi_clk_type;
  */
 typedef enum {
   RSMI_COMPUTE_PARTITION_INVALID = 0,
-  RSMI_COMPUTE_PARTITION_CPX, //!< Core mode (CPX)- Per-chip XCC with
-                              //!< shared memory
   RSMI_COMPUTE_PARTITION_SPX, //!< Single GPU mode (SPX)- All XCCs work
                               //!< together with shared memory
   RSMI_COMPUTE_PARTITION_DPX, //!< Dual GPU mode (DPX)- Half XCCs work
@@ -377,6 +375,8 @@ typedef enum {
                               //!< work together with shared memory
   RSMI_COMPUTE_PARTITION_QPX, //!< Quad GPU mode (QPX)- Quarter XCCs
                               //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_CPX  //!< Core mode (CPX)- Per-chip XCC with
+                              //!< shared memory
 } rsmi_compute_partition_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
@@ -4052,6 +4052,30 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
  *
  */
 rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind);
+
+/**
+ *  @brief Retrieves the partition_id for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a uint32_t pointer @p partition_id ,
+ *  this function will attempt to obtain the device's partition ID.
+ *  Upon successful retreival, the obtained device's partition will be stored
+ *  in the passed @p partition_id uint32_t variable. If device does
+ *  not support partitions or is in SPX, a @p partition_id ID of 0 shall
+ *  be returned.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] partition_id a uint32_t variable,
+ *  which the device's partition_id will be written to.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *
+ */
+rsmi_status_t rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id);
 
 /** @} */  // end of ComputePartition
 

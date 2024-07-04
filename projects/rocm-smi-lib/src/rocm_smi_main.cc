@@ -235,15 +235,7 @@ RocmSMI::Initialize(uint64_t flags) {
   int i_ret;
   std::ostringstream ss;
 
-  LOG_ALWAYS("=============== ROCM SMI initialize ================");
-  ROCmLogging::Logger::getInstance()->enableAllLogLevels();
-  // Leaving below to allow developers to check current log settings
-  // std::string logSettings = Logger::getInstance()->getLogSettings();
-  // std::cout << "Current log settings:\n" << logSettings << std::endl;
 
-  if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
-    logSystemDetails();
-  }
 
   assert(ref_count_ == 1);
   if (ref_count_ != 1) {
@@ -258,6 +250,15 @@ RocmSMI::Initialize(uint64_t flags) {
   GetEnvVariables();
   // To help debug env variable issues
   // debugRSMIEnvVarInfo();
+
+  if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
+    ROCmLogging::Logger::getInstance()->enableAllLogLevels();
+    LOG_ALWAYS("=============== ROCM SMI initialize ================");
+    logSystemDetails();
+  }
+  // Leaving below to allow developers to check current log settings
+  // std::string logSettings = ROCmLogging::Logger::getInstance()->getLogSettings();
+  // std::cout << "Current log settings:\n" << logSettings << std::endl;
 
   while (!std::string(kAMDMonitorTypes[i]).empty()) {
       amd_monitor_types_.insert(kAMDMonitorTypes[i]);
@@ -863,6 +864,15 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
            << " BDF = " << std::to_string(primaryBdfId)
            << " (" << print_int_as_hex(primaryBdfId) << ")";
         LOG_DEBUG(ss);
+        if (doesDeviceSupportPartitions && strCompPartition != "SPX"
+           && i->second.s_partition_id == 0) {
+          i->second.s_partition_id = i->second.s_function;
+          ss << __PRETTY_FUNCTION__ << " | (secondary node add) fall back - "
+            << "detected !SPX && partition_id == 0"
+            << "; function = " << std::to_string(i->second.s_function)
+            << "; partition_id = " << std::to_string(i->second.s_partition_id);
+          LOG_DEBUG(ss);
+        }
         ss << __PRETTY_FUNCTION__
            << " | (secondary node add) B4 AddToDeviceList() -->"
            << "\n[node_id = " << std::to_string(i->second.s_node_id)
@@ -881,6 +891,15 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       } else {
         ss << __PRETTY_FUNCTION__ << " | primary node add ; "
            << " BDF = " << std::to_string(UINT64_MAX);
+        if (doesDeviceSupportPartitions && strCompPartition != "SPX"
+           && i->second.s_partition_id == 0) {
+          i->second.s_partition_id = i->second.s_function;
+          ss << __PRETTY_FUNCTION__ << " | (primary node add) fall back - "
+            << "detected !SPX && partition_id == 0"
+            << "; function = " << std::to_string(i->second.s_function)
+            << "; partition_id = " << std::to_string(i->second.s_partition_id);
+          LOG_DEBUG(ss);
+        }
         LOG_DEBUG(ss);
         ss << __PRETTY_FUNCTION__
            << " | (primary node add) After AddToDeviceList() -->"
@@ -1010,6 +1029,15 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
            << " BDF = " << std::to_string(myBdfId)
            << " (" << print_int_as_hex(myBdfId) << ")";
         LOG_DEBUG(ss);
+        if (doesDeviceSupportPartitions && strCompPartition != "SPX"
+           && it->second.s_partition_id == 0) {
+          it->second.s_partition_id = it->second.s_function;
+          ss << __PRETTY_FUNCTION__ << " | (secondary node add #2) fall back - "
+            << "detected !SPX && partition_id == 0"
+            << "; function = " << std::to_string(it->second.s_function)
+            << "; partition_id = " << std::to_string(it->second.s_partition_id);
+          LOG_DEBUG(ss);
+        }
         ss << __PRETTY_FUNCTION__
            << " | (secondary node add #2) B4 AddToDeviceList() -->"
            << "\n[node_id = " << std::to_string(it->second.s_node_id)

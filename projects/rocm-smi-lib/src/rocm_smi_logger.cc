@@ -265,7 +265,7 @@ void ROCmLogging::Logger::buffer(const char* text) throw() {
   // and timestamp in the buffer message. Just log the raw bytes.
   if ((m_LogType == FILE_LOG) && (m_LogLevel >= LOG_LEVEL_BUFFER)) {
     lock();
-    if(!m_File.is_open()) {
+    if (!m_File.is_open()) {
       initialize_resources();
       if (!m_File.is_open()) {
         std::cout << "WARNING: re-initializing resources was unsuccessful."

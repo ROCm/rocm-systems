@@ -229,7 +229,7 @@ const char *FreqEnumToStr(rsmi_clk_type rsmi_clk) {
 }
 
 void printRSMIError(rsmi_status_t err) {
-  std::cout << "err = " << amd::smi::getRSMIStatusString(err);
+  std::cout << "err = " << amd::smi::getRSMIStatusString(err) << "\n";
 }
 
 #if ENABLE_SMI
