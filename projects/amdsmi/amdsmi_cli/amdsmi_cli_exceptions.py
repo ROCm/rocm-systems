@@ -182,7 +182,7 @@ class AmdSmiMissingParameterValueException(AmdSmiException):
         self.stdout_message = f"{common_message} Error code: {self.value}"
 
 
-class AmdSmiNotSupportedCommandException(AmdSmiException):
+class AmdSmiCommandNotSupportedException(AmdSmiException):
     def __init__(self, command, outputformat: str):
         super().__init__()
         self.value = -7

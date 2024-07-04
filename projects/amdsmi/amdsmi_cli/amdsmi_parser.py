@@ -111,10 +111,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             help="Descriptions:",
             metavar='')
 
-        # Store possible subcommands for later errors
+        # Store possible subcommands & aliases for later errors
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
-                                  'reset', 'monitor', 'xgmi']
+                                  'reset', 'monitor', 'dmon', 'xgmi']
 
         # Add all subparsers
         self._add_version_parser(self.subparsers, version)
@@ -1138,7 +1138,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         process_help = "Enable Process information table below monitor output"
 
         # Create monitor subparser
-        monitor_parser = subparsers.add_parser('monitor', help=monitor_help, description=monitor_subcommand_help)
+        monitor_parser = subparsers.add_parser('monitor', help=monitor_help, description=monitor_subcommand_help, aliases=["dmon"])
         monitor_parser._optionals.title = monitor_optionals_title
         monitor_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         monitor_parser.set_defaults(func=func)
@@ -1243,7 +1243,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             message = message.split("'")[0]
             # Check if the command is possible in other system configurations and error accordingly
             if message in self.possible_commands:
-                raise amdsmi_cli_exceptions.AmdSmiNotSupportedCommandException(message, outputformat)
+                raise amdsmi_cli_exceptions.AmdSmiCommandNotSupportedException(message, outputformat)
             raise amdsmi_cli_exceptions.AmdSmiInvalidCommandException(message, outputformat)
         elif "unrecognized arguments: " in message:
             l = len("unrecognized arguments: ")

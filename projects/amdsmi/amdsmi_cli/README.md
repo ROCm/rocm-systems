@@ -73,7 +73,7 @@ Type "help", "copyright", "credits" or "license" for more information.
 
 ## Usage
 
-amd-smi will report the version and current platform detected when running the command without arguments:
+AMD-SMI reports the version and current platform detected when running the command line interface (CLI) without arguments:
 
 ``` bash
 ~$ amd-smi
@@ -97,7 +97,7 @@ AMD-SMI Commands:
     topology          Displays topology information of the devices
     set               Set options for devices
     reset             Reset options for devices
-    monitor           Monitor metrics for target devices
+    monitor (dmon)    Monitor metrics for target devices
     xgmi              Displays xgmi information of the devices
 ```
 
@@ -594,7 +594,7 @@ Command Modifiers:
 usage: amd-smi monitor [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                        [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                        [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-p] [-t] [-u] [-m] [-n]
-                       [-d] [-e] [-v] [-r]
+                       [-d] [-e] [-v] [-r] [-q]
 
 Monitor a target device for the specified arguments.
 If no arguments are provided, all arguments will be enabled.
@@ -629,6 +629,7 @@ Monitor Arguments:
   -e, --ecc                    Monitor ECC single bit, ECC double bit, and PCIe replay error counts
   -v, --vram-usage             Monitor memory usage in MB
   -r, --pcie                   Monitor PCIe bandwidth in Mb/s
+  -q, --process                Enable Process information table below monitor output
 
 Command Modifiers:
   --json                       Displays output in JSON format (human readable by default).

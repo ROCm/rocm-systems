@@ -521,7 +521,7 @@ Command Modifiers:
 usage: amd-smi monitor [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                        [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                        [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-p] [-t] [-u] [-m] [-n]
-                       [-d] [-e] [-v] [-r]
+                       [-d] [-e] [-v] [-r] [-q]
 
 Monitor a target device for the specified arguments.
 If no arguments are provided, all arguments will be enabled.
@@ -556,6 +556,7 @@ Monitor Arguments:
   -e, --ecc                    Monitor ECC single bit, ECC double bit, and PCIe replay error counts
   -v, --vram-usage             Monitor memory usage in MB
   -r, --pcie                   Monitor PCIe bandwidth in Mb/s
+  -q, --process                Enable Process information table below monitor output
 
 Command Modifiers:
   --json                       Displays output in JSON format (human readable by default).

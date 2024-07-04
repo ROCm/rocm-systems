@@ -8,6 +8,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Additions
 
+- **`amd-smi dmon` is now available as an alias to `amd-smi monitor`**.  
+
 - **Added optional process table under `amd-smi monitor -q`**.  
 The monitor subcommand within the CLI Tool now has the `-q` option to enable an optional process table underneath the original monitored output.
 
