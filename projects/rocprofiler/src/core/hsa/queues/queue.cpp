@@ -365,6 +365,7 @@ bool AsyncSignalReadyHandler(hsa_signal_value_t signal_value, void* data) {
     queue->cv_ready_signal.notify_all();
     return false;
   }
+  queue->cv_ready_signal.notify_all();
   hsasupport_singleton.GetCoreApiTable().hsa_signal_store_screlease_fn(queue->GetReadySignal(), 1);
   if (serializer.dispatch_queue == nullptr)
     enable_dispatch(queue);
@@ -473,7 +474,6 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
       auto* profile = pending->profile ? pending->profile->profile.get() : nullptr;
       if (pending->counters_count > 0 && profile && profile->events)
       {
-        ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_sub(1);
         Packet::AQLPacketProfile::MoveToCache(queue_info_session->agent, std::move(pending->profile));
 
         profiler_serializer_t& serializer =
@@ -483,10 +483,12 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
         hsasupport_singleton.GetCoreApiTable().hsa_signal_store_screlease_fn(
             queue_info_session->block_signal, 1);
         serializer.dispatch_queue = nullptr;
-        if (serializer.dispatch_ready.empty()) return false;
-        Queue* queue = serializer.dispatch_ready.front();
-        serializer.dispatch_ready.erase(serializer.dispatch_ready.begin());
-        enable_dispatch(queue);
+        if (!serializer.dispatch_ready.empty())
+        {
+          Queue* queue = serializer.dispatch_ready.front();
+          serializer.dispatch_ready.erase(serializer.dispatch_ready.begin());
+          enable_dispatch(queue);
+        }
       }
 
       if (pending->new_signal.handle)
@@ -494,6 +496,9 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
       if (queue_info_session->interrupt_signal.handle)
         hsasupport_singleton.GetCoreApiTable().hsa_signal_destroy_fn(
             queue_info_session->interrupt_signal);
+
+      if (pending->counters_count > 0 && profile && profile->events)
+        ACTIVE_INTERRUPT_SIGNAL_COUNT.fetch_sub(1);
   }
   delete queue_info_session;
   return false;
@@ -641,7 +646,7 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
         continue;
       }
 
-      std::unique_ptr<Packet::AQLPacketProfile> profile_packet;
+      std::unique_ptr<Packet::AQLPacketProfile> profile_packet{nullptr};
       // If counters found in the session
       if (session_data_count > 0 && is_counter_collection_mode) {
         // Get the PM4 Packets using packets_generator

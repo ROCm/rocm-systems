@@ -83,9 +83,11 @@ void LaunchMultiStreamKernels() {
   int blockSize = 64;
   // This Kernel will always be launched with one wave
   int numBlocks = 1;
+
   for(int i = 0; i < 100; i++) {
     for(int j = 0; j < hip_streams.size(); j++)
        hipLaunchKernelGGL(add, numBlocks, blockSize, 0, hip_streams[j], N, d_x, d_y);
+    HIP_ASSERT(hipDeviceSynchronize());
   }
 
   //Wait for GPU to finish before accessing on host
