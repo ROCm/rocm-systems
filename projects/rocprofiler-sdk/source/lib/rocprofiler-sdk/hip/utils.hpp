@@ -26,6 +26,7 @@
 
 #include "lib/common/mpl.hpp"
 #include "lib/common/stringize_arg.hpp"
+#include "lib/rocprofiler-sdk/hip/details/format.hpp"
 #include "lib/rocprofiler-sdk/hip/details/ostream.hpp"
 
 #include "fmt/core.h"
@@ -44,12 +45,6 @@ namespace hip
 {
 namespace utils
 {
-inline static std::ostream&
-operator<<(std::ostream& out, const hipDeviceProp_tR0000& v)
-{
-    return ::rocprofiler::hip::detail::operator<<(out, v);
-}
-
 template <typename Tp>
 auto
 stringize_impl(const Tp& _v)
@@ -79,22 +74,3 @@ stringize(int32_t max_deref, Args... args)
 }  // namespace utils
 }  // namespace hip
 }  // namespace rocprofiler
-
-namespace fmt
-{
-template <>
-struct formatter<rocprofiler_dim3_t>
-{
-    template <typename ParseContext>
-    constexpr auto parse(ParseContext& ctx)
-    {
-        return ctx.begin();
-    }
-
-    template <typename Ctx>
-    auto format(const rocprofiler_dim3_t& v, Ctx& ctx) const
-    {
-        return fmt::format_to(ctx.out(), "{}z={}, y={}, x={}{}", '{', v.z, v.y, v.x, '}');
-    }
-};
-}  // namespace fmt

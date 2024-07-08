@@ -4994,7 +4994,14 @@ operator<<(std::ostream& out, const hipUUID& v)
 }
 
 inline static std::ostream&
-operator<<(std::ostream& out, const hipDeviceProp_t& v)
+operator<<(std::ostream& out, const hipDeviceProp_tR0000& v)
+{
+    ::rocprofiler::hip::detail::operator<<(out, v);
+    return out;
+}
+
+inline static std::ostream&
+operator<<(std::ostream& out, const hipDeviceProp_tR0600& v)
 {
     ::rocprofiler::hip::detail::operator<<(out, v);
     return out;

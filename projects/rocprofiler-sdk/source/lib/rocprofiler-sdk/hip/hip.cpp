@@ -25,8 +25,6 @@
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
-#include "lib/rocprofiler-sdk/hip/details/ostream.hpp"
-#include "lib/rocprofiler-sdk/hip/types.hpp"
 #include "lib/rocprofiler-sdk/hip/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"

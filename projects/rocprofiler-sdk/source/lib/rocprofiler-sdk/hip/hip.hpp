@@ -25,12 +25,7 @@
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <hip/hip_version.h>
-
-#if HIP_VERSION_MAJOR < 6
-#    include "lib/rocprofiler-sdk/hip/details/hip_api_trace.hpp"
-#else
-#    include <hip/amd_detail/hip_api_trace.hpp>
-#endif
+#include <hip/amd_detail/hip_api_trace.hpp>
 
 #include <cstdint>
 #include <vector>

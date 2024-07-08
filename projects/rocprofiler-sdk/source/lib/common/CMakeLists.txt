@@ -6,6 +6,7 @@ rocprofiler_activate_clang_tidy()
 set(common_sources environment.cpp demangle.cpp logging.cpp static_object.cpp utility.cpp
                    xml.cpp)
 set(common_headers
+    abi.hpp
     defines.hpp
     environment.hpp
     demangle.hpp

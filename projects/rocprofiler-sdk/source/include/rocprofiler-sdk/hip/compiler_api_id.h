@@ -22,6 +22,10 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/version.h>
+
+#include <hip/amd_detail/hip_api_trace.hpp>
+
 /**
  * @brief ROCProfiler enumeration of HIP Compiler API tracing operations
  */

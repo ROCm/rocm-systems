@@ -33,6 +33,7 @@
 #include <hip/hip_deprecated.h>
 
 #include <hip/amd_detail/amd_hip_gl_interop.h>
+#include <hip/amd_detail/hip_api_trace.hpp>
 
 ROCPROFILER_EXTERN_C_INIT
 
@@ -2773,15 +2774,222 @@ typedef union rocprofiler_hip_api_args_t
     {
         hipStream_t stream;
     } hipGetStreamDeviceId;
-    // struct
-    // {
-    //     hipGraphNode_t*               phGraphNode;
-    //     hipGraph_t                    hGraph;
-    //     const hipGraphNode_t*         dependencies;
-    //     size_t                        numDependencies;
-    //     const HIP_MEMSET_NODE_PARAMS* memsetParams;
-    //     hipCtx_t                      ctx;
-    // } hipDrvGraphAddMemsetNode;
+    struct
+    {
+        hipGraphNode_t*               phGraphNode;
+        hipGraph_t                    hGraph;
+        const hipGraphNode_t*         dependencies;
+        size_t                        numDependencies;
+        const HIP_MEMSET_NODE_PARAMS* memsetParams;
+        hipCtx_t                      ctx;
+    } hipDrvGraphAddMemsetNode;
+    struct
+    {
+        hipGraphNode_t*                           pGraphNode;
+        hipGraph_t                                graph;
+        const hipGraphNode_t*                     pDependencies;
+        size_t                                    numDependencies;
+        const hipExternalSemaphoreWaitNodeParams* nodeParams;
+    } hipGraphAddExternalSemaphoresWaitNode;
+    struct
+    {
+        hipGraphNode_t*                             pGraphNode;
+        hipGraph_t                                  graph;
+        const hipGraphNode_t*                       pDependencies;
+        size_t                                      numDependencies;
+        const hipExternalSemaphoreSignalNodeParams* nodeParams;
+    } hipGraphAddExternalSemaphoresSignalNode;
+    struct
+    {
+        hipGraphNode_t                              hNode;
+        const hipExternalSemaphoreSignalNodeParams* nodeParams;
+    } hipGraphExternalSemaphoresSignalNodeSetParams;
+    struct
+    {
+        hipGraphNode_t                            hNode;
+        const hipExternalSemaphoreWaitNodeParams* nodeParams;
+    } hipGraphExternalSemaphoresWaitNodeSetParams;
+    struct
+    {
+        hipGraphNode_t                        hNode;
+        hipExternalSemaphoreSignalNodeParams* params_out;
+    } hipGraphExternalSemaphoresSignalNodeGetParams;
+    struct
+    {
+        hipGraphNode_t                      hNode;
+        hipExternalSemaphoreWaitNodeParams* params_out;
+    } hipGraphExternalSemaphoresWaitNodeGetParams;
+    struct
+    {
+        hipGraphExec_t                              hGraphExec;
+        hipGraphNode_t                              hNode;
+        const hipExternalSemaphoreSignalNodeParams* nodeParams;
+    } hipGraphExecExternalSemaphoresSignalNodeSetParams;
+    struct
+    {
+        hipGraphExec_t                            hGraphExec;
+        hipGraphNode_t                            hNode;
+        const hipExternalSemaphoreWaitNodeParams* nodeParams;
+    } hipGraphExecExternalSemaphoresWaitNodeSetParams;
+    struct
+    {
+        hipGraphNode_t*       pGraphNode;
+        hipGraph_t            graph;
+        const hipGraphNode_t* pDependencies;
+        size_t                numDependencies;
+        hipGraphNodeParams*   nodeParams;
+    } hipGraphAddNode;
+    struct
+    {
+        hipGraphExec_t*            pGraphExec;
+        hipGraph_t                 graph;
+        hipGraphInstantiateParams* instantiateParams;
+    } hipGraphInstantiateWithParams;
+    struct
+    {
+        // Empty struct has a size of 0 in C but size of 1 in C++.
+        // Add the rocprofiler_hip_api_no_args struct to fix this
+        rocprofiler_hip_api_no_args no_args;
+    } hipExtGetLastError;
+    struct
+    {
+        float*                  pBorderColor;
+        const textureReference* texRef;
+    } hipTexRefGetBorderColor;
+    struct
+    {
+        hipArray_t*             pArray;
+        const textureReference* texRef;
+    } hipTexRefGetArray;
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 1
+    struct
+    {
+        const char*                      symbol;
+        void**                           pfn;
+        int                              hipVersion;
+        uint64_t                         flags;
+        hipDriverProcAddressQueryResult* symbolStatus;
+    } hipGetProcAddress;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 2
+    struct
+    {
+        hipStream_t             stream;
+        hipGraph_t              graph;
+        const hipGraphNode_t*   dependencies;
+        const hipGraphEdgeData* dependencyData;
+        size_t                  numDependencies;
+        hipStreamCaptureMode    mode;
+    } hipStreamBeginCaptureToGraph;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 3
+    struct
+    {
+        hipFunction_t* functionPtr;
+        const void*    symbolPtr;
+    } hipGetFuncBySymbol;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 4
+    struct
+    {
+        hipGraphNode_t*       phGraphNode;
+        hipGraph_t            hGraph;
+        const hipGraphNode_t* dependencies;
+        size_t                numDependencies;
+        hipDeviceptr_t        dptr;
+    } hipDrvGraphAddMemFreeNode;
+    struct
+    {
+        hipGraphExec_t      hGraphExec;
+        hipGraphNode_t      hNode;
+        const HIP_MEMCPY3D* copyParams;
+        hipCtx_t            ctx;
+    } hipDrvGraphExecMemcpyNodeSetParams;
+    struct
+    {
+        hipGraphExec_t                hGraphExec;
+        hipGraphNode_t                hNode;
+        const HIP_MEMSET_NODE_PARAMS* memsetParams;
+        hipCtx_t                      ctx;
+    } hipDrvGraphExecMemsetNodeSetParams;
+    struct
+    {
+        int* device_arr;
+        int  len;
+    } hipSetValidDevices;
+    struct
+    {
+        hipDeviceptr_t dstDevice;
+        hipArray_t     srcArray;
+        size_t         srcOffset;
+        size_t         ByteCount;
+    } hipMemcpyAtoD;
+    struct
+    {
+        hipArray_t     dstArray;
+        size_t         dstOffset;
+        hipDeviceptr_t srcDevice;
+        size_t         ByteCount;
+    } hipMemcpyDtoA;
+    struct
+    {
+        hipArray_t dstArray;
+        size_t     dstOffset;
+        hipArray_t srcArray;
+        size_t     srcOffset;
+        size_t     ByteCount;
+    } hipMemcpyAtoA;
+    struct
+    {
+        void*       dstHost;
+        hipArray_t  srcArray;
+        size_t      srcOffset;
+        size_t      ByteCount;
+        hipStream_t stream;
+    } hipMemcpyAtoHAsync;
+    struct
+    {
+        hipArray_t  dstArray;
+        size_t      dstOffset;
+        const void* srcHost;
+        size_t      ByteCount;
+        hipStream_t stream;
+    } hipMemcpyHtoAAsync;
+    struct
+    {
+        hipArray_t       dst;
+        size_t           wOffsetDst;
+        size_t           hOffsetDst;
+        hipArray_const_t src;
+        size_t           wOffsetSrc;
+        size_t           hOffsetSrc;
+        size_t           width;
+        size_t           height;
+        hipMemcpyKind    kind;
+    } hipMemcpy2DArrayToArray;
+    struct
+    {
+        hipGraphExec_t      graphExec;
+        unsigned long long* flags;
+    } hipGraphExecGetFlags;
+    struct
+    {
+        hipGraphNode_t      node;
+        hipGraphNodeParams* nodeParams;
+    } hipGraphNodeSetParams;
+    struct
+    {
+        hipGraphExec_t      graphExec;
+        hipGraphNode_t      node;
+        hipGraphNodeParams* nodeParams;
+    } hipGraphExecNodeSetParams;
+    struct
+    {
+        hipMipmappedArray_t*                       mipmap;
+        hipExternalMemory_t                        extMem;
+        const hipExternalMemoryMipmappedArrayDesc* mipmapDesc;
+    } hipExternalMemoryGetMappedMipmappedArray;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

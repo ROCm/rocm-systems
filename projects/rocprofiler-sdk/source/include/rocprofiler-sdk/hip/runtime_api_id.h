@@ -22,6 +22,10 @@
 
 #pragma once
 
+#include <rocprofiler-sdk/version.h>
+
+#include <hip/amd_detail/hip_api_trace.hpp>
+
 /**
  * @brief ROCProfiler enumeration of HIP runtime API tracing operations
  */
@@ -456,6 +460,44 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamGetCaptureInfo_v2_spt,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipLaunchHostFunc_spt,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGetStreamDeviceId,
-    // ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphAddMemsetNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphAddMemsetNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphAddExternalSemaphoresWaitNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphAddExternalSemaphoresSignalNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExternalSemaphoresSignalNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExternalSemaphoresWaitNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExternalSemaphoresSignalNodeGetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExternalSemaphoresWaitNodeGetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecExternalSemaphoresSignalNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecExternalSemaphoresWaitNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphAddNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphInstantiateWithParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtGetLastError,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipTexRefGetBorderColor,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipTexRefGetArray,
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 1
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGetProcAddress,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 2
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipStreamBeginCaptureToGraph,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 3
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGetFuncBySymbol,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 4
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphAddMemFreeNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphExecMemcpyNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphExecMemsetNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipSetValidDevices,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAtoD,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyDtoA,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAtoA,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAtoHAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyHtoAAsync,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2DArrayToArray,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecGetFlags,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExternalMemoryGetMappedMipmappedArray,
+#endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;
