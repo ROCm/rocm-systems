@@ -107,7 +107,7 @@ do_ldconfig() {
 case "$1" in
   ( configure )
     do_ldconfig
-    do_configureLogrotate || return 0
+    do_configureLogrotate || exit 0
   ;;
   ( abort-upgrade | abort-remove | abort-deconfigure )
     echo "$1"
