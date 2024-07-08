@@ -84,6 +84,8 @@ GetCodeobjContents()
 
 TEST(codeobj_library, segment_test)
 {
+    using CodeobjTableTranslator = rocprofiler::codeobj::segment::CodeobjTableTranslator;
+
     CodeobjTableTranslator     table;
     std::unordered_set<size_t> used_addr{};
 
@@ -92,21 +94,30 @@ TEST(codeobj_library, segment_test)
         for(int j = 0; j < 2500; j++)
         {
             size_t addr = rand() % 10000000;
-            size_t size = (rand() % 10) + 1;
+            size_t size = 1;
             if(used_addr.find(addr) != used_addr.end()) continue;
             used_addr.insert(addr);
-            table.insert({addr, addr + size, 0, 0});
+            table.insert({addr, size, 0});
         }
 
-        for(size_t i = 1; i < table.size(); i++)
-            ASSERT_LT(table[i - 1], table[i]);
+        ASSERT_NE(table.begin(), table.end());
+        {
+            auto it = std::next(table.begin());
+            while(it != table.end())
+            {
+                ASSERT_LT(*std::prev(it), *it);
+                it++;
+            }
+        }
 
+        std::vector<size_t> addr_leftover(used_addr.begin(), used_addr.end());
         for(size_t i = 0; i < 2400; i++)
         {
-            size_t idx    = rand() % table.size();
-            auto   rdelem = table[idx];
-            used_addr.erase(rdelem.vbegin);
-            ASSERT_NE(table.remove(rdelem.vbegin), 0);
+            size_t idx  = rand() % addr_leftover.size();
+            auto   addr = addr_leftover.at(idx);
+            ASSERT_EQ(table.remove(addr), true);
+            addr_leftover.erase(addr_leftover.begin() + idx);
+            used_addr.erase(addr);
         }
     }
 }
@@ -181,12 +192,14 @@ TEST(codeobj_library, loaded_codeobj_component)
 
 TEST(codeobj_library, codeobj_map_test)
 {
+    using marker_id_t = rocprofiler::codeobj::segment::marker_id_t;
+
     const std::vector<char>& objdata = rocprofiler::testing::codeobjhelper::GetCodeobjContents();
     constexpr size_t         laddr1  = 0x1000;
     constexpr size_t         laddr3  = 0x3000;
 
     uint64_t kaddr = [&objdata]() {
-        CodeobjDecoderComponent comp((const void*) objdata.data(), objdata.size());
+        CodeobjDecoderComponent comp(objdata.data(), objdata.size());
         for(auto& [addr, _] : comp.m_symbol_map)
             return addr;
         return 0ul;
@@ -195,19 +208,11 @@ TEST(codeobj_library, codeobj_map_test)
     EXPECT_NE(kaddr, 0);
 
     disassembly::CodeobjMap map;
-    map.addDecoder((const void*) objdata.data(),
-                   objdata.size(),
-                   codeobj_marker_id_t{1},
-                   laddr1,
-                   objdata.size());
-    map.addDecoder((const void*) objdata.data(),
-                   objdata.size(),
-                   codeobj_marker_id_t{3},
-                   laddr3,
-                   objdata.size());
+    const void*             objdataptr = (const void*) objdata.data();
+    map.addDecoder(objdataptr, objdata.size(), marker_id_t{1}, laddr1, objdata.size());
+    map.addDecoder(objdataptr, objdata.size(), marker_id_t{3}, laddr3, objdata.size());
 
-    EXPECT_EQ(map.get(codeobj_marker_id_t{1}, kaddr)->inst,
-              map.get(codeobj_marker_id_t{3}, kaddr)->inst);
+    EXPECT_EQ(map.get(marker_id_t{1}, kaddr)->inst, map.get(marker_id_t{3}, kaddr)->inst);
 
     ASSERT_EQ(map.removeDecoderbyId(1), true);
     ASSERT_EQ(map.removeDecoderbyId(3), true);
@@ -216,6 +221,8 @@ TEST(codeobj_library, codeobj_map_test)
 
 TEST(codeobj_library, codeobj_table_test)
 {
+    using marker_id_t = rocprofiler::codeobj::segment::marker_id_t;
+
     const std::vector<std::string>& hiplines = codeobjhelper::GetHipccOutput();
     const std::vector<char>&        objdata  = codeobjhelper::GetCodeobjContents();
     constexpr size_t                laddr1   = 0x1000;
@@ -225,7 +232,7 @@ TEST(codeobj_library, codeobj_table_test)
 
     uint64_t kaddr = 0, memsize = 0;
     std::tie(kaddr, memsize) = [&objdata]() {
-        CodeobjDecoderComponent comp((const void*) objdata.data(), objdata.size());
+        CodeobjDecoderComponent comp(objdata.data(), objdata.size());
         for(auto& [addr, symbol] : comp.m_symbol_map)
             return std::pair<uint64_t, uint64_t>(addr, symbol.mem_size);
         return std::pair<uint64_t, uint64_t>(0, 0);
@@ -233,10 +240,8 @@ TEST(codeobj_library, codeobj_table_test)
     ASSERT_NE(kaddr, 0);
     ASSERT_NE(memsize, 0);
 
-    map.addDecoder(
-        (const void*) objdata.data(), objdata.size(), codeobj_marker_id_t{1}, laddr1, 0x2000);
-    map.addDecoder(
-        (const void*) objdata.data(), objdata.size(), codeobj_marker_id_t{3}, laddr3, 0x2000);
+    map.addDecoder((const void*) objdata.data(), objdata.size(), marker_id_t{1}, laddr1, 0x2000);
+    map.addDecoder((const void*) objdata.data(), objdata.size(), marker_id_t{3}, laddr3, 0x2000);
 
     EXPECT_NE(map.get(laddr1 + kaddr).get(), nullptr);
     EXPECT_NE(map.get(laddr3 + kaddr).get(), nullptr);

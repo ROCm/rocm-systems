@@ -162,6 +162,7 @@ tool_codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
         while(vaddr < begin_end.second)
         {
             auto inst = codeobjTranslate.get(vaddr);
+            assert(inst != nullptr);
             if(inst->comment.size())
             {
                 std::string_view source = inst->comment;

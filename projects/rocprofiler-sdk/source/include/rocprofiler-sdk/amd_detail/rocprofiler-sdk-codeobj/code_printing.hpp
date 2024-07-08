@@ -44,6 +44,8 @@ namespace codeobj
 {
 namespace disassembly
 {
+using marker_id_t = segment::marker_id_t;
+
 struct Instruction
 {
     Instruction() = default;
@@ -51,53 +53,47 @@ struct Instruction
     : inst(std::move(_inst))
     , size(_size)
     {}
-    std::string inst;
-    std::string comment;
-    uint64_t    faddr;
-    uint64_t    vaddr;
-    uint64_t    ld_addr;
-    size_t      size;
-};
-
-struct DSourceLine
-{
-    uint64_t    vaddr;
-    uint64_t    size;
-    std::string str;
-    uint64_t    begin() const { return vaddr; }
-    bool        inrange(uint64_t addr) const { return addr >= vaddr && addr < vaddr + size; }
+    std::string inst{};
+    std::string comment{};
+    uint64_t    faddr{0};
+    uint64_t    vaddr{0};
+    size_t      size{0};
+    uint64_t    ld_addr{0};     // Instruction load address, if from loaded codeobj
+    marker_id_t codeobj_id{0};  // Instruction code object load id, if from loaded codeobj
 };
 
 class CodeobjDecoderComponent
 {
-public:
-    CodeobjDecoderComponent(const void* codeobj_data, uint64_t codeobj_size)
+    struct ProtectedFd
     {
-        m_fd = -1;
+        ProtectedFd(std::string_view uri)
+        {
 #if defined(_GNU_SOURCE) && defined(MFD_ALLOW_SEALING) && defined(MFD_CLOEXEC)
-        m_fd = ::memfd_create(m_uri.c_str(), MFD_ALLOW_SEALING | MFD_CLOEXEC);
+            m_fd = ::memfd_create(uri.data(), MFD_ALLOW_SEALING | MFD_CLOEXEC);
 #endif
-        if(m_fd == -1)  // If fail, attempt under /tmp
-            m_fd = ::open("/tmp", O_TMPFILE | O_RDWR, 0666);
-
-        if(m_fd == -1)
-        {
-            printf("could not create a temporary file for code object\n");
-            return;
+            if(m_fd == -1) m_fd = ::open("/tmp", O_TMPFILE | O_RDWR, 0666);
+            if(m_fd == -1) throw std::runtime_error("Could not create a file for codeobj!");
         }
-
-        if(size_t size = ::write(m_fd, (const char*) codeobj_data, codeobj_size);
-           size != codeobj_size)
+        ~ProtectedFd()
         {
-            printf("could not write to the temporary file\n");
-            return;
+            if(m_fd != -1) ::close(m_fd);
         }
-        ::lseek(m_fd, 0, SEEK_SET);
-        fsync(m_fd);
+        int m_fd{-1};
+    };
+
+public:
+    CodeobjDecoderComponent(const char* codeobj_data, uint64_t codeobj_size)
+    {
+        ProtectedFd prot("");
+        if(::write(prot.m_fd, codeobj_data, codeobj_size) != static_cast<int64_t>(codeobj_size))
+            throw std::runtime_error("Could not write to temporary file!");
+
+        ::lseek(prot.m_fd, 0, SEEK_SET);
+        fsync(prot.m_fd);
 
         m_line_number_map = {};
 
-        std::unique_ptr<Dwarf, void (*)(Dwarf*)> dbg(dwarf_begin(m_fd, DWARF_C_READ),
+        std::unique_ptr<Dwarf, void (*)(Dwarf*)> dbg(dwarf_begin(prot.m_fd, DWARF_C_READ),
                                                      [](Dwarf* _dbg) { dwarf_end(_dbg); });
 
         if(dbg)
@@ -105,7 +101,7 @@ public:
             Dwarf_Off cu_offset{0}, next_offset;
             size_t    header_size;
 
-            std::unordered_set<uint64_t> used_addrs;
+            std::map<uint64_t, std::string> line_addrs;
 
             while(!dwarf_nextcu(
                 dbg.get(), cu_offset, &next_offset, &header_size, nullptr, nullptr, nullptr))
@@ -129,47 +125,42 @@ public:
                         std::string src        = dwarf_linesrc(line, nullptr, nullptr);
                         auto        dwarf_line = src + ':' + std::to_string(line_number);
 
-                        if(used_addrs.find(addr) != used_addrs.end())
+                        if(line_addrs.find(addr) != line_addrs.end())
                         {
-                            size_t pos = m_line_number_map.lower_bound(addr);
-                            m_line_number_map.data()[pos].str += ' ' + dwarf_line;
+                            line_addrs.at(addr) += ' ' + dwarf_line;
                             continue;
                         }
 
-                        used_addrs.insert(addr);
-                        m_line_number_map.insert(DSourceLine{addr, 0, std::move(dwarf_line)});
+                        line_addrs.emplace(addr, std::move(dwarf_line));
                     }
                 }
                 cu_offset = next_offset;
             }
+
+            auto it = line_addrs.begin();
+            if(it != line_addrs.end())
+            {
+                while(std::next(it) != line_addrs.end())
+                {
+                    uint64_t delta   = std::next(it)->first - it->first;
+                    auto     segment = segment::address_range_t{it->first, delta, 0};
+                    m_line_number_map.emplace(segment, std::move(it->second));
+                    it++;
+                }
+                auto segment = segment::address_range_t{it->first, codeobj_size - it->first, 0};
+                m_line_number_map.emplace(segment, std::move(it->second));
+            }
         }
 
         // Can throw
-        disassembly =
-            std::make_unique<DisassemblyInstance>((const char*) codeobj_data, codeobj_size);
-        if(m_line_number_map.size())
-        {
-            size_t total_size = 0;
-            for(size_t i = 0; i < m_line_number_map.size() - 1; i++)
-            {
-                size_t s = m_line_number_map.get(i + 1).vaddr - m_line_number_map.get(i).vaddr;
-                m_line_number_map.data()[i].size = s;
-                total_size += s;
-            }
-            m_line_number_map.back().size = std::max(total_size, codeobj_size) - total_size;
-        }
+        disassembly = std::make_unique<DisassemblyInstance>(codeobj_data, codeobj_size);
         try
         {
             m_symbol_map = disassembly->GetKernelMap();  // Can throw
         } catch(...)
         {}
-
-        // disassemble_kernels();
     }
-    ~CodeobjDecoderComponent()
-    {
-        if(m_fd) ::close(m_fd);
-    }
+    ~CodeobjDecoderComponent() {}
 
     std::optional<uint64_t> va2fo(uint64_t vaddr)
     {
@@ -181,31 +172,22 @@ public:
     {
         if(!disassembly) throw std::exception();
 
-        const char* cpp_line = nullptr;
-
-        try
-        {
-            const DSourceLine& it = m_line_number_map.find_obj(vaddr);
-            cpp_line              = it.str.data();
-        } catch(...)
-        {}
-
         auto pair   = disassembly->ReadInstruction(faddr);
         auto inst   = std::make_unique<Instruction>(std::move(pair.first), pair.second);
         inst->faddr = faddr;
         inst->vaddr = vaddr;
 
-        if(cpp_line) inst->comment = cpp_line;
+        auto it = m_line_number_map.find({vaddr, 0, 0});
+        if(it != m_line_number_map.end()) inst->comment = it->second;
+
         return inst;
     }
-    int m_fd;
 
-    cached_ordered_vector<DSourceLine> m_line_number_map;
-    std::map<uint64_t, SymbolInfo>     m_symbol_map{};
-
-    std::string                               m_uri;
+    std::map<uint64_t, SymbolInfo>            m_symbol_map{};
     std::vector<std::shared_ptr<Instruction>> instructions{};
     std::unique_ptr<DisassemblyInstance>      disassembly{};
+
+    std::map<segment::address_range_t, std::string> m_line_number_map{};
 };
 
 class LoadedCodeobjDecoder
@@ -255,7 +237,8 @@ public:
         auto     faddr   = decoder->va2fo(voffset);
         if(!faddr) return nullptr;
 
-        auto unique     = decoder->disassemble_instruction(*faddr, voffset);
+        auto unique = decoder->disassemble_instruction(*faddr, voffset);
+        if(unique == nullptr || unique->size == 0) return nullptr;
         unique->ld_addr = ld_addr;
         return unique;
     }
@@ -283,7 +266,7 @@ public:
     const uint64_t load_addr;
 
 private:
-    uint64_t load_end = 0;
+    uint64_t load_end{0};
 
     std::unique_ptr<CodeobjDecoderComponent> decoder{nullptr};
 };
@@ -297,42 +280,53 @@ public:
     CodeobjMap()          = default;
     virtual ~CodeobjMap() = default;
 
-    virtual void addDecoder(const char*         filepath,
-                            codeobj_marker_id_t id,
-                            uint64_t            load_addr,
-                            uint64_t            memsize)
+    virtual void addDecoder(const char* filepath,
+                            marker_id_t id,
+                            uint64_t    load_addr,
+                            uint64_t    memsize)
     {
         decoders[id] = std::make_shared<LoadedCodeobjDecoder>(filepath, load_addr, memsize);
     }
 
-    virtual void addDecoder(const void*         data,
-                            size_t              memory_size,
-                            codeobj_marker_id_t id,
-                            uint64_t            load_addr,
-                            uint64_t            memsize)
+    virtual void addDecoder(const void* data,
+                            size_t      memory_size,
+                            marker_id_t id,
+                            uint64_t    load_addr,
+                            uint64_t    memsize)
     {
         decoders[id] =
             std::make_shared<LoadedCodeobjDecoder>(data, memory_size, load_addr, memsize);
     }
 
-    virtual bool removeDecoderbyId(codeobj_marker_id_t id) { return decoders.erase(id) != 0; }
+    virtual bool removeDecoderbyId(marker_id_t id) { return decoders.erase(id) != 0; }
 
-    std::unique_ptr<Instruction> get(codeobj_marker_id_t id, uint64_t offset)
+    std::unique_ptr<Instruction> get(marker_id_t id, uint64_t offset)
     {
-        auto& decoder = decoders.at(id);
-        return decoder->get(decoder->begin() + offset);
+        try
+        {
+            auto& decoder = decoders.at(id);
+            auto  inst    = decoder->get(decoder->begin() + offset);
+            if(inst != nullptr) inst->codeobj_id = id;
+            return inst;
+        } catch(std::out_of_range&)
+        {}
+        return nullptr;
     }
 
-    const char* getSymbolName(codeobj_marker_id_t id, uint64_t offset)
+    const char* getSymbolName(marker_id_t id, uint64_t offset)
     {
-        auto&    decoder = decoders.at(id);
-        uint64_t vaddr   = decoder->begin() + offset;
-        if(decoder->inrange(vaddr)) return decoder->getSymbolName(vaddr);
+        try
+        {
+            auto&    decoder = decoders.at(id);
+            uint64_t vaddr   = decoder->begin() + offset;
+            if(decoder->inrange(vaddr)) return decoder->getSymbolName(vaddr);
+        } catch(std::out_of_range&)
+        {}
         return nullptr;
     }
 
 protected:
-    std::unordered_map<codeobj_marker_id_t, std::shared_ptr<LoadedCodeobjDecoder>> decoders{};
+    std::unordered_map<marker_id_t, std::shared_ptr<LoadedCodeobjDecoder>> decoders{};
 };
 
 /**
@@ -346,39 +340,39 @@ public:
     CodeobjAddressTranslate()           = default;
     ~CodeobjAddressTranslate() override = default;
 
-    virtual void addDecoder(const char*         filepath,
-                            codeobj_marker_id_t id,
-                            uint64_t            load_addr,
-                            uint64_t            memsize) override
+    virtual void addDecoder(const char* filepath,
+                            marker_id_t id,
+                            uint64_t    load_addr,
+                            uint64_t    memsize) override
     {
         this->Super::addDecoder(filepath, id, load_addr, memsize);
         auto ptr = decoders.at(id);
-        table.insert({ptr->begin(), ptr->size(), id, 0});
+        table.insert({ptr->begin(), ptr->size(), id});
     }
 
-    virtual void addDecoder(const void*         data,
-                            size_t              memory_size,
-                            codeobj_marker_id_t id,
-                            uint64_t            load_addr,
-                            uint64_t            memsize) override
+    virtual void addDecoder(const void* data,
+                            size_t      memory_size,
+                            marker_id_t id,
+                            uint64_t    load_addr,
+                            uint64_t    memsize) override
     {
         this->Super::addDecoder(data, memory_size, id, load_addr, memsize);
         auto ptr = decoders.at(id);
-        table.insert({ptr->begin(), ptr->size(), id, 0});
+        table.insert({ptr->begin(), ptr->size(), id});
     }
 
-    virtual bool removeDecoder(codeobj_marker_id_t id, uint64_t load_addr)
+    virtual bool removeDecoder(marker_id_t id, uint64_t load_addr)
     {
         return table.remove(load_addr) && this->Super::removeDecoderbyId(id);
     }
 
     std::unique_ptr<Instruction> get(uint64_t vaddr)
     {
-        auto& addr_range = table.find_codeobj_in_range(vaddr);
-        return this->Super::get(addr_range.id, vaddr - addr_range.vbegin);
+        auto addr_range = table.find_codeobj_in_range(vaddr);
+        return this->Super::get(addr_range.id, vaddr - addr_range.addr);
     }
 
-    std::unique_ptr<Instruction> get(codeobj_marker_id_t id, uint64_t offset)
+    std::unique_ptr<Instruction> get(marker_id_t id, uint64_t offset)
     {
         if(id == 0)
             return get(offset);
@@ -410,7 +404,7 @@ public:
         return symbols;
     }
 
-    std::map<uint64_t, SymbolInfo> getSymbolMap(codeobj_marker_id_t id) const
+    std::map<uint64_t, SymbolInfo> getSymbolMap(marker_id_t id) const
     {
         if(decoders.find(id) == decoders.end()) return {};
 
@@ -424,7 +418,7 @@ public:
     }
 
 private:
-    CodeobjTableTranslator table;
+    segment::CodeobjTableTranslator table{};
 };
 
 }  // namespace disassembly
