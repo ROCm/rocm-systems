@@ -189,45 +189,45 @@ message(STATUS "Pytest CPU threadcount: ${PYTEST_NUMPROCS}")
 
 add_test(
     NAME test_profile_kernel_execution
-    COMMAND pytest -m kernel_execution --junitxml=tests/test_profile_kernel_execution.xml
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m kernel_execution --junitxml=tests/test_profile_kernel_execution.xml
             ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_ipblocks
-    COMMAND pytest -m block --junitxml=tests/test_profile_blocks.xml ${COV_OPTION}
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m block --junitxml=tests/test_profile_blocks.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_property(TEST test_profile_ipblocks PROPERTY COST 11)
 
 add_test(
     NAME test_profile_dispatch
-    COMMAND pytest -m dispatch --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m dispatch --junitxml=tests/test_profile_dispatch.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 set_property(TEST test_profile_ipblocks PROPERTY COST 5)
 
 add_test(
     NAME test_profile_mem
-    COMMAND pytest -m mem --junitxml=tests/test_profile_mem.xml ${COV_OPTION}
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m mem --junitxml=tests/test_profile_mem.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_join
-    COMMAND pytest -m join --junitxml=tests/test_profile_join.xml ${COV_OPTION}
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m join --junitxml=tests/test_profile_join.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_sort
-    COMMAND pytest -m sort --junitxml=tests/test_profile_sort.xml ${COV_OPTION}
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m sort --junitxml=tests/test_profile_sort.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
 add_test(
     NAME test_profile_misc
-    COMMAND pytest -m misc --junitxml=tests/test_profile_misc.xml ${COV_OPTION}
+    COMMAND ${Python3_EXECUTABLE} -m pytest -m misc --junitxml=tests/test_profile_misc.xml ${COV_OPTION}
             ${PROJECT_SOURCE_DIR}/tests/test_profile_general.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
@@ -247,7 +247,7 @@ set_tests_properties(
 
 add_test(
     NAME test_analyze_commands
-    COMMAND pytest -n ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_commands.xml
+    COMMAND ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_commands.xml
             ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_commands.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
@@ -257,7 +257,7 @@ add_test(
 
 add_test(
     NAME test_analyze_workloads
-    COMMAND pytest -n ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_workloads.xml
+    COMMAND ${Python3_EXECUTABLE} -m pytest -n ${PYTEST_NUMPROCS} --junitxml=tests/test_analyze_workloads.xml
             ${COV_OPTION} ${PROJECT_SOURCE_DIR}/tests/test_analyze_workloads.py
     WORKING_DIRECTORY ${PROJECT_SOURCE_DIR})
 
