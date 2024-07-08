@@ -364,10 +364,10 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
                 # Channel counter 
                 if '[' in ctr:
 
-                    # Remove number, append "_sum" so we know to add the channel later
+                    # Remove number, append "_expand" so we know to add the channel later
                     channel = int(ctr.split('[')[1].split(']')[0])
                     if channel == 0:
-                        counter_name = ctr.split('[')[0] + "_sum"
+                        counter_name = ctr.split('[')[0] + "_expand"
                         try:
                             normal_counters[counter_name] += 1
                         except:
@@ -406,15 +406,28 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
         file_name = os.path.join(workload_perfmon_dir, "pmc_perf_{}.txt".format(i))
 
         pmc = []
-        for name, item in f.blocks.items():
-            for ctr in item.elements:
+        for block_name in f.blocks.keys():
 
-                # Expand TCC counters
-                # e.g. TCC_HIT_sum = TCC_HIT[0] TCC_HIT[1] .... TCC_HIT[15]
-                if "TCC" in name and "_sum" in ctr:
-                    c = ctr.split("_sum")[0]
-                    pmc.extend(expand_channels(c, perfmon_config["TCC_channels"]))
-                else:
+            if block_name == "TCC":
+
+                # Expand and interleve the TCC channel counters
+                # e.g.  TCC_HIT[0] TCC_ATOMIC[0] ... TCC_HIT[1] TCC_ATOMIC[1] ...
+                channel_counters = []
+                num_channels = perfmon_config["TCC_channels"]
+                for ctr in f.blocks[block_name].elements:
+                    if "_expand" in ctr:
+                        channel_counters.append(ctr.split("_expand")[0])
+
+                for i in range(0, num_channels):
+                    for c in channel_counters:
+                        pmc.append("{}[{}]".format(c, i))
+
+                # Handle the rest of the TCC counters
+                for ctr in f.blocks[block_name].elements:
+                    if "_expand" not in ctr:
+                        pmc.append(ctr)
+            else:
+                for ctr in f.blocks[block_name].elements:
                     pmc.append(ctr)
 
         stext = "pmc: " + " ".join(pmc)
