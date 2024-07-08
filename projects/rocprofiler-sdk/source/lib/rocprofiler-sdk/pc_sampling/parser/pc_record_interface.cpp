@@ -114,4 +114,4 @@ PCSamplingParserContext::generate_upcoming_pc_record(
         buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
                       ROCPROFILER_PC_SAMPLING_RECORD_SAMPLE,
                       samples[i]);
-};
+}

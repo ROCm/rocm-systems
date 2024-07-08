@@ -160,11 +160,12 @@ query_avail_configs_for_agent(tool_agent_info* agent_info)
     {
         // The query operation failed, so consider the PC sampling is unsupported at the agent.
         // This can happen if the PC sampling service is invoked within the ROCgdb.
-        ss << "Querying PC sampling capabilities failed with status: " << status << std::endl;
+        ss << "Querying PC sampling capabilities failed with status=" << status
+           << " :: " << rocprofiler_get_status_string(status) << std::endl;
         *utils::get_output_stream() << ss.str() << std::endl;
         return false;
     }
-    else if(agent_info->avail_configs->size() == 0)
+    else if(agent_info->avail_configs->empty())
     {
         // No available configuration at the moment, so mark the PC sampling as unsupported.
         return false;

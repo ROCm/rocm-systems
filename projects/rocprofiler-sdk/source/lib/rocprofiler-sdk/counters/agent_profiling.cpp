@@ -21,18 +21,21 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/agent_profiling.hpp"
-#include <cstdint>
-#include <unordered_map>
-
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
-#include "rocprofiler-sdk/fwd.h"
+
+#include <rocprofiler-sdk/fwd.h>
+
+#include <chrono>
+#include <cstdint>
+#include <unordered_map>
 
 namespace rocprofiler
 {
@@ -46,13 +49,15 @@ hsa_inited()
 }
 
 uint64_t
-submitPacket(const CoreApiTable& table, hsa_queue_t* queue, const void* packet)
+submitPacket(hsa_queue_t* queue, const void* packet)
 {
     const uint32_t pkt_size = 0x40;
 
     // advance command queue
-    const uint64_t write_idx = table.hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
-    while((write_idx - table.hsa_queue_load_read_index_relaxed_fn(queue)) >= queue->size)
+    const uint64_t write_idx =
+        hsa::get_core_table()->hsa_queue_add_write_index_scacq_screl_fn(queue, 1);
+    while((write_idx - hsa::get_core_table()->hsa_queue_load_read_index_relaxed_fn(queue)) >=
+          queue->size)
     {
         sched_yield();
     }
@@ -74,7 +79,7 @@ submitPacket(const CoreApiTable& table, hsa_queue_t* queue, const void* packet)
     header_atomic_ptr->store(slot_data[0], std::memory_order_release);
 
     // ringdoor bell
-    table.hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
+    hsa::get_core_table()->hsa_signal_store_relaxed_fn(queue->doorbell_signal, write_idx);
 
     return write_idx;
 }
@@ -148,7 +153,7 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
     }
 
     // reset the signal to allow another sample to start
-    callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+    hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
     return true;
 }
 
@@ -167,31 +172,36 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
 
     callback_data.packet = construct_aql_pkt(callback_data.profile);
     callback_data.queue  = agent.profile_queue();
-    callback_data.table  = CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table();
 
     if(callback_data.completion.handle != 0) return;
+
+    CHECK(hsa::get_core_table() != nullptr);
+    CHECK(hsa::get_amd_ext_table() != nullptr);
+    CHECK(hsa::get_core_table()->hsa_signal_create_fn != nullptr);
+    CHECK(hsa::get_core_table()->hsa_signal_wait_relaxed_fn != nullptr);
+    CHECK(hsa::get_core_table()->hsa_signal_store_relaxed_fn != nullptr);
+    CHECK(hsa::get_amd_ext_table()->hsa_amd_signal_async_handler_fn != nullptr);
 
     // Tri-state signal
     //   1: allow next sample to start
     //   0: sample in progress
     //  -1: sample complete
-    CHECK_EQ(callback_data.table.hsa_signal_create_fn(1, 0, nullptr, &callback_data.completion),
+    CHECK_EQ(hsa::get_core_table()->hsa_signal_create_fn(1, 0, nullptr, &callback_data.completion),
              HSA_STATUS_SUCCESS);
 
     // Signal to manage the startup of the context. Allows us to ensure that
     // the AQL packet we inject with start_context() completes before returning
-    CHECK_EQ(callback_data.table.hsa_signal_create_fn(1, 0, nullptr, &callback_data.start_signal),
-             HSA_STATUS_SUCCESS);
+    CHECK_EQ(
+        hsa::get_core_table()->hsa_signal_create_fn(1, 0, nullptr, &callback_data.start_signal),
+        HSA_STATUS_SUCCESS);
 
     // Setup callback
     // NOLINTBEGIN(performance-no-int-to-ptr)
-    CHECK_EQ(CHECK_NOTNULL(hsa::get_queue_controller())
-                 ->get_ext_table()
-                 .hsa_amd_signal_async_handler_fn(callback_data.completion,
-                                                  HSA_SIGNAL_CONDITION_LT,
-                                                  0,
-                                                  agent_async_handler,
-                                                  (void*) &callback_data),
+    CHECK_EQ(hsa::get_amd_ext_table()->hsa_amd_signal_async_handler_fn(callback_data.completion,
+                                                                       HSA_SIGNAL_CONDITION_LT,
+                                                                       0,
+                                                                       agent_async_handler,
+                                                                       &callback_data),
              HSA_STATUS_SUCCESS);
     // NOLINTEND(performance-no-int-to-ptr)
 
@@ -207,23 +217,20 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
     CHECK(agent.get_hsa_agent().handle != 0);
 
     aql::set_profiler_active_on_queue(
-        CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table(),
-        agent.cpu_pool(),
-        agent.get_hsa_agent(),
-        [&](hsa::rocprofiler_packet pkt) {
+        agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
             pkt.ext_amd_aql_pm4.completion_signal = callback_data.completion;
-            submitPacket(callback_data.table, callback_data.queue, (void*) &pkt);
+            submitPacket(callback_data.queue, (void*) &pkt);
             constexpr auto timeout_hint =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
-            if(callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                              HSA_SIGNAL_CONDITION_EQ,
-                                                              0,
-                                                              timeout_hint.count(),
-                                                              HSA_WAIT_STATE_ACTIVE) != 0)
+            if(hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                                 HSA_SIGNAL_CONDITION_EQ,
+                                                                 0,
+                                                                 timeout_hint.count(),
+                                                                 HSA_WAIT_STATE_ACTIVE) != 0)
             {
                 ROCP_FATAL << "Could not set agent to be profiled";
             }
-            callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, 1);
+            hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 1);
         });
 }
 }  // namespace
@@ -284,16 +291,16 @@ read_agent_ctx(const context::context*    ctx,
         if(callback_data.profile->reqired_hw_counters.empty())
         {
             callback_data.user_data = user_data;
-            callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, -1);
+            hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, -1);
             // Wait for the barrier/read packet to complete
             if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
             {
                 // Wait for any inprogress samples to complete before returning
-                callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                               HSA_SIGNAL_CONDITION_EQ,
-                                                               1,
-                                                               UINT64_MAX,
-                                                               HSA_WAIT_STATE_ACTIVE);
+                hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                                  HSA_SIGNAL_CONDITION_EQ,
+                                                                  1,
+                                                                  UINT64_MAX,
+                                                                  HSA_WAIT_STATE_ACTIVE);
             }
             continue;
         }
@@ -307,28 +314,26 @@ read_agent_ctx(const context::context*    ctx,
                                   agent->get_rocp_agent()->simd_arrays_per_engine);
 
         // Submit the read packet to the queue
-        submitPacket(callback_data.table,
-                     agent->profile_queue(),
-                     (void*) &callback_data.packet->packets.read_packet);
+        submitPacket(agent->profile_queue(), &callback_data.packet->packets.read_packet);
 
         // Submit a barrier packet. This is needed to flush hardware caches. Without this
         // the read packet may not have the correct data.
         rocprofiler::hsa::rocprofiler_packet barrier{};
         barrier.barrier_and.header            = header_pkt(HSA_PACKET_TYPE_BARRIER_AND);
         barrier.barrier_and.completion_signal = callback_data.completion;
-        callback_data.table.hsa_signal_store_relaxed_fn(callback_data.completion, 0);
+        hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 0);
         callback_data.user_data = user_data;
-        submitPacket(callback_data.table, agent->profile_queue(), (void*) &barrier.barrier_and);
+        submitPacket(agent->profile_queue(), &barrier.barrier_and);
 
         // Wait for the barrier/read packet to complete
         if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
         {
             // Wait for any inprogress samples to complete before returning
-            callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                           HSA_SIGNAL_CONDITION_EQ,
-                                                           1,
-                                                           UINT64_MAX,
-                                                           HSA_WAIT_STATE_ACTIVE);
+            hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                              HSA_SIGNAL_CONDITION_EQ,
+                                                              1,
+                                                              UINT64_MAX,
+                                                              HSA_WAIT_STATE_ACTIVE);
         }
     }
 
@@ -458,17 +463,15 @@ start_agent_ctx(const context::context* ctx)
         }
 
         callback_data.packet->packets.start_packet.completion_signal = callback_data.start_signal;
-        callback_data.table.hsa_signal_store_relaxed_fn(callback_data.start_signal, 1);
-        submitPacket(callback_data.table,
-                     agent->profile_queue(),
-                     (void*) &callback_data.packet->packets.start_packet);
+        hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.start_signal, 1);
+        submitPacket(agent->profile_queue(), &callback_data.packet->packets.start_packet);
 
         // Wait for startup to finish before continuing
-        callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.start_signal,
-                                                       HSA_SIGNAL_CONDITION_EQ,
-                                                       0,
-                                                       UINT64_MAX,
-                                                       HSA_WAIT_STATE_ACTIVE);
+        hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.start_signal,
+                                                          HSA_SIGNAL_CONDITION_EQ,
+                                                          0,
+                                                          UINT64_MAX,
+                                                          HSA_WAIT_STATE_ACTIVE);
     }
 
     agent_ctx.status.exchange(
@@ -517,17 +520,15 @@ stop_agent_ctx(const context::context* ctx)
         if(!callback_data.profile->reqired_hw_counters.empty())
         {
             // Remove when AQL is updated to not require stop to be called first
-            submitPacket(callback_data.table,
-                         agent->profile_queue(),
-                         (void*) &callback_data.packet->packets.stop_packet);
+            submitPacket(agent->profile_queue(), &callback_data.packet->packets.stop_packet);
         }
 
         // Wait for the stop packet to complete
-        callback_data.table.hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                       HSA_SIGNAL_CONDITION_EQ,
-                                                       1,
-                                                       UINT64_MAX,
-                                                       HSA_WAIT_STATE_ACTIVE);
+        hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                          HSA_SIGNAL_CONDITION_EQ,
+                                                          1,
+                                                          UINT64_MAX,
+                                                          HSA_WAIT_STATE_ACTIVE);
     }
 
     agent_ctx.status.exchange(
@@ -553,7 +554,7 @@ agent_profile_hsa_registration()
 
 agent_callback_data::~agent_callback_data()
 {
-    if(completion.handle != 0) table.hsa_signal_destroy_fn(completion);
+    if(completion.handle != 0) hsa::get_core_table()->hsa_signal_destroy_fn(completion);
 }
 }  // namespace counters
 }  // namespace rocprofiler

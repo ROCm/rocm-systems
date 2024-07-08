@@ -29,5 +29,5 @@ set_tests_properties(${codeobj-library-test_TESTS} PROPERTIES TIMEOUT 10 LABELS
 target_compile_definitions(codeobj-library-test
                            PRIVATE -DCODEOBJ_BINARY_DIR=\"${CMAKE_CURRENT_BINARY_DIR}/\")
 
-configure_file(smallkernel.b smallkernel.b COPYONLY)
+configure_file(smallkernel.bin smallkernel.bin COPYONLY)
 configure_file(hipcc_output.s hipcc_output.s COPYONLY)

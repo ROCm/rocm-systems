@@ -22,17 +22,17 @@
 
 #pragma once
 
-#include <functional>
-#include <map>
-#include <string>
-
-#include <hsa/hsa_ven_amd_aqlprofile.h>
-
-#include <rocprofiler-sdk/fwd.h>
-
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+
+#include <hsa/hsa_ven_amd_aqlprofile.h>
+
+#include <functional>
+#include <map>
+#include <string>
 
 namespace rocprofiler
 {
@@ -62,8 +62,7 @@ set_dim_id_from_sample(rocprofiler_counter_instance_id_t& id,
                        size_t                             sample_id);
 
 rocprofiler_status_t
-set_profiler_active_on_queue(const AmdExtTable&                api,
-                             hsa_amd_memory_pool_t             pool,
+set_profiler_active_on_queue(hsa_amd_memory_pool_t             pool,
                              hsa_agent_t                       hsa_agent,
                              const rocprofiler_profile_pkt_cb& packet_submit);
 }  // namespace aql

@@ -108,9 +108,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_NO_HARDWARE_COUNTERS,
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_MISMATCH,
                           "Counter profile agent does not match the agent in the context")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE,
-                          "The service is not available."
-                          "Please refer to API functions that return this status code"
-                          "for more information.")
+                          "The service is not available. Please refer to API functions that return "
+                          "this status code for more information.")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,
                           "Request exceeds the capabilities of the hardware to collect")
 

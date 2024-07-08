@@ -143,3 +143,21 @@ jobs:
         command: review
         pull_number: ${{ github.event.pull_request.number }}
         git_dir: '.'
+
+  missing-new-line:
+    runs-on: ubuntu-22.04
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Find missing new line
+      shell: bash
+      run: |
+        OUTFILE=missing_newline.txt
+        for i in $(find source/lib source/include tests samples cmake -type f | egrep -v '\.bin$'); do VAL=$(tail -c 1 ${i}); if [ -n "${VAL}" ]; then echo "- ${i}" >> ${OUTFILE}; fi; done
+        if [[ -f ${OUTFILE} && $(cat ${OUTFILE} | wc -l) -gt 0 ]]; then
+          echo -e "\nError! Source code missing new line at end of file...\n"
+          echo -e "\nFiles:\n"
+          cat ${OUTFILE}
+          exit 1
+        fi

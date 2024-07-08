@@ -19,12 +19,14 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
+#include <hsa/hsa_api_trace_version.h>
 #include <hsa/hsa_ext_amd.h>
 
 namespace rocprofiler
@@ -38,6 +40,9 @@ get_ext_table()
 {
     static auto _v = []() {
         auto val                                      = AmdExtTable{};
+        val.version.major_id                          = HSA_AMD_EXT_API_TABLE_MAJOR_VERSION;
+        val.version.minor_id                          = sizeof(AmdExtTable);
+        val.version.step_id                           = HSA_AMD_EXT_API_TABLE_STEP_VERSION;
         val.hsa_amd_coherency_get_type_fn             = hsa_amd_coherency_get_type;
         val.hsa_amd_coherency_set_type_fn             = hsa_amd_coherency_set_type;
         val.hsa_amd_profiling_set_profiler_enabled_fn = hsa_amd_profiling_set_profiler_enabled;
@@ -122,6 +127,9 @@ get_api_table()
 {
     static auto _v = []() {
         auto val                                     = CoreApiTable{};
+        val.version.major_id                         = HSA_CORE_API_TABLE_MAJOR_VERSION;
+        val.version.minor_id                         = sizeof(CoreApiTable);
+        val.version.step_id                          = HSA_CORE_API_TABLE_STEP_VERSION;
         val.hsa_init_fn                              = hsa_init;
         val.hsa_shut_down_fn                         = hsa_shut_down;
         val.hsa_system_get_info_fn                   = hsa_system_get_info;

@@ -31,8 +31,8 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
-#include "rocprofiler-sdk/buffer.h"
 
+#include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/dispatch_profile.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
@@ -51,7 +51,6 @@
 
 using namespace rocprofiler::counters::test_constants;
 using namespace rocprofiler::counters::testing;
-using namespace rocprofiler::counters;
 using namespace rocprofiler;
 
 #define ROCPROFILER_CALL(result, msg)                                                              \
@@ -76,17 +75,17 @@ auto
 findDeviceMetrics(const hsa::AgentCache& agent, const std::unordered_set<std::string>& metrics)
 {
     std::vector<counters::Metric> ret;
-    auto                          all_counters = counters::getMetricMap();
+    const auto*                   all_counters = counters::getMetricMap();
 
     ROCP_ERROR << "Looking up counters for " << std::string(agent.name());
-    auto gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
+    const auto* gfx_metrics = common::get_val(*all_counters, std::string(agent.name()));
     if(!gfx_metrics)
     {
         ROCP_ERROR << "No counters found for " << std::string(agent.name());
         return ret;
     }
 
-    for(auto& counter : *gfx_metrics)
+    for(const auto& counter : *gfx_metrics)
     {
         if(metrics.count(counter.name()) > 0 || metrics.empty())
         {
@@ -102,6 +101,8 @@ test_init()
     HsaApiTable table;
     table.amd_ext_ = &get_ext_table();
     table.core_    = &get_api_table();
+    rocprofiler::hsa::copy_table(table.core_, 0);
+    rocprofiler::hsa::copy_table(table.amd_ext_, 0);
     agent::construct_agent_cache(&table);
     ASSERT_TRUE(hsa::get_queue_controller() != nullptr);
     hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
@@ -292,10 +293,7 @@ protected:
             // Set state of the queue to allow profiling (may not be needed since AQL
             // may do this in the future).
             aql::set_profiler_active_on_queue(
-                get_ext_table(),
-                agent.cpu_pool(),
-                agent.get_hsa_agent(),
-                [&](hsa::rocprofiler_packet pkt) {
+                agent.cpu_pool(), agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
                     pkt.ext_amd_aql_pm4.completion_signal = completion_signal;
                     submitPacket(queue, (void*) &pkt);
 

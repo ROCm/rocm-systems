@@ -510,16 +510,11 @@ Queue::Queue(const AgentCache&  agent,
     CHECK(_agent.get_hsa_agent().handle != 0);
     // Set state of the queue to allow profiling
     aql::set_profiler_active_on_queue(
-        CHECK_NOTNULL(hsa::get_queue_controller())->get_ext_table(),
-        _agent.cpu_pool(),
-        _agent.get_hsa_agent(),
-        [&](hsa::rocprofiler_packet pkt) {
+        _agent.cpu_pool(), _agent.get_hsa_agent(), [&](hsa::rocprofiler_packet pkt) {
             hsa_signal_t completion;
             create_signal(0, &completion);
             pkt.ext_amd_aql_pm4.completion_signal = completion;
-            counters::submitPacket(CHECK_NOTNULL(hsa::get_queue_controller())->get_core_table(),
-                                   _intercept_queue,
-                                   &pkt);
+            counters::submitPacket(_intercept_queue, &pkt);
             constexpr auto timeout_hint =
                 std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::seconds{1});
             if(core_api.hsa_signal_wait_relaxed_fn(completion,

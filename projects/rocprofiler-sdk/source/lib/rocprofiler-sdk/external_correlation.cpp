@@ -146,10 +146,10 @@ external_correlation::pop(rocprofiler_thread_id_t tid)
 {
     static auto default_tid = get_default_tid();
 
-    return data.wlock(
-        [](external_correlation_map_t& _data, rocprofiler_thread_id_t tid_v) {
+    return data.rlock(
+        [](const external_correlation_map_t& _data, rocprofiler_thread_id_t tid_v) {
             if(_data.count(tid_v) == 0) return empty_user_data;
-            auto& itr = _data.at(tid_v);
+            const auto& itr = _data.at(tid_v);
             return itr.wlock([tid_v](external_correlation_stack_t& data_stack) {
                 if(data_stack.empty()) return empty_user_data;
                 auto ret = data_stack.back();

@@ -69,7 +69,7 @@ static const std::vector<char>&
 GetCodeobjContents()
 {
     static std::vector<char> buffer = []() {
-        std::string   filename = CODEOBJ_BINARY_DIR "smallkernel.b";
+        std::string   filename = CODEOBJ_BINARY_DIR "smallkernel.bin";
         std::ifstream file(filename.data(), std::ios::binary);
 
         using iterator_t = std::istreambuf_iterator<char>;
@@ -141,7 +141,7 @@ TEST(codeobj_library, decoder_component)
 
     CodeobjDecoderComponent component(objdata.data(), objdata.size());
 
-    std::string          kernel_with_protocol = "file://" CODEOBJ_BINARY_DIR "smallkernel.b";
+    std::string          kernel_with_protocol = "file://" CODEOBJ_BINARY_DIR "smallkernel.bin";
     LoadedCodeobjDecoder loadecomp(kernel_with_protocol.data(), loaded_offset, objdata.size());
 
     ASSERT_EQ(component.m_symbol_map.size(), 1);
