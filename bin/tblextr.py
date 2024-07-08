@@ -416,6 +416,8 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
 #############################################################
 # arguments manipulation routines
 def get_field(args, field):
+    if args == None:
+        return (None, 0)
     ptrn1_field = re.compile(r"^.* " + field + "\(")
     ptrn2_field = re.compile(r"\) .*$")
     ptrn3_field = re.compile(r"\)\)$")
@@ -483,7 +485,13 @@ def fill_api_db(
     range_start_times = {}
     copy_csv = ""
 
-    ptrn_val = re.compile(r"(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$")
+    # Matches normal API records.
+    ptrn_api_record = re.compile(r"(\d+):(\d+) (\d+):(\d+) ([^\(]+)(\(.*)$")
+    # Matches records with a function name of "unknown" and no parameters.
+    # Capture groups 1-4 should match the same information as in ptrn_api_record.
+    # Used to avoid modifying ptrn_api_record regex.
+    ptrn_api_record_unknown = re.compile(r"(\d+):(\d+) (\d+):(\d+) (unknown).*$")
+
     hip_mcopy_ptrn = re.compile(r"hipMemcpy|hipMemset")
     hip_wait_event_ptrn = re.compile(r"WaitEvent")
     hip_sync_event_ptrn = re.compile(r"hipStreamSynchronize")
@@ -558,209 +566,215 @@ def fill_api_db(
                 )
                 record = mfixformat.group(1) + "( " + reformated_args + ")"
 
-            m = ptrn_val.match(record)
+            m = ptrn_api_record.match(record)
             if not m:
-                fatal(api_name + " bad record: '" + record + "'")
-            else:
-                rec_vals = []
-                rec_len = len(api_table_descr[0]) - 3
-                for ind in range(1, rec_len):
+                m = ptrn_api_record_unknown.match(record)
+                if not m:
+                    fatal(api_name + " bad record: '" + record + "'")
+
+            rec_vals = []
+            rec_len = len(api_table_descr[0]) - 3
+            for ind in range(1, rec_len):
+                try:
                     rec_vals.append(m.group(ind))
-                proc_id = int(rec_vals[2])
-                thread_id = int(rec_vals[3])
-                record_name = rec_vals[4]
-                record_args = rec_vals[5]
+                except IndexError:
+                    rec_vals.append(None)
+            proc_id = int(rec_vals[2])
+            thread_id = int(rec_vals[3])
+            record_name = rec_vals[4]
+            # record_args is optional, and may be None if an unknown record is found.
+            record_args = rec_vals[5]
 
-                # incrementing per-process record id/correlation id
-                if not proc_id in record_id_dict:
-                    record_id_dict[proc_id] = 0
-                record_id_dict[proc_id] += 1
-                record_id = record_id_dict[proc_id]
+            # incrementing per-process record id/correlation id
+            if not proc_id in record_id_dict:
+                record_id_dict[proc_id] = 0
+            record_id_dict[proc_id] += 1
+            record_id = record_id_dict[proc_id]
 
-                # setting correlationid to record id if correlation id is not defined
-                if corr_id == 0:
-                    corr_id = record_id
+            # setting correlationid to record id if correlation id is not defined
+            if corr_id == 0:
+                corr_id = record_id
 
-                rec_vals.append(corr_id)
-                # extracting/converting stream id
-                (stream_id, stream_found) = get_field(record_args, "stream")
+            rec_vals.append(corr_id)
+            # extracting/converting stream id
+            (stream_id, stream_found) = get_field(record_args, "stream")
+            if stream_found:
+                stream_id = get_stream_index(stream_id)
+                (rec_vals[5], found) = set_field(record_args, "stream", stream_id)
+                if found == 0:
+                    fatal(
+                        'set_field() failed for "stream", args: "' + record_args + '"'
+                    )
+            else:
+                (stream_id, stream_found) = get_field(record_args, "hStream")
                 if stream_found:
                     stream_id = get_stream_index(stream_id)
-                    (rec_vals[5], found) = set_field(record_args, "stream", stream_id)
+                    (rec_vals[5], found) = set_field(
+                        record_args, "hStream", stream_id
+                    )
                     if found == 0:
                         fatal(
-                            'set_field() failed for "stream", args: "' + record_args + '"'
+                            'set_field() failed for "stream", args: "'
+                            + record_args
+                            + '"'
                         )
                 else:
-                    (stream_id, stream_found) = get_field(record_args, "hStream")
-                    if stream_found:
-                        stream_id = get_stream_index(stream_id)
-                        (rec_vals[5], found) = set_field(
-                            record_args, "hStream", stream_id
-                        )
-                        if found == 0:
-                            fatal(
-                                'set_field() failed for "stream", args: "'
-                                + record_args
-                                + '"'
-                            )
-                    else:
-                        stream_id = 0
+                    stream_id = 0
 
-                if hip_strm_cr_event_ptrn.match(record_name):
-                    hip_streams.append(stream_id)
+            if hip_strm_cr_event_ptrn.match(record_name):
+                hip_streams.append(stream_id)
 
-                if hip_sync_event_ptrn.match(record_name):
-                    if (proc_id, stream_id) in last_hip_api_map:
-                        (last_hip_api_corr_id, last_hip_api_from_pid) = last_hip_api_map[
-                            (proc_id, stream_id)
-                        ][-1]
-                        sync_api_beg_us = int((int(rec_vals[0]) - START_NS) / 1000)
-                        if not proc_id in dep_dict:
-                            dep_dict[proc_id] = {}
-                        if HIP_PID not in dep_dict[proc_id]:
-                            dep_dict[proc_id][HIP_PID] = {
-                                "pid": last_hip_api_from_pid,
-                                "from": [],
-                                "to": {},
-                                "id": [],
-                            }
-                        dep_dict[proc_id][HIP_PID]["from"].append(
-                            (-1, stream_id, thread_id)
-                        )
-                        dep_dict[proc_id][HIP_PID]["id"].append(last_hip_api_corr_id)
-                        dep_dict[proc_id][HIP_PID]["to"][
-                            last_hip_api_corr_id
-                        ] = sync_api_beg_us
-                        from_ids[(last_hip_api_corr_id, proc_id)] = (
-                            len(dep_dict[proc_id][HIP_PID]["from"]) - 1
-                        )
-
-                m = beg_pattern.match(record)
-                gpu_id = 0
-                if m:
-                    kernel_properties = m.group(2)
-                    for prop in kernel_properties.split(", "):
-                        m = prop_pattern.match(prop)
-                        if m:
-                            val = m.group(2)
-                            var = m.group(1)
-                            if var == "gpu-id":
-                                gpu_id = int(val)
-
-                if hsa_mcopy_ptrn.match(record_name) or hip_mcopy_ptrn.match(record_name):
-                    ops_section_id = COPY_PID
-                else:
-                    ops_section_id = GPU_BASE_PID + int(gpu_id)
-
-                if (proc_id, stream_id) not in last_hip_api_map:
-                    last_hip_api_map[(proc_id, stream_id)] = []
-                last_hip_api_map[(proc_id, stream_id)].append((corr_id, ops_section_id))
-
-                # asyncronous opeartion API found
-                op_found = 0
-                mcopy_found = 0
-
-                # extract kernel name string
-                (kernel_str, kernel_found) = get_field(record_args, "kernel")
-                if kernel_found == 0:
-                    kernel_str = ""
-                else:
-                    op_found = 1
-
-                if hip_mcopy_ptrn.match(record_name):
-                    mcopy_found = 1
-                    op_found = 1
-
-                # HIP Graph API
-                if hip_graph_ptrn.search(record_name):
-                    op_found = 1
-
-                # HIP WaitEvent API
-                if wait_event_ptrn.search(record_name):
-                    op_found = 1
-
-                if hip_stream_wait_write_ptrn.search(record_name):
-                    op_found = 1
-
-                # HSA memcopy API
-                if hsa_mcopy_ptrn.match(record_name):
-                    mcopy_found = 1
-                    op_found = 1
-
-                    stream_id = thread_id
-                    hsa_patch_data[(corr_id, proc_id)] = thread_id
-
-                if op_found:
-                    roctx_msg = ""
-
-                    if not thread_id in range_start_times:
-                        range_start_times[thread_id] = (
-                            sorted(range_data[thread_id].keys())
-                            if thread_id in range_data
-                            else []
-                        )
-                    start_times = range_start_times[thread_id]
-
-                    index = bisect.bisect_right(start_times, int(rec_vals[0]))
-                    if index > 0:
-                        # We found the range that is closest to this operation. Iterate the
-                        # range stack this range is part of until we find a range that entirely
-                        # contains the operation.
-                        range_start = start_times[index - 1]
-                        while range_start != 0:
-                            (range_end, range_start, msg) = range_data[thread_id][
-                                range_start
-                            ]
-                            if int(rec_vals[1]) < range_end:
-                                # This range contains the operation.
-                                roctx_msg = msg
-                                break
-
-                    ops_patch_data[(corr_id, proc_id)] = (
-                        thread_id,
-                        stream_id,
-                        kernel_str,
-                        roctx_msg,
+            if hip_sync_event_ptrn.match(record_name):
+                if (proc_id, stream_id) in last_hip_api_map:
+                    (last_hip_api_corr_id, last_hip_api_from_pid) = last_hip_api_map[
+                        (proc_id, stream_id)
+                    ][-1]
+                    sync_api_beg_us = int((int(rec_vals[0]) - START_NS) / 1000)
+                    if not proc_id in dep_dict:
+                        dep_dict[proc_id] = {}
+                    if HIP_PID not in dep_dict[proc_id]:
+                        dep_dict[proc_id][HIP_PID] = {
+                            "pid": last_hip_api_from_pid,
+                            "from": [],
+                            "to": {},
+                            "id": [],
+                        }
+                    dep_dict[proc_id][HIP_PID]["from"].append(
+                        (-1, stream_id, thread_id)
+                    )
+                    dep_dict[proc_id][HIP_PID]["id"].append(last_hip_api_corr_id)
+                    dep_dict[proc_id][HIP_PID]["to"][
+                        last_hip_api_corr_id
+                    ] = sync_api_beg_us
+                    from_ids[(last_hip_api_corr_id, proc_id)] = (
+                        len(dep_dict[proc_id][HIP_PID]["from"]) - 1
                     )
 
-                if op_found:
-                    op_found = 0
-                    beg_ns = int(rec_vals[0])
-                    end_ns = int(rec_vals[1])
-                    dur_us = int((end_ns - beg_ns) / 1000)
-                    from_us = int((beg_ns - START_NS) / 1000) + dur_us / 2
-                    if api_pid == HIP_PID or hsa_copy_deps == 1:
-                        if not proc_id in dep_dict:
-                            dep_dict[proc_id] = {}
-                        dep_proc = dep_dict[proc_id]
-                        if not dep_pid in dep_proc:
-                            if api_pid == "HIP_PID":
-                                dep_proc[dep_pid] = {"pid": api_pid, "from": [], "id": []}
-                            else:
-                                dep_proc[dep_pid] = {
-                                    "pid": api_pid,
-                                    "from": [],
-                                    "id": [],
-                                    "to": {},
-                                }
-                        dep_str = dep_proc[dep_pid]
-                        dep_str["from"].append((from_us, stream_id, thread_id))
-                        if expl_id:
-                            dep_str["id"].append(corr_id)
+            m = beg_pattern.match(record)
+            gpu_id = 0
+            if m:
+                kernel_properties = m.group(2)
+                for prop in kernel_properties.split(", "):
+                    m = prop_pattern.match(prop)
+                    if m:
+                        val = m.group(2)
+                        var = m.group(1)
+                        if var == "gpu-id":
+                            gpu_id = int(val)
 
-                # memcopy registering
-                api_data = (
-                    memory_manager.register_api(rec_vals) if mcopy_data_enabled else ""
+            if hsa_mcopy_ptrn.match(record_name) or hip_mcopy_ptrn.match(record_name):
+                ops_section_id = COPY_PID
+            else:
+                ops_section_id = GPU_BASE_PID + int(gpu_id)
+
+            if (proc_id, stream_id) not in last_hip_api_map:
+                last_hip_api_map[(proc_id, stream_id)] = []
+            last_hip_api_map[(proc_id, stream_id)].append((corr_id, ops_section_id))
+
+            # asyncronous opeartion API found
+            op_found = 0
+            mcopy_found = 0
+
+            # extract kernel name string
+            (kernel_str, kernel_found) = get_field(record_args, "kernel")
+            if kernel_found == 0:
+                kernel_str = ""
+            else:
+                op_found = 1
+
+            if hip_mcopy_ptrn.match(record_name):
+                mcopy_found = 1
+                op_found = 1
+
+            # HIP Graph API
+            if hip_graph_ptrn.search(record_name):
+                op_found = 1
+
+            # HIP WaitEvent API
+            if wait_event_ptrn.search(record_name):
+                op_found = 1
+
+            if hip_stream_wait_write_ptrn.search(record_name):
+                op_found = 1
+
+            # HSA memcopy API
+            if hsa_mcopy_ptrn.match(record_name):
+                mcopy_found = 1
+                op_found = 1
+
+                stream_id = thread_id
+                hsa_patch_data[(corr_id, proc_id)] = thread_id
+
+            if op_found:
+                roctx_msg = ""
+
+                if not thread_id in range_start_times:
+                    range_start_times[thread_id] = (
+                        sorted(range_data[thread_id].keys())
+                        if thread_id in range_data
+                        else []
+                    )
+                start_times = range_start_times[thread_id]
+
+                index = bisect.bisect_right(start_times, int(rec_vals[0]))
+                if index > 0:
+                    # We found the range that is closest to this operation. Iterate the
+                    # range stack this range is part of until we find a range that entirely
+                    # contains the operation.
+                    range_start = start_times[index - 1]
+                    while range_start != 0:
+                        (range_end, range_start, msg) = range_data[thread_id][
+                            range_start
+                        ]
+                        if int(rec_vals[1]) < range_end:
+                            # This range contains the operation.
+                            roctx_msg = msg
+                            break
+
+                ops_patch_data[(corr_id, proc_id)] = (
+                    thread_id,
+                    stream_id,
+                    kernel_str,
+                    roctx_msg,
                 )
-                rec_vals.append(api_data)
 
-                # setting section and lane
-                rec_vals.append(api_pid)    # __section
-                rec_vals.append(thread_id)  # __lane
+            if op_found:
+                op_found = 0
+                beg_ns = int(rec_vals[0])
+                end_ns = int(rec_vals[1])
+                dur_us = int((end_ns - beg_ns) / 1000)
+                from_us = int((beg_ns - START_NS) / 1000) + dur_us / 2
+                if api_pid == HIP_PID or hsa_copy_deps == 1:
+                    if not proc_id in dep_dict:
+                        dep_dict[proc_id] = {}
+                    dep_proc = dep_dict[proc_id]
+                    if not dep_pid in dep_proc:
+                        if api_pid == "HIP_PID":
+                            dep_proc[dep_pid] = {"pid": api_pid, "from": [], "id": []}
+                        else:
+                            dep_proc[dep_pid] = {
+                                "pid": api_pid,
+                                "from": [],
+                                "id": [],
+                                "to": {},
+                            }
+                    dep_str = dep_proc[dep_pid]
+                    dep_str["from"].append((from_us, stream_id, thread_id))
+                    if expl_id:
+                        dep_str["id"].append(corr_id)
 
-                # inserting an API record to DB
-                db.insert_entry(table_handle, rec_vals)
+            # memcopy registering
+            api_data = (
+                memory_manager.register_api(rec_vals) if mcopy_data_enabled else ""
+            )
+            rec_vals.append(api_data)
+
+            # setting section and lane
+            rec_vals.append(api_pid)    # __section
+            rec_vals.append(thread_id)  # __lane
+
+            # inserting an API record to DB
+            db.insert_entry(table_handle, rec_vals)
 
     # inserting of dispatch events correlated to the dependent dispatches
     for from_ns, proc_id, thread_id in dep_list:
