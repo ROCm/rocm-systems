@@ -127,7 +127,7 @@ rocprofiler_sample_add_executable(
 target_include_directories(
     pcie_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR}
                                   ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(pcie_counters_sampler PRIVATE rocprofiler-v2 systemd amd_comgr)
+target_link_libraries(pcie_counters_sampler PRIVATE rocprofiler-v2 amd_comgr)
 target_link_options(pcie_counters_sampler PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples pcie_counters_sampler)
 install(TARGETS pcie_counters_sampler
@@ -143,7 +143,7 @@ rocprofiler_sample_add_executable(
 target_include_directories(
     xgmi_counters_sampler PRIVATE ${PROJECT_SOURCE_DIR}
                                   ${CMAKE_CURRENT_SOURCE_DIR}/common)
-target_link_libraries(xgmi_counters_sampler PRIVATE rocprofiler-v2 systemd amd_comgr)
+target_link_libraries(xgmi_counters_sampler PRIVATE rocprofiler-v2 amd_comgr)
 target_link_options(xgmi_counters_sampler PRIVATE "-Wl,--build-id=md5")
 add_dependencies(samples xgmi_counters_sampler)
 install(TARGETS xgmi_counters_sampler

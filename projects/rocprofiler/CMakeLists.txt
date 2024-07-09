@@ -366,7 +366,7 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
     set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
     set(CPACK_DEBIAN_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
     set(CPACK_DEBIAN_RUNTIME_PACKAGE_DEPENDS
-        "rocminfo, hsa-rocr, rocm-core, libsystemd-dev, libelf-dev, libnuma-dev, libpciaccess-dev, libxml2-dev"
+        "rocminfo, hsa-rocr, rocm-core, libelf-dev, libnuma-dev, libxml2-dev"
         )
     set(CPACK_DEBIAN_DEV_PACKAGE_NAME "${PROJECT_NAME}-dev")
     set(CPACK_DEBIAN_DEV_PACKAGE_DEPENDS "${PROJECT_NAME}, hsa-rocr-dev, rocm-core")
@@ -409,7 +409,7 @@ if(${LIBRARY_TYPE} STREQUAL SHARED)
     set(CPACK_RPM_FILE_NAME "RPM-DEFAULT")
     set(CPACK_RPM_RUNTIME_PACKAGE_NAME "${PROJECT_NAME}")
     set(CPACK_RPM_RUNTIME_PACKAGE_REQUIRES
-        "rocminfo, hsa-rocr, rocm-core, systemd-devel, libpciaccess-devel, libxml2-devel")
+        "rocminfo, hsa-rocr, rocm-core, libxml2-devel")
     set(CPACK_RPM_DEV_PACKAGE_NAME "${PROJECT_NAME}-devel")
     set(CPACK_RPM_DEV_PACKAGE_REQUIRES "${PROJECT_NAME}, hsa-rocr-devel, rocm-core")
     set(CPACK_RPM_DEV_PACKAGE_PROVIDES "${PROJECT_NAME}-dev")

@@ -58,6 +58,7 @@ cd .../rocprofiler/build
 export LD_LIBRARY_PATH=.:$LD_LIBRARY_PATH # paths to ROC profiler and oher libraries
 export HSA_TOOLS_LIB=librocprofiler64.so.1 # ROC profiler library loaded by HSA runtime
 export ROCP_TOOL_LIB=test/librocprof-tool.so # tool library loaded by ROC profiler
+export LIBPCI_TOOL_LIB=libpciaccess.so # PCI access library loaded by ROC profiler
 export ROCP_METRICS=metrics.xml # ROC profiler metrics config file
 export ROCP_INPUT=input.xml # input file for the tool library
 export ROCP_OUTPUT_DIR=./ # output directory for the tool library, for metrics results file 'results.txt' and trace files
@@ -125,7 +126,7 @@ Note: ROCProfilerV2 is currently considered a beta version and is subject to cha
 - rocm-llvm-dev
 - makecache
 - Gtest Development Package (Ubuntu: libgtest-dev)
-- libsystemd-dev, libelf-dev, libnuma-dev, libpciaccess-dev on ubuntu or their corresponding packages on any other OS
+- libelf-dev, libnuma-dev, libpciaccess-dev on ubuntu or their corresponding packages on any other OS
 - Cppheaderparser, websockets, matplotlib, lxml, barectf Python3 Packages
 - Python packages can be installed using:
 

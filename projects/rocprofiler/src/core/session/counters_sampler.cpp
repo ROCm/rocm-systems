@@ -23,6 +23,7 @@
 #include "src/api/rocprofiler_singleton.h"
 #include "src/core/counters/mmio/pcie_counters_mi200.h"
 #include "src/core/counters/mmio/df_counters_mi200.h"
+#include "src/utils/libpci_helper.h"
 
 namespace rocprofiler {
 
@@ -32,9 +33,9 @@ CountersSampler::CountersSampler(rocprofiler_buffer_id_t buffer_id,
     : buffer_id_(buffer_id),
       filter_id_(filter_id),
       session_id_(session_id),
-      pci_system_initialized_(pci_system_init() == 0)
-
+      pci_system_initialized_(false)
 {
+  pci_system_initialized_ = GetPciAccessLibApi()->pci_system_init() == 0;
   params_ = rocprofiler::ROCProfiler_Singleton::GetInstance()
                 .GetSession(session_id_)
                 ->GetFilter(filter_id_)
@@ -94,8 +95,9 @@ CountersSampler::~CountersSampler() {
   // clean up libpcieaccess resources
   // TODO: should be part of mmio class in future
   if (pci_system_initialized_) {
-    pci_system_cleanup();
+    GetPciAccessLibApi()->pci_system_cleanup();
     pci_system_initialized_ = false;
+    UnLoadPcieAccessLibAPI();
   }
 }
 

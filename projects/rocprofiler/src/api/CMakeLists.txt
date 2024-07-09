@@ -337,7 +337,6 @@ target_link_libraries(
             amd_comgr
             dw
             elf
-            ${PCIACCESS_LIBRARIES}
             rocprofiler::memcheck)
 
 get_target_property(ROCPROFILER_LIBRARY_V2_NAME rocprofiler-v2 OUTPUT_NAME)

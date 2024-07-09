@@ -25,12 +25,12 @@
 #include <unordered_map>
 
 #include <hsa/hsa.h>
-#include <pciaccess.h>
 
 #include "src/api/rocprofiler_singleton.h"
 #include "src/pcsampler/session/pc_sampler.h"
 #include "src/pcsampler/gfxip/gfxip.h"
 #include "src/core/hsa/hsa_support.h"
+#include "src/utils/libpci_helper.h"
 
 namespace rocprofiler::pc_sampler {
 
@@ -39,12 +39,16 @@ PCSampler::PCSampler(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t 
     : buffer_id_(buffer_id),
       filter_id_(filter_id),
       session_id_(session_id),
-      pci_system_initialized_(pci_system_init() == 0) {}
+      pci_system_initialized_(false) {
+  pci_system_initialized_ = GetPciAccessLibApi()->pci_system_init() == 0;
+}
 
 PCSampler::~PCSampler() {
   if (pci_system_initialized_) {
-    pci_system_cleanup();
+    GetPciAccessLibApi()->pci_system_cleanup();
+
     pci_system_initialized_ = false;
+    UnLoadPcieAccessLibAPI();
   }
 }
 

@@ -33,6 +33,7 @@
 
 #include "gfxip.h"
 #include "src/utils/helper.h"
+#include "src/utils/libpci_helper.h"
 
 static const char DEBUG_DRI_PATH[] = "/sys/kernel/debug/dri/";
 static const char DEV_PFX[] = "dev=";
@@ -142,6 +143,7 @@ device_t::device_t(const bool pci_inited, const HSAAgentInfo& info)
   }());
 
   int instance = find_pci_instance(name);
+  bool use_pciaccess_library = false;
   {
     std::string dri_debug_path_pfx(DEBUG_DRI_PATH);
     dri_debug_path_pfx += std::to_string(instance);
@@ -156,30 +158,33 @@ device_t::device_t(const bool pci_inited, const HSAAgentInfo& info)
         fatal(msg);
       }
     } else {
-      goto device_specific_init;
+      use_pciaccess_library = true;
     }
   }
+  if (use_pciaccess_library) {
 
-  pci_device_ =
-      pci_device_find_by_slot(pci_domain, pci_location_id >> 8, pci_location_id & 0xFF, 0);
-  if (!pci_device_ || pci_device_probe(pci_device_)) fatal("failed to probe the GPU device\n");
+    pci_device_ =
+        GetPciAccessLibApi()->pci_device_find_by_slot(pci_domain, pci_location_id >> 8, pci_location_id & 0xFF, 0);
+    if (!pci_device_ || GetPciAccessLibApi()->pci_device_probe(pci_device_)) fatal("failed to probe the GPU device\n");
 
-  // Look for a region between 256KB and 4096KB, 32-bit, non IO, and non prefetchable.
-  for (size_t region = 0; region < sizeof(pci_device::regions) / sizeof(pci_device::regions[0]);
-       ++region)
-    if (pci_device_->regions[region].is_64 == 0 &&
-        pci_device_->regions[region].is_prefetchable == 0 &&
-        pci_device_->regions[region].is_IO == 0 &&
-        pci_device_->regions[region].size >= (256UL * 1024) &&
-        pci_device_->regions[region].size <= (4096UL * 1024)) {
-      pci_memory_size_ = pci_device_->regions[region].size;
-      if (pci_device_map_range(pci_device_, pci_device_->regions[region].base_addr,
-                               pci_device_->regions[region].size, PCI_DEV_MAP_FLAG_WRITABLE,
-                               (void**)&pci_memory_))
-        fatal("failed to map the registers\n");
+    // Look for a region between 256KB and 4096KB, 32-bit, non IO, and non prefetchable.
+    for (size_t region = 0; region < sizeof(pci_device::regions) / sizeof(pci_device::regions[0]);
+        ++region) {
+      if (pci_device_->regions[region].is_64 == 0 &&
+          pci_device_->regions[region].is_prefetchable == 0 &&
+          pci_device_->regions[region].is_IO == 0 &&
+          pci_device_->regions[region].size >= (256UL * 1024) &&
+          pci_device_->regions[region].size <= (4096UL * 1024)) {
+        pci_memory_size_ = pci_device_->regions[region].size;
+        if (GetPciAccessLibApi()->pci_device_map_range(pci_device_, pci_device_->regions[region].base_addr,
+                                pci_device_->regions[region].size, PCI_DEV_MAP_FLAG_WRITABLE,
+                                (void**)&pci_memory_))
+          fatal("failed to map the registers\n");
+      }
     }
 
-  if (pci_memory_ == nullptr) fatal("could not find the pci memory address\n");
+    if (pci_memory_ == nullptr) fatal("could not find the pci memory address\n");
+  }
 
 device_specific_init:
   // FIXME: detect the gfxip and call the correct routine.
@@ -187,7 +192,7 @@ device_specific_init:
 }
 
 device_t::~device_t() {
-  if (pci_memory_ && pci_device_unmap_range(pci_device_, pci_memory_, pci_memory_size_)) {
+  if (pci_memory_ && GetPciAccessLibApi()->pci_device_unmap_range(pci_device_, pci_memory_, pci_memory_size_)) {
     warning("failed to unmap the pci memory\n");
   }
 }
