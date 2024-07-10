@@ -455,6 +455,8 @@
 <gfx1100_expr base="gfx11_expr"></gfx1100_expr>
 <gfx1101_expr base="gfx11_expr"></gfx1101_expr>
 <gfx1102_expr base="gfx11_expr"></gfx1102_expr>
+<gfx1150_expr base="gfx11_expr"></gfx1150_expr>
+<gfx1151_expr base="gfx11_expr"></gfx1151_expr>
 
 <gfx1030_expr base="gfx10_expr">
 </gfx1030_expr>
@@ -488,6 +490,8 @@
 <gfx1100 base="gfx1100_expr"></gfx1100>
 <gfx1101 base="gfx1101_expr"></gfx1101>
 <gfx1102 base="gfx1102_expr"></gfx1102>
+<gfx1150 base="gfx1150_expr"></gfx1150>
+<gfx1151 base="gfx1151_expr"></gfx1151>
 
 <gfx1200 base="gfx1200_expr"></gfx1200>
 <gfx1201 base="gfx1201_expr"></gfx1201>

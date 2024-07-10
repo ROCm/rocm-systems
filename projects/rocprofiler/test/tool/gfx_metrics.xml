@@ -740,6 +740,8 @@
 <gfx1100 base="gfx11"></gfx1100>
 <gfx1101 base="gfx11"></gfx1101>
 <gfx1102 base="gfx11"></gfx1102>
+<gfx1150 base="gfx11"></gfx1150>
+<gfx1151 base="gfx11"></gfx1151>
 
 <gfx12>
   <metric name="GRBM_COUNT" block=GRBM event=0 descr="Tie High - Count Number of Clocks"></metric>
