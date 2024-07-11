@@ -71,7 +71,7 @@ $BLACKLIST_ALL_ASICS\
 #
 # For those systems gfx_target_version must be used. It can be found in
 # /sys/class/kfd/kfd/topology/nodes/*/properties
-# 
+#
 # ex.
 # FILTER[90400]=\
 # $BLACKLIST_ALL_ASICS\
