@@ -103,8 +103,8 @@ def get_os_info(os_distrib, os_version):
             if "debian" in _os_info["ID_LIKE"]:
                 os_distrib = "ubuntu"
                 if os_version is None:
-                    # fallback on 18.04 if ID is not ubuntu but debian-like
-                    os_version = "18.04"
+                    # fallback on 20.04 if ID is not ubuntu but debian-like
+                    os_version = "20.04"
             elif "suse" in _os_info["ID_LIKE"]:
                 os_distrib = "opensuse"
                 # fallback on 15.3 if ID is not opensuse but suse-like

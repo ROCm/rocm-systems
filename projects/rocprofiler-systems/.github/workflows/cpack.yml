@@ -31,10 +31,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu 18.04
-          - os-distro: "ubuntu"
-            os-version: "18.04"
-            rocm-version: "0.0"
           # ubuntu 20.04
           - os-distro: "ubuntu"
             os-version: "20.04"

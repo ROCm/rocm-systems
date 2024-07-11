@@ -1,6 +1,5 @@
 # Omnitrace: Application Profiling, Tracing, and Analysis
 
-[![Ubuntu 18.04 with GCC and MPICH](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-bionic.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-bionic.yml)
 [![Ubuntu 20.04 with GCC, ROCm, and MPI](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-focal.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-focal.yml)
 [![Ubuntu 22.04 (GCC, Python, ROCm)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/ubuntu-jammy.yml)
 [![OpenSUSE 15.x with GCC](https://github.com/ROCm/omnitrace/actions/workflows/opensuse.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/opensuse.yml)

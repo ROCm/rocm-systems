@@ -30,13 +30,9 @@ jobs:
       matrix:
         include:
           - distro: "ubuntu"
-            version: "18.04"
-          - distro: "ubuntu"
             version: "20.04"
           - distro: "ubuntu"
             version: "22.04"
-          - distro: "opensuse"
-            version: "15.2"
           - distro: "opensuse"
             version: "15.3"
           - distro: "opensuse"
@@ -86,22 +82,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # ubuntu 18.04
-          - os-distro: "ubuntu"
-            os-version: "18.04"
-            rocm-version: "0.0"
-          - os-distro: "ubuntu"
-            os-version: "18.04"
-            rocm-version: "4.5"
-          - os-distro: "ubuntu"
-            os-version: "18.04"
-            rocm-version: "5.0"
-          - os-distro: "ubuntu"
-            os-version: "18.04"
-            rocm-version: "5.1"
-          - os-distro: "ubuntu"
-            os-version: "18.04"
-            rocm-version: "5.2"
           # ubuntu 20.04
           - os-distro: "ubuntu"
             os-version: "20.04"
