@@ -6,6 +6,7 @@ on:
     branches: [ main, develop ]
     paths-ignore:
       - '*.md'
+      - 'docs/**'
       - 'source/docs/**'
       - 'source/python/gui/**'
       - '.github/workflows/docs.yml'
@@ -17,6 +18,7 @@ on:
     branches: [ main, develop ]
     paths-ignore:
       - '*.md'
+      - 'docs/**'
       - 'source/docs/**'
       - 'source/python/gui/**'
       - '.github/workflows/docs.yml'
