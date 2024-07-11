@@ -32,7 +32,7 @@ from rsmiBindings import *
 # Patch version - Increment when adding a fix, set to 0 when minor is incremented
 # Hash  version - Shortened commit hash. Print here and not with lib for consistency with amd-smi
 SMI_MAJ = 2
-SMI_MIN = 2
+SMI_MIN = 3
 SMI_PAT = 0
 # SMI_HASH is provided by rsmiBindings
 __version__ = '%s.%s.%s+%s' % (SMI_MAJ, SMI_MIN, SMI_PAT, SMI_HASH)
