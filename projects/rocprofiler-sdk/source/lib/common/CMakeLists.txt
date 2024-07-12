@@ -3,19 +3,22 @@
 #
 rocprofiler_activate_clang_tidy()
 
-set(common_sources environment.cpp demangle.cpp logging.cpp static_object.cpp utility.cpp
-                   xml.cpp)
+set(common_sources demangle.cpp elf_utils.cpp environment.cpp logging.cpp
+                   static_object.cpp utility.cpp xml.cpp)
 set(common_headers
     abi.hpp
     defines.hpp
-    environment.hpp
     demangle.hpp
+    elf_utils.hpp
+    environment.hpp
+    filesystem.hpp
     logging.hpp
     mpl.hpp
     scope_destructor.hpp
     static_object.hpp
     stringize_arg.hpp
     synchronized.hpp
+    units.hpp
     utility.hpp
     xml.hpp)
 
@@ -41,7 +44,8 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-dl>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-ptl>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-atomic>
-           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-hsakmt-nolink>)
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-hsakmt-nolink>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-elfio>)
 
 set_target_properties(rocprofiler-common-library PROPERTIES OUTPUT_NAME
                                                             rocprofiler-common)

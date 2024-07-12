@@ -23,7 +23,9 @@
 #define _GNU_SOURCE 1
 
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/common/elf_utils.hpp"
 #include "lib/common/environment.hpp"
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -88,6 +90,8 @@ namespace registration
 {
 namespace
 {
+namespace fs = ::rocprofiler::common::filesystem;
+
 // invoke all rocprofiler_configure symbols
 bool
 invoke_client_configures();
@@ -129,8 +133,7 @@ std::vector<std::string>
 get_link_map()
 {
     auto  chain  = std::vector<std::string>{};
-    void* handle = nullptr;
-    handle       = dlopen(nullptr, RTLD_LAZY | RTLD_NOLOAD);
+    void* handle = dlopen(nullptr, RTLD_LAZY | RTLD_NOLOAD);
 
     if(handle)
     {
@@ -245,6 +248,16 @@ find_clients()
         {
             ROCP_INFO << "[env] searching " << itr << " for rocprofiler_configure";
 
+            if(fs::exists(itr))
+            {
+                auto elfinfo = common::elf_utils::read(itr);
+                if(!elfinfo.has_symbol(std::regex{"^rocprofiler_configure$"}))
+                {
+                    ROCP_FATAL << "rocprofiler tool library " << itr
+                               << " did not contain rocprofiler_configure symbol";
+                }
+            }
+
             void* handle = dlopen(itr.c_str(), RTLD_NOLOAD | RTLD_LAZY);
 
             if(!handle)
@@ -294,11 +307,23 @@ find_clients()
 
     // if there are two "rocprofiler_configures", we need to trigger a search of all the shared
     // libraries
-    if(_next_configure)
+    if(_default_configure)
     {
         for(const auto& itr : get_link_map())
         {
             ROCP_INFO << "searching " << itr << " for rocprofiler_configure";
+
+            if(fs::exists(itr))
+            {
+                auto elfinfo = common::elf_utils::read(itr);
+                if(!elfinfo.has_symbol(std::regex{"^rocprofiler_configure$"})) continue;
+            }
+            else
+            {
+                continue;
+            }
+
+            ROCP_INFO << "dlopening " << itr << " for rocprofiler_configure";
 
             void* handle = dlopen(itr.c_str(), RTLD_LAZY | RTLD_NOLOAD);
             ROCP_ERROR_IF(handle == nullptr) << "error dlopening " << itr;

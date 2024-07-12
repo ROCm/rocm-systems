@@ -266,3 +266,13 @@ find_library(
 target_include_directories(rocprofiler-drm SYSTEM INTERFACE ${drm_INCLUDE_DIR}
                                                             ${xf86drm_INCLUDE_DIR})
 target_link_libraries(rocprofiler-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBRARY})
+
+# ----------------------------------------------------------------------------------------#
+#
+# ELFIO library
+#
+# ----------------------------------------------------------------------------------------#
+
+# get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
+# target_include_directories(rocprofiler-elfio SYSTEM INTERFACE ${ELFIO_INCLUDE_DIR})
+target_link_libraries(rocprofiler-elfio INTERFACE elfio::elfio)
