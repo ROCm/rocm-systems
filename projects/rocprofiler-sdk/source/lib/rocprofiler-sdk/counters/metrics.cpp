@@ -27,10 +27,18 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/common/xml.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 
 #include "glog/logging.h"
+
+#include "yaml-cpp/exceptions.h"
+#include "yaml-cpp/node/convert.h"
+#include "yaml-cpp/node/detail/impl.h"
+#include "yaml-cpp/node/impl.h"
+#include "yaml-cpp/node/iterator.h"
+#include "yaml-cpp/node/node.h"
+#include "yaml-cpp/node/parse.h"
+#include "yaml-cpp/parser.h"
 
 #include <dlfcn.h>  // for dladdr
 #include <cstdint>
@@ -79,55 +87,76 @@ get_constants()
     }
     return constants;
 }
-
-// Future TODO: inheritance? does it work for derived_counters.xml?
+/**
+ * Expected YAML Format:
+ * COUNTER_NAME:
+ *  architectures:
+ *   gfxXX: // Can be more than one, / deliminated if they share idential data
+ *     block: <Optional>
+ *     event: <Optional>
+ *     expression: <optional>
+ *     description: <Optional>
+ *   gfxYY:
+ *      ...
+ *  description: General counter desctiption
+ */
 MetricMap
-loadXml(const std::string& filename, bool load_constants = false)
+loadYAML(const std::string& filename, bool load_constants = false, bool load_derived = false)
 {
     MetricMap ret;
     ROCP_INFO << "Loading Counter Config: " << filename;
-    // todo: return unique_ptr....
-    auto xml = common::Xml::Create(filename);
-    ROCP_FATAL_IF(!xml)
-        << "Could not open XML Counter Config File (set env ROCPROFILER_METRICS_PATH)";
+    auto yaml = YAML::LoadFile(filename);
 
-    const auto& constant_metrics = get_constants();
-    for(const auto& [gfx_name, nodes] : xml->GetAllNodes())
+    for(auto it = yaml.begin(); it != yaml.end(); ++it)
     {
-        /**
-         * "top." is used to designate the root encapsulation of all contained XML subroots (in our
-         * case "gfxX"). This is inserted by the parser so it will always be present. .metric
-         * denotes XML tags that are contained in the subroots. This will not change unless we
-         * respec the XML (which we should...).
-         */
-        if(gfx_name.find("metric") == std::string::npos ||
-           gfx_name.find("top.") == std::string::npos || gfx_name.find("gfx") == std::string::npos)
-            continue;
+        auto counter_name = it->first.as<std::string>();
+        auto counter_def  = it->second;
+        auto def_iterator = counter_def["architectures"];
 
-        auto& metricVec =
-            ret.emplace(gfx_name.substr(strlen("top."),
-                                        gfx_name.size() - strlen("top.") - strlen(".metric")),
-                        std::vector<Metric>())
-                .first->second;
-        for(const auto& node : nodes)
+        for(auto def_it = def_iterator.begin(); def_it != def_iterator.end(); ++def_it)
         {
-            metricVec.emplace_back(gfx_name,
-                                   node->opts["name"],
-                                   node->opts["block"],
-                                   node->opts["event"],
-                                   node->opts["descr"],
-                                   node->opts["expr"],
-                                   node->opts["special"],
-                                   current_id());
-            current_id()++;
-        }
+            auto archs = def_it->first.as<std::string>();
+            auto def   = def_it->second;
+            // To save space in the YAML file, we combine architectures with the same
+            // definition into a single entry. Split these out into separate entries.
+            // architectures:
+            //     gfx10/gfx1010/gfx1030/gfx1031/.....9:
+            //     expression: 400*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE
+            std::vector<std::string> result;
+            std::stringstream        ss(archs);
+            std::string              arch_name;
 
-        if(load_constants)
-        {
-            metricVec.insert(metricVec.end(), constant_metrics.begin(), constant_metrics.end());
+            while(std::getline(ss, arch_name, '/'))
+            {
+                auto& metricVec = ret.emplace(arch_name, std::vector<Metric>()).first->second;
+                if(metricVec.empty() && load_constants)
+                {
+                    metricVec.insert(
+                        metricVec.end(), get_constants().begin(), get_constants().end());
+                }
+
+                if((def["expression"] && load_derived) || (!load_derived && !def["expression"]))
+                {
+                    std::string description;
+                    if(def["description"])
+                        description = def["description"].as<std::string>();
+                    else if(counter_def["description"])
+                        description = counter_def["description"].as<std::string>();
+                    metricVec.emplace_back(
+                        arch_name,
+                        counter_name,
+                        (def["block"] ? def["block"].as<std::string>() : ""),
+                        (def["event"] ? def["event"].as<std::string>() : ""),
+                        description,
+                        (def["expression"] ? def["expression"].as<std::string>() : ""),
+                        "",
+                        current_id());
+                    current_id()++;
+                    ROCP_TRACE << fmt::format("Inserted info {}: {}", arch_name, metricVec.back());
+                }
+            }
         }
     }
-
     ROCP_FATAL_IF(current_id() > 65536)
         << "Counter count exceeds 16 bits, which may break counter id output";
     return ret;
@@ -163,19 +192,19 @@ findViaEnvironment(const std::string& filename)
 MetricMap
 getDerivedHardwareMetrics()
 {
-    auto counters_path = findViaEnvironment("derived_counters.xml");
+    auto counters_path = findViaEnvironment("counter_defs.yaml");
     ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
         << "metric xml file '" << counters_path << "' does not exist";
-    return loadXml(counters_path);
+    return loadYAML(counters_path, false, true);
 }
 
 MetricMap
 getBaseHardwareMetrics()
 {
-    auto counters_path = findViaEnvironment("basic_counters.xml");
+    auto counters_path = findViaEnvironment("counter_defs.yaml");
     ROCP_FATAL_IF(!common::filesystem::exists(counters_path))
         << "metric xml file '" << counters_path << "' does not exist";
-    return loadXml(counters_path, true);
+    return loadYAML(counters_path, true, false);
 }
 
 const MetricIdMap*

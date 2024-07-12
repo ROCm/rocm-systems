@@ -126,6 +126,21 @@ if(NOT TARGET PTL::ptl-static)
     add_subdirectory(ptl EXCLUDE_FROM_ALL)
 endif()
 
+rocprofiler_checkout_git_submodule(
+    RECURSIVE
+    RELATIVE_PATH external/yaml-cpp
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    REPO_URL https://github.com/jbeder/yaml-cpp.git
+    REPO_BRANCH "master")
+
+add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
+
+target_link_libraries(rocprofiler-yaml-cpp
+                      INTERFACE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
+target_include_directories(
+    rocprofiler-yaml-cpp
+    INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/yaml-cpp/include>)
+
 # checkout submodule if not already checked out or clone repo if no .gitmodules file
 rocprofiler_checkout_git_submodule(
     RECURSIVE

@@ -208,6 +208,7 @@ TEST(core, check_packet_generation)
              */
             rocprofiler_profile_config_id_t cfg_id = {};
             rocprofiler_counter_id_t        id     = {.handle = metric.id()};
+            ROCP_ERROR << fmt::format("Generating packet for {}", metric);
             ROCPROFILER_CALL(
                 rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
                 "Unable to create profile");

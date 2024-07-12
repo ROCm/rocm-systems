@@ -54,6 +54,7 @@ rocprofiler_add_interface_library(rocprofiler-elf "ElfUtils elf library" INTERNA
 rocprofiler_add_interface_library(rocprofiler-dw "ElfUtils dw library" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-elfio "ELFIO header-only C++ library"
                                   INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-yaml-cpp "YAML CPP Parser" INTERNAL)
 
 #
 # interface for libraries (ROCm-specific)

@@ -9,6 +9,7 @@ target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOU
 
 add_subdirectory(xml)
 add_subdirectory(parser)
+add_subdirectory(yaml)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

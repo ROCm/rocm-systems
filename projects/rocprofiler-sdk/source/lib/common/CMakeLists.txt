@@ -4,7 +4,7 @@
 rocprofiler_activate_clang_tidy()
 
 set(common_sources demangle.cpp elf_utils.cpp environment.cpp logging.cpp
-                   static_object.cpp utility.cpp xml.cpp)
+                   static_object.cpp utility.cpp)
 set(common_headers
     abi.hpp
     defines.hpp
@@ -19,8 +19,7 @@ set(common_headers
     stringize_arg.hpp
     synchronized.hpp
     units.hpp
-    utility.hpp
-    xml.hpp)
+    utility.hpp)
 
 add_library(rocprofiler-common-library STATIC)
 add_library(rocprofiler-sdk::rocprofiler-common-library ALIAS rocprofiler-common-library)
@@ -41,6 +40,7 @@ target_link_libraries(
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-cxx-filesystem>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-glog>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-fmt>
+           $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-yaml-cpp>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-dl>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-ptl>
            $<BUILD_INTERFACE:rocprofiler-sdk::rocprofiler-atomic>

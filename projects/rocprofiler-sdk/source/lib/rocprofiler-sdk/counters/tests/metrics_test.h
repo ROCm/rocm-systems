@@ -31,11 +31,7 @@
 // Layout is: {name, block, event, expression, description}.
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>> basic_gfx908 = {
     {"gfx908",
-     {{"MAX_WAVE_SIZE", "", "", "1", "Max wave size constant"},
-      {"SE_NUM", "", "", "1", "SE_NUM"},
-      {"SIMD_NUM", "", "", "1", "SIMD Number"},
-      {"CU_NUM", "", "", "1", "CU_NUM"},
-      {"SQ_INSTS_VMEM_WR",
+     {{"SQ_INSTS_VMEM_WR",
        "SQ",
        "28",
        "<None>",
@@ -86,14 +82,14 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "SQ",
        "72",
        "<None>",
-       "regspec 71? Number of cycles the SQ instruction arbiter is working on a VALU instruction. "
-       "(per-simd, nondeterministic). Units in quad-cycles(4 cycles)"},
+       "Number of cycles the SQ instruction arbiter is working on a VALU instruction. "
+       "(per-simd, emulated). Units in quad-cycles(4 cycles)"},
       {"SQ_INST_CYCLES_SALU",
        "SQ",
        "85",
        "<None>",
        "Number of cycles needed to execute non-memory read scalar operations. (per-simd, "
-       "emulated)"},
+       "emulated). Units in quad-cycles(4 cycles)"},
       {"SQ_THREAD_CYCLES_VALU",
        "SQ",
        "86",
@@ -166,7 +162,11 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
 
 static const std::unordered_map<std::string, std::vector<std::vector<std::string>>> derived_gfx908 =
     {{"gfx908",
-      {{"GPUBusy",
+      {{"MAX_WAVE_SIZE", "", "", "wave_front_size", "Max wave size constant"},
+       {"SE_NUM", "", "", "array_count/simd_arrays_per_engine", "SE_NUM"},
+       {"SIMD_NUM", "", "", "simd_per_cu/CU_NUM", "SIMD Number"},
+       {"CU_NUM", "", "", "cu_per_simd_array*array_count", "CU_NUM"},
+       {"GPUBusy",
         "",
         "",
         "100*GRBM_GUI_ACTIVE/GRBM_COUNT",
@@ -231,7 +231,7 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
         "",
         "",
         "reduce(TCC_MISS,sum)",
-        "Number of cache misses. Sum over TCC instances."},
+        "Number of cache misses. UC reads count as misses. Sum over TCC instances."},
        {"TCC_EA_RDREQ_32B_sum",
         "",
         "",
