@@ -107,6 +107,7 @@ class OmniProfiler_Base:
             if out is None:
                 out = self.__args.path + "/pmc_perf.csv"
             files = glob.glob(self.__args.path + "/" + "pmc_perf_*.csv")
+            files.extend(glob.glob(self.__args.path + "/" + "SQ_*.csv"))
         elif type(self.__args.path) == list:
             files = self.__args.path
         else:
@@ -261,7 +262,9 @@ class OmniProfiler_Base:
             df.to_csv(out, index=False)
             if not self.__args.verbose:
                 for file in files:
-                    os.remove(file)
+                    # Do not remove accumulate counter files
+                    if "SQ_" not in file:
+                        os.remove(file)
         else:
             return df
 

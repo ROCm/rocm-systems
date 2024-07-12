@@ -310,8 +310,8 @@ class LimitedSet:
 # Represents a file that lists PMC counters. Number of counters for each
 # block limited according to perfmon config.
 class CounterFile:
-    def __init__(self, perfmon_config) -> None:
-
+    def __init__(self, name, perfmon_config) -> None:
+        self.file_name = name
         self.blocks = {b: LimitedSet(v) for b, v in perfmon_config.items()}
 
     def add(self, counter) -> bool:
@@ -386,10 +386,14 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
 
     # Each accumulate counter is in a different file
     for ctrs in accumulate_counters:
-        output_files.append(CounterFile(perfmon_config))
+
+        # Get name of the counter and use it as file name
+        ctr_name = ctrs[ctrs.index("SQ_ACCUM_PREV_HIRES") - 1]
+        output_files.append(CounterFile(ctr_name + ".txt", perfmon_config))
         for ctr in ctrs:
             output_files[-1].add(ctr)
 
+    file_count = 0
     for ctr in normal_counters.keys():
 
         # Add counter to first file that has room
@@ -401,13 +405,14 @@ def perfmon_coalesce(pmc_files_list, perfmon_config, workload_dir):
 
         # All files are full, create a new file
         if not added:
-            output_files.append(CounterFile(perfmon_config))
+            output_files.append(CounterFile("pmc_perf_{}.txt".format(file_count), perfmon_config))
+            file_count += 1
             output_files[-1].add(ctr)
 
 
     # Output to files
-    for i, f in enumerate(output_files):
-        file_name = os.path.join(workload_perfmon_dir, "pmc_perf_{}.txt".format(i))
+    for f in output_files:
+        file_name = os.path.join(workload_perfmon_dir, f.file_name)
 
         pmc = []
         for block_name in f.blocks.keys():
