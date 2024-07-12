@@ -282,14 +282,6 @@ class OmniSoC_Base:
 def getblock(counter):
     return counter.split('_')[0]
 
-def expand_channels(counter, n):
-    ara = []
-
-    for i in range(0, n):
-        ara.append("{}[{}]".format(counter, i))
-    
-    return ara
-
 # Set with limited size
 class LimitedSet:
     def __init__(self, maxsize) -> None:
