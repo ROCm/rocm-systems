@@ -59,8 +59,6 @@ class rocprof_v2_profiler(OmniProfiler_Base):
     def pre_processing(self):
         """Perform any pre-processing steps prior to profiling."""
         super().pre_processing()
-        # if self.ready_to_profile:
-        #     self.pmc_perf_split()
 
     @demarcate
     def run_profiling(self, version, prog):

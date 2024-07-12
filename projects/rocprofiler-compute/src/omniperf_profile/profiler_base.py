@@ -63,43 +63,6 @@ class OmniProfiler_Base:
         return []
 
     @demarcate
-    def pmc_perf_split(self):
-        """Avoid default rocprof join utility by spliting each line into a separate input file"""
-        workload_perfmon_dir = os.path.join(self.__args.path, "perfmon")
-        lines = (
-            open(os.path.join(workload_perfmon_dir, "pmc_perf.txt"), "r")
-            .read()
-            .splitlines()
-        )
-
-        # Iterate over each line in pmc_perf.txt
-        mpattern = r"^pmc:(.*)"
-        i = 0
-        for line in lines:
-            # Verify no comments
-            stext = line.split("#")[0].strip()
-            if not stext:
-                continue
-
-            # all pmc counters start with  "pmc:"
-            m = re.match(mpattern, stext)
-            if m is None:
-                continue
-
-            # Create separate file for each line
-            fd = open(workload_perfmon_dir + "/pmc_perf_" + str(i) + ".txt", "w")
-            fd.write(stext + "\n\n")
-            fd.write("gpu:\n")
-            fd.write("range:\n")
-            fd.write("kernel:\n")
-            fd.close()
-
-            i += 1
-
-        # Remove old pmc_perf.txt input from perfmon dir
-        os.remove(workload_perfmon_dir + "/pmc_perf.txt")
-
-    @demarcate
     def join_prof(self, out=None):
         """Manually join separated rocprof runs"""
         # Set default output directory if not specified
