@@ -48,7 +48,8 @@ if(HIP_PLATFORM MATCHES "amd")
       hipMemMap.cc
       hipMemRelease.cc
       hipMemUnmap.cc
-      hipMemVmm_old.cc)
+      hipMemVmm_old.cc
+      hipGetProcAddressVmmApis.cc)
 endif()
 
 hip_add_exe_to_target(NAME VirtualMemoryManagementTest

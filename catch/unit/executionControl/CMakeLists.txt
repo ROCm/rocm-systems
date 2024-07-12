@@ -11,6 +11,7 @@ if(HIP_PLATFORM MATCHES "amd")
         hipExtLaunchKernel.cc
         hipExtLaunchMultiKernelMultiDevice.cc
         launch_api.cc
+        hipGetProcAddressLaunchCbExecCtrlApis.cc
     )
 else()
     # These functions are currently unimplemented on AMD
