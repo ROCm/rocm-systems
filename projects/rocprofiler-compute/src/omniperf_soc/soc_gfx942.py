@@ -64,7 +64,7 @@ class gfx942_soc(OmniSoC_Base):
                 "SPI": 2,
                 "GRBM": 2,
                 "GDS": 4,
-                "TCC_channels": 32,
+                "TCC_channels": 16,
             }
         )
         # self.roofline_obj = Roofline(args, self._mspec)
