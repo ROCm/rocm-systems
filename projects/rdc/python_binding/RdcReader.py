@@ -16,13 +16,13 @@ default_unit_coverter = {
         rdc_field_t.RDC_FI_GPU_MEMORY_TOTAL: 0.000001, # MegaBytes
         rdc_field_t.RDC_FI_POWER_USAGE: 0.000001, # Watts
         rdc_field_t.RDC_FI_GPU_CLOCK: 0.000001, # MHz
-        rdc_field_t.RDC_FI_GPU_TEMP: 0.001 # degree
+        rdc_field_t.RDC_FI_GPU_TEMP: 0.001, # degree
 }
 
 class RdcReader:
     # To run the RDC in embedded mode, set the ip_port = None
     def __init__(self, ip_port = "localhost:50051", field_ids = default_field_ids,
-            unit_converter = default_unit_coverter,
+            unit_converter: dict[int, float] = default_unit_coverter,
             update_freq = 10000000, max_keep_age = 3600.0 , max_keep_samples = 1000,
             field_group_name = "rdc_reader_field_group", gpu_group_name = "rdc_reader_gpu_group",
             gpu_indexes = None, root_ca = "/etc/rdc/client/certs/rdc_cacert.pem",
@@ -98,7 +98,10 @@ class RdcReader:
                         if value.type.value == rdc_field_type_t.INTEGER:
                             value.value.l_int = int(value.value.l_int * self.unit_converter[fid])
                         if value.type.value == rdc_field_type_t.DOUBLE:
-                            value.value.dbl  = value.value.l_int * self.unit_converter[fid]
+                            value.value.dbl = int(value.value.dbl * self.unit_converter[fid])
+                    # convert from double to l_int
+                    if value.type.value == rdc_field_type_t.DOUBLE:
+                        value.value.l_int = int(value.value.dbl)
                     self.handle_field(gindex, value)
                     has_succeed = True
 
