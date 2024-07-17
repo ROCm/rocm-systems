@@ -71,7 +71,10 @@ std::vector<att_pending_signal_t> AttTracer::MovePendingSignals(uint32_t writer_
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
   auto it = sessions_pending_signals_.find(writer_id);
   if (it == sessions_pending_signals_.end())
-    rocprofiler::fatal("writer_id is not found in the pending_signals");
+  {
+    rocprofiler::warning("writer_id is not found in the pending_signals");
+    return {};
+  }
 
   auto move_pending = std::move(it->second);
   sessions_pending_signals_.erase(writer_id);

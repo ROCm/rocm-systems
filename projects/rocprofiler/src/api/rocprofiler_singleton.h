@@ -109,7 +109,7 @@ class ROCProfiler_Singleton {
   const Agent::DeviceInfo& GetDeviceInfo(uint64_t gpu_id);
   rocprofiler_timestamp_t timestamp_ns();
  private:
-  rocprofiler_session_id_t current_session_id_{0};
+  std::atomic<rocprofiler_session_id_t> current_session_id_{rocprofiler_session_id_t{0}};
   std::mutex session_map_lock_;
   std::map<uint64_t, Session*> sessions_;
   std::atomic<uint64_t> records_counter_{0};

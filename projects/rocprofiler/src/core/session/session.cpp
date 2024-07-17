@@ -203,6 +203,7 @@ void Session::Start()
     counters_sampler_->Start();
   }
 
+  if (profiler_) profiler_->bIsSessionDestroying.store(false);
   is_active_ = true;
 }
 

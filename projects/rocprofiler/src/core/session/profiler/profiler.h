@@ -93,6 +93,7 @@ class Profiler {
   void StartReplayPass(rocprofiler_session_id_t session_id);
   void EndReplayPass();
   bool HasActivePass();
+  std::atomic<bool> bIsSessionDestroying{false};
 
  private:
   std::mutex counter_names_lock_;
@@ -105,7 +106,6 @@ class Profiler {
   std::mutex sessions_pending_signals_lock_;
   std::map<uint32_t, std::vector<pending_signal_ptr_t>> sessions_pending_signals_{};
   std::condition_variable has_session_pending_cv;
-  std::atomic<bool> bIsSessionDestroying{false};
 };
 
 }  // namespace profiler

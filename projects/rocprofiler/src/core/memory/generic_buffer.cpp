@@ -69,9 +69,6 @@ GenericBuffer::GenericBuffer(rocprofiler_session_id_t session_id, rocprofiler_bu
 GenericBuffer::~GenericBuffer() {
   if (is_valid_.load(std::memory_order_acquire)) {
     std::lock_guard lock(buffer_lock_);
-    //rocprofiler::ROCProfiler_Singleton& instance = rocprofiler::ROCProfiler_Singleton::GetInstance();
-    //if (instance.GetSession(session_id_))
-     // instance.GetSession(session_id_)->DisableTools(id_);
 
     Flush();
 
@@ -97,7 +94,7 @@ bool GenericBuffer::Flush() {
   {
     // Wait for the current operation to complete.
     std::unique_lock consumer_lock(consumer_mutex_);
-    consumer_cond_.wait(consumer_lock, [this]() { return !consumer_arg_.valid; });
+    consumer_cond_.wait(consumer_lock, [this]() { return !consumer_arg_.valid || !consumerRunning; });
   }
   return true;
 }
@@ -120,6 +117,7 @@ void GenericBuffer::ConsumerThreadLoop(std::promise<void> ready) {
   std::unique_lock consumer_lock(consumer_mutex_);
 
   // This consumer is now ready to accept work.
+  consumerRunning.store(true);
   ready.set_value();
 
   while (true) {
@@ -138,6 +136,7 @@ void GenericBuffer::ConsumerThreadLoop(std::promise<void> ready) {
     consumer_arg_.valid = false;
     consumer_cond_.notify_all();
   }
+  consumerRunning.store(false);
 }
 
 void GenericBuffer::NotifyConsumerThread(const std::byte* data_begin, const std::byte* data_end) {
@@ -150,7 +149,7 @@ void GenericBuffer::NotifyConsumerThread(const std::byte* data_begin, const std:
   // would be lost if multiple producers could enter this critical section
   // (sequentially) before the consumer thread could re-acquire the
   // consumer_mutex_ lock.
-  consumer_cond_.wait(consumer_lock, [this]() { return !consumer_arg_.valid; });
+  consumer_cond_.wait(consumer_lock, [this]() { return !consumer_arg_.valid || !consumerRunning; });
 
   consumer_arg_.begin = data_begin;
   consumer_arg_.end = data_end;

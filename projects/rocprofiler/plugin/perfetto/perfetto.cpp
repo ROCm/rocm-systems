@@ -195,10 +195,9 @@ class perfetto_plugin_t {
 
   void delete_perfetto_plugin() {
     if (is_valid_ && tracing_session_ && internal_buffer_finished.load(std::memory_order_acquire)) {
-      writing_lock.lock();
       tracing_session_->StopBlocking();
+      is_valid_ = false;
       // close(file_descriptor_);
-      writing_lock.unlock();
     }
   }
 
@@ -231,8 +230,6 @@ class perfetto_plugin_t {
                           rocprofiler_session_id_t session_id) {
     // ToDO: rename this variable?
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
-
-    writing_lock.lock();
 
     const uint64_t device_id = profiler_record.gpu_id.handle;
     const uint64_t queue_id = profiler_record.queue_id.handle;
@@ -321,14 +318,12 @@ class perfetto_plugin_t {
       TRACE_COUNTER("COUNTERS", counters_track, profiler_record.timestamps.end.value, 0);
     }
 
-    writing_lock.unlock();
     return 0;
   }
 
   int FlushTracerRecord(rocprofiler_record_tracer_t tracer_record,
                         rocprofiler_session_id_t session_id) {
     if (!tracing_session_) rocprofiler::warning("Tracing session is deleted!\n");
-    writing_lock.lock();
     uint64_t device_id = tracer_record.agent_id.handle;
     const char* operation_name_c = nullptr;
     // ROCTX domain Operation ID doesn't have a name
@@ -556,7 +551,6 @@ class perfetto_plugin_t {
         break;
       }
     }
-    writing_lock.unlock();
     return 0;
   }
 
@@ -650,34 +644,32 @@ int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
       rocprofiler_minor_version > ROCPROFILER_VERSION_MINOR)
     return -1;
 
-  // std::lock_guard<std::mutex> lock(writing_lock);
-  writing_lock.lock();
+  std::lock_guard<std::mutex> lock(writing_lock);
   if (perfetto_plugin != nullptr) return -1;
 
   perfetto_plugin = new perfetto_plugin_t();
-  if (perfetto_plugin->IsValid()) {
-    writing_lock.unlock();
+  if (perfetto_plugin->IsValid())
     return 0;
-  }
 
   // delete perfetto_plugin;
   // perfetto_plugin = nullptr;
-  writing_lock.unlock();
   return -1;
 }
 
-void rocprofiler_plugin_finalize() {
-
+void rocprofiler_plugin_finalize()
+{
+  std::lock_guard<std::mutex> lock(writing_lock);
   if (!perfetto_plugin) return;
   perfetto_plugin->delete_perfetto_plugin();
   // delete perfetto_plugin;
-  // perfetto_plugin = nullptr;
+  //perfetto_plugin = nullptr;
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
     const rocprofiler_record_header_t* begin, const rocprofiler_record_header_t* end,
     rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
 
+  std::lock_guard<std::mutex> lock(writing_lock);
   if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
   return perfetto_plugin->WriteBufferRecords(begin, end, session_id, buffer_id);
 }
@@ -685,6 +677,7 @@ ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_record(rocprofiler_record_tracer_t record) {
   if (record.header.id.handle == 0) return 0;
 
+  std::lock_guard<std::mutex> lock(writing_lock);
   if (!perfetto_plugin || !perfetto_plugin->IsValid()) return -1;
   return perfetto_plugin->FlushTracerRecord(record, rocprofiler_session_id_t{0});
 }

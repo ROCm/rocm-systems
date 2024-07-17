@@ -116,6 +116,7 @@ class GenericBuffer {
   std::mutex& GetBufferLock();
 
  private:
+  std::atomic<bool> consumerRunning{false};
   void SwitchBuffers();
   void ConsumerThreadLoop(std::promise<void> ready);
   void NotifyConsumerThread(const std::byte* data_begin, const std::byte* data_end);
