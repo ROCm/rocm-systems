@@ -153,8 +153,8 @@ eval_test "tool period test" "ROCP_CTRL_RATE=10:50000:500000 ./test/MatrixTransp
 eval_test "tool flushing test" "ROCP_FLUSH_RATE=100000 ./test/MatrixTranspose" MatrixTranspose_hip_flush_trace
 
 #API records filtering
-echo "<trace name=\"HIP\"><parameters api=\"hipFree, hipMalloc, hipMemcpy\"></parameters></trace>" > test/input.xml
-export ROCP_INPUT=test/input.xml
+echo "<trace name=\"HIP\"><parameters api=\"hipFree, hipMalloc, hipMemcpy\"></parameters></trace>" > /tmp/input.xml
+export ROCP_INPUT=/tmp/input.xml
 eval_test "tool HIP test input" ./test/MatrixTranspose MatrixTranspose_hip_input_trace
 unset ROCP_INPUT
 
@@ -175,8 +175,8 @@ export ROCP_THRS=1
 
 eval_test "tool HSA test" ./test/copy copy_hsa_trace
 
-echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > test/input.xml
-export ROCP_INPUT=test/input.xml
+echo "<trace name=\"HSA\"><parameters api=\"hsa_agent_get_info, hsa_amd_memory_pool_allocate\"></parameters></trace>" > /tmp/input.xml
+export ROCP_INPUT=/tmp/input.xml
 eval_test "tool HSA test input" ./test/copy copy_hsa_input_trace
 unset ROCP_INPUT
 
