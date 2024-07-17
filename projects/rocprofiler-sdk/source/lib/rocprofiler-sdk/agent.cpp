@@ -28,6 +28,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/string_entry.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
@@ -59,36 +60,6 @@ namespace agent
 namespace
 {
 namespace fs = ::rocprofiler::common::filesystem;
-
-using name_array_t = std::vector<std::pair<size_t, std::unique_ptr<std::string>>>;
-
-name_array_t*
-get_string_array()
-{
-    static auto*& _v = common::static_object<name_array_t>::construct();
-    return _v;
-}
-
-std::string*
-get_string_entry(std::string_view name)
-{
-    auto        _hash_v = std::hash<std::string_view>{}(name);
-    static auto _sync   = std::shared_mutex{};
-    if(!get_string_array()) return nullptr;
-
-    {
-        auto _unlock = common::scope_destructor{[]() { _sync.unlock_shared(); }};
-        _sync.lock_shared();
-        for(const auto& itr : *get_string_array())
-            if(itr.first == _hash_v) return itr.second.get();
-    }
-
-    auto _unlock = common::scope_destructor{[]() { _sync.unlock(); }};
-    _sync.lock();
-    return get_string_array()
-        ->emplace_back(std::make_pair(_hash_v, std::make_unique<std::string>(name)))
-        .second.get();
-}
 
 uint64_t
 get_agent_offset()
@@ -410,7 +381,7 @@ read_topology()
 
         if(!name_prop.empty())
             agent_info.model_name =
-                get_string_entry(fmt::format("{}", fmt::join(name_prop, " ")))->c_str();
+                common::get_string_entry(fmt::format("{}", fmt::join(name_prop, " ")))->c_str();
         else
             agent_info.model_name = "";
 
@@ -497,10 +468,11 @@ read_topology()
                     auto step  = (agent_info.gfx_target_version % 100);
 
                     agent_info.name =
-                        get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))->c_str();
+                        common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
+                            ->c_str();
                     agent_info.product_name =
-                        get_string_entry(amdgpu_get_marketing_name(device_handle))->c_str();
-                    agent_info.vendor_name = get_string_entry("AMD")->c_str();
+                        common::get_string_entry(amdgpu_get_marketing_name(device_handle))->c_str();
+                    agent_info.vendor_name = common::get_string_entry("AMD")->c_str();
 
                     amdgpu_gpu_info gpu_info = {};
                     if(amdgpu_query_gpu_info(device_handle, &gpu_info) == 0)
@@ -515,13 +487,13 @@ read_topology()
         else if(agent_info.type == ROCPROFILER_AGENT_TYPE_CPU)
         {
             agent_info.cu_count    = agent_info.cpu_cores_count;
-            agent_info.vendor_name = get_string_entry("CPU")->c_str();
+            agent_info.vendor_name = common::get_string_entry("CPU")->c_str();
             for(const auto& itr : cpu_info_v)
             {
                 if(agent_info.cpu_core_id_base == itr.apicid)
                 {
-                    agent_info.name         = get_string_entry(itr.model_name)->c_str();
-                    agent_info.product_name = get_string_entry(agent_info.name)->c_str();
+                    agent_info.name         = common::get_string_entry(itr.model_name)->c_str();
+                    agent_info.product_name = common::get_string_entry(agent_info.name)->c_str();
                     agent_info.family_id    = itr.family;
                     break;
                 }

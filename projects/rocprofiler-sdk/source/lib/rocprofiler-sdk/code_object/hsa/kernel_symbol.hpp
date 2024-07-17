@@ -60,7 +60,7 @@ struct kernel_symbol
 
     bool                    beg_notified   = false;
     bool                    end_notified   = false;
-    std::string*            name           = {};
+    const std::string*      name           = nullptr;
     hsa_executable_t        hsa_executable = {};
     hsa_agent_t             hsa_agent      = {};
     hsa_executable_symbol_t hsa_symbol     = {};

@@ -23,6 +23,7 @@
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/string_entry.hpp"
 #include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
@@ -158,7 +159,6 @@ using context_t                      = context::context;
 using user_data_t                    = rocprofiler_user_data_t;
 using context_array_t                = context::context_array_t;
 using context_user_data_map_t        = std::unordered_map<const context_t*, user_data_t>;
-using name_array_t                   = std::vector<std::pair<size_t, std::unique_ptr<std::string>>>;
 using amd_compute_pgm_rsrc_three32_t = uint32_t;
 
 struct kernel_descriptor_t
@@ -294,34 +294,6 @@ sgpr_count(std::string_view name, kernel_descriptor_t kernel_code)
     ROCP_INFO_IF(emplaced) << "Missing support for sgpr_count for " << name;
 
     return 0;
-}
-
-name_array_t*
-get_string_array()
-{
-    static auto*& _v = common::static_object<name_array_t>::construct();
-    return _v;
-}
-
-std::string*
-get_string_entry(std::string_view name)
-{
-    auto        _hash_v = std::hash<std::string_view>{}(name);
-    static auto _sync   = std::shared_mutex{};
-    if(!get_string_array()) return nullptr;
-
-    {
-        auto _unlock = common::scope_destructor{[]() { _sync.unlock_shared(); }};
-        _sync.lock_shared();
-        for(const auto& itr : *get_string_array())
-            if(itr.first == _hash_v) return itr.second.get();
-    }
-
-    auto _unlock = common::scope_destructor{[]() { _sync.unlock(); }};
-    _sync.lock();
-    return get_string_array()
-        ->emplace_back(std::make_pair(_hash_v, std::make_unique<std::string>(name)))
-        .second.get();
 }
 
 hsa_loader_table_t&
@@ -472,7 +444,7 @@ executable_iterate_agent_symbols_load_callback(hsa_executable_t        executabl
         auto _name = std::string(_name_length + 1, '\0');
         ROCP_HSA_CORE_GET_EXE_SYMBOL_INFO(HSA_EXECUTABLE_SYMBOL_INFO_NAME, _name.data());
 
-        symbol_v.name = get_string_entry(_name.substr(0, _name.find_first_of('\0')));
+        symbol_v.name = common::get_string_entry(_name.substr(0, _name.find_first_of('\0')));
     }
     data.kernel_name = (symbol_v.name) ? symbol_v.name->c_str() : nullptr;
 
@@ -648,7 +620,7 @@ code_object_load_callback(hsa_executable_t         executable,
         ROCP_HSA_VEN_LOADER_GET_CODE_OBJECT_INFO(HSA_VEN_AMD_LOADER_LOADED_CODE_OBJECT_INFO_URI,
                                                  _uri.data());
 
-        code_obj_v.uri = get_string_entry(_uri);
+        code_obj_v.uri = common::get_string_entry(_uri);
     }
     data.uri = (code_obj_v.uri) ? code_obj_v.uri->data() : nullptr;
 

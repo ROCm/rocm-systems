@@ -4,7 +4,7 @@
 rocprofiler_activate_clang_tidy()
 
 set(common_sources demangle.cpp elf_utils.cpp environment.cpp logging.cpp
-                   static_object.cpp utility.cpp)
+                   static_object.cpp string_entry.cpp utility.cpp)
 set(common_headers
     abi.hpp
     defines.hpp
@@ -16,6 +16,7 @@ set(common_headers
     mpl.hpp
     scope_destructor.hpp
     static_object.hpp
+    string_entry.hpp
     stringize_arg.hpp
     synchronized.hpp
     units.hpp

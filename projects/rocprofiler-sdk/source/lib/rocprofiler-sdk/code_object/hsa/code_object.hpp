@@ -61,7 +61,7 @@ struct code_object
 
     bool                     beg_notified    = false;
     bool                     end_notified    = false;
-    std::string*             uri             = {};
+    const std::string*       uri             = nullptr;
     hsa_executable_t         hsa_executable  = {};
     hsa_loaded_code_object_t hsa_code_object = {};
     code_object_data_t       rocp_data       = common::init_public_api_struct(code_object_data_t{});
