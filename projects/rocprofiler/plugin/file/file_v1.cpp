@@ -254,7 +254,7 @@ class file_plugin_t {
           output_file = get_output_file(output_type_t::COUNTER);
 
           *output_file << "Index,KernelName,gpu-id,queue-id,queue-index,pid,tid,grd,wgr,lds,scr,"
-                          "arch_vgpr,accum_vgpr,sgpr,wave_size,sig,obj";
+                          "arch_vgpr,accum_vgpr,sgpr,wave_size";
           if (counter_names_.size() > 0) {
             for (uint32_t i = 0; i < counter_names_.size(); i++)
               *output_file << "," << counter_names_[i];
