@@ -394,7 +394,6 @@ ROCPROFILER_EXPORT extern const uint32_t HSA_AMD_TOOL_PRIORITY = 25;
 PUBLIC_API bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count,
                        const char* const* failed_tool_names) {
   ONLOAD_TRACE_BEG();
-  ProfilingLock::Lock(PROFILER_V1_LOCK);
   rocprofiler::SaveHsaApi(table);
   rocprofiler::ProxyQueue::InitFactory();
 
@@ -488,6 +487,7 @@ PUBLIC_API hsa_status_t rocprofiler_open(hsa_agent_t agent, rocprofiler_feature_
                                          uint32_t feature_count, rocprofiler_t** handle,
                                          uint32_t mode, rocprofiler_properties_t* properties) {
   API_METHOD_PREFIX
+  ProfilingLock::Lock(PROFILER_V1_LOCK);
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
   if (agent_info == NULL) {
@@ -673,6 +673,7 @@ rocprofiler_pool_open(hsa_agent_t agent,                          // GPU handle
                       rocprofiler_pool_properties_t* properties)  // pool properties
 {
   API_METHOD_PREFIX
+  ProfilingLock::Lock(PROFILER_V1_LOCK);
   rocprofiler::util::HsaRsrcFactory* hsa_rsrc = &rocprofiler::util::HsaRsrcFactory::Instance();
   const rocprofiler::util::AgentInfo* agent_info = hsa_rsrc->GetAgentInfo(agent);
   if (agent_info == NULL) {

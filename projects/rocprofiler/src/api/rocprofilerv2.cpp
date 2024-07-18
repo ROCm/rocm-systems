@@ -325,6 +325,23 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_create_filter(
   // rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_FILTER_DATA_CORRUPTED); if (error_code == 0)
   //   throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_FILTER_DATA_MISMATCH);
   auto& rocprofiler_singleton = rocprofiler::ROCProfiler_Singleton::GetInstance();
+  switch (filter_kind) {
+    case ROCPROFILER_COUNTERS_COLLECTION:
+    case ROCPROFILER_COUNTERS_SAMPLER:
+      try{
+      ProfilingLock::Lock(PROFILER_V2_LOCK);
+      }catch(std::exception& e){
+        std::cout << e.what();
+        abort();
+      }
+      break;
+    case ROCPROFILER_DISPATCH_TIMESTAMPS_COLLECTION:
+    case ROCPROFILER_PC_SAMPLING_COLLECTION:
+    case ROCPROFILER_ATT_TRACE_COLLECTION:
+    case ROCPROFILER_SPM_COLLECTION:
+    case ROCPROFILER_API_TRACE:
+      break;
+  }  
   if (!rocprofiler_singleton.FindSession(session_id))
     throw rocprofiler::Exception(ROCPROFILER_STATUS_ERROR_SESSION_NOT_FOUND);
   *filter_id = rocprofiler_singleton
@@ -507,6 +524,12 @@ ROCPROFILER_API rocprofiler_status_t rocprofiler_device_profiling_session_create
     int cpu_index, int gpu_index) {
   API_METHOD_PREFIX
   std::vector<std::string> counters(counter_names, counter_names + num_counters);
+  try {
+    ProfilingLock::Lock(PROFILER_V2_LOCK);
+  } catch (std::exception& e) {
+    std::cout << e.what();
+    abort();
+  }
   *session_id =
       rocprofiler::ROCProfiler_Singleton::GetInstance().CreateDeviceProfilingSession(counters, cpu_index, gpu_index);
   API_METHOD_SUFFIX
@@ -618,7 +641,6 @@ ROCPROFILER_EXPORT bool OnLoad(HsaApiTable* table, uint64_t runtime_version,
                                uint64_t failed_tool_count, const char* const* failed_tool_names) {
   if (started) rocprofiler::fatal("HSA Tool started already!");
   started = true;
-  ProfilingLock::Lock(PROFILER_V2_LOCK);
   rocprofiler::HSASupport_Singleton::GetInstance().HSAInitialize(table);
   return true;
 }

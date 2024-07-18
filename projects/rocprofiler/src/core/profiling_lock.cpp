@@ -9,8 +9,8 @@
 #include <sstream>
 #include <sstream>
 #include <cstring>
-#include "util/exception.h"
 #include "profiling_lock.h"
+#include <stdexcept>
 
 #define ROCPROFILER_LOCK_FILE "/tmp/rocprofiler_process.lock"
 #define ROCPROFILER_PID_FILE "/tmp/rocprofiler.pid"
@@ -67,12 +67,12 @@ bool check_process_exists(int pid) {
 }
 
 void terminate_current_profiler_instance() {
-  EXC_RAISING(
-      0,
-      "\nA profiling instance already exists! Multiple profiling instances are not "
-      "allowed.\nCheck "
-          << ROCPROFILER_PID_FILE
-          << " and kill the process, delete this .pid file and try again.\nTerminating ...\n");
+  std::stringstream oss;
+  oss << "\nA profiling instance already exists! Multiple profiling instances are not "
+      << "allowed.\nCheck " << ROCPROFILER_PID_FILE
+      << " and kill the process, delete this .pid file and try again.\nTerminating "
+         "...\n";
+  throw std::runtime_error(oss.str()); 
 }
 
 
@@ -95,6 +95,8 @@ void ProfilingLock::Lock(LockMode mode) {
   bool is_standalone_mode_v1 = check_standalone_mode() && (mode == PROFILER_V1_LOCK);
 
   ProfilingLock* profiling_lock = Instance();
+  // Check if we have already locked in this process
+  if (profiling_lock->already_locked.exchange(true)) return;
   if (file_exists(profiling_lock->pid_file)) {
     profiling_lock->lock = acquire_lock(profiling_lock->lock_file);
     if (profiling_lock->lock < 1) {
