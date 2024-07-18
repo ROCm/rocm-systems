@@ -66,6 +66,24 @@ target_link_libraries(rocprofiler-build-flags INTERFACE rocprofiler-sdk::rocprof
 rocprofiler_target_compile_options(rocprofiler-build-flags
                                    INTERFACE "-W" "-Wall" "-Wno-unknown-pragmas")
 
+# compiler version specific flags
+function(set_compiler_options compiler_id version)
+    if(CMAKE_CXX_COMPILER_ID STREQUAL ${compiler_id} AND CMAKE_CXX_COMPILER_VERSION
+                                                         VERSION_LESS_EQUAL ${version})
+        rocprofiler_target_compile_options(
+            rocprofiler-build-flags
+            INTERFACE "-Wno-error=extra" "-Wno-unused-variable"
+                      "-Wno-error=unused-but-set-variable"
+                      "-Wno-error=unused-but-set-parameter" "-Wno-error=shadow")
+    endif()
+endfunction()
+
+# Check GCC version
+set_compiler_options("GNU" "8.5")
+
+# Check Clang version
+set_compiler_options("Clang" "13.0")
+
 # ----------------------------------------------------------------------------------------#
 # extra flags for debug information in debug or optimized binaries
 #
