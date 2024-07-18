@@ -1,0 +1,2 @@
+"Kind","Agent_Id","Queue_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH",1,139690710949888,15,"matrixTranspose(float*, float*, int)",0,671599758568,671599825328,0,0,4,4,1,1024,1024,1

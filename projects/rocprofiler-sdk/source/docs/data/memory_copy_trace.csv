@@ -1,0 +1,3 @@
+"Kind","Direction","Source_Agent_Id","Destination_Agent_Id","Correlation_Id","Start_Timestamp","End_Timestamp"
+"MEMORY_COPY","HOST_TO_DEVICE",0,1,0,14955949675563,14955950239443
+"MEMORY_COPY","DEVICE_TO_HOST",1,0,0,14955952733485,14955953315285

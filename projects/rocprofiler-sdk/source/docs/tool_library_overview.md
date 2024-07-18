@@ -1,22 +1,19 @@
-# Tool Library
+# Tool library
 
-## Rocprofiler and ROCm Runtimes Design
+The tool library utilizes APIs from `rocprofiler-sdk` and `rocprofiler-register` libraries for profiling and tracing HIP applications. This document provides information to help you design a tool by utilizing the `rocprofiler-sdk` and `rocprofiler-register` libraries efficiently. The command-line tool `rocprofv3` is also built on `librocprofiler-sdk-tool.so.0.4.0`, which uses these libraries.
 
-The ROCm runtimes are now designed to directly communicate with a new library called rocprofiler-register during their initialization. This library does cursory checks
-for whether any tools have indicated they want rocprofiler support via detection of one or more instances of a symbol named `rocprofiler_configure` (which is provided by
-the tool libraries) and/or the `ROCP_TOOL_LIBRARIES` environment variable. This design dramatically improves upon previous designs, which relied solely on
-a tool racing to set runtime-specific environment variables (e.g., `HSA_TOOLS_LIB`) before the runtime initialization.
+## ROCm runtimes design
 
-## Tool Library Design
+The ROCm runtimes are designed to directly communicate with a helper library named `rocprofiler-register` during initialization. This library performs cursory checks to find if a tool requires ROCprofiler-SDK services. This detection is based on the presence of one or more instances of `rocprofiler_configure` in the tool or `ROCP_TOOL_LIBRARIES` environment variable. This design provides drastic improvement over previous designs, which relied solely on a tool racing to set runtime-specific environment variables like `HSA_TOOLS_LIB` before the runtime initialization.
 
-When a tool has `rocprofiler_configure` visible in its symbol table, rocprofiler will invoke this function and provide information regarding
-the version of rocprofiler, which invokes the function, how many tools have already been invoked, and a unique identifier for the tool. The tool
-returns a pointer to a `rocprofiler_tool_configure_result_t` struct, which, if non-null, can provide rocprofiler with the function it should
-call for tool initialization (i.e., the opportunity for context creation), and a function should call when rocprofiler is finalized, and a pointer
-to any data that the rocprofiler should provide back to the tool when it calls the initialization and finalization functions.
+## Tool library design
 
-Rocprofiler provides a `rocprofiler/registration.h` header file, which forward declares the `rocprofiler_configure` function with the necessary
-compiler function attributes to ensure that the symbol is publicly visible.
+When ROCprofiler-SDK detects `rocprofiler_configure` in a tool's symbol table, ROCprofiler-SDK invokes `rocprofiler-configure` with parameters such as ROCprofiler-SDK version that invokes the function, number of tools already invoked, and a unique identifier for the tool. The tool returns a pointer to a `rocprofiler_tool_configure_result_t` struct, which, if non-null, provides ROCprofiler-SDK with:
+- Function to be called for tool initialization, which is also the opportunity for context creation.
+- Function to be called when ROCprofiler-SDK is finalized.
+- A pointer to data to be provided to the tool when ROCprofiler-SDK calls the initialization and finalization functions.
+
+ROCprofiler-SDK provides a `rocprofiler-sdk/registration.h` header file, which forward declares the `rocprofiler_configure` function with the necessary compiler function attributes to ensure that the `rocprofiler-configure` symbol is publicly visible.
 
 ```cpp
 #include <rocprofiler-sdk/registration.h>
@@ -73,15 +70,16 @@ rocprofiler_configure(uint32_t                 version,
 }
 ```
 
-## Tool Initialization
+## Tool initialization
 
-> ***NOTE: rocprofiler does NOT support calls to any runtime function (HSA, HIP, etc.) during tool initialization.***
-> ***Invoking any functions from the runtimes will result in a deadlock.***
+:::{note}
+ROCprofiler-SDK does NOT support calls to any runtime function (HSA, HIP, and so on) during tool initialization.
+Invoking any functions from the runtimes results in a deadlock.
+:::
 
-For each tool that contains a `rocprofiler_configure` function and returns a non-null pointer to a `rocprofiler_tool_configure_result_t` struct,
-rocprofiler will invoke the `initialize` callback after completing the scan for all `rocprofiler_configure` symbols. In other words, rocprofiler
-collects all of the `rocprofiler_tool_configure_result_t` instances before invoking the `initialize` member of any of these instances.
-When rocprofiler invokes this function in a tool, this is the opportunity to create contexts:
+For each tool that contains a `rocprofiler_configure` function and returns a non-null pointer to a `rocprofiler_tool_configure_result_t` struct, ROCprofiler-SDK invokes the `initialize` callback after completing the scan for all `rocprofiler_configure` symbols. In other words, ROCprofiler-SDK
+collects all `rocprofiler_tool_configure_result_t` instances before invoking the `initialize` member of any of these instances.
+When ROCprofiler-SDK invokes `initialize` function in a tool, this is the opportunity to create contexts:
 
 ```cpp
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -106,12 +104,12 @@ tool_init(rocprofiler_client_finalize_t fini_func,
 }
 ```
 
-Although not strictly necessary, it is recommended that tools store the context handle(s) to control the data collection of the services associated with the context.
+Although not mandatory, it is recommended that tools store the context handles to control the data collection for the services associated with the context.
 
-## Tool Finalization
+## Tool finalization
 
-When the user-provided `initialize` callback is invoked, rocprofiler will provide a function pointer of type `rocprofiler_client_finalize_t`.
-This function pointer can be invoked by the tool to explicitly invoke the `finalize` callback from the `rocprofiler_tool_configure_result_t` instance:
+When the `initialize` callback is invoked in the tool, ROCprofiler-SDK provides a function pointer of type `rocprofiler_client_finalize_t`.
+The tool can invoke this function pointer to explicitly invoke the `finalize` callback from the `rocprofiler_tool_configure_result_t` instance:
 
 ```cpp
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -143,7 +141,7 @@ tool_init(rocprofiler_client_finalize_t fini_func,
 }
 ```
 
-Otherwise, the rocprofiler will invoke the `finalize` callback via an `atexit` handler.
+Otherwise, ROCprofiler-SDK invokes the `finalize` callback via an `atexit` handler.
 
 ## Agent Information
 

@@ -5,7 +5,7 @@ Note: rocprofiler-sdk is currently considered a beta version and is subject to c
 
 ## Overview
 
-ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a hardware-specific low-level performance analysis interface for profiling and tracing GPU compute applications. To see what's changed [Click Here](source/docs/index.md)
+ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a hardware-specific low-level performance analysis interface for profiling and tracing GPU compute applications. To see what's changed [Click Here](source/docs/what-is-rocprof-sdk.rst)
 
 ## GPU Metrics
 
@@ -21,7 +21,7 @@ ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 
 rocprofv3 is the command line tool built using the rocprofiler-sdk library and shipped with the ROCm stack. To see details on
 the command line options of rocprofv3, please see rocprofv3 user guide
-[Click Here](source/docs/rocprofv3.md)
+[Click Here](source/docs/how-to/using-rocprofv3.rst)
 
 ## Documentation
 
@@ -55,7 +55,7 @@ To install ROCprofiler, run:
 cmake --build rocprofiler-sdk-build --target install
 ```
 
-Please see the detailed section on build and installation here: [Click Here](source/docs/installation.md)
+Please see the detailed section on build and installation here: [Click Here](source/docs/install/installation.md)
 
 ## Support
 
