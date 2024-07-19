@@ -549,7 +549,6 @@ bool Queue::CheckNeededProfileConfigs()
   std::unique_lock<std::shared_mutex> session_id_lock(session_id_mutex);
   is_counter_collection_mode = false;
   is_timestamp_collection_mode = false;
-  is_timestamp_collection_mode = false;
   is_att_collection_mode = false;
   is_pc_sampling_collection_mode = false;
   session_data_count = 0;
@@ -561,6 +560,7 @@ bool Queue::CheckNeededProfileConfigs()
   session_id = rocprofiler_singleton.GetCurrentSessionId();
   // Getting Counters count from the Session
   if (session_id.handle == 0) return false;
+
   session = rocprofiler_singleton.GetSession(session_id);
 
   if (session && session->FindFilterWithKind(ROCPROFILER_COUNTERS_COLLECTION)) {
@@ -758,9 +758,9 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
       if (session_data_count > 0 && is_counter_collection_mode && context_backup)
       {
         hsa_signal_t dummy_signal{};
-        context_backup->read_packet->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+        context_backup->read_packet->header = (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER);
         Packet::AddVendorSpecificPacket(context_backup->read_packet, &transformed_packets, dummy_signal);
-        context_backup->stop_packet->header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+        context_backup->stop_packet->header = (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) | (1 << HSA_PACKET_HEADER_BARRIER);
         Packet::AddVendorSpecificPacket(context_backup->stop_packet, &transformed_packets, interrupt_signal);
 
         // Added Interrupt Signal with barrier and provided handler for it
