@@ -259,7 +259,7 @@ shared_mutex_t shared_mutex_init(const char *name, mode_t mode, bool retried) {
       std::vector<std::string> ids = lsof(shared_mutex_filename.c_str());
       if (ids.size() == 0) {  // no process is using it
         fprintf(stderr, "%d re-init the mutex %s since no one use it. ret:%d ptr:%p\n",
-              cur_pid, shared_mutex_filename, ret, reinterpret_cast<shared_mutex_t *>(addr)->ptr);
+              cur_pid, shared_mutex_filename.c_str(), ret, reinterpret_cast<shared_mutex_t *>(addr)->ptr);
         memset(mutex_ptr, 0, sizeof(pthread_mutex_t));
         // Set mutex.created == 1 so that it can be initialized latter.
         mutex.created = 1;

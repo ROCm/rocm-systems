@@ -31,6 +31,7 @@ from subprocess import run
 from subprocess import PIPE, STDOUT
 from typing import List
 from enum import Enum
+from typing import Set
 
 from amdsmi_init import *
 from BDF import BDF
@@ -789,7 +790,7 @@ class AMDSMIHelpers():
         """
         return int(float(val) * unit_in / unit_out)
 
-    def get_pci_device_ids(self) -> set[str]:
+    def get_pci_device_ids(self) -> Set[str]:
         pci_devices_path = "/sys/bus/pci/devices"
         pci_devices: set[str] = set()
         for device in os.listdir(pci_devices_path):
