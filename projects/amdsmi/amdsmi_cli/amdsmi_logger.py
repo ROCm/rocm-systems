@@ -480,10 +480,10 @@ class AMDSMILogger():
                 print(json_std_output)
         else: # Write output to file
             if watching_output: # Flush the full JSON output to the file on watch command completion
-                with self.destination.open('w') as output_file:
+                with self.destination.open('w', encoding="utf-8") as output_file:
                     json.dump(self.watch_output, output_file, indent=4)
             else:
-                with self.destination.open('a') as output_file:
+                with self.destination.open('a', encoding="utf-8") as output_file:
                     json.dump(json_output, output_file, indent=4)
 
 
@@ -516,7 +516,7 @@ class AMDSMILogger():
                 print(str(csv_stdout_output))
         else:
             if watching_output:
-                with self.destination.open('w', newline = '') as output_file:
+                with self.destination.open('w', newline = '', encoding="utf-8") as output_file:
                     if self.watch_output:
                         csv_keys = set()
                         for output in self.watch_output:
@@ -534,7 +534,7 @@ class AMDSMILogger():
                         writer.writeheader()
                         writer.writerows(self.watch_output)
             else:
-                with self.destination.open('a', newline = '') as output_file:
+                with self.destination.open('a', newline = '', encoding="utf-8") as output_file:
                     # Get the header as a list of the first element to maintain order
                     csv_header = stored_csv_output[0].keys()
                     writer = csv.DictWriter(output_file, csv_header)
@@ -622,7 +622,7 @@ class AMDSMILogger():
                     print()
         else:
             if watching_output:
-                with self.destination.open('w', newline = '') as output_file:
+                with self.destination.open('w', newline = '', encoding="utf-8") as output_file:
                     primary_csv_output = []
                     secondary_csv_output = []
                     if self.watch_output:
@@ -687,7 +687,7 @@ class AMDSMILogger():
                             writer.writeheader()
                             writer.writerows(secondary_csv_output)
             else:
-                with self.destination.open('a', newline = '') as output_file:
+                with self.destination.open('a', newline = '', encoding="utf-8") as output_file:
                     if primary_csv_output:
                         # Get the header as a list of the first element to maintain order
                         csv_header = primary_csv_output[0].keys()
@@ -724,13 +724,13 @@ class AMDSMILogger():
                 print(human_readable_output.encode('ascii', 'ignore').decode('ascii'))
         else:
             if watching_output:
-                with self.destination.open('w') as output_file:
+                with self.destination.open('w', encoding="utf-8") as output_file:
                     human_readable_output = ''
                     for output in self.watch_output:
                         human_readable_output += self._convert_json_to_human_readable(output)
                     output_file.write(human_readable_output + '\n')
             else:
-                with self.destination.open('a') as output_file:
+                with self.destination.open('a', encoding="utf-8") as output_file:
                     output_file.write(human_readable_output + '\n')
 
 
@@ -806,7 +806,7 @@ class AMDSMILogger():
                     print("\n")
         else:
             if watching_output: # Write all stored watched output to a file
-                with self.destination.open('w') as output_file:
+                with self.destination.open('w', encoding="utf-8") as output_file:
                     primary_table = ''
                     secondary_table = ''
                     # Add process_list to the secondary_table
@@ -851,6 +851,6 @@ class AMDSMILogger():
                     if secondary_table:
                         output_file.write("\n" + secondary_table)
             else: # Write all singular output to a file
-                with self.destination.open('a') as output_file:
+                with self.destination.open('a', encoding="utf-8") as output_file:
                     output_file.write(primary_table + '\n')
                     output_file.write(secondary_table)

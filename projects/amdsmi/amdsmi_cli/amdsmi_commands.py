@@ -122,7 +122,7 @@ class AMDSMICommands():
             if self.logger.destination == 'stdout':
                 print(human_readable_output)
             else:
-                with self.logger.destination.open('a') as output_file:
+                with self.logger.destination.open('a', encoding="utf-8") as output_file:
                     output_file.write(human_readable_output + '\n')
         elif self.logger.is_json_format() or self.logger.is_csv_format():
             self.logger.print_output()
@@ -4300,11 +4300,19 @@ class AMDSMICommands():
             self.logger.table_header += 'DOUBLE_ECC'.rjust(12)
 
             try:
-                pcie_replay = amdsmi_interface.amdsmi_get_gpu_pci_replay_counter(args.gpu)
-                monitor_values['pcie_replay'] = pcie_replay
+                pcie_metric = amdsmi_interface.amdsmi_get_pcie_info(args.gpu)['pcie_metric']
+                logging.debug("PCIE Metric for %s | %s", gpu_id, pcie_metric)
+                monitor_values['pcie_replay'] = pcie_metric['pcie_replay_count']
             except amdsmi_exception.AmdSmiLibraryException as e:
                 monitor_values['pcie_replay'] = "N/A"
-                logging.debug("Failed to get pcie replay counter on gpu %s | %s", gpu_id, e.get_error_info())
+                logging.debug("Failed to get gpu_metrics pcie replay counter on gpu %s | %s", gpu_id, e.get_error_info())
+
+            if monitor_values['pcie_replay'] == "N/A":
+                try:
+                    pcie_replay = amdsmi_interface.amdsmi_get_gpu_pci_replay_counter(args.gpu)
+                    monitor_values['pcie_replay'] = pcie_replay
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get sysfs pcie replay counter on gpu %s | %s", gpu_id, e.get_error_info())
 
             self.logger.table_header += 'PCIE_REPLAY'.rjust(13)
         if args.vram_usage:

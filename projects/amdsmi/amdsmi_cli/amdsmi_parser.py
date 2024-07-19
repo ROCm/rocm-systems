@@ -140,7 +140,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             return int(int_value)
 
         outputformat = self.helpers.get_output_format()
-        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
+        if int_value == "":
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(int_value, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
 
 
     def _positive_int(self, int_value):
@@ -150,7 +153,10 @@ class AMDSMIParser(argparse.ArgumentParser):
                 return int(int_value)
 
         outputformat = self.helpers.get_output_format()
-        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
+        if int_value == "":
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(int_value, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(int_value, outputformat)
 
 
     def _is_valid_string(self, string_value):
@@ -160,8 +166,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             return string_value
 
         outputformat = self.helpers.get_output_format()
-        raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
-
+        if string_value == "":
+            raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(string_value, outputformat)
+        else:
+            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
 
     def _check_output_file_path(self):
         """ Argument action validator:

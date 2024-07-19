@@ -145,6 +145,9 @@ ASIC products. This requires users to update any ABIs using this structure.
 
 ### Fixes
 
+- **Fixed Leftover Mutex deadlock when running multiple instances of the CLI tool**.  
+When running `amd-smi reset --gpureset --gpu all` and then running an instance of `amd-smi static` (or any other subcommand that access the GPUs) a mutex would lock and not return requiring either a clear of the mutex in /dev/shm or rebooting the machine.
+
 - **Fixed multiple processes not being registered in `amd-smi process` with json and csv format**.  
 Multiple process outputs in the CLI tool were not being registered correctly. The json output did not handle multiple processes and is now in a new valid json format:
 

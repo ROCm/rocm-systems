@@ -22,6 +22,7 @@
 
 import logging
 import math
+import os
 import platform
 import sys
 import time
@@ -58,19 +59,23 @@ class AMDSMIHelpers():
             self._is_linux = True
             logging.debug(f"AMDSMIHelpers: Platform is linux:{self._is_linux}")
 
-            output = run(["lscpu"], stdout=PIPE, stderr=STDOUT, encoding="UTF-8").stdout
-            if "hypervisor" not in output:
-                self._is_baremetal = True
-            else:
-                self._is_virtual_os = True
+            try:
+                with open('/proc/cpuinfo', 'r') as f:
+                    if 'hypervisor' in f.read():
+                        self._is_virtual_os = True
+            except IOError:
+                pass
+
+            self._is_baremetal = not self._is_virtual_os
 
             # Check for passthrough system filtering by device id
-            output = run(["lspci", "-nn"], stdout=PIPE, stderr=STDOUT, encoding="UTF-8").stdout
+            output = self.get_pci_device_ids()
             passthrough_device_ids = ["7460", "73c8", "74a0", "74a1", "74a2"]
-            if any(device_id in output for device_id in passthrough_device_ids):
-                self._is_baremetal = True
-                self._is_virtual_os = False
-                self._is_passthrough = True
+            if any(('0x' + device_id) in output for device_id in passthrough_device_ids):
+                if self._is_virtual_os:
+                    self._is_baremetal = True
+                    self._is_virtual_os = False
+                    self._is_passthrough = True
 
 
     def os_info(self, string_format=True):
@@ -783,3 +788,17 @@ class AMDSMIHelpers():
             int : converted SI unit of value requested
         """
         return int(float(val) * unit_in / unit_out)
+
+    def get_pci_device_ids(self) -> set[str]:
+        pci_devices_path = "/sys/bus/pci/devices"
+        pci_devices: set[str] = set()
+        for device in os.listdir(pci_devices_path):
+            subsystem_device_path = os.path.join(pci_devices_path, device, "subsystem_device")
+            try:
+                with open(subsystem_device_path, 'r') as f:
+                    subsystem_device = f.read().strip()
+                    pci_devices.add(subsystem_device)
+            except Exception as _:
+                continue
+        return pci_devices
+

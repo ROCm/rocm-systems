@@ -442,13 +442,14 @@ class AmdSmiEventReader:
         for i in range(0, num_elem):
             unique_event_values = set(event.value for event in AmdSmiEvtNotificationType)
             if self.event_info[i].event in unique_event_values:
-                ret.append(
-                    {
-                        "processor_handle": self.event_info[i].processor_handle,
-                        "event": AmdSmiEvtNotificationType(self.event_info[i].event).name,
-                        "message": self.event_info[i].message.decode("utf-8"),
-                    }
-                )
+                if AmdSmiEvtNotificationType(self.event_info[i].event).name != "NONE":
+                    ret.append(
+                        {
+                            "processor_handle": self.event_info[i].processor_handle,
+                            "event": AmdSmiEvtNotificationType(self.event_info[i].event).name,
+                            "message": self.event_info[i].message.decode("utf-8"),
+                        }
+                    )
 
         return ret
 

@@ -88,6 +88,9 @@ class RocmSMI {
 
     void set_init_options(uint64_t options) {init_options_ = options;}
     uint64_t init_options() const {return init_options_;}
+    uint64_t is_thread_only_mutex() const {
+      return init_options_ & RSMI_INIT_FLAG_THRAD_ONLY_MUTEX;
+    }
 
     uint32_t euid() const {return euid_;}
 

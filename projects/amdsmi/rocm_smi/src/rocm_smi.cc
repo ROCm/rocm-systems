@@ -3435,7 +3435,8 @@ rsmi_dev_gpu_reset(uint32_t dv_ind) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
-  DEVICE_MUTEX
+  // No longer using DEVICE_MUTEX as it blocks long running processes
+  // DEVICE_MUTEX
 
   rsmi_status_t ret;
   uint64_t status_code = 0;

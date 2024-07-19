@@ -42,7 +42,7 @@ def _print_error(e, destination):
     if destination in ['stdout', 'json', 'csv']:
         print(e)
     else:
-        f = open(destination, "w")
+        f = open(destination, "w", encoding="utf-8")
         f.write(e)
         f.close()
         print("Error occured. Result written to " + str(destination) + " file")
