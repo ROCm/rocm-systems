@@ -114,11 +114,13 @@ CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  ag
                                                         reinterpret_cast<void*>(&pool));
     if(status != HSA_STATUS_SUCCESS) ROCP_FATAL << "Could not create PMC packets!";
 
-    auto header                 = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    packets.start_packet.header = header;
-    packets.stop_packet.header  = header;
-    packets.read_packet.header  = header;
-    empty                       = false;
+    packets.start_packet.header = 1 << HSA_PACKET_HEADER_BARRIER;
+    // Read and stop packets require the barrier bit set to wait for the dispatch packet
+    auto header = (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
+                  (1 << HSA_PACKET_HEADER_BARRIER);
+    packets.stop_packet.header = header;
+    packets.read_packet.header = header;
+    empty                      = false;
 }
 
 hsa_status_t
@@ -180,7 +182,8 @@ TraceControlAQLPacket::TraceControlAQLPacket(const TraceMemoryPool&          _tr
     CHECK_HSA(status, "failed to create ATT packet");
 
     packets.start_packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
-    packets.stop_packet.header  = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
+    packets.stop_packet.header  = (HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE) |
+                                 (1 << HSA_PACKET_HEADER_BARRIER);
     packets.start_packet.completion_signal = hsa_signal_t{.handle = 0};
     packets.stop_packet.completion_signal  = hsa_signal_t{.handle = 0};
     this->empty                            = false;

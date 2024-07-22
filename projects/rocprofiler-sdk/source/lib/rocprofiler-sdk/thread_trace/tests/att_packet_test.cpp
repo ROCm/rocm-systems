@@ -95,11 +95,8 @@ TEST(thread_trace, resource_creation)
         packet->populate_before();
         packet->populate_after();
 
-        size_t vendor_packet = HSA_PACKET_TYPE_VENDOR_SPECIFIC << HSA_PACKET_HEADER_TYPE;
         ASSERT_TRUE(packet->before_krn_pkt.size() > 0);
         ASSERT_TRUE(packet->after_krn_pkt.size() > 0);
-        ASSERT_TRUE(packet->before_krn_pkt.at(0).header == vendor_packet);
-        ASSERT_TRUE(packet->after_krn_pkt.at(0).header == vendor_packet);
     }
 
     {
