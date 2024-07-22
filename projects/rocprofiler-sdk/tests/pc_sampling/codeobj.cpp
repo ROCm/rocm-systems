@@ -185,7 +185,7 @@ codeobj_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                 // extract symbols from code object
                 auto& kernel_object_map = client::address_translation::get_kernel_object_map();
-                auto  symbolmap         = translator.getSymbolMap();
+                auto  symbolmap         = translator.getSymbolMap(data->code_object_id);
                 for(auto& [vaddr, symbol] : symbolmap)
                 {
                     kernel_object_map.add_kernel(

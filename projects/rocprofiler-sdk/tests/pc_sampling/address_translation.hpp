@@ -40,6 +40,27 @@ namespace address_translation
 {
 using Instruction             = rocprofiler::codeobj::disassembly::Instruction;
 using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
+using marker_id_t             = rocprofiler::codeobj::disassembly::marker_id_t;
+
+/**
+ * @brief Pair (code_object_id, pc_addr) uniquely identifies an instruction.
+ */
+struct inst_id_t
+{
+    marker_id_t code_object_id;
+    uint64_t    pc_addr;
+
+    bool operator==(const inst_id_t& b) const
+    {
+        return this->pc_addr == b.pc_addr && this->code_object_id == b.code_object_id;
+    };
+
+    bool operator<(const inst_id_t& b) const
+    {
+        if(this->code_object_id == b.code_object_id) return this->pc_addr < b.pc_addr;
+        return this->code_object_id < b.code_object_id;
+    };
+};
 
 class KernelObject
 {
@@ -207,8 +228,9 @@ public:
     {
         auto lock = std::unique_lock{mut};
 
-        auto inst_id = get_instruction_id(*instruction);
-        auto itr     = samples.find(inst_id);
+        inst_id_t inst_id = {.code_object_id = instruction->codeobj_id,
+                             .pc_addr        = instruction->ld_addr};
+        auto      itr     = samples.find(inst_id);
         if(itr == samples.end())
         {
             // Add new instruction
@@ -225,28 +247,19 @@ public:
     {
         auto lock = std::shared_lock{mut};
 
-        auto inst_id = get_instruction_id(inst);
-        auto itr     = samples.find(inst_id);
+        // TODO: Avoid creating a new instance of `inst_id_t` whenever querying
+        // sampled instructions.
+        inst_id_t inst_id = {.code_object_id = inst.codeobj_id, .pc_addr = inst.ld_addr};
+        auto      itr     = samples.find(inst_id);
         if(itr == samples.end()) return nullptr;
         return itr->second.get();
+        return nullptr;
     }
 
 private:
-    // For the sake of this test, we use `ld_addr` as the instruction identifier.
-    // TODO: To cover code object loading/unloading and relocations,
-    // use `(code_object_id + ld_addr)` as the unique identifier.
-    // This assumes the decoder chage to return code_object_id as part
-    // of the `LoadedCodeobjDecoder::get(uint64_t ld_addr)` method.
-    using instrution_id_t = uint64_t;
-    instrution_id_t get_instruction_id(const Instruction& instruction) const
-    {
-        // Ensure the decoder determined the `ld_addr`.
-        assert(instruction.ld_addr > 0);
-        return instruction.ld_addr;
-    }
-
-    std::unordered_map<instrution_id_t, std::unique_ptr<SampleInstruction>> samples;
-    mutable std::shared_mutex                                               mut;
+    // TODO: optimize to use unordered_map
+    std::map<inst_id_t, std::unique_ptr<SampleInstruction>> samples;
+    mutable std::shared_mutex                               mut;
 };
 
 std::mutex&

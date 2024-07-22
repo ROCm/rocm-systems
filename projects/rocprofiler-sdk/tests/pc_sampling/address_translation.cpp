@@ -107,7 +107,7 @@ KernelObject::KernelObject(uint64_t    code_object_id,
     uint64_t vaddr      = begin_address;
     while(vaddr < end_address)
     {
-        auto inst = translator.get(vaddr);
+        auto inst = translator.get(code_object_id, vaddr);
         vaddr += inst->size;
         this->add_instruction(std::move(inst));
     }
@@ -143,6 +143,10 @@ dump_flat_profile()
             {
                 _sample_instruction->process([&](const SampleInstruction& sample_instruction) {
                     ss << sample_instruction.sample_count();
+                    // Each instruction should be visited exactly once.
+                    // Otherwise, code object loading/unloading and relocations
+                    // are not handled properly.
+                    assert(visited_instructions.count(sample_instruction.inst()) == 0);
                     // Assure that each instruction is counted once.
                     if(visited_instructions.count(sample_instruction.inst()) == 0)
                     {
