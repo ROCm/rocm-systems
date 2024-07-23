@@ -32,7 +32,7 @@ set(TEST_SRC
     hipSimpleTexture1DLayered.cc
     hipSimpleTexture2DLayered.cc
     hipBindTexture.cc
-    hipBindTex2DPitch.cc
+    hipBindTexture2D.cc
     hipTex1DFetchCheckModes.cc
     hipGetChanDesc.cc
     hipGetTextureAlignmentOffset.cc
