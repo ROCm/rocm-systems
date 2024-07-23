@@ -42,7 +42,6 @@ cmake                                         \
       -B rocprofiler-sdk-build                \
       -D ROCPROFILER_BUILD_TESTS=ON           \
       -D ROCPROFILER_BUILD_SAMPLES=ON         \
-      -D ROCPROFILER_BUILD_DOCS=ON            \
       -D CMAKE_INSTALL_PREFIX=/opt/rocm       \
        rocprofiler-sdk-source
 
