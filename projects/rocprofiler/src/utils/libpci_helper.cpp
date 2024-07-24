@@ -26,8 +26,8 @@
 
 
 namespace rocprofiler {
-PcieAccessApi* api;
-void* libpciaccess_handle;
+PcieAccessApi* api = nullptr;
+void* libpciaccess_handle = nullptr;
 
 // A function just to load all the symbols you need
 PcieAccessApi* LoadPcieAccessLibAPI() {
