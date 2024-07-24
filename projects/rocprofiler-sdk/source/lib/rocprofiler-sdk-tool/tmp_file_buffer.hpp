@@ -71,7 +71,8 @@ void
 write_ring_buffer(Tp _v, domain_type type)
 {
     auto [_tmp_buf, _tmp_file] = get_tmp_file_buffer<ring_buffer_t<Tp>>(type);
-    auto* ptr                  = _tmp_buf->request(false);
+    if(_tmp_buf->capacity() == 0) return;
+    auto* ptr = _tmp_buf->request(false);
     if(ptr == nullptr)
     {
         offload_buffer<ring_buffer_t<Tp>>(type);
