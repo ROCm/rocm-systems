@@ -157,6 +157,7 @@ static void checkPartitionIdChanges(
   uint32_t dev, const std::string current_partition, bool isVerbose,
   bool reinitialize) {
   uint32_t max_loop = MAX_SPX_PARTITIONS;
+  uint32_t current_num_devices = 0;
 
   // re-initialize to ensure new device ordering is followed
   if (reinitialize) {
@@ -185,8 +186,19 @@ static void checkPartitionIdChanges(
       }
     }
   }
+  rsmi_num_monitor_devices(&current_num_devices);
 
   for (uint32_t i = dev; i < dev + max_loop; i++) {
+    if (dev+max_loop > current_num_devices) {
+      std::cout << "\t**Devices: " << dev << "; max_loop: " << max_loop
+      << "; current_num_devices: " << current_num_devices << "\n";
+      std::cout << "\t**[WARNING] Detected max DRM minor limitation "
+      "(max of 64).\n\tPlease disable any other drivers taking up PCIe space"
+      "\n\t(ex. ast or other drivers -> "
+      "\"sudo rmmod amdgpu && sudo rmmod ast && sudo modprobe amdgpu\")."
+      "\n\tCPX may not enumerate properly.\n";
+      break;
+    }
     uint32_t partition_id;
     rsmi_status_t ret = rsmi_dev_partition_id_get(i, &partition_id);
     std::cout << "\t** Checking Partition ID | Device: " << std::to_string(i)
@@ -419,7 +431,43 @@ void TestComputePartitionReadWrite::Run(void) {
      * 
      */
     std::string final_partition_state = "UNKNOWN";
+
+    // loop through modes lower than original, but do not re-initialize this throws
+    // off device id numbers in tests
+    // (since we started with higher total # of devices)
     for (int partition = static_cast<int>(RSMI_COMPUTE_PARTITION_SPX);
+         partition < static_cast<int>(mapStringToRSMIComputePartitionTypes.at(
+                                      std::string(orig_char_computePartition)));
+         partition++) {
+      if (std::string(orig_char_computePartition) == "SPX") {
+        break;
+      }
+      rsmi_compute_partition_type_t updatePartition
+        = static_cast<rsmi_compute_partition_type_t>(partition);
+      IF_VERB(STANDARD) {
+        std::cout << std::endl;
+        std::cout << "\t**"
+                  << "======== TEST RSMI_COMPUTE_PARTITION_"
+                  << computePartitionString(updatePartition)
+                  << " ===============" << std::endl;
+      }
+      ret = rsmi_dev_compute_partition_set(dv_ind, updatePartition);
+      IF_VERB(STANDARD) {
+        std::cout << "\t**"
+                  << "rsmi_dev_compute_partition_set(" << dv_ind
+                  << ", updatePartition): "
+                  << amd::smi::getRSMIStatusString(ret, false) << "\n"
+                  << "\t**New Partition (set): "
+                  << computePartitionString(updatePartition) << "\n";
+      }
+      ASSERT_TRUE((ret == RSMI_STATUS_SETTING_UNAVAILABLE)
+                  || (ret== RSMI_STATUS_PERMISSION)
+                  || (ret == RSMI_STATUS_SUCCESS)
+                  || ret == RSMI_STATUS_BUSY);
+    }
+
+    for (int partition = static_cast<int>(mapStringToRSMIComputePartitionTypes.at(
+                                      std::string(orig_char_computePartition)));
          partition <= static_cast<int>(RSMI_COMPUTE_PARTITION_CPX);
          partition++) {
       rsmi_compute_partition_type_t updatePartition

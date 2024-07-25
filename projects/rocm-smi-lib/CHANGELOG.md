@@ -4,6 +4,41 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 6.3
+
+### Added
+
+- N/A
+
+### Changed
+
+- N/A
+
+### Optimized
+
+- N/A
+
+### Fixed
+
+- **Fixed rsmitstReadWrite.TestComputePartitionReadWrite segfault**  
+Segfault was caused due to unhandled start conditions:
+
+1) When setting CPX as a partition mode, there is a DRM node limitation of 64.
+This is a known limitation of the driver, if other drivers are using other DRM nodes (ex. using PCIe space, such as ast).  
+The number of DRM nodes can be checked via `ls /sys/class/drm`  
+Recommended steps for removing unnecessary drivers:  
+a. unloading amdgpu - `sudo rmmod amdgpu`  
+b. removing unnecessary driver(s) - ex. `sudo rmmod ast`  
+c. reload amgpu - `sudo modprobe amdgpu`
+
+2) Since user could start amdgpu in different partition modes (ex. `sudo modprobe amdgpu user_partt_mode=1`).
+Test needed to keep track of total number of devices, in order to ensure test comes back to the original configuration.
+The test segfault could be seen on all MI3x ASICs, if brought up in a non-SPX configuration upon boot.
+
+### Known Issues
+
+- N/A
+
 ## rocm_smi_lib for ROCm 6.2
 
 ### Added
@@ -37,7 +72,6 @@ plan to eventually remove partition ID from the function portion of the BDF (Bus
 ### Known Issues
 
 - N/A
-
 
 ## rocm_smi_lib for ROCm 6.1.2
 
