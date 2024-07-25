@@ -119,9 +119,9 @@ class rocprofiler_plugin_t {
     rocprofiler_plugin_write_record_ = reinterpret_cast<decltype(rocprofiler_plugin_write_record)*>(
         dlsym(plugin_handle_, "rocprofiler_plugin_write_record"));
     if (!rocprofiler_plugin_write_record_) return;
-    rocprofiler_plugin_finalize_ = reinterpret_cast<decltype(rocprofiler_plugin_finalize)*>(
+    rocprofiler_plugin_finalize_fn = reinterpret_cast<decltype(rocprofiler_plugin_finalize)*>(
         dlsym(plugin_handle_, "rocprofiler_plugin_finalize"));
-    if (!rocprofiler_plugin_finalize_) return;
+    if (!rocprofiler_plugin_finalize_fn) return;
     if (auto* initialize = reinterpret_cast<decltype(rocprofiler_plugin_initialize)*>(
             dlsym(plugin_handle_, "rocprofiler_plugin_initialize"));
         initialize != nullptr)
@@ -129,7 +129,7 @@ class rocprofiler_plugin_t {
   }
 
   ~rocprofiler_plugin_t() {
-    if (is_valid()) rocprofiler_plugin_finalize_();
+    if (is_valid()) rocprofiler_plugin_finalize_fn();
     if (plugin_handle_ != nullptr) dlclose(plugin_handle_);
   }
 
@@ -148,17 +148,18 @@ class rocprofiler_plugin_t {
 
   std::string& getPluginName() { return plugin_name_; }
 
+  decltype(rocprofiler_plugin_finalize)* rocprofiler_plugin_finalize_fn;
+
  private:
   bool valid_{false};
   void* plugin_handle_;
   std::string plugin_name_;
 
-  decltype(rocprofiler_plugin_finalize)* rocprofiler_plugin_finalize_;
   decltype(rocprofiler_plugin_write_buffer_records)* rocprofiler_plugin_write_buffer_records_;
   decltype(rocprofiler_plugin_write_record)* rocprofiler_plugin_write_record_;
 };
 
-rocprofiler_plugin_t* plugin;
+rocprofiler_plugin_t* plugin = nullptr;
 
 }  // namespace
 
@@ -355,10 +356,11 @@ att_parsed_input_t GetATTParams() {
 
 std::mutex finish_lock{};
 
-void finish() {
+void finish()
+{
   std::lock_guard<std::mutex> lock(finish_lock);
 
-  if (!rocprof_started.load(std::memory_order_acquire)) return;
+  if (!rocprof_started.load(std::memory_order_seq_cst)) return;
 
   if (trace_period_thread_control.load(std::memory_order_acquire)) {
     trace_period_thread_control.exchange(false, std::memory_order_release);
@@ -382,15 +384,8 @@ void finish() {
     CHECK_ROCPROFILER(rocprofiler_terminate_session(session_id));
   }
 
-  delete plugin;
-  rocprof_started.exchange(false, std::memory_order_acquire);
-  // If hsa_shut_down() is not called from the application then we may still have async calls back
-  // to the rocprofiler to use session parameters, thats why we need to leak the session up till
-  // this is fixed in the ROCR-Runtime
-
-  // if (session_id.handle > 0) {
-  //   CHECK_ROCPROFILER(rocprofiler_destroy_session(session_id));
-  // }
+  if (plugin->is_valid()) plugin->rocprofiler_plugin_finalize_fn();
+  rocprof_started.exchange(false, std::memory_order_seq_cst);
 }
 
 static bool env_var_search(std::string& s) {
@@ -455,8 +450,10 @@ void plugins_load(void* userdata) {
     plugin = new rocprofiler_plugin_t{header};
     if (!plugin->is_valid()) {
       delete plugin;
+      plugin = nullptr;
     }
-    plugin->setPluginName(plugin_name);
+    if (plugin)
+      plugin->setPluginName(plugin_name);
   }
 }
 
@@ -478,7 +475,8 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
           .begin = rocprofiler_timestamp_t{*tracer_record.api_data.hip->phase_data},
           .end = timestamp};
-      plugin->write_callback_record(tracer_record);
+      if (plugin)
+        plugin->write_callback_record(tracer_record);
     }
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_HSA_API) {
@@ -492,7 +490,8 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
       tracer_record.timestamps = rocprofiler_record_header_timestamp_t{
           .begin = rocprofiler_timestamp_t{*tracer_record.api_data.hip->phase_data},
           .end = timestamp};
-      plugin->write_callback_record(tracer_record);
+      if (plugin)
+        plugin->write_callback_record(tracer_record);
     }
   }
   if (tracer_record.domain == ACTIVITY_DOMAIN_ROCTX) {
@@ -501,7 +500,8 @@ void sync_api_trace_callback(rocprofiler_record_tracer_t tracer_record,
     tracer_record.timestamps =
         rocprofiler_record_header_timestamp_t{timestamp, rocprofiler_timestamp_t{0}};
     tracer_record.operation_id.id = tracer_record.api_data.roctx->args.id;
-    plugin->write_callback_record(tracer_record);
+    if (plugin)
+      plugin->write_callback_record(tracer_record);
   }
 }
 
@@ -636,7 +636,7 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
     warning("the ROCProfiler API version is not compatible with this tool");
     return true;
   }
-  rocprof_started.exchange(true, std::memory_order_acquire);
+  rocprof_started.exchange(true, std::memory_order_seq_cst);
 
   std::atexit(finish);
 
@@ -724,7 +724,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin)
+                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -745,7 +746,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin)
+                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -764,7 +766,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin)
+                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -788,7 +791,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin)
+                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);
@@ -825,7 +829,8 @@ ROCPROFILER_EXPORT bool OnLoad(void* table, uint64_t runtime_version, uint64_t f
             [](const rocprofiler_record_header_t* record,
                const rocprofiler_record_header_t* end_record, rocprofiler_session_id_t session_id,
                rocprofiler_buffer_id_t buffer_id) {
-              if (plugin) plugin->write_buffer_records(record, end_record, session_id, buffer_id);
+              if (plugin)
+                plugin->write_buffer_records(record, end_record, session_id, buffer_id);
             },
             1 << 20, &buffer_id));
         buffer_ids.emplace_back(buffer_id);

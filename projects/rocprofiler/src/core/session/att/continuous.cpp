@@ -71,11 +71,8 @@ void AttTracer::InsertLoadMarker(
   bool bFromStart
 ) {
   this->InsertMarker(transformed_packets, agent, codeobj.mem_size, ATT_MARKER_SIZE_CHANNEL);
-  // TODO: Add this channel
   auto sizehi = static_cast<hsa_ven_amd_aqlprofile_att_marker_channel_t>(4);
-  // Need to send mem_hi
-  this->InsertMarker(transformed_packets, agent, codeobj.mem_size, sizehi);
-
+  this->InsertMarker(transformed_packets, agent, codeobj.mem_size>>32, sizehi);
 
   uint64_t addr = codeobj.base_address;
   this->InsertMarker(transformed_packets, agent, addr & ((1ul << 32)-1), ATT_MARKER_LO_CHANNEL);
