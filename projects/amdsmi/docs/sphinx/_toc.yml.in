@@ -38,9 +38,9 @@ subtrees:
       
 - caption: Tutorials
   entries:
-    - url: https://github.com/ROCm/amdsmi/tree/develop/example
+    - url: https://github.com/ROCm/amdsmi/tree/amd-staging/example
       title: AMD SMI GitHub samples
-    - url: https://github.com/ROCm/rocm_smi_lib/tree/develop/docs
+    - url: https://github.com/ROCm/rocm_smi_lib/tree/amd-staging/docs
       title: ROCm SMI lib GitHub samples
       
 - caption: About
