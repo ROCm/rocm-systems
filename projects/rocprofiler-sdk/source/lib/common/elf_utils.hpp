@@ -86,12 +86,13 @@ struct ElfInfo
 {
     explicit ElfInfo(std::string);
 
-    std::string                  filename        = {};
-    ELFIO::elfio                 reader          = {};
-    std::vector<Section*>        sections        = {};
-    std::vector<SymbolEntry>     symbol_entries  = {};
-    std::vector<DynamicEntry>    dynamic_entries = {};
-    std::vector<RelocationEntry> reloc_entries   = {};
+    std::string                  filename               = {};
+    ELFIO::elfio                 reader                 = {};
+    std::vector<Section*>        sections               = {};
+    std::vector<SymbolEntry>     symbol_entries         = {};
+    std::vector<SymbolEntry>     dynamic_symbol_entries = {};
+    std::vector<DynamicEntry>    dynamic_entries        = {};
+    std::vector<RelocationEntry> reloc_entries          = {};
 
     bool has_symbol(std::regex&&) const;
 

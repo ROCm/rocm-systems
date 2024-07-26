@@ -246,15 +246,16 @@ find_clients()
     {
         for(const auto& itr : env)
         {
-            ROCP_INFO << "[env] searching " << itr << " for rocprofiler_configure";
+            ROCP_INFO << "[ROCP_TOOL_LIBRARIES] searching " << itr << " for rocprofiler_configure";
 
             if(fs::exists(itr))
             {
                 auto elfinfo = common::elf_utils::read(itr);
                 if(!elfinfo.has_symbol(std::regex{"^rocprofiler_configure$"}))
                 {
-                    ROCP_FATAL << "rocprofiler tool library " << itr
-                               << " did not contain rocprofiler_configure symbol";
+                    ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] rocprofiler-sdk tool library '" << itr
+                               << "' did not contain rocprofiler_configure symbol (search method: "
+                                  "ELF parsing)";
                 }
             }
 
@@ -262,15 +263,14 @@ find_clients()
 
             if(!handle)
             {
-                ROCP_WARNING << "[env] " << itr
-                             << " is not already loaded, doing a local lazy dlopen...";
+                ROCP_INFO << "[ROCP_TOOL_LIBRARIES] '" << itr
+                          << "' is not already loaded, doing a local lazy dlopen...";
                 handle = dlopen(itr.c_str(), RTLD_LOCAL | RTLD_LAZY);
             }
 
             if(!handle)
             {
-                ROCP_ERROR << "error dlopening " << itr;
-                continue;
+                ROCP_FATAL << "[ROCP_TOOL_LIBRARIES] error dlopening '" << itr << "'";
             }
 
             for(const auto& ditr : data)
@@ -286,8 +286,9 @@ find_clients()
             {
                 auto _sym = rocprofiler_configure_dlsym(handle);
                 // FATAL bc they explicitly said this was a tool library
-                ROCP_FATAL_IF(!_sym) << "rocprofiler tool library " << itr
-                                     << " did not contain rocprofiler_configure symbol";
+                ROCP_FATAL_IF(!_sym)
+                    << "[ROCP_TOOL_LIBRARIES] rocprofiler-sdk tool library '" << itr
+                    << "' did not contain rocprofiler_configure symbol (search method: dlsym)";
                 if(is_unique_configure_func(_sym)) emplace_client(itr, handle, _sym);
             }
         }

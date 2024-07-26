@@ -37,3 +37,26 @@ set_tests_properties(
         "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
         FAIL_REGULAR_EXPRESSION
         "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+# this test uses ROCP_TOOL_LIBRARIES instead of LD_PRELOAD
+add_test(NAME test-c-tool-rocp-tool-lib-execute COMMAND $<TARGET_FILE:transpose> 1)
+
+set(c-tool-rocp-tool-lib-env
+    "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+    "ROCP_TOOL_LIBRARIES=$<TARGET_FILE:rocprofiler-sdk-c-tool>"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    )
+
+set_tests_properties(
+    test-c-tool-rocp-tool-lib-execute
+    PROPERTIES
+        TIMEOUT
+        45
+        LABELS
+        "integration-tests"
+        ENVIRONMENT
+        "${c-tool-rocp-tool-lib-env}"
+        PASS_REGULAR_EXPRESSION
+        "Test C tool \\(priority=0\\) is using rocprofiler-sdk v([0-9]+\\.[0-9]+\\.[0-9]+)"
+        FAIL_REGULAR_EXPRESSION
+        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

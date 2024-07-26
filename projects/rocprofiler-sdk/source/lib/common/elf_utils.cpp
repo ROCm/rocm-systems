@@ -89,6 +89,11 @@ ElfInfo::has_symbol(std::regex&& _re) const
     {
         if(!itr.name.empty() && std::regex_search(itr.name, _re)) return true;
     }
+    // For stripped binaries
+    for(const auto& itr : dynamic_symbol_entries)
+    {
+        if(!itr.name.empty() && std::regex_search(itr.name, _re)) return true;
+    }
 
     return false;
 }
@@ -96,12 +101,13 @@ ElfInfo::has_symbol(std::regex&& _re) const
 ElfInfo
 read(const std::string& _inp)
 {
-    auto  _info           = ElfInfo{_inp};
-    auto& reader          = _info.reader;
-    auto& sections        = _info.sections;
-    auto& symbol_entries  = _info.symbol_entries;
-    auto& dynamic_entries = _info.dynamic_entries;
-    auto& reloc_entries   = _info.reloc_entries;
+    auto  _info                  = ElfInfo{_inp};
+    auto& reader                 = _info.reader;
+    auto& sections               = _info.sections;
+    auto& symbol_entries         = _info.symbol_entries;
+    auto& dynamic_symbol_entries = _info.dynamic_symbol_entries;
+    auto& dynamic_entries        = _info.dynamic_entries;
+    auto& reloc_entries          = _info.reloc_entries;
 
     ROCP_TRACE << "\nReading " << _inp;
 
@@ -148,9 +154,16 @@ read(const std::string& _inp)
         if(psec->get_type() == ELFIO::SHT_SYMTAB)
         {
             const ELFIO::symbol_section_accessor _symbols(reader, psec);
-            ROCP_TRACE << "   Number of symbol_entries: " << _symbols.get_symbols_num();
+            ROCP_TRACE << "   Number of symbol entries: " << _symbols.get_symbols_num();
             for(ELFIO::Elf_Xword k = 0; k < _symbols.get_symbols_num(); ++k)
                 symbol_entries.emplace_back(k, _symbols);
+        }
+        else if(psec->get_type() == ELFIO::SHT_DYNSYM)
+        {
+            const ELFIO::symbol_section_accessor _symbols(reader, psec);
+            ROCP_TRACE << "   Number of dynamic symbol entries: " << _symbols.get_symbols_num();
+            for(ELFIO::Elf_Xword k = 0; k < _symbols.get_symbols_num(); ++k)
+                dynamic_symbol_entries.emplace_back(k, _symbols);
         }
         else if(psec->get_type() == ELFIO::SHT_DYNAMIC)
         {
@@ -173,6 +186,13 @@ read(const std::string& _inp)
     {
         if(!symbol_entries.at(k).name.empty())
             ROCP_TRACE << "      [" << k << "] " << symbol_entries.at(k).name;
+    }
+
+    ROCP_TRACE << "Dynamic Symbols:";
+    for(size_t k = 0; k < dynamic_symbol_entries.size(); ++k)
+    {
+        if(!dynamic_symbol_entries.at(k).name.empty())
+            ROCP_TRACE << "      [" << k << "] " << dynamic_symbol_entries.at(k).name;
     }
 
     ROCP_TRACE << "Dynamic entries:";

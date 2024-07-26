@@ -38,3 +38,14 @@ set_target_properties(
                VERSION
                ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH}
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
+if(NOT CMAKE_STRIP)
+    find_program(CMAKE_STRIP NAMES strip REQUIRED)
+endif()
+
+add_custom_command(
+    TARGET rocprofiler-sdk-c-tool
+    POST_BUILD
+    COMMAND ${CMAKE_STRIP} $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Stripping rocprofiler-sdk-c-tool...")
