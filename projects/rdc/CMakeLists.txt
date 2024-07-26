@@ -276,9 +276,12 @@ if(BUILD_STANDALONE)
                 COMPONENT ${SERVER_COMPONENT})
         endif()
         # Also include dev setup for people do not want to build grpc
-        install(DIRECTORY ${GRPC_ROOT}/bin
-            USE_SOURCE_PERMISSIONS
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
+        file(GLOB install_bin_files "${GRPC_ROOT}/bin/*")
+        foreach(ITEM ${install_bin_files})
+            LIST( APPEND bin_files "${ITEM}" )
+        endforeach()
+        INSTALL( FILES ${bin_files}
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc/bin
             COMPONENT ${SERVER_COMPONENT})
 
         install(DIRECTORY ${GRPC_ROOT}/include
