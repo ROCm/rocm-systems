@@ -10,7 +10,8 @@ project(
 
 find_package(rocprofiler-sdk REQUIRED)
 
-rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
+rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py
+                                                          input.json)
 
 # basic-metrics
 add_test(NAME rocprofv3-test-list-metrics-execute
@@ -19,7 +20,8 @@ add_test(NAME rocprofv3-test-list-metrics-execute
 
 # list-metrics-stdout
 add_test(NAME rocprofv3-test-list-metrics-std-out-execute
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --list-metrics)
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
+                 ${CMAKE_CURRENT_BINARY_DIR}/input.json)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")

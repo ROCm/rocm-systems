@@ -6,10 +6,58 @@ import argparse
 import subprocess
 
 
+class dotdict(dict):
+    """dot.notation access to dictionary attributes"""
+
+    __getattr__ = dict.get
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+
+    def __init__(self, d):
+        super(dotdict, self).__init__(d)
+        for k, v in self.items():
+            if isinstance(v, dict):
+                self.__setitem__(k, dotdict(v))
+            elif isinstance(v, (list, tuple)):
+                self.__setitem__(
+                    k,
+                    [dotdict(i) if isinstance(i, (list, tuple, dict)) else i for i in v],
+                )
+
+
 def fatal_error(msg, exit_code=1):
     sys.stderr.write(f"Fatal error: {msg}\n")
     sys.stderr.flush()
     sys.exit(exit_code)
+
+
+def strtobool(val):
+    """Convert a string representation of truth to true or false.
+    True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
+    are 'n', 'no', 'f', 'false', 'off', and '0'.  Raises ValueError if
+    'val' is anything else.
+    """
+    if isinstance(val, (list, tuple)):
+        if len(val) > 1:
+            val_type = type(val).__name__
+            raise ValueError(f"invalid truth value {val} (type={val_type})")
+        else:
+            val = val[0]
+
+    if isinstance(val, bool):
+        return val
+    elif isinstance(val, str) and val.lower() in ("y", "yes", "t", "true", "on", "1"):
+        return True
+    elif isinstance(val, str) and val.lower() in ("n", "no", "f", "false", "off", "0"):
+        return False
+    else:
+        val_type = type(val).__name__
+        raise ValueError(f"invalid truth value {val} (type={val_type})")
+
+
+class booleanArgAction(argparse.Action):
+    def __call__(self, parser, args, value, option_string=None):
+        setattr(args, self.dest, strtobool(value))
 
 
 def parse_arguments(args=None):
@@ -35,112 +83,90 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
+    def add_parser_bool_argument(*args, **kwargs):
+        parser.add_argument(
+            *args,
+            **kwargs,
+            action=booleanArgAction,
+            nargs="?",
+            const=True,
+            type=str,
+            required=False,
+            metavar="BOOL",
+        )
+
     # Add the arguments
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hip-trace",
-        action="store_true",
         help="For Collecting HIP Traces (runtime + compiler)",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hip-runtime-trace",
-        action="store_true",
         help="For Collecting HIP Runtime API Traces",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hip-compiler-trace",
-        action="store_true",
         help="For Collecting HIP Compiler generated code Traces",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--marker-trace",
-        action="store_true",
         help="For Collecting Marker (ROCTx) Traces",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--kernel-trace",
-        action="store_true",
         help="For Collecting Kernel Dispatch Traces",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--memory-copy-trace",
-        action="store_true",
         help="For Collecting Memory Copy Traces",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--scratch-memory-trace",
-        action="store_true",
         help="For Collecting Scratch Memory operations Traces",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--stats",
-        action="store_true",
         help="For Collecting statistics of enabled tracing types",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hsa-trace",
-        action="store_true",
         help="For Collecting HSA Traces (core + amd + image + finalizer)",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hsa-core-trace",
-        action="store_true",
         help="For Collecting HSA API Traces (core API)",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hsa-amd-trace",
-        action="store_true",
         help="For Collecting HSA API Traces (AMD-extension API)",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hsa-image-trace",
-        action="store_true",
         help="For Collecting HSA API Traces (Image-extenson API)",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "--hsa-finalizer-trace",
-        action="store_true",
         help="For Collecting HSA API Traces (Finalizer-extension API)",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "-s",
         "--sys-trace",
-        action="store_true",
         help="For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Scratch memory, and Kernel dispatch traces",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "-M",
         "--mangled-kernels",
-        action="store_true",
         help="Do not demangle the kernel names",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "-T",
         "--truncate-kernels",
-        action="store_true",
         help="Truncate the demangled kernel names",
-        required=False,
     )
-    parser.add_argument(
+    add_parser_bool_argument(
         "-L",
         "--list-metrics",
-        action="store_true",
         help="List metrics for counter collection",
-        required=False,
     )
     parser.add_argument(
         "-i",
@@ -168,7 +194,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--output-format",
         help="For adding output format (supported formats: csv, json, pftrace)",
         nargs="+",
-        default=["csv"],
+        default=None,
         choices=("csv", "json", "pftrace"),
         type=str.lower,
     )
@@ -176,15 +202,29 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--log-level",
         help="Set the log level",
         default=None,
-        choices=("fatal", "error", "warning", "info", "trace"),
+        choices=("fatal", "error", "warning", "info", "trace", "env"),
         type=str.lower,
     )
     parser.add_argument(
-        "--kernel-names",
-        help="Filter kernel names",
+        "--kernel-include-regex",
+        help="Include the kernels matching this filter",
         default=None,
         type=str,
+        metavar="REGULAR_EXPRESSION",
+    )
+    parser.add_argument(
+        "--kernel-exclude-regex",
+        help="Exclude the kernels matching this filter",
+        default=None,
+        type=str,
+        metavar="REGULAR_EXPRESSION",
+    )
+    parser.add_argument(
+        "--kernel-iteration-range",
+        help="Iteration range",
         nargs="+",
+        default=None,
+        type=str,
     )
     parser.add_argument(
         "--preload",
@@ -197,6 +237,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         args = sys.argv[1:]
 
     rocp_args = args[:]
+
     app_args = []
 
     for idx, itr in enumerate(args):
@@ -215,11 +256,19 @@ def parse_yaml(yaml_file):
         fatal_error(
             f"{e}\n\nYAML package is not installed. Run '{sys.executable} -m pip install pyyaml' or use JSON or text format"
         )
-
     try:
+        lst = []
         with open(yaml_file, "r") as file:
             data = yaml.safe_load(file)
-        return [" ".join(itr["pmc"]) for itr in data["metrics"]]
+        for itr in data["jobs"]:
+            # TODO: support naming jobs
+            # if isinstance(itr, str):
+            #     itr = data["jobs"][itr]
+            itr["sub_directory"] = "pass_"
+            lst.append(itr)
+
+        return [dotdict(itr) for itr in lst]
+
     except yaml.YAMLError as exc:
         fatal_error(f"{exc}")
 
@@ -230,9 +279,15 @@ def parse_json(json_file):
     import json
 
     try:
+        lst = []
         with open(json_file, "r") as file:
             data = json.load(file)
-        return [" ".join(itr["pmc"]) for itr in data["metrics"]]
+        for itr in data["jobs"]:
+            itr["sub_directory"] = "pass_"
+            lst.append(itr)
+
+        return [dotdict(itr) for itr in lst]
+
     except Exception as e:
         fatal_error(f"{e}")
 
@@ -252,10 +307,10 @@ def parse_text(text_file):
         def _dedup(_line, _sep):
             for itr in _sep:
                 _line = " ".join(_line.split(itr))
-            return _line
+            return _line.strip()
 
         # remove tabs and duplicate spaces
-        return _dedup(line.replace("pmc:", ""), ["\t", " "]).strip()
+        return _dedup(line.replace("pmc:", ""), ["\n", "\t", " "]).split(" ")
 
     try:
         with open(text_file, "r") as file:
@@ -271,25 +326,81 @@ def parse_text(text_file):
 
 
 def parse_input(input_file):
-    pmc_lines = []
+
     _, extension = os.path.splitext(input_file)
     if extension == ".txt":
-        pmc_lines = parse_text(input_file)
+        text_input = parse_text(input_file)
+        text_input_lst = [{"pmc": itr, "sub_directory": "pmc_"} for itr in text_input]
+        return [dotdict(itr) for itr in text_input_lst]
     elif extension in (".yaml", ".yml"):
-        pmc_lines = parse_yaml(input_file)
+        return parse_yaml(input_file)
     elif extension == ".json":
-        pmc_lines = parse_json(input_file)
+        return parse_json(input_file)
     else:
         fatal_error(
             f"Input file '{input_file}' does not have a recognized extension (.txt, .json, .yaml, .yml)\n"
         )
 
-    return pmc_lines
+    return None
 
 
-def main(argv=None):
+def has_set_attr(obj, key):
+    if obj and hasattr(obj, key) and getattr(obj, key) is not None:
+        return True
+    else:
+        return False
+
+
+def patch_args(data):
+    """Used to handle certain fields which might be specified as a string instead of an array or vice-versa"""
+
+    if hasattr(data, "kernel_iteration_range") and isinstance(
+        data.kernel_iteration_range, str
+    ):
+        data.kernel_iteration_range = [data.kernel_iteration_range]
+    return data
+
+
+def get_args(cmd_args, inp_args):
+
+    def ensure_type(name, var, type_id):
+        if not isinstance(var, type_id):
+            raise TypeError(
+                f"{name} is of type {type(var).__name__}, expected {type(type_id).__name__}"
+            )
+
+    ensure_type("cmd_args", cmd_args, argparse.Namespace)
+    ensure_type("inp_args", inp_args, dotdict)
+
+    cmd_keys = list(cmd_args.__dict__.keys())
+    inp_keys = list(inp_args.keys())
+    data = {}
+
+    def get_attr(key):
+        if has_set_attr(cmd_args, key):
+            return getattr(cmd_args, key)
+        elif has_set_attr(inp_args, key):
+            return getattr(inp_args, key)
+        return None
+
+    for itr in set(cmd_keys + inp_keys):
+        if (
+            has_set_attr(cmd_args, itr)
+            and has_set_attr(inp_args, itr)
+            and getattr(cmd_args, itr) != getattr(inp_args, itr)
+        ):
+            raise RuntimeError(f"conflicting value for {itr}")
+        else:
+            data[itr] = get_attr(itr)
+
+    return patch_args(dotdict(data))
+
+
+def run(app_args, args, **kwargs):
 
     app_env = dict(os.environ)
+    use_execv = kwargs.get("use_execv", True)
+    app_pass = kwargs.get("pass_id", None)
 
     def update_env(env_var, env_val, **kwargs):
         """Local function for updating application environment which supports
@@ -361,12 +472,12 @@ def main(argv=None):
     ROCPROF_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     ROCPROF_SDK_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk.so"
 
-    args, app_args = parse_arguments(argv)
+    args.preload = [itr for itr in args.preload if itr]
+    if args.preload:
+        update_env("LD_PRELOAD", ":".join(args.preload), prepend=True)
 
-    _preload = ":".join(args.preload) if args.preload else None
-
-    update_env("LD_PRELOAD", _preload, prepend=True)
     update_env("LD_PRELOAD", f"{ROCPROF_TOOL_LIBRARY}:{ROCPROF_SDK_LIBRARY}", append=True)
+
     update_env(
         "ROCP_TOOL_LIBRARIES",
         f"{ROCPROF_TOOL_LIBRARY}",
@@ -385,16 +496,20 @@ def main(argv=None):
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
+    if app_pass is not None:
+        app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
+            f"{_output_path}", f"{args.sub_directory}{app_pass}"
+        )
 
     if args.output_file is not None or args.output_directory is not None:
         update_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", True)
 
+    if not args.output_format:
+        args.output_format = ["csv"]
+
     update_env(
         "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
     )
-
-    _kernel_names = ",".join(args.kernel_names) if args.kernel_names else None
-    update_env("ROCPROF_KERNEL_NAMES", _kernel_names, append=True, join_char=",")
 
     if args.sys_trace:
         for itr in (
@@ -445,7 +560,9 @@ def main(argv=None):
 
     update_env("ROCPROF_STATS", args.stats, overwrite_if_true=True)
     update_env(
-        "ROCPROF_DEMANGLE_KERNELS", not args.mangled_kernels, overwrite_if_false=True
+        "ROCPROF_DEMANGLE_KERNELS",
+        not args.mangled_kernels,
+        overwrite_if_false=True,
     )
     update_env(
         "ROCPROF_TRUNCATE_KERNELS",
@@ -458,61 +575,96 @@ def main(argv=None):
         overwrite_if_true=True,
     )
 
-    for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
-        update_env(
-            f"{itr}_LOG_LEVEL",
-            args.log_level,
-        )
+    if args.log_level and args.log_level not in ("env"):
+        for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):
+            update_env(
+                f"{itr}_LOG_LEVEL",
+                args.log_level,
+            )
 
     def log_config(_env):
         existing_env = dict(os.environ)
-        init_message = "- rocprofv3 configuration:\n"
+        init_message = "\n- rocprofv3 configuration{}:\n".format(
+            "" if app_pass is None else f" (pass {app_pass})"
+        )
         for key, itr in _env.items():
             if key not in existing_env.keys():
                 if init_message:
                     sys.stderr.write(init_message)
                     init_message = None
                 sys.stderr.write(f"\t- {key}={itr}\n")
+        if init_message is None:
+            sys.stderr.write("\n")
         sys.stderr.flush()
 
     if args.list_metrics:
         app_args = [f"{ROCM_DIR}/lib/rocprofiler-sdk/rocprofv3-trigger-list-metrics"]
+
     elif not app_args:
         log_config(app_env)
         fatal_error("No application provided")
 
-    pmc_lines = []
-    if args.input:
-        pmc_lines = parse_input(args.input)
+    if args.kernel_include_regex:
+        update_env(
+            "ROCPROF_KERNEL_FILTER_INCLUDE_REGEX",
+            args.kernel_include_regex,
+        )
 
-    if pmc_lines:
-        exit_code = 0
-        update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite_if_true=True)
+    if args.kernel_exclude_regex:
+        update_env(
+            "ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX",
+            args.kernel_exclude_regex,
+        )
 
-        for idx, pmc_line in enumerate(pmc_lines):
-            COUNTER = idx + 1
-            pmc_env = dict(app_env)
-            pmc_env["ROCPROF_COUNTERS"] = f"pmc: {pmc_line}"
-            pmc_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
-                f"{_output_path}", f"pmc_{COUNTER}"
-            )
+    if args.kernel_iteration_range:
+        update_env("ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range))
 
-            if args.log_level in ("info", "trace"):
-                log_config(pmc_env)
-
-            try:
-                exit_code = subprocess.check_call(app_args, env=pmc_env)
-                if exit_code != 0:
-                    fatal_error("Application exited with non-zero exit code", exit_code)
-            except Exception as e:
-                fatal_error(f"{e}\n")
-
-        return exit_code
+    if args.pmc:
+        update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)
+        update_env(
+            "ROCPROF_COUNTERS", "pmc: {}".format(" ".join(args.pmc)), overwrite=True
+        )
     else:
-        if args.log_level in ("info", "trace"):
-            log_config(app_env)
+        update_env("ROCPROF_COUNTER_COLLECTION", False, overwrite=True)
+
+    if args.log_level in ("info", "trace", "env"):
+        log_config(app_env)
+
+    if use_execv:
         # does not return
         os.execvpe(app_args[0], app_args, env=app_env)
+    else:
+        try:
+            exit_code = subprocess.check_call(app_args, env=app_env)
+            if exit_code != 0:
+                fatal_error("Application exited with non-zero exit code", exit_code)
+        except Exception as e:
+            fatal_error(f"{e}\n")
+        return exit_code
+
+
+def main(argv=None):
+
+    cmd_args, app_args = parse_arguments(argv)
+    inp_args = (
+        parse_input(cmd_args.input) if getattr(cmd_args, "input") else [dotdict({})]
+    )
+
+    if len(inp_args) == 1:
+        args = get_args(cmd_args, inp_args[0])
+        pass_idx = None
+        if hasattr(args, "pmc") and args.pmc is not None and len(args.pmc) > 0:
+            pass_idx = 1
+        run(app_args, args, pass_id=pass_idx)
+    else:
+        for idx, itr in enumerate(inp_args):
+            args = get_args(cmd_args, itr)
+            run(
+                app_args,
+                args,
+                pass_id=(idx + 1),
+                use_execv=False,
+            )
 
 
 if __name__ == "__main__":

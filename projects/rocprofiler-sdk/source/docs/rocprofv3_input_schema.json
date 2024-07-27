@@ -1,0 +1,147 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "description": "Schema for the rocprofv3 JSON input",
+  "properties": {
+      "jobs": {
+        "type": "array",
+        "description": "rocprofv3 input data per application run",
+        "items": {
+            "type" : "object",
+             "description": "data for rocprofv3",
+              "properties": {
+
+                    "pmc": {
+                      "type" : "array",
+                      "description": "list of counters to collect"
+                     },
+
+                     "kernel_include_regex":{
+                        "type": "string",
+                        "description": "regex string"
+                     },
+
+                     "kernel_exclude_regex": {
+                      "type": "string",
+                      "description": "regex string"
+                     },
+
+                     "kernel_iteration_range": {
+                        "type": "string",
+                        "description": "range for range for each kernel that match the filter [start-stop]"
+                     },
+
+                     "hip_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Traces (runtime + compiler)"
+                     },
+
+                     "hip_runtime_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Runtime API Traces"
+                     },
+
+                     "hip_compiler_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting HIP Compiler generated code Traces"
+                     },
+
+                     "marker_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Marker (ROCTx) Traces"
+                     },
+
+                     "kernel_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Kernel Dispatch Traces"
+                     },
+
+                     "memory_copy_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Memory Copy Traces"
+                     },
+
+                     "scratch_memory_trace": {
+                          "type": "boolean",
+                          "description": "For Collecting Scratch Memory operations Traces"
+                     },
+
+                     "stats": {
+                          "type": "boolean",
+                          "description": "For Collecting statistics of enabled tracing types"
+                     },
+
+                     "hsa_trace": {
+                          "type": "boolean",
+                          "description":"For Collecting HSA Traces (core + amd + image + finalizer)"
+                     },
+
+                     "hsa_core_trace": {
+                            "type": "boolean",
+                            "description": "For Collecting HSA API Traces (core API)"
+                     },
+
+                     "hsa_amd_trace": {
+                              "type": "boolean",
+                              "description": "For Collecting HSA API Traces (AMD-extension API)"
+                     },
+
+                     "hsa_finalize_trace": {
+                              "type": "boolean",
+                              "description": "For Collecting HSA API Traces (Finalizer-extension API)"
+                     },
+
+                     "hsa_image_trace": {
+                              "type": "boolean",
+                              "description": "For Collecting HSA API Traces (Image-extenson API)"
+                     },
+
+                     "sys_trace" : {
+                              "type": "boolean",
+                              "description": "For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Scratch memory, and Kernel dispatch traces"
+                     },
+
+                     "mangled-kernels": {
+                      "type": "boolean",
+                      "description": "Do not demangle the kernel names"
+                     },
+
+                     "truncate-kernels": {
+                      "type": "boolean",
+                      "description": "Truncate the demangled kernel names"
+                     },
+
+                     "output_file":{
+                      "type": "string",
+                      "description": "For the output file name"
+                     },
+
+                     "output_directory":{
+                      "type": "string",
+                      "description": "For adding output path where the output files will be saved"
+                     },
+
+                     "output_format":{
+                      "type": "array",
+                      "description": "For adding output format (supported formats: csv, json, pftrace)"
+                     },
+
+                     "list_metrics" : {
+                      "type" : "boolean",
+                      "description": "List the metrics"
+                     },
+
+                     "log_level":{
+                      "type": "string",
+                      "description": "fatal, error, warning, info, trace"
+                     },
+
+                     "preload":{
+                      "type": "array",
+                      "description": "Libraries to prepend to LD_PRELOAD (usually for sanitizers)"
+                     }
+                 }
+              }
+           }
+        }
+}

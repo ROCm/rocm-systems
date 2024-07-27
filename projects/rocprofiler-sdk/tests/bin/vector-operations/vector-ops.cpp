@@ -274,7 +274,7 @@ main()
     HIP_API_CALL(hipGetDeviceCount(&device_count));
 
     for(int i = 0; i < device_count; ++i)
-        run(4, i);
+        run(8, i);
 
     return 0;
 }

@@ -43,20 +43,21 @@ add_test(
     NAME rocprofv3-test-counter-collection-json-pmc1-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_json_agent_info.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_json_agent_info.csv
         --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_json_counter_collection.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_json_counter_collection.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_json_agent_info.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_agent_info.csv
         --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_json_counter_collection.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_counter_collection.csv
     )
 
 set(JSON_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_json_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_json_counter_collection.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_json_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_json_counter_collection.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_json_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_json_counter_collection.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_json_counter_collection.csv
+    )
 
 set_tests_properties(
     rocprofv3-test-counter-collection-json-pmc1-validate
@@ -75,20 +76,21 @@ add_test(
     NAME rocprofv3-test-counter-collection-yaml-pmc1-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_yaml_agent_info.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_yaml_agent_info.csv
         --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_yaml_counter_collection.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_yaml_counter_collection.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_yaml_agent_info.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_agent_info.csv
         --counter-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_yaml_counter_collection.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_counter_collection.csv
     )
 
 set(YAML_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_yaml_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_1/out_yaml_counter_collection.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_yaml_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pmc_2/out_yaml_counter_collection.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_yaml_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_1/out_yaml_counter_collection.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-cc/pass_2/out_yaml_counter_collection.csv
+    )
 
 set_tests_properties(
     rocprofv3-test-counter-collection-yaml-pmc1-validate

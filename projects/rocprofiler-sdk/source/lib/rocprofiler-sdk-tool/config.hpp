@@ -28,6 +28,7 @@
 
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace rocprofiler
@@ -81,8 +82,13 @@ struct config
     std::string output_path   = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
     std::string output_file   = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
     std::string tmp_directory = get_env("ROCPROF_TMPDIR", output_path);
-    std::vector<std::string> kernel_names = {};
-    std::set<std::string>    counters     = {};
+
+    std::string kernel_filter_include =
+        get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", std::string{".*"});
+    std::string kernel_filter_exclude =
+        get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", std::string{});
+    std::unordered_set<uint32_t> kernel_filter_range = {};
+    std::set<std::string>        counters            = {};
 };
 
 template <config_context ContextT = config_context::global>

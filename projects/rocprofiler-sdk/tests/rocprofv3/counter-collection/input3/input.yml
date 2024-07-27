@@ -1,6 +1,6 @@
-metrics:
+jobs:
   - pmc:
-      - SQ_WAVES
-      - GRBM_COUNT
+    - SQ_WAVES
+    - GRBM_COUNT
   - pmc:
-      - GRBM_GUI_ACTIVE
+    - GRBM_GUI_ACTIVE

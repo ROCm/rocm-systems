@@ -177,40 +177,79 @@ as_pointer()
 }
 
 using code_object_data_map_t = std::unordered_map<uint64_t, rocprofiler_code_object_data_t>;
-using targeted_kernels_set_t = std::unordered_set<rocprofiler_kernel_id_t>;
+using targeted_kernels_map_t =
+    std::unordered_map<rocprofiler_kernel_id_t, std::unordered_set<uint32_t>>;
 using counter_dimension_info_map_t =
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>;
-using agent_info_map_t = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
+using agent_info_map_t   = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
+using kernel_iteration_t = std::unordered_map<rocprofiler_kernel_id_t, uint32_t>;
 
 auto  code_obj_data          = as_pointer<common::Synchronized<code_object_data_map_t, true>>();
 auto* kernel_data            = as_pointer<common::Synchronized<kernel_symbol_data_map_t, true>>();
 auto* marker_msg_data        = as_pointer<common::Synchronized<marker_message_map_t, true>>();
 auto  counter_dimension_data = common::Synchronized<counter_dimension_info_map_t, true>{};
-auto  target_kernels         = common::Synchronized<targeted_kernels_set_t>{};
+auto  target_kernels         = common::Synchronized<targeted_kernels_map_t>{};
 auto* buffered_name_info     = as_pointer(get_buffer_id_names());
 auto* callback_name_info     = as_pointer(get_callback_id_names());
 auto* agent_info             = as_pointer(agent_info_map_t{});
 auto* tool_functions         = as_pointer(tool_table{});
 auto* stats_timestamp        = as_pointer(timestamps_t{});
+auto  kernel_iteration       = common::Synchronized<kernel_iteration_t, true>{};
 
 bool
-add_kernel_target(uint64_t _kern_id)
+add_kernel_target(uint64_t _kern_id, const std::unordered_set<uint32_t>& range)
 {
     return target_kernels
-        .wlock([](targeted_kernels_set_t& _targets_v,
-                  uint64_t                _kern_id_v) { return _targets_v.emplace(_kern_id_v); },
-               _kern_id)
+        .wlock(
+            [](targeted_kernels_map_t&      _targets_v,
+               uint64_t                     _kern_id_v,
+               std::unordered_set<uint32_t> _range) {
+                return _targets_v.emplace(_kern_id_v, _range);
+            },
+            _kern_id,
+            range)
         .second;
 }
 
 bool
 is_targeted_kernel(uint64_t _kern_id)
 {
-    return target_kernels.rlock(
-        [](const targeted_kernels_set_t& _targets_v, uint64_t _kern_id_v) {
-            return (_targets_v.count(_kern_id_v) > 0);
+    bool                         is_target_kernel = false;
+    std::unordered_set<uint32_t> range            = {};
+    is_target_kernel                              = target_kernels.rlock(
+        [&range](const auto& _targets_v, uint64_t _kern_id_v) {
+            if(_targets_v.find(_kern_id_v) != _targets_v.end())
+            {
+                range = _targets_v.at(_kern_id_v);
+                return true;
+            }
+            return false;
         },
         _kern_id);
+
+    if(is_target_kernel)
+    {
+        kernel_iteration.rlock(
+            [&](const auto&                  _kernel_iter,
+                uint64_t                     _kernel_id,
+                std::unordered_set<uint32_t> _range) {
+                auto itr = _kernel_iter.at(_kernel_id);
+
+                // If the iteration range is not given then all iterations of the kernel is profiled
+                if(_range.empty())
+                    is_target_kernel = true;
+
+                else if(_range.find(itr) != _range.end())
+                {
+                    is_target_kernel = true;
+                }
+                else
+                    is_target_kernel = false;
+            },
+            _kern_id,
+            range);
+    }
+    return is_target_kernel;
 }
 
 auto&
@@ -496,34 +535,19 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             {
                 // if kernel name is provided by user then by default all kernels in the application
                 // are targeted
-                if(tool::get_config().kernel_names.empty())
+                const auto& kernel_info           = itr.first->second;
+                auto        kernel_filter_include = tool::get_config().kernel_filter_include;
+                auto        kernel_filter_exclude = tool::get_config().kernel_filter_exclude;
+                auto        kernel_filter_range   = tool::get_config().kernel_filter_range;
+
+                std::regex include_regex(kernel_filter_include);
+                std::regex exclude_regex(kernel_filter_exclude);
+                if(std::regex_search(kernel_info.formatted_kernel_name, include_regex))
                 {
-                    add_kernel_target(sym_data->kernel_id);
-                }
-                else
-                {
-                    const auto& kernel_info = itr.first->second;
-                    for(const auto& name : tool::get_config().kernel_names)
-                    {
-                        if(name == kernel_info.truncated_kernel_name)
-                        {
-                            add_kernel_target(itr.first->first);
-                            break;
-                        }
-                        else
-                        {
-                            auto dkernel_name = std::string_view{kernel_info.demangled_kernel_name};
-                            auto pos          = dkernel_name.find(name);
-                            // if the demangled kernel name contains name and the next character is
-                            // '(' then mark as found
-                            if(pos != std::string::npos && (pos + 1) < dkernel_name.size() &&
-                               dkernel_name.at(pos + 1) == '(')
-                            {
-                                add_kernel_target(itr.first->first);
-                                break;
-                            }
-                        }
-                    }
+                    if(kernel_filter_exclude.empty())
+                        add_kernel_target(sym_data->kernel_id, kernel_filter_range);
+                    else if(!std::regex_search(kernel_info.formatted_kernel_name, exclude_regex))
+                        add_kernel_target(sym_data->kernel_id, kernel_filter_range);
                 }
             }
         }
@@ -881,6 +905,18 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
 {
     auto kernel_id = dispatch_data.dispatch_info.kernel_id;
     auto agent_id  = dispatch_data.dispatch_info.agent_id;
+
+    kernel_iteration.wlock(
+        [](auto& _kernel_iter, rocprofiler_kernel_id_t _kernel_id) {
+            auto itr = _kernel_iter.find(_kernel_id);
+            if(itr == _kernel_iter.end())
+                _kernel_iter.emplace(_kernel_id, 1);
+            else
+            {
+                itr->second++;
+            }
+        },
+        kernel_id);
 
     if(!is_targeted_kernel(kernel_id))
     {

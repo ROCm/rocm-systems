@@ -1,0 +1,13 @@
+{
+    "jobs": [
+        {
+            "sys_trace": true,
+            "output_file": "out",
+            "output_format": [
+                "csv",
+                "json",
+                "pftrace"
+            ]
+        }
+    ]
+}

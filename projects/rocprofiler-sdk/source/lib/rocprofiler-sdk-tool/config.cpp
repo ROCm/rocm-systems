@@ -27,7 +27,10 @@
 #include "lib/common/demangle.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
+
+#include <rocprofiler-sdk/cxx/details/delimit.hpp>
 
 #include <fmt/core.h>
 
@@ -133,14 +136,6 @@ handle_special_chars(std::string& str)
 }
 
 bool
-has_kernel_name_format(std::string const& str)
-{
-    return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
-               return (isalnum(ch) != 0 || ch == '_');
-           }) != str.end();
-}
-
-bool
 has_counter_format(std::string const& str)
 {
     return std::find_if(str.begin(), str.end(), [](unsigned char ch) {
@@ -149,34 +144,40 @@ has_counter_format(std::string const& str)
 }
 
 // validate kernel names
-auto
-parse_kernel_names(const std::string& line)
+std::unordered_set<uint32_t>
+get_kernel_filter_range(const std::string& kernel_filter)
 {
-    auto kernel_names_v = std::vector<std::string>{};
-    if(line.empty()) return kernel_names_v;
+    if(kernel_filter.empty()) return {};
 
-    auto kernel_names = std::set<std::string>{};
-    trim(line);
-    auto input_line  = std::stringstream{line};
-    auto kernel_name = std::string{};
-    while(getline(input_line, kernel_name, ','))
+    auto delim     = rocprofiler::sdk::parse::tokenize(kernel_filter, ",");
+    auto range_set = std::unordered_set<uint32_t>{};
+    for(const auto& itr : delim)
     {
-        if(has_kernel_name_format(kernel_name))
+        if(itr.find('-') != std::string::npos && itr.find('[') != std::string::npos &&
+           itr.find(']') != std::string::npos)
         {
-            ROCP_INFO << "kernel name " << kernel_names.size() << ": " << kernel_name;
-            kernel_names.emplace(kernel_name);
+            auto drange = rocprofiler::sdk::parse::tokenize(itr, "[-] ");
+            ROCP_FATAL_IF(drange.size() != 2)
+                << "bad range format for '" << itr << "'. Expected [A-B] where A and B are numbers";
+
+            uint32_t start_range = std::stoul(drange.front());
+            uint32_t end_range   = std::stoul(drange.back());
+            for(auto i = start_range; i <= end_range; i++)
+                range_set.emplace(i);
         }
         else
         {
-            ROCP_ERROR << "invalid kernel name: " << kernel_name;
+            auto dval = rocprofiler::sdk::parse::tokenize(itr, " ");
+            ROCP_ERROR_IF(dval.empty()) << "kernel range value '" << itr << "' produced no numbers";
+            for(const auto& ditr : dval)
+            {
+                ROCP_FATAL_IF(ditr.find_first_not_of("0123456789") != std::string::npos)
+                    << "expected integer for " << itr << ". Non-integer value detected";
+                range_set.emplace(std::stoul(ditr));
+            }
         }
     }
-
-    kernel_names_v.reserve(kernel_names.size());
-    for(const auto& itr : kernel_names)
-        kernel_names_v.emplace_back(itr);
-
-    return kernel_names_v;
+    return range_set;
 }
 
 std::set<std::string>
@@ -240,7 +241,8 @@ get_mpi_rank()
 }
 
 config::config()
-: kernel_names{parse_kernel_names(get_env("ROCPROF_KERNEL_NAMES", std::string{}))}
+: kernel_filter_range{get_kernel_filter_range(
+      get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
 , counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
 {
     auto output_format = get_env("ROCPROF_OUTPUT_FORMAT", "CSV");
@@ -281,6 +283,7 @@ config::config()
         LOG_IF(FATAL, supported_formats.count(itr) == 0)
             << "Unsupported output format type: " << itr;
     }
+    if(kernel_filter_include.empty()) kernel_filter_include = std::string(".*");
 }
 
 std::vector<output_key>
