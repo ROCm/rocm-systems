@@ -25,6 +25,8 @@
 #include "helper.hpp"
 #include "output_file.hpp"
 
+#include "lib/common/string_entry.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 
@@ -89,6 +91,27 @@ write_json(tool_table*                                                      tool
             json_ar(cereal::make_nvp("callback_records", callback_name_info));
             json_ar(cereal::make_nvp("buffer_records", buffer_name_info));
             json_ar(cereal::make_nvp("marker_api", marker_msg_data));
+
+            {
+                auto _extern_corr_id_strings = std::map<size_t, std::string>{};
+                if(tool::get_config().kernel_rename)
+                {
+                    for(auto itr : *kernel_dispatch_deque)
+                    {
+                        auto _value = itr.correlation_id.external.value;
+                        if(_value > 0)
+                        {
+                            const auto* _str = common::get_string_entry(_value);
+                            if(_str) _extern_corr_id_strings.emplace(_value, *_str);
+                        }
+                    }
+                }
+
+                json_ar.setNextName("correlation_id");
+                json_ar.startNode();
+                json_ar(cereal::make_nvp("external", _extern_corr_id_strings));
+                json_ar.finishNode();
+            }
 
             {
                 json_ar.setNextName("counters");

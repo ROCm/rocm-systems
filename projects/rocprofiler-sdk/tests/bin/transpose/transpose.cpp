@@ -206,8 +206,8 @@ run(int rank, int tid, int devid, int argc, char** argv)
     int* in  = nullptr;
     int* out = nullptr;
 
-    HIP_API_CALL(hipMalloc(&in, size));
-    HIP_API_CALL(hipMalloc(&out, size));
+    HIP_API_CALL(hipMallocAsync(&in, size, stream));
+    HIP_API_CALL(hipMallocAsync(&out, size, stream));
     HIP_API_CALL(hipMemsetAsync(in, 0, size, stream));
     HIP_API_CALL(hipMemsetAsync(out, 0, size, stream));
     HIP_API_CALL(hipMemcpyAsync(in, inp_matrix, size, hipMemcpyHostToDevice, stream));
@@ -238,13 +238,15 @@ run(int rank, int tid, int devid, int argc, char** argv)
     print_lock.unlock();
 
     HIP_API_CALL(hipStreamSynchronize(stream));
-    HIP_API_CALL(hipStreamDestroy(stream));
 
     // cpu_transpose(matrix, out_matrix, M, N);
     verify(inp_matrix, out_matrix, M, N);
 
-    HIP_API_CALL(hipFree(in));
-    HIP_API_CALL(hipFree(out));
+    HIP_API_CALL(hipFreeAsync(in, stream));
+    HIP_API_CALL(hipFreeAsync(out, stream));
+
+    HIP_API_CALL(hipStreamSynchronize(stream));
+    HIP_API_CALL(hipStreamDestroy(stream));
 
     delete[] inp_matrix;
     delete[] out_matrix;

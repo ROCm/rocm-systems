@@ -34,7 +34,10 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/scope_destructor.hpp"
+#include "lib/common/string_entry.hpp"
 #include "lib/common/synchronized.hpp"
+#include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -181,8 +184,10 @@ using targeted_kernels_map_t =
     std::unordered_map<rocprofiler_kernel_id_t, std::unordered_set<uint32_t>>;
 using counter_dimension_info_map_t =
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_dimension_info_t>>;
-using agent_info_map_t   = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
-using kernel_iteration_t = std::unordered_map<rocprofiler_kernel_id_t, uint32_t>;
+using agent_info_map_t      = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>;
+using kernel_iteration_t    = std::unordered_map<rocprofiler_kernel_id_t, uint32_t>;
+using kernel_rename_map_t   = std::unordered_map<uint64_t, uint64_t>;
+using kernel_rename_stack_t = std::stack<uint64_t>;
 
 auto  code_obj_data          = as_pointer<common::Synchronized<code_object_data_map_t, true>>();
 auto* kernel_data            = as_pointer<common::Synchronized<kernel_symbol_data_map_t, true>>();
@@ -196,14 +201,20 @@ auto* tool_functions         = as_pointer(tool_table{});
 auto* stats_timestamp        = as_pointer(timestamps_t{});
 auto  kernel_iteration       = common::Synchronized<kernel_iteration_t, true>{};
 
+thread_local auto thread_dispatch_rename      = as_pointer<kernel_rename_stack_t>();
+thread_local auto thread_dispatch_rename_dtor = common::scope_destructor{[]() {
+    delete thread_dispatch_rename;
+    thread_dispatch_rename = nullptr;
+}};
+
 bool
 add_kernel_target(uint64_t _kern_id, const std::unordered_set<uint32_t>& range)
 {
     return target_kernels
         .wlock(
-            [](targeted_kernels_map_t&      _targets_v,
-               uint64_t                     _kern_id_v,
-               std::unordered_set<uint32_t> _range) {
+            [](targeted_kernels_map_t&             _targets_v,
+               uint64_t                            _kern_id_v,
+               const std::unordered_set<uint32_t>& _range) {
                 return _targets_v.emplace(_kern_id_v, _range);
             },
             _kern_id,
@@ -214,42 +225,33 @@ add_kernel_target(uint64_t _kern_id, const std::unordered_set<uint32_t>& range)
 bool
 is_targeted_kernel(uint64_t _kern_id)
 {
-    bool                         is_target_kernel = false;
-    std::unordered_set<uint32_t> range            = {};
-    is_target_kernel                              = target_kernels.rlock(
-        [&range](const auto& _targets_v, uint64_t _kern_id_v) {
-            if(_targets_v.find(_kern_id_v) != _targets_v.end())
-            {
-                range = _targets_v.at(_kern_id_v);
-                return true;
-            }
-            return false;
+    const std::unordered_set<uint32_t>* range = target_kernels.rlock(
+        [](const auto& _targets_v, uint64_t _kern_id_v) -> const std::unordered_set<uint32_t>* {
+            if(_targets_v.find(_kern_id_v) != _targets_v.end()) return &_targets_v.at(_kern_id_v);
+            return nullptr;
         },
         _kern_id);
 
-    if(is_target_kernel)
+    if(range)
     {
-        kernel_iteration.rlock(
-            [&](const auto&                  _kernel_iter,
-                uint64_t                     _kernel_id,
-                std::unordered_set<uint32_t> _range) {
+        return kernel_iteration.rlock(
+            [](const auto&                         _kernel_iter,
+               uint64_t                            _kernel_id,
+               const std::unordered_set<uint32_t>& _range) {
                 auto itr = _kernel_iter.at(_kernel_id);
 
                 // If the iteration range is not given then all iterations of the kernel is profiled
                 if(_range.empty())
-                    is_target_kernel = true;
-
+                    return true;
                 else if(_range.find(itr) != _range.end())
-                {
-                    is_target_kernel = true;
-                }
-                else
-                    is_target_kernel = false;
+                    return true;
+                return false;
             },
             _kern_id,
-            range);
+            *range);
     }
-    return is_target_kernel;
+
+    return false;
 }
 
 auto&
@@ -295,6 +297,26 @@ get_roctx_msg(uint64_t cid)
             cid);
 }
 
+int
+set_kernel_rename_correlation_id(rocprofiler_thread_id_t                            thr_id,
+                                 rocprofiler_context_id_t                           ctx_id,
+                                 rocprofiler_external_correlation_id_request_kind_t kind,
+                                 rocprofiler_tracing_operation_t                    op,
+                                 uint64_t                 internal_corr_id,
+                                 rocprofiler_user_data_t* external_corr_id,
+                                 void*                    user_data)
+{
+    ROCP_FATAL_IF(kind != ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH)
+        << "unexpected kind: " << kind;
+
+    if(thread_dispatch_rename != nullptr && !thread_dispatch_rename->empty())
+        external_corr_id->value = thread_dispatch_rename->top();
+
+    common::consume_args(thr_id, ctx_id, kind, op, internal_corr_id, user_data);
+
+    return 0;
+}
+
 void
 cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                        rocprofiler_user_data_t*              user_data,
@@ -335,6 +357,45 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
             write_ring_buffer(marker_record, domain_type::MARKER);
         }
     }
+}
+
+void
+kernel_rename_callback(rocprofiler_callback_tracing_record_t record,
+                       rocprofiler_user_data_t*              user_data,
+                       void*                                 data)
+{
+    if(!rocprofiler::tool::get_config().kernel_rename || thread_dispatch_rename == nullptr) return;
+
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API)
+    {
+        auto* marker_data =
+            static_cast<rocprofiler_callback_tracing_marker_api_data_t*>(record.payload);
+
+        if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA &&
+           record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT && marker_data->args.roctxMarkA.message)
+        {
+            thread_dispatch_rename->emplace(
+                common::add_string_entry(marker_data->args.roctxMarkA.message));
+        }
+        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA &&
+                record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT &&
+                marker_data->args.roctxRangePushA.message)
+        {
+            thread_dispatch_rename->emplace(
+                common::add_string_entry(marker_data->args.roctxRangePushA.message));
+        }
+        else if(record.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop &&
+                record.phase == ROCPROFILER_CALLBACK_PHASE_ENTER)
+        {
+            ROCP_FATAL_IF(thread_dispatch_rename->empty())
+                << "roctxRangePop invoked more times than roctxRangePush on thread "
+                << rocprofiler::common::get_tid();
+
+            thread_dispatch_rename->pop();
+        }
+    }
+
+    common::consume_args(user_data, data);
 }
 
 void
@@ -485,8 +546,6 @@ callback_tracing_callback(rocprofiler_callback_tracing_record_t record,
         }
     }
 
-    (void) record;
-    (void) user_data;
     (void) data;
 }
 
@@ -544,9 +603,14 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 std::regex exclude_regex(kernel_filter_exclude);
                 if(std::regex_search(kernel_info.formatted_kernel_name, include_regex))
                 {
-                    if(kernel_filter_exclude.empty())
+                    if(kernel_filter_exclude.empty() ||
+                       !std::regex_search(kernel_info.formatted_kernel_name, exclude_regex))
                         add_kernel_target(sym_data->kernel_id, kernel_filter_range);
-                    else if(!std::regex_search(kernel_info.formatted_kernel_name, exclude_regex))
+                }
+                else
+                {
+                    if(kernel_filter_exclude.empty() ||
+                       !std::regex_search(kernel_info.formatted_kernel_name, exclude_regex))
                         add_kernel_target(sym_data->kernel_id, kernel_filter_range);
                 }
             }
@@ -558,8 +622,13 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
 }
 
 std::string_view
-get_kernel_name(uint64_t kernel_id)
+get_kernel_name(uint64_t kernel_id, uint64_t rename_id)
 {
+    if(rename_id > 0)
+    {
+        if(const auto* _name = common::get_string_entry(rename_id)) return std::string_view{*_name};
+    }
+
     return CHECK_NOTNULL(kernel_data)->rlock([kernel_id](const auto& _data) -> std::string_view {
         return _data.at(kernel_id).formatted_kernel_name;
     });
@@ -1180,8 +1249,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     client_finalizer = fini_func;
 
-    constexpr uint64_t buffer_size      = 4096;
-    constexpr uint64_t buffer_watermark = 4096;
+    const uint64_t buffer_size      = 32 * common::units::get_page_size();
+    const uint64_t buffer_watermark = 31 * common::units::get_page_size();
 
     rocprofiler_get_timestamp(&(stats_timestamp->app_start_time));
 
@@ -1360,6 +1429,40 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             rocprofiler_configure_callback_dispatch_profile_counting_service(
                 get_client_ctx(), dispatch_callback, nullptr, counter_record_callback, nullptr),
             "Could not setup counting service");
+    }
+
+    if(tool::get_config().kernel_rename)
+    {
+        auto rename_ctx            = rocprofiler_context_id_t{};
+        auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 3>{
+            ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA,
+            ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA,
+            ROCPROFILER_MARKER_CORE_API_ID_roctxRangePop};
+
+        ROCPROFILER_CALL(rocprofiler_create_context(&rename_ctx), "failed to create context");
+
+        ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                             rename_ctx,
+                             ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
+                             marker_core_api_kinds.data(),
+                             marker_core_api_kinds.size(),
+                             kernel_rename_callback,
+                             nullptr),
+                         "callback tracing service failed to configure");
+
+        ROCPROFILER_CALL(rocprofiler_start_context(rename_ctx), "start context failed");
+
+        auto external_corr_id_request_kinds =
+            std::array<rocprofiler_external_correlation_id_request_kind_t, 1>{
+                ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH};
+
+        ROCPROFILER_CALL(rocprofiler_configure_external_correlation_id_request_service(
+                             get_client_ctx(),
+                             external_corr_id_request_kinds.data(),
+                             external_corr_id_request_kinds.size(),
+                             set_kernel_rename_correlation_id,
+                             nullptr),
+                         "Could not configure external correlation id request service");
     }
 
     for(auto itr : get_buffers().as_array())

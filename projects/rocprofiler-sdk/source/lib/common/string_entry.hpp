@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 
@@ -31,5 +32,11 @@ namespace common
 {
 const std::string*
 get_string_entry(std::string_view name);
+
+const std::string*
+get_string_entry(size_t hash);
+
+size_t
+add_string_entry(std::string_view name);
 }  // namespace common
 }  // namespace rocprofiler

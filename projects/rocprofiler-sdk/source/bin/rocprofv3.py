@@ -168,6 +168,10 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--list-metrics",
         help="List metrics for counter collection",
     )
+    add_parser_bool_argument(
+        "--kernel-rename",
+        help="Use region names defined by roctxRangePush/roctxRangePop regions to rename the kernels",
+    )
     parser.add_argument(
         "-i",
         "--input",
@@ -231,6 +235,35 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help="Libraries to prepend to LD_PRELOAD (usually for sanitizers)",
         default=os.environ.get("ROCPROF_PRELOAD", "").split(":"),
         nargs="*",
+    )
+    parser.add_argument(
+        "--perfetto-backend",
+        help="Perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons",
+        default=None,
+        type=str,
+        nargs=1,
+        choices=("inprocess", "system"),
+    )
+    parser.add_argument(
+        "--perfetto-buffer-size",
+        help="Size of buffer for perfetto output in KB. default: 1 GB",
+        default=None,
+        type=int,
+        metavar="KB",
+    )
+    parser.add_argument(
+        "--perfetto-buffer-fill-policy",
+        help="Policy for handling new records when perfetto has reached the buffer limit",
+        default=None,
+        type=str,
+        choices=("discard", "ring_buffer"),
+    )
+    parser.add_argument(
+        "--perfetto-shmem-size-hint",
+        help="Perfetto shared memory size hint in KB. default: 64 KB",
+        default=None,
+        type=int,
+        metavar="KB",
     )
 
     if args is None:
@@ -581,6 +614,29 @@ def run(app_args, args, **kwargs):
                 f"{itr}_LOG_LEVEL",
                 args.log_level,
             )
+
+    for opt, env_val in dict(
+        [
+            ["kernel_rename", "KERNEL_RENAME"],
+        ]
+    ).items():
+        val = getattr(args, f"{opt}")
+        if val is not None:
+            update_env(f"ROCPROF_{env_val}", val, overwrite_if_true=True)
+
+    for opt, env_val in dict(
+        [
+            ["perfetto_buffer_size", "PERFETTO_BUFFER_SIZE_KB"],
+            ["perfetto_shmem_size_hint", "PERFETTO_SHMEM_SIZE_HINT_KB"],
+            ["perfetto_fill_policy", "PERFETTO_BUFFER_FILL_POLICY"],
+            ["perfetto_backend", "PERFETTO_BACKEND"],
+        ]
+    ).items():
+        val = getattr(args, f"{opt}")
+        if val is not None:
+            if isinstance(val, (list, tuple, set)):
+                val = ", ".join(val)
+            update_env(f"ROCPROF_{env_val}", val, overwrite=True)
 
     def log_config(_env):
         existing_env = dict(os.environ)

@@ -287,6 +287,8 @@ generate_csv(tool_table*                                                        
                                  {"Kind",
                                   "Agent_Id",
                                   "Queue_Id",
+                                  "Thread_Id",
+                                  "Dispatch_Id",
                                   "Kernel_Id",
                                   "Kernel_Name",
                                   "Correlation_Id",
@@ -304,12 +306,15 @@ generate_csv(tool_table*                                                        
     for(const auto& record : data)
     {
         auto row_ss      = std::stringstream{};
-        auto kernel_name = tool_functions->tool_get_kernel_name_fn(record.dispatch_info.kernel_id);
+        auto kernel_name = tool_functions->tool_get_kernel_name_fn(
+            record.dispatch_info.kernel_id, record.correlation_id.external.value);
         rocprofiler::tool::csv::kernel_trace_csv_encoder::write_row(
             row_ss,
             tool_functions->tool_get_domain_name_fn(record.kind),
             tool_functions->tool_get_agent_node_id_fn(record.dispatch_info.agent_id),
             record.dispatch_info.queue_id.handle,
+            record.thread_id,
+            record.dispatch_info.dispatch_id,
             record.dispatch_info.kernel_id,
             kernel_name,
             record.correlation_id.internal,
@@ -542,6 +547,7 @@ generate_csv(tool_table*                                                     too
                                   "Process_Id",
                                   "Thread_Id",
                                   "Grid_Size",
+                                  "Kernel_Id",
                                   "Kernel_Name",
                                   "Workgroup_Size",
                                   "LDS_Block_Size",
@@ -583,7 +589,8 @@ generate_csv(tool_table*                                                     too
                 getpid(),
                 record.thread_id,
                 magnitude(record.dispatch_data.dispatch_info.grid_size),
-                tool_functions->tool_get_kernel_name_fn(kernel_id),
+                record.dispatch_data.dispatch_info.kernel_id,
+                tool_functions->tool_get_kernel_name_fn(kernel_id, correlation_id.external.value),
                 magnitude(record.dispatch_data.dispatch_info.workgroup_size),
                 record.lds_block_size_v,
                 record.dispatch_data.dispatch_info.private_segment_size,

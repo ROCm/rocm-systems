@@ -77,8 +77,11 @@ struct config
     bool        csv_output                  = false;
     bool        json_output                 = false;
     bool        pftrace_output              = false;
+    bool        kernel_rename               = get_env("ROCPROF_KERNEL_RENAME", false);
     int         mpi_size                    = get_mpi_size();
     int         mpi_rank                    = get_mpi_rank();
+    size_t      perfetto_shmem_size_hint    = get_env("ROCPROF_PERFETTO_SHMEM_SIZE_HINT_KB", 64);
+    size_t      perfetto_buffer_size        = get_env("ROCPROF_PERFETTO_BUFFER_SIZE_KB", 1024000);
     std::string output_path   = get_env("ROCPROF_OUTPUT_PATH", fs::current_path().string());
     std::string output_file   = get_env("ROCPROF_OUTPUT_FILE_NAME", std::to_string(getpid()));
     std::string tmp_directory = get_env("ROCPROF_TMPDIR", output_path);
@@ -87,6 +90,9 @@ struct config
         get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", std::string{".*"});
     std::string kernel_filter_exclude =
         get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", std::string{});
+    std::string perfetto_buffer_fill_policy =
+        get_env("ROCPROF_PERFETTO_BUFFER_FILL_POLICY", std::string{"discard"});
+    std::string perfetto_backend = get_env("ROCPROF_PERFETTO_BACKEND", std::string{"inprocess"});
     std::unordered_set<uint32_t> kernel_filter_range = {};
     std::set<std::string>        counters            = {};
 };

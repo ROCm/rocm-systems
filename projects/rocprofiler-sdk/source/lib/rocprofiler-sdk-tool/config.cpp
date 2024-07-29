@@ -284,6 +284,10 @@ config::config()
             << "Unsupported output format type: " << itr;
     }
     if(kernel_filter_include.empty()) kernel_filter_include = std::string(".*");
+
+    const auto supported_perfetto_backends = std::set<std::string_view>{"inprocess", "system"};
+    LOG_IF(FATAL, supported_perfetto_backends.count(perfetto_backend) == 0)
+        << "Unsupported perfetto backend type: " << perfetto_backend;
 }
 
 std::vector<output_key>

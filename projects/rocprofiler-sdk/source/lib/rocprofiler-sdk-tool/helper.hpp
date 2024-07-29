@@ -333,7 +333,7 @@ using scratch_memory_buffered_output_t =
 
 using tool_get_agent_node_id_fn_t      = uint64_t (*)(rocprofiler_agent_id_t);
 using tool_get_app_timestamps_fn_t     = timestamps_t* (*) ();
-using tool_get_kernel_name_fn_t        = std::string_view (*)(uint64_t);
+using tool_get_kernel_name_fn_t        = std::string_view (*)(uint64_t, uint64_t);
 using tool_get_domain_name_fn_t        = std::string_view (*)(rocprofiler_buffer_tracing_kind_t);
 using tool_get_operation_name_fn_t     = std::string_view (*)(rocprofiler_buffer_tracing_kind_t,
                                                           rocprofiler_tracing_operation_t);

@@ -25,6 +25,7 @@
 #include "output_file.hpp"
 
 #include "lib/common/utility.hpp"
+#include "lib/rocprofiler-sdk-tool/config.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -83,20 +84,37 @@ write_perfetto(
     auto cfg             = ::perfetto::TraceConfig{};
 
     // environment settings
-    auto shmem_size_hint = size_t{64};
-    auto buffer_size_kb  = size_t{1024000};
+    auto shmem_size_hint = get_config().perfetto_shmem_size_hint;
+    auto buffer_size_kb  = get_config().perfetto_buffer_size;
 
     auto* buffer_config = cfg.add_buffers();
     buffer_config->set_size_kb(buffer_size_kb);
-    buffer_config->set_fill_policy(
-        ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD);
+
+    if(get_config().perfetto_buffer_fill_policy == "discard" ||
+       get_config().perfetto_buffer_fill_policy.empty())
+        buffer_config->set_fill_policy(
+            ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_DISCARD);
+    else if(get_config().perfetto_buffer_fill_policy == "ring_buffer")
+        buffer_config->set_fill_policy(
+            ::perfetto::protos::gen::TraceConfig_BufferConfig_FillPolicy_RING_BUFFER);
+    else
+        ROCP_FATAL << "Unsupport perfetto buffer fill policy: '"
+                   << get_config().perfetto_buffer_fill_policy
+                   << "'. Supported: discard, ring_buffer";
 
     auto* ds_cfg = cfg.add_data_sources()->mutable_config();
     ds_cfg->set_name("track_event");  // this MUST be track_event
     ds_cfg->set_track_event_config_raw(track_event_cfg.SerializeAsString());
 
     args.shmem_size_hint_kb = shmem_size_hint;
-    args.backends |= ::perfetto::kInProcessBackend;
+
+    if(get_config().perfetto_backend == "inprocess" || get_config().perfetto_backend.empty())
+        args.backends |= ::perfetto::kInProcessBackend;
+    else if(get_config().perfetto_backend == "system")
+        args.backends |= ::perfetto::kSystemBackend;
+    else
+        ROCP_FATAL << "Unsupport perfetto backend: '" << get_config().perfetto_backend
+                   << "'. Supported: inprocess, system";
 
     ::perfetto::Tracing::Initialize(args);
     ::perfetto::TrackEvent::Register();
@@ -175,13 +193,15 @@ write_perfetto(
         for(auto titr : itr.second)
         {
             auto _namess = std::stringstream{};
-            _namess << "COPY to [" << _agent->logical_node_id << "] THREAD ["
-                    << thread_indexes.at(titr) << "]";
+            _namess << "COPY to AGENT [" << _agent->logical_node_id << "] THREAD ["
+                    << thread_indexes.at(titr) << "] ";
 
             if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _namess << " CPU";
+                _namess << "(CPU)";
             else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _namess << " GPU";
+                _namess << "(GPU)";
+            else
+                _namess << "(UNK)";
 
             auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
             auto _desc  = _track.Serialize();
@@ -201,12 +221,15 @@ write_perfetto(
             const auto* _agent = _get_agent(aitr.first);
 
             auto _namess = std::stringstream{};
-            _namess << "COMPUTE [" << _agent->logical_node_id << "] QUEUE [" << nqueue++ << "] ";
+            _namess << "COMPUTE AGENT [" << _agent->logical_node_id << "] QUEUE [" << nqueue++
+                    << "] ";
 
             if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _namess << "CPU";
+                _namess << "(CPU)";
             else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _namess << "GPU";
+                _namess << "(GPU)";
+            else
+                _namess << "(UNK)";
 
             auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
             auto _desc  = _track.Serialize();
@@ -451,9 +474,9 @@ write_perfetto(
             const auto* _agent      = _get_agent(mitr.first);
 
             if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _track_name << "COPY BYTES to [" << _agent->logical_node_id << "] CPU";
+                _track_name << "COPY BYTES to AGENT [" << _agent->logical_node_id << "] (CPU)";
             else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _track_name << "COPY BYTES to [" << _agent->logical_node_id << "] GPU";
+                _track_name << "COPY BYTES to AGENT [" << _agent->logical_node_id << "] (GPU)";
 
             constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
             auto&          _name = mem_cpy_cnt_names.emplace_back(_track_name.str());

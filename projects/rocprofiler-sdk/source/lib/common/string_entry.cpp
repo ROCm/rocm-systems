@@ -70,5 +70,33 @@ get_string_entry(std::string_view name)
         ->emplace(_hash_v, std::make_unique<std::string>(name))
         .first->second.get();
 }
+
+const std::string*
+get_string_entry(size_t _hash_v)
+{
+    if(!get_string_array()) return nullptr;
+
+    auto _lk = std::shared_lock<std::shared_mutex>{get_sync()};
+    if(get_string_array()->count(_hash_v) > 0) return get_string_array()->at(_hash_v).get();
+
+    return nullptr;
+}
+
+size_t
+add_string_entry(std::string_view name)
+{
+    if(!get_string_array()) return 0;
+
+    auto _hash_v = std::hash<std::string_view>{}(name);
+    {
+        auto _lk = std::shared_lock<std::shared_mutex>{get_sync()};
+        if(get_string_array()->count(_hash_v) > 0) return _hash_v;
+    }
+
+    auto _lk = std::unique_lock<std::shared_mutex>{get_sync()};
+    get_string_array()->emplace(_hash_v, std::make_unique<std::string>(name));
+
+    return _hash_v;
+}
 }  // namespace common
 }  // namespace rocprofiler
