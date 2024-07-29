@@ -37,6 +37,10 @@
 # Python cache files
 *.pyc
 
+# Documentation artifacts
+/_build
+_toc.yml
+
 /build*
 /.vscode
 /.cache

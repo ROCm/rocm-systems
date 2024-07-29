@@ -7,8 +7,6 @@
 [![Installer Packaging (CPack)](https://github.com/ROCm/omnitrace/actions/workflows/cpack.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/cpack.yml)
 [![Documentation](https://github.com/ROCm/omnitrace/actions/workflows/docs.yml/badge.svg)](https://github.com/ROCm/omnitrace/actions/workflows/docs.yml)
 
-> ***[Omnitrace](https://github.com/ROCm/omnitrace) is an AMD open source research project and is not supported as part of the ROCm software stack.***
-
 ## Overview
 
 AMD Research is seeking to improve observability and performance analysis for software running on AMD heterogeneous systems.
@@ -86,8 +84,8 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
 
 ## Documentation
 
-The full documentation for [omnitrace](https://github.com/ROCm/omnitrace) is available at [rocm.github.io/omnitrace](https://rocm.github.io/omnitrace/).
-See the [Getting Started documentation](https://rocm.github.io/omnitrace/getting_started) for general tips and a detailed discussion about sampling vs. binary instrumentation.
+The full documentation for [omnitrace](https://github.com/ROCm/omnitrace) is available at [the ROCm Omnitrace documentation repository](https://rocm.docs.amd.com/projects/omnitrace/en/latest/index.html).
+See the [Getting Started documentation](https://rocm.docs.amd.com/projects/omnitrace/en/conceptual/how-omnitrace-works.html) for general tips and a detailed discussion about sampling vs. binary instrumentation.
 
 ## Quick Start
 
@@ -108,7 +106,7 @@ wget https://github.com/ROCm/omnitrace/releases/latest/download/omnitrace-instal
 python3 ./omnitrace-install.py --prefix /opt/omnitrace/rocm-5.4 --rocm 5.4
 ```
 
-See the [Installation Documentation](https://rocm.github.io/omnitrace/installation) for detailed information.
+See the [Installation Documentation](https://rocm.docs.amd.com/projects/omnitrace/en/install/install.html) for detailed information.
 
 ### Setup
 
@@ -297,13 +295,13 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 - Select "Open trace file" from panel on the left
 - Locate the omnitrace perfetto output (extension: `.proto`)
 
-![omnitrace-perfetto](source/docs/images/omnitrace-perfetto.png)
+![omnitrace-perfetto](docs/data/omnitrace-perfetto.png)
 
-![omnitrace-rocm](source/docs/images/omnitrace-rocm.png)
+![omnitrace-rocm](docs/data/omnitrace-rocm.png)
 
-![omnitrace-rocm-flow](source/docs/images/omnitrace-rocm-flow.png)
+![omnitrace-rocm-flow](docs/data/omnitrace-rocm-flow.png)
 
-![omnitrace-user-api](source/docs/images/omnitrace-user-api.png)
+![omnitrace-user-api](docs/data/omnitrace-user-api.png)
 
 ## Using Perfetto tracing with System Backend
 
