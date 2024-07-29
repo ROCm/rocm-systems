@@ -46,7 +46,7 @@ namespace {
 struct shmd_t {
   int command;
 };
-struct shmd_t* shmd;
+struct shmd_t* shmd = nullptr;
 }  // namespace
 
 namespace fs = rocprofiler::common::filesystem;
@@ -193,12 +193,12 @@ int main(int argc, char* argv[]) {
       int argindex = i;
       std::vector<std::string> env_vars;
       env_vars.emplace_back("");
-      if (strncmp(argv[i], "rocprofv2", 8) == 0) {
+      if (std::string(argv[i]).find("rocprofv2") != std::string::npos) {
         env_vars.emplace_back("--roc-sys");
         env_vars.emplace_back(std::to_string(session_id));
       }
       for (argindex++; argindex < argc; argindex++) {
-        if (strncmp(argv[argindex], "rocprofv2", 8) == 0) {
+       if (std::string(argv[argindex]).find("rocprofv2") != std::string::npos) {
           fs::path command = bin_path;
           command.append("rocprofv2");
           env_vars.emplace_back(command.c_str());
