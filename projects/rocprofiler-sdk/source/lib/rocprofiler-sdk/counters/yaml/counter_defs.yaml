@@ -2,10 +2,9 @@ ALUStalledByLDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
       expression: 400*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE
-  description: 'The percentage of GPUTime ALU units are stalled by the LDS input queue
-    being full or the output queue being not ready. If there are LDS bank conflicts,
-    reduce them. Otherwise, try reducing the number of LDS accesses if possible. Value
-    range: 0% (optimal) to 100% (bad).'
+  description: 'The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the
+    output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing
+    the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).'
 AggSysCycles:
   architectures:
     gfx90a:
@@ -81,15 +80,13 @@ CPC_UTCL1_STALL_ON_TRANSLATION:
     gfx942/gfx941/gfx940/gfx90a:
       block: CPC
       event: 24
-  description: One of the UTCL1s is stalled waiting on translation, XNACK or PENDING
-    response.
+  description: One of the UTCL1s is stalled waiting on translation, XNACK or PENDING response.
 CPF_CMP_UTCL1_STALL_ON_TRANSLATION:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: CPF
       event: 20
-  description: One of the Compute UTCL1s is stalled waiting on translation, XNACK
-    or PENDING response.
+  description: One of the Compute UTCL1s is stalled waiting on translation, XNACK or PENDING response.
 CPF_CPF_STAT_BUSY:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -130,25 +127,24 @@ CP_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: 100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE
-  description: Percentage of the GRBM_GUI_ACTIVE time that any of the Command Processor
-    (CPG/CPC/CPF) blocks are busy
+  description: Percentage of the GRBM_GUI_ACTIVE time that any of the Command Processor (CPG/CPC/CPF)
+    blocks are busy
 CU_NUM:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9: 
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       expression: cu_per_simd_array*array_count
   description: CU_NUM
 CU_OCCUPANCY:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: (SQ_CYCLES/(SQ_WAVE_CYCLES*4))/MAX_WAVE_SIZE
-  description: The ratio of active waves on a CU to the maximum number of active waves
-    supported by the CU
+  description: The ratio of active waves on a CU to the maximum number of active waves supported by the
+    CU
 CU_UTILIZATION:
   architectures:
     gfx942/gfx941/gfx940/gfx908/gfx90a:
       expression: GRBM_GUI_ACTIVE/GRBM_COUNT
-  description: The total number of active cycles divided by total number of elapsed
-    cycles
+  description: The total number of active cycles divided by total number of elapsed cycles
 CpUtil:
   architectures:
     gfx90a:
@@ -158,8 +154,7 @@ EA_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: 100*GRBM_EA_BUSY/GRBM_GUI_ACTIVE
-  description: Percentage of the GRBM_GUI_ACTIVE time that the Efficiency Arbiter
-    (EA) block is busy.
+  description: Percentage of the GRBM_GUI_ACTIVE time that the Efficiency Arbiter (EA) block is busy.
 EaAtomicLatency:
   architectures:
     gfx90a:
@@ -227,39 +222,37 @@ FETCH_SIZE:
       expression: (TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024
     gfx942/gfx941/gfx940:
       expression: (TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*64)/1024
-  description: The total kilobytes fetched from the video memory. This is measured
-    with all extra fetches and any cache or memory effects taken into account.
+  description: The total kilobytes fetched from the video memory. This is measured with all extra fetches
+    and any cache or memory effects taken into account.
 FetchSize:
   architectures:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9:
       expression: FETCH_SIZE
-  description: The total kilobytes fetched from the video memory. This is measured
-    with all extra fetches and any cache or memory effects taken into account.
+  description: The total kilobytes fetched from the video memory. This is measured with all extra fetches
+    and any cache or memory effects taken into account.
 FlatLDSInsts:
   architectures:
     gfx906/gfx908/gfx8/gfx90a/gfx9:
       expression: SQ_INSTS_FLAT_LDS_ONLY/SQ_WAVES
-  description: The average number of FLAT instructions that read or write to LDS executed
-    per work item (affected by flow control).
+  description: The average number of FLAT instructions that read or write to LDS executed per work item
+    (affected by flow control).
 FlatVMemInsts:
   architectures:
     gfx906/gfx908/gfx8/gfx90a/gfx9:
       expression: (SQ_INSTS_FLAT-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
-  description: The average number of FLAT instructions that read from or write to
-    the video memory executed per work item (affected by flow control). Includes FLAT
-    instructions that read from or write to scratch.
+  description: The average number of FLAT instructions that read from or write to the video memory executed
+    per work item (affected by flow control). Includes FLAT instructions that read from or write to scratch.
 GDSInsts:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
       expression: SQ_INSTS_GDS/SQ_WAVES
-  description: The average number of GDS read or GDS write instructions executed per
-    work item (affected by flow control).
+  description: The average number of GDS read or GDS write instructions executed per work item (affected
+    by flow control).
 GDS_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: 100*GRBM_GDS_BUSY/GRBM_GUI_ACTIVE
-  description: Percentage of the GRBM_GUI_ACTIVE time that the Global Data Share (GDS)
-    is busy.
+  description: Percentage of the GRBM_GUI_ACTIVE time that the Global Data Share (GDS) is busy.
 GL2C_EA_RDREQ_128B:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
@@ -309,14 +302,13 @@ GL2C_EA_WRREQ_64B:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       block: GL2C
       event: 85
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the TC_EA_wrreq interface.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
 GL2C_EA_WRREQ_64B_sum:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       expression: reduce(GL2C_EA_WRREQ_64B,sum)
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the GL2C_EA_wrreq interface. Sum over GL2C instances.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the GL2C_EA_wrreq
+    interface. Sum over GL2C instances.
 GL2C_HIT:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
@@ -338,16 +330,16 @@ GL2C_MC_RDREQ_sum:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       expression: reduce(GL2C_MC_RDREQ,sum)
-  description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte).
-    Sum over GL2C instances.
+  description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over GL2C
+    instances.
 GL2C_MC_WRREQ:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       block: GL2C
       event: 83
-  description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_wrreq
-    interface. Atomics may travel over the same interface and are generally classified
-    as write requests. This does not include probe commands
+  description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_wrreq interface.
+    Atomics may travel over the same interface and are generally classified as write requests. This does
+    not include probe commands
 GL2C_MC_WRREQ_STALL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
@@ -358,8 +350,8 @@ GL2C_MC_WRREQ_sum:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       expression: reduce(GL2C_MC_WRREQ,sum)
-  description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq
-    interface. Sum over GL2C instances.
+  description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq interface.
+    Sum over GL2C instances.
 GL2C_MISS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
@@ -387,8 +379,8 @@ GPU_UTIL:
       expression: 100*GRBM_GUI_ACTIVE/GRBM_COUNT
   description: Percentage of the time that GUI is active
 GRBM_COUNT:
-  architectures: 
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9: 
+  architectures:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       block: GRBM
       event: 0
   description: Tie High - Count Number of Clocks
@@ -430,7 +422,7 @@ GRBM_GL2CC_BUSY:
   description: The GL2CC block is busy.
 GRBM_GUI_ACTIVE:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9: 
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       block: GRBM
       event: 2
   description: The GUI is Active
@@ -479,8 +471,8 @@ L2CacheHit:
       expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
     gfx906/gfx908/gfx8/gfx90a/gfx9:
       expression: 100*reduce(TCC_HIT,sum)/(reduce(TCC_HIT,sum)+reduce(TCC_MISS,sum))
-  description: 'The percentage of fetch, write, atomic, and other instructions that
-    hit the data in L2 cache. Value range: 0% (no hit) to 100% (optimal).'
+  description: 'The percentage of fetch, write, atomic, and other instructions that hit the data in L2
+    cache. Value range: 0% (no hit) to 100% (optimal).'
 L2CacheHitRate:
   architectures:
     gfx90a:
@@ -497,15 +489,14 @@ LDSBankConflict:
       expression: 100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE
     gfx906/gfx908/gfx8/gfx90a/gfx9:
       expression: 100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM
-  description: 'The percentage of GPUTime LDS is stalled by bank conflicts. Value
-    range: 0% (optimal) to 100% (bad).'
+  description: 'The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal)
+    to 100% (bad).'
 LDSInsts:
   architectures:
     gfx906/gfx908/gfx8/gfx90a/gfx9:
       expression: (SQ_INSTS_LDS-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
-  description: The average number of LDS read or LDS write instructions executed per
-    work item (affected by flow control).  Excludes FLAT instructions that read from
-    or write to LDS.
+  description: The average number of LDS read or LDS write instructions executed per work item (affected
+    by flow control).  Excludes FLAT instructions that read from or write to LDS.
 LdsBankConflict:
   architectures:
     gfx90a:
@@ -528,7 +519,7 @@ LdsUtil:
   description: 'Unit: percent'
 MAX_WAVE_SIZE:
   architectures:
-     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       expression: wave_front_size
   description: Max wave size constant
 MeanOccupancyPerActiveCU:
@@ -551,18 +542,17 @@ MemUnitBusy:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
       expression: 100*reduce(TA_TA_BUSY,max)/GRBM_GUI_ACTIVE/SE_NUM
-  description: 'The percentage of GPUTime the memory unit is active. The result includes
-    the stall time (MemUnitStalled). This is measured with all extra fetches and writes
-    and any cache or memory effects taken into account. Value range: 0% to 100% (fetch-bound).'
+  description: 'The percentage of GPUTime the memory unit is active. The result includes the stall time
+    (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects
+    taken into account. Value range: 0% to 100% (fetch-bound).'
 MemUnitStalled:
   architectures:
     gfx8:
       expression: 100*reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max)/GRBM_GUI_ACTIVE/SE_NUM
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9:
       expression: 100*TCP_TCP_TA_DATA_STALL_CYCLES_max/GRBM_GUI_ACTIVE/SE_NUM
-  description: 'The percentage of GPUTime the memory unit is stalled. Try reducing
-    the number or size of fetches and writes if possible. Value range: 0% (optimal)
-    to 100% (bad).'
+  description: 'The percentage of GPUTime the memory unit is stalled. Try reducing the number or size
+    of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad).'
 MemWrites32B:
   architectures:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9:
@@ -602,22 +592,21 @@ RDATA1_SIZE:
   architectures:
     gfx906:
       expression: (TCC_EA1_RDREQ_32B_sum*32+(TCC_EA1_RDREQ_sum-TCC_EA1_RDREQ_32B_sum)*64)
-  description: The total kilobytes fetched from the video memory. This is measured
-    on EA1s.
+  description: The total kilobytes fetched from the video memory. This is measured on EA1s.
 SALUBusy:
   architectures:
     gfx906/gfx908/gfx8/gfx90a/gfx9:
       expression: 100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
     gfx942/gfx941/gfx940:
       expression: 100*reduce(SQ_INST_CYCLES_SALU,sum)*4/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,sum)
-  description: 'The percentage of GPUTime scalar ALU instructions are processed. Value
-    range: 0% (bad) to 100% (optimal).'
+  description: 'The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad)
+    to 100% (optimal).'
 SALUInsts:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
       expression: SQ_INSTS_SALU/SQ_WAVES
-  description: The average number of scalar ALU instructions executed per work-item
-    (affected by flow control).
+  description: The average number of scalar ALU instructions executed per work-item (affected by flow
+    control).
 SE_NUM:
   architectures:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
@@ -627,11 +616,11 @@ SFetchInsts:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
       expression: SQ_INSTS_SMEM/SQ_WAVES
-  description: The average number of scalar fetch instructions from the video memory
-    executed per work-item (affected by flow control).
+  description: The average number of scalar fetch instructions from the video memory executed per work-item
+    (affected by flow control).
 SIMD_NUM:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9: 
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       expression: simd_per_cu/CU_NUM
   description: SIMD Number
 SPI_CSN_BUSY:
@@ -640,32 +629,32 @@ SPI_CSN_BUSY:
       block: SPI
       event: 48
   description: Number of clocks with outstanding waves (SPI or SH). Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL
-    to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source
-    is CS2; DEBUG_PIPE_SEL = 3, source is CS3; default, source is CS0;
+    to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL
+    = 3, source is CS3; default, source is CS0;
 SPI_CSN_NUM_THREADGROUPS:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SPI
       event: 49
-  description: Number of threadgroups launched. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL
-    to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source
-    is CS2; DEBUG_PIPE_SEL = 3, source is CS3; default, source is CS0;
+  description: Number of threadgroups launched. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source,
+    DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL = 3, source is
+    CS3; default, source is CS0;
 SPI_CSN_WAVE:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SPI
       event: 52
-  description: Number of waves. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source,
-    DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL
-    = 3, source is CS3; default, source is CS0;
+  description: Number of waves. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL
+    = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL = 3, source is CS3; default,
+    source is CS0;
 SPI_CSN_WINDOW_VALID:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SPI
       event: 47
   description: Clock count enabled by perfcounter_start event. Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL
-    to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source
-    is CS2; DEBUG_PIPE_SEL = 3, source is CS3; default, source is CS0;
+    to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL
+    = 3, source is CS3; default, source is CS0;
 SPI_RA_BAR_CU_FULL_CSN:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -743,25 +732,23 @@ SPI_SWC_CSC_WR:
     gfx942/gfx941/gfx940/gfx90a:
       block: SPI
       event: 189
-  description: Number of clocks to write CSC waves to SGPRs (need to multiply this
-    value by 4) Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL
-    = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL = 3, source
-    is CS3; default, source is CS0;
+  description: Number of clocks to write CSC waves to SGPRs (need to multiply this value by 4) Requires
+    SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL
+    = 2, source is CS2; DEBUG_PIPE_SEL = 3, source is CS3; default, source is CS0;
 SPI_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: 100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE
-  description: Percentage of the GRBM_GUI_ACTIVE time that any of the Shader Pipe
-    Interpolators (SPI) are busy in the shader engine(s)
+  description: Percentage of the GRBM_GUI_ACTIVE time that any of the Shader Pipe Interpolators (SPI)
+    are busy in the shader engine(s)
 SPI_VWC_CSC_WR:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SPI
       event: 195
-  description: Number of clocks to write CSC waves to VGPRs (need to multiply this
-    value by 4) Requires SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL
-    = 1, source is CS1; DEBUG_PIPE_SEL = 2, source is CS2; DEBUG_PIPE_SEL = 3, source
-    is CS3; default, source is CS0;
+  description: Number of clocks to write CSC waves to VGPRs (need to multiply this value by 4) Requires
+    SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL
+    = 2, source is CS2; DEBUG_PIPE_SEL = 3, source is CS3; default, source is CS0;
 SQC_DCACHE_ATOMIC:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -773,8 +760,8 @@ SQC_DCACHE_BUSY_CYCLES:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 289
-  description: ' Clock cycles while cache is reporting that it is busy. (No-Masking,
-    nondeterministic, unwindowed)'
+  description: ' Clock cycles while cache is reporting that it is busy. (No-Masking, nondeterministic,
+    unwindowed)'
 SQC_DCACHE_HITS:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -792,15 +779,14 @@ SQC_DCACHE_MISSES:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 292
-  description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank,
-    nondeterministic)
+  description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank, nondeterministic)
 SQC_DCACHE_MISSES_DUPLICATE:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 293
-  description: Number of misses that were duplicates (access to a non-resident, miss
-    pending CL). (per-SQ, per-Bank, nondeterministic)
+  description: Number of misses that were duplicates (access to a non-resident, miss pending CL). (per-SQ,
+    per-Bank, nondeterministic)
 SQC_DCACHE_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -842,8 +828,7 @@ SQC_ICACHE_BUSY_CYCLES:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 269
-  description: Clock cycles while cache is reporting that it is busy. (No-Masking,
-    nondeterministic, unwindowed)
+  description: Clock cycles while cache is reporting that it is busy. (No-Masking, nondeterministic, unwindowed)
 SQC_ICACHE_HITS:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -861,15 +846,14 @@ SQC_ICACHE_MISSES:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 272
-  description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank,
-    nondeterministic)
+  description: Number of cache misses, includes uncached requests. (per-SQ, per-Bank, nondeterministic)
 SQC_ICACHE_MISSES_DUPLICATE:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 273
-  description: Number of misses that were duplicates (access to a non-resident, miss
-    pending CL). (per-SQ, per-Bank, nondeterministic)
+  description: Number of misses that were duplicates (access to a non-resident, miss pending CL). (per-SQ,
+    per-Bank, nondeterministic)
 SQC_ICACHE_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -893,8 +877,8 @@ SQC_LDS_IDX_ACTIVE:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 261
-  description: Number of cycles LDS is used for indexed (non-direct,non-interpolation)
-    operations. {per-simd, emulated, C1}
+  description: Number of cycles LDS is used for indexed (non-direct,non-interpolation) operations. {per-simd,
+    emulated, C1}
 SQC_TC_DATA_ATOMIC_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -924,22 +908,24 @@ SQC_TC_REQ:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 262
-  description: Total number of TC requests that were issued by instruction and constant
-    caches. (No-Masking, nondeterministic)
+  description: Total number of TC requests that were issued by instruction and constant caches. (No-Masking,
+    nondeterministic)
 SQC_TC_STALL:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 267
-  description: Valid request stalled TC request interface (no-credits). (No-Masking,
-    nondeterministic, unwindowed)
+  description: Valid request stalled TC request interface (no-credits). (No-Masking, nondeterministic,
+    unwindowed)
 SQ_ACCUM_PREV:
   architectures:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx940/gfx90a:
       block: SQ
       event: 1
-  description: For counter N, increment by the value of counter N-1. Only accumulates
-    once every 4 cycles.
+  description: This is a hardware register that can be used for accumulating values for other counters.
+    This is useful in expressions where you want to collect deltas over time. For example SQ_ACCUM_PREV/SQ_WAVES
+    calculates the number of in-flight waves over the previous 4 cycles. Only accumulates once every 4
+    cycles. This counter is primarily for use with derived counters supplied by rocprof.
 SQ_ACCUM_PREV_HIRES:
   architectures:
     gfx90a:
@@ -948,7 +934,10 @@ SQ_ACCUM_PREV_HIRES:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 184
-  description: For counter N, increment by the value of counter N-1.
+  description: This is a hardware register that can be used for accumulating values for other counters.
+    This is useful in expressions where you want to collect deltas over time. For example SQ_ACCUM_PREV_HIRES/SQ_WAVES
+    calculates the number of in-flight waves over the previous cycle. Accumulates once every cycle. This
+    counter is primarily for use with derived counters supplied by rocprof.
 SQ_ACTIVE_INST_ANY:
   architectures:
     gfx90a:
@@ -957,8 +946,9 @@ SQ_ACTIVE_INST_ANY:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 101
-  description: Number of cycles each wave is working on an instruction. (per-simd,
-    emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on any type of instruction. Useful in determining
+    percentage of time spend executing wave workloads (see WaveExec). This value is returned on a per-SE
+    (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4 cycles).
 SQ_ACTIVE_INST_EXP_GDS:
   architectures:
     gfx90a:
@@ -967,8 +957,11 @@ SQ_ACTIVE_INST_EXP_GDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 106
-  description: Number of cycles the SQ instruction arbiter is working on an EXPORT
-    or GDS instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on EXPORT or GDS instructions. This value represents
+    the number of cycles each wave spends executing instructions synchronizing workgroups across the device
+    (global data sync). High values indicates large amounts of time spent waiting on communication between
+    CUs. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units
+    in quad-cycles(4 cycles). See AMD ISAs for more information on GDS instructions.
 SQ_ACTIVE_INST_FLAT:
   architectures:
     gfx90a:
@@ -977,8 +970,11 @@ SQ_ACTIVE_INST_FLAT:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 108
-  description: Number of cycles the SQ instruction arbiter is working on a FLAT instruction.
-    (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on FLAT instructions. This value represents the
+    number of cycles each wave spends executing instructions accessing flat scratch memory locations.
+    High values indicates a large amount of reading/writing to scratch memory on the device. This value
+    is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4
+    cycles). See AMD ISAs for more information on FLAT instructions.
 SQ_ACTIVE_INST_LDS:
   architectures:
     gfx90a:
@@ -987,8 +983,11 @@ SQ_ACTIVE_INST_LDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 103
-  description: Number of cycles the SQ instruction arbiter is working on a LDS instruction.
-    (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on LDS instructions. This value represents the
+    number of cycles each wave spends executing instructions accessing the local data store (data shared
+    between SIMDs on the same CU). High values indicates a large amount of reading/writing to this shared
+    memory space. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with
+    units in quad-cycles(4 cycles). See AMD ISAs for more information on LDS instructions.
 SQ_ACTIVE_INST_MISC:
   architectures:
     gfx90a:
@@ -997,8 +996,10 @@ SQ_ACTIVE_INST_MISC:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 107
-  description: Number of cycles the SQ instruction aribter is working on a BRANCH
-    or SENDMSG instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on a BRANCH or SENDMSG instructions. This value
+    represents the number of cycles each wave spends executing instructions performing control flow branching
+    and message sending. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis
+    with units in quad-cycles(4 cycles). See AMD ISAs for more information on BRANCH and SENDMSG instructions.
 SQ_ACTIVE_INST_SCA:
   architectures:
     gfx90a:
@@ -1007,8 +1008,11 @@ SQ_ACTIVE_INST_SCA:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 105
-  description: Number of cycles the SQ instruction arbiter is working on a SALU or
-    SMEM instruction. (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on a SALU or SMEM instructions. This value represents
+    the number of cycles each wave spends executing scalar ALU or scalar memory instructions. On MI200/300
+    platforms, there is a single ALU per CU. High values indicates a large amount of time spent executing
+    scalar instructions. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis
+    with units in quad-cycles(4 cycles). See AMD ISAs for more information on SALU and SMEM instructions.
 SQ_ACTIVE_INST_VALU:
   architectures:
     gfx8:
@@ -1026,8 +1030,11 @@ SQ_ACTIVE_INST_VALU:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 104
-  description: Number of cycles the SQ instruction arbiter is working on a VALU instruction.
-    (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on a VALU instructions. This value represents
+    the number of cycles each wave spends executing vector ALU instructions. On MI200 platforms, there
+    are 4 VALUs per CU. High values indicates a large amount of time spent executing vector instructions.
+    This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4
+    cycles).
 SQ_ACTIVE_INST_VMEM:
   architectures:
     gfx90a:
@@ -1036,27 +1043,32 @@ SQ_ACTIVE_INST_VMEM:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 102
-  description: Number of cycles the SQ instruction arbiter is working on a VMEM instruction.
-    (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: Number of cycles each wave spends working on a VMEM instructions. This value represents
+    the number of cycles each wave spends executing vector memory instructions. High values indicates
+    a large amount of time spent executing vector memory operations. This value is returned on a per-SE
+    (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4 cycles).
 SQ_BUSY_CU_CYCLES:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 13
-  description: Count quad-cycles each CU is busy. (nondeterministic, per-simd)
+  description: Number of quad-cycles each CU is busy. Can be used to calculate the percentage of time
+    each CU is busy. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis
+    with units in quad-cycles(4 cycles).
 SQ_BUSY_CYCLES:
   architectures:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx940/gfx90a:
       block: SQ
       event: 3
-  description: Clock cycles while SQ is reporting that it is busy. (nondeterministic,
-    per-simd, global)
+  description: Number of clock cycles there are active waves in a shader engine (as reported by the distributed
+    sequencer). This value does not denote the number of active waves, only the clock cycle in which any
+    wave is present in a SE. This value is returned on a per-shader engine basis in clock cycles.
 SQ_CYCLES:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 2
-  description: Clock cycles. (nondeterministic, per-simd, global)
+  description: Clock cycles. Value is returned per-SIMD.
 SQ_IFETCH:
   architectures:
     gfx90a:
@@ -1065,7 +1077,8 @@ SQ_IFETCH:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 120
-  description: Number of instruction fetch requests from cache. (per-simd, emulated)
+  description: Number of instruction fetch requests from L1I (instruction) cache. This is a value returned
+    per-SIMD.
 SQ_IFETCH_LEVEL:
   architectures:
     gfx90a:
@@ -1074,13 +1087,16 @@ SQ_IFETCH_LEVEL:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 121
-  description: Number of instruction fetch requests from cache. (per-simd, level)
+  description: Number of inflight instruction fetch requests from the cache. This is a value returned
+    per-sharder engine. Best used with accumlate() functions as part of a derived counter.
 SQ_INSTS:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 25
-  description: Number of instructions issued. (per-simd, emulated)
+  description: Total number of instructions issued. When used in combination with SQ_ACTIVE_INST_ANY (cycle
+    count for executing instructions) the average latency of instruction execution can be calculated (SQ_ACTIVE_INST_ANY
+    / SQ_INSTS). This value is returned per-SE (aggregate of values in SIMDs in the SE).
 SQ_INSTS_BRANCH:
   architectures:
     gfx90a:
@@ -1089,7 +1105,10 @@ SQ_INSTS_BRANCH:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 69
-  description: Number of Branch instructions issued. (per-simd, emulated)
+  description: Total number of BRANCH instructions issued. This value is returned per-SE (aggregate of
+    values in SIMDs in the SE). This value SHOULD NOT be used in combination with SQ_ACTIVE_INST_MISC
+    to calculate latency. SQ_ACTIVE_INST_MISC includes both BRANCH and SENDMSG instructions while this
+    is only BRANCH.
 SQ_INSTS_EXP_GDS:
   architectures:
     gfx90a:
@@ -1098,8 +1117,10 @@ SQ_INSTS_EXP_GDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 68
-  description: Number of EXP and GDS instructions issued, excluding skipped export
-    instructions. (per-simd, emulated)
+  description: Total number of EXPORT or GDS (global wave state) instructions issued. When used in combination
+    with SQ_ACTIVE_INST_EXP_GDS (cycle count for executing instructions) the average latency of EXPORT/GDS
+    instruction execution can be calculated (SQ_ACTIVE_INST_EXP_GDS / SQ_INSTS_EXP_GDS). This value is
+    returned per-SE (aggregate of values in SIMDs in the SE).
 SQ_INSTS_FLAT:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1120,7 +1141,10 @@ SQ_INSTS_FLAT:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 62
-  description: Number of FLAT instructions issued. (per-simd, emulated)
+  description: Total number of FLAT instructions issued. When used in combination with SQ_ACTIVE_INST_FLAT
+    (cycle count for executing instructions) the average latency of FLAT instruction execution can be
+    calculated (SQ_ACTIVE_INST_FLAT / SQ_INSTS). This value is returned per-SE (aggregate of values in
+    SIMDs in the SE).
 SQ_INSTS_FLAT_LDS_ONLY:
   architectures:
     gfx906/gfx8/gfx900/gfx9:
@@ -1132,8 +1156,9 @@ SQ_INSTS_FLAT_LDS_ONLY:
     gfx90a:
       block: SQ
       event: 59
-  description: Number of FLAT instructions issued that read/wrote only from/to LDS
-    (only works if EARLY_TA_DONE is enabled). (per-simd, emulated)
+  description: Total number of FLAT instructions issued that read/wrote only from/to LDS (scratch memory).
+    Values are only populated if EARLY_TA_DONE is enabled. This value is returned per-SE (aggregate of
+    values in SIMDs in the SE).
 SQ_INSTS_GDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1154,7 +1179,9 @@ SQ_INSTS_GDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 66
-  description: Number of GDS instructions issued. (per-simd, emulated)
+  description: Total number of GDS (global data sync) instructions issued. This value is returned per-SE
+    (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on GDS (global data sync)
+    instructions.
 SQ_INSTS_LDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1175,7 +1202,8 @@ SQ_INSTS_LDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 65
-  description: Number of LDS instructions issued (including FLAT). (per-simd, emulated)
+  description: Total number of LDS instructions issued (including FLAT). This value is returned per-SE
+    (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on LDS instructions.
 SQ_INSTS_MFMA:
   architectures:
     gfx90a:
@@ -1184,7 +1212,8 @@ SQ_INSTS_MFMA:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 56
-  description: Number of MFMA instructions issued. (per-simd, emulated)
+  description: Total number of MFMA (Matrix-Fused-Multiply-Add) instructions issued. This value is returned
+    per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on MFMA instructions.
 SQ_INSTS_SALU:
   architectures:
     gfx11/gfx1102/gfx1100/gfx1101:
@@ -1202,7 +1231,8 @@ SQ_INSTS_SALU:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx940:
       block: SQ
       event: 60
-  description: Number of SALU instructions issued. (per-simd, emulated)
+  description: Total Number of SALU (Scalar ALU) instructions issued. This value is returned per-SE (aggregate
+    of values in SIMDs in the SE). See AMD ISAs for more information on SALU instructions.
 SQ_INSTS_SENDMSG:
   architectures:
     gfx90a:
@@ -1211,7 +1241,9 @@ SQ_INSTS_SENDMSG:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 70
-  description: Number of Sendmsg instructions issued. (per-simd, emulated)
+  description: Total number of Sendmsg (typically an interrupt to the CPU host) instructions issued. This
+    value is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information
+    on Sendmsg instructions.
 SQ_INSTS_SMEM:
   architectures:
     gfx11/gfx1102/gfx1100/gfx1101:
@@ -1229,7 +1261,8 @@ SQ_INSTS_SMEM:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx940:
       block: SQ
       event: 61
-  description: Number of SMEM instructions issued. (per-simd, emulated)
+  description: Total number of SMEM (Scalar Memory Read) instructions issued. This value is returned per-SE
+    (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on SMEM instructions.
 SQ_INSTS_SMEM_NORM:
   architectures:
     gfx90a:
@@ -1238,22 +1271,27 @@ SQ_INSTS_SMEM_NORM:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 187
-  description: Number of SMEM instructions issued normalized to match smem_level (*2
-    load/store; *2 atomic; *2 memtime; *4 wb/inv). (per-simd, emulated)
+  description: Number of SMEM instructions issued normalized to match the level of memory accessed (i.e.
+    scratch, global, etc). This normalized value is designed to give a hint of high cost memory actions
+    being used. The formula used to calculate this value is the following (INST_COUNT *2 for load/store;
+    INST_COUNT*2 atomic; INST_COUNT*2 memtime; INST_COUNT*4 wb/inv). This value is returned per-SE (aggregate
+    of values in SIMDs in the SE).
 SQ_INSTS_TEX_LOAD:
   architectures:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 66
-  description: Number of buffer load, image load, sample, or atomic (with return)
-    instructions issued. {emulated, C1}
+  description: The number of buffer load, image load, sample, or atomic (with return) texture instructions
+    issued. The value is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more
+    information on TEX_LOAD instructions.
 SQ_INSTS_TEX_STORE:
   architectures:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 67
-  description: Number of buffer store, image store, or atomic (without return) instructions
-    issued. {emulated, C1}
+  description: The number of buffer store, image store, or atomic (without return) texture instructions
+    issued. The value is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more
+    information on TEX_STORE instructions.
 SQ_INSTS_VALU:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1265,93 +1303,126 @@ SQ_INSTS_VALU:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       block: SQ
       event: 26
-  description: Number of VALU instructions issued. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) instructions issued. The value is returned per-SE (aggregate
+    of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_ADD_F16:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 27
-  description: Number of VALU ADD/SUB instructions on float16. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) ADD/SUB instructions on float16. For maximum performance
+    lower percision floating point ops are preferred to higher percision ones. The value is returned per-SE
+    (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_ADD_F32:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 31
-  description: Number of VALU ADD/SUB instructions on float32. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) ADD/SUB instructions on float32. For maximum performance
+    lower percision floating point ops are preferred to higher percision ones. The value is returned per-SE
+    (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_ADD_F64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 35
-  description: Number of VALU ADD/SUB instructions on float64. (per-simd, emulated)
+  description: The number of VALU ADD/SUB instructions on float64. For maximum performance lower percision
+    floating point ops are preferred to higher percision ones. The value is returned per-SE (aggregate
+    of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_CVT:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 41
-  description: Number of VALU data conversion instructions. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) data conversion instructions (ex. float -> int). The value
+    is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on
+    VALU instructions.
 SQ_INSTS_VALU_FMA_F16:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 29
-  description: Number of VALU FMA/MAD instructions on float16. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) FMA (Fused-Multiply-Add)/MAD(Multiply-Add) instructions
+    on float16. For maximum performance lower percision floating point ops are preferred to higher percision
+    ones. The value is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more
+    information on VALU instructions.
 SQ_INSTS_VALU_FMA_F32:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 33
-  description: Number of VALU FMA/MAD instructions on float32. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) FMA (Fused-Multiply-Add)/MAD(Multiply-Add) instructions
+    on float32. For maximum performance lower percision floating point ops are preferred to higher percision
+    ones. The value is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more
+    information on VALU instructions.
 SQ_INSTS_VALU_FMA_F64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 37
-  description: Number of VALU FMA/MAD instructions on float64. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) FMA (Fused-Multiply-Add)/MAD(Multiply-Add) instructions
+    on float64. For maximum performance lower percision floating point ops are preferred to higher percision
+    ones. The value is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more
+    information on VALU instructions.
 SQ_INSTS_VALU_INT32:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 39
-  description: Number of VALU 32-bit integer (signed or unsigned) instructions. (per-simd,
-    emulated)
+  description: The number of VALU (Vector ALU) 32-bit integer (signed or unsigned) instructions. The value
+    is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on
+    VALU instruction.
 SQ_INSTS_VALU_INT64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 40
-  description: Number of VALU 64-bit integer (signed or unsigned) instructions. (per-simd,
-    emulated)
+  description: The number of VALU (Vector ALU) 64-bit integer (signed or unsigned) instructions. The value
+    is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on
+    VALU instruction.
 SQ_INSTS_VALU_MFMA_BF16:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 44
-  description: Number of VALU V_MFMA_*_BF16 instructions. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) MFMA (Matrix-Fused-Multiply-Add) BF16 (outputing bfloat16
+    format) instructions (V_MFMA_*_BF16). For maximum performance lower percision floating point ops are
+    preferred to higher percision ones. The value is returned per-SE (aggregate of values in SIMDs in
+    the SE). See AMD ISAs for more information on MFMA instructions.
 SQ_INSTS_VALU_MFMA_F16:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 43
-  description: Number of VALU V_MFMA_*_F16 instructions. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) MFMA (Matrix-Fused-Multiply-Add) F16 (outputing float16
+    format) instructions (V_MFMA_*_F16). For maximum performance lower percision floating point ops are
+    preferred to higher percision ones. The value is returned per-SE (aggregate of values in SIMDs in
+    the SE). See AMD ISAs for more information on MFMA instructions.
 SQ_INSTS_VALU_MFMA_F32:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 45
-  description: Number of VALU V_MFMA_*_F32 instructions. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) MFMA (Matrix-Fused-Multiply-Add) F32 (outputing float32
+    format) instructions (V_MFMA_*_F32). For maximum performance lower percision floating point ops are
+    preferred to higher percision ones. The value is returned per-SE (aggregate of values in SIMDs in
+    the SE). See AMD ISAs for more information on MFMA instructions.
 SQ_INSTS_VALU_MFMA_F64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 46
-  description: Number of VALU V_MFMA_*_F64 instructions. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) MFMA (Matrix-Fused-Multiply-Add) F64 (outputing float32
+    format) instructions (V_MFMA_*_F64). For maximum performance lower percision floating point ops are
+    preferred to higher percision ones. The value is returned per-SE (aggregate of values in SIMDs in
+    the SE). See AMD ISAs for more information on MFMA instructions.
 SQ_INSTS_VALU_MFMA_I8:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 42
-  description: Number of VALU V_MFMA_*_I8 instructions. (per-simd, emulated)
+  description: The number of VALU (Vector ALU) MFMA (Matrix-Fused-Multiply-Add) I8 (outputing 8bit intergers)
+    instructions (V_MFMA_*_I8). See AMD ISAs for more information on MFMA instructions.
 SQ_INSTS_VALU_MFMA_MOPS_BF16:
   architectures:
     gfx90a:
@@ -1360,8 +1431,11 @@ SQ_INSTS_VALU_MFMA_MOPS_BF16:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 51
-  description: Number of VALU matrix math operations (add or mul) performed dividied
-    by 512, assuming a full EXEC mask, of data type BF16. (per-simd, emulated)
+  description: The number of math operation instructions on the VALU (Vector ALU) using MFMA (Matrix-Fused-Multiply-Add)
+    and operating on BF16 (bfloat16) data. Captures add or mul ops performed divided by 512. For maximum
+    performance lower percision floating point ops are preferred to higher percision ones. The value is
+    returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on MFMA
+    instructions.
 SQ_INSTS_VALU_MFMA_MOPS_F16:
   architectures:
     gfx90a:
@@ -1370,8 +1444,11 @@ SQ_INSTS_VALU_MFMA_MOPS_F16:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 50
-  description: Number of VALU matrix math operations (add or mul) performed dividied
-    by 512, assuming a full EXEC mask, of data type F16. (per-simd, emulated)
+  description: The number of math operation instructions on the VALU (Vector ALU) using MFMA (Matrix-Fused-Multiply-Add)
+    and operating on F16 (float16) data. Captures add or mul ops performed divided by 512. For maximum
+    performance lower percision floating point ops are preferred to higher percision ones. The value is
+    returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on MFMA
+    instructions.
 SQ_INSTS_VALU_MFMA_MOPS_F32:
   architectures:
     gfx90a:
@@ -1380,8 +1457,11 @@ SQ_INSTS_VALU_MFMA_MOPS_F32:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 52
-  description: Number of VALU matrix math operations (add or mul) performed dividied
-    by 512, assuming a full EXEC mask, of data type F32. (per-simd, emulated)
+  description: The number of math operation instructions on the VALU (Vector ALU) using MFMA (Matrix-Fused-Multiply-Add)
+    and operating on F32 (float32) data. Captures add or mul ops performed divided by 512. For maximum
+    performance lower percision floating point ops are preferred to higher percision ones. The value is
+    returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on MFMA
+    instructions.
 SQ_INSTS_VALU_MFMA_MOPS_F64:
   architectures:
     gfx90a:
@@ -1390,8 +1470,11 @@ SQ_INSTS_VALU_MFMA_MOPS_F64:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 53
-  description: Number of VALU matrix math operations (add or mul) performed dividied
-    by 512, assuming a full EXEC mask, of data type F64. (per-simd, emulated)
+  description: The number of math operation instructions on the VALU (Vector ALU) using MFMA (Matrix-Fused-Multiply-Add)
+    and operating on F64 (float64) data. Captures add or mul ops performed divided by 512. For maximum
+    performance lower percision floating point ops are preferred to higher percision ones. The value is
+    returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on MFMA
+    instructions.
 SQ_INSTS_VALU_MFMA_MOPS_I8:
   architectures:
     gfx90a:
@@ -1400,44 +1483,61 @@ SQ_INSTS_VALU_MFMA_MOPS_I8:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 49
-  description: Number of VALU matrix math operations (add or mul) performed dividied
-    by 512, assuming a full EXEC mask, of data type I8. (per-simd, emulated)
+  description: The number of math operation instructions on the VALU (Vector ALU) using MFMA (Matrix-Fused-Multiply-Add)
+    and operating on I8 (8 bit int) data. Captures add or mul ops performed divided by 512. The value
+    is returned per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on
+    MFMA instructions.
 SQ_INSTS_VALU_MUL_F16:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 28
-  description: Number of VALU MUL instructions on float16. (per-simd, emulated)
+  description: The number of VALU MUL instructions on float16 data. For maximum performance lower percision
+    floating point ops are preferred to higher percision ones. The value is returned per-SE (aggregate
+    of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_MUL_F32:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 32
-  description: Number of VALU MUL instructions on float32. (per-simd, emulated)
+  description: The number of VALU MUL instructions on float32 data. For maximum performance lower percision
+    floating point ops are preferred to higher percision ones. The value is returned per-SE (aggregate
+    of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_MUL_F64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 36
-  description: Number of VALU MUL instructions on float64. (per-simd, emulated)
+  description: The number of VALU MUL instructions on float64 data. For maximum performance lower percision
+    floating point ops are preferred to higher percision ones. The value is returned per-SE (aggregate
+    of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_TRANS_F16:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 30
-  description: Number of VALU transcendental instructions on float16. (per-simd, emulated)
+  description: The number of VALU transcendental instructions on float16 data. Transcendental instructions
+    include sin, cos, exp, log, etc. For maximum performance lower percision floating point ops are preferred
+    to higher percision ones. The value is returned per-SE (aggregate of values in SIMDs in the SE). See
+    AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_TRANS_F32:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 34
-  description: Number of VALU transcendental instructions on float32. (per-simd, emulated)
+  description: The number of VALU transcendental instructions on float32 data. Transcendental instructions
+    include sin, cos, exp, log, etc. For maximum performance lower percision floating point ops are preferred
+    to higher percision ones. The value is returned per-SE (aggregate of values in SIMDs in the SE). See
+    AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_TRANS_F64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 38
-  description: Number of VALU transcendental instructions on float64. (per-simd, emulated)
+  description: The number of VALU transcendental instructions on float64 data. Transcendental instructions
+    include sin, cos, exp, log, etc. For maximum performance lower percision floating point ops are preferred
+    to higher percision ones. The value is returned per-SE (aggregate of values in SIMDs in the SE). See
+    AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VMEM:
   architectures:
     gfx90a:
@@ -1446,7 +1546,8 @@ SQ_INSTS_VMEM:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 59
-  description: Number of VMEM instructions issued. (per-simd, emulated)
+  description: The number of VMEM (GPU Memory) instructions issued. The value is returned per-SE (aggregate
+    of values in SIMDs in the SE).
 SQ_INSTS_VMEM_RD:
   architectures:
     gfx906/gfx8/gfx900/gfx9:
@@ -1461,8 +1562,8 @@ SQ_INSTS_VMEM_RD:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 58
-  description: Number of VMEM read instructions issued (including FLAT). (per-simd,
-    emulated)
+  description: The number of VMEM (GPU Memory) read instructions issued (including FLAT/scratch memory).
+    The value is returned per-SE (aggregate of values in SIMDs in the SE).
 SQ_INSTS_VMEM_WR:
   architectures:
     gfx906/gfx8/gfx900/gfx9:
@@ -1477,8 +1578,8 @@ SQ_INSTS_VMEM_WR:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 57
-  description: Number of VMEM write instructions issued (including FLAT). (per-simd,
-    emulated)
+  description: The number of VMEM (GPU Memory) write instructions issued (including FLAT/scratch memory).
+    The value is returned per-SE (aggregate of values in SIMDs in the SE).
 SQ_INSTS_VSKIPPED:
   architectures:
     gfx90a:
@@ -1487,7 +1588,10 @@ SQ_INSTS_VSKIPPED:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 71
-  description: Number of vector instructions skipped. (per-simd, emulated)
+  description: The number of vector instructions skipped. This can occur when the S_SETVSKIP bit is enabled
+    on certain instructions. Often this is used as an alturnative to branching (a compiler may replace
+    a branch with setting this bit to skip the operation, typically as a performance optimization). The
+    value is returned per-SE (aggregate of values in SIMDs in the SE).
 SQ_INSTS_WAVE32:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1496,8 +1600,7 @@ SQ_INSTS_WAVE32:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 70
-  description: Number of wave32 instructions issued, for flat, lds, valu, tex. {emulated,
-    C1}
+  description: Number of wave32 instructions issued, for flat, lds, valu, tex. {emulated, C1}
 SQ_INSTS_WAVE32_LDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1506,8 +1609,8 @@ SQ_INSTS_WAVE32_LDS:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 72
-  description: Number of wave32 LDS indexed instructions issued. Wave64 may count
-    1 or 2, depending on what gets issued. {emulated, C1}
+  description: Number of wave32 LDS indexed instructions issued. Wave64 may count 1 or 2, depending on
+    what gets issued. {emulated, C1}
 SQ_INSTS_WAVE32_VALU:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1516,8 +1619,8 @@ SQ_INSTS_WAVE32_VALU:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 73
-  description: Number of wave32 valu instructions issued. Wave64 may count 1 or 2,
-    depending on what gets issued. {emulated, C1}
+  description: Number of wave32 valu instructions issued. Wave64 may count 1 or 2, depending on what gets
+    issued. {emulated, C1}
 SQ_INST_CYCLES_SALU:
   architectures:
     gfx8:
@@ -1535,8 +1638,9 @@ SQ_INST_CYCLES_SALU:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 117
-  description: Number of cycles needed to execute non-memory read scalar operations.
-    (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: The number of cycles needed to execute non-memory read scalar operations (SALU). This value
+    is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4
+    cycles).
 SQ_INST_CYCLES_SMEM:
   architectures:
     gfx90a:
@@ -1545,8 +1649,8 @@ SQ_INST_CYCLES_SMEM:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 116
-  description: Number of cycles needed to execute scalar memory reads. (per-simd,
-    emulated)
+  description: The number of cycles needed to execute scalar memory reads (SMEM). This value is returned
+    on a per-SE (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4 cycles).
 SQ_INST_CYCLES_VMEM:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1555,8 +1659,9 @@ SQ_INST_CYCLES_VMEM:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 106
-  description: Number of cycles needed to send addr and data for VMEM (lds, buffer,
-    image, flat, scratch, global) instructions, windowed by perf_en. {emulated, C1}
+  description: The number of cycles needed to send addr and data for VMEM (lds, buffer, image, flat, scratch,
+    global) instructions, windowed by perf_en. This value is returned on a per-SE (aggregate of values
+    in SIMDs in the SE) basis with units in quad-cycles(4 cycles).
 SQ_INST_CYCLES_VMEM_RD:
   architectures:
     gfx90a:
@@ -1565,8 +1670,9 @@ SQ_INST_CYCLES_VMEM_RD:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 110
-  description: Number of cycles needed to send addr and cmd data for VMEM read instructions.
-    (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: The number of cycles needed to send addr and cmd data for VMEM read instructions. This
+    value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4
+    cycles).
 SQ_INST_CYCLES_VMEM_WR:
   architectures:
     gfx90a:
@@ -1575,8 +1681,9 @@ SQ_INST_CYCLES_VMEM_WR:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 109
-  description: Number of cycles needed to send addr and cmd data for VMEM write instructions.
-    (per-simd, emulated). Units in quad-cycles(4 cycles)
+  description: The number of cycles needed to send addr and cmd data for VMEM write instructions. This
+    value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units in quad-cycles(4
+    cycles).
 SQ_INST_LEVEL_GDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1585,8 +1692,10 @@ SQ_INST_LEVEL_GDS:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 87
-  description: Number of in-flight GDS instructions. Set next counter to ACCUM_PREV
-    and divide by INSTS_GDS for average latency. {level, nondeterministic, C1}
+  description: Number of in-flight GDS (global) instructions. This value represents the number of instructions
+    each wave spends synchronizing workgroups across the device (global data sync). Set next counter to
+    ACCUM_PREV and divide by INSTS_GDS for average latency. This value is returned on a per-SE (aggregate
+    of values in SIMDs in the SE) basis.
 SQ_INST_LEVEL_LDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1601,9 +1710,10 @@ SQ_INST_LEVEL_LDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 74
-  description: Number of in-flight LDS instructions. Set next counter to ACCUM_PREV
-    and divide by INSTS_LDS for average latency. Includes FLAT instructions. (per-simd,
-    level, nondeterministic)
+  description: Number of in-flight LDS instructions. This value represents the number of instructions
+    each wave spends executing instructions accessing the local data store (data shared between SIMDs
+    on the same CU). Set next counter to ACCUM_PREV and divide by INSTS_LDS for average latency. Includes
+    FLAT instructions. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_INST_LEVEL_SMEM:
   architectures:
     gfx90a:
@@ -1612,12 +1722,11 @@ SQ_INST_LEVEL_SMEM:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 73
-  description: Number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2
-    memtime; *4 wb/inv). Set next counter to ACCUM_PREV and divide by INSTS_SMEM for
-    average latency per smem request. Falls slightly short of total request latency
-    because some fetches are divided into two requests that may finish at different
-    times and this counter collects the average latency of the two. (per-simd, level,
-    nondeterministic)
+  description: Number of in-flight SMEM instructions (*2 load/store; *2 atomic; *2 memtime; *4 wb/inv).
+    Set next counter to ACCUM_PREV and divide by INSTS_SMEM for average latency per smem request. Falls
+    slightly short of total request latency because some fetches are divided into two requests that may
+    finish at different times and this counter collects the average latency of the two. This value is
+    returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_INST_LEVEL_VMEM:
   architectures:
     gfx90a:
@@ -1626,15 +1735,16 @@ SQ_INST_LEVEL_VMEM:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 72
-  description: Number of in-flight VMEM instructions. Set next counter to ACCUM_PREV
-    and divide by INSTS_VMEM for average latency. Includes FLAT instructions. (per-simd,
-    level, nondeterministic)
+  description: Number of in-flight VMEM instructions. Set next counter to ACCUM_PREV and divide by INSTS_VMEM
+    for average latency. Includes FLAT instructions. This value is returned on a per-SE (aggregate of
+    values in SIMDs in the SE) basis.
 SQ_ITEMS:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 14
-  description: Number of valid items per wave. (per-simd, global)
+  description: Number of valid items per wave. This value is returned on a per-SE (aggregate of values
+    in SIMDs in the SE) basis.
 SQ_LDS_ADDR_CONFLICT:
   architectures:
     gfx90a:
@@ -1643,7 +1753,8 @@ SQ_LDS_ADDR_CONFLICT:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 127
-  description: Number of cycles LDS is stalled by address conflicts. (emulated,nondeterministic)
+  description: Number of cycles LDS (local data store) is stalled by address conflicts. This value is
+    returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_LDS_ATOMIC_RETURN:
   architectures:
     gfx90a:
@@ -1652,7 +1763,8 @@ SQ_LDS_ATOMIC_RETURN:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 130
-  description: Number of atomic return cycles in LDS. (per-simd, emulated)
+  description: The number of atomic return cycles in LDS (local data store). This value is returned on
+    a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_LDS_BANK_CONFLICT:
   architectures:
     gfx8:
@@ -1670,7 +1782,8 @@ SQ_LDS_BANK_CONFLICT:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 126
-  description: Number of cycles LDS is stalled by bank conflicts. (emulated)
+  description: The number of cycles LDS (local data store) is stalled by bank conflicts. This value is
+    returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_LDS_IDX_ACTIVE:
   architectures:
     gfx90a:
@@ -1679,8 +1792,8 @@ SQ_LDS_IDX_ACTIVE:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 131
-  description: Number of cycles LDS is used for indexed (non-direct,non-interpolation)
-    operations. (per-simd, emulated)
+  description: Number of cycles LDS (local data store) is used for indexed (non-direct,non-interpolation)
+    operations. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_LDS_MEM_VIOLATIONS:
   architectures:
     gfx90a:
@@ -1689,7 +1802,8 @@ SQ_LDS_MEM_VIOLATIONS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 129
-  description: Number of threads that have a memory violation in the LDS.(emulated)
+  description: Number of threads that have a memory violation in the LDS (local data store). This value
+    is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_LDS_UNALIGNED_STALL:
   architectures:
     gfx90a:
@@ -1698,8 +1812,8 @@ SQ_LDS_UNALIGNED_STALL:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 128
-  description: Number of cycles LDS is stalled processing flat unaligned load/store
-    ops. (emulated)
+  description: Number of cycles LDS (local data store) is stalled processing flat unaligned load/store
+    ops. This value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_LEVEL_WAVES:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1708,8 +1822,8 @@ SQ_LEVEL_WAVES:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 5
-  description: Track the number of waves. Set ACCUM_PREV for the next counter to use
-    this. (level, per-simd, global)
+  description: Track the number of waves. Set ACCUM_PREV for the next counter to use this. This value
+    is returned on a per-SIMD basis.
 SQ_THREAD_CYCLES_VALU:
   architectures:
     gfx8:
@@ -1727,8 +1841,8 @@ SQ_THREAD_CYCLES_VALU:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 118
-  description: 'Number of thread-cycles used to execute VALU operations (similar to
-    INST_CYCLES_VALU but multiplied by # of active threads). (per-simd)'
+  description: 'Number of thread-cycles used to execute VALU operations (similar to INST_CYCLES_VALU but
+    multiplied by # of active threads). (per-simd)'
 SQ_VALU_MFMA_BUSY_CYCLES:
   architectures:
     gfx90a:
@@ -1737,7 +1851,8 @@ SQ_VALU_MFMA_BUSY_CYCLES:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 77
-  description: Number of cycles the MFMA ALU is busy (per-simd, emulated)
+  description: Number of cycles the MFMA (Matrixed-Fused-Multiply-Add) ALU is busy. This value is returned
+    on a per-SIMD basis.
 SQ_WAIT_ANY:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1752,8 +1867,8 @@ SQ_WAIT_ANY:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 90
-  description: Number of wave-cycles spent waiting for anything (per-simd, nondeterministic).
-    Units in quad-cycles(4 cycles)
+  description: Number of wave-cycles spent waiting for anything (per-simd, nondeterministic). Units in
+    quad-cycles(4 cycles)
 SQ_WAIT_INST_ANY:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1768,8 +1883,7 @@ SQ_WAIT_INST_ANY:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 93
-  description: Number of wave-cycles spent waiting for any instruction issue. In units
-    of 4 cycles. (per-simd, nondeterministic)
+  description: Number of wave-cycles spent waiting for any instruction issue. Units in quad-cycles(4 cycles).
 SQ_WAIT_INST_LDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1793,8 +1907,8 @@ SQ_WAIT_INST_LDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 96
-  description: Number of wave-cycles spent waiting for LDS instruction issue. In units
-    of 4 cycles. (per-simd, nondeterministic)
+  description: Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd,
+    nondeterministic)
 SQ_WAVE32_INSTS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1803,8 +1917,7 @@ SQ_WAVE32_INSTS:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 82
-  description: Number of instructions issued by wave32 waves. Skipped instructions
-    are not counted. {emulated}
+  description: Number of instructions issued by wave32 waves. Skipped instructions are not counted. {emulated}
 SQ_WAVE64_INSTS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1813,49 +1926,75 @@ SQ_WAVE64_INSTS:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 83
-  description: Number of instructions issued by wave64 waves. Skipped instructions
-    are not counted. {emulated}
+  description: Number of instructions issued by wave64 waves. Skipped instructions are not counted. {emulated}
 SQ_WAVES:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9: 
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       block: SQ
       event: 4
-  description: Count number of waves sent to SQs. (per-simd, emulated, global)
+  description: Count number of waves sent to distributed sequencers (SQs). This value represents the number
+    of waves that are sent to each SQ. This only counts new waves sent since the start of collection (for
+    dispatch profiling this is the timeframe of kernel execution, for agent profiling it is the timeframe
+    between start_context and read counter data). A sum of all SQ_WAVES values will give the total number
+    of waves started by the application during the collection timeframe. Returns one value per-SE (aggregates
+    of SIMD values).
 SQ_WAVES_EQ_64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 6
-  description: Count number of waves with exactly 64 active threads sent to SQs. (per-simd,
-    emulated, global)
+  description: Count number of waves with exactly 64 active threads sent to SQs. This value represents
+    the number of waves that an each individual SIMD has enqueued during the collection timeframe (for
+    dispatch profiling this is the timeframe of kernel execution, for agent profiling it is the timeframe
+    between start_context and read counter data) with exactly 64 threads. A sum of all SQ_WAVES_EQ_64
+    values will give the total number of waves with 64 threads enqueued during the collection timeframe
+    by the application. Returns one value per-SE (aggregates of SIMD values). Useful for checking for
+    wavefront occupancy.
 SQ_WAVES_LT_16:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 10
-  description: Count number of waves sent <16 active threads sent to SQs. (per-simd,
-    emulated, global)
+  description: Count number of waves sent <16 active threads sent to SQs. (per-simd, emulated, global).
+    This value represents the number of waves that an each individual SIMD has enqueued during the collection
+    timeframe (for dispatch profiling this is the timeframe of kernel execution, for agent profiling it
+    is the timeframe between start_context and read counter data) with less than 16 threads. A sum of
+    all SQ_WAVES_LT_16 values will give the total number of waves with 16 threads enqueued during the
+    collection timeframe by the application. Returns one value per-SE (aggregates of SIMD values). Useful
+    for checking for wavefront occupancy.
 SQ_WAVES_LT_32:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 9
-  description: Count number of waves sent <32 active threads sent to SQs. (per-simd,
-    emulated, global)
+  description: Count number of waves sent <32 active threads sent to SQs. This value represents the number
+    of waves that an each individual SIMD has enqueued during the collection timeframe (for dispatch profiling
+    this is the timeframe of kernel execution, for agent profiling it is the timeframe between start_context
+    and read counter data) with less than 32 threads. A sum of all SQ_WAVES_LT_32 values will give the
+    total number of waves with 32 threads enqueued during the collection timeframe by the application.
+    Returns one value per-SE (aggregates of SIMD values). Useful for checking for wavefront occupancy.
 SQ_WAVES_LT_48:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 8
-  description: Count number of waves with <48 active threads sent to SQs. (per-simd,
-    emulated, global)
+  description: Count number of waves with <48 active threads sent to SQs. This value represents the number
+    of waves that an each individual SIMD has enqueued during the collection timeframe (for dispatch profiling
+    this is the timeframe of kernel execution, for agent profiling it is the timeframe between start_context
+    and read counter data) with less than 48 threads. A sum of all SQ_WAVES_LT_48 values will give the
+    total number of waves with 48 threads enqueued during the collection timeframe by the application.
+    Returns one value per-SE (aggregates of SIMD values). Useful for checking for wavefront occupancy.
 SQ_WAVES_LT_64:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: SQ
       event: 7
-  description: Count number of waves with <64 active threads sent to SQs. (per-simd,
-    emulated, global)
+  description: Count number of waves with <64 active threads sent to SQs. This value represents the number
+    of waves that an each individual SIMD has enqueued during the collection timeframe (for dispatch profiling
+    this is the timeframe of kernel execution, for agent profiling it is the timeframe between start_context
+    and read counter data) with less than 64 threads. A sum of all SQ_WAVES_LT_64 values will give the
+    total number of waves with 64 threads enqueued during the collection timeframe by the application.
+    Returns one value per-SE (aggregates of SIMD values). Useful for checking for wavefront occupancy.
 SQ_WAVES_RESTORED:
   architectures:
     gfx90a:
@@ -1864,8 +2003,12 @@ SQ_WAVES_RESTORED:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 185
-  description: Count number of context-restored waves sent to SQs. (per-simd, emulated,
-    global)
+  description: Count number of context-restored waves sent to SQs. This value represents the number of
+    waves whos current register state has been restored from a register bank during the collection timeframe
+    (for dispatch profiling this is the timeframe of kernel execution, for agent profiling it is the timeframe
+    between start_context and read counter data). Context saving/restoring is a slow operation and should
+    be limited. High values can also indicate that stalling may be taking place (waiting for free register
+    space). Returns one value per-SE (aggregates of SIMD values).
 SQ_WAVES_SAVED:
   architectures:
     gfx90a:
@@ -1874,13 +2017,19 @@ SQ_WAVES_SAVED:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 186
-  description: Count number of context-saved waves. (per-simd, emulated, global)
+  description: Count number of context-saved waves sent to SQs. This value represents the number of waves
+    whos current register state has been saved to a register bank during the collection timeframe (for
+    dispatch profiling this is the timeframe of kernel execution, for agent profiling it is the timeframe
+    between start_context and read counter data) . Context saving/restoring is a slow operation and should
+    be limited. High values can also indicate that stalling may be taking place (waiting for free register
+    space). Returns one value per-SE (aggregates of SIMD values).
 SQ_WAVES_sum:
   architectures:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx90a/gfx9:
       expression: reduce(SQ_WAVES,sum)
-  description: Count number of waves sent to SQs. (per-simd, emulated, global). Sum
-    over SQ instances.
+  description: Gives the total number of waves currently enqueued by the application during the collection
+    timeframe (for dispatch profiling this is the timeframe of kernel execution, for agent profiling it
+    is the timeframe between start_context and read counter data). See SQ_WAVES for more details.
 SQ_WAVE_CYCLES:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
@@ -1895,8 +2044,10 @@ SQ_WAVE_CYCLES:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 79
-  description: Number of wave-cycles spent by waves in the CUs (per-simd, nondeterministic).
-    Units in quad-cycles(4 cycles)
+  description: The cycles spent executing waves in the CUs. This value is reported per-SE (aggregates
+    of SIMD values) and is nondeterministic. Units are in quad-cycles (4 cycles). Useful for determining
+    how much time is spent executing wave code vs overhead/waiting. Low cycle count relative to actual
+    number of cycles processed by the CU can indicate that the CU is stalling or is overloaded.
 ScaPipeIssueUtil:
   architectures:
     gfx90a:
@@ -1920,14 +2071,13 @@ TA_ADDR_STALLED_BY_TC_CYCLES:
     gfx942/gfx941/gfx940:
       block: TA
       event: 42
-  description: Number of cycles addr path stalled by TC. Perf_Windowing not supported
-    for this counter.
+  description: Number of cycles addr path stalled by TC. Perf_Windowing not supported for this counter.
 TA_ADDR_STALLED_BY_TC_CYCLES_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TA_ADDR_STALLED_BY_TC_CYCLES,sum)
-  description: Number of cycles addr path stalled by TC. Perf_Windowing not supported
-    for this counter. Sum over TA instances.
+  description: Number of cycles addr path stalled by TC. Perf_Windowing not supported for this counter.
+    Sum over TA instances.
 TA_ADDR_STALLED_BY_TD_CYCLES:
   architectures:
     gfx90a:
@@ -1936,14 +2086,13 @@ TA_ADDR_STALLED_BY_TD_CYCLES:
     gfx942/gfx941/gfx940:
       block: TA
       event: 43
-  description: Number of cycles addr path stalled by TD. Perf_Windowing not supported
-    for this counter.
+  description: Number of cycles addr path stalled by TD. Perf_Windowing not supported for this counter.
 TA_ADDR_STALLED_BY_TD_CYCLES_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TA_ADDR_STALLED_BY_TD_CYCLES,sum)
-  description: Number of cycles addr path stalled by TD. Perf_Windowing not supported
-    for this counter. Sum over TA instances.
+  description: Number of cycles addr path stalled by TD. Perf_Windowing not supported for this counter.
+    Sum over TA instances.
 TA_BUFFER_ATOMIC_WAVEFRONTS:
   architectures:
     gfx90a:
@@ -1996,8 +2145,7 @@ TA_BUFFER_LOAD_WAVEFRONTS_sum:
   architectures:
     gfx11/gfx1102/gfx1100/gfx1101:
       expression: reduce(TA_BUFFER_LOAD_WAVEFRONTS,sum)
-  description: Number of buffer load vec32 packets processed by the TA. Sum over TA
-    instances.
+  description: Number of buffer load vec32 packets processed by the TA. Sum over TA instances.
 TA_BUFFER_READ_WAVEFRONTS:
   architectures:
     gfx90a:
@@ -2022,8 +2170,7 @@ TA_BUFFER_STORE_WAVEFRONTS_sum:
   architectures:
     gfx11/gfx1102/gfx1100/gfx1101:
       expression: reduce(TA_BUFFER_STORE_WAVEFRONTS,sum)
-  description: Number of buffer store vec32 packets processed by the TA. Sum over
-    TA instances.
+  description: Number of buffer store vec32 packets processed by the TA. Sum over TA instances.
 TA_BUFFER_TOTAL_CYCLES:
   architectures:
     gfx90a:
@@ -2089,14 +2236,13 @@ TA_DATA_STALLED_BY_TC_CYCLES:
     gfx942/gfx941/gfx940:
       block: TA
       event: 44
-  description: Number of cycles data path stalled by TC. Perf_Windowing not supported
-    for this counter.
+  description: Number of cycles data path stalled by TC. Perf_Windowing not supported for this counter.
 TA_DATA_STALLED_BY_TC_CYCLES_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TA_DATA_STALLED_BY_TC_CYCLES,sum)
-  description: Number of cycles data path stalled by TC. Perf_Windowing not supported
-    for this counter. Sum over TA instances.
+  description: Number of cycles data path stalled by TC. Perf_Windowing not supported for this counter.
+    Sum over TA instances.
 TA_FLAT_ATOMIC_WAVEFRONTS:
   architectures:
     gfx90a:
@@ -2116,14 +2262,13 @@ TA_FLAT_LOAD_WAVEFRONTS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: TA
       event: 101
-  description: ' Number of flat load vec32 packets processed by TA, same as flat_read_wavefronts
-    in earlier IP'
+  description: ' Number of flat load vec32 packets processed by TA, same as flat_read_wavefronts in earlier
+    IP'
 TA_FLAT_LOAD_WAVEFRONTS_sum:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: reduce(TA_FLAT_LOAD_WAVEFRONTS,sum)
-  description: Number of flat load vec32 packets processed by the TA. Sum over TA
-    instances.
+  description: Number of flat load vec32 packets processed by the TA. Sum over TA instances.
 TA_FLAT_READ_WAVEFRONTS:
   architectures:
     gfx906/gfx908/gfx8/gfx900/gfx90a/gfx9:
@@ -2143,14 +2288,13 @@ TA_FLAT_STORE_WAVEFRONTS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: TA
       event: 102
-  description: Number of flat store vec32 packets processed by TA, same as flat_write_wavefronts
-    in earlier IP
+  description: Number of flat store vec32 packets processed by TA, same as flat_write_wavefronts in earlier
+    IP
 TA_FLAT_STORE_WAVEFRONTS_sum:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: reduce(TA_FLAT_STORE_WAVEFRONTS,sum)
-  description: Number of flat store vec32 packets processed by the TA. Sum over TA
-    instances.
+  description: Number of flat store vec32 packets processed by the TA. Sum over TA instances.
 TA_FLAT_WAVEFRONTS:
   architectures:
     gfx90a:
@@ -2192,8 +2336,7 @@ TA_TA_BUSY_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TA_TA_BUSY,sum)
-  description: TA block is busy. Perf_Windowing not supported for this counter. Sum
-    over TA instances.
+  description: TA block is busy. Perf_Windowing not supported for this counter. Sum over TA instances.
 TA_TOTAL_WAVEFRONTS:
   architectures:
     gfx90a:
@@ -2212,8 +2355,8 @@ TA_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: 100*GRBM_TA_BUSY/GRBM_GUI_ACTIVE
-  description: Percentage of the GRBM_GUI_ACTIVE time that any of the Texture Pipes
-    (TA) are busy in the shader engine(s).
+  description: Percentage of the GRBM_GUI_ACTIVE time that any of the Texture Pipes (TA) are busy in the
+    shader engine(s).
 TCA_BUSY:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -2246,8 +2389,7 @@ TCC_ALL_TC_OP_INV_EVICT_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_ALL_TC_OP_INV_EVICT,sum)
-  description: Number of evictions due to all TC_OP invalidate requests. Sum over
-    TCC instances.
+  description: Number of evictions due to all TC_OP invalidate requests. Sum over TCC instances.
 TCC_ALL_TC_OP_WB_WRITEBACK:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -2258,8 +2400,7 @@ TCC_ALL_TC_OP_WB_WRITEBACK_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_ALL_TC_OP_WB_WRITEBACK,sum)
-  description: Number of writebacks due to all TC_OP writeback requests. Sum over
-    TCC instances.
+  description: Number of writebacks due to all TC_OP writeback requests. Sum over TCC instances.
 TCC_ATOMIC:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -2286,21 +2427,19 @@ TCC_BUSY_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_BUSY,sum)
-  description: Number of cycles we have a request pending. Not windowable. Sum over
-    TCC instances.
+  description: Number of cycles we have a request pending. Not windowable. Sum over TCC instances.
 TCC_CC_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 7
-  description: The number of coherently cached requests. This is measured at the tag
-    block.
+  description: The number of coherently cached requests. This is measured at the tag block.
 TCC_CC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_CC_REQ,sum)
-  description: The number of coherently cached requests. This is measured at the tag
-    block. Sum over TCC instances.
+  description: The number of coherently cached requests. This is measured at the tag block. Sum over TCC
+    instances.
 TCC_CYCLE:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -2317,28 +2456,27 @@ TCC_EA0_ATOMIC:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 36
-  description: Number of transactions going over the TC_EA_wrreq interface that are
-    actually atomic requests.
+  description: Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests.
 TCC_EA0_ATOMIC_LEVEL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 37
-  description: The sum of the number of EA atomics in flight. This is primarily meant
-    for measure average EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
+  description: The sum of the number of EA atomics in flight. This is primarily meant for measure average
+    EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
 TCC_EA0_ATOMIC_LEVEL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_ATOMIC_LEVEL,sum)
-  description: The sum of the number of EA atomics in flight. This is primarily meant
-    for measure average EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
+  description: The sum of the number of EA atomics in flight. This is primarily meant for measure average
+    EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
     Sum over TCC instances.
 TCC_EA0_ATOMIC_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_ATOMIC,sum)
-  description: Number of transactions going over the TC_EA_wrreq interface that are
-    actually atomic requests. Sum over TCC instances.
+  description: Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests.
+    Sum over TCC instances.
 TCC_EA0_RDREQ:
   architectures:
     gfx942/gfx941/gfx940:
@@ -2361,178 +2499,165 @@ TCC_EA0_RDREQ_DRAM:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 102
-  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined
-    for DRAM (MC).
+  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC).
 TCC_EA0_RDREQ_DRAM_CREDIT_STALL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 43
-  description: Number of cycles there was a stall because the read request interface
-    was out of DRAM credits. Stalls occur regardless of whether a read needed to be
-    performed or not.
+  description: Number of cycles there was a stall because the read request interface was out of DRAM credits.
+    Stalls occur regardless of whether a read needed to be performed or not.
 TCC_EA0_RDREQ_DRAM_CREDIT_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_RDREQ_DRAM_CREDIT_STALL,sum)
-  description: Number of cycles there was a stall because the read request interface
-    was out of DRAM credits. Stalls occur regardless of whether a read needed to be
-    performed or not. Sum over TCC instances.
+  description: Number of cycles there was a stall because the read request interface was out of DRAM credits.
+    Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances.
 TCC_EA0_RDREQ_DRAM_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_RDREQ_DRAM,sum)
-  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined
-    for DRAM (MC). Sum over TCC instances.
+  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC). Sum
+    over TCC instances.
 TCC_EA0_RDREQ_GMI_CREDIT_STALL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 42
-  description: Number of cycles there was a stall because the read request interface
-    was out of GMI credits. Stalls occur regardless of whether a read needed to be
-    performed or not.
+  description: Number of cycles there was a stall because the read request interface was out of GMI credits.
+    Stalls occur regardless of whether a read needed to be performed or not.
 TCC_EA0_RDREQ_GMI_CREDIT_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_RDREQ_GMI_CREDIT_STALL,sum)
-  description: Number of cycles there was a stall because the read request interface
-    was out of GMI credits. Stalls occur regardless of whether a read needed to be
-    performed or not. Sum over TCC instances.
+  description: Number of cycles there was a stall because the read request interface was out of GMI credits.
+    Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances.
 TCC_EA0_RDREQ_IO_CREDIT_STALL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 41
-  description: Number of cycles there was a stall because the read request interface
-    was out of IO credits. Stalls occur regardless of whether a read needed to be
-    performed or not.
+  description: Number of cycles there was a stall because the read request interface was out of IO credits.
+    Stalls occur regardless of whether a read needed to be performed or not.
 TCC_EA0_RDREQ_IO_CREDIT_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_RDREQ_IO_CREDIT_STALL,sum)
-  description: Number of cycles there was a stall because the read request interface
-    was out of IO credits. Stalls occur regardless of whether a read needed to be
-    performed or not. Sum over TCC instances.
+  description: Number of cycles there was a stall because the read request interface was out of IO credits.
+    Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances.
 TCC_EA0_RDREQ_LEVEL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 44
-  description: The sum of the number of TCC/EA read requests in flight. This is primarily
-    meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
+  description: The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure
+    average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
 TCC_EA0_RDREQ_LEVEL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_RDREQ_LEVEL,sum)
-  description: The sum of the number of TCC/EA read requests in flight. This is primarily
-    meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
+  description: The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure
+    average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
     Sum over TCC instances.
 TCC_EA0_RDREQ_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_RDREQ,sum)
-  description: Number of TCC/EA read requests (either 32-byte or 64-byte) Sum over
-    TCC instances.
+  description: Number of TCC/EA read requests (either 32-byte or 64-byte) Sum over TCC instances.
 TCC_EA0_RD_UNCACHED_32B:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 40
-  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request
-    will be counted as 2
+  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted
+    as 2
 TCC_EA0_RD_UNCACHED_32B_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_RD_UNCACHED_32B,sum)
-  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request
-    will be counted as 2 Sum over TCC instances.
+  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted
+    as 2 Sum over TCC instances.
 TCC_EA0_WRREQ:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 26
-  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq
-    interface. Atomics may travel over the same interface and are generally classified
-    as write requests. This does not include probe commands.
+  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface.
+    Atomics may travel over the same interface and are generally classified as write requests. This does
+    not include probe commands.
 TCC_EA0_WRREQ_64B:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 27
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the TC_EA_wrreq interface.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
 TCC_EA0_WRREQ_64B_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_64B,sum)
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the TC_EA_wrreq interface. Sum over TCC instances.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
+    Sum over TCC instances.
 TCC_EA0_WRREQ_DRAM:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 103
-  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined
-    for DRAM (MC).
+  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC).
 TCC_EA0_WRREQ_DRAM_CREDIT_STALL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 33
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of DRAM credits.
+  description: Number of cycles a EA write request was stalled because the interface was out of DRAM credits.
 TCC_EA0_WRREQ_DRAM_CREDIT_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_DRAM_CREDIT_STALL,sum)
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of DRAM credits. Sum over TCC instances.
+  description: Number of cycles a EA write request was stalled because the interface was out of DRAM credits.
+    Sum over TCC instances.
 TCC_EA0_WRREQ_DRAM_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_DRAM,sum)
-  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined
-    for DRAM (MC). Sum over TCC instances.
+  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum
+    over TCC instances.
 TCC_EA0_WRREQ_GMI_CREDIT_STALL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 32
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of GMI credits.
+  description: Number of cycles a EA write request was stalled because the interface was out of GMI credits.
 TCC_EA0_WRREQ_GMI_CREDIT_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_GMI_CREDIT_STALL,sum)
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of GMI credits. Sum over TCC instances.
+  description: Number of cycles a EA write request was stalled because the interface was out of GMI credits.
+    Sum over TCC instances.
 TCC_EA0_WRREQ_IO_CREDIT_STALL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 31
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of IO credits.
+  description: Number of cycles a EA write request was stalled because the interface was out of IO credits.
 TCC_EA0_WRREQ_IO_CREDIT_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_IO_CREDIT_STALL,sum)
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of IO credits. Sum over TCC instances.
+  description: Number of cycles a EA write request was stalled because the interface was out of IO credits.
+    Sum over TCC instances.
 TCC_EA0_WRREQ_LEVEL:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 35
-  description: The sum of the number of EA write requests in flight. This is primarily
-    meant for measure average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
+  description: The sum of the number of EA write requests in flight. This is primarily meant for measure
+    average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
 TCC_EA0_WRREQ_LEVEL_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_LEVEL,sum)
-  description: The sum of the number of EA write requests in flight. This is primarily
-    meant for measure average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
+  description: The sum of the number of EA write requests in flight. This is primarily meant for measure
+    average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
     Sum over TCC instances.
 TCC_EA0_WRREQ_PROBE_COMMAND:
   architectures:
@@ -2555,25 +2680,24 @@ TCC_EA0_WRREQ_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ,sum)
-  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq
-    interface. Atomics may travel over the same interface and are generally classified
-    as write requests. This does not include probe commands. Sum over TCC instances.
+  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface.
+    Atomics may travel over the same interface and are generally classified as write requests. This does
+    not include probe commands. Sum over TCC instances.
 TCC_EA0_WR_UNCACHED_32B:
   architectures:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 29
-  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface
-    due to uncached traffic. Note that CC mtypes can produce uncached requests, and
-    those are included in this. A 64-byte request will be counted as 2
+  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic.
+    Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request
+    will be counted as 2
 TCC_EA0_WR_UNCACHED_32B_sum:
   architectures:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WR_UNCACHED_32B,sum)
-  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface
-    due to uncached traffic. Note that CC mtypes can produce uncached requests, and
-    those are included in this. A 64-byte request will be counted as 2. Sum over TCC
-    instances.
+  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic.
+    Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request
+    will be counted as 2. Sum over TCC instances.
 TCC_EA1_RDREQ:
   architectures:
     gfx906:
@@ -2595,29 +2719,27 @@ TCC_EA1_RDREQ_sum:
   architectures:
     gfx906:
       expression: reduce(TCC_EA1_RDREQ,sum)
-  description: Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over
-    TCC EA1s.
+  description: Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC EA1s.
 TCC_EA1_WRREQ:
   architectures:
     gfx906:
       block: TCC
       event: 256
-  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq
-    interface. Atomics may travel over the same interface and are generally classified
-    as write requests. This does not include probe commands.
+  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface.
+    Atomics may travel over the same interface and are generally classified as write requests. This does
+    not include probe commands.
 TCC_EA1_WRREQ_64B:
   architectures:
     gfx906:
       block: TCC
       event: 257
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the TC_EA_wrreq interface.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
 TCC_EA1_WRREQ_64B_sum:
   architectures:
     gfx906:
       expression: reduce(TCC_EA1_WRREQ_64B,sum)
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the TC_EA_wrreq interface. Sum over TCC EA1s.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
+    Sum over TCC EA1s.
 TCC_EA1_WRREQ_STALL:
   architectures:
     gfx906:
@@ -2628,35 +2750,34 @@ TCC_EA1_WRREQ_sum:
   architectures:
     gfx906:
       expression: reduce(TCC_EA1_WRREQ,sum)
-  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq
-    interface. Sum over TCC EA1s.
+  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface.
+    Sum over TCC EA1s.
 TCC_EA_ATOMIC:
   architectures:
     gfx90a:
       block: TCC
       event: 36
-  description: Number of transactions going over the TC_EA_wrreq interface that are
-    actually atomic requests.
+  description: Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests.
 TCC_EA_ATOMIC_LEVEL:
   architectures:
     gfx90a:
       block: TCC
       event: 37
-  description: The sum of the number of EA atomics in flight. This is primarily meant
-    for measure average EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
+  description: The sum of the number of EA atomics in flight. This is primarily meant for measure average
+    EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
 TCC_EA_ATOMIC_LEVEL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_ATOMIC_LEVEL,sum)
-  description: The sum of the number of EA atomics in flight. This is primarily meant
-    for measure average EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
+  description: The sum of the number of EA atomics in flight. This is primarily meant for measure average
+    EA atomic latency. Average atomic latency = TCC_PERF_SEL_EA_WRREQ_ATOMIC_LEVEL/TCC_PERF_SEL_EA_WRREQ_ATOMIC.
     Sum over TCC instances.
 TCC_EA_ATOMIC_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_ATOMIC,sum)
-  description: Number of transactions going over the TC_EA_wrreq interface that are
-    actually atomic requests. Sum over TCC instances.
+  description: Number of transactions going over the TC_EA_wrreq interface that are actually atomic requests.
+    Sum over TCC instances.
 TCC_EA_RDREQ:
   architectures:
     gfx906/gfx900/gfx9:
@@ -2685,92 +2806,84 @@ TCC_EA_RDREQ_DRAM:
     gfx90a:
       block: TCC
       event: 102
-  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined
-    for DRAM (MC).
+  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC).
 TCC_EA_RDREQ_DRAM_CREDIT_STALL:
   architectures:
     gfx90a:
       block: TCC
       event: 43
-  description: Number of cycles there was a stall because the read request interface
-    was out of DRAM credits. Stalls occur regardless of whether a read needed to be
-    performed or not.
+  description: Number of cycles there was a stall because the read request interface was out of DRAM credits.
+    Stalls occur regardless of whether a read needed to be performed or not.
 TCC_EA_RDREQ_DRAM_CREDIT_STALL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_RDREQ_DRAM_CREDIT_STALL,sum)
-  description: Number of cycles there was a stall because the read request interface
-    was out of DRAM credits. Stalls occur regardless of whether a read needed to be
-    performed or not. Sum over TCC instances.
+  description: Number of cycles there was a stall because the read request interface was out of DRAM credits.
+    Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances.
 TCC_EA_RDREQ_DRAM_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_RDREQ_DRAM,sum)
-  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined
-    for DRAM (MC). Sum over TCC instances.
+  description: Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC). Sum
+    over TCC instances.
 TCC_EA_RDREQ_GMI_CREDIT_STALL:
   architectures:
     gfx90a:
       block: TCC
       event: 42
-  description: Number of cycles there was a stall because the read request interface
-    was out of GMI credits. Stalls occur regardless of whether a read needed to be
-    performed or not.
+  description: Number of cycles there was a stall because the read request interface was out of GMI credits.
+    Stalls occur regardless of whether a read needed to be performed or not.
 TCC_EA_RDREQ_GMI_CREDIT_STALL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_RDREQ_GMI_CREDIT_STALL,sum)
-  description: Number of cycles there was a stall because the read request interface
-    was out of GMI credits. Stalls occur regardless of whether a read needed to be
-    performed or not. Sum over TCC instances.
+  description: Number of cycles there was a stall because the read request interface was out of GMI credits.
+    Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances.
 TCC_EA_RDREQ_IO_CREDIT_STALL:
   architectures:
     gfx90a:
       block: TCC
       event: 41
-  description: Number of cycles there was a stall because the read request interface
-    was out of IO credits. Stalls occur regardless of whether a read needed to be
-    performed or not.
+  description: Number of cycles there was a stall because the read request interface was out of IO credits.
+    Stalls occur regardless of whether a read needed to be performed or not.
 TCC_EA_RDREQ_IO_CREDIT_STALL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_RDREQ_IO_CREDIT_STALL,sum)
-  description: Number of cycles there was a stall because the read request interface
-    was out of IO credits. Stalls occur regardless of whether a read needed to be
-    performed or not. Sum over TCC instances.
+  description: Number of cycles there was a stall because the read request interface was out of IO credits.
+    Stalls occur regardless of whether a read needed to be performed or not. Sum over TCC instances.
 TCC_EA_RDREQ_LEVEL:
   architectures:
     gfx90a:
       block: TCC
       event: 44
-  description: The sum of the number of TCC/EA read requests in flight. This is primarily
-    meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
+  description: The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure
+    average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
 TCC_EA_RDREQ_LEVEL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_RDREQ_LEVEL,sum)
-  description: The sum of the number of TCC/EA read requests in flight. This is primarily
-    meant for measure average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
+  description: The sum of the number of TCC/EA read requests in flight. This is primarily meant for measure
+    average EA read latency. Average read latency = TCC_PERF_SEL_EA_RDREQ_LEVEL/TCC_PERF_SEL_EA_RDREQ.
     Sum over TCC instances.
 TCC_EA_RDREQ_sum:
   architectures:
     gfx906/gfx908/gfx90a/gfx9:
       expression: reduce(TCC_EA_RDREQ,sum)
-  description: Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over
-    TCC instances.
+  description: Number of TCC/EA read requests (either 32-byte or 64-byte). Sum over TCC instances.
 TCC_EA_RD_UNCACHED_32B:
   architectures:
     gfx90a:
       block: TCC
       event: 40
-  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request
-    will be counted as 2
+  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted
+    as 2
 TCC_EA_RD_UNCACHED_32B_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_RD_UNCACHED_32B,sum)
-  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request
-    will be counted as 2 Sum over TCC instances.
+  description: Number of 32-byte TCC/EA read due to uncached traffic. A 64-byte request will be counted
+    as 2 Sum over TCC instances.
 TCC_EA_WRREQ:
   architectures:
     gfx906/gfx900/gfx9:
@@ -2779,9 +2892,9 @@ TCC_EA_WRREQ:
     gfx908/gfx90a:
       block: TCC
       event: 26
-  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq
-    interface. Atomics may travel over the same interface and are generally classified
-    as write requests. This does not include probe commands.
+  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface.
+    Atomics may travel over the same interface and are generally classified as write requests. This does
+    not include probe commands.
 TCC_EA_WRREQ_64B:
   architectures:
     gfx906/gfx900/gfx9:
@@ -2790,79 +2903,74 @@ TCC_EA_WRREQ_64B:
     gfx908/gfx90a:
       block: TCC
       event: 27
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the TC_EA_wrreq interface.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
 TCC_EA_WRREQ_64B_sum:
   architectures:
     gfx906/gfx908/gfx90a/gfx9:
       expression: reduce(TCC_EA_WRREQ_64B,sum)
-  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over
-    the TC_EA_wrreq interface. Sum over TCC instances.
+  description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
+    Sum over TCC instances.
 TCC_EA_WRREQ_DRAM:
   architectures:
     gfx90a:
       block: TCC
       event: 103
-  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined
-    for DRAM (MC).
+  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC).
 TCC_EA_WRREQ_DRAM_CREDIT_STALL:
   architectures:
     gfx90a:
       block: TCC
       event: 33
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of DRAM credits.
+  description: Number of cycles a EA write request was stalled because the interface was out of DRAM credits.
 TCC_EA_WRREQ_DRAM_CREDIT_STALL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_WRREQ_DRAM_CREDIT_STALL,sum)
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of DRAM credits. Sum over TCC instances.
+  description: Number of cycles a EA write request was stalled because the interface was out of DRAM credits.
+    Sum over TCC instances.
 TCC_EA_WRREQ_DRAM_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_WRREQ_DRAM,sum)
-  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined
-    for DRAM (MC). Sum over TCC instances.
+  description: Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum
+    over TCC instances.
 TCC_EA_WRREQ_GMI_CREDIT_STALL:
   architectures:
     gfx90a:
       block: TCC
       event: 32
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of GMI credits.
+  description: Number of cycles a EA write request was stalled because the interface was out of GMI credits.
 TCC_EA_WRREQ_GMI_CREDIT_STALL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_WRREQ_GMI_CREDIT_STALL,sum)
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of GMI credits. Sum over TCC instances.
+  description: Number of cycles a EA write request was stalled because the interface was out of GMI credits.
+    Sum over TCC instances.
 TCC_EA_WRREQ_IO_CREDIT_STALL:
   architectures:
     gfx90a:
       block: TCC
       event: 31
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of IO credits.
+  description: Number of cycles a EA write request was stalled because the interface was out of IO credits.
 TCC_EA_WRREQ_IO_CREDIT_STALL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_WRREQ_IO_CREDIT_STALL,sum)
-  description: Number of cycles a EA write request was stalled because the interface
-    was out of IO credits. Sum over TCC instances.
+  description: Number of cycles a EA write request was stalled because the interface was out of IO credits.
+    Sum over TCC instances.
 TCC_EA_WRREQ_LEVEL:
   architectures:
     gfx90a:
       block: TCC
       event: 35
-  description: The sum of the number of EA write requests in flight. This is primarily
-    meant for measure average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
+  description: The sum of the number of EA write requests in flight. This is primarily meant for measure
+    average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
 TCC_EA_WRREQ_LEVEL_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_WRREQ_LEVEL,sum)
-  description: The sum of the number of EA write requests in flight. This is primarily
-    meant for measure average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
+  description: The sum of the number of EA write requests in flight. This is primarily meant for measure
+    average EA write latency. Average write latency = TCC_PERF_SEL_EA_WRREQ_LEVEL/TCC_PERF_SEL_EA_WRREQ.
     Sum over TCC instances.
 TCC_EA_WRREQ_STALL:
   architectures:
@@ -2882,24 +2990,23 @@ TCC_EA_WRREQ_sum:
   architectures:
     gfx906/gfx908/gfx90a/gfx9:
       expression: reduce(TCC_EA_WRREQ,sum)
-  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq
-    interface. Sum over TCC instances.
+  description: Number of transactions (either 32-byte or 64-byte) going over the TC_EA_wrreq interface.
+    Sum over TCC instances.
 TCC_EA_WR_UNCACHED_32B:
   architectures:
     gfx90a:
       block: TCC
       event: 29
-  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface
-    due to uncached traffic. Note that CC mtypes can produce uncached requests, and
-    those are included in this. A 64-byte request will be counted as 2
+  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic.
+    Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request
+    will be counted as 2
 TCC_EA_WR_UNCACHED_32B_sum:
   architectures:
     gfx90a:
       expression: reduce(TCC_EA_WR_UNCACHED_32B,sum)
-  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface
-    due to uncached traffic. Note that CC mtypes can produce uncached requests, and
-    those are included in this. A 64-byte request will be counted as 2. Sum over TCC
-    instances.
+  description: Number of 32-byte write/atomic going over the TC_EA_wrreq interface due to uncached traffic.
+    Note that CC mtypes can produce uncached requests, and those are included in this. A 64-byte request
+    will be counted as 2. Sum over TCC instances.
 TCC_HIT:
   architectures:
     gfx8:
@@ -2922,15 +3029,14 @@ TCC_INTERNAL_PROBE:
     gfx942/gfx941/gfx940:
       block: TCC
       event: 11
-  description: Number of self-probes spawned by TCC for CC writes/atomic operations.
-    Not windowable.
+  description: Number of self-probes spawned by TCC for CC writes/atomic operations. Not windowable.
 TCC_MC_RDREQ:
   architectures:
     gfx8:
       block: TCC
       event: 35
-  description: Number of 32-byte reads. The hardware actually does 64-byte reads but
-    the number is adjusted to provide uniformity.
+  description: Number of 32-byte reads. The hardware actually does 64-byte reads but the number is adjusted
+    to provide uniformity.
 TCC_MC_RDREQ_sum:
   architectures:
     gfx8:
@@ -2941,9 +3047,8 @@ TCC_MC_WRREQ:
     gfx8:
       block: TCC
       event: 26
-  description: Number of 32-byte transactions going over the TC_MC_wrreq interface.
-    Atomics may travel over the same interface and are generally classified as write
-    requests.
+  description: Number of 32-byte transactions going over the TC_MC_wrreq interface. Atomics may travel
+    over the same interface and are generally classified as write requests.
 TCC_MC_WRREQ_STALL:
   architectures:
     gfx8:
@@ -2954,8 +3059,7 @@ TCC_MC_WRREQ_sum:
   architectures:
     gfx8:
       expression: reduce(TCC_MC_WRREQ,sum)
-  description: Number of 32-byte transactions going over the TC_MC_wrreq interface.
-    Sum over TCC instaces.
+  description: Number of 32-byte transactions going over the TC_MC_wrreq interface. Sum over TCC instaces.
 TCC_MISS:
   architectures:
     gfx906/gfx900/gfx9:
@@ -2975,27 +3079,25 @@ TCC_NC_REQ:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 5
-  description: The number of noncoherently cached requests. This is measured at the
-    tag block.
+  description: The number of noncoherently cached requests. This is measured at the tag block.
 TCC_NC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_NC_REQ,sum)
-  description: The number of noncoherently cached requests. This is measured at the
-    tag block. Sum over TCC instances.
+  description: The number of noncoherently cached requests. This is measured at the tag block. Sum over
+    TCC instances.
 TCC_NORMAL_EVICT:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 74
-  description: Number of evictions due to requests that are not invalidate or probe
-    requests.
+  description: Number of evictions due to requests that are not invalidate or probe requests.
 TCC_NORMAL_EVICT_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_NORMAL_EVICT,sum)
-  description: Number of evictions due to requests that are not invalidate or probe
-    requests. Sum over TCC instances.
+  description: Number of evictions due to requests that are not invalidate or probe requests. Sum over
+    TCC instances.
 TCC_NORMAL_WRITEBACK:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3006,8 +3108,7 @@ TCC_NORMAL_WRITEBACK_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_NORMAL_WRITEBACK,sum)
-  description: Number of writebacks due to requests that are not writeback requests.
-    Sum over TCC instances.
+  description: Number of writebacks due to requests that are not writeback requests. Sum over TCC instances.
 TCC_PROBE:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3019,14 +3120,13 @@ TCC_PROBE_ALL:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 10
-  description: Number of external probe requests with with EA_TCC_preq_all== 1. Not
-    windowable.
+  description: Number of external probe requests with with EA_TCC_preq_all== 1. Not windowable.
 TCC_PROBE_ALL_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_PROBE_ALL,sum)
-  description: Number of external probe requests with with EA_TCC_preq_all== 1. Not
-    windowable. Sum over TCC instances.
+  description: Number of external probe requests with with EA_TCC_preq_all== 1. Not windowable. Sum over
+    TCC instances.
 TCC_PROBE_EVICT:
   architectures:
     gfx942/gfx941/gfx940:
@@ -3043,30 +3143,29 @@ TCC_READ:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 12
-  description: Number of read requests. Compressed reads are included in this, but
-    metadata reads are not included.
+  description: Number of read requests. Compressed reads are included in this, but metadata reads are
+    not included.
 TCC_READ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_READ,sum)
-  description: Number of read requests. Compressed reads are included in this, but
-    metadata reads are not included. Sum over TCC instances.
+  description: Number of read requests. Compressed reads are included in this, but metadata reads are
+    not included. Sum over TCC instances.
 TCC_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 3
-  description: Number of requests of all types. This is measured at the tag block.
-    This may be more than the number of requests arriving at the TCC, but it is a
-    good indication of the total amount of work that needs to be performed.
+  description: Number of requests of all types. This is measured at the tag block. This may be more than
+    the number of requests arriving at the TCC, but it is a good indication of the total amount of work
+    that needs to be performed.
 TCC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_REQ,sum)
-  description: Number of requests of all types. This is measured at the tag block.
-    This may be more than the number of requests arriving at the TCC, but it is a
-    good indication of the total amount of work that needs to be performed. Sum over
-    TCC instances.
+  description: Number of requests of all types. This is measured at the tag block. This may be more than
+    the number of requests arriving at the TCC, but it is a good indication of the total amount of work
+    that needs to be performed. Sum over TCC instances.
 TCC_RW_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3077,8 +3176,7 @@ TCC_RW_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_RW_REQ,sum)
-  description: The number of RW requests. This is measured at the tag block. Sum over
-    TCC instances.
+  description: The number of RW requests. This is measured at the tag block. Sum over TCC instances.
 TCC_STREAMING_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3089,38 +3187,34 @@ TCC_STREAMING_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_STREAMING_REQ,sum)
-  description: Number of streaming requests. This is measured at the tag block. Sum
-    over TCC instances.
+  description: Number of streaming requests. This is measured at the tag block. Sum over TCC instances.
 TCC_TAG_STALL:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 45
-  description: Number of cycles the normal request pipeline in the tag was stalled
-    for any reason. Normally, stalls of this nature are measured exactly from one
-    point the pipeline, but that is not the case for this counter. Probes can stall
-    the pipeline at a variety of places, and there is no single point that can reasonably
-    measure the total stalls accurately.
+  description: Number of cycles the normal request pipeline in the tag was stalled for any reason. Normally,
+    stalls of this nature are measured exactly from one point the pipeline, but that is not the case for
+    this counter. Probes can stall the pipeline at a variety of places, and there is no single point that
+    can reasonably measure the total stalls accurately.
 TCC_TAG_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_TAG_STALL,sum)
-  description: Total number of cycles the normal request pipeline in the tag is stalled
-    for any reason.
+  description: Total number of cycles the normal request pipeline in the tag is stalled for any reason.
 TCC_TOO_MANY_EA_WRREQS_STALL:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 34
-  description: Number of cycles the TCC could not send a EA write request because
-    it already reached its maximum number of pending EA write requests.
+  description: Number of cycles the TCC could not send a EA write request because it already reached its
+    maximum number of pending EA write requests.
 TCC_TOO_MANY_EA_WRREQS_STALL_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_TOO_MANY_EA_WRREQS_STALL,sum)
-  description: Number of cycles the TCC could not send a EA write request because
-    it already reached its maximum number of pending EA write requests. Sum over TCC
-    instances.
+  description: Number of cycles the TCC could not send a EA write request because it already reached its
+    maximum number of pending EA write requests. Sum over TCC instances.
 TCC_UC_REQ:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3131,8 +3225,7 @@ TCC_UC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_UC_REQ,sum)
-  description: The number of uncached requests. This is measured at the tag block.
-    Sum over TCC instances.
+  description: The number of uncached requests. This is measured at the tag block. Sum over TCC instances.
 TCC_WRITE:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3144,14 +3237,14 @@ TCC_WRITEBACK:
     gfx942/gfx941/gfx940/gfx90a:
       block: TCC
       event: 22
-  description: Number of lines written back to main memory. This includes writebacks
-    of dirty lines and uncached write/atomic requests.
+  description: Number of lines written back to main memory. This includes writebacks of dirty lines and
+    uncached write/atomic requests.
 TCC_WRITEBACK_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCC_WRITEBACK,sum)
-  description: Number of lines written back to main memory. This includes writebacks
-    of dirty lines and uncached write/atomic requests. Sum over TCC instances.
+  description: Number of lines written back to main memory. This includes writebacks of dirty lines and
+    uncached write/atomic requests. Sum over TCC instances.
 TCC_WRITE_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3262,8 +3355,7 @@ TCP_TCC_ATOMIC_WITHOUT_RET_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_ATOMIC_WITHOUT_RET_REQ,sum)
-  description: Total atomic without return requests from TCP to all TCCs Sum over
-    TCP instances.
+  description: Total atomic without return requests from TCP to all TCCs Sum over TCP instances.
 TCP_TCC_ATOMIC_WITH_RET_REQ:
   architectures:
     gfx90a:
@@ -3277,8 +3369,7 @@ TCP_TCC_ATOMIC_WITH_RET_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_ATOMIC_WITH_RET_REQ,sum)
-  description: Total atomic with return requests from TCP to all TCCs Sum over TCP
-    instances.
+  description: Total atomic with return requests from TCP to all TCCs Sum over TCP instances.
 TCP_TCC_CC_ATOMIC_REQ:
   architectures:
     gfx90a:
@@ -3292,8 +3383,7 @@ TCP_TCC_CC_ATOMIC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_CC_ATOMIC_REQ,sum)
-  description: Total atomic requests with CC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total atomic requests with CC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_CC_READ_REQ:
   architectures:
     gfx90a:
@@ -3307,8 +3397,7 @@ TCP_TCC_CC_READ_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_CC_READ_REQ,sum)
-  description: Total write requests with CC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_CC_WRITE_REQ:
   architectures:
     gfx90a:
@@ -3322,8 +3411,7 @@ TCP_TCC_CC_WRITE_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_CC_WRITE_REQ,sum)
-  description: Total write requests with CC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total write requests with CC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_NC_ATOMIC_REQ:
   architectures:
     gfx90a:
@@ -3337,8 +3425,7 @@ TCP_TCC_NC_ATOMIC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_NC_ATOMIC_REQ,sum)
-  description: Total atomic requests with NC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total atomic requests with NC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_NC_READ_REQ:
   architectures:
     gfx90a:
@@ -3352,8 +3439,7 @@ TCP_TCC_NC_READ_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_NC_READ_REQ,sum)
-  description: Total read requests with NC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total read requests with NC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_NC_WRITE_REQ:
   architectures:
     gfx90a:
@@ -3367,8 +3453,7 @@ TCP_TCC_NC_WRITE_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_NC_WRITE_REQ,sum)
-  description: Total write requests with NC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total write requests with NC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_READ_REQ:
   architectures:
     gfx90a:
@@ -3383,14 +3468,13 @@ TCP_TCC_READ_REQ_LATENCY:
     gfx90a:
       block: TCP
       event: 66
-  description: Total TCP->TCC request latency for reads and atomics with return. Not
-    Windowed.
+  description: Total TCP->TCC request latency for reads and atomics with return. Not Windowed.
 TCP_TCC_READ_REQ_LATENCY_sum:
   architectures:
     gfx90a:
       expression: reduce(TCP_TCC_READ_REQ_LATENCY,sum)
-  description: Total TCP->TCC request latency for reads and atomics with return. Not
-    Windowed. Sum over TCP instances.
+  description: Total TCP->TCC request latency for reads and atomics with return. Not Windowed. Sum over
+    TCP instances.
 TCP_TCC_READ_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3409,8 +3493,7 @@ TCP_TCC_RW_ATOMIC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_RW_ATOMIC_REQ,sum)
-  description: Total atomic requests with RW mtype from this TCP to all TCCs. Sum
-    over TCP instances.
+  description: Total atomic requests with RW mtype from this TCP to all TCCs. Sum over TCP instances.
 TCP_TCC_RW_READ_REQ:
   architectures:
     gfx90a:
@@ -3424,8 +3507,7 @@ TCP_TCC_RW_READ_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_RW_READ_REQ,sum)
-  description: Total write requests with RW mtype from this TCP to all TCCs. Sum over
-    TCP instances.
+  description: Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances.
 TCP_TCC_RW_WRITE_REQ:
   architectures:
     gfx90a:
@@ -3439,8 +3521,7 @@ TCP_TCC_RW_WRITE_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_RW_WRITE_REQ,sum)
-  description: Total write requests with RW mtype from this TCP to all TCCs. Sum over
-    TCP instances.
+  description: Total write requests with RW mtype from this TCP to all TCCs. Sum over TCP instances.
 TCP_TCC_UC_ATOMIC_REQ:
   architectures:
     gfx90a:
@@ -3454,8 +3535,7 @@ TCP_TCC_UC_ATOMIC_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_UC_ATOMIC_REQ,sum)
-  description: Total atomic requests with UC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total atomic requests with UC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_UC_READ_REQ:
   architectures:
     gfx90a:
@@ -3469,8 +3549,7 @@ TCP_TCC_UC_READ_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_UC_READ_REQ,sum)
-  description: Total read requests with UC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total read requests with UC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_UC_WRITE_REQ:
   architectures:
     gfx90a:
@@ -3484,8 +3563,7 @@ TCP_TCC_UC_WRITE_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TCC_UC_WRITE_REQ,sum)
-  description: Total write requests with UC mtype from this TCP to all TCCs Sum over
-    TCP instances.
+  description: Total write requests with UC mtype from this TCP to all TCCs Sum over TCP instances.
 TCP_TCC_WRITE_REQ:
   architectures:
     gfx90a:
@@ -3500,14 +3578,13 @@ TCP_TCC_WRITE_REQ_LATENCY:
     gfx90a:
       block: TCP
       event: 67
-  description: Total TCP->TCC request latency for writes and atomics without return.
-    Not Windowed.
+  description: Total TCP->TCC request latency for writes and atomics without return. Not Windowed.
 TCP_TCC_WRITE_REQ_LATENCY_sum:
   architectures:
     gfx90a:
       expression: reduce(TCP_TCC_WRITE_REQ_LATENCY,sum)
-  description: Total TCP->TCC request latency for writes and atomics without return.
-    Not Windowed. Sum over TCP instances.
+  description: Total TCP->TCC request latency for writes and atomics without return. Not Windowed. Sum
+    over TCP instances.
 TCP_TCC_WRITE_REQ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3518,15 +3595,14 @@ TCP_TCP_LATENCY:
     gfx90a:
       block: TCP
       event: 65
-  description: Total TCP wave latency (from first clock of wave entering to first
-    clock of wave leaving), divide by TA_TCP_STATE_READ to avg wave latency
+  description: Total TCP wave latency (from first clock of wave entering to first clock of wave leaving),
+    divide by TA_TCP_STATE_READ to avg wave latency
 TCP_TCP_LATENCY_sum:
   architectures:
     gfx90a:
       expression: reduce(TCP_TCP_LATENCY,sum)
-  description: Total TCP wave latency (from first clock of wave entering to first
-    clock of wave leaving), divide by TA_TCP_STATE_READ to avg wave latency Sum over
-    TCP instances.
+  description: Total TCP wave latency (from first clock of wave entering to first clock of wave leaving),
+    divide by TA_TCP_STATE_READ to avg wave latency Sum over TCP instances.
 TCP_TCP_TA_DATA_STALL_CYCLES:
   architectures:
     gfx8:
@@ -3596,8 +3672,7 @@ TCP_TOTAL_ATOMIC_WITHOUT_RET_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TOTAL_ATOMIC_WITHOUT_RET,sum)
-  description: Total number of atomic without return pixels/buffers from TA Sum over
-    TCP instances.
+  description: Total number of atomic without return pixels/buffers from TA Sum over TCP instances.
 TCP_TOTAL_ATOMIC_WITH_RET:
   architectures:
     gfx90a:
@@ -3611,8 +3686,7 @@ TCP_TOTAL_ATOMIC_WITH_RET_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TOTAL_ATOMIC_WITH_RET,sum)
-  description: Total number of atomic with return pixels/buffers from TA. Sum over
-    TCP instances.
+  description: Total number of atomic with return pixels/buffers from TA. Sum over TCP instances.
 TCP_TOTAL_CACHE_ACCESSES:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3623,8 +3697,7 @@ TCP_TOTAL_CACHE_ACCESSES_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TOTAL_CACHE_ACCESSES,sum)
-  description: Count of total cache line (tag) accesses (includes hits and misses).
-    Sum over TCP instances.
+  description: Count of total cache line (tag) accesses (includes hits and misses). Sum over TCP instances.
 TCP_TOTAL_READ:
   architectures:
     gfx90a:
@@ -3633,15 +3706,14 @@ TCP_TOTAL_READ:
     gfx942/gfx941/gfx940:
       block: TCP
       event: 28
-  description: Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ
-    + TCP_PERF_SEL_TOTAL_MISS_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ
+  description: Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_LRU_READ
+    + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ
 TCP_TOTAL_READ_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TOTAL_READ,sum)
-  description: Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ
-    + TCP_PERF_SEL_TOTAL_MISS_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ. Sum over
-    TCP instances.
+  description: Total number of read pixels/buffers from TA. Equals TCP_PERF_SEL_TOTAL_HIT_LRU_READ + TCP_PERF_SEL_TOTAL_MISS_LRU_READ
+    + TCP_PERF_SEL_TOTAL_MISS_EVICT_READ. Sum over TCP instances.
 TCP_TOTAL_WRITE:
   architectures:
     gfx90a:
@@ -3660,16 +3732,14 @@ TCP_TOTAL_WRITEBACK_INVALIDATES:
     gfx942/gfx941/gfx940:
       block: TCP
       event: 43
-  description: Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+
-    TCP_PERF_SEL_TOTAL_WBINVL1_VOL+ TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL.
-    Not Windowed.
+  description: Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+ TCP_PERF_SEL_TOTAL_WBINVL1_VOL+
+    TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL. Not Windowed.
 TCP_TOTAL_WRITEBACK_INVALIDATES_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_TOTAL_WRITEBACK_INVALIDATES,sum)
-  description: Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+
-    TCP_PERF_SEL_TOTAL_WBINVL1_VOL+ TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL.
-    Not Windowed. Sum over TCP instances.
+  description: Total number of cache invalidates. Equals TCP_PERF_SEL_TOTAL_WBINVL1+ TCP_PERF_SEL_TOTAL_WBINVL1_VOL+
+    TCP_PERF_SEL_CP_TCP_INVALIDATE+ TCP_PERF_SEL_SQ_TCP_INVALIDATE_VOL. Not Windowed. Sum over TCP instances.
 TCP_TOTAL_WRITE_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3801,8 +3871,7 @@ TD_LOAD_WAVEFRONT_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TD_LOAD_WAVEFRONT,sum)
-  description: Count the wavefronts with opcode = load, include atomics and store.
-    Sum over TD instances.
+  description: Count the wavefronts with opcode = load, include atomics and store. Sum over TD instances.
 TD_SPI_STALL:
   architectures:
     gfx90a:
@@ -3850,14 +3919,13 @@ TD_TD_BUSY:
     gfx942/gfx941/gfx940/gfx90a:
       block: TD
       event: 1
-  description: TD is processing or waiting for data. Perf_Windowing not supported
-    for this counter.
+  description: TD is processing or waiting for data. Perf_Windowing not supported for this counter.
 TD_TD_BUSY_sum:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TD_TD_BUSY,sum)
-  description: TD is processing or waiting for data. Perf_Windowing not supported
-    for this counter. Sum over TD instances.
+  description: TD is processing or waiting for data. Perf_Windowing not supported for this counter. Sum
+    over TD instances.
 TOTAL_16_OPS:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3889,35 +3957,33 @@ VALUBusy:
       expression: 100*SQ_ACTIVE_INST_VALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
     gfx942/gfx941/gfx940:
       expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)*4/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,sum)
-  description: 'The percentage of GPUTime vector ALU instructions are processed. Value
-    range: 0% (bad) to 100% (optimal).'
+  description: 'The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad)
+    to 100% (optimal).'
 VALUInsts:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
       expression: SQ_INSTS_VALU/SQ_WAVES
-  description: The average number of vector ALU instructions executed per work-item
-    (affected by flow control).
+  description: The average number of vector ALU instructions executed per work-item (affected by flow
+    control).
 VALUUtilization:
   architectures:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9:
       expression: 100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*MAX_WAVE_SIZE)
-  description: 'The percentage of active vector ALU threads in a wave. A lower number
-    can mean either more thread divergence in a wave or that the work-group size is
-    not a multiple of 64. Value range: 0% (bad), 100% (ideal - no thread divergence).'
+  description: 'The percentage of active vector ALU threads in a wave. A lower number can mean either
+    more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range:
+    0% (bad), 100% (ideal - no thread divergence).'
 VFetchInsts:
   architectures:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9:
       expression: (SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES
-  description: The average number of vector fetch instructions from the video memory
-    executed per work-item (affected by flow control). Excludes FLAT instructions
-    that fetch from video memory.
+  description: The average number of vector fetch instructions from the video memory executed per work-item
+    (affected by flow control). Excludes FLAT instructions that fetch from video memory.
 VWriteInsts:
   architectures:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9:
       expression: (SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES
-  description: The average number of vector write instructions to the video memory
-    executed per work-item (affected by flow control). Excludes FLAT instructions
-    that write to video memory.
+  description: The average number of vector write instructions to the video memory executed per work-item
+    (affected by flow control). Excludes FLAT instructions that write to video memory.
 ValuIops:
   architectures:
     gfx90a:
@@ -3947,14 +4013,12 @@ WAVE_ISSUE_WAIT:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       expression: 100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES
-  description: Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction
-    issue.
+  description: Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue.
 WDATA1_SIZE:
   architectures:
     gfx906:
       expression: ((TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)*32+TCC_EA1_WRREQ_64B_sum*64)
-  description: The total kilobytes written to the video memory. This is measured on
-    EA1s.
+  description: The total kilobytes written to the video memory. This is measured on EA1s.
 WRITE_REQ_32B:
   architectures:
     gfx8:
@@ -3976,8 +4040,8 @@ WRITE_SIZE:
       expression: ((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024
     gfx942/gfx941/gfx940:
       expression: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024
-  description: The total kilobytes written to the video memory. This is measured with
-    all extra fetches and any cache or memory effects taken into account.
+  description: The total kilobytes written to the video memory. This is measured with all extra fetches
+    and any cache or memory effects taken into account.
 WaveDepWait:
   architectures:
     gfx90a:
@@ -4012,16 +4076,15 @@ WriteSize:
   architectures:
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9:
       expression: WRITE_SIZE
-  description: The total kilobytes written to the video memory. This is measured with
-    all extra fetches and any cache or memory effects taken into account.
+  description: The total kilobytes written to the video memory. This is measured with all extra fetches
+    and any cache or memory effects taken into account.
 WriteUnitStalled:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       expression: 100*GL2C_WRREQ_STALL_max/GRBM_GUI_ACTIVE
     gfx906/gfx908/gfx8/gfx90a/gfx9:
       expression: 100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE
-  description: 'The percentage of GPUTime the Write unit is stalled. Value range:
-    0% to 100% (bad).'
+  description: 'The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).'
 sL1dCacheHitRate:
   architectures:
     gfx90a:

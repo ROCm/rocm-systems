@@ -35,43 +35,57 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "SQ",
        "28",
        "<None>",
-       "Number of VMEM write instructions issued (including FLAT). (per-simd, emulated)"},
+       "The number of VMEM (GPU Memory) write instructions issued (including FLAT/scratch memory). "
+       "The value is returned per-SE (aggregate of values in SIMDs in the SE)."},
       {"SQ_INSTS_VMEM_RD",
        "SQ",
        "29",
        "<None>",
-       "Number of VMEM read instructions issued (including FLAT). (per-simd, emulated)"},
+       "The number of VMEM (GPU Memory) read instructions issued (including FLAT/scratch memory). "
+       "The value is returned per-SE (aggregate of values in SIMDs in the SE)."},
       {"SQ_INSTS_SALU",
        "SQ",
        "31",
        "<None>",
-       "Number of SALU instructions issued. (per-simd, emulated)"},
+       "Total Number of SALU (Scalar ALU) instructions issued. This value is returned per-SE "
+       "(aggregate of values in SIMDs in the SE). See AMD ISAs for more information on SALU "
+       "instructions."},
       {"SQ_INSTS_SMEM",
        "SQ",
        "32",
        "<None>",
-       "Number of SMEM instructions issued. (per-simd, emulated)"},
+       "Total number of SMEM (Scalar Memory Read) instructions issued. This value is returned "
+       "per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on SMEM "
+       "instructions."},
       {"SQ_INSTS_FLAT",
        "SQ",
        "33",
        "<None>",
-       "Number of FLAT instructions issued. (per-simd, emulated)"},
+       "Total number of FLAT instructions issued. When used in combination with "
+       "SQ_ACTIVE_INST_FLAT (cycle count for executing instructions) the average latency of FLAT "
+       "instruction execution can be calculated (SQ_ACTIVE_INST_FLAT / SQ_INSTS). This value is "
+       "returned per-SE (aggregate of values in SIMDs in the SE)."},
       {"SQ_INSTS_FLAT_LDS_ONLY",
        "SQ",
        "34",
        "<None>",
-       "Number of FLAT instructions issued that read/wrote only from/to LDS (only works if "
-       "EARLY_TA_DONE is enabled). (per-simd, emulated)"},
+       "Total number of FLAT instructions issued that read/wrote only from/to LDS (scratch "
+       "memory). Values are only populated if EARLY_TA_DONE is enabled. This value is returned "
+       "per-SE (aggregate of values in SIMDs in the SE)."},
       {"SQ_INSTS_LDS",
        "SQ",
        "35",
        "<None>",
-       "Number of LDS instructions issued (including FLAT). (per-simd, emulated)"},
+       "Total number of LDS instructions issued (including FLAT). This value is returned per-SE "
+       "(aggregate of values in SIMDs in the SE). See AMD ISAs for more information on LDS "
+       "instructions."},
       {"SQ_INSTS_GDS",
        "SQ",
        "36",
        "<None>",
-       "Number of GDS instructions issued. (per-simd, emulated)"},
+       "Total number of GDS (global data sync) instructions issued. This value is returned per-SE "
+       "(aggregate of values in SIMDs in the SE). See AMD ISAs for more information on GDS (global "
+       "data sync) instructions."},
       {"SQ_WAIT_INST_LDS",
        "SQ",
        "64",
@@ -82,14 +96,18 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "SQ",
        "72",
        "<None>",
-       "Number of cycles the SQ instruction arbiter is working on a VALU instruction. "
-       "(per-simd, emulated). Units in quad-cycles(4 cycles)"},
+       "Number of cycles each wave spends working on a VALU instructions. This value represents "
+       "the number of cycles each wave spends executing vector ALU instructions. On MI200 "
+       "platforms, there are 4 VALUs per CU. High values indicates a large amount of time spent "
+       "executing vector instructions. This value is returned on a per-SE (aggregate of values in "
+       "SIMDs in the SE) basis with units in quad-cycles(4 cycles)."},
       {"SQ_INST_CYCLES_SALU",
        "SQ",
        "85",
        "<None>",
-       "Number of cycles needed to execute non-memory read scalar operations. (per-simd, "
-       "emulated). Units in quad-cycles(4 cycles)"},
+       "The number of cycles needed to execute non-memory read scalar operations (SALU). This "
+       "value is returned on a per-SE (aggregate of values in SIMDs in the SE) basis with units in "
+       "quad-cycles(4 cycles)."},
       {"SQ_THREAD_CYCLES_VALU",
        "SQ",
        "86",
@@ -100,7 +118,8 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "SQ",
        "94",
        "<None>",
-       "Number of cycles LDS is stalled by bank conflicts. (emulated)"},
+       "The number of cycles LDS (local data store) is stalled by bank conflicts. This value is "
+       "returned on a per-SE (aggregate of values in SIMDs in the SE) basis."},
       {"TCC_HIT", "TCC", "17", "<None>", "Number of cache hits."},
       {"TCC_MISS", "TCC", "19", "<None>", "Number of cache misses. UC reads count as misses."},
       {"TCC_EA_WRREQ",
@@ -133,12 +152,19 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
        "SQ",
        "4",
        "<None>",
-       "Count number of waves sent to SQs. (per-simd, emulated, global)"},
+       "Count number of waves sent to distributed sequencers (SQs). This value represents the "
+       "number of waves that are sent to each SQ. This only counts new waves sent since the start "
+       "of collection (for dispatch profiling this is the timeframe of kernel execution, for agent "
+       "profiling it is the timeframe between start_context and read counter data). A sum of all "
+       "SQ_WAVES values will give the total number of waves started by the application during the "
+       "collection timeframe. Returns one value per-SE (aggregates of SIMD values)."},
       {"SQ_INSTS_VALU",
        "SQ",
        "26",
        "<None>",
-       "Number of VALU instructions issued. (per-simd, emulated)"},
+       "The number of VALU (Vector ALU) instructions issued. The value is returned per-SE "
+       "(aggregate of values in SIMDs in the SE). See AMD ISAs for more information on VALU "
+       "instructions."},
       {"TA_TA_BUSY",
        "TA",
        "15",
@@ -220,8 +246,10 @@ static const std::unordered_map<std::string, std::vector<std::vector<std::string
         "",
         "",
         "reduce(SQ_WAVES,sum)",
-        "Count number of waves sent to SQs. (per-simd, emulated, global). Sum over SQ "
-        "instances."},
+        "Gives the total number of waves currently enqueued by the application during the "
+        "collection timeframe (for dispatch profiling this is the timeframe of kernel execution, "
+        "for agent profiling it is the timeframe between start_context and read counter data). See "
+        "SQ_WAVES for more details."},
        {"TCC_HIT_sum",
         "",
         "",
