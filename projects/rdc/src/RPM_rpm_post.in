@@ -33,9 +33,10 @@ do_update_alternatives(){
     altscore=$((altscore*1000000+(now-1600000000)/60))
     binaries=(
         rdcd
+        rdci
     )
 
-    for i in $binaries
+    for i in "${binaries[@]}"
     do
         # No obvious recover strategy if things fail
         # No manual or other slave pages to install

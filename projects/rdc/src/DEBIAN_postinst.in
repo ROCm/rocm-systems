@@ -34,9 +34,10 @@ do_update_alternatives(){
 
     binaries=(
         rdcd
+        rdci
     )
 
-    for i in $binaries
+    for i in "${binaries[@]}"
     do
         # No obvious recover strategy if things fail
         # No manual or other slave pages to install
