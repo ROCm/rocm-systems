@@ -24,10 +24,10 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
-
-#include "texture_reference.hh"
 #include "utils.hh"
 #include "vec4.hh"
+#include "texture_reference.hh"
+#include "hip_texture_helper.hh"
 
 template <typename TestType> struct TextureTestParams {
   hipExtent extent;
@@ -64,7 +64,8 @@ template <typename TestType> struct TextureTestParams {
 
   bool Layered() const { return layers > 1; }
 
-  void GenerateTextureDesc(decltype(hipReadModeElementType) read_mode = hipReadModeElementType) {
+  void GenerateTextureDesc(decltype(hipReadModeElementType) read_mode = hipReadModeElementType,
+                           bool mipmap = false) {
     constexpr bool is_floating_point = std::is_floating_point_v<TestType>;
 
     memset(&tex_desc, 0, sizeof(tex_desc));
@@ -75,7 +76,10 @@ template <typename TestType> struct TextureTestParams {
       tex_desc.filterMode = GENERATE(hipFilterModePoint, hipFilterModeLinear);
     }
 
-    tex_desc.normalizedCoords = GENERATE(false, true);
+    tex_desc.normalizedCoords = true;
+    if (!mipmap) {  // mipMap requires normalizedCoords = true
+      tex_desc.normalizedCoords = GENERATE(false, true);
+    }
 
     auto address_mode_x = hipAddressModeClamp;
     auto address_mode_y = address_mode_x;
@@ -116,7 +120,7 @@ struct TextureTestFixture {
   hipResourceDesc res_desc;
 
   LinearAllocGuard<VecType> host_alloc;
-  TextureReference<VecType> tex_h;
+  TextureReference<VecType, normalized_read> tex_h;
   ArrayAllocGuardType<VecType> tex_alloc_d;
   TextureGuard tex;
   LinearAllocGuard<OutType> out_alloc_d;
@@ -167,5 +171,19 @@ struct TextureTestFixture {
     HIP_CHECK(hipMemcpy(out_alloc_h.data(), out_alloc_d.ptr(), sizeof(OutType) * params.NumIters(),
                         hipMemcpyDeviceToHost));
     HIP_CHECK(hipDeviceSynchronize());
+  }
+
+  template <typename ValType> bool Verify(const ValType& devValue, const ValType& hostValue) {
+    bool match = false;
+    if (params.tex_desc.filterMode == hipFilterModeLinear)
+      match = hipTextureSamplingVerify<ValType, hipFilterModeLinear>(devValue, hostValue);
+    else
+      match = hipTextureSamplingVerify<ValType, hipFilterModePoint>(devValue, hostValue);
+    if (!match) {
+      WARN((match ? "Matched: " : "Mismatched: ")
+           << " GPU output : " << getString(devValue) << " CPU expected: " << getString(hostValue)
+           << "\n");
+    }
+    return match;
   }
 };

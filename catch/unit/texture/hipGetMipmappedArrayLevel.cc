@@ -50,7 +50,7 @@ TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative_Parameters") {
   hipMipmappedArray_t array;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   hipExtent extent = make_hipExtent(4, 4, 6);
-  unsigned int levels = 4;
+  unsigned int levels = 1 + std::log2(extent.depth);
 
   HIP_CHECK(hipMallocMipmappedArray(&array, &desc, extent, levels, 0));
 
@@ -65,7 +65,7 @@ TEST_CASE("Unit_hipGetMipmappedArrayLevel_Negative_Parameters") {
   }
 
   SECTION("level index is greater than number of levels") {
-    HIP_CHECK_ERROR(hipGetMipmappedArrayLevel(&levelArray, array, 4), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipGetMipmappedArrayLevel(&levelArray, array, levels), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipFreeMipmappedArray(array));

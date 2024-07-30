@@ -148,7 +148,7 @@ hipFabs(const T &t) {
 }
 
 template<typename T, hipTextureFilterMode fMode = hipFilterModePoint, bool sRGB = false>
-bool hipTextureSamplingVerify(T outputData, T expected) {
+bool hipTextureSamplingVerify(const T &outputData, const T &expected) {
   bool testResult = false;
   if (fMode == hipFilterModePoint && !sRGB) {
     testResult = outputData == expected;

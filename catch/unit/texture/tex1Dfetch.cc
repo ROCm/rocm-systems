@@ -24,7 +24,7 @@ THE SOFTWARE.
 
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
-
+#include "test_fixture.hh"
 #include "kernels.hh"
 #include "utils.hh"
 #include "vec4.hh"
@@ -91,10 +91,7 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeElementType", "", char, uns
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
     INFO("Index: " << i);
     const auto ref_val = tex_h[i];
-    REQUIRE(ref_val.x == out_alloc_h[i].x);
-    REQUIRE(ref_val.y == out_alloc_h[i].y);
-    REQUIRE(ref_val.z == out_alloc_h[i].z);
-    REQUIRE(ref_val.w == out_alloc_h[i].w);
+    REQUIRE(out_alloc_h[i] == ref_val);
   }
 }
 
@@ -135,11 +132,11 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char,
   hipTextureDesc tex_desc;
   memset(&tex_desc, 0, sizeof(tex_desc));
   tex_desc.filterMode = hipFilterModePoint;
-  tex_desc.readMode = hipReadModeElementType;
+  tex_desc.readMode = hipReadModeNormalizedFloat;
   tex_desc.normalizedCoords = false;
   tex_desc.addressMode[0] = hipAddressModeClamp;
 
-  LinearAllocGuard<vec4<float>> out_alloc_d(LinearAllocs::hipMalloc, alloc_size);
+  LinearAllocGuard<vec4<float>> out_alloc_d(LinearAllocs::hipMalloc, tex_h.size() * sizeof(vec4<float>));
   TextureGuard tex(&res_desc, &tex_desc);
 
   const auto num_threads = std::min<size_t>(1024, tex_h.size());
@@ -148,16 +145,14 @@ TEMPLATE_TEST_CASE("Unit_tex1Dfetch_Positive_ReadModeNormalizedFloat", "", char,
       <<<num_blocks, num_threads>>>(out_alloc_d.ptr(), tex_h.size(), tex.object());
 
   std::vector<vec4<float>> out_alloc_h(tex_h.size());
-  HIP_CHECK(hipMemcpy(out_alloc_h.data(), out_alloc_d.ptr(), alloc_size, hipMemcpyDeviceToHost));
+  HIP_CHECK(hipMemcpy(out_alloc_h.data(), out_alloc_d.ptr(), tex_h.size() * sizeof(vec4<float>),
+                      hipMemcpyDeviceToHost));
   HIP_CHECK(hipDeviceSynchronize());
 
   for (auto i = 0u; i < out_alloc_h.size(); ++i) {
     INFO("Index: " << i);
-    const auto ref_val = Vec4Map<TestType>(tex_h[i], NormalizeInteger<TestType>);
-    REQUIRE(ref_val.x == out_alloc_h[i].x);
-    REQUIRE(ref_val.y == out_alloc_h[i].y);
-    REQUIRE(ref_val.z == out_alloc_h[i].z);
-    REQUIRE(ref_val.w == out_alloc_h[i].w);
+    const auto ref_val = Vec4Map(tex_h[i]);
+    REQUIRE(out_alloc_h[i] == ref_val);
   }
 }
 

@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipMipmappedArrayCreate_Negative_Parameters") {
   desc.Depth = 6;
   desc.Flags = 0;
 
-  unsigned int levels = 4;
+  unsigned int levels = 1 + std::log2(desc.Depth);
 
   HIP_CHECK(hipFree(0));
 

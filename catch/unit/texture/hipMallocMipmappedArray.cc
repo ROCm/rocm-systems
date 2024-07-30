@@ -50,7 +50,7 @@ TEST_CASE("Unit_hipMallocMipmappedArray_Negative_Parameters") {
   hipMipmappedArray_t array;
   hipChannelFormatDesc desc = hipCreateChannelDesc<float>();
   hipExtent extent = make_hipExtent(4, 4, 6);
-  unsigned int levels = 4;
+  unsigned int levels = 1 + std::log2(extent.depth);
 
   SECTION("mipmappedArray is nullptr") {
     HIP_CHECK_ERROR(hipMallocMipmappedArray(nullptr, &desc, extent, levels, 0),

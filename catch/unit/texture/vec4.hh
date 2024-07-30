@@ -75,13 +75,12 @@ template <typename T> inline void MakeVec4(const T x, const T y, const T z, cons
   return vec;
 }
 
-template <typename T, typename F> inline auto Vec4Map(const vec4<T>& vec, F f) {
-  vec4<decltype(f(vec.x))> ret;
-  ret.x = f(vec.x);
-  ret.y = f(vec.y);
-  ret.z = f(vec.z);
-  ret.w = f(vec.w);
-
+template <typename T> inline vec4<float> Vec4Map(const T& vec) {
+  vec4<float> ret;
+  ret.x = NormalizeInteger(vec.x);
+  ret.y = NormalizeInteger(vec.y);
+  ret.z = NormalizeInteger(vec.z);
+  ret.w = NormalizeInteger(vec.w);
   return ret;
 }
 

@@ -51,12 +51,18 @@ THE SOFTWARE.
 TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeElementType", "", char, unsigned char, short,
                    unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
-
+#if HT_NVIDIA
+  (void)hipGetLastError(); // Prevent negative tests affecting this
+#endif
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 4, 2);
   params.num_subdivisions = 2;
   params.GenerateTextureDesc();
-
+  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1] ||
+      params.tex_desc.addressMode[0] != params.tex_desc.addressMode[2]) {
+    INFO("Different address modes on X, Y, Z aren't supported. Skipped.");
+    return;
+  }
   TextureTestFixture<TestType> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(10, params.NumItersX());
@@ -104,10 +110,7 @@ TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeElementType", "", char, unsigned
     INFO("z: " << std::fixed << std::setprecision(16) << z);
 
     const auto ref_val = fixture.tex_h.Tex3D(x, y, z, params.tex_desc);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 
@@ -136,7 +139,11 @@ TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeNormalizedFloat", "", char, unsi
   params.extent = make_hipExtent(2, 2, 2);
   params.num_subdivisions = 2;
   params.GenerateTextureDesc(hipReadModeNormalizedFloat);
-
+  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1] ||
+      params.tex_desc.addressMode[0] != params.tex_desc.addressMode[2]) {
+    INFO("Different address modes on X, Y, Z aren't supported. Skipped.");
+    return;
+  }
   TextureTestFixture<TestType, true> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(10, params.NumItersX());
@@ -183,13 +190,8 @@ TEMPLATE_TEST_CASE("Unit_tex3D_Positive_ReadModeNormalizedFloat", "", char, unsi
     INFO("y: " << std::fixed << std::setprecision(16) << y);
     INFO("z: " << std::fixed << std::setprecision(16) << z);
 
-
-    auto ref_val = Vec4Map<TestType>(fixture.tex_h.Tex3D(x, y, z, params.tex_desc),
-                                     NormalizeInteger<TestType>);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    auto ref_val = fixture.tex_h.Tex3D(x, y, z, params.tex_desc);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 

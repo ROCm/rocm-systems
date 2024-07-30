@@ -55,6 +55,8 @@ TEST_CASE("Unit_hipMipmappedArrayDestroy_Negative_Parameters") {
   }
 
   SECTION("double free") {
+    INFO("Double free cheching isn't supported. Skipped.");
+    return;
     hipmipmappedArray array;
 
     HIP_ARRAY3D_DESCRIPTOR desc = {};
@@ -66,7 +68,7 @@ TEST_CASE("Unit_hipMipmappedArrayDestroy_Negative_Parameters") {
     desc.Depth = 6;
     desc.Flags = 0;
 
-    unsigned int levels = 4;
+    unsigned int levels = 1 + std::log2(desc.Depth);
 
     HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels));
 

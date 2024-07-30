@@ -23,35 +23,40 @@ THE SOFTWARE.
 #pragma once
 
 #include <cmath>
-
 #include "fixed_point.hh"
 
 #if defined(_WIN64)
 typedef __int64 ssize_t;
 #endif // _WIN64
 
-template <typename TexelType> class TextureReference {
+template <typename TexelType, bool normalized_read>
+class TextureReference {
+  using valType = decltype(TexelType::x);
+  static constexpr bool supportFilter = normalized_read || std::is_floating_point<valType>::value;
  public:
   TextureReference(TexelType* alloc, hipExtent extent, size_t layers)
-      : alloc_{alloc}, extent_{extent}, layers_{layers} {}
+      : alloc_(alloc), extent_{extent}, layers_{layers} {}
 
-  TexelType Tex1D(float x, const hipTextureDesc& tex_desc) const {
+  auto Tex1D(float x, const hipTextureDesc& tex_desc) const {
     return Tex1DLayered(x, 0, tex_desc);
   }
 
-  TexelType Tex2DGather(float x, float y, int comp, const hipTextureDesc& tex_desc) const {
+  auto Tex2DGather(float x, float y, int comp, const hipTextureDesc& tex_desc) const {
     x = tex_desc.normalizedCoords ? x * extent_.width : x;
     y = tex_desc.normalizedCoords ? y * extent_.height : y;
-
+#if HT_AMD
+    const auto [i, alpha] = GetLinearFilteringParams(x - 0.5f);
+    const auto [j, beta] = GetLinearFilteringParams(y - 0.5f);
+#else
     const auto [i, alpha] = GetLinearFilteringParams(x);
     const auto [j, beta] = GetLinearFilteringParams(y);
-
+#endif
     const auto T_i0j0 = Sample(i, j, 0, tex_desc.addressMode);
     const auto T_i1j0 = Sample(i + 1.0f, j, 0, tex_desc.addressMode);
     const auto T_i0j1 = Sample(i, j + 1.0f, 0, tex_desc.addressMode);
     const auto T_i1j1 = Sample(i + 1.0f, j + 1.0f, 0, tex_desc.addressMode);
 
-    const auto IndexVec4 = [](auto vec, int comp) {
+    const auto IndexVec4 = [](auto& vec, int comp) {
       switch (comp) {
         case 0:
           return vec.x;
@@ -66,33 +71,36 @@ template <typename TexelType> class TextureReference {
       }
     };
 
-    TexelType texel;
-    texel.x = IndexVec4(T_i0j1, comp);
-    texel.y = IndexVec4(T_i1j1, comp);
-    texel.z = IndexVec4(T_i1j0, comp);
-    texel.w = IndexVec4(T_i0j0, comp);
-
+    decltype(T_i0j0) texel {
+      IndexVec4(T_i0j1, comp),
+      IndexVec4(T_i1j1, comp),
+      IndexVec4(T_i1j0, comp),
+      IndexVec4(T_i0j0, comp)};
     return texel;
   }
 
-  TexelType Tex2D(float x, float y, const hipTextureDesc& tex_desc) const {
+  auto Tex2D(float x, float y, const hipTextureDesc& tex_desc) const {
     return Tex2DLayered(x, y, 0, tex_desc);
   }
 
-  TexelType Tex3D(float x, float y, float z, const hipTextureDesc& tex_desc) const {
+  auto Tex3D(float x, float y, float z, const hipTextureDesc& tex_desc) const {
     x = tex_desc.normalizedCoords ? x * extent_.width : x;
     y = tex_desc.normalizedCoords ? y * extent_.height : y;
     z = tex_desc.normalizedCoords ? z * extent_.depth : z;
     if (tex_desc.filterMode == hipFilterModePoint) {
       return Sample(floorf(x), floorf(y), floorf(z), tex_desc.addressMode);
     } else if (tex_desc.filterMode == hipFilterModeLinear) {
-      return LinearFiltering(x, y, z, tex_desc.addressMode);
+      if constexpr (supportFilter) {
+        return LinearFiltering(x, y, z, tex_desc.addressMode);
+      } else {
+        throw std::invalid_argument("hipFilterModeLinear not supported");
+      }
     } else {
       throw std::invalid_argument("Invalid hipFilterMode value");
     }
   }
 
-  TexelType TexCubemap(float x, float y, float z, const hipTextureDesc& tex_desc) const {
+  auto TexCubemap(float x, float y, float z, const hipTextureDesc& tex_desc) const {
     x = tex_desc.normalizedCoords ? x * extent_.width : x;
     y = tex_desc.normalizedCoords ? y * extent_.height : y;
     z = tex_desc.normalizedCoords ? z * extent_.depth : z;
@@ -144,30 +152,42 @@ template <typename TexelType> class TextureReference {
     if (tex_desc.filterMode == hipFilterModePoint) {
       return Sample(roundf(coord1), roundf(coord2), face, tex_desc.addressMode);
     } else if (tex_desc.filterMode == hipFilterModeLinear) {
-      return LinearFiltering(coord1, coord2, face, tex_desc.addressMode);
+      if constexpr (supportFilter) {
+        return LinearFiltering(coord1, coord2, face, tex_desc.addressMode);
+      } else {
+        throw std::invalid_argument("hipFilterModeLinear not supported");
+      }
     } else {
       throw std::invalid_argument("Invalid hipFilterMode value");
     }
   }
 
-  TexelType Tex1DLayered(float x, int layer, const hipTextureDesc& tex_desc) const {
+  auto Tex1DLayered(float x, int layer, const hipTextureDesc& tex_desc) const {
     x = tex_desc.normalizedCoords ? x * extent_.width : x;
     if (tex_desc.filterMode == hipFilterModePoint) {
       return Sample(floorf(x), layer, tex_desc.addressMode);
     } else if (tex_desc.filterMode == hipFilterModeLinear) {
-      return LinearFiltering(x, layer, tex_desc.addressMode);
+      if constexpr (supportFilter) {
+        return LinearFiltering(x, layer, tex_desc.addressMode);
+      } else {
+        throw std::invalid_argument("hipFilterModeLinear not supported");
+      }
     } else {
       throw std::invalid_argument("Invalid hipFilterMode value");
     }
   }
 
-  TexelType Tex2DLayered(float x, float y, int layer, const hipTextureDesc& tex_desc) const {
+  auto Tex2DLayered(float x, float y, int layer, const hipTextureDesc& tex_desc) const {
     x = tex_desc.normalizedCoords ? x * extent_.width : x;
     y = tex_desc.normalizedCoords ? y * extent_.height : y;
     if (tex_desc.filterMode == hipFilterModePoint) {
       return Sample(floorf(x), floorf(y), layer, tex_desc.addressMode);
     } else if (tex_desc.filterMode == hipFilterModeLinear) {
-      return LinearFiltering(x, y, layer, tex_desc.addressMode);
+      if constexpr (supportFilter) {
+        return LinearFiltering(x, y, layer, tex_desc.addressMode);
+      } else {
+        throw std::invalid_argument("hipFilterModeLinear not supported");
+      }
     } else {
       throw std::invalid_argument("Invalid hipFilterMode value");
     }
@@ -188,15 +208,13 @@ template <typename TexelType> class TextureReference {
   const hipExtent extent_;
   const size_t layers_;
 
-  template <typename T> TexelType Vec4Sum(T arg) const { return Vec4Add(arg, Zero()); }
-
-  template <typename T, typename... Ts> TexelType Vec4Sum(T arg, Ts... args) const {
-    return Vec4Add(arg, Vec4Sum(args...));
+  TexelType Zero() const {
+    TexelType ret {0, 0, 0, 0};
+    return ret;
   }
 
-  TexelType Zero() const {
-    TexelType ret;
-    memset(&ret, 0, sizeof(ret));
+  vec4<float> Zerof() const {
+    vec4<float> ret {0., 0., 0., 0.};
     return ret;
   }
 
@@ -217,41 +235,63 @@ template <typename TexelType> class TextureReference {
     }
   }
 
-  TexelType Sample(float x, int layer, const hipTextureAddressMode* address_mode) const {
+  auto Sample(float x, int layer, const hipTextureAddressMode* address_mode) const {
     x = ApplyAddressMode(x, extent_.width, address_mode[0]);
 
-    if (std::isnan(x)) {
-      return Zero();
+    if constexpr (normalized_read) {
+      if (std::isnan(x)) {
+        return Zerof();
+      }
+      return Vec4Map(ptr(layer)[static_cast<size_t>(x)]);
+    } else {
+      if (std::isnan(x)) {
+        return Zero();
+      }
+      return ptr(layer)[static_cast<size_t>(x)];
     }
-
-    return ptr(layer)[static_cast<size_t>(x)];
   }
 
-  TexelType Sample(float x, float y, int layer, const hipTextureAddressMode* address_mode) const {
+  auto Sample(float x, float y, int layer, const hipTextureAddressMode* address_mode) const {
     x = ApplyAddressMode(x, extent_.width, address_mode[0]);
     y = ApplyAddressMode(y, extent_.height, address_mode[1]);
 
-    if (std::isnan(x) || std::isnan(y)) {
-      return Zero();
+    if constexpr (normalized_read) {
+      if (std::isnan(x) || std::isnan(y)) {
+        return Zerof();
+      }
+      return Vec4Map(
+          ptr(layer)[static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)]);
+    } else {
+      if (std::isnan(x) || std::isnan(y)) {
+        return Zero();
+      }
+      return ptr(layer)[static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)];
     }
-
-    return ptr(layer)[static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)];
   }
 
-  TexelType Sample(float x, float y, float z, const hipTextureAddressMode* address_mode) const {
+  auto Sample(float x, float y, float z, const hipTextureAddressMode* address_mode) const {
     x = ApplyAddressMode(x, extent_.width, address_mode[0]);
     y = ApplyAddressMode(y, extent_.height, address_mode[1]);
     z = ApplyAddressMode(z, extent_.depth, address_mode[2]);
 
-    if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
-      return Zero();
+    if constexpr (normalized_read) {
+      if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
+        return Zerof();
+      }
+      return Vec4Map(
+          ptr(0)[static_cast<size_t>(z) * extent_.width * extent_.height +
+                            static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)]);
+    } else {
+      if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
+        return Zero();
+      }
+      return ptr(0)[static_cast<size_t>(z) * extent_.width * extent_.height +
+                    static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)];
     }
-
-    return ptr(0)[static_cast<size_t>(z) * extent_.width * extent_.height +
-                  static_cast<size_t>(y) * extent_.width + static_cast<size_t>(x)];
   }
 
-  TexelType LinearFiltering(float x, int layer, const hipTextureAddressMode* address_mode) const {
+  // LinearFiltering won't be called when valType isn't float or normalized_read is false
+  auto LinearFiltering(float x, int layer, const hipTextureAddressMode* address_mode) const {
     const auto [i, alpha] = GetLinearFilteringParams(x);
 
     const auto T_i0 = Sample(i, layer, address_mode);
@@ -259,11 +299,10 @@ template <typename TexelType> class TextureReference {
 
     const auto term_i0 = Vec4Scale((1.0f - alpha), T_i0);
     const auto term_i1 = Vec4Scale(alpha, T_i1);
-
-    return Vec4Sum(term_i0, term_i1);
+    return term_i0 + term_i1;
   }
 
-  TexelType LinearFiltering(float x, float y, int layer,
+  auto LinearFiltering(float x, float y, int layer,
                             const hipTextureAddressMode* address_mode) const {
     const auto [i, alpha] = GetLinearFilteringParams(x);
     const auto [j, beta] = GetLinearFilteringParams(y);
@@ -278,10 +317,10 @@ template <typename TexelType> class TextureReference {
     const auto term_i0j1 = Vec4Scale((1.0f - alpha) * beta, T_i0j1);
     const auto term_i1j1 = Vec4Scale(alpha * beta, T_i1j1);
 
-    return Vec4Sum(term_i0j0, term_i1j0, term_i0j1, term_i1j1);
+    return term_i0j0 + term_i1j0 + term_i0j1 + term_i1j1;
   }
 
-  TexelType LinearFiltering(float x, float y, float z,
+  auto LinearFiltering(float x, float y, float z,
                             const hipTextureAddressMode* address_mode) const {
     const auto [i, alpha] = GetLinearFilteringParams(x);
     const auto [j, beta] = GetLinearFilteringParams(y);
@@ -305,8 +344,8 @@ template <typename TexelType> class TextureReference {
     const auto term_i0j1k1 = Vec4Scale((1.0f - alpha) * beta * gamma, T_i0j1k1);
     const auto term_i1j1k1 = Vec4Scale(alpha * beta * gamma, T_i1j1k1);
 
-    return Vec4Sum(term_i0j0k0, term_i1j0k0, term_i0j1k0, term_i1j1k0, term_i0j0k1, term_i1j0k1,
-                   term_i0j1k1, term_i1j1k1);
+    return term_i0j0k0 + term_i1j0k0 + term_i0j1k0 + term_i1j1k0 + term_i0j0k1 + term_i1j0k1 +
+                   term_i0j1k1 + term_i1j1k1;
   }
 
   float ApplyClamp(float coord, size_t dim) const {

@@ -57,7 +57,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DGrad_Positive_ReadModeElementType", "", char, unsi
   params.num_subdivisions = 4;
   params.GenerateTextureDesc();
 
-  TextureTestFixture<TestType, false, true> fixture{params};
+  TextureTestFixture<TestType, false, false> fixture{params};
 
   const auto [num_threads, num_blocks] = GetLaunchConfig(1024, params.NumItersX());
   tex1DGradKernel<vec4<TestType>><<<num_blocks, num_threads>>>(
@@ -77,10 +77,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DGrad_Positive_ReadModeElementType", "", char, unsi
     INFO("x: " << std::fixed << std::setprecision(16) << x);
 
     auto ref_val = fixture.tex_h.Tex1D(x, params.tex_desc);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 
@@ -110,7 +107,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DGrad_Positive_ReadModeNormalizedFloat", "", char, 
   params.num_subdivisions = 4;
   params.GenerateTextureDesc(hipReadModeNormalizedFloat);
 
-  TextureTestFixture<TestType, true, true> fixture{params};
+  TextureTestFixture<TestType, true, false> fixture{params};
 
   const auto [num_threads, num_blocks] = GetLaunchConfig(1024, params.NumItersX());
   tex1DGradKernel<vec4<float>><<<num_blocks, num_threads>>>(
@@ -129,12 +126,8 @@ TEMPLATE_TEST_CASE("Unit_tex1DGrad_Positive_ReadModeNormalizedFloat", "", char, 
     INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
     INFO("x: " << std::fixed << std::setprecision(16) << x);
 
-    auto ref_val =
-        Vec4Map<TestType>(fixture.tex_h.Tex1D(x, params.tex_desc), NormalizeInteger<TestType>);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    auto ref_val = fixture.tex_h.Tex1D(x, params.tex_desc);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 

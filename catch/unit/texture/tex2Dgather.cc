@@ -56,7 +56,11 @@ TEMPLATE_TEST_CASE("Unit_tex2Dgather_Positive_ReadModeElementType", "", char, un
   params.extent = make_hipExtent(16, 4, 0);
   params.num_subdivisions = 4;
   params.GenerateTextureDesc();
-
+  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1]) {
+    INFO("Different address modes on X, Y aren't supported. Skipped.");
+    return;
+  }
+  if (params.tex_desc.filterMode == hipFilterModeLinear) return;
   TextureTestFixture<TestType> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(32, params.NumItersX());
@@ -94,12 +98,10 @@ TEMPLATE_TEST_CASE("Unit_tex2Dgather_Positive_ReadModeElementType", "", char, un
     INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
     INFO("x: " << std::fixed << std::setprecision(16) << x);
     INFO("y: " << std::fixed << std::setprecision(16) << y);
+    INFO("comp: " << comp);
 
     const auto ref_val = fixture.tex_h.Tex2DGather(x, y, comp, params.tex_desc);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 

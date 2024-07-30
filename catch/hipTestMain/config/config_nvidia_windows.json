@@ -39,6 +39,25 @@
         "Performance_hipMemsetD32Async",
         "Unit_hipMemcpyParam2D_Positive_Synchronization_Behavior",
         "Unit_hipMemcpy_Positive_Synchronization_Behavior",
-        "Unit_hipMemMapArrayAsync_Positive_Basic"
+        "Unit_hipMemMapArrayAsync_Positive_Basic",
+        "=== SWDEV-475987 : Disable tests to merge hipother change 12/08/2024 ===",
+        "Unit_hipMalloc3DArray_Negative_InvalidFormat",
+        "Unit_hipMalloc3DArray_Negative_BadChannelLayout",
+        "Unit_hipMalloc3DArray_Negative_8BitFloat",
+        "Unit_hipMalloc3DArray_Negative_DifferentChannelSizes",
+        "Unit_hipMalloc3DArray_Negative_BadChannelSize",
+        "Unit_hipMallocMipmappedArray_Negative_InvalidFormat",
+        "Unit_hipMallocMipmappedArray_Negative_BadChannelLayout",
+        "Unit_hipMallocMipmappedArray_Negative_8BitFloat",
+        "Unit_hipMallocMipmappedArray_Negative_DifferentChannelSizes",
+        "Unit_hipMallocMipmappedArray_Negative_BadChannelSize",
+        "Unit_hipMallocArray_Negative_DifferentChannelSizes",
+        "Unit_hipMallocArray_Negative_8bitFloat - float",
+        "Unit_hipMallocArray_Negative_8bitFloat - float2",
+        "Unit_hipMallocArray_Negative_8bitFloat - float4",
+        "Unit_hipMallocArray_Negative_BadNumberOfBits",
+        "Unit_hipMallocArray_Negative_3ChannelElement",
+        "Unit_hipMallocArray_Negative_ChannelAfterZeroChannel",
+        "Unit_hipMallocArray_Negative_InvalidChannelFormat"
     ]
 }

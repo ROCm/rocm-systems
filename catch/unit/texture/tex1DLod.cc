@@ -55,7 +55,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DLod_Positive_ReadModeElementType", "", char, unsig
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(1024, 0, 0);
   params.num_subdivisions = 4;
-  params.GenerateTextureDesc();
+  params.GenerateTextureDesc(hipReadModeElementType, true);
 
   TextureTestFixture<TestType, false, true> fixture{params};
 
@@ -77,10 +77,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DLod_Positive_ReadModeElementType", "", char, unsig
     INFO("x: " << std::fixed << std::setprecision(16) << x);
 
     auto ref_val = fixture.tex_h.Tex1D(x, params.tex_desc);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 
@@ -108,7 +105,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DLod_Positive_ReadModeNormalizedFloat", "", char, u
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(1024, 0, 0);
   params.num_subdivisions = 4;
-  params.GenerateTextureDesc(hipReadModeNormalizedFloat);
+  params.GenerateTextureDesc(hipReadModeNormalizedFloat, true);
 
   TextureTestFixture<TestType, true, true> fixture{params};
 
@@ -129,12 +126,8 @@ TEMPLATE_TEST_CASE("Unit_tex1DLod_Positive_ReadModeNormalizedFloat", "", char, u
     INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
     INFO("x: " << std::fixed << std::setprecision(16) << x);
 
-    auto ref_val =
-        Vec4Map<TestType>(fixture.tex_h.Tex1D(x, params.tex_desc), NormalizeInteger<TestType>);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    auto ref_val = fixture.tex_h.Tex1D(x, params.tex_desc);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 

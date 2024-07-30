@@ -56,7 +56,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayeredLod_Positive_ReadModeElementType", "", char
   params.extent = make_hipExtent(1024, 0, 0);
   params.layers = 2;
   params.num_subdivisions = 4;
-  params.GenerateTextureDesc();
+  params.GenerateTextureDesc(hipReadModeElementType, true);
 
   TextureTestFixture<TestType, false, true> fixture{params};
 
@@ -81,10 +81,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayeredLod_Positive_ReadModeElementType", "", char
       INFO("x: " << std::fixed << std::setprecision(16) << x);
 
       auto ref_val = fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc);
-      REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-      REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-      REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-      REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+      REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
     }
   }
 }
@@ -114,7 +111,7 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayeredLod_Positive_ReadModeNormalizedFloat", "", 
   params.extent = make_hipExtent(1024, 0, 0);
   params.layers = 2;
   params.num_subdivisions = 4;
-  params.GenerateTextureDesc(hipReadModeNormalizedFloat);
+  params.GenerateTextureDesc(hipReadModeNormalizedFloat, true);
 
   TextureTestFixture<TestType, true, true> fixture{params};
 
@@ -138,12 +135,8 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayeredLod_Positive_ReadModeNormalizedFloat", "", 
       INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
       INFO("x: " << std::fixed << std::setprecision(16) << x);
 
-      auto ref_val = Vec4Map<TestType>(fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc),
-                                       NormalizeInteger<TestType>);
-      REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-      REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-      REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-      REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+      auto ref_val = fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc);
+      REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
     }
   }
 }

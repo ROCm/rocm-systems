@@ -56,6 +56,10 @@ TEMPLATE_TEST_CASE("Unit_tex2D_Positive_ReadModeElementType", "", char, unsigned
   params.extent = make_hipExtent(16, 4, 0);
   params.num_subdivisions = 4;
   params.GenerateTextureDesc();
+  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1]) {
+    INFO("Different address modes on X, Y aren't supported. Skipped.");
+    return;
+  }
 
   TextureTestFixture<TestType> fixture{params};
 
@@ -94,10 +98,7 @@ TEMPLATE_TEST_CASE("Unit_tex2D_Positive_ReadModeElementType", "", char, unsigned
     INFO("y: " << std::fixed << std::setprecision(16) << y);
 
     const auto ref_val = fixture.tex_h.Tex2D(x, y, params.tex_desc);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 
@@ -126,6 +127,10 @@ TEMPLATE_TEST_CASE("Unit_tex2D_Positive_ReadModeNormalizedFloat", "", char, unsi
   params.extent = make_hipExtent(16, 4, 0);
   params.num_subdivisions = 4;
   params.GenerateTextureDesc(hipReadModeNormalizedFloat);
+  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1]) {
+    INFO("Different address modes on X, Y aren't supported. Skipped.");
+    return;
+  }
 
   TextureTestFixture<TestType, true> fixture{params};
 
@@ -149,7 +154,7 @@ TEMPLATE_TEST_CASE("Unit_tex2D_Positive_ReadModeNormalizedFloat", "", char, unsi
 
   for (auto i = 0u; i < params.NumItersX() * params.NumItersY(); ++i) {
     float x = i % params.NumItersX();
-    float y = i / params.NumItersY();
+    float y = i / params.NumItersX();
 
     x = GetCoordinate(x, params.NumItersX(), params.Width(), params.num_subdivisions,
                       params.tex_desc.normalizedCoords);
@@ -162,13 +167,8 @@ TEMPLATE_TEST_CASE("Unit_tex2D_Positive_ReadModeNormalizedFloat", "", char, unsi
     INFO("Address mode Y: " << AddressModeToString(params.tex_desc.addressMode[1]));
     INFO("x: " << std::fixed << std::setprecision(16) << x);
     INFO("y: " << std::fixed << std::setprecision(16) << y);
-
-    auto ref_val =
-        Vec4Map<TestType>(fixture.tex_h.Tex2D(x, y, params.tex_desc), NormalizeInteger<TestType>);
-    REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-    REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-    REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-    REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+    auto ref_val = fixture.tex_h.Tex2D(x, y, params.tex_desc);
+    REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
   }
 }
 

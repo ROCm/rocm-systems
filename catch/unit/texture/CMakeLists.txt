@@ -52,55 +52,34 @@ set(TEST_SRC
     hipTexRefSetMaxAnisotropy.cc
 )
 
-# Mipmap APIs are not supported on Linux
-if(WIN32)
 # tests not for gfx90a+
 set(NOT_FOR_gfx90a_AND_ABOVE_TEST
     tex1D.cc
     tex1DGrad.cc
-    tex1DLod.cc
-    tex1DLayeredLod.cc
     tex1DLayeredGrad.cc
     tex1Dfetch.cc
     tex1DLayered.cc
     tex2D.cc
-    tex2DLod.cc
     tex2DGrad.cc
-    tex2DLayeredLod.cc
     tex2DLayeredGrad.cc
     tex2Dgather.cc
     tex2DLayered.cc
     tex3D.cc
     tex3DGrad.cc
-    tex3DLod.cc
-    texCubemap.cc
-    texCubemapGrad.cc
-    texCubemapLod.cc
-    texCubemapLayered.cc
-    texCubemapLayeredGrad.cc
-    texCubemapLayeredLod.cc
 )
-endif()
 
-set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx940 gfx941 gfx942)
+set(gfx90a_AND_ABOVE_TARGETS gfx90a gfx940 gfx941 gfx942 gfx950)
 function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   set(ARCH_CHECK -1 PARENT_SCOPE)
-  set(NOT_GFX90a -1)
-  set(GFX90a -1)
   string(REGEX MATCHALL "--offload-arch=gfx[0-9a-z]+" OFFLOAD_ARCH_LIST ${OFFLOAD_ARCH_STR_LOCAL})
   foreach(OFFLOAD_ARCH IN LISTS OFFLOAD_ARCH_LIST)
     string(REGEX MATCHALL "--offload-arch=(gfx[0-9a-z]+)" matches ${OFFLOAD_ARCH})
     if (CMAKE_MATCH_COUNT EQUAL 1)
       if (CMAKE_MATCH_1 IN_LIST gfx90a_AND_ABOVE_TARGETS)
-        set(GFX90a 1)
-      else()
-        set(NOT_GFX90a 1)
+        set(ARCH_CHECK 1 PARENT_SCOPE)
       endif()         # CMAKE_MATCH_1
     endif()        # CMAKE_MATCH_COUNT
   endforeach()   # OFFLOAD_ARCH_LIST
-  if (${NOT_GFX90a} EQUAL -1 AND ${GFX90a} EQUAL 1)
-    set(ARCH_CHECK 1 PARENT_SCOPE)
-  endif()
 endfunction()  # CheckAcceptedArchs
 
 add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
@@ -143,6 +122,11 @@ set(TEST_SRC
     hipTextureMipmapObj1D.cc
     hipTextureMipmapObj2D.cc
     hipTextureMipmapObj3D.cc
+    tex1DLod.cc
+    tex1DLayeredLod.cc
+    tex2DLod.cc
+    tex2DLayeredLod.cc
+    tex3DLod.cc
 )
 endif()
 

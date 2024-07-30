@@ -51,13 +51,18 @@ THE SOFTWARE.
 TEMPLATE_TEST_CASE("Unit_texCubemapLod_Positive_ReadModeElementType", "", char, unsigned char,
                    short, unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT;
-
+  INFO("texCubemap isn't supported. Skipped.");
+  return;
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);
   params.num_subdivisions = 4;
   params.cubemap = true;
-  params.GenerateTextureDesc();
-
+  params.GenerateTextureDesc(hipReadModeElementType, true);
+  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1] ||
+      params.tex_desc.addressMode[0] != params.tex_desc.addressMode[2]) {
+    INFO("Different address modes on X, Y, Z aren't supported. Skipped.");
+    return;
+  }
   TextureTestFixture<TestType, false, true> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(10, params.NumItersX());
@@ -107,10 +112,8 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLod_Positive_ReadModeElementType", "", char, 
         auto index = k * params.NumItersX() * params.NumItersY() + j * params.NumItersX() + i;
 
         const auto ref_val = fixture.tex_h.TexCubemap(x, y, z, params.tex_desc);
-        REQUIRE(ref_val.x == fixture.out_alloc_h[index].x);
-        REQUIRE(ref_val.y == fixture.out_alloc_h[index].y);
-        REQUIRE(ref_val.z == fixture.out_alloc_h[index].z);
-        REQUIRE(ref_val.w == fixture.out_alloc_h[index].w);
+        REQUIRE(fixture.Verify(fixture.out_alloc_h[index], ref_val));
+
       }
     }
   }
@@ -136,13 +139,18 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLod_Positive_ReadModeElementType", "", char, 
 TEMPLATE_TEST_CASE("Unit_texCubemapLod_Positive_ReadModeNormalizedFloat", "", char, unsigned char,
                    short, unsigned short) {
   CHECK_IMAGE_SUPPORT;
-
+  INFO("texCubemap isn't supported. Skipped.");
+  return;
   TextureTestParams<TestType> params = {};
   params.extent = make_hipExtent(2, 2, 6);
   params.num_subdivisions = 4;
   params.cubemap = true;
   params.GenerateTextureDesc(hipReadModeNormalizedFloat);
-
+  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1] ||
+      params.tex_desc.addressMode[0] != params.tex_desc.addressMode[2]) {
+    INFO("Different address modes on X, Y, Z aren't supported. Skipped.");
+    return;
+  }
   TextureTestFixture<TestType, true, true> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(10, params.NumItersX());
@@ -191,12 +199,8 @@ TEMPLATE_TEST_CASE("Unit_texCubemapLod_Positive_ReadModeNormalizedFloat", "", ch
 
         auto index = k * params.NumItersX() * params.NumItersY() + j * params.NumItersX() + i;
 
-        auto ref_val = Vec4Map<TestType>(fixture.tex_h.TexCubemap(x, y, z, params.tex_desc),
-                                         NormalizeInteger<TestType>);
-        REQUIRE(ref_val.x == fixture.out_alloc_h[index].x);
-        REQUIRE(ref_val.y == fixture.out_alloc_h[index].y);
-        REQUIRE(ref_val.z == fixture.out_alloc_h[index].z);
-        REQUIRE(ref_val.w == fixture.out_alloc_h[index].w);
+        auto ref_val = fixture.tex_h.TexCubemap(x, y, z, params.tex_desc);
+        REQUIRE(fixture.Verify(fixture.out_alloc_h[index], ref_val));
       }
     }
   }

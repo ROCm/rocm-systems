@@ -81,10 +81,8 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayered_Positive_ReadModeElementType", "", char, u
       INFO("x: " << std::fixed << std::setprecision(16) << x);
 
       const auto ref_val = fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc);
-      REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-      REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-      REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-      REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+      REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
+
     }
   }
 }
@@ -138,12 +136,8 @@ TEMPLATE_TEST_CASE("Unit_tex1DLayered_Positive_ReadModeNormalizedFloat", "", cha
       INFO("Address mode: " << AddressModeToString(params.tex_desc.addressMode[0]));
       INFO("x: " << std::fixed << std::setprecision(16) << x);
 
-      auto ref_val = Vec4Map<TestType>(fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc),
-                                       NormalizeInteger<TestType>);
-      REQUIRE(ref_val.x == fixture.out_alloc_h[i].x);
-      REQUIRE(ref_val.y == fixture.out_alloc_h[i].y);
-      REQUIRE(ref_val.z == fixture.out_alloc_h[i].z);
-      REQUIRE(ref_val.w == fixture.out_alloc_h[i].w);
+      auto ref_val = fixture.tex_h.Tex1DLayered(x, layer, params.tex_desc);
+      REQUIRE(fixture.Verify(fixture.out_alloc_h[i], ref_val));
     }
   }
 }

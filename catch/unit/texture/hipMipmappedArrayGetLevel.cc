@@ -59,7 +59,7 @@ TEST_CASE("Unit_hipMipmappedArrayGetLevel_Negative_Parameters") {
   desc.Depth = 6;
   desc.Flags = 0;
 
-  unsigned int levels = 4;
+  unsigned int levels = 1 + std::log2(desc.Depth);
 
   HIP_CHECK(hipFree(0));
   HIP_CHECK(hipMipmappedArrayCreate(&array, &desc, levels));
@@ -75,7 +75,7 @@ TEST_CASE("Unit_hipMipmappedArrayGetLevel_Negative_Parameters") {
   }
 
   SECTION("level index is greater than number of levels") {
-    HIP_CHECK_ERROR(hipMipmappedArrayGetLevel(&levelArray, array, 4), hipErrorInvalidValue);
+    HIP_CHECK_ERROR(hipMipmappedArrayGetLevel(&levelArray, array, levels), hipErrorInvalidValue);
   }
 
   HIP_CHECK(hipMipmappedArrayDestroy(array));

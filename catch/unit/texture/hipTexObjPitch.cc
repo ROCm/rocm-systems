@@ -57,15 +57,16 @@ static __global__ void texture2dCopyKernel(hipTextureObject_t texObj,
  *  - Textures supported on device
  *  - HIP_VERSION >= 5.2
  */
-TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", float, int,
-                    unsigned char, int16_t, char, unsigned int) {
+TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", char, unsigned char, short,
+                   unsigned short, int, unsigned int, float) {
   CHECK_IMAGE_SUPPORT
-
+#if HT_NVIDIA
+  (void)hipGetLastError(); // Prevent negative tests affecting this
+#endif
 #if __HIP_NO_IMAGE_SUPPORT
   HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
   return;
 #endif
-
   TestType* B;
   TestType* A;
   TestType* devPtrB;
