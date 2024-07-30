@@ -1,13 +1,14 @@
+# Counter Collection Services
 
-# Definitions: 
+## Definitions
 
 *Profile Config*: A configuration to specify what counters should be collected on an agent. This needs to be supplied to various counter collection APIs to initiate collection of counter data. Profiles are agent specific and cannot be used on different agents.
 
-*Counter ID*: Unique ID (per-architecture) that specifies the counter. The counter interface can be used to fetch information about the counter (such as its name or expression). 
+*Counter ID*: Unique ID (per-architecture) that specifies the counter. The counter interface can be used to fetch information about the counter (such as its name or expression).
 
 *Instance ID*: Unique record id encoding both the counter id and dimension for a specific collected value.
 
-*Dimension*: Dimensions provide context to the raw counter values to specify the specific hardware register (such as shader engine) that the value was collected from. All counter values have dimension data encoded in its instance id and functions in the counter interface can be used to extract the values for individual dimensions. There following dimensions are currently supported by rocprofiler-sdk: 
+*Dimension*: Dimensions provide context to the raw counter values to specify the specific hardware register (such as shader engine) that the value was collected from. All counter values have dimension data encoded in its instance id and functions in the counter interface can be used to extract the values for individual dimensions. There following dimensions are currently supported by rocprofiler-sdk:
 
 ```c
     ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
@@ -19,14 +20,13 @@
     ROCPROFILER_DIMENSION_INSTANCE,       ///< From unspecified hardware register
 ```
 
-# Using The Counter Collection Service
+## Using The Counter Collection Service
 
 There are two modes for the counter collection service: *dispatch profiling* where counters are collected on a per kernel launch basis and *agent profiling* where counters are collected on a device level. Dispatch profiling is useful for collecting highly detailed counters for a specific kernel execution in isolation (Note: dispatch profiling allows only a single kernel to execute in hardware at a time). Agent profiling is useful for collecting device level counters not tied to a specific kernel execution (i.e. collecting counter values for a specific time range). 
 
-This guide explains how to setup dispatch and agent profiling along will describing the usage of the common counter collection APIs. More detail on the APIs themselves (as well as non-common options) is available in the API documentation. Fully functional examples of both dispatch and agent profiling can be found on the sample directory of rocprofiler-sdk. 
+This guide explains how to setup dispatch and agent profiling along will describing the usage of the common counter collection APIs. More detail on the APIs themselves (as well as non-common options) is available in the API documentation. Fully functional examples of both dispatch and agent profiling can be found on the sample directory of rocprofiler-sdk.
 
-
-## tool_init() setup 
+### tool_init() setup
 
 The setup for dispatch and agent profiling is similar (with only minor changes needed to adapt code from one to another). In tool_init, similar to tracing services, you need to create a context and a buffer to collect the output. Important Note: buffered_callback in rocprofiler_create_buffer is called when the buffer is full with a vector of collected counter samples, see the buffered callback section below for processing.  
 
@@ -63,8 +63,7 @@ After creating a context and buffer to store results, it is highly recommended (
                      "Could not setup buffered service");
 ```
 
-
-### Profile Setup
+#### Profile Setup
 
 The first step in constructing a counter collection profile is to find the GPU agents on the machine. A profile will need to be created for each set of counters you want to collect on every agent on the machine. You can use rocprofiler_query_available_agents to find agents on the system. The below example will collect all GPU agents on the device and store them in the vector agents.
 
@@ -150,13 +149,13 @@ After you have identified a set of counters you wish to collect, a profile can b
 
 The created profile can in turn be used for both dispatch and agent counter collection services. 
 
-#### Special Notes On Profile Behavior
+##### Special Notes On Profile Behavior
 - Profile created is *only valid* for the agent it was created for.
 - Profiles are immutable. If a new counter set is desired to be collected, construct a new profile. 
 - A single profile can be used multiple times on the same agent. 
 - Counter IDs that are supplied to rocprofiler_create_profile_config are *agent specific* and cannot be used to construct profiles for other agents.
 
-## Dispatch Profiling Callback
+### Dispatch Profiling Callback
 
 When a kernel is dispatched, a dispatch callback is issued to the tool to allow for the selection of counters to collect for the dispatch (via supplying a profile). 
 
@@ -170,7 +169,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
 
 Dispatch data contains information about the dispatch that is being launched (such as its name) and config is where the tool can specify the profile (and in turn counters) to collect for the dispatch. If no profile is supplied, no counters are collected for this dispatch. User data contains user data supplied to rocprofiler_configure_buffered_dispatch_profile_counting_service. 
 
-## Agent Set Profile Callback
+### Agent Set Profile Callback
 
 This callback is called when the context is started and allows for the tool to specify the profile to be used. 
 
@@ -184,7 +183,7 @@ set_profile(rocprofiler_context_id_t                 context_id,
 
 The profile to be used for this agent is specified by calling set_config(agent, profile). 
 
-## Buffered Callback
+### Buffered Callback
 
 Data from collected counter values is returned via a buffered callback. The buffered callback routines are similar between dispatch and agent profiling with the exception that some data (such as kernel launch ids) are not available in agent profiling mode. A sample iteration to print out counter collection data is the following:
 
@@ -225,7 +224,7 @@ Data from collected counter values is returned via a buffered callback. The buff
     }
 ```
 
-# Counter Definitions
+## Counter Definitions
 
 Counters are defined in yaml format in the file counter_defs.yaml. The counter definition has the following format
 
@@ -244,9 +243,9 @@ counter_name:       # Counter name
 
 Architectures can be separately defined with their own definitions (i.e. gfx90a and gfx1010 in the above example). If two or more architectures share the same block/event/expression definition, they can be "/" delimited on a single line (i.e. "gfx90a/gfx1010:"). Hardware metrics have the elements block, event, and description defined. Derrived metrics have the element expression defined (and cannot have block or event defined).
 
-# Derived Metrics
+## Derived Metrics
 
-Derrived metrics allow for computations (via expressions) to be performed on collected hardware metrics with the result returned as it it were a real hardware counter. 
+Derrived metrics allow for computations (via expressions) to be performed on collected hardware metrics with the result returned as it it were a real hardware counter.
 
 ```yaml
 GPU_UTIL:
@@ -258,26 +257,25 @@ GPU_UTIL:
 
 GPU_UTIL is an example of a derrived metric which takes the values of two GRBM hardware counters (GRBM_GUI_ACTIVE and GRBM_COUNT) and uses a mathematic expression to calculate the utilization rate of the GPU. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions (reduce and accumulate).
 
-## Reduce Function
+### Reduce Function
 
 ```yaml
 expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
 ```
 
-Reduce() reduces counter values across all dimensions (shader engine, SIMD, etc) to produce a single output value. This is useful when you want to collect and compare values across the entire device. There are a number of reduction operations that can be perfomed: sum, average (avr), minimum value (selects minimum value across all dimensions, min), and max (selects the maximum value across all dimensions). For example reduce(GL2C_HIT,sum) sums all GL2C_HIT hardware register values together to return a single output value. 
+Reduce() reduces counter values across all dimensions (shader engine, SIMD, etc) to produce a single output value. This is useful when you want to collect and compare values across the entire device. There are a number of reduction operations that can be perfomed: sum, average (avr), minimum value (selects minimum value across all dimensions, min), and max (selects the maximum value across all dimensions). For example reduce(GL2C_HIT,sum) sums all GL2C_HIT hardware register values together to return a single output value.
 
-
-## Accumulate Function
+### Accumulate Function
 ```yaml
 expression: accumulate(<basic_level_counter>, <resolution>)
 ```
-### Description
+#### Description
 - The accumulate metric is used to sum the values of a basic level counter over a specified number of cycles. By setting the resolution parameter, you can control the frequency of the summing operation:
     - HIGH_RES: Sums up the basic counter every clock cycle. Captures the value every single cycle for higher accuracy, suitable for fine-grained analysis.
     - LOW_RES: Sums up the basic counter every four clock cycles. Reduces the data points and provides less detailed summing, useful for reducing data volume.
     - NONE: Does nothing and is equivalent to collecting basic_level_counter. Outputs the value of the basic counter without any summing operation.
 
-### Usage
+#### Usage
 ```yaml
 MeanOccupancyPerCU:
   architectures:

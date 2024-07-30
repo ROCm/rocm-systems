@@ -7,10 +7,12 @@ on:
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
+      - 'CODEOWNERS'
   pull_request:
     paths-ignore:
       - '*.md'
       - 'source/docs/**'
+      - 'CODEOWNERS'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
