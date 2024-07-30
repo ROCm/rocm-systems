@@ -62,11 +62,14 @@ do_create_rdc_user() {
         --no-create-home \
         --disabled-password \
         rdc
+    # only add render if it exists
     if [ $(getent group render) ]; then
         usermod -a -G render rdc
-    else
-        usermod -a -G video rdc
     fi
+
+    # add video always
+    usermod -a -G video rdc
+
     # Make sure this doesn't return non-zero if an id already exists
     return 0
 }
