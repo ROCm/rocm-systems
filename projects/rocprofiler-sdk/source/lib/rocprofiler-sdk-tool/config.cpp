@@ -161,14 +161,14 @@ get_kernel_filter_range(const std::string& kernel_filter)
 {
     if(kernel_filter.empty()) return {};
 
-    auto delim     = rocprofiler::sdk::parse::tokenize(kernel_filter, ",");
+    auto delim     = rocprofiler::sdk::parse::tokenize(kernel_filter, "[], ");
     auto range_set = std::unordered_set<uint32_t>{};
     for(const auto& itr : delim)
     {
-        if(itr.find('-') != std::string::npos && itr.find('[') != std::string::npos &&
-           itr.find(']') != std::string::npos)
+        if(itr.find('-') != std::string::npos)
         {
-            auto drange = rocprofiler::sdk::parse::tokenize(itr, "[-] ");
+            auto drange = rocprofiler::sdk::parse::tokenize(itr, "- ");
+
             ROCP_FATAL_IF(drange.size() != 2)
                 << "bad range format for '" << itr << "'. Expected [A-B] where A and B are numbers";
 
@@ -179,14 +179,9 @@ get_kernel_filter_range(const std::string& kernel_filter)
         }
         else
         {
-            auto dval = rocprofiler::sdk::parse::tokenize(itr, " ");
-            ROCP_ERROR_IF(dval.empty()) << "kernel range value '" << itr << "' produced no numbers";
-            for(const auto& ditr : dval)
-            {
-                ROCP_FATAL_IF(ditr.find_first_not_of("0123456789") != std::string::npos)
-                    << "expected integer for " << itr << ". Non-integer value detected";
-                range_set.emplace(std::stoul(ditr));
-            }
+            ROCP_FATAL_IF(itr.find_first_not_of("0123456789") != std::string::npos)
+                << "expected integer for " << itr << ". Non-integer value detected";
+            range_set.emplace(std::stoul(itr));
         }
     }
     return range_set;
