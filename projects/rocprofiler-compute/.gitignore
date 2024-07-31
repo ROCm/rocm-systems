@@ -19,3 +19,8 @@ VERSION.sha
 
 # temp files
 /tests/Testing
+
+# documentation artifacts
+/_build
+_toc.yml
+

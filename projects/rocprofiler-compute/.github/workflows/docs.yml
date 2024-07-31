@@ -4,10 +4,9 @@ on:
   push:
     branches: ["main"]
     paths:
-      - 'src/docs'
-      - 'src/archive/docs-1.x'
+      - 'docs/archive/docs-2.x/**'
+      - 'docs/archive/docs-1.x/**'
       - '.github/workflows/docs.yml'
-      - 'VERSION'
 
   workflow_dispatch:
 
@@ -31,24 +30,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
       - name: Additional python packages
-        run: pip3 install -r requirements-doc.txt
+        run: pip3 install -r docs/archive/requirements-doc.txt
       - name: Setup Pages
         uses: actions/configure-pages@v4
       - name: Build 1.x docs
         run: |
-          cd src/archive/docs-1.x
+          cd docs/archive/docs-1.x
           make html	
-      - name: Build current docs
+      - name: Build 2.x docs
         run: |
-          cd src/docs
+          cd docs/archive/docs-2.x
           make html
       - name: Relocate 1.x docs
         run: |
-          mv src/archive/docs-1.x/_build/html src/docs/_build/html/1.x
+          mv docs/archive/docs-1.x/_build/html docs/archive/_build/html/1.x
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./src/docs/_build/html
+          path: ./docs/archive/_build/html
 
   # Deployment job
   deploy:

@@ -20,8 +20,8 @@ sys.path.insert(0, os.path.abspath(".."))
 
 repo_version = "unknown"
 # Determine short version by file in repo
-if os.path.isfile("../../VERSION"):
-    with open("../../VERSION") as f:
+if os.path.isfile("./VERSION"):
+    with open("./VERSION") as f:
         repo_version = f.readline().strip()
 
 
