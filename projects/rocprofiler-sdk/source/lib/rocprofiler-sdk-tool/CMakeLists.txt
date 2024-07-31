@@ -11,6 +11,7 @@ set(TOOL_HEADERS
     domain_type.hpp
     generateCSV.hpp
     generateJSON.hpp
+    generateOTF2.hpp
     generatePerfetto.hpp
     helper.hpp
     output_file.hpp
@@ -23,6 +24,7 @@ set(TOOL_SOURCES
     domain_type.cpp
     generateCSV.cpp
     generateJSON.cpp
+    generateOTF2.cpp
     generatePerfetto.cpp
     helper.cpp
     main.c
@@ -44,7 +46,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-memcheck
             rocprofiler-sdk::rocprofiler-common-library
             rocprofiler-sdk::rocprofiler-cereal
-            rocprofiler-sdk::rocprofiler-perfetto)
+            rocprofiler-sdk::rocprofiler-perfetto
+            rocprofiler-sdk::rocprofiler-otf2)
 
 set_target_properties(
     rocprofiler-sdk-tool

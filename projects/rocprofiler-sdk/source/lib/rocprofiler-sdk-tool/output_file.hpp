@@ -43,6 +43,9 @@ namespace tool
 {
 using output_stream_dtor_t = void (*)(std::ostream*&);
 
+std::string
+get_output_filename(std::string_view fname, std::string_view ext);
+
 std::pair<std::ostream*, output_stream_dtor_t>
 get_output_stream(std::string_view fname, std::string_view ext);
 

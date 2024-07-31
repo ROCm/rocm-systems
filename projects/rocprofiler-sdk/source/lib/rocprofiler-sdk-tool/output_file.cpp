@@ -33,17 +33,10 @@ namespace tool
 {
 namespace fs = common::filesystem;
 
-std::pair<std::ostream*, output_stream_dtor_t>
-get_output_stream(std::string_view fname, std::string_view ext)
+std::string
+get_output_filename(std::string_view fname, std::string_view ext)
 {
     auto cfg_output_path = tool::format(tool::get_config().output_path);
-
-    if(cfg_output_path == "stdout" || cfg_output_path == "STDOUT")
-        return {&std::cout, [](auto*&) {}};
-    else if(cfg_output_path == "stderr" || cfg_output_path == "STDERR")
-        return {&std::cout, [](auto*&) {}};
-    else if(cfg_output_path.empty())
-        return {&std::clog, [](auto*&) {}};
 
     // add a period to provided file extension if necessary
     constexpr auto period   = std::string_view{"."};
@@ -60,10 +53,22 @@ get_output_stream(std::string_view fname, std::string_view ext)
                         output_path.string())};
     if(!fs::exists(output_path)) fs::create_directories(output_path);
 
-    auto output_file =
-        tool::format(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
+    return tool::format(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
+}
+std::pair<std::ostream*, output_stream_dtor_t>
+get_output_stream(std::string_view fname, std::string_view ext)
+{
+    auto cfg_output_path = tool::format(tool::get_config().output_path);
 
-    auto* _ofs = new std::ofstream{output_file};
+    if(cfg_output_path == "stdout" || cfg_output_path == "STDOUT")
+        return {&std::cout, [](auto*&) {}};
+    else if(cfg_output_path == "stderr" || cfg_output_path == "STDERR")
+        return {&std::cout, [](auto*&) {}};
+    else if(cfg_output_path.empty())
+        return {&std::clog, [](auto*&) {}};
+
+    auto  output_file = get_output_filename(fname, ext);
+    auto* _ofs        = new std::ofstream{output_file};
 
     LOG_IF(FATAL, !_ofs && !*_ofs) << fmt::format("Failed to open {} for output", output_file);
     ROCP_ERROR << "Opened result file: " << output_file;

@@ -5,6 +5,7 @@ cmake>=3.21.0
 cmake-format
 dataclasses
 numpy
+otf2
 pandas
 perfetto
 pycobertura

@@ -36,6 +36,7 @@
 
 #include <unistd.h>
 #include <algorithm>
+#include <chrono>
 #include <cstring>
 #include <ctime>
 #include <fstream>
@@ -51,24 +52,35 @@ namespace tool
 {
 namespace
 {
-std::string*
-get_local_datetime(const std::string& dt_format);
+template <typename Tp>
+auto
+as_pointer(Tp&& _val)
+{
+    return new Tp{_val};
+}
 
-const auto* launch_datetime = get_local_datetime(get_env("ROCP_TIME_FORMAT", "%F_%H.%M"));
-const auto  env_regexes =
+std::string*
+get_local_datetime(const std::string& dt_format, std::time_t*& dt_curr);
+
+std::time_t* launch_time  = nullptr;
+const auto*  launch_clock = as_pointer(std::chrono::system_clock::now());
+const auto*  launch_datetime =
+    get_local_datetime(get_env("ROCP_TIME_FORMAT", "%F_%H.%M"), launch_time);
+const auto env_regexes =
     new std::array<std::regex, 2>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
                                   std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"}};
 
 std::string*
-get_local_datetime(const std::string& dt_format)
+get_local_datetime(const std::string& dt_format, std::time_t*& _dt_curr)
 {
     constexpr auto strsize = 512;
-    auto           dt_curr = std::time_t{std::time(nullptr)};
 
-    char mbstr[strsize];
+    if(!_dt_curr) _dt_curr = new std::time_t{std::time_t{std::time(nullptr)}};
+
+    char mbstr[strsize] = {};
     memset(mbstr, '\0', sizeof(mbstr) * sizeof(char));
 
-    if(std::strftime(mbstr, sizeof(mbstr) - 1, dt_format.c_str(), std::localtime(&dt_curr)) != 0)
+    if(std::strftime(mbstr, sizeof(mbstr) - 1, dt_format.c_str(), std::localtime(_dt_curr)) != 0)
         return new std::string{mbstr};
 
     return nullptr;
@@ -245,39 +257,23 @@ config::config()
       get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
 , counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
 {
+    auto to_upper = [](std::string val) {
+        for(auto& vitr : val)
+            vitr = toupper(vitr);
+        return val;
+    };
+
     auto output_format = get_env("ROCPROF_OUTPUT_FORMAT", "CSV");
-
-    for(auto& itr : output_format)
-        itr = toupper(itr);
-
-    for(auto itr : {',', ';', ':'})
-    {
-        auto pos = std::string::npos;
-        do
-        {
-            pos = output_format.find(itr);
-            if(pos != std::string::npos) output_format.replace(pos, 1, " ");
-        } while(pos != std::string::npos);
-    }
-
-    auto entries = std::set<std::string>{};
-    auto parser  = std::stringstream{output_format};
-
-    while(true)
-    {
-        auto _val = std::string{};
-        parser >> _val;
-        if(!_val.empty())
-            entries.emplace(_val);
-        else
-            break;
-    }
+    auto entries       = std::set<std::string>{};
+    for(const auto& itr : sdk::parse::tokenize(output_format, " \t,;:"))
+        entries.emplace(to_upper(itr));
 
     csv_output     = entries.count("CSV") > 0 || entries.empty();
     json_output    = entries.count("JSON") > 0;
     pftrace_output = entries.count("PFTRACE") > 0;
+    otf2_output    = entries.count("OTF2") > 0;
 
-    const auto supported_formats = std::set<std::string_view>{"CSV", "JSON", "PFTRACE"};
+    const auto supported_formats = std::set<std::string_view>{"CSV", "JSON", "PFTRACE", "OTF2"};
     for(const auto& itr : entries)
     {
         LOG_IF(FATAL, supported_formats.count(itr) == 0)

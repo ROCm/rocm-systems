@@ -79,9 +79,11 @@ get_ticks(clockid_t clk_id_v) noexcept
     return (static_cast<uint64_t>(ts.tv_sec) * nanosec) + static_cast<uint64_t>(ts.tv_nsec);
 }
 
+static constexpr int default_clock_id = CLOCK_BOOTTIME;
+
 // CLOCK_MONOTONIC_RAW equates to HSA-runtime library implementation of os::ReadAccurateClock()
 // CLOCK_BOOTTIME equates to HSA-runtime library implementation of os::ReadSystemClock()
-template <int ClockT = CLOCK_BOOTTIME>
+template <int ClockT = default_clock_id>
 inline uint64_t
 timestamp_ns()
 {

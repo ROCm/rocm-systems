@@ -53,7 +53,8 @@
     {                                                                                              \
     namespace NS                                                                                   \
     {                                                                                              \
-    struct VALUE;                                                                                  \
+    struct VALUE                                                                                   \
+    {};                                                                                            \
     }                                                                                              \
     }                                                                                              \
     }                                                                                              \

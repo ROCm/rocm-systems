@@ -77,6 +77,7 @@ struct config
     bool        csv_output                  = false;
     bool        json_output                 = false;
     bool        pftrace_output              = false;
+    bool        otf2_output                 = false;
     bool        kernel_rename               = get_env("ROCPROF_KERNEL_RENAME", false);
     int         mpi_size                    = get_mpi_size();
     int         mpi_rank                    = get_mpi_rank();

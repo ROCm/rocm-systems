@@ -36,7 +36,7 @@ add_test(
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --sys-trace no --hsa-trace=0
         --hsa-core-trace=1 --hip-compiler-trace False --hip-runtime-trace --kernel-trace
         --memory-copy-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace-cmd-line -o out
-        --output-format pftrace json --log-level env --kernel-rename
+        --output-format pftrace json otf2 --log-level env --kernel-rename
         --perfetto-shmem-size-hint 128 --perfetto-buffer-size 2048000
         --perfetto-buffer-fill-policy ring_buffer --perfetto-backend inprocess --
         $<TARGET_FILE:transpose>)
@@ -52,7 +52,9 @@ add_test(
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.pftrace
+        --otf2-input
+        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.otf2)
 
 set(VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-cmd-line/out_results.pftrace
@@ -94,7 +96,9 @@ add_test(
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
         ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.pftrace
+        --otf2-input
+        ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.otf2)
 
 set(VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/transpose-trace-inp-yaml/out_results.pftrace

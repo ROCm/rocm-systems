@@ -26,6 +26,7 @@
 #include "domain_type.hpp"
 #include "generateCSV.hpp"
 #include "generateJSON.hpp"
+#include "generateOTF2.hpp"
 #include "generatePerfetto.hpp"
 #include "helper.hpp"
 #include "output_file.hpp"
@@ -1249,8 +1250,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 {
     client_finalizer = fini_func;
 
-    const uint64_t buffer_size      = 32 * common::units::get_page_size();
-    const uint64_t buffer_watermark = 31 * common::units::get_page_size();
+    constexpr uint64_t buffer_size      = 32 * common::units::KiB;
+    constexpr uint64_t buffer_watermark = 31 * common::units::KiB;
 
     rocprofiler_get_timestamp(&(stats_timestamp->app_start_time));
 
@@ -1528,6 +1529,7 @@ tool_fini(void* /*tool_data*/)
 
     rocprofiler_get_timestamp(&(stats_timestamp->app_end_time));
 
+    flush();
     rocprofiler_stop_context(get_client_ctx());
     flush();
 
@@ -1603,6 +1605,19 @@ tool_fini(void* /*tool_data*/)
                                           &memory_copy_output.element_data,
                                           &marker_output.element_data,
                                           &scratch_memory_output.element_data);
+    }
+
+    if(tool::get_config().otf2_output)
+    {
+        rocprofiler::tool::write_otf2(tool_functions,
+                                      getpid(),
+                                      _agents,
+                                      &hip_output.element_data,
+                                      &hsa_output.element_data,
+                                      &kernel_dispatch_output.element_data,
+                                      &memory_copy_output.element_data,
+                                      &marker_output.element_data,
+                                      &scratch_memory_output.element_data);
     }
 
     auto destroy_output = [](auto& _buffered_output_v) { _buffered_output_v.destroy(); };

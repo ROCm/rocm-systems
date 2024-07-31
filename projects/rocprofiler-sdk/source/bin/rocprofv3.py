@@ -196,10 +196,10 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     )
     parser.add_argument(
         "--output-format",
-        help="For adding output format (supported formats: csv, json, pftrace)",
+        help="For adding output format (supported formats: csv, json, pftrace, otf2)",
         nargs="+",
         default=None,
-        choices=("csv", "json", "pftrace"),
+        choices=("csv", "json", "pftrace", "otf2"),
         type=str.lower,
     )
     parser.add_argument(

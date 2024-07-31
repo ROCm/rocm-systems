@@ -18,6 +18,7 @@ rocprofiler_add_interface_library(rocprofiler-threading "Enables multithreading 
                                   INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-perfetto "Enables Perfetto support"
                                   INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-otf2 "Enables OTF2 support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-cereal "Enables Cereal support" INTERNAL)
 rocprofiler_add_interface_library(rocprofiler-compile-definitions "Compile definitions"
                                   INTERNAL)

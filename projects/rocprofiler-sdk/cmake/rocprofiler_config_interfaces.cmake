@@ -276,3 +276,11 @@ target_link_libraries(rocprofiler-drm INTERFACE ${drm_LIBRARY} ${drm_amdgpu_LIBR
 # get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
 # target_include_directories(rocprofiler-elfio SYSTEM INTERFACE ${ELFIO_INCLUDE_DIR})
 target_link_libraries(rocprofiler-elfio INTERFACE elfio::elfio)
+
+# ----------------------------------------------------------------------------------------#
+#
+# OTF2
+#
+# ----------------------------------------------------------------------------------------#
+
+target_link_libraries(rocprofiler-otf2 INTERFACE otf2::otf2)

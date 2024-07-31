@@ -204,3 +204,6 @@ if(TARGET rocprofiler-elfio)
     get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
     target_include_directories(rocprofiler-elfio SYSTEM INTERFACE ${ELFIO_INCLUDE_DIR})
 endif()
+
+# OTF2
+add_subdirectory(otf2)
