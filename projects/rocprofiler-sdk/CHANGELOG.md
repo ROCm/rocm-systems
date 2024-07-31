@@ -74,3 +74,22 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 ## Changes
 
 - rocprofv3 tool now needs `--` in front of application. For detailed uses, please [Click Here](source/docs/rocprofv3.md)
+  
+## ROCprofiler-SDK for AFAR VI
+
+## Additions
+
+- OTF2 Tool Support
+- Kernel and Range Filtering
+- Counter Collection Definitions in YAML
+- Documentation updates (SQ Block, Counter Collection, Tracing, Tool Usage)
+- Added rocprofv3 option --kernel-rename
+- Added rocprofv3 options for perfetto settings (buffer size, etc.)
+- Added CSV columns for kernel trace
+  - Thread_Id
+  - Dispatch_Id
+- Added CSV column for counter_collection
+
+## Fixes
+
+- Miscellaneous bug fixes
