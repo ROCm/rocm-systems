@@ -48,13 +48,16 @@
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <algorithm>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <fmt/core.h>
+
 #include <unistd.h>
+#include <algorithm>
 #include <cassert>
+#include <csignal>
+#include <cstring>
 #include <fstream>
 #include <iomanip>
 #include <mutex>
@@ -1753,6 +1756,9 @@ get_main_function()
     static main_func_t user_main = nullptr;
     return user_main;
 }
+
+bool signal_handler_exit =
+    rocprofiler::tool::get_env("ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT", false);
 }  // namespace
 
 #define ROCPROFV3_INTERNAL_API __attribute__((visibility("internal")));
@@ -1760,6 +1766,15 @@ get_main_function()
 extern "C" {
 void
 rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
+
+void
+rocprofv3_error_signal_handler(int signo)
+{
+    finalize_rocprofv3();
+    // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
+    if(signal_handler_exit) ::exit(signo);
+    ::raise(signo);
+}
 
 int
 rocprofv3_main(int argc, char** argv, char** envp) ROCPROFV3_INTERNAL_API;
@@ -1847,6 +1862,20 @@ rocprofv3_main(int argc, char** argv, char** envp)
     initialize_logging();
 
     initialize_rocprofv3();
+
+    struct sigaction sig_act = {};
+    sigemptyset(&sig_act.sa_mask);
+    sig_act.sa_flags   = SA_RESETHAND | SA_NODEFER;
+    sig_act.sa_handler = &rocprofv3_error_signal_handler;
+    for(auto signal_v : {SIGTERM, SIGSEGV, SIGINT, SIGILL, SIGABRT, SIGFPE})
+    {
+        if(sigaction(signal_v, &sig_act, nullptr) != 0)
+        {
+            auto _errno_v = errno;
+            ROCP_ERROR << "error setting signal handler for " << signal_v
+                       << " :: " << strerror(_errno_v);
+        }
+    }
 
     auto ret = CHECK_NOTNULL(get_main_function())(argc, argv, envp);
 

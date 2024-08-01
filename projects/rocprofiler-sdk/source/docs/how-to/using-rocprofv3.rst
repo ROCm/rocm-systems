@@ -608,7 +608,7 @@ The following table lists the various fields or the columns in the output CSV fi
 Kernel Filtering
 +++++++++++++++++
 
-rocprofv3 supports kernel filtering. A kernel filter is a set of a regex string (to include the kernels matching this filter), a regex string (to exclude the kernels matching this filter),
+rocprofv3 supports kernel filtering for profiling. A kernel filter is a set of a regex string (to include the kernels matching this filter), a regex string (to exclude the kernels matching this filter),
 and an iteration range (set of iterations of the included kernels). If the iteration range is not provided then all iterations of the included kernels are profiled.
 
 .. code-block:: shell

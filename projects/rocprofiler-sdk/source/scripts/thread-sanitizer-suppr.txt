@@ -27,3 +27,6 @@ mutex:external/ptl/source/PTL/TaskGroup.hh
 
 # lock order inversion that cannot happen
 mutex:source/lib/common/synchronized.hpp
+
+# signal-unsafe function called from signal handler
+signal:rocprofv3_error_signal_handler

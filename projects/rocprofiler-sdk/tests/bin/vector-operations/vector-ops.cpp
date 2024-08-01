@@ -26,6 +26,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <algorithm>
+#include <csignal>
 #include <iostream>
 #include <mutex>
 #include <vector>
@@ -217,6 +218,12 @@ run(int NUM_QUEUE, int DEVICE_ID)
 
         HIP_API_CALL(hipGetLastError());
 
+        if(getenv("ROCPROF_TESTING_RAISE_SIGNAL") != nullptr &&
+           std::stoi(getenv("ROCPROF_TESTING_RAISE_SIGNAL")) > 0)
+        {
+            ::raise(SIGINT);
+        }
+
         hipLaunchKernelGGL(multiply_kernel,
                            dim3(WIDTH / THREADS_PER_BLOCK_X, HEIGHT / THREADS_PER_BLOCK_Y),
                            dim3(THREADS_PER_BLOCK_X, THREADS_PER_BLOCK_Y),
@@ -268,13 +275,17 @@ run(int NUM_QUEUE, int DEVICE_ID)
 }
 
 int
-main()
+main(int argc, char** argv)
 {
+    int stream_count = 8;
     int device_count = 0;
     HIP_API_CALL(hipGetDeviceCount(&device_count));
 
+    if(argc > 1) stream_count = std::stoi(argv[1]);
+    if(argc > 2) device_count = std::stoi(argv[2]);
+
     for(int i = 0; i < device_count; ++i)
-        run(8, i);
+        run(stream_count, i);
 
     return 0;
 }
