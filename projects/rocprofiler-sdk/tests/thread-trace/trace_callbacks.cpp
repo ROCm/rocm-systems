@@ -29,7 +29,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include "common.hpp"
 
 #include <atomic>
@@ -50,8 +50,8 @@ namespace Callbacks
 {
 using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
-using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
-using Instruction             = rocprofiler::codeobj::disassembly::Instruction;
+using CodeobjAddressTranslate = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+using Instruction             = rocprofiler::sdk::codeobj::disassembly::Instruction;
 
 CodeobjAddressTranslate* codeobjTranslate = nullptr;
 

@@ -23,7 +23,7 @@
 #include <glog/logging.h>
 #include <gtest/gtest.h>
 #include <fstream>
-#include <rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <string_view>
 #include <vector>
 
@@ -84,7 +84,7 @@ GetCodeobjContents()
 
 TEST(codeobj_library, segment_test)
 {
-    using CodeobjTableTranslator = rocprofiler::codeobj::segment::CodeobjTableTranslator;
+    using CodeobjTableTranslator = rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator;
 
     CodeobjTableTranslator     table;
     std::unordered_set<size_t> used_addr{};
@@ -122,10 +122,10 @@ TEST(codeobj_library, segment_test)
     }
 }
 
-namespace disassembly         = rocprofiler::codeobj::disassembly;
+namespace disassembly         = rocprofiler::sdk::codeobj::disassembly;
 namespace codeobjhelper       = rocprofiler::testing::codeobjhelper;
-using CodeobjDecoderComponent = rocprofiler::codeobj::disassembly::CodeobjDecoderComponent;
-using LoadedCodeobjDecoder    = rocprofiler::codeobj::disassembly::LoadedCodeobjDecoder;
+using CodeobjDecoderComponent = rocprofiler::sdk::codeobj::disassembly::CodeobjDecoderComponent;
+using LoadedCodeobjDecoder    = rocprofiler::sdk::codeobj::disassembly::LoadedCodeobjDecoder;
 
 TEST(codeobj_library, file_opens)
 {
@@ -192,7 +192,7 @@ TEST(codeobj_library, loaded_codeobj_component)
 
 TEST(codeobj_library, codeobj_map_test)
 {
-    using marker_id_t = rocprofiler::codeobj::segment::marker_id_t;
+    using marker_id_t = rocprofiler::sdk::codeobj::segment::marker_id_t;
 
     const std::vector<char>& objdata = rocprofiler::testing::codeobjhelper::GetCodeobjContents();
     constexpr size_t         laddr1  = 0x1000;
@@ -221,7 +221,7 @@ TEST(codeobj_library, codeobj_map_test)
 
 TEST(codeobj_library, codeobj_table_test)
 {
-    using marker_id_t = rocprofiler::codeobj::segment::marker_id_t;
+    using marker_id_t = rocprofiler::sdk::codeobj::segment::marker_id_t;
 
     const std::vector<std::string>& hiplines = codeobjhelper::GetHipccOutput();
     const std::vector<char>&        objdata  = codeobjhelper::GetCodeobjContents();

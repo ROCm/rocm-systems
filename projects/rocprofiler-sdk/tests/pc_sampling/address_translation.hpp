@@ -22,7 +22,7 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -38,9 +38,9 @@ namespace client
 {
 namespace address_translation
 {
-using Instruction             = rocprofiler::codeobj::disassembly::Instruction;
-using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
-using marker_id_t             = rocprofiler::codeobj::disassembly::marker_id_t;
+using Instruction             = rocprofiler::sdk::codeobj::disassembly::Instruction;
+using CodeobjAddressTranslate = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+using marker_id_t             = rocprofiler::sdk::codeobj::disassembly::marker_id_t;
 
 /**
  * @brief Pair (code_object_id, pc_addr) uniquely identifies an instruction.

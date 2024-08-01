@@ -31,6 +31,8 @@
 
 namespace rocprofiler
 {
+namespace sdk
+{
 namespace codeobj
 {
 namespace segment
@@ -89,4 +91,5 @@ private:
 
 }  // namespace segment
 }  // namespace codeobj
+}  // namespace sdk
 }  // namespace rocprofiler

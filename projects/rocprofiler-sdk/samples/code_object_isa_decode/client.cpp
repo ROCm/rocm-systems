@@ -38,7 +38,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 
 #include "common/defines.hpp"
 #include "common/filesystem.hpp"
@@ -90,8 +90,8 @@ using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 using kernel_symbol_map_t  = std::unordered_map<std::string, std::pair<uint64_t, size_t>>;
 
-using Instruction             = rocprofiler::codeobj::disassembly::Instruction;
-using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
+using Instruction             = rocprofiler::sdk::codeobj::disassembly::Instruction;
+using CodeobjAddressTranslate = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
 
 rocprofiler_client_id_t*      client_id          = nullptr;
 rocprofiler_client_finalize_t client_fini_func   = nullptr;

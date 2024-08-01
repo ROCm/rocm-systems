@@ -40,6 +40,8 @@
 
 namespace rocprofiler
 {
+namespace sdk
+{
 namespace codeobj
 {
 namespace disassembly
@@ -423,4 +425,5 @@ private:
 
 }  // namespace disassembly
 }  // namespace codeobj
+}  // namespace sdk
 }  // namespace rocprofiler

@@ -11,4 +11,5 @@ install(
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rocprofiler-sdk/cxx
     COMPONENT development)
 
+add_subdirectory(codeobj)
 add_subdirectory(details)

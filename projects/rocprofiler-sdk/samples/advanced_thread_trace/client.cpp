@@ -37,7 +37,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/amd_detail/rocprofiler-sdk-codeobj/code_printing.hpp>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <shared_mutex>
 
 #include "common/defines.hpp"
@@ -106,9 +106,9 @@ namespace client
 using code_obj_load_data_t = rocprofiler_callback_tracing_code_object_load_data_t;
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
 
-using Instruction             = rocprofiler::codeobj::disassembly::Instruction;
-using CodeobjAddressTranslate = rocprofiler::codeobj::disassembly::CodeobjAddressTranslate;
-using SymbolInfo              = rocprofiler::codeobj::disassembly::SymbolInfo;
+using Instruction             = rocprofiler::sdk::codeobj::disassembly::Instruction;
+using CodeobjAddressTranslate = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+using SymbolInfo              = rocprofiler::sdk::codeobj::disassembly::SymbolInfo;
 
 rocprofiler_client_id_t* client_id  = nullptr;
 rocprofiler_context_id_t client_ctx = {};
