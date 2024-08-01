@@ -3,7 +3,7 @@ run-name: ubuntu-focal
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -15,7 +15,7 @@ on:
       - '.github/workflows/formatting.yml'
       - 'docker/**'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
