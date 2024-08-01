@@ -460,7 +460,7 @@
 					let L2FirstToken = {}
 					let L2InstTime = {}
 					insts.forEach((ins, i) => {
-						const line_num = ins[4]
+						const line_num = ins[4]-1
 						if (!(line_num in L2FirstToken)) {
 							L2FirstToken[line_num] = ins[0]
 						}

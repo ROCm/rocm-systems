@@ -21,9 +21,10 @@ from http import HTTPStatus
 from io import BytesIO
 from drawing import Readable, GeneratePIC
 from copy import deepcopy
+from shutil import copy2
+from glob import glob
 
 JSON_GLOBAL_DICTIONARY = {}
-
 
 def get_ip():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -259,11 +260,11 @@ def view_trace(
 
     os.makedirs(trace_instance_name + "_ui/", exist_ok=True)
     JSON_GLOBAL_DICTIONARY["live.json"] = Readable({"live": 0})
-    os.system(
-        "cp "
-        + os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")
-        + "/* " + trace_instance_name + "_ui/"
-    )
+
+    ui_dir_files = glob(os.path.join(os.path.abspath(os.path.dirname(__file__)), "ui")+"/*")
+    for f in ui_dir_files:
+        copy2(f, trace_instance_name + "_ui/")
+
     for k, v in JSON_GLOBAL_DICTIONARY.items():
         with open(os.path.join(trace_instance_name+"_ui", k), "w" if ".json" in k else "wb") as f:
             f.write(v.read())
