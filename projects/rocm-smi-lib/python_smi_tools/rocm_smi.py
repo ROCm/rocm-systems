@@ -871,7 +871,13 @@ def printLog(device, metricName, value=None, extraSpace=False, useItalics=False)
     try:
         if extraSpace:
             print('\n', end='')
-        print(logstr + '\n', end='')
+
+        # Handle non UTF-8 locale
+        try:
+            print(logstr + '\n', end='')
+        except UnicodeEncodeError:
+            print(logstr.encode('ascii', 'ignore').decode('ascii'))
+
         sys.stdout.flush()
     # when piped into programs like 'head' - print throws an error.
     # silently ignore instead
