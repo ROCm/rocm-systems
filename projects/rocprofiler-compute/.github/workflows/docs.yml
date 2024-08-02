@@ -2,7 +2,7 @@ name: Documentation
 
 on:
   push:
-    branches: ["main"]
+    branches: [ main, amd-mainline ]
     paths:
       - 'docs/archive/docs-2.x/**'
       - 'docs/archive/docs-1.x/**'
@@ -36,7 +36,7 @@ jobs:
       - name: Build 1.x docs
         run: |
           cd docs/archive/docs-1.x
-          make html	
+          make html
       - name: Build 2.x docs
         run: |
           cd docs/archive/docs-2.x

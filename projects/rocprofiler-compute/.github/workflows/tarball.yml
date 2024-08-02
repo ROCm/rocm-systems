@@ -2,15 +2,13 @@ name: tarball
 
 on:
   push:
-    branches:
-      - main
-      - 2.x
+    branches: [ main, amd-mainline ]
   pull_request:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-  
+
 jobs:
   distbuild:
     runs-on: ubuntu-latest
@@ -25,7 +23,7 @@ jobs:
             echo "sha=${{github.event.pull_request.head.sha}}" >> $GITHUB_OUTPUT
           else
             echo "sha=$GITHUB_SHA" >> $GITHUB_OUTPUT
-          fi      
+          fi
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -101,9 +99,9 @@ jobs:
         run: sudo apt-get install -y lmod
       - name: Access omniperf using modulefile
         run: |
-          . /etc/profile.d/lmod.sh 
+          . /etc/profile.d/lmod.sh
           module use $INSTALL_DIR/omniperf/share/omniperf/modulefiles
           module load omniperf
           module list
           omniperf --version
-          
+

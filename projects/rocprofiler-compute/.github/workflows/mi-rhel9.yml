@@ -2,11 +2,10 @@ name: mi-rhel9
 
 on:
   push:
-    branches:
-      - 'main'
+    branches: [ main, amd-mainline ]
 
   # Allows manual execution
-  workflow_dispatch:            
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -29,10 +29,10 @@ contribution process.
 Omniperf follows a
 [main-dev](https://nvie.com/posts/a-successful-git-branching-model/)
 branching model. As a result, our latest stable release is shipped
-from the `main` branch, while new features are developed in our
-`dev` branch.
+from the `amd-mainline` branch, while new features are developed in our
+`amd-staging` branch.
 
-Users may checkout `dev` to preview upcoming features.
+Users may checkout `amd-staging` to preview upcoming features.
 
 ## How to Cite
 
