@@ -69,14 +69,6 @@ ALL_CSVS = sorted(
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
-        "pmc_perf_10.csv",
-        "pmc_perf_11.csv",
-        "pmc_perf_12.csv",
-        "pmc_perf_13.csv",
-        "pmc_perf_14.csv",
-        "pmc_perf_15.csv",
-        "pmc_perf_16.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -84,15 +76,13 @@ ALL_CSVS = sorted(
 ALL_CSVS_MI200 = sorted(
     ALL_CSVS
     + [
-        "pmc_perf_17.csv",
-        "pmc_perf_18.csv",
+        "pmc_perf_9.csv",
         "roofline.csv",
     ]
 )
 ALL_CSVS_MI300 = sorted(
     ALL_CSVS
     + [
-        "pmc_perf_17.csv",
     ]
 )
 ROOF_ONLY_FILES = sorted(
@@ -650,9 +640,6 @@ def test_block_SQ():
             "pmc_perf.csv",
             "pmc_perf_0.csv",
             "pmc_perf_1.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_11.csv",
-            "pmc_perf_12.csv",
             "pmc_perf_2.csv",
             "pmc_perf_3.csv",
             "pmc_perf_4.csv",
@@ -668,18 +655,14 @@ def test_block_SQ():
     if "MI300" in soc:
         expected_csvs = [
             "pmc_perf_0.csv",
-            "pmc_perf_11.csv",
             "pmc_perf_1.csv",
             "pmc_perf_3.csv",
             "pmc_perf_5.csv",
             "pmc_perf_7.csv",
-            "pmc_perf_9.csv",
             "SQ_IFETCH_LEVEL.csv",
             "SQ_INST_LEVEL_SMEM.csv",
             "SQ_LEVEL_WAVES.csv",
             "timestamps.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_12.csv",
             "pmc_perf_2.csv",
             "pmc_perf_4.csv",
             "pmc_perf_6.csv",
@@ -868,7 +851,6 @@ def test_block_TCC():
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1062,18 +1044,14 @@ def test_block_SQ_CPC():
     if "MI300" in soc:
         expected_csvs = [
             "pmc_perf_0.csv",
-            "pmc_perf_11.csv",
             "pmc_perf_1.csv",
             "pmc_perf_3.csv",
             "pmc_perf_5.csv",
             "pmc_perf_7.csv",
-            "pmc_perf_9.csv",
             "SQ_IFETCH_LEVEL.csv",
             "SQ_INST_LEVEL_SMEM.csv",
             "SQ_LEVEL_WAVES.csv",
             "timestamps.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_12.csv",
             "pmc_perf_2.csv",
             "pmc_perf_4.csv",
             "pmc_perf_6.csv",
@@ -1149,18 +1127,14 @@ def test_block_SQ_TA():
     if "MI300" in soc:
         expected_csvs = [
             "pmc_perf_0.csv",
-            "pmc_perf_11.csv",
             "pmc_perf_1.csv",
             "pmc_perf_3.csv",
             "pmc_perf_5.csv",
             "pmc_perf_7.csv",
-            "pmc_perf_9.csv",
             "SQ_IFETCH_LEVEL.csv",
             "SQ_INST_LEVEL_SMEM.csv",
             "SQ_LEVEL_WAVES.csv",
             "timestamps.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_12.csv",
             "pmc_perf_2.csv",
             "pmc_perf_4.csv",
             "pmc_perf_6.csv",
@@ -1232,18 +1206,14 @@ def test_block_SQ_SPI():
     if "MI300" in soc:
         expected_csvs = [
             "pmc_perf_0.csv",
-            "pmc_perf_11.csv",
             "pmc_perf_1.csv",
             "pmc_perf_3.csv",
             "pmc_perf_5.csv",
             "pmc_perf_7.csv",
-            "pmc_perf_9.csv",
             "SQ_IFETCH_LEVEL.csv",
             "SQ_INST_LEVEL_SMEM.csv",
             "SQ_LEVEL_WAVES.csv",
             "timestamps.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_12.csv",
             "pmc_perf_2.csv",
             "pmc_perf_4.csv",
             "pmc_perf_6.csv",
@@ -1287,7 +1257,6 @@ def test_block_SQ_SQC_TCP_CPC():
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1319,18 +1288,14 @@ def test_block_SQ_SQC_TCP_CPC():
     if "MI300" in soc:
         expected_csvs = [
             "pmc_perf_0.csv",
-            "pmc_perf_11.csv",
             "pmc_perf_1.csv",
             "pmc_perf_3.csv",
             "pmc_perf_5.csv",
             "pmc_perf_7.csv",
-            "pmc_perf_9.csv",
             "SQ_IFETCH_LEVEL.csv",
             "SQ_INST_LEVEL_SMEM.csv",
             "SQ_LEVEL_WAVES.csv",
             "timestamps.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_12.csv",
             "pmc_perf_2.csv",
             "pmc_perf_4.csv",
             "pmc_perf_6.csv",
@@ -1364,7 +1329,6 @@ def test_block_SQ_SPI_TA_TCC_CPF():
         "pmc_perf.csv",
         "pmc_perf_0.csv",
         "pmc_perf_1.csv",
-        "pmc_perf_10.csv",
         "pmc_perf_2.csv",
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
@@ -1372,7 +1336,6 @@ def test_block_SQ_SPI_TA_TCC_CPF():
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
-        "pmc_perf_9.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1404,18 +1367,14 @@ def test_block_SQ_SPI_TA_TCC_CPF():
     if "MI300" in soc:
         expected_csvs = [
             "pmc_perf_0.csv",
-            "pmc_perf_11.csv",
             "pmc_perf_1.csv",
             "pmc_perf_3.csv",
             "pmc_perf_5.csv",
             "pmc_perf_7.csv",
-            "pmc_perf_9.csv",
             "SQ_IFETCH_LEVEL.csv",
             "SQ_INST_LEVEL_SMEM.csv",
             "SQ_LEVEL_WAVES.csv",
             "timestamps.csv",
-            "pmc_perf_10.csv",
-            "pmc_perf_12.csv",
             "pmc_perf_2.csv",
             "pmc_perf_4.csv",
             "pmc_perf_6.csv",
