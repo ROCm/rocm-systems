@@ -241,5 +241,6 @@ int main(int argc, char* argv[]) {
       report("ROCSYS:: Error: Not possible to reach here, please report(invalid sys_type)!\n", 1);
     }
   }
+  msync(shmd, sizeof(shmd->command), MS_SYNC | MS_INVALIDATE);
   return 1;
 }

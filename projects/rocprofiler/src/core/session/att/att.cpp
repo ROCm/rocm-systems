@@ -57,7 +57,7 @@ void AttTracer::AddPendingSignals(
     kernel_object,
     original_completion_signal,
     new_completion_signal,
-    session_id_,
+    session_id,
     buffer_id,
     profile,
     kernel_properties,

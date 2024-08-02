@@ -125,8 +125,6 @@ void Profiler::AddPendingSignals(
     uint64_t correlation_id)
 {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
-  if (bIsSessionDestroying.load())
-    return;
 
   if (sessions_pending_signals_.find(writer_id) == sessions_pending_signals_.end())
     sessions_pending_signals_.emplace(writer_id, std::vector<pending_signal_ptr_t>{});
@@ -134,7 +132,7 @@ void Profiler::AddPendingSignals(
   sessions_pending_signals_.at(writer_id).emplace_back(
     new pending_signal_t{
       kernel_object, original_completion_signal, new_completion_signal,
-      session_id_, buffer_id, session_data_count, std::move(profile),
+      session_id, buffer_id, session_data_count, std::move(profile),
       kernel_properties, thread_id, queue_index, correlation_id
     }
   );
@@ -143,12 +141,10 @@ void Profiler::AddPendingSignals(
 std::vector<pending_signal_ptr_t> Profiler::MovePendingSignals(uint32_t writer_id)
 {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
+
   auto it = sessions_pending_signals_.find(writer_id);
   if (it == sessions_pending_signals_.end())
-  {
-    rocprofiler::warning("writer_id is not found in the pending_signals");
     return {};
-  }
 
   auto move_pending = std::move(it->second);
   sessions_pending_signals_.erase(writer_id);
@@ -160,8 +156,8 @@ std::vector<pending_signal_ptr_t> Profiler::MovePendingSignals(uint32_t writer_i
 
 void Profiler::WaitForPendingAndDestroy()
 {
-  bIsSessionDestroying.store(true);
   std::unique_lock<std::mutex> lk(sessions_pending_signals_lock_);
+  bIsSessionDestroying.store(true);
   if (sessions_pending_signals_.size() == 0)
     return;
 

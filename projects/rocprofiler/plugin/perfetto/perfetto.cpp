@@ -134,10 +134,12 @@ std::string get_kernel_name(rocprofiler_record_profiler_t& profiler_record) {
 
 class perfetto_plugin_t {
  public:
-  perfetto_plugin_t() {
+  perfetto_plugin_t(int filename_ext) {
     const char* output_dir = getenv("OUTPUT_PATH");
     const char* temp_file_name = getenv("OUT_FILE_NAME");
     std::string output_file_name = temp_file_name ? std::string(temp_file_name) + "_" : "";
+    if (filename_ext > 0)
+      output_file_name += "_run"+std::to_string(filename_ext)+"_";
 
     if (output_dir == nullptr) output_dir = "./";
 
@@ -193,12 +195,16 @@ class perfetto_plugin_t {
     is_valid_ = true;
   }
 
-  void delete_perfetto_plugin() {
-    if (is_valid_ && tracing_session_ && internal_buffer_finished.load(std::memory_order_acquire)) {
+  bool delete_perfetto_plugin() {
+    if (is_valid_ && tracing_session_)
+    {
       tracing_session_->StopBlocking();
       is_valid_ = false;
-      // close(file_descriptor_);
+      close(file_descriptor_);
+      tracing_session_.reset();
+      return true;
     }
+    return false;
   }
 
   const char* GetDomainName(rocprofiler_tracer_activity_domain_t domain) {
@@ -579,7 +585,6 @@ class perfetto_plugin_t {
       }
       rocprofiler_next_record(begin, &begin, session_id, buffer_id);
     }
-    internal_buffer_finished.exchange(true, std::memory_order_acq_rel);
     return 0;
   }
 
@@ -591,8 +596,6 @@ class perfetto_plugin_t {
   int file_descriptor_;
   bool is_valid_{false};
   size_t roctx_track_entries_{0};
-
-  std::atomic<bool> internal_buffer_finished{false};
 
   // Correlate stream id(s) with correlation id(s) to identify the stream id of every HIP activity
   std::unordered_map<uint64_t, uint64_t> stream_ids_;
@@ -644,10 +647,15 @@ int rocprofiler_plugin_initialize(uint32_t rocprofiler_major_version,
       rocprofiler_minor_version > ROCPROFILER_VERSION_MINOR)
     return -1;
 
-  std::lock_guard<std::mutex> lock(writing_lock);
-  if (perfetto_plugin != nullptr) return -1;
+  //if (perfetto_plugin != nullptr && perfetto_plugin->IsValid()) return -1;
 
-  perfetto_plugin = new perfetto_plugin_t();
+  std::lock_guard<std::mutex> lock(writing_lock);
+  if (perfetto_plugin != nullptr)
+    perfetto_plugin->delete_perfetto_plugin();
+
+  static int perfetto_init_count = 0;
+  perfetto_plugin = new perfetto_plugin_t(perfetto_init_count++);
+
   if (perfetto_plugin->IsValid())
     return 0;
 
@@ -660,9 +668,11 @@ void rocprofiler_plugin_finalize()
 {
   std::lock_guard<std::mutex> lock(writing_lock);
   if (!perfetto_plugin) return;
-  perfetto_plugin->delete_perfetto_plugin();
-  // delete perfetto_plugin;
-  //perfetto_plugin = nullptr;
+  if (perfetto_plugin->delete_perfetto_plugin())
+  {
+    delete perfetto_plugin;
+    perfetto_plugin = nullptr;
+  }
 }
 
 ROCPROFILER_EXPORT int rocprofiler_plugin_write_buffer_records(

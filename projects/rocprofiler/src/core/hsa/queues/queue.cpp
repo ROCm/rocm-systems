@@ -538,10 +538,7 @@ void Queue::ResetSessionID(rocprofiler_session_id_t id)
 {
   std::unique_lock<std::shared_mutex> session_id_lock(session_id_mutex);
   session_id = id;
-  if (session_id.handle != 0)
-    session = rocprofiler::ROCProfiler_Singleton::GetInstance().GetSession(session_id);
-  else
-    session = nullptr;
+  session = nullptr;
 }
 
 bool Queue::CheckNeededProfileConfigs()
@@ -618,7 +615,8 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
 
   std::shared_lock<std::shared_mutex> session_id_lock(session_id_mutex);
 
-  if (session_id.handle == 0 || session_id.handle != rocprofiler::ROCProfiler_Singleton::GetInstance().GetCurrentSessionId().handle)
+  if (session == nullptr || session_id.handle == 0 ||
+      session_id.handle != rocprofiler::ROCProfiler_Singleton::GetInstance().GetCurrentSessionId().handle)
   {
     session_id_lock.unlock();
     CheckNeededProfileConfigs();
