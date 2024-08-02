@@ -26,6 +26,7 @@ import os
 import platform
 import sys
 import time
+import re
 
 from subprocess import run
 from subprocess import PIPE, STDOUT
@@ -305,7 +306,21 @@ class AMDSMIHelpers():
         return (gpu_choices, gpu_choices_str)
 
 
-    def get_device_handles_from_gpu_selections(self, gpu_selections: List[str], gpu_choices=None):
+    @staticmethod
+    def is_UUID(uuid_question: str) -> bool:
+        """Determine if given string is of valid UUID format
+        Args:
+            uuid_question (str): the given string to be evaluated.
+        Returns:
+            True or False: wether the UUID given matches the UUID format.
+        """
+        UUID_pattern = re.compile("^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$", flags=re.IGNORECASE)
+        if re.match(UUID_pattern, uuid_question) is None:
+            return False
+        return True
+
+
+    def get_device_handles_from_gpu_selections(self, gpu_selections: List[str], gpu_choices=None) -> tuple:
         """Convert provided gpu_selections to device_handles
 
         Args:
@@ -313,9 +328,9 @@ class AMDSMIHelpers():
                     ex: ID:0  | BDF:0000:23:00.0 | UUID:ffffffff-0000-1000-0000-000000000000
             gpu_choices (dict{gpu_choices}): This is a dictionary of the possible gpu_choices
         Returns:
-            (True, list[device_handles]): Returns a list of all the gpu_selections converted to
+            (True, True, list[device_handles]): Returns a list of all the gpu_selections converted to
                 amdsmi device_handles
-            (False, str): Return False, and the first input that failed to be converted
+            (False, valid_gpu_format, str): Return False, whether the format of the GPU input is valid, and the first input that failed to be converted
         """
         if 'all' in gpu_selections:
             return (True, amdsmi_interface.amdsmi_get_processor_handles())
@@ -324,6 +339,7 @@ class AMDSMIHelpers():
             gpu_selections = [gpu_selections]
 
         if gpu_choices is None:
+            # obtains dictionary of possible gpu choices
             gpu_choices = self.get_gpu_choices()[0]
 
         selected_device_handles = []
@@ -332,6 +348,7 @@ class AMDSMIHelpers():
 
             for gpu_id, gpu_info in gpu_choices.items():
                 bdf = gpu_info['BDF']
+                is_bdf = True
                 uuid = gpu_info['UUID']
                 device_handle = gpu_info['Device Handle']
 
@@ -347,13 +364,16 @@ class AMDSMIHelpers():
                             valid_gpu_choice = True
                             break
                     except Exception:
-                        # Ignore exception when checking if the gpu_choice is a BDF
+                        is_bdf = False
                         pass
 
             if not valid_gpu_choice:
                 logging.debug(f"AMDSMIHelpers.get_device_handles_from_gpu_selections - Unable to convert {gpu_selection}")
-                return False, gpu_selection
-        return True, selected_device_handles
+                valid_gpu_format = True
+                if not self.is_UUID(gpu_selection) and not gpu_selection.isdigit() and not is_bdf:
+                    valid_gpu_format = False
+                return False, valid_gpu_format, gpu_selection
+        return True, True, selected_device_handles
 
 
     def get_device_handles_from_cpu_selections(self, cpu_selections: List[str], cpu_choices=None):
@@ -390,8 +410,11 @@ class AMDSMIHelpers():
                     break
             if not valid_cpu_choice:
                 logging.debug(f"AMDSMIHelpers.get_device_handles_from_cpu_selections - Unable to convert {cpu_selection}")
-                return False, cpu_selection
-        return True, selected_device_handles
+                valid_cpu_format = True
+                if not cpu_selection.isdigit():
+                    valid_cpu_format = False
+                return False, valid_cpu_format, cpu_selection
+        return True, True, selected_device_handles
 
 
     def get_device_handles_from_core_selections(self, core_selections: List[str], core_choices=None):
@@ -428,8 +451,11 @@ class AMDSMIHelpers():
                     break
             if not valid_core_choice:
                 logging.debug(f"AMDSMIHelpers.get_device_handles_from_core_selections - Unable to convert {core_selection}")
-                return False, core_selection
-        return True, selected_device_handles
+                valid_core_format = True
+                if not core_selection.isdigit():
+                    valid_core_format = False
+                return False, valid_core_format, core_selection
+        return True, True, selected_device_handles
 
 
     def handle_gpus(self, args, logger, subcommand):
