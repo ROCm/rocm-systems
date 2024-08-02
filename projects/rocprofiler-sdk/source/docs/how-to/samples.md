@@ -4,7 +4,7 @@ The samples are provided to help you see the profiler in action.
 
 ## Finding samples
 
-After the ROCm build is installed:
+The ROCm installation provides sample programs and `rocprofv3` tool.
 
 - Sample programs are installed here:
 
@@ -35,7 +35,7 @@ ctest -V
 ```
 
 :::{note}
-Running a few of these tests require you to install Pandas and pytest first.
+Running a few of these tests require you to install [pandas](https://pandas.pydata.org/) and [pytest](https://docs.pytest.org/en/stable/) first.
 :::
 
 ```bash

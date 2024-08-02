@@ -6,14 +6,6 @@ defaults:
 
 root: index
 subtrees:
-  - entries: 
-    - file: what-is-rocprof-sdk
-    - file: buffered_services.md
-    - file: callback_services.md
-    - file: counter_collection_services.md
-    - file: intercept_table.md
-    - file: pc_sampling.md
-    - file: tool_library_overview.md
   - caption: Install
     entries:
     - file: install/installation
@@ -23,8 +15,17 @@ subtrees:
     - file: how-to/samples
   - caption: API reference
     entries:
+    - file: api-reference/buffered_services
+    - file: api-reference/callback_services
+    - file: api-reference/counter_collection_services
+    - file: api-reference/intercept_table
+    - file: api-reference/pc_sampling
+    - file: api-reference/tool_library
     - file: _doxygen/html/index
       title: API library
+  - caption: Conceptual
+    entries:
+    - file: conceptual/comparing-with-legacy-tools
   - caption: License
     entries:
     - file: license

@@ -1,4 +1,4 @@
-# PC Sampling Method
+# PC sampling method
 
 PC Sampling is a profiling method that uses statistical approximation of the kernel execution by sampling GPU program counters. Furthermore, the method periodically chooses an active wave (in a round robin manner) and snapshot it's program counter (PC). The process takes place on every compute unit simultaneously which makes it device-wide PC sampling. The outcome is the histogram of samples that says how many times each kernel instruction was sampled.
 

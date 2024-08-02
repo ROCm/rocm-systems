@@ -1,4 +1,4 @@
-# Runtime Intercept Tables
+# Runtime intercept tables
 
 Although most tools will want to leverage the callback or buffer tracing services for tracing the HIP, HSA, and ROCTx
 APIs, rocprofiler-sdk does provide access to the raw API dispatch tables. Each of the aforementioned APIs are

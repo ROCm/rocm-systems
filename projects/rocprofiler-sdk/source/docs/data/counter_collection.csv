@@ -1,0 +1,2 @@
+"Correlation_Id","Dispatch_Id","Agent_Id","Queue_Id","Process_Id","Thread_Id","Grid_Size","Kernel_Name","Workgroup_Size","LDS_Block_Size","Scratch_Size","VGPR_Count","SGPR_Count","Counter_Name","Counter_Value"
+0,1,1,139892123975680,5619,5619,1048576,"matrixTranspose(float*, float*, int)",16,0,0,8,16,"SQ_WAVES",65536

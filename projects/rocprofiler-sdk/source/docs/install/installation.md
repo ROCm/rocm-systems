@@ -11,7 +11,7 @@ ROCprofiler-SDK is supported only on Linux. The following distributions are test
 - OpenSUSE 15.4
 - RedHat 8.8
 
-Other [Linux distributions](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems) might be supported but not tested yet.
+ROCprofiler-SDK might operate as expected on other [Linux distributions](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems), but has not been tested.
 
 ### Identifying the operating system
 
@@ -31,9 +31,11 @@ The relevant fields are `ID` and the `VERSION_ID`.
 
 ## Build requirements
 
-Install [CMake](https://cmake.org/) version 3.21 or higher.
+Install [CMake](https://cmake.org/) version 3.21 (or later).
 
-**Note:** If the `CMake` installed on the system is too old, you can install a new version using various methods. One of the easiest options is to use PyPi (Python’s pip).
+:::{note}
+If the `CMake` installed on the system is too old, you can install a new version using various methods. One of the easiest options is to use PyPi (Python’s pip).
+:::
 
 ```bash
 pip install --user 'cmake==3.22.0'

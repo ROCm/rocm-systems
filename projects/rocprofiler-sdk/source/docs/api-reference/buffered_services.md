@@ -1,4 +1,4 @@
-# Buffered Services
+# Buffered services
 
 For the buffered approach, supported buffer record categories are enumerated in `rocprofiler_buffer_category_t` category field.
 

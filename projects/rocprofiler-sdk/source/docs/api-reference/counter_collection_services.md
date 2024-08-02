@@ -1,4 +1,4 @@
-# Counter Collection Services
+# Counter collection services
 
 ## Definitions
 
