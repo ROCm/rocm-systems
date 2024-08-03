@@ -69,22 +69,58 @@ ALL_CSVS = sorted(
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "pmc_perf_10.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
 )
 ALL_CSVS_MI200 = sorted(
-    ALL_CSVS
-    + [
+    [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
         "pmc_perf_9.csv",
         "roofline.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
     ]
 )
 ALL_CSVS_MI300 = sorted(
-    ALL_CSVS
-    + [
+    [
+        "SQ_IFETCH_LEVEL.csv",
+        "SQ_INST_LEVEL_LDS.csv",
+        "SQ_INST_LEVEL_SMEM.csv",
+        "SQ_INST_LEVEL_VMEM.csv",
+        "SQ_LEVEL_WAVES.csv",
+        "pmc_perf.csv",
+        "pmc_perf_0.csv",
+        "pmc_perf_1.csv",
+        "pmc_perf_2.csv",
+        "pmc_perf_3.csv",
+        "pmc_perf_4.csv",
+        "pmc_perf_5.csv",
+        "pmc_perf_6.csv",
+        "pmc_perf_7.csv",
+        "pmc_perf_8.csv",
+        "sysinfo.csv",
+        "timestamps.csv",
     ]
+
 )
+
 ROOF_ONLY_FILES = sorted(
     [
         "empirRoof_gpu-0_fp32_fp64.pdf",
@@ -624,9 +660,6 @@ def test_block_SQ():
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -849,6 +882,8 @@ def test_block_TCC():
         "pmc_perf_6.csv",
         "pmc_perf_7.csv",
         "pmc_perf_8.csv",
+        "pmc_perf_9.csv",
+        "pmc_perf_10.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1008,9 +1043,6 @@ def test_block_SQ_CPC():
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1087,9 +1119,6 @@ def test_block_SQ_TA():
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1162,9 +1191,6 @@ def test_block_SQ_SPI():
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1240,9 +1266,6 @@ def test_block_SQ_SQC_TCP_CPC():
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
@@ -1315,9 +1338,6 @@ def test_block_SQ_SPI_TA_TCC_CPF():
         "pmc_perf_3.csv",
         "pmc_perf_4.csv",
         "pmc_perf_5.csv",
-        "pmc_perf_6.csv",
-        "pmc_perf_7.csv",
-        "pmc_perf_8.csv",
         "sysinfo.csv",
         "timestamps.csv",
     ]
