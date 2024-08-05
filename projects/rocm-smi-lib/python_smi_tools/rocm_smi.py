@@ -89,14 +89,17 @@ validClockNames.sort()
 def driverInitialized():
     """ Returns true if amdgpu is found in the list of initialized modules
     """
-    driverInitialized = ''
-    try:
-        driverInitialized = str(subprocess.check_output("cat /sys/module/amdgpu/initstate |grep live", shell=True))
-    except subprocess.CalledProcessError:
-        pass
-    if len(driverInitialized) > 0:
-        return True
-    return False
+    driverInitialized = False
+    if os.path.exists("/sys/module/amdgpu") :
+        if os.path.exists("/sys/module/amdgpu/initstate"):
+            # amdgpu is loadable module
+            with open("/sys/module/amdgpu/initstate") as initstate:
+                if 'live' in initstate.read():
+                    driverInitialized = True
+        else:
+            # amdgpu is built into the kernel
+            driverInitialized = True
+    return driverInitialized
 
 
 def formatJson(device, log):
