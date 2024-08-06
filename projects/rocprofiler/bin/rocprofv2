@@ -60,6 +60,8 @@ usage() {
   echo -e "\t#${GREY} usage e.g:  rocprofv2 --hip-trace -fi 1000 <executable>${RESET}\n"
   echo -e "${GREEN}-tp  | --trace-period ${RESET}       Specifies a trace period in milliseconds, with format \"-tp <DELAY>:<ACTIVE_TIME>:<LOOP_RESET_TIME>\"."
   echo -e "\t#${GREY} usage e.g:  rocprofv2 --hip-trace -tp 1000:2000:4000 <executable>${RESET}\n"
+  echo -e "${GREEN}-ns  | --no-serialization ${RESET}       For disabling serilization when running in counter-collection mode\"."
+  echo -e "\t#${GREY} usage e.g:  rocprofv2 -i pmc.txt -ns${RESET}\n"
   exit 1
 }
 
@@ -139,6 +141,9 @@ while [ 1 ]; do
     shift
   elif [ "$1" == "--hip-api" ]; then
     export ROCPROFILER_HIP_API_TRACE=1
+    shift
+  elif [[ "$1" == "-ns" || "$1" == "--no-serialization" ]]; then
+    export ROCPROFILER_NO_SERIALIZATION=1
     shift
   elif [[ "$1" == "--hip-activity" || "$1" == "--hip-trace" ]]; then
     export ROCPROFILER_HIP_API_TRACE=1

@@ -386,6 +386,16 @@ void SignalAsyncReadyHandler(const hsa_signal_t& signal, void* data) {
           signal, HSA_SIGNAL_CONDITION_EQ, 0, AsyncSignalReadyHandler, data);
   if (status != HSA_STATUS_SUCCESS) fatal("hsa_amd_signal_async_handler failed");
 }
+
+bool GetNoSerialization() {
+  const static bool no_serialization = []() {
+  const char* str = getenv("ROCPROFILER_NO_SERIALIZATION");
+    if (str != NULL) return (atol(str) > 0);
+    return false;
+  }();
+  return no_serialization;
+}
+
 bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
 {
   auto queue_info_session = static_cast<queue_info_session_t*>(data);
@@ -475,20 +485,21 @@ bool AsyncSignalHandler(hsa_signal_value_t signal_value, void* data)
       if (pending->counters_count > 0 && profile && profile->events)
       {
         Packet::AQLPacketProfile::MoveToCache(queue_info_session->agent, std::move(pending->profile));
-
-        profiler_serializer_t& serializer =
-          rocprofiler::ROCProfiler_Singleton::GetInstance().GetSerializer();
-        std::lock_guard<std::mutex> serializer_lock(serializer.serializer_mutex);
-        assert(serializer.dispatch_queue != nullptr);
-        hsasupport_singleton.GetCoreApiTable().hsa_signal_store_screlease_fn(
+	if (!GetNoSerialization()) {
+          profiler_serializer_t& serializer =
+            rocprofiler::ROCProfiler_Singleton::GetInstance().GetSerializer();
+          std::lock_guard<std::mutex> serializer_lock(serializer.serializer_mutex);
+          assert(serializer.dispatch_queue != nullptr);
+          hsasupport_singleton.GetCoreApiTable().hsa_signal_store_screlease_fn(
             queue_info_session->block_signal, 1);
-        serializer.dispatch_queue = nullptr;
-        if (!serializer.dispatch_ready.empty())
-        {
-          Queue* queue = serializer.dispatch_ready.front();
-          serializer.dispatch_ready.erase(serializer.dispatch_ready.begin());
-          enable_dispatch(queue);
-        }
+          serializer.dispatch_queue = nullptr;
+          if (!serializer.dispatch_ready.empty())
+          {
+            Queue* queue = serializer.dispatch_ready.front();
+            serializer.dispatch_ready.erase(serializer.dispatch_ready.begin());
+            enable_dispatch(queue);
+          }
+	}
       }
 
       if (pending->new_signal.handle)
@@ -518,6 +529,7 @@ void CreateSignal(uint32_t attribute, hsa_signal_t* signal) {
 
 rocprofiler_session_id_t Queue::session_id = rocprofiler_session_id_t{0};
 std::shared_mutex Queue::session_id_mutex;
+
 // Counter Names declaration
 std::vector<std::string> session_data;
 
@@ -661,7 +673,7 @@ void Queue::WriteInterceptor(const void* packets, uint64_t pkt_count, uint64_t u
         }
       }
 
-      if (profile_packet.get())
+      if (profile_packet.get() && !GetNoSerialization())
       {
         hsa_signal_t ready_signal = queue_info.GetReadySignal();
         hsa_signal_t block_signal = queue_info.GetBlockSignal();

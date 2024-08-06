@@ -190,6 +190,13 @@ void print_usage(fs::path current_path) {
       "<DELAY>:<ACTIVE_TIME>:<LOOP_RESET_TIME>\n\t\t\t");
   fmt::print(fg(fmt::color::gray),
              "usage e.g:  rocprofv2 --hip-trace -tp 1000:2000:4000  [target]\n");
+
+  // no serialization
+  fmt::print(fg(fmt::color::cyan), " -ns  | --no-serialization\n\t\t\t");
+  fmt::print(
+      "For disabling serilization when running in counter-collection mode\n\t\t\t");
+  fmt::print(fg(fmt::color::gray),
+             "usage e.g:  rocprofv2 -i pmc.txt -ns\n");
 }
 
 // runs memory check on hip_vectoradd
@@ -509,6 +516,11 @@ int main(int argc, char** argv) {
         std::cerr << "Error: Missing trace period value!" << std::endl;
         rocprofv2::print_usage(current_path);
         exit(EXIT_FAILURE);
+      }
+      // no serialization for counter-collection mode
+    } else if (strcmp(argv[i], "-ns") == 0 || strcmp(argv[i], "--no-serialization") == 0) {
+      if (argv[i]) {
+        pathenv.emplace_back("ROCPROFILER_NO_SERIALIZATION=1");
       }
       // wrong argument given
     } else if (argv[i][0] == '-') {
