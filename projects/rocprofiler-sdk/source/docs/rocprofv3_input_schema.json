@@ -18,17 +18,17 @@
 
                      "kernel_include_regex":{
                         "type": "string",
-                        "description": "regex string"
+                        "description": "Include the kernels matching this filter"
                      },
 
                      "kernel_exclude_regex": {
                       "type": "string",
-                      "description": "regex string"
+                      "description": "Exclude the kernels matching this filter"
                      },
 
                      "kernel_iteration_range": {
                         "type": "string",
-                        "description": "range for range for each kernel that match the filter [start-stop]"
+                        "description": "Iteration range for each kernel that match the filter [start-stop]"
                      },
 
                      "hip_trace": {
@@ -101,12 +101,12 @@
                               "description": "For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Scratch memory, and Kernel dispatch traces"
                      },
 
-                     "mangled-kernels": {
+                     "mangled_kernels": {
                       "type": "boolean",
                       "description": "Do not demangle the kernel names"
                      },
 
-                     "truncate-kernels": {
+                     "truncate_kernels": {
                       "type": "boolean",
                       "description": "Truncate the demangled kernel names"
                      },

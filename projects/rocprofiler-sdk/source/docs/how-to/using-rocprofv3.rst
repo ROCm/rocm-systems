@@ -1,5 +1,5 @@
 .. meta::
-  :description: Documentation of the installation, configuration, use of the ROCprofiler-SDK, and rocprofv3 command-line tool 
+  :description: Documentation of the installation, configuration, use of the ROCprofiler-SDK, and rocprofv3 command-line tool
   :keywords: ROCprofiler-SDK tool, ROCprofiler-SDK library, rocprofv3, ROCm, API, reference
 
 .. _using-rocprofv3:
@@ -8,7 +8,7 @@
 Using rocprofv3
 ======================
 
-``rocprofv3`` is a CLI tool that helps you quickly optimize applications and understand the low-level kernel details without requiring any modification in the source code. 
+``rocprofv3`` is a CLI tool that helps you quickly optimize applications and understand the low-level kernel details without requiring any modification in the source code.
 It's backward compatible with its predecessor, ``rocprof``, and provides more features for application profiling with better accuracy.
 
 The following sections demonstrate the use of ``rocprofv3`` for application tracing and kernel profiling using various command-line options.
@@ -37,7 +37,7 @@ Here is the list of ``rocprofv3`` command-line options. Some options are used fo
   * - Option
     - Description
     - Use
-  
+
   * - ``--hip-trace``
     - Collects HIP runtime traces.
     - Application tracing
@@ -96,10 +96,18 @@ Here is the list of ``rocprofv3`` command-line options. Some options are used fo
 
   * - ``-i``
     - Specifies the input file.
+    - Kernel profiling with text file. Tracing and profiling with JSON and YAML.
+
+  * - ``--kernel-include-regex``
+    - Include the kernels matching this filter.
     - Kernel profiling
 
-  * - ``--kernel-names``
-    - pecifies the kernel names to target during counter collection.
+  * - ``--kernel-exclude-regex``
+    - Exclude the kernels matching this filter.
+    - Kernel profiling
+
+  * - ``--kernel-iteration-range``
+    - Iteration range for each kernel that match the filter [start-stop].
     - Kernel profiling
 
   * - ``-L`` \| ``--list-metrics``
@@ -113,7 +121,7 @@ Here is the list of ``rocprofv3`` command-line options. Some options are used fo
   * - ``-o`` \| ``--output-file``
     - Specifies the name of the output file. Note that this name is appended to the default names (_api_trace or counter_collection.csv) of the generated files'.
     - Output control
-    
+
   * - ``-M`` \| ``--mangled-kernels``
     - Overrides the default demangling of kernel names.
     - Output control
@@ -125,7 +133,7 @@ Here is the list of ``rocprofv3`` command-line options. Some options are used fo
   * - ``--output-format``
     - For adding output format (supported formats: csv, json, pftrace)
     - Output control
-  
+
   * - ``--preload``
     - Libraries to prepend to LD_PRELOAD (usually for sanitizers)
     - Extension
@@ -167,9 +175,9 @@ The above command generates a `hip_api_trace.csv` file prefixed with the process
 Here are the contents of `hip_api_trace.csv` file:
 
 .. csv-table:: HIP runtime api trace
-   :file: /data/hip_compile_trace.csv 
-   :widths: 10,10,10,10,10,20,20  
-   :header-rows: 1  
+   :file: /data/hip_compile_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
 
 To trace HIP compile time APIs, use:
 
@@ -186,9 +194,9 @@ The above command generates a `hip_api_trace.csv` file prefixed with the process
 Here are the contents of `hip_api_trace.csv` file:
 
 .. csv-table:: HIP compile time api trace
-   :file: /data/hip_compile_trace.csv 
-   :widths: 10,10,10,10,10,20,20   
-   :header-rows: 1  
+   :file: /data/hip_compile_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
@@ -200,7 +208,7 @@ The HIP runtime library is implemented with the low-level HSA runtime. HSA API t
 HSA trace contains the start and end time of HSA runtime API calls and their asynchronous activities.
 
 .. code-block:: bash
-  
+
   rocprofv3 --hsa-trace -- < app_relative_path >
 
 The above command generates a `hsa_api_trace.csv` file prefixed with process ID. Note that the contents of this file have been truncated for demonstration purposes.
@@ -212,9 +220,9 @@ The above command generates a `hsa_api_trace.csv` file prefixed with process ID.
 Here are the contents of `hsa_api_trace.csv` file:
 
 .. csv-table:: HSA api trace
-   :file: /data/hsa_trace.csv 
-   :widths: 10,10,10,10,10,20,20   
-   :header-rows: 1  
+   :file: /data/hsa_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
@@ -270,9 +278,9 @@ Running the preceding command generates a `marker_api_trace.csv` file prefixed w
 Here are the contents of `marker_api_trace.csv` file:
 
 .. csv-table:: Marker api trace
-   :file: /data/marker_api_trace.csv 
-   :widths: 10,10,10,10,10,20,20   
-   :header-rows: 1  
+   :file: /data/marker_api_trace.csv
+   :widths: 10,10,10,10,10,20,20
+   :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
@@ -294,10 +302,10 @@ The above command generates a `kernel_trace.csv` file prefixed with the process 
 Here are the contents of `kernel_trace.csv` file:
 
 .. csv-table:: Kernel trace
-   :file: /data/kernel_trace.csv 
-   :widths: 10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10   
+   :file: /data/kernel_trace.csv
+   :widths: 10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
    :header-rows: 1
-  
+
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
 Memory copy trace
@@ -318,8 +326,8 @@ The above command generates a `memory_copy_trace.csv` file prefixed with the pro
 Here are the contents of `memory_copy_trace.csv` file:
 
 .. csv-table:: Memory copy trace
-   :file: /data/memory_copy_trace.csv 
-   :widths: 10,10,10,10,10,20,20  
+   :file: /data/memory_copy_trace.csv
+   :widths: 10,10,10,10,10,20,20
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -363,8 +371,8 @@ The above command generates a `hip_stats.csv` and `hip_api_trace` file prefixed 
 Here are the contents of `hip_stats.csv` file:
 
 .. csv-table:: HIP stats
-   :file: /data/hip_stats.csv 
-   :widths: 10,10,20,20,10,10,10,10   
+   :file: /data/hip_stats.csv
+   :widths: 10,10,20,20,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -379,7 +387,70 @@ For a comprehensive list of counters available on MI200, see `MI200 performance 
 Input file
 ++++++++++++
 
-To collect the desired basic counters or derived metrics, mention them in an input file. In the input file, the line consisting of the counter or metric names must begin with ``pmc``. The input file could be in text (.txt), yaml (.yaml/.yml), or JSON (.json) format.
+To collect the desired basic counters or derived metrics or tracing, mention them in an input file. The input file could be in text (.txt), yaml (.yaml/.yml), or JSON (.json) format.
+
+In the input text file, the line consisting of the counter or metric names must begin with ``pmc``.
+The number of basic counters or derived metrics that can be collected in one run of profiling are limited by the GPU hardware resources. If too many counters or metrics are selected, the kernels need to be executed multiple times to collect them. For multi-pass execution, include multiple ``pmc`` rows in the input file. Counters or metrics in each ``pmc`` row can be collected in each application run.
+
+The JSON and YAML files supports all the command line options and it can be used to configure both tracing and profiling. The input file has an array of profiling/tracing configurations called jobs. Each job is used to configure profiling/tracing for an application execution. The input schema of these files is given below.
+
+Properties
+++++++++++++
+
+-  **``jobs``** *(array)*: rocprofv3 input data per application run.
+
+   -  **Items** *(object)*: data for rocprofv3.
+
+      -  **``pmc``** *(array)*: list of counters to collect.
+      -  **``kernel_include_regex``** *(string)*: Include the kernels
+         matching this filter.
+      -  **``kernel_exclude_regex``** *(string)*: Exclude the kernels
+         matching this filter.
+      -  **``kernel_iteration_range``** *(string)*: Iteration range for
+         each kernel that match the filter [start-stop].
+      -  **``hip_trace``** *(boolean)*: For Collecting HIP Traces
+         (runtime + compiler).
+      -  **``hip_runtime_trace``** *(boolean)*: For Collecting HIP
+         Runtime API Traces.
+      -  **``hip_compiler_trace``** *(boolean)*: For Collecting HIP
+         Compiler generated code Traces.
+      -  **``marker_trace``** *(boolean)*: For Collecting Marker (ROCTx)
+         Traces.
+      -  **``kernel_trace``** *(boolean)*: For Collecting Kernel
+         Dispatch Traces.
+      -  **``memory_copy_trace``** *(boolean)*: For Collecting Memory
+         Copy Traces.
+      -  **``scratch_memory_trace``** *(boolean)*: For Collecting
+         Scratch Memory operations Traces.
+      -  **``stats``** *(boolean)*: For Collecting statistics of enabled
+         tracing types.
+      -  **``hsa_trace``** *(boolean)*: For Collecting HSA Traces (core
+         + amd + image + finalizer).
+      -  **``hsa_core_trace``** *(boolean)*: For Collecting HSA API
+         Traces (core API).
+      -  **``hsa_amd_trace``** *(boolean)*: For Collecting HSA API
+         Traces (AMD-extension API).
+      -  **``hsa_finalize_trace``** *(boolean)*: For Collecting HSA API
+         Traces (Finalizer-extension API).
+      -  **``hsa_image_trace``** *(boolean)*: For Collecting HSA API
+         Traces (Image-extenson API).
+      -  **``sys_trace``** *(boolean)*: For Collecting HIP, HSA, Marker
+         (ROCTx), Memory copy, Scratch memory, and Kernel dispatch
+         traces.
+      -  **``mangled_kernels``** *(boolean)*: Do not demangle the kernel
+         names.
+      -  **``truncate_kernels``** *(boolean)*: Truncate the demangled
+         kernel names.
+      -  **``output_file``** *(string)*: For the output file name.
+      -  **``output_directory``** *(string)*: For adding output path
+         where the output files will be saved.
+      -  **``output_format``** *(array)*: For adding output format
+         (supported formats: csv, json, pftrace).
+      -  **``list_metrics``** *(boolean)*: List the metrics.
+      -  **``log_level``** *(string)*: fatal, error, warning, info,
+         trace.
+      -  **``preload``** *(array)*: Libraries to prepend to LD_PRELOAD
+         (usually for sanitizers).
 
 .. code-block:: shell
 
@@ -393,13 +464,21 @@ To collect the desired basic counters or derived metrics, mention them in an inp
   $ cat input.json
 
   {
-    "metrics": [
+    "jobs": [
       {
         "pmc": ["SQ_WAVES", "GRBM_COUNT", "GUI_ACTIVE"]
       },
       {
-        "pmc": ["FETCH_SIZE", "WRITE_SIZE"]
-      }
+        "pmc": ["FETCH_SIZE", "WRITE_SIZE"],
+        "kernel_include_regex": ".*_kernel",
+        "kernel_exclude_regex": "multiply",
+        "kernel_iteration_range": "[1-2]","[3-4]"
+        "output_file": "out",
+        "output_format": [
+                "csv",
+                "json"
+        ],
+        "truncate_kernels": true
     ]
   }
 
@@ -407,7 +486,7 @@ To collect the desired basic counters or derived metrics, mention them in an inp
 
   $ cat input.yaml
 
-  metrics:
+  jobs:
     - pmc:
         - SQ_WAVES
         - GRBM_COUNT
@@ -418,7 +497,6 @@ To collect the desired basic counters or derived metrics, mention them in an inp
         - FETCH_SIZE
         - WRITE_SIZE
 
-The number of basic counters or derived metrics that can be collected in one run of profiling are limited by the GPU hardware resources. If too many counters or metrics are selected, the kernels need to be executed multiple times to collect them. For multi-pass execution, include multiple ``pmc`` rows in the input file. Counters or metrics in each ``pmc`` row can be collected in each kernel run.
 
 Kernel profiling output
 +++++++++++++++++++++++++
@@ -431,6 +509,8 @@ To supply the input file for kernel profiling, use:
 
 Running the above command generates a `./pmc_n/counter_collection.csv` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a `counter_collection.csv` file is generated, where n = 1 for the first row and so on.
 
+In case of JSON or YAML input file, for each job, a directory ``pass_n`` containing a `counter_collection.csv` file is generated where n = 1...N jobs.
+
 Each row of the CSV file is an instance of kernel execution. Here is a truncated version of the output file from ``pmc_1``:
 
 .. code-block:: shell
@@ -440,35 +520,26 @@ Each row of the CSV file is an instance of kernel execution. Here is a truncated
 Here are the contents of `counter_collection.csv` file:
 
 .. csv-table:: Counter collection
-   :file: /data/counter_collection.csv 
-   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10  
+   :file: /data/counter_collection.csv
+   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
-Kernel names
-++++++++++++++
+Kernel Filtering
++++++++++++++++++
 
-To target a specific kernel for counter collection when multiple kernels are present, use the ``--kernel-names`` option:
+rocprofv3 supports kernel filtering in case of profiling. A kernel filter is a set of a regex string (to include the kernels matching this filter), a regex string (to exclude the kernels matching this filter),
+and an iteration range (set of iterations of the included kernels). If the iteration range is not provided then all iterations of the included kernels are profiled.
 
 .. code-block:: shell
 
-  rocprofv3 -i input.txt --kernel-names divide_kernel -- <app_relative_path>
-
-Running the above command generates a `./pmc_n/counter_collection.csv` file prefixed with the process ID. For each ``pmc`` row, a directory ``pmc_n`` containing a `counter_collection.csv` file is generated, where n = 1 for the first row and so on.
-
-Each row of the CSV file is an instance of kernel execution. Here is a truncated version of the output file from ``pmc_1``:
- 
-.. code-block:: shell
-
-  $ cat pmc_1/312_counter_collection.csv
-
-Here are the contents of `counter_collection.csv` file:
-
-.. csv-table:: Targeted kernel counter collection
-   :file: /data/kernel_names.csv 
-   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10  
-   :header-rows: 1
+  $ cat input.yml
+   jobs:
+    - pmc: [SQ_WAVES]
+      kernel_include_regex: "divide"
+      kernel_exclude_regex: ""
+      kernel_iteration_range: "[1, 2, [5-8]]"
 
 Agent info
 ++++++++++++
@@ -477,7 +548,7 @@ Agent info
   All tracing and counter collection options generate an additional `agent_info.csv` file prefixed with the process ID.
 
 The `agent_info.csv` file contains information about the CPU or GPU the kernel runs on.
- 
+
 .. code-block:: shell
 
   $ cat 238_agent_info.csv
