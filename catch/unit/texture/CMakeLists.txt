@@ -41,6 +41,7 @@ set(TEST_SRC
     hipTexRefGetArray.cc
     hipTexRefGetBorderColor.cc
     hipTexRefSetBorderColor.cc
+    hipTexRefGetAddress.cc
     hipTextureObj1DFetch.cc
     hipTextureObj1DCheckModes.cc
     hipTextureObj2DCheckModes.cc
@@ -130,6 +131,7 @@ set(TEST_SRC
     tex3DLod.cc
 )
 endif()
+
 
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
