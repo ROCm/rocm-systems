@@ -44,6 +44,8 @@ set(TEST_SRC
     hipTexRefSetBorderColor.cc
     hipTexRefGetAddress.cc
     hipTexRefSetAddress.cc
+    hipTexRefGetFormat.cc
+    hipTexRefSetFormat.cc
     hipTextureObj1DFetch.cc
     hipTextureObj1DCheckModes.cc
     hipTextureObj2DCheckModes.cc
