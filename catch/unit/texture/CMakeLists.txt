@@ -58,6 +58,7 @@ set(TEST_SRC
     hipTexRefSetMaxAnisotropy.cc
     hipTexRefGetMaxAnisotropy.cc
     hipUnbindTexture.cc
+    hipTexRefSetFlags.cc
 )
 
 # tests not for gfx90a+
