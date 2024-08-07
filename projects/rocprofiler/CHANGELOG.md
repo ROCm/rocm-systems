@@ -231,14 +231,14 @@ Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced
 
 ### Changed
 
-- ATT analysis will not run by default. For ATT to have the same behaviour as 5.5, use --plugin att <as.s> --mode network
+- ATT analysis will not run by default. For ATT to have the same behavior as 5.5, use --plugin att <as.s> --mode network
 - Kernel Names are now removed from HIP API records, users of the API can get the kernel names from the corresponding HIP Dispatch OPS using the correlation ID, this change was done to optimize and to manage the data copied.
 - Removing Replay modes as we discovered that some of them will corrupt the applications' behavior, we will re-add them once we implement the fix for them.
 
 ### Optimized
 
-- Improved ATT parser performance and filesizes.
-- Now profiler autocorrects user input errors for pmc and throws exception for wrong input with this message:"Bad input metric. usage --> pmc: [counter1] [counter2]"
+- Improved ATT parser performance and file sizes.
+- Now profiler autocorrect user input errors for pmc and throws exception for wrong input with this message:"Bad input metric. usage --> pmc: [counter1] [counter2]"
 
 ### Added
 
@@ -249,7 +249,7 @@ Rocprofiler for ROCm 5.7 added support for counter collection (PMC) and advanced
 - MI300 individual XCC counters dumped per-xcc as separate records but with same record-id and kernel dispatch info
 - Naming for MPI ranks. Filenames containing "%rank" are replaced by variables "MPI_RANK", "OMPI_COMM_WORLD_RANK" or "MV2_COMM_WORLD_RANK".
 - MPI Rank will appear in perfetto track names.
-- File plugin is splitted to File & CLI plugins, CLI plugin is responsible for showing results on the terminal screen and will be automatically the choice if no -d option given in rocprof, File plugin on the other hand is responsible for writing the output results in files if -d option is given.
+- File plugin has been split to File & CLI plugins, CLI plugin is responsible for showing results on the terminal screen and will be automatically the choice if no -d option given in rocprof, File plugin on the other hand is responsible for writing the output results in files if -d option is given.
 - Structure of the results is different for both CLI & File plugin; File plugin will make sure every type of result is in a separate file, starting by specifying the header; CLI plugin will have the records in the old way.
 Example for file plugin output:
 
@@ -268,7 +268,7 @@ Example for file plugin output:
   ```
 
 - Removing Record IDs from tracer records in CLI plugin.
-- Added Flush Interval and Trace Period functionality, where --flush-interval [time_in_ms], for flushing the buffers every given interval by the user, and --trace-period [delay]:[trace_time]:[interval], where delay is the time to wait before starting session, trace_time is the time between every start and stop session and interval the time between two consecutive sessions (ommiting interval = infinite). For more details please refer to the ROCProfV2 tool usage document.
+- Added Flush Interval and Trace Period functionality, where --flush-interval [time_in_ms], for flushing the buffers every given interval by the user, and --trace-period [delay]:[trace_time]:[interval], where delay is the time to wait before starting session, trace_time is the time between every start and stop session and interval the time between two consecutive sessions (omitting interval = infinite). For more details please refer to the ROCProfV2 tool usage document.
 - Added requirements.txt to be used to install all the necessary python3 packages.
 - ATT plugin:
   - Added --mode, --mpi and --depth parameters.

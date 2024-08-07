@@ -38,7 +38,7 @@ ROCProfiler: input from "/tmp/rpl_data_191018_011134_9695/input0.xml"
 Device name Ellesmere [Radeon RX 470/480/570/570X/580/580X]
 PASSED!
 
-ROCPRofiler: 1 contexts collected, output directory /tmp/rpl_data_191018_011134_9695/input0_results_191018_011134
+ROCprofiler: 1 contexts collected, output directory /tmp/rpl_data_191018_011134_9695/input0_results_191018_011134
 RPL: '/…./MatrixTranspose/input.csv' is generated
 ```
 #### 2.1.1.	Counters and metrics
@@ -94,7 +94,7 @@ Derived metrics:
       TCC_HIT_sum = sum(TCC_HIT,16)
   gpu-agent0 : TCC_MISS_sum : Number of cache misses. Sum over TCC instances.
       TCC_MISS_sum = sum(TCC_MISS,16)
-  gpu-agent0 : TCC_MC_RDREQ_sum : Number of 32-byte reads. Sum over TCC instaces.
+  gpu-agent0 : TCC_MC_RDREQ_sum : Number of 32-byte reads. Sum over TCC instances.
       TCC_MC_RDREQ_sum = sum(TCC_MC_RDREQ,16)
 	. . .
 ```
@@ -199,7 +199,7 @@ hsa: hsa_queue_create hsa_amd_memory_pool_allocate
 #### 3.2.2.	Tracing time period
 Trace can be dumped periodically with initial delay, dumping period length and rate:
 ```
---trace-period <dealy:length:rate>
+--trace-period <delay:length:rate>
 ```
 ### 3.3.	Concurrent kernels
 Currently concurrent kernels profiling is not supported which is a planned feature. Kernels are serialized.
@@ -268,12 +268,12 @@ Options:
 
   -o <output file> - output CSV file [<input file base>.csv]
   -d <data directory> - directory where profiler store profiling data including traces [/tmp]
-      The data directory is renoving autonatically if the directory is matching the temporary one, which is the default.
+      The data directory is removed automatically if the directory is matching the temporary one, which is the default.
   -t <temporary directory> - to change the temporary directory [/tmp]
       By changing the temporary directory you can prevent removing the profiling data from /tmp or enable removing from not '/tmp' directory.
 
   --basenames <on|off> - to turn on/off truncating of the kernel full function names till the base ones [off]
-  --timestamp <on|off> - to turn on/off the kernel disoatches timestamps, dispatch/begin/end/complete [off]
+  --timestamp <on|off> - to turn on/off the kernel dispatches timestamps, dispatch/begin/end/complete [off]
   --ctx-wait <on|off> - to wait for outstanding contexts on profiler exit [on]
   --ctx-limit <max number> - maximum number of outstanding contexts [0 - unlimited]
   --heartbeat <rate sec> - to print progress heartbeats [0 - disabled]
@@ -297,11 +297,11 @@ Options:
       </trace>
 
   --trace-start <on|off> - to enable tracing on start [on]
-  --trace-period <dealy:length:rate> - to enable trace with initial delay, with periodic sample length and rate
+  --trace-period <delay:length:rate> - to enable trace with initial delay, with periodic sample length and rate
     Supported time formats: <number(m|s|ms|us)>
 
 Configuration file:
-  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:/home/evgeny:<package path>
+  You can set your parameters defaults preferences in the configuration file 'rpl_rc.xml'. The search path sequence: .:/home/user:<package path>
   First the configuration file is looking in the current directory, then in your home, and then in the package directory.
   Configurable options: 'basenames', 'timestamp', 'ctx-limit', 'heartbeat', 'obj-tracking'.
   An example of 'rpl_rc.xml':

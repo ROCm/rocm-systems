@@ -154,7 +154,7 @@ The user has two options for building:
     ./build.sh --clean-build OR ./build.sh -cb
     ```
 
-- Option 2 (Where ROCM_PATH envronment need to be set with the current installation directory of rocm), run the following:
+- Option 2 (Where ROCM_PATH environment need to be set with the current installation directory of rocm), run the following:
 
   - Creating the build directory
 
@@ -353,7 +353,7 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
 
   - Install plugin package. See Plugin Support section for installation
   - Run the following to view the trace. Att-specific options must come right after the assembly file.
-  - On ROCm 6.0, ATT enables automatic capture of the ISA during kernel execution, and does not require recompiling. It is recommeneded to leave at "auto".
+  - On ROCm 6.0, ATT enables automatic capture of the ISA during kernel execution, and does not require recompiling. It is recommended to leave at "auto".
 
     ```bash
     rocprofv2 -i input.txt --plugin att auto --mode csv <app_relative_path>
@@ -371,7 +371,7 @@ Tool used to collect fine-grained hardware metrics. Provides ISA-level instructi
       - csv
           Dumps the analyzed assembly into a CSV format, with the hitcount and total cycles cost. Recommended mode for most users.
       - file (deprecated)
-          Dumps the analyzed json files to disk for vieweing at a later time. Run python3 httpserver.py from within the generated name_ui/ folder to view the trace. The folder can be copied to another machine, and will run without rocm.
+          Dumps the analyzed json files to disk for viewing at a later time. Run python3 httpserver.py from within the generated name_ui/ folder to view the trace. The folder can be copied to another machine, and will run without rocm.
       - file,csv
           Both options can be used at the same time, generating a UI folder and a .csv.
       - network [removed]
@@ -503,7 +503,7 @@ A device profiling session allows the user to profile the GPU device for counter
 
 - unittests (Gtest Based) : These includes tests for core classes. Any newly added functionality should have a unit test written to it.
 
-- featuretests (standalone and Gtest Based): These includes both API tests and tool tests. Tool is tested against different applications to make sure we have right output in evry run.
+- featuretests (standalone and Gtest Based): These includes both API tests and tool tests. Tool is tested against different applications to make sure we have right output in every run.
 
 - memorytests (standalone): This includes running address sanitizer for memory leaks, corruptions.
 
@@ -607,7 +607,7 @@ samples can be run as independent executables once installed
 - plugin
   - file: File Plugin
   - perfetto: Perfetto Plugin
-  - att: Adavced thread tracer Plugin
+  - att: Advanced thread tracer Plugin
   - ctf: CTF Plugin
 - samples: Samples of how to use the API, and also input.txt input file samples for counter collection and ATT.
 - script: Scripts needed for tracing

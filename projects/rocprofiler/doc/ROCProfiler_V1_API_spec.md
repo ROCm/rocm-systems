@@ -124,7 +124,7 @@ Info API:
 - rocprofiler_info_query_t - profiling info query
 - rocprofiler_info_data_t - profiling info data
 - rocprofiler_get_info - return the info for a given info kind
-- rocprofiler_iterote_inf_ - iterate over the info for a given info kind 
+- rocprofiler_iterate_inf_ - iterate over the info for a given info kind 
 - rocprofiler_query_info - iterate over the info for a given info query
 
 Context API:

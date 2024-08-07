@@ -51,7 +51,7 @@ The user has two options for building:
   ./build.sh --clean-build OR ./build.sh -cb
   ```
 
-- Option 2 (Where ROCM_PATH envronment need to be set with the current installation directory of rocm), run the following:
+- Option 2 (Where ROCM_PATH environment need to be set with the current installation directory of rocm), run the following:
   ```bash
   # Creating the build directory
   mkdir build && cd build
@@ -121,7 +121,7 @@ The user has two options for building:
       pmc: SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE SQ_INSTS_VALU
   ```
 
-  - Application Trace Support: Differnt trace options are available while profiling an app:
+  - Application Trace Support: Different trace options are available while profiling an app:
   ```bash
       # HIP API & asynchronous activity tracing
       rocprofv2 --hip-api <app_relative_path> ## For synchronous HIP API Activity tracing
@@ -202,7 +202,7 @@ The user has two options for building:
 
 - unittests (Gtest Based) : These includes tests for core classes. Any newly added functionality should have a unit test written to it.
 
-- featuretests (standalone and Gtest Based): These includes both API tests and tool tests. Tool is tested against different applications to make sure we have right output in evry run.
+- featuretests (standalone and Gtest Based): These includes both API tests and tool tests. Tool is tested against different applications to make sure we have right output in every run.
 
 - memorytests (standalone): This includes running address sanitizer for memory leaks, corruptions.
 
@@ -267,7 +267,7 @@ samples can be run as independent executables once installed
 - plugin
   - file: File Plugin
   - perfetto: Perfetto Plugin
-  - att: Adavced thread tracer Plugin
+  - att: Advanced thread tracer Plugin
   - ctf: CTF Plugin
 - samples: Samples of how to use the API, and also input.txt input file samples for counter collection and ATT.
 - script: Scripts needed for tracing
