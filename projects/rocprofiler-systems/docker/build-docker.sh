@@ -174,28 +174,23 @@ do
             ROCM_REPO_DIST="ubuntu"
             ROCM_REPO_VERSION=${ROCM_VERSION}
             case "${ROCM_VERSION}" in
-                4.1* | 4.0*)
-                    ROCM_REPO_DIST="xenial"
-                    ;;
                 5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.* | 6.*)
                     case "${VERSION}" in
                         22.04)
-                            ROCM_REPO_DIST="ubuntu"
+                            ROCM_REPO_DIST="jammy"
                             ;;
                         20.04)
                             ROCM_REPO_DIST="focal"
                             ;;
-                        18.04)
-                            ROCM_REPO_DIST="bionic"
-                            ;;
                         *)
                             ;;
                     esac
+                    ROCM_DEB=amdgpu-install_${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1_all.deb
                     ;;
                 *)
                     ;;
             esac
-            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
+            verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg AMDGPU_DEB=${ROCM_DEB} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "rhel" ]; then
             if [ -z "${VERSION_MINOR}" ]; then
                 send-error "Please provide a major and minor version of the OS. Supported: >= 8.7, <= 9.3"

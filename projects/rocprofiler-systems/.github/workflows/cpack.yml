@@ -54,6 +54,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "20.04"
             rocm-version: "6.1"
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "6.2"
           # ubuntu 22.04
           - os-distro: "ubuntu"
             os-version: "22.04"
@@ -76,6 +79,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "6.1"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.2"
           # opensuse 15.3
           - os-distro: "opensuse"
             os-version: "15.3"
@@ -130,6 +136,9 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.5"
             rocm-version: "6.1"
+          - os-distro: "opensuse"
+            os-version: "15.5"
+            rocm-version: "6.2"
           # RHEL 8.7
           - os-distro: "rhel"
             os-version: "8.7"
@@ -175,6 +184,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "8.9"
             rocm-version: "6.1"
+          - os-distro: "rhel"
+            os-version: "8.9"
+            rocm-version: "6.2"
           # RHEL 9.1
           - os-distro: "rhel"
             os-version: "9.1"
@@ -211,6 +223,9 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.3"
             rocm-version: "6.1"
+          - os-distro: "rhel"
+            os-version: "9.3"
+            rocm-version: "6.2"
 
     steps:
       - name: Free Disk Space
