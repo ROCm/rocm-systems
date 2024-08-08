@@ -295,6 +295,14 @@ export LD_PRELOAD=$LD_PRELOAD:$ROCM_DIR/lib/rocprofiler/librocprofiler_tool.so
 
 if [ -n "$PMC_LINES" ] && [ ! -n "$ATT_ARGV" ]; then
   COUNTER=1
+
+  for i in ${!PMC_LINES[@]}; do
+    if [[ ${PMC_LINES[$i]} =~ "kernel:" ]]; then
+      echo ${PMC_LINES[$i]} 
+      export ROCPROFILER_KERNEL_FILTER="${PMC_LINES[$i]}"
+    fi
+  done
+
   for i in ${!PMC_LINES[@]}; do
     export ROCPROFILER_COUNTERS="${PMC_LINES[$i]}"
     if [[ ! ${PMC_LINES[$i]} =~ "pmc" ]]; then

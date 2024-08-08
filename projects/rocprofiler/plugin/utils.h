@@ -32,6 +32,8 @@
 #include <cstdint>
 #include <cstdlib>
 #include <string>
+#include <set>
+#include <sstream>
 
 #include "src/utils/helper.h"
 
@@ -50,5 +52,21 @@ namespace {
 }
 
 [[maybe_unused]] uint64_t GetMachineID() { return gethostid(); }
+
+[[maybe_unused]] std::set<std::string> GetKernelFilters() {
+    std::set<std::string> ret;
+    if (const char* line_c_str = getenv("ROCPROFILER_KERNEL_FILTER")) {
+      std::stringstream ss(std::string{line_c_str});
+      std::string filter_name;
+      while(std::getline(ss, filter_name, ' '))
+      {
+        if (filter_name.find("kernel:") != std::string::npos) {
+          continue;
+        }
+        ret.insert(filter_name);
+      }
+    }
+    return ret;
+}
 
 }  // namespace

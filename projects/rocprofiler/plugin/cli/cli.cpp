@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -136,7 +137,10 @@ class file_plugin_t {
   }
 
  public:
-  file_plugin_t() { valid_ = true; }
+  file_plugin_t() { 
+    valid_ = true; 
+    kernel_filters_ = GetKernelFilters();
+  }
 
   std::mutex writing_lock;
 
@@ -208,6 +212,22 @@ class file_plugin_t {
 
   void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
                            rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+    auto check_filter_cache = [&](const char * k_name) {
+      auto str = std::string{k_name};
+      auto f = kernel_filter_cache_.find(k_name);
+      if (f == kernel_filter_cache_.end()) {
+        bool found_match = false;
+        for (const auto& filter : kernel_filters_) {
+          if (str.find(filter) != std::string::npos) {
+            found_match = true;
+            break;
+          }
+        }
+        f = kernel_filter_cache_.emplace(str, found_match).first;
+      }
+      return f->second;
+    };
+
     std::lock_guard<std::mutex> lock(writing_lock);
     size_t name_length = 0;
     output_file_t* output_file{nullptr};
@@ -220,6 +240,10 @@ class file_plugin_t {
     if (name_length > 1) {
       CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                       profiler_record->kernel_id, &kernel_name_c));
+      if (kernel_name_c != nullptr && !kernel_filters_.empty() && !check_filter_cache(kernel_name_c)) {
+        free(const_cast<char*>(kernel_name_c));
+        return;
+      }
     }
     *output_file << "Dispatch_ID(" << std::to_string(profiler_record->header.id.handle) << "), "
                  << "GPU_ID(" << std::to_string(profiler_record->gpu_id.handle) << "), "
@@ -340,6 +364,8 @@ class file_plugin_t {
 
  private:
   bool valid_{false};
+  std::set<std::string> kernel_filters_;
+  std::map<std::string, bool> kernel_filter_cache_;
   std::atomic<bool> tracer_header_written_{false};
   std::atomic<bool> profiler_header_written_{false};
 

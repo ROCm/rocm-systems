@@ -32,6 +32,7 @@
 #include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ostream>
@@ -176,6 +177,7 @@ class file_plugin_t {
   file_plugin_t(void* data) {
     if (data) counter_names_ = GetCounterNames();
 
+    kernel_filters_ = GetKernelFilters();
     const char* str = getenv("ROCPROFILER_INDIVIDUAL_XCC_MODE");
     if (str != NULL) is_individual_xcc_mode = (atol(str) > 0);
 
@@ -328,6 +330,23 @@ class file_plugin_t {
 
   void FlushProfilerRecord(const rocprofiler_record_profiler_t* profiler_record,
                            rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id) {
+
+    auto check_filter_cache = [&](const char * k_name) {
+      auto str = std::string{k_name};
+      auto f = kernel_filter_cache_.find(k_name);
+      if (f == kernel_filter_cache_.end()) {
+        bool found_match = false;
+        for (const auto& filter : kernel_filters_) {
+          if (str.find(filter) != std::string::npos) {
+            found_match = true;
+            break;
+          }
+        }
+        f = kernel_filter_cache_.emplace(str, found_match).first;
+      }
+      return f->second;
+    };
+
     std::lock_guard<std::mutex> lock(writing_lock);
     std::stringstream ss;
     WriteHeader(output_type_t::COUNTER, ACTIVITY_DOMAIN_NUMBER);
@@ -342,6 +361,10 @@ class file_plugin_t {
     if (name_length > 1) {
       CHECK_ROCPROFILER(rocprofiler_query_kernel_info(ROCPROFILER_KERNEL_NAME,
                                                       profiler_record->kernel_id, &kernel_name_c));
+      if (kernel_name_c != nullptr && !kernel_filters_.empty() && !check_filter_cache(kernel_name_c)) {
+        free(const_cast<char*>(kernel_name_c));
+        return;
+      }
     }
 
     if (!counter_header_written_) {
@@ -465,6 +488,8 @@ class file_plugin_t {
   bool counter_header_written_ = false;
   bool is_individual_xcc_mode=false;
   std::vector<std::string> counter_names_;
+  std::set<std::string> kernel_filters_;
+  std::map<std::string, bool> kernel_filter_cache_;
 
   std::atomic<bool> roctx_header_written_{false}, hsa_api_header_written_{false},
       hip_api_header_written_{false}, hip_activity_header_written_{false},
