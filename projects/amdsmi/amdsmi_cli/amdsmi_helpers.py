@@ -28,9 +28,7 @@ import sys
 import time
 import re
 
-from subprocess import run
-from subprocess import PIPE, STDOUT
-from typing import List
+from typing import List, Union
 from enum import Enum
 from typing import Set
 
@@ -333,7 +331,7 @@ class AMDSMIHelpers():
             (False, valid_gpu_format, str): Return False, whether the format of the GPU input is valid, and the first input that failed to be converted
         """
         if 'all' in gpu_selections:
-            return (True, amdsmi_interface.amdsmi_get_processor_handles())
+            return True, True, amdsmi_interface.amdsmi_get_processor_handles()
 
         if isinstance(gpu_selections, str):
             gpu_selections = [gpu_selections]
@@ -389,7 +387,7 @@ class AMDSMIHelpers():
             (False, str): Return False, and the first input that failed to be converted
         """
         if 'all' in cpu_selections:
-            return (True, amdsmi_interface.amdsmi_get_cpusocket_handles())
+            return True, True, amdsmi_interface.amdsmi_get_cpusocket_handles()
 
         if isinstance(cpu_selections, str):
             cpu_selections = [cpu_selections]
@@ -430,7 +428,7 @@ class AMDSMIHelpers():
             (False, str): Return False, and the first input that failed to be converted
         """
         if 'all' in core_selections:
-            return (True, amdsmi_interface.amdsmi_get_cpucore_handles())
+            return True, True, amdsmi_interface.amdsmi_get_cpucore_handles()
 
         if isinstance(core_selections, str):
             core_selections = [core_selections]
@@ -786,35 +784,24 @@ class AMDSMIHelpers():
         MICRO = 0.000001   # 10^-6
         NANO = 0.000000001 # 10^-9
 
-    def convert_SI_unit(val: float, unit_in: SI_Unit, unit_out = SI_Unit.BASE) -> float:
+    def convert_SI_unit(self, val: Union[int, float], unit_in: SI_Unit, unit_out = SI_Unit.BASE) -> Union[int, float]:
         """This function will convert a value into another
          scientific (SI) unit. Defaults unit_out to SI_Unit.BASE
-         This function returns a float.
 
         params:
-            val: float unit to convert
+            val: int or float unit to convert
             unit_in: Requires using SI_Unit to set current value's SI unit (eg. SI_Unit.MICRO)
             unit_out - Requires using SI_Unit to set current value's SI unit
              default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
         return:
-            float : converted SI unit of value requested
+            int or float : converted SI unit of value requested
         """
-        return val * unit_in / unit_out
-
-    def convert_SI_unit(val: int, unit_in: SI_Unit, unit_out=SI_Unit.BASE) -> int:
-        """This function will convert a value into another
-         scientific (SI) unit. Defaults unit_out to SI_Unit.BASE
-         This function returns a int.
-
-        params:
-            val: int unit to convert
-            unit_in: Requires using SI_Unit to set current value's SI unit (eg. SI_Unit.MICRO)
-            unit_out - Requires using SI_Unit to set current value's SI unit
-             default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
-        return:
-            int : converted SI unit of value requested
-        """
-        return int(float(val) * unit_in / unit_out)
+        if isinstance(val, float):
+            return val * unit_in / unit_out
+        elif isinstance(val, int):
+            return int(float(val) * unit_in / unit_out)
+        else:
+            raise TypeError("val must be an int or float")
 
     def get_pci_device_ids(self) -> Set[str]:
         pci_devices_path = "/sys/bus/pci/devices"

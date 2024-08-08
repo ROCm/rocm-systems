@@ -28,7 +28,7 @@ find_program(GIT NAMES git)
 
 ## Setup the package version based on git tags.
 set(PKG_VERSION_GIT_TAG_PREFIX "amdsmi_pkg_ver")
-get_package_version_number("24.6.2" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
+get_package_version_number("24.6.3" ${PKG_VERSION_GIT_TAG_PREFIX} GIT)
 message("Package version: ${PKG_VERSION_STR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MAJOR "${CPACK_PACKAGE_VERSION_MAJOR}")
 set(${AMD_SMI_LIBS_TARGET}_VERSION_MINOR "${CPACK_PACKAGE_VERSION_MINOR}")
@@ -286,6 +286,9 @@ set(CPACK_RPM_ASAN_PACKAGE_REQUIRES ${CPACK_RPM_PACKAGE_REQUIRES})
 
 # don't terminate if bytecompile of python files fails
 set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
+# Cpack converts !/usr/bin/env python3 to /usr/libexec/platform-python in RHEL8.
+# prevent the BRP(buildroot policy) script from checking and modifying interpreter directives
+string( APPEND CPACK_RPM_SPEC_MORE_DEFINE "\n%undefine __brp_mangle_shebangs")
 
 # Add rocm-core dependency if -DROCM_DEP_ROCMCORE=ON is passed
 if(ROCM_DEP_ROCMCORE)

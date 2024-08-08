@@ -107,6 +107,7 @@ class AmdSmiTimeoutException(AmdSmiLibraryException):
 class AmdSmiParameterException(AmdSmiException):
     def __init__(self, receivedValue, expectedType, msg=None):
         super().__init__(msg)
+        self.err_code = None
         self.actualType = type(receivedValue)
         self.expectedType = expectedType
         self.set_err_msg()

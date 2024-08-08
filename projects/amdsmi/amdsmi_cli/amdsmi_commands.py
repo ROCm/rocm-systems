@@ -422,11 +422,11 @@ class AMDSMICommands():
                     power_limit_error = False
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
                     max_power_limit = power_cap_info['max_power_cap']
-                    max_power_limit = AMDSMIHelpers.convert_SI_unit(max_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                    max_power_limit = self.helpers.convert_SI_unit(max_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
                     min_power_limit = power_cap_info['min_power_cap']
-                    min_power_limit = AMDSMIHelpers.convert_SI_unit(min_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                    min_power_limit = self.helpers.convert_SI_unit(min_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
                     socket_power_limit = power_cap_info['power_cap']
-                    socket_power_limit = AMDSMIHelpers.convert_SI_unit(socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
+                    socket_power_limit = self.helpers.convert_SI_unit(socket_power_limit, AMDSMIHelpers.SI_Unit.MICRO)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     power_limit_error = True
                     max_power_limit = "N/A"
@@ -2679,14 +2679,15 @@ class AMDSMICommands():
         # General and Engine to expose process_info values
         if args.general or args.engine:
             for process_info in filtered_process_values:
-                if args.general and args.engine:
-                    del process_info['process_info']['memory_usage']
-                elif args.general:
-                    del process_info['process_info']['memory_usage']
-                    del process_info['process_info']['usage'] # Used in engine
-                elif args.engine:
-                    del process_info['process_info']['memory_usage']
-                    del process_info['process_info']['mem_usage'] # Used in general
+                if not process_info['process_info'] == "N/A":
+                    if args.general and args.engine:
+                        del process_info['process_info']['memory_usage']
+                    elif args.general:
+                        del process_info['process_info']['memory_usage']
+                        del process_info['process_info']['usage'] # Used in engine
+                    elif args.engine:
+                        del process_info['process_info']['memory_usage']
+                        del process_info['process_info']['mem_usage'] # Used in general
 
         # Filter out non specified pids
         if args.pid:
@@ -3529,11 +3530,11 @@ class AMDSMICommands():
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
                 logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
                 min_power_cap = power_cap_info["min_power_cap"]
-                min_power_cap = AMDSMIHelpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+                min_power_cap = self.helpers.convert_SI_unit(min_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
                 max_power_cap = power_cap_info["max_power_cap"]
-                max_power_cap = AMDSMIHelpers.convert_SI_unit(max_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+                max_power_cap = self.helpers.convert_SI_unit(max_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
                 current_power_cap = power_cap_info["power_cap"]
-                current_power_cap = AMDSMIHelpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
+                current_power_cap = self.helpers.convert_SI_unit(current_power_cap, AMDSMIHelpers.SI_Unit.MICRO)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 raise ValueError(f"Unable to get power cap info from {gpu_string}") from e
 
@@ -3541,7 +3542,7 @@ class AMDSMICommands():
                 self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {args.power_cap}")
             elif args.power_cap >= min_power_cap and args.power_cap <= max_power_cap:
                 try:
-                    new_power_cap = AMDSMIHelpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
+                    new_power_cap = self.helpers.convert_SI_unit(args.power_cap, AMDSMIHelpers.SI_Unit.BASE,
                                                                   AMDSMIHelpers.SI_Unit.MICRO)
                     amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, new_power_cap)
                 except amdsmi_exception.AmdSmiLibraryException as e:
@@ -3932,9 +3933,9 @@ class AMDSMICommands():
                 power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
                 logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
                 default_power_cap_in_w = power_cap_info["default_power_cap"]
-                default_power_cap_in_w = AMDSMIHelpers.convert_SI_unit(default_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
+                default_power_cap_in_w = self.helpers.convert_SI_unit(default_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
                 current_power_cap_in_w = power_cap_info["power_cap"]
-                current_power_cap_in_w = AMDSMIHelpers.convert_SI_unit(current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
+                current_power_cap_in_w = self.helpers.convert_SI_unit(current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
             except amdsmi_exception.AmdSmiLibraryException as e:
                 raise ValueError(f"Unable to get power cap info from {gpu_id}") from e
 
@@ -3942,7 +3943,7 @@ class AMDSMICommands():
                 self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {default_power_cap_in_w}")
             else:
                 try:
-                    default_power_cap_in_uw = AMDSMIHelpers.convert_SI_unit(default_power_cap_in_w,
+                    default_power_cap_in_uw = self.helpers.convert_SI_unit(default_power_cap_in_w,
                                                                             AMDSMIHelpers.SI_Unit.BASE,
                                                                             AMDSMIHelpers.SI_Unit.MICRO)
                     amdsmi_interface.amdsmi_set_power_cap(args.gpu, 0, default_power_cap_in_uw)

@@ -24,19 +24,43 @@
 
 import logging
 import sys
+import os
 
 try:
     import argcomplete
 except ImportError:
     logging.debug("argcomplete module not found. Autocomplete will not work.")
-
-from amdsmi_commands import AMDSMICommands
-from amdsmi_parser import AMDSMIParser
-from amdsmi_logger import AMDSMILogger
-import amdsmi_cli_exceptions
-from amdsmi import amdsmi_interface
-from amdsmi import amdsmi_exception
-
+from typing import TYPE_CHECKING
+# only used for type checking
+# pyright trips up and cannot find amdsmi scripts without it
+if TYPE_CHECKING:
+    from amdsmi_commands import AMDSMICommands
+    from amdsmi_parser import AMDSMIParser
+    from amdsmi_logger import AMDSMILogger
+    import amdsmi_cli_exceptions
+    from amdsmi import amdsmi_interface
+    from amdsmi import amdsmi_exception
+try:
+    from amdsmi_commands import AMDSMICommands
+    from amdsmi_parser import AMDSMIParser
+    from amdsmi_logger import AMDSMILogger
+    import amdsmi_cli_exceptions
+    from amdsmi import amdsmi_interface
+    from amdsmi import amdsmi_exception
+except ImportError:
+    current_path = os.path.dirname(os.path.abspath(__file__))
+    additional_path = f"{current_path}/../libexec/amdsmi_cli"
+    sys.path.append(additional_path)
+    try:
+        from amdsmi_commands import AMDSMICommands
+        from amdsmi_parser import AMDSMIParser
+        from amdsmi_logger import AMDSMILogger
+        import amdsmi_cli_exceptions
+        from amdsmi import amdsmi_interface
+        from amdsmi import amdsmi_exception
+    except ImportError:
+        print(f"Still couldn't import 'amdsmi related scripts'. Make sure it's installed in {additional_path}")
+        sys.exit(1)
 
 def _print_error(e, destination):
     if destination in ['stdout', 'json', 'csv']:

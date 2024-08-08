@@ -4,6 +4,26 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ***All information listed below is for reference and subject to change.***
 
+## amd_smi_lib for ROCm 6.2.1
+
+### Additions
+
+- N/A
+
+### Optimizations
+
+- N/A
+
+### Fixes
+
+- **Fixed TypeError in `amd-smi process -G`**.  
+
+- **Updated CLI error strings to handle empty and invalid GPU/CPU inputs**.  
+
+### Known Issues
+
+- N/A
+
 ## amd_smi_lib for ROCm 6.2.0
 
 ### Additions
