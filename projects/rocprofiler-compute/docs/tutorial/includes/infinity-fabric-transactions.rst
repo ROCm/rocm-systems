@@ -410,7 +410,7 @@ Experiment 5: Coarse-grained, CPU-DRAM reads
 ----------------------------------------------
 
 In our next fabric experiment, we change our CPU memory allocation to be
-`coarse-grained <Mtype>`__. We accomplish this by passing the
+:ref:`coarse-grained <memory-type>`. We accomplish this by passing the
 ``hipHostMalloc`` API the ``hipHostMallocNonCoherent`` flag, to mark the
 allocation as coarse-grained:
 
