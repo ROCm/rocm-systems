@@ -4,7 +4,7 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
-## rocm_smi_lib for ROCm 6.3
+## rocm_smi_lib for ROCm 6.2.1
 
 ### Added
 
@@ -16,7 +16,8 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ### Optimized
 
-- N/A
+- **Improved handling of UnicodeEncodeErrors with non UTF-8 locales**  
+Non UTF-8 locales were causing crashing on UTF-8 special characters
 
 ### Fixed
 
