@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 
+"""Main entry point for omniperf"""
+
 ##############################################################################bl
 # MIT License
 #
@@ -24,23 +26,24 @@
 # SOFTWARE.
 ##############################################################################el
 
-import logging
+# import logging
 import os
 import sys
-from pip._internal.req import parse_requirements
-from pathlib import Path
-from importlib import import_module, metadata
 import re
 
 try:
+    from pathlib import Path
+    from importlib import metadata
     from omniperf_base import Omniperf
     from utils.utils import console_error
-except:
+except ImportError as e:
+    # print("Failed to import required modules: " + str(e))
     pass
 
 
 def verify_deps_version(localVer, desiredVer, operator):
-    """Check package version strings with simple operators used in companion requirements.txt file"""
+    """Check package version strings with simple operators used in companion
+    requirements.txt file"""
     if operator == "==":
         return localVer == desiredVer
     elif operator == ">=":
@@ -56,15 +59,24 @@ def verify_deps_version(localVer, desiredVer, operator):
 
 
 def verify_deps():
-    """Utility to read library dependencies from requirements.txt and endeavor to load them within current execution environment. 
-    Used in top-level omniperf to provide error messages if necessary dependencies are not available. """
+    """Utility to read library dependencies from requirements.txt and endeavor
+    to load them within current execution environment.
+    Used in top-level omniperf to provide error messages if necessary
+    dependencies are not available."""
+
+    # Check which version of python is being used
+    if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
+        print("[ERROR] Python 3.8 or higher is required to run omniperf."
+              f" The current version is {sys.version_info[0]}.{sys.version_info[1]}.")
+        sys.exit(1)
+
     bindir = Path(__file__).resolve().parent
     depsLocation = ["requirements.txt", "../requirements.txt"]
 
     for location in depsLocation:
         checkFile = os.path.join(bindir, location)
         if os.path.exists(checkFile):
-            with open(checkFile, "r") as file_in:
+            with open(checkFile, "r", encoding="utf-8") as file_in:
                 dependencies = file_in.read().splitlines()
 
             error = False
@@ -84,8 +96,8 @@ def verify_deps():
                 except metadata.PackageNotFoundError:
                     error = True
                     print(
-                        "[ERROR] The '%s' package was not found in the current execution environment."
-                        % dependency
+                        f"[ERROR] The '{dependency}' package was not found "
+                        "in the current execution environment."
                     )
 
                 # check version requirement
@@ -95,8 +107,8 @@ def verify_deps():
                             localVersion, desiredVersion, operator
                         ):
                             print(
-                                "[ERROR] the '%s' distribution does not meet version requirements to use omniperf."
-                                % dependency
+                                f"[ERROR] the '{dependency}' distribution does "
+                                "not meet version requirements to use omniperf."
                             )
                             print("  --> version installed :", localVersion)
                             error = True
@@ -104,15 +116,18 @@ def verify_deps():
             if error:
                 print("")
                 print(
-                    "Please verify all of the python dependencies called out in the requirements file"
+                    "Please verify all of the python dependencies called out "
+                    "in the requirements file"
                 )
                 print("are installed locally prior to running omniperf.")
                 print("")
-                print("See: %s" % checkFile)
+                print(f"See: {checkFile}")
                 sys.exit(1)
     return
 
+
 def main():
+    '''Main function for omniperf'''
 
     # verify required python dependencies
     verify_deps()
