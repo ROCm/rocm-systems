@@ -59,7 +59,7 @@ externalproject_add(
     PATCH_COMMAND
         ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
         <SOURCE_DIR>/configure -q --prefix=${_otf2_root} CFLAGS=-fPIC\ -O3\ -g
-        CXXFLAGS=-fPIC\ -O3\ -g PYTHON=: SPHINX=:
+        CXXFLAGS=-fPIC\ -O3\ -g LDFLAGS= PYTHON=: SPHINX=:
     CONFIGURE_COMMAND ${MAKE_COMMAND} install -s
     BUILD_COMMAND ""
     BUILD_BYPRODUCTS "${_otf2_build_byproducts}"
