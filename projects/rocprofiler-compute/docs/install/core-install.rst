@@ -32,7 +32,7 @@ right for you.
    :width: 800
 
 .. _core-install:
- 
+
 Core installation
 =================
 
@@ -43,6 +43,12 @@ installation.
 * Python ``>= 3.8``
 * CMake ``>= 3.19``
 * ROCm ``>= 5.7.1``
+
+.. note::
+
+   Omniperf will use the first version of ``Python3`` found in your system's
+   ``PATH``. If the default version of Python3 is older than 3.8, you may need to
+   update your system's ``PATH`` to point to a newer version of Python3.
 
 Omniperf depends on a number of Python packages documented in the top-level
 ``requirements.txt`` file. Install these *before* configuring Omniperf.
@@ -65,6 +71,16 @@ system so that multiple users can access the final installation. The
 following steps illustrate how to install the necessary Python dependencies
 using `pip <https://packaging.python.org/en/latest/>`_ and Omniperf into a
 shared location controlled by the ``INSTALL_DIR`` environment variable.
+
+.. tip::
+
+   To always run Omniperf with a particular version of python, you can create a
+   bash alias. For example, to run Omniperf with Python 3.10, you can run the
+   following command:
+
+   .. code-block:: shell
+
+      alias omniperf-mypython="/usr/bin/python3.10 /opt/rocm/bin/omniperf"
 
 .. _core-install-cmake-vars:
 
@@ -208,21 +224,21 @@ software stack.
       .. code-block:: shell
 
          $ sudo apt install omniperf
-         $ pip install -r /opt/rocm/libexec/omniperf/requirements.txt
+         $ python3 -m pip install -r /opt/rocm/libexec/omniperf/requirements.txt
 
    .. tab-item:: Red Hat Enterprise Linux
 
       .. code-block:: shell
 
          $ sudo dnf install omniperf
-         $ pip install -r /opt/rocm/libexec/omniperf/requirements.txt
+         $ python3 -m pip install -r /opt/rocm/libexec/omniperf/requirements.txt
 
    .. tab-item:: SUSE Linux Enterprise Server
 
       .. code-block:: shell
 
          $ sudo zypper install omniperf
-         $ pip install -r /opt/rocm/libexec/omniperf/requirements.txt
+         $ python3 -m pip install -r /opt/rocm/libexec/omniperf/requirements.txt
 
 .. _core-install-rocprof-var:
 
