@@ -3,9 +3,9 @@ name: Formatting
 
 on:
   push:
-    branches: [ main, dev, amd-mainline, amd-staging ]
+    branches: [ amd-mainline, amd-staging ]
   pull_request:
-    branches: [ main, dev, amd-mainline, amd-staging ]
+    branches: [ amd-mainline, amd-staging ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

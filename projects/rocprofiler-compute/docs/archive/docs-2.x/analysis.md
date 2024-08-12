@@ -181,7 +181,7 @@ Analysis mode = cli
                 2.1.30 -> L1I Fetch Latency
 ...
 ```
-3. Choose your own customized subset of metrics with `-b` (a.k.a. `--block`), or build your own config following [config_template](https://github.com/ROCm/omniperf/blob/main/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
+3. Choose your own customized subset of metrics with `-b` (a.k.a. `--block`), or build your own config following [config_template](https://github.com/ROCm/omniperf/blob/amd-mainline/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/MI200/ -b 2
 --------

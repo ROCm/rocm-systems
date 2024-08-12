@@ -2,7 +2,7 @@ name: Documentation
 
 on:
   push:
-    branches: [ main, amd-mainline ]
+    branches: [ amd-mainline ]
     paths:
       - 'docs/archive/docs-2.x/**'
       - 'docs/archive/docs-1.x/**'

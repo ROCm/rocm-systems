@@ -38,7 +38,7 @@ Run ``omniperf profile -h`` for more details. See
 Profiling example
 -----------------
 
-The `<https://github.com/ROCm/omniperf/blob/main/sample/vcopy.cpp>`__ repository
+The `<https://github.com/ROCm/omniperf/blob/amd-mainline/sample/vcopy.cpp>`__ repository
 includes source code for a sample GPU compute workload, ``vcopy.cpp``. A copy of
 this file is available in the ``share/sample`` subdirectory after a normal
 Omniperf installation, or via the ``$OMNIPERF_SHARE/sample`` directory when

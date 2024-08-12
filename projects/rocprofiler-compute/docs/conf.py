@@ -55,7 +55,7 @@ external_projects_current_project = "omniperf"
 
 # frequently used external resources
 extlinks = {
-    "dev-sample": ("https://github.com/ROCm/omniperf/blob/dev/sample/%s", "%s"),
+    "dev-sample": ("https://github.com/ROCm/omniperf/blob/amd-mainline/sample/%s", "%s"),
     "prod-page": (
         "https://www.amd.com/en/products/accelerators/instinct/%s.html",
         "%s",

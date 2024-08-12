@@ -7,7 +7,7 @@ Profiling by example
 ********************
 
 The following examples refer to sample :doc:`HIP <hip:index>` code located in
-:fab:`github` :dev-sample:`ROCm/omniperf/blob/dev/sample <>` and distributed
+:fab:`github` :dev-sample:`ROCm/omniperf/blob/amd-mainline/sample <>` and distributed
 as part of Omniperf.
 
 .. include:: ./includes/valu-arithmetic-instruction-mix.rst
