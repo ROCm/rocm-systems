@@ -56,15 +56,25 @@ do_update_alternatives(){
 # it already exists
 # https://www.debian.org/doc/debian-policy/ch-opersys.html#users-and-groups
 do_create_rdc_user() {
-    adduser \
-        --system \
-        --quiet \
-        --home /nonexistent \
-        --no-create-home \
-        --disabled-password \
-        rdc
+    # create rdc group
+    if ! getent group rdc > /dev/null 2>&1 ; then
+        addgroup --system rdc
+    fi
+
+    # create rdc user
+    if ! getent passwd rdc > /dev/null 2>&1 ; then
+        adduser \
+            --system \
+            --quiet \
+            --home /nonexistent \
+            --no-create-home \
+            --disabled-password \
+            --ingroup rdc \
+            rdc
+    fi
+
     # only add render if it exists
-    if [ $(getent group render) ]; then
+    if getent group render > /dev/null 2>&1 ; then
         usermod -a -G render rdc
     fi
 
@@ -78,7 +88,7 @@ do_create_rdc_user() {
 create_rdc_service() {
     #Symlink RDC Service
     if [ -d /run/systemd/system ]; then
-        ln -s -f -r /@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service /lib/systemd/system/rdc.service
+        ln -s -f -r @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service /lib/systemd/system/rdc.service
     fi
 }
 

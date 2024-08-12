@@ -53,9 +53,19 @@ do_update_alternatives(){
 
 # https://fedoraproject.org/wiki/Packaging%3aUsersAndGroups
 do_create_rdc_user() {
-    useradd -r -s /sbin/nologin rdc
+
+    # create rdc group
+    if ! getent group rdc > /dev/null 2>&1 ; then
+        groupadd --system rdc
+    fi
+
+    # create rdc user
+    if ! getent passwd rdc > /dev/null 2>&1 ; then
+        useradd -r -g rdc -s /sbin/nologin rdc
+    fi
+
     # only add render if it exists
-    if [ $(getent group render) ]; then
+    if getent group render > /dev/null 2>&1 ; then
         usermod -a -G render rdc
     fi
 
@@ -68,7 +78,7 @@ do_create_rdc_user() {
 
 create_rdc_service() {
     if [ -d /run/systemd/system ]; then
-        ln -s -f -r /@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service @DISTRO_ROOT@/rdc.service
+        ln -s -f -r @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service @DISTRO_ROOT@/rdc.service
     fi
 }
 
