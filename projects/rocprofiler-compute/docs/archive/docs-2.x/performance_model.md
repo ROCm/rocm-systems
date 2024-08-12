@@ -2178,7 +2178,7 @@ A good discussion of coarse and fine grained memory allocations and what type of
 (VALU_inst_mix_example)=
 ## VALU Arithmetic Instruction Mix
 
-For this example, we consider the [instruction mix sample](https://github.com/ROCm/omniperf/blob/dev/sample/instmix.hip) distributed as a part of Omniperf.
+For this example, we consider the [instruction mix sample](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/instmix.hip) distributed as a part of Omniperf.
 
 ```{note}
 This example is expected to work on all CDNA accelerators, however the results in this section were collected on an [MI2XX](2xxnote) accelerator
@@ -2269,7 +2269,7 @@ shows that we have exactly one of each type of VALU arithmetic instruction, by c
 (Fabric_transactions_example)=
 ## Infinity-Fabric(tm) transactions
 
-For this example, we consider the [Infinity Fabric(tm) sample](https://github.com/ROCm/omniperf/blob/dev/sample/fabric.hip) distributed as a part of Omniperf.
+For this example, we consider the [Infinity Fabric(tm) sample](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/fabric.hip) distributed as a part of Omniperf.
 This code launches a simple read-only kernel, e.g.:
 
 ```c++
@@ -2826,7 +2826,7 @@ On an AMD [MI2XX](2xxnote) accelerator, for FP32 values this will generate a `gl
 (flatmembench)=
 ### Global / Generic (FLAT)
 
-For this example, we consider the [vector-memory sample](https://github.com/ROCm/omniperf/blob/dev/sample/vmem.hip) distributed as a part of Omniperf.
+For this example, we consider the [vector-memory sample](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/vmem.hip) distributed as a part of Omniperf.
 This code launches many different versions of a simple read/write/atomic-only kernels targeting various address spaces, e.g. below is our simple `global_write` kernel:
 
 ```c++
@@ -2976,7 +2976,7 @@ The assembly in these experiments were generated for an [MI2XX](2xxnote) acceler
 Next, we examine a generic write.
 As discussed [previously](Flat_design), our `generic_write` kernel uses an address space cast to _force_ the compiler to choose our desired address space, regardless of other optimizations that may be possible.
 
-We also note that the `filter` parameter passed in as a kernel argument (see [example](https://github.com/ROCm/omniperf/blob/dev/sample/vmem.hip), or [design note](Flat_design)) is set to zero on the host, such that we always write to the 'local' (LDS) memory allocation `lds`.
+We also note that the `filter` parameter passed in as a kernel argument (see [example](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/vmem.hip), or [design note](Flat_design)) is set to zero on the host, such that we always write to the 'local' (LDS) memory allocation `lds`.
 
 Examining this kernel in the VMEM Instruction Mix table yields: 
 
@@ -3339,7 +3339,7 @@ Next we examine the use of 'Spill/Scratch' memory.
 On current CDNA accelerators such as the [MI2XX](2xxnote), this is implemented using the [private](mspace) memory space, which maps to ['scratch' memory](https://llvm.org/docs/AMDGPUUsage.html#amdgpu-address-spaces) in AMDGPU hardware terminology.
 This type of memory can be accessed via different instructions depending on the specific architecture targeted. However, current CDNA accelerators such as the [MI2XX](2xxnote) use so called `buffer` instructions to access private memory in a simple (and typically) coalesced manner.  See [Sec. 9.1, 'Vector Memory Buffer Instructions' of the CDNA2 ISA guide](https://www.amd.com/system/files/TechDocs/instinct-mi200-cdna2-instruction-set-architecture.pdf) for further reading on this instruction type.
 
-We develop a [simple kernel](https://github.com/ROCm/omniperf/blob/dev/sample/stack.hip) that uses stack memory:
+We develop a [simple kernel](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/stack.hip) that uses stack memory:
 ```c++
 #include <hip/hip_runtime.h>
 __global__ void knl(int* out, int filter) {
@@ -3404,7 +3404,7 @@ Here we see a single write to the stack (10.3.6), which corresponds to an L1-L2 
 (IPC_example)=
 ## Instructions-per-cycle and Utilizations example
 
-For this section, we use the instructions-per-cycle (IPC) [example](https://github.com/ROCm/omniperf/blob/dev/sample/ipc.hip) included with Omniperf.
+For this section, we use the instructions-per-cycle (IPC) [example](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/ipc.hip) included with Omniperf.
 
 This example is compiled using `c++17` support:
 
@@ -3824,7 +3824,7 @@ Finally, we note that our branch utilization (11.2.5) has increased slightly fro
 
 ## LDS Examples
 
-For this example, we consider the [LDS sample](https://github.com/ROCm/omniperf/blob/dev/sample/lds.hip) distributed as a part of Omniperf.
+For this example, we consider the [LDS sample](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/lds.hip) distributed as a part of Omniperf.
 This code contains two kernels to explore how both [LDS](lds) bandwidth and bank conflicts are calculated in Omniperf.
 
 This example was compiled and run on an MI250 accelerator using ROCm v5.6.0, and Omniperf v2.0.0.
@@ -4037,7 +4037,7 @@ The bank conflict rate linearly increases with the number of work-items within a
 ## Occupancy Limiters Example 
 
 
-In this [example](https://github.com/ROCm/omniperf/blob/dev/sample/occupancy.hip), we will investigate the use of the resource allocation panel in the [Workgroup Manager](SPI)'s metrics section to determine occupancy limiters.
+In this [example](https://github.com/ROCm/omniperf/blob/amd-mainline/sample/occupancy.hip), we will investigate the use of the resource allocation panel in the [Workgroup Manager](SPI)'s metrics section to determine occupancy limiters.
 This code contains several kernels to explore how both various kernel resources impact achieved occupancy, and how this is reported in Omniperf.
 
 This example was compiled and run on a MI250 accelerator using ROCm v5.6.0, and Omniperf v2.0.0:
