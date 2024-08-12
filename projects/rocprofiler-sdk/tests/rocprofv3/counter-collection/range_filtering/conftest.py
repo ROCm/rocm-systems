@@ -36,20 +36,26 @@ def pytest_addoption(parser):
     )
 
 
+def tokenize(kernel_iteration_range):
+    range_str = kernel_iteration_range.replace("[", "").replace("]", "")
+    split_list = range_str.split(",")
+    _range = []
+    for split_string in split_list:
+        if "-" in split_string:
+            interval = split_string.split("-")
+            [
+                _range.append(i)
+                for i in list(range((int)(interval[0]), (int)(interval[1]) + 1))
+            ]
+        else:
+            _range.append(int(split_string))
+    return _range
+
+
 def extract_iteration_list(jobs, pass_):
 
-    kernel_iteration_range = jobs[pass_]["kernel_iteration_range"]
-    _range = re.split(r"\[|,|\],|\[|,|\]", kernel_iteration_range)
-    _range = list(filter(lambda itr: itr != "", _range))
-    range_list = []
-    for itr in _range:
-        if "-" in itr:
-            interval = re.split("-", itr)
-            range_list.append(list(range((int)(interval[0]), (int)(interval[1]))))
-        else:
-
-            range_list.append(itr)
-    return range_list
+    kernel_iteration_range = jobs[pass_]["kernel_iteration_range"].strip()
+    return tokenize(kernel_iteration_range)
 
 
 def process_config(out_file, input_config, pass_):

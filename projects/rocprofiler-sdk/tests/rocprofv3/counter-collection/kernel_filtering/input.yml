@@ -13,3 +13,6 @@ jobs:
   - pmc: [GRBM_GUI_ACTIVE]
     kernel_include_regex: ".*_kernel"
     kernel_exclude_regex: ""
+  - pmc: [SQ_WAVES]
+    kernel_include_regex: "divide"
+    kernel_exclude_regex: ""

@@ -27,9 +27,9 @@ def validate_json(input_data):
     for dispatch in kernel_dispatch_data:
         dispatch_info = dispatch["dispatch_info"]
         kernel_name = get_kernel_name(dispatch_info["kernel_id"])
+        if kernel_name == "transpose" and iteration in iteration_list:
+            dispatch_ids[dispatch_info["dispatch_id"]] = dispatch_info
         if kernel_name == "transpose":
-            if iteration in iteration_list:
-                dispatch_ids[dispatch_info[dispatch_id]] = dispatch_info
             iteration = iteration + 1
 
     for counter in counter_collection_data:

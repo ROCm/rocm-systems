@@ -31,7 +31,7 @@ def pytest_addoption(parser):
     parser.addoption(
         "--input-csv-pass2",
         action="store",
-        help="Path to JSON file.",
+        help="Path to CSV file.",
     )
 
     parser.addoption(
@@ -43,7 +43,19 @@ def pytest_addoption(parser):
     parser.addoption(
         "--input-csv-pass3",
         action="store",
+        help="Path to CSV file.",
+    )
+
+    parser.addoption(
+        "--input-json-pass4",
+        action="store",
         help="Path to JSON file.",
+    )
+
+    parser.addoption(
+        "--input-csv-pass4",
+        action="store",
+        help="Path to CSV file.",
     )
 
     parser.addoption(
@@ -75,6 +87,13 @@ def input_csv_pass3(request):
 
 
 @pytest.fixture
+def input_csv_pass4(request):
+    filename = request.config.getoption("--input-csv-pass4")
+    with open(filename, "r") as inp:
+        return pd.read_csv(inp)
+
+
+@pytest.fixture
 def input_csv_pmc1(request):
     filename = request.config.getoption("--input-csv-pmc1")
     with open(filename, "r") as inp:
@@ -98,5 +117,12 @@ def input_json_pass2(request):
 @pytest.fixture
 def input_json_pass3(request):
     filename = request.config.getoption("--input-json-pass3")
+    with open(filename, "r") as inp:
+        return dotdict(collapse_dict_list(json.load(inp)))
+
+
+@pytest.fixture
+def input_json_pass4(request):
+    filename = request.config.getoption("--input-json-pass4")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))

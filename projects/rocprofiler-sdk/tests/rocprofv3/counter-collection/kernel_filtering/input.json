@@ -39,6 +39,20 @@
                 "json"
             ],
             "truncate_kernels": true
+        },
+        {
+            "pmc": [
+                "SQ_WAVES"
+            ],
+            "kernel_include_regex": "divide",
+            "kernel_exclude_regex": "",
+
+            "output_file": "out",
+            "output_format": [
+                "csv",
+                "json"
+            ],
+            "truncate_kernels": true
         }
     ]
 }

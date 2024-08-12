@@ -72,7 +72,10 @@ add_test(
         --input-json-pass2 ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_2/out_results.json
         --input-csv-pass3
         ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_3/out_counter_collection.csv
-        --input-json-pass3 ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_3/out_results.json)
+        --input-json-pass3 ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_3/out_results.json
+        --input-csv-pass4
+        ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_counter_collection.csv
+        --input-json-pass4 ${CMAKE_CURRENT_BINARY_DIR}/json_input/pass_4/out_results.json)
 
 add_test(
     NAME rocprofv3-test-cc-kernel-filtering-input-yaml-validate
@@ -86,7 +89,10 @@ add_test(
         --input-json-pass2 ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_2/out_results.json
         --input-csv-pass3
         ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_3/out_counter_collection.csv
-        --input-json-pass3 ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_3/out_results.json)
+        --input-json-pass3 ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_3/out_results.json
+        --input-csv-pass4
+        ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_counter_collection.csv
+        --input-json-pass4 ${CMAKE_CURRENT_BINARY_DIR}/yaml_input/pass_4/out_results.json)
 
 add_test(
     NAME rocprofv3-test-cc-kernel-filtering-input-cmd-validate

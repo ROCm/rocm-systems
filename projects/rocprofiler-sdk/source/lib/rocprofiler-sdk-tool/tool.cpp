@@ -611,12 +611,6 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
                        !std::regex_search(kernel_info.formatted_kernel_name, exclude_regex))
                         add_kernel_target(sym_data->kernel_id, kernel_filter_range);
                 }
-                else
-                {
-                    if(kernel_filter_exclude.empty() ||
-                       !std::regex_search(kernel_info.formatted_kernel_name, exclude_regex))
-                        add_kernel_target(sym_data->kernel_id, kernel_filter_range);
-                }
             }
         }
     }

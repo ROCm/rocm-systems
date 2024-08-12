@@ -121,6 +121,11 @@ def test_validate_counter_collection_csv_pass3(input_csv_pass3: pd.DataFrame):
     validate_csv(input_csv_pass3, kernel_list, "GRBM_GUI_ACTIVE")
 
 
+def test_validate_counter_collection_csv_pass4(input_csv_pass4: pd.DataFrame):
+    kernel_list = sorted(["divide_kernel"])
+    validate_csv(input_csv_pass4, kernel_list, "SQ_WAVES")
+
+
 def test_validate_counter_collection_json_pass1(input_json_pass1):
     validate_json(input_json_pass1, "SQ_WAVES", False)
 
@@ -131,6 +136,10 @@ def test_validate_counter_collection_json_pass2(input_json_pass2):
 
 def test_validate_counter_collection_json_pass3(input_json_pass3):
     validate_json(input_json_pass3, "GRBM_GUI_ACTIVE", True)
+
+
+def test_validate_counter_collection_json_pass4(input_json_pass4):
+    validate_json(input_json_pass4, "SQ_WAVES", False)
 
 
 if __name__ == "__main__":
