@@ -10,7 +10,7 @@ updates:
     open-pull-requests-limit: 10
     schedule:
       interval: "daily"
-    target-branch: "dev"
+    target-branch: "amd-staging"
     labels:
       - "documentation"
       - "dependencies"
