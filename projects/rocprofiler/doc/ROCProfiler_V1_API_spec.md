@@ -75,7 +75,7 @@ Library version:
 ```
 ### 3.2. Returning the error and error string methods
 ```
-const char* rocprofiler_error_string();
+hsa_status_t rocprofiler_error_string(const char** str);
 ```
 ### 3.3. Library version
 ```
