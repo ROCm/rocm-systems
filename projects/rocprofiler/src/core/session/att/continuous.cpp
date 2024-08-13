@@ -261,12 +261,12 @@ bool AttTracer::ATTContiguousWriteInterceptor(
     codeobj_event_cnt = new_load_cnt;
 
     auto symbols = codeobj_record::get_capture(this->capture_id);
-    std::unordered_set<uint32_t> current_ids;
+    std::unordered_set<size_t> current_ids;
 
     for (size_t s=0; s<symbols.count; s++)
       current_ids.insert(symbols.symbols[s].att_marker_id);
 
-    for (uint32_t prev_id : active_capture_event_ids)
+    for (size_t prev_id : active_capture_event_ids)
       if (current_ids.find(prev_id) == current_ids.end())
         InsertUnloadMarker(transformed, queue_info.GetGPUAgent(), prev_id);
 

@@ -35,7 +35,7 @@ AttTracer::AttTracer(rocprofiler_buffer_id_t buffer_id, rocprofiler_filter_id_t 
     : buffer_id_(buffer_id), filter_id_(filter_id), session_id_(session_id) {}
 
 void AttTracer::AddPendingSignals(
-    uint32_t writer_id,
+    size_t writer_id,
     uint64_t kernel_object,
     const hsa_signal_t& original_completion_signal,
     const hsa_signal_t& new_completion_signal,
@@ -66,7 +66,7 @@ void AttTracer::AddPendingSignals(
   });
 }
 
-std::vector<att_pending_signal_t> AttTracer::MovePendingSignals(uint32_t writer_id)
+std::vector<att_pending_signal_t> AttTracer::MovePendingSignals(size_t writer_id)
 {
   std::lock_guard<std::mutex> lock(sessions_pending_signals_lock_);
   auto it = sessions_pending_signals_.find(writer_id);

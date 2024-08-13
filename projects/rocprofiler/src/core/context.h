@@ -288,8 +288,8 @@ class Context {
         rinfo->data.kind = ROCPROFILER_DATA_KIND_UNINIT;
         rinfo->data.result_int64 = 0;
       }
-      uint32_t xcc_count = agent_info_->xcc_num;
-      uint32_t single_xcc_buff_size = tuple.profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
+      size_t xcc_count = agent_info_->xcc_num;
+      size_t single_xcc_buff_size = tuple.profile->output_buffer.size / (sizeof(uint64_t) * xcc_count);
       callback_data_t callback_data{tuple.profile, tuple.info_vector, tuple.info_vector->size(),
                                     NULL, single_xcc_buff_size, 0};
       const hsa_status_t status =

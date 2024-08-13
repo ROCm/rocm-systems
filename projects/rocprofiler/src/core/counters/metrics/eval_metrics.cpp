@@ -104,7 +104,7 @@ bool metrics::ExtractMetricEvents(
   */
   try {
     HSASupport_Singleton& hsasupport_singleton = HSASupport_Singleton::GetInstance();
-    uint32_t xcc_count = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
+    size_t xcc_count = hsasupport_singleton.GetHSAAgentInfo(gpu_agent.handle).GetDeviceInfo().getXccCount();
 
 
     for (size_t i = 0; i < metric_names.size(); i++) {

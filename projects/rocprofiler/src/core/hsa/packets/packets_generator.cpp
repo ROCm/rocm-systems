@@ -740,8 +740,6 @@ void AQLPacketProfile::MoveToCache(hsa_agent_t gpu_agent, std::unique_ptr<AQLPac
 {
   if (!packet.get()) return;
 
-  auto& output_buffer = packet->profile->output_buffer;
-
   std::lock_guard<std::mutex> lk(cache_mutex);
 
   auto agent_it = _cache.find(gpu_agent.handle);

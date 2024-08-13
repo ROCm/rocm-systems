@@ -109,10 +109,10 @@ struct queue_info_session_t {
   hsa_agent_t agent;
   rocprofiler_session_id_t session_id;
   uint64_t queue_id;
-  uint32_t writer_id;
+  size_t writer_id;
   hsa_signal_t interrupt_signal;
   uint64_t gpu_index;
-  uint32_t xcc_count;
+  size_t xcc_count;
   hsa_signal_t block_signal;
 };
 

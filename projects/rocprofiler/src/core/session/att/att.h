@@ -71,7 +71,7 @@ public:
     rocprofiler_session_id_t session_id
   );
 
-  void AddPendingSignals(uint32_t writer_id, uint64_t kernel_object,
+  void AddPendingSignals(size_t writer_id, uint64_t kernel_object,
                          const hsa_signal_t& original_completion_signal,
                          const hsa_signal_t& new_completion_signal,
                          rocprofiler_session_id_t session_id, rocprofiler_buffer_id_t buffer_id,
@@ -95,7 +95,7 @@ public:
     uint64_t agent_handle
   );
 
-  std::vector<att_pending_signal_t> MovePendingSignals(uint32_t writer_id);
+  std::vector<att_pending_signal_t> MovePendingSignals(size_t writer_id);
 
   bool ATTWriteInterceptor(
     const void* packets,
@@ -201,7 +201,7 @@ private:
   rocprofiler_buffer_id_t buffer_id_;
   rocprofiler_filter_id_t filter_id_;
   rocprofiler_session_id_t session_id_;
-  std::atomic<uint32_t> WRITER_ID{0};
+  std::atomic<size_t> WRITER_ID{0};
 
   std::vector<std::string> kernel_profile_names;
   std::vector<std::pair<uint64_t,uint64_t>> kernel_profile_dispatch_ids;
@@ -209,12 +209,12 @@ private:
   std::vector<rocprofiler_att_parameter_t> att_parameters_data;
 
   std::mutex sessions_pending_signals_lock_;
-  std::map<uint32_t, std::vector<att_pending_signal_t>> sessions_pending_signals_;
+  std::map<size_t, std::vector<att_pending_signal_t>> sessions_pending_signals_;
   std::condition_variable has_session_pending_cv;
   std::atomic<bool> bIsSessionDestroying{false};
 
   rocprofiler_record_id_t capture_id;
-  std::unordered_set<uint32_t> active_capture_event_ids;
+  std::unordered_set<size_t> active_capture_event_ids;
 };
 
 }  // namespace att
