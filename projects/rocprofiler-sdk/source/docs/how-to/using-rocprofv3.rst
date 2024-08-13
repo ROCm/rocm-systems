@@ -67,7 +67,7 @@ Here is the list of ``rocprofv3`` command-line options. Some options are used fo
     - Application tracing
 
   * - ``--hsa-image-trace``
-    - Collects HSA API Ttaces (Image-extension API).
+    - Collects HSA API Traces (Image-extension API).
     - Application tracing
 
   * - ``--hsa-finalizer-trace``
@@ -303,7 +303,7 @@ Here are the contents of `kernel_trace.csv` file:
 
 .. csv-table:: Kernel trace
    :file: /data/kernel_trace.csv
-   :widths: 10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,20,20,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -346,7 +346,7 @@ Running the above command generates `hip_api_trace.csv`, `hsa_api_trace.csv`, `k
 Scratch memory trace
 ++++++++++++++++++++++
 
-This option collects scratch memory operation's traces. Scratch is an address space on AMDGPUs, which is roughly equivalent to the `local memory` in NVIDIA CUDA. The `local memory` in CUDA is a thread-local global memory with interleaved addressing, which is used for register spills or stack space. With this option, you can trace when the ``rocr`` runtime allocates, frees, and tries to reclaim scratch memory.
+This option collects scratch memory operation's traces. Scratch is an address space on AMD GPUs, which is roughly equivalent to the `local memory` in NVIDIA CUDA. The `local memory` in CUDA is a thread-local global memory with interleaved addressing, which is used for register spills or stack space. With this option, you can trace when the ``rocr`` runtime allocates, frees, and tries to reclaim scratch memory.
 
 .. code-block:: shell
 
@@ -433,7 +433,7 @@ Properties
       -  **``hsa_finalize_trace``** *(boolean)*: For Collecting HSA API
          Traces (Finalizer-extension API).
       -  **``hsa_image_trace``** *(boolean)*: For Collecting HSA API
-         Traces (Image-extenson API).
+         Traces (Image-extension API).
       -  **``sys_trace``** *(boolean)*: For Collecting HIP, HSA, Marker
          (ROCTx), Memory copy, Scratch memory, and Kernel dispatch
          traces.

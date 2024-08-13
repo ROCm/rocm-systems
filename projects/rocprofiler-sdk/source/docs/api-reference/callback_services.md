@@ -273,14 +273,14 @@ Sample Output:
     2: rocprofiler_dim3_t dimBlocks        = {z=1, y=32, x=32}
     3: void**             args             = 0x7ffe6d8dd3c0
     4: unsigned long      sharedMemBytes   = 0
-    5: ihipStream_t*      stream           = 0x17b40c0
+    5: hipStream_t*      stream           = 0x17b40c0
 
 [HIP_RUNTIME_API] hipMemcpyAsync
     0: void*              dst              = 0x7f06c7bbb010
     1: void const*        src              = 0x7f0698800000
     2: unsigned long      sizeBytes        = 393625600
     3: hipMemcpyKind      kind             = DeviceToHost
-    4: ihipStream_t*      stream           = 0x25dfcf0
+    4: hipStream_t*      stream           = 0x25dfcf0
 ```
 
 ## Code Object Tracing
@@ -334,4 +334,4 @@ any/all buffers which might contain references to that code object or kernel sym
 deleting the associated data.
 
 For a sample of code object tracing, please see the `samples/code_object_tracing` example in the
-[rocprofiler-sdk GitHub repository](https://github.com/ROCm/rocproifler-sdk).
+[rocprofiler-sdk GitHub repository](https://github.com/ROCm/rocprofiler-sdk).

@@ -128,7 +128,7 @@ rocprofiler_counter_id_t is a handle to a counter. The information about the cou
     for(auto& counter : gpu_counters)
     {
         // Contains name and other attributes about the counter.
-        // See API documenation for more info on the contents of this struct.
+        // See API documentation for more info on the contents of this struct.
         rocprofiler_counter_info_v0_t version;
         ROCPROFILER_CALL(
             rocprofiler_query_counter_info(
@@ -150,6 +150,7 @@ After you have identified a set of counters you wish to collect, a profile can b
 The created profile can in turn be used for both dispatch and agent counter collection services. 
 
 ##### Special Notes On Profile Behavior
+
 - Profile created is *only valid* for the agent it was created for.
 - Profiles are immutable. If a new counter set is desired to be collected, construct a new profile. 
 - A single profile can be used multiple times on the same agent. 
@@ -234,18 +235,18 @@ counter_name:       # Counter name
     gfx90a:         # Architecture name 
       block:        # Block information (SQ/etc)
       event:        # Event ID (used by AQLProfile to identify counter register)
-      expression:   # Formula for the counter (if derrived counter)
+      expression:   # Formula for the counter (if derived counter)
       description:  # Per-arch description (optional)
     gfx1010:
        ...
   description:      # Description of the counter
 ```
 
-Architectures can be separately defined with their own definitions (i.e. gfx90a and gfx1010 in the above example). If two or more architectures share the same block/event/expression definition, they can be "/" delimited on a single line (i.e. "gfx90a/gfx1010:"). Hardware metrics have the elements block, event, and description defined. Derrived metrics have the element expression defined (and cannot have block or event defined).
+Architectures can be separately defined with their own definitions (i.e. gfx90a and gfx1010 in the above example). If two or more architectures share the same block/event/expression definition, they can be "/" delimited on a single line (i.e. "gfx90a/gfx1010:"). Hardware metrics have the elements block, event, and description defined. Derived metrics have the element expression defined (and cannot have block or event defined).
 
 ## Derived Metrics
 
-Derrived metrics allow for computations (via expressions) to be performed on collected hardware metrics with the result returned as it it were a real hardware counter.
+Derived metrics allow for computations (via expressions) to be performed on collected hardware metrics with the result returned as it it were a real hardware counter.
 
 ```yaml
 GPU_UTIL:
@@ -255,7 +256,7 @@ GPU_UTIL:
   description: Percentage of the time that GUI is active
 ```
 
-GPU_UTIL is an example of a derrived metric which takes the values of two GRBM hardware counters (GRBM_GUI_ACTIVE and GRBM_COUNT) and uses a mathematic expression to calculate the utilization rate of the GPU. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions (reduce and accumulate).
+GPU_UTIL is an example of a derived metric which takes the values of two GRBM hardware counters (GRBM_GUI_ACTIVE and GRBM_COUNT) and uses a mathematic expression to calculate the utilization rate of the GPU. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions (reduce and accumulate).
 
 ### Reduce Function
 
@@ -266,16 +267,20 @@ expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum)
 Reduce() reduces counter values across all dimensions (shader engine, SIMD, etc) to produce a single output value. This is useful when you want to collect and compare values across the entire device. There are a number of reduction operations that can be perfomed: sum, average (avr), minimum value (selects minimum value across all dimensions, min), and max (selects the maximum value across all dimensions). For example reduce(GL2C_HIT,sum) sums all GL2C_HIT hardware register values together to return a single output value.
 
 ### Accumulate Function
+
 ```yaml
 expression: accumulate(<basic_level_counter>, <resolution>)
 ```
+
 #### Description
+
 - The accumulate metric is used to sum the values of a basic level counter over a specified number of cycles. By setting the resolution parameter, you can control the frequency of the summing operation:
-    - HIGH_RES: Sums up the basic counter every clock cycle. Captures the value every single cycle for higher accuracy, suitable for fine-grained analysis.
-    - LOW_RES: Sums up the basic counter every four clock cycles. Reduces the data points and provides less detailed summing, useful for reducing data volume.
-    - NONE: Does nothing and is equivalent to collecting basic_level_counter. Outputs the value of the basic counter without any summing operation.
+  - HIGH_RES: Sums up the basic counter every clock cycle. Captures the value every single cycle for higher accuracy, suitable for fine-grained analysis.
+  - LOW_RES: Sums up the basic counter every four clock cycles. Reduces the data points and provides less detailed summing, useful for reducing data volume.
+  - NONE: Does nothing and is equivalent to collecting basic_level_counter. Outputs the value of the basic counter without any summing operation.
 
 #### Usage
+
 ```yaml
 MeanOccupancyPerCU:
   architectures:
@@ -283,5 +288,7 @@ MeanOccupancyPerCU:
       expression: accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
   description: Mean occupancy per compute unit.
 ```
-    <metric name="MeanOccupancyPerCU" expr=accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM descr="Mean occupancy per compute unit."></metric>
+
+<metric name="MeanOccupancyPerCU" expr=accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM descr="Mean occupancy per compute unit."></metric>
+
 - MeanOccupancyPerCU: This metric calculates the mean occupancy per compute unit. It uses the accumulate function with HIGH_RES to sum the SQ_LEVEL_WAVES counter at every clock cycle. This sum is then divided by GRBM_GUI_ACTIVE and the number of compute units (CU_NUM) to derive the mean occupancy.

@@ -65,7 +65,7 @@ get_dispatch_table()
 }  // namespace impl
 ```
 
-### Implementaiton of public C API function
+### Implementation of public C API function
 
 ```cpp
 extern "C"

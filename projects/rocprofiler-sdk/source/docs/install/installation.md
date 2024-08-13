@@ -41,6 +41,7 @@ If the `CMake` installed on the system is too old, you can install a new version
 pip install --user 'cmake==3.22.0'
 export PATH=${HOME}/.local/bin:${PATH}
 ```
+
 ## Building ROCprofiler-SDK
 
 ```bash

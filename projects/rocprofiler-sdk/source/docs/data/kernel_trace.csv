@@ -1,2 +1,9 @@
-"Kind","Agent_Id","Queue_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
-"KERNEL_DISPATCH",1,139690710949888,15,"matrixTranspose(float*, float*, int)",0,671599758568,671599825328,0,0,4,4,1,1024,1024,1
+"Kind","Agent_Id","Queue_Id","Thread_Id","Dispatch_Id","Kernel_Id","Kernel_Name","Correlation_Id","Start_Timestamp","End_Timestamp","Private_Segment_Size","Group_Segment_Size","Workgroup_Size_X","Workgroup_Size_Y","Workgroup_Size_Z","Grid_Size_X","Grid_Size_Y","Grid_Size_Z"
+"KERNEL_DISPATCH",1,1,69,1,16,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1451,8819330200067564,8819330200116308,0,0,64,1,1,1024,1024,1
+"KERNEL_DISPATCH",1,2,69,5,16,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1484,8819330200118678,8819330200219573,0,0,64,1,1,1024,1024,1
+"KERNEL_DISPATCH",1,1,69,2,19,"subtract_kernel(float*, float const*, float const*, int, int)",1459,8819330200120456,8819330200223721,0,0,64,1,1,1024,1024,1
+"KERNEL_DISPATCH",1,3,69,9,16,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1517,8819330200152902,8819330200283428,0,0,64,1,1,1024,1024,1
+"KERNEL_DISPATCH",1,4,69,13,16,"void addition_kernel<float>(float*, float const*, float const*, int, int)",1550,8819330200187127,8819330200320468,0,0,64,1,1,1024,1024,1
+"KERNEL_DISPATCH",1,2,69,6,19,"subtract_kernel(float*, float const*, float const*, int, int)",1492,8819330200225499,8819330200364618,0,0,64,1,1,1024,1024,1
+"KERNEL_DISPATCH",1,1,69,3,18,"multiply_kernel(float*, float const*, float const*, int, int)",1467,8819330200229796,8819330200369359,0,0,64,1,1,1024,1024,1
+

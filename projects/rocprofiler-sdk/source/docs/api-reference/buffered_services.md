@@ -4,7 +4,7 @@ For the buffered approach, supported buffer record categories are enumerated in 
 
 ## Overview
 
-In buffered approach, callbacks are receieved for batches of records from an internal (background) thread.
+In buffered approach, callbacks are received for batches of records from an internal (background) thread.
 Supported buffered tracing services are enumerated in  `rocprofiler_buffer_tracing_kind_t`. Configuring
 a buffer tracing service requires the creation of a buffer. When the buffer is "flushed", either implicitly
 or explicitly, a callback to the tool will be invoked which provides an array of one or more buffer records.

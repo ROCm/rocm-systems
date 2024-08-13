@@ -11,6 +11,7 @@ The ROCm installation provides sample programs and `rocprofv3` tool.
     ```bash
     /opt/rocm/share/rocprofiler-sdk/samples
     ```
+
 - `rocprofv3` tool is installed here:
 
     ```bash
