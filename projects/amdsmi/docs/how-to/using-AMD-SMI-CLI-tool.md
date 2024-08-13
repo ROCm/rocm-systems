@@ -1,5 +1,7 @@
 # Using AMD SMI Command Line Interface tool
 
+**Disclaimer: CLI Tool is provided as an example code to aid the development of telemetry tools. Python or C++ Library is recommended as a reliable data source.**  
+
 AMD-SMI reports the version and current platform detected when running the command line interface (CLI) without arguments:
 
 ``` bash

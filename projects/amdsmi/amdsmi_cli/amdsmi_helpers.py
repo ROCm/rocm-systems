@@ -807,12 +807,11 @@ class AMDSMIHelpers():
         pci_devices_path = "/sys/bus/pci/devices"
         pci_devices: set[str] = set()
         for device in os.listdir(pci_devices_path):
-            subsystem_device_path = os.path.join(pci_devices_path, device, "subsystem_device")
+            device_path = os.path.join(pci_devices_path, device, "device")
             try:
-                with open(subsystem_device_path, 'r') as f:
-                    subsystem_device = f.read().strip()
-                    pci_devices.add(subsystem_device)
+                with open(device_path, 'r') as f:
+                    device = f.read().strip()
+                    pci_devices.add(device)
             except Exception as _:
                 continue
         return pci_devices
-

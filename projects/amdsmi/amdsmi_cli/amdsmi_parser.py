@@ -620,10 +620,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-c', '--cache', action='store_true', required=False, help=cache_help)
             static_parser.add_argument('-B', '--board', action='store_true', required=False, help=board_help)
             static_parser.add_argument('-R', '--process-isolation', action='store_true', required=False, help=process_isolation_help)
+            static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
 
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
-                static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
                 static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--soc-pstate', action='store_true', required=False, help=soc_pstate_help)
@@ -804,6 +804,9 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-c', '--clock', action='store_true', required=False, help=clock_help)
                 metric_parser.add_argument('-t', '--temperature', action='store_true', required=False, help=temperature_help)
                 metric_parser.add_argument('-P', '--pcie', action='store_true', required=False, help=pcie_help)
+
+            # Options that only apply to Hypervisors and Baremetal Linux
+            if self.helpers.is_hypervisor() or (self.helpers.is_baremetal() and self.helpers.is_linux()):
                 metric_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
                 metric_parser.add_argument('-k', '--ecc-blocks', action='store_true', required=False, help=ecc_blocks_help)
 
