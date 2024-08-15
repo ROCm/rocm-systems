@@ -128,7 +128,8 @@ struct context
     std::unique_ptr<agent_counter_collection_service>    agent_counter_collection = {};
     std::unique_ptr<pc_sampling_service>                 pc_sampler               = {};
 
-    std::unique_ptr<thread_trace::ThreadTracerInterface> thread_trace = {};
+    std::unique_ptr<thread_trace::DispatchThreadTracer> dispatch_thread_trace = {};
+    std::unique_ptr<thread_trace::AgentThreadTracer>    agent_thread_trace    = {};
 };
 
 // set the client index needs to be called before allocate_context()

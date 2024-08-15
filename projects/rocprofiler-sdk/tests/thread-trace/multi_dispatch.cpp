@@ -54,37 +54,18 @@ rocprofiler_att_control_flags_t
 dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
                   const rocprofiler_agent_t* /* agent  */,
                   rocprofiler_correlation_id_t /* correlation_id  */,
-                  rocprofiler_kernel_id_t kernel_id,
+                  rocprofiler_kernel_id_t /* kernel_id */,
                   rocprofiler_dispatch_id_t /* dispatch_id */,
                   rocprofiler_user_data_t* dispatch_userdata,
                   void*                    userdata)
 {
     C_API_BEGIN
+
     assert(userdata && "Dispatch callback passed null!");
-    ToolData& tool         = *reinterpret_cast<ToolData*>(userdata);
     dispatch_userdata->ptr = userdata;
 
-    static std::atomic<int> call_id{0};
-    static std::string_view desired_func_name = "branching_kernel";
-
-    try
-    {
-        auto& kernel_name = tool.kernel_id_to_kernel_name.at(kernel_id);
-        if(kernel_name.find(desired_func_name) == std::string::npos)
-            return ROCPROFILER_ATT_CONTROL_NONE;
-
-        int id = call_id.fetch_add(1);
-        if(id == 0)
-            return ROCPROFILER_ATT_CONTROL_START;
-        else if(id == 1)
-            return ROCPROFILER_ATT_CONTROL_STOP;
-    } catch(...)
-    {
-        std::cerr << "Could not find kernel id: " << kernel_id << std::endl;
-    }
-
     C_API_END
-    return ROCPROFILER_ATT_CONTROL_NONE;
+    return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
 }
 
 int

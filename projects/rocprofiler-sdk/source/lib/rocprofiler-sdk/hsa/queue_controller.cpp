@@ -147,8 +147,8 @@ QueueController::add_queue(hsa_queue_t* id, std::unique_ptr<Queue> queue)
 {
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(itr->thread_trace)
-            itr->thread_trace->resource_init(queue->get_agent(), get_core_table(), get_ext_table());
+        if(auto* trace = itr->dispatch_thread_trace.get())
+            trace->resource_init(queue->get_agent(), get_core_table(), get_ext_table());
     }
 
     CHECK(queue);
@@ -175,11 +175,11 @@ QueueController::destroy_queue(hsa_queue_t* id)
 
     for(const auto& itr : context::get_registered_contexts())
     {
-        if(!itr->thread_trace) continue;
+        if(!itr->dispatch_thread_trace) continue;
 
         _queues.wlock([&](auto& map) {
             if(map.find(id) != map.end())
-                itr->thread_trace->resource_deinit(map.at(id)->get_agent());
+                itr->dispatch_thread_trace->resource_deinit(map.at(id)->get_agent());
         });
     }
 
@@ -264,7 +264,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     auto enable_intercepter = false;
     for(const auto& itr : context::get_registered_contexts())
     {
-        constexpr auto expected_context_size = 208UL;
+        constexpr auto expected_context_size = 216UL;
         static_assert(
             sizeof(context::context) == expected_context_size,
             "If you added a new field to context struct, make sure there is a check here if it "
@@ -277,7 +277,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
              itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH));
 
         if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           itr->agent_counter_collection || itr->thread_trace)
+           itr->agent_counter_collection || itr->agent_thread_trace || itr->dispatch_thread_trace)
         {
             enable_intercepter = true;
             break;

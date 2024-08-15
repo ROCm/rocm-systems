@@ -631,6 +631,7 @@ finalize()
         set_fini_status(-1);
         hsa::async_copy_fini();
         hsa::queue_controller_fini();
+        thread_trace::finalize();
         page_migration::finalize();
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // WARNING: this must precede `code_object::finalize()`
@@ -788,7 +789,7 @@ rocprofiler_set_api_table(const char* name,
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
         rocprofiler::code_object::initialize(hsa_api_table);
-        rocprofiler::thread_trace::code_object::initialize(hsa_api_table);
+        rocprofiler::thread_trace::initialize(hsa_api_table);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         rocprofiler::pc_sampling::code_object::initialize(hsa_api_table);
 #endif

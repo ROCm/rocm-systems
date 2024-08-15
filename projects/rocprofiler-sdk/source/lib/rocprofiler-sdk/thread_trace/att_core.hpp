@@ -71,6 +71,8 @@ struct thread_trace_parameter_pack
     static constexpr size_t DEFAULT_SE_MASK               = 0x21;
     static constexpr size_t DEFAULT_BUFFER_SIZE           = 0x8000000;
     static constexpr size_t PERFCOUNTER_SIMD_MASK_SHIFT   = 28;
+
+    bool are_params_valid() const;
 };
 
 class ThreadTracerQueue
@@ -99,7 +101,19 @@ public:
     std::unique_ptr<hsa::TraceControlAQLPacket>       control_packet;
     std::unique_ptr<aql::ThreadTraceAQLPacketFactory> factory;
 
-    bool Submit(hsa_ext_amd_aql_pm4_packet_t* packet);
+    [[nodiscard]] std::unique_ptr<class Signal> Submit(hsa_ext_amd_aql_pm4_packet_t* packet,
+                                                       bool                          bWait);
+
+    template <typename VecType>
+    [[nodiscard]] std::unique_ptr<class Signal> SubmitAndSignalLast(VecType vec)
+    {
+        for(size_t i = 0; i < vec.size(); i++)
+        {
+            auto sig = Submit(&vec.at(i), i == vec.size() - 1);
+            if(sig) return sig;
+        }
+        return nullptr;
+    }
 
 private:
     std::unique_ptr<code_object::CodeobjCallbackRegistry> codeobj_reg{nullptr};
@@ -112,19 +126,7 @@ private:
     decltype(hsa_queue_destroy)*                 queue_destroy_fn{nullptr};
 };
 
-class ThreadTracerInterface
-{
-public:
-    ThreadTracerInterface()          = default;
-    virtual ~ThreadTracerInterface() = default;
-
-    virtual void start_context()                                                                = 0;
-    virtual void stop_context()                                                                 = 0;
-    virtual void resource_init(const hsa::AgentCache&, const CoreApiTable&, const AmdExtTable&) = 0;
-    virtual void resource_deinit(const hsa::AgentCache&)                                        = 0;
-};
-
-class DispatchThreadTracer : public ThreadTracerInterface
+class DispatchThreadTracer
 {
     using code_object_id_t = uint64_t;
     using AQLPacketPtr     = std::unique_ptr<hsa::AQLPacket>;
@@ -134,12 +136,12 @@ public:
     DispatchThreadTracer(thread_trace_parameter_pack _params)
     : params(std::move(_params))
     {}
-    ~DispatchThreadTracer() override = default;
+    ~DispatchThreadTracer() = default;
 
-    void start_context() override;
-    void stop_context() override;
-    void resource_init(const hsa::AgentCache&, const CoreApiTable&, const AmdExtTable&) override;
-    void resource_deinit(const hsa::AgentCache&) override;
+    void start_context();
+    void stop_context();
+    void resource_init(const hsa::AgentCache&, const CoreApiTable&, const AmdExtTable&);
+    void resource_deinit(const hsa::AgentCache&);
 
     std::unique_ptr<hsa::AQLPacket> pre_kernel_call(const hsa::Queue&              queue,
                                                     uint64_t                       kernel_id,
@@ -157,16 +159,16 @@ public:
     thread_trace_parameter_pack params;
 };
 
-class AgentThreadTracer : public ThreadTracerInterface
+class AgentThreadTracer
 {
 public:
-    AgentThreadTracer()           = default;
-    ~AgentThreadTracer() override = default;
+    AgentThreadTracer()  = default;
+    ~AgentThreadTracer() = default;
 
-    void start_context() override;
-    void stop_context() override;
-    void resource_init(const hsa::AgentCache&, const CoreApiTable&, const AmdExtTable&) override;
-    void resource_deinit(const hsa::AgentCache&) override;
+    void start_context();
+    void stop_context();
+    void resource_init(const CoreApiTable&, const AmdExtTable&);
+    void resource_deinit();
 
     void add_agent(rocprofiler_agent_id_t id, thread_trace_parameter_pack _params)
     {
@@ -180,10 +182,16 @@ public:
     }
 
     std::map<rocprofiler_agent_id_t, std::unique_ptr<ThreadTracerQueue>> tracers{};
-    std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params;
+    std::map<rocprofiler_agent_id_t, thread_trace_parameter_pack>        params{};
 
     std::mutex agent_mut;
 };
+
+void
+initialize(HsaApiTable* table);
+
+void
+finalize();
 
 };  // namespace thread_trace
 

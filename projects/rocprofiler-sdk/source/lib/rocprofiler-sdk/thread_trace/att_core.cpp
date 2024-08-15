@@ -51,12 +51,14 @@
         }                                                                                          \
     }
 
-constexpr size_t ROCPROFILER_QUEUE_SIZE = 64;
-
 namespace rocprofiler
 {
 namespace thread_trace
 {
+constexpr size_t   QUEUE_SIZE      = 128;
+constexpr uint64_t MIN_BUFFER_SIZE = 1 << 18;                              // 2 pages per SE
+constexpr uint64_t MAX_BUFFER_SIZE = std::numeric_limits<int32_t>::max();  // aqlprofile limit
+
 struct cbdata_t
 {
     rocprofiler_att_shader_data_callback_t cb_fn;
@@ -65,10 +67,78 @@ struct cbdata_t
 
 common::Synchronized<std::optional<int64_t>> client;
 
-bool
-ThreadTracerQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet)
+CoreApiTable&
+get_core()
 {
-    const uint64_t write_idx = add_write_index_relaxed_fn(queue, 1);
+    static CoreApiTable api{};
+    return api;
+}
+
+AmdExtTable&
+get_ext()
+{
+    static AmdExtTable api{};
+    return api;
+}
+
+bool
+thread_trace_parameter_pack::are_params_valid() const
+{
+    if(shader_cb_fn == nullptr)
+    {
+        ROCP_WARNING << "Callback cannot be null!";
+        return false;
+    }
+
+    if(shader_engine_mask == 0) return false;
+
+    if(buffer_size > MAX_BUFFER_SIZE || buffer_size < MIN_BUFFER_SIZE)
+    {
+        ROCP_WARNING << "Invalid buffer size: " << buffer_size;
+        return false;
+    }
+
+    if(target_cu > 0xF) return false;
+    if(simd_select > 0xF) return false;  // Only 16 CUs and 4 SIMDs
+
+    return true;
+}
+
+class Signal
+{
+public:
+    Signal(hsa_ext_amd_aql_pm4_packet_t* packet)
+    {
+        get_ext().hsa_amd_signal_create_fn(0, 0, nullptr, 0, &signal);
+        packet->completion_signal = signal;
+        get_core().hsa_signal_store_screlease_fn(signal, 1);
+    };
+    ~Signal()
+    {
+        WaitOn();
+        get_core().hsa_signal_destroy_fn(signal);
+    }
+    Signal(Signal& other)       = delete;
+    Signal(const Signal& other) = delete;
+    Signal& operator=(Signal& other) = delete;
+    Signal& operator=(const Signal& other) = delete;
+
+    void WaitOn() const
+    {
+        auto* wait_fn = get_core().hsa_signal_wait_scacquire_fn;
+        while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED))
+            ;
+    }
+
+    hsa_signal_t      signal;
+    std::atomic<bool> released{false};
+};
+
+std::unique_ptr<Signal>
+ThreadTracerQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait)
+{
+    std::unique_ptr<Signal> signal{};
+    const uint64_t          write_idx = add_write_index_relaxed_fn(queue, 1);
 
     size_t index      = (write_idx % queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
     auto*  queue_slot = reinterpret_cast<uint32_t*>(size_t(queue->base_address) + index);  // NOLINT
@@ -76,23 +146,15 @@ ThreadTracerQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet)
     const auto* slot_data = reinterpret_cast<const uint32_t*>(packet);
 
     memcpy(&queue_slot[1], &slot_data[1], sizeof(hsa_ext_amd_aql_pm4_packet_t) - sizeof(uint32_t));
+    if(bWait)
+        signal =
+            std::make_unique<Signal>(reinterpret_cast<hsa_ext_amd_aql_pm4_packet_t*>(queue_slot));
     auto* header = reinterpret_cast<std::atomic<uint32_t>*>(queue_slot);
 
     header->store(slot_data[0], std::memory_order_release);
     signal_store_screlease_fn(queue->doorbell_signal, write_idx);
 
-    int loops = 0;
-    while(load_read_index_relaxed_fn(queue) <= write_idx)
-    {
-        loops++;
-        usleep(1);
-        if(loops > 10000)  // Add loop limit to prevent hang. TODO: Remove once stability proven
-        {
-            ROCP_ERROR << "Codeobj packet submission failed!";
-            return false;
-        }
-    }
-    return true;
+    return signal;
 }
 
 ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
@@ -106,7 +168,7 @@ ThreadTracerQueue::ThreadTracerQueue(thread_trace_parameter_pack _params,
     control_packet = factory->construct_control_packet();
 
     auto status = coreapi.hsa_queue_create_fn(cache.get_hsa_agent(),
-                                              ROCPROFILER_QUEUE_SIZE,
+                                              QUEUE_SIZE,
                                               HSA_QUEUE_TYPE_SINGLE,
                                               nullptr,
                                               nullptr,
@@ -147,8 +209,10 @@ ThreadTracerQueue::~ThreadTracerQueue()
     control_packet->clear();
     control_packet->populate_after();
 
+    std::vector<std::unique_ptr<Signal>> wait_idx{};
+
     for(auto& after_packet : control_packet->after_krn_pkt)
-        Submit(&after_packet);
+        wait_idx.emplace_back(Submit(&after_packet, true));
 }
 
 /**
@@ -200,11 +264,8 @@ ThreadTracerQueue::load_codeobj(code_object_id_t id, uint64_t addr, uint64_t siz
 
     if(!queue || active_traces.load() < 1) return;
 
-    auto packet   = factory->construct_load_marker_packet(id, addr, size);
-    bool bSuccess = Submit(&packet->packet);
-
-    if(!bSuccess)  // If something went wrong, don't delete packet to avoid CP memory access fault
-        packet.release();
+    auto packet = factory->construct_load_marker_packet(id, addr, size);
+    Submit(&packet->packet, true)->WaitOn();
 }
 
 void
@@ -215,11 +276,8 @@ ThreadTracerQueue::unload_codeobj(code_object_id_t id)
     if(!control_packet->remove_codeobj(id)) return;
     if(!queue || active_traces.load() < 1) return;
 
-    auto packet   = factory->construct_unload_marker_packet(id);
-    bool bSuccess = Submit(&packet->packet);
-
-    if(!bSuccess)  // If something went wrong, don't delete packet to avoid CP memory access fault
-        packet.release();
+    auto packet = factory->construct_unload_marker_packet(id);
+    Submit(&packet->packet, true)->WaitOn();
 }
 
 void
@@ -301,15 +359,13 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     auto it = agents.find(queue.get_agent().get_hsa_agent());
     assert(it != agents.end() && it->second != nullptr);
 
-    auto packet = it->second->get_control(bool(control_flags & ROCPROFILER_ATT_CONTROL_START));
+    auto packet = it->second->get_control(true);
 
     post_move_data.fetch_add(1);
     maybe_add_serialization(packet);
 
-    if((control_flags & ROCPROFILER_ATT_CONTROL_START) != 0) packet->populate_before();
-
-    if((control_flags & ROCPROFILER_ATT_CONTROL_STOP) != 0) packet->populate_after();
-
+    packet->populate_before();
+    packet->populate_after();
     return packet;
 }
 
@@ -383,7 +439,7 @@ DispatchThreadTracer::start_context()
 }
 
 void
-DispatchThreadTracer::stop_context()
+DispatchThreadTracer::stop_context()  // NOLINT
 {
     client.wlock([&](auto& client_id) {
         if(!client_id) return;
@@ -398,34 +454,33 @@ DispatchThreadTracer::stop_context()
 }
 
 void
-AgentThreadTracer::resource_init(const hsa::AgentCache& cache,
-                                 const CoreApiTable&    coreapi,
-                                 const AmdExtTable&     ext)
+AgentThreadTracer::resource_init(const CoreApiTable& coreapi, const AmdExtTable& ext)
 {
-    auto                         id = cache.get_rocp_agent()->id;
+    auto rocp_agents = rocprofiler::agent::get_agents();
+
     std::unique_lock<std::mutex> lk(agent_mut);
 
-    if(params.find(id) == params.end()) return;
-
-    if(tracers.find(id) != tracers.end())
+    for(const auto* rocp_agent : rocp_agents)
     {
-        tracers.at(id)->active_queues.fetch_add(1);
-        return;
+        auto        id    = rocp_agent->id;
+        const auto* cache = rocprofiler::agent::get_agent_cache(rocp_agent);
+
+        if(tracers.find(id) != tracers.end())
+            ROCP_WARNING << "Agent configured twice: " << id.handle;
+        else if(params.find(id) == params.end())
+            ROCP_INFO << "Skipping agent " << id.handle;
+        else if(cache == nullptr)
+            ROCP_WARNING << "Invalid agent id: " << id.handle;
+        else
+            tracers[id] = std::make_unique<ThreadTracerQueue>(params.at(id), *cache, coreapi, ext);
     }
-    tracers.emplace(id, std::make_unique<ThreadTracerQueue>(params.at(id), cache, coreapi, ext));
 }
 
 void
-AgentThreadTracer::resource_deinit(const hsa::AgentCache& cache)
+AgentThreadTracer::resource_deinit()
 {
-    auto                         id = cache.get_rocp_agent()->id;
     std::unique_lock<std::mutex> lk(agent_mut);
-
-    if(params.find(id) == params.end()) return;
-    if(tracers.find(id) == tracers.end()) return;
-
-    auto& tracer = *tracers.at(id);
-    if(tracer.active_queues.fetch_sub(1) == 1) tracers.erase(id);
+    tracers.clear();
 }
 
 void
@@ -439,13 +494,15 @@ AgentThreadTracer::start_context()
         return;
     }
 
+    std::vector<std::unique_ptr<Signal>> wait_list{};
+
     for(auto& [_, tracer] : tracers)
     {
         auto packet = tracer->get_control(true);
         packet->populate_before();
 
-        for(auto& start : packet->before_krn_pkt)
-            tracer->Submit(&start);
+        auto sig = tracer->SubmitAndSignalLast(packet->before_krn_pkt);
+        if(sig) wait_list.emplace_back(std::move(sig));
     }
 }
 
@@ -460,16 +517,50 @@ AgentThreadTracer::stop_context()
         return;
     }
 
-    for(auto& [_, tracer] : tracers)
+    std::vector<std::tuple<ThreadTracerQueue*, aqlprofile_handle_t, std::unique_ptr<Signal>>>
+        wait_list{};
+
+    for(auto& [id, tracer] : tracers)
     {
         auto packet = tracer->get_control(false);
         packet->populate_after();
 
-        for(auto& stop : packet->after_krn_pkt)
-            tracer->Submit(&stop);
+        std::optional<uint64_t> write_index{};
+        auto                    signal = tracer->SubmitAndSignalLast(packet->after_krn_pkt);
+        if(signal)
+            wait_list.push_back({tracer.get(), packet->GetHandle(), std::move(signal)});  // NOLINT
+    }
 
+    for(auto& [tracer, handle, signal] : wait_list)
+    {
+        signal->WaitOn();
         rocprofiler_user_data_t userdata{.ptr = tracer->params.callback_userdata};
-        tracer->iterate_data(packet->GetHandle(), userdata);
+        tracer->iterate_data(handle, userdata);
+    }
+}
+
+void
+initialize(HsaApiTable* table)
+{
+    assert(table->core_ && table->amd_ext_);
+    get_core() = *table->core_;
+    get_ext()  = *table->amd_ext_;
+
+    code_object::initialize(table);
+
+    for(auto& ctx : context::get_registered_contexts())
+    {
+        if(ctx->agent_thread_trace)
+            ctx->agent_thread_trace->resource_init(*table->core_, *table->amd_ext_);
+    }
+}
+
+void
+finalize()
+{
+    for(auto& ctx : context::get_registered_contexts())
+    {
+        if(ctx->agent_thread_trace) ctx->agent_thread_trace->resource_deinit();
     }
 }
 

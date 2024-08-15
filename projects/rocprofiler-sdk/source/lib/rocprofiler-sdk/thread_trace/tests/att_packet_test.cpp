@@ -209,7 +209,7 @@ TEST(thread_trace, perfcounters_configure_test)
         nullptr);
 
     auto* context = rocprofiler::context::get_mutable_registered_context(ctx);
-    auto* tracer  = dynamic_cast<thread_trace::DispatchThreadTracer*>(context->thread_trace.get());
+    auto* tracer  = context->dispatch_thread_trace.get();
 
     ASSERT_NE(tracer, nullptr);
     ASSERT_EQ(tracer->params.perfcounter_ctrl, 1);
@@ -249,4 +249,62 @@ TEST(thread_trace, perfcounters_aql_options_test)
               sqtt_default_num_options + perf_counters.size());
     context::pop_client(1);
     hsa_shut_down();
+}
+
+rocprofiler_status_t
+query_available_agents(rocprofiler_agent_version_t /* version */,
+                       const void** agents,
+                       size_t       num_agents,
+                       void*        ctx_ptr)
+{
+    for(size_t idx = 0; idx < num_agents; idx++)
+    {
+        const auto* agent = static_cast<const rocprofiler_agent_v0_t*>(agents[idx]);
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        std::vector<rocprofiler_att_parameter_t> params;
+        params.push_back({ROCPROFILER_ATT_PARAMETER_TARGET_CU, {1}});
+        params.push_back({ROCPROFILER_ATT_PARAMETER_SHADER_ENGINE_MASK, {0xF}});
+        params.push_back({ROCPROFILER_ATT_PARAMETER_BUFFER_SIZE, {0x1000000}});
+        params.push_back({ROCPROFILER_ATT_PARAMETER_SIMD_SELECT, {0xF}});
+        params.push_back({ROCPROFILER_ATT_PARAMETER_PERFCOUNTERS_CTRL, {1}});
+
+        {
+            auto metrics = rocprofiler::counters::getMetricsForAgent("gfx90a");
+
+            rocprofiler_att_parameter_t att_param;
+            att_param.type      = ROCPROFILER_ATT_PARAMETER_PERFCOUNTER;
+            att_param.simd_mask = 0xF;
+            for(auto& metric : metrics)
+                if(metric.name() == "SQ_WAVES") rocprofiler_counter_id_t{.handle = metric.id()};
+
+            params.push_back(att_param);
+        }
+
+        rocprofiler_configure_agent_thread_trace_service(
+            *reinterpret_cast<rocprofiler_context_id_t*>(ctx_ptr),
+            params.data(),
+            params.size(),
+            agent->id,
+            [](int64_t, void*, size_t, rocprofiler_user_data_t) {},
+            nullptr);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
+
+TEST(thread_trace, agent_configure_test)
+{
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+    rocprofiler_context_id_t ctx;
+    ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
+
+    ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,
+                                                        &query_available_agents,
+                                                        sizeof(rocprofiler_agent_t),
+                                                        &ctx),
+                     "Failed to find GPU agents");
 }

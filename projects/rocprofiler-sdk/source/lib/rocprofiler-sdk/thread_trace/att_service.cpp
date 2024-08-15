@@ -30,6 +30,9 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "rocprofiler-sdk/amd_detail/thread_trace.h"
 
+using DispatchThreadTracer = rocprofiler::thread_trace::DispatchThreadTracer;
+using AgentThreadTracer    = rocprofiler::thread_trace::AgentThreadTracer;
+
 extern "C" {
 rocprofiler_status_t ROCPROFILER_API
 rocprofiler_configure_dispatch_thread_trace_service(
@@ -45,7 +48,8 @@ rocprofiler_configure_dispatch_thread_trace_service(
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
-    if(ctx->thread_trace) return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+    if(ctx->dispatch_thread_trace) return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+    if(ctx->agent_thread_trace) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
     auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
 
@@ -53,6 +57,8 @@ rocprofiler_configure_dispatch_thread_trace_service(
     pack.dispatch_cb_fn    = dispatch_callback;
     pack.shader_cb_fn      = shader_callback;
     pack.callback_userdata = callback_userdata;
+
+    if(pack.dispatch_cb_fn == nullptr) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
     auto id_map = rocprofiler::counters::getPerfCountersIdMap();
     for(size_t p = 0; p < num_parameters; p++)
@@ -83,7 +89,9 @@ rocprofiler_configure_dispatch_thread_trace_service(
         }
     }
 
-    ctx->thread_trace = std::make_unique<rocprofiler::thread_trace::DispatchThreadTracer>(pack);
+    if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+
+    ctx->dispatch_thread_trace = std::make_unique<DispatchThreadTracer>(pack);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
@@ -96,14 +104,14 @@ rocprofiler_configure_agent_thread_trace_service(
     rocprofiler_att_shader_data_callback_t shader_callback,
     void*                                  callback_userdata)
 {
-    using AgentThreadTracer = rocprofiler::thread_trace::AgentThreadTracer;
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED;
+    if(ctx->dispatch_thread_trace) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
 
-    if(!ctx->thread_trace) ctx->thread_trace = std::make_unique<AgentThreadTracer>();
+    if(!ctx->agent_thread_trace) ctx->agent_thread_trace = std::make_unique<AgentThreadTracer>();
 
     auto pack = rocprofiler::thread_trace::thread_trace_parameter_pack{};
 
@@ -140,11 +148,10 @@ rocprofiler_configure_agent_thread_trace_service(
         }
     }
 
-    auto* agent_tracer = dynamic_cast<AgentThreadTracer*>(ctx->thread_trace.get());
-    if(agent_tracer == nullptr || agent_tracer->has_agent(agent))
-        return ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED;
+    if(!pack.are_params_valid()) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
 
-    agent_tracer->add_agent(agent, pack);
+    assert(ctx->agent_thread_trace);
+    ctx->agent_thread_trace->add_agent(agent, pack);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 }
