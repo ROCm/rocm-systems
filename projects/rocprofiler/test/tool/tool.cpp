@@ -1286,6 +1286,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings) {
   const uint32_t features_found = metrics_vec.size();
 
   // Getting Trace Period
+  bool b_disable_queue_callback = false;
+
   const char* ctrl_str = getenv("ROCP_CTRL_RATE");
   if (ctrl_str != nullptr) {
     uint32_t ctrl_delay = 0;
@@ -1307,6 +1309,7 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings) {
                 << "us), rate(" << ctrl_rate << "us)" << std::endl;
       trace_period_thread = new std::thread(trace_period_fun);
     } else {
+      b_disable_queue_callback = true;
       std::cout << "ROCProfiler: trace start disabled" << std::endl;
     }
   } else {
@@ -1388,6 +1391,8 @@ extern "C" PUBLIC_API void OnLoadToolProp(rocprofiler_settings_t* settings) {
 
     rocprofiler_set_queue_callbacks(callbacks_ptrs, callbacks_data);
   }
+
+  if (b_disable_queue_callback) rocprofiler_stop_queue_callbacks();
 
   xml::Xml::Destroy(xml);
 
