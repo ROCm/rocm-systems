@@ -142,7 +142,7 @@ Install from source
          cd build
          cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/{{ config.version }} \
                  -DPYTHON_DEPS=${INSTALL_DIR}/python-libs \
-                 -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles ..
+                 -DMOD_INSTALL_PATH=${INSTALL_DIR}/modulefiles/omniperf ..
 
          # install
          make install
