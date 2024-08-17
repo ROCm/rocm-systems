@@ -36,6 +36,8 @@ class RdciDiscoverySubSystem : public RdciSubSystem {
  private:
   bool show_help_;
   void show_help() const;
+  bool is_list_;
+  void show_attributes();
 };
 
 }  // namespace rdc

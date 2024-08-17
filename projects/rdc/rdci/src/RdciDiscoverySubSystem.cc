@@ -31,7 +31,9 @@ THE SOFTWARE.
 namespace amd {
 namespace rdc {
 
-RdciDiscoverySubSystem::RdciDiscoverySubSystem() : show_help_(false) {}
+RdciDiscoverySubSystem::RdciDiscoverySubSystem()
+    : show_help_(false),
+      is_list_(false) {}
 
 void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
   const int HOST_OPTIONS = 1000;
@@ -43,7 +45,6 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
 
   int option_index = 0;
   int opt = 0;
-  bool is_list = false;
 
   while ((opt = getopt_long(argc, argv, "hlu", long_options, &option_index)) != -1) {
     switch (opt) {
@@ -60,7 +61,7 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
         use_auth_ = false;
         break;
       case 'l':
-        is_list = true;
+        is_list_ = true;
         break;
       default:
         show_help();
@@ -68,7 +69,7 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
     }
   }
 
-  if (!is_list) {
+  if (!is_list_) {
     show_help();
     throw RdcException(RDC_ST_BAD_PARAMETER, "Need to specify operations");
   }
@@ -89,11 +90,7 @@ void RdciDiscoverySubSystem::show_help() const {
             << " on the system\n";
 }
 
-void RdciDiscoverySubSystem::process() {
-  if (show_help_) {
-    return show_help();
-  }
-
+void RdciDiscoverySubSystem::show_attributes() {
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   uint32_t count = 0;
   rdc_status_t result = rdc_device_get_all(rdc_handle_, gpu_index_list, &count);
@@ -138,6 +135,16 @@ void RdciDiscoverySubSystem::process() {
   } else {
     std::cout << "------------------------------------------------"
               << "-----------------\n";
+  }
+}
+
+void RdciDiscoverySubSystem::process() {
+  if (show_help_) {
+    return show_help();
+  }
+
+  if (is_list_) {
+    return show_attributes();
   }
 }
 
