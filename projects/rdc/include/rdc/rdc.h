@@ -142,6 +142,11 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 #define RDC_MAX_NUM_FIELD_GROUPS 64
 
 /**
+ * @brief The max string length occupied by version information
+ */
+#define RDC_MAX_VERSION_STR_LENGTH 60
+
+/**
  * These enums are used to specify a particular field to be retrieved.
  */
 typedef enum {
@@ -344,6 +349,13 @@ typedef struct {
 } rdc_device_attributes_t;
 
 /**
+ * @brief Store version information for each component
+ */
+typedef struct {
+  char version[RDC_MAX_VERSION_STR_LENGTH];
+} rdc_component_version_t;
+
+/**
  * @brief The structure to store the group info
  */
 typedef struct {
@@ -475,6 +487,14 @@ typedef enum {
   RDC_DIAG_GPU_PARAMETERS,  //!< GPU parameters in range
   RDC_DIAG_TEST_LAST = RDC_DIAG_GPU_PARAMETERS
 } rdc_diag_test_cases_t;
+
+/**
+ * @brief Type of Components
+ */
+typedef enum {
+  RDC_AMDMSI_COMPONENT
+  //If needed later, add them one by one
+} rdc_component_t;
 
 /**
  * @brief The maximum test cases to run
@@ -749,6 +769,21 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
  */
 rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                        rdc_device_attributes_t* p_rdc_attr);
+
+/**
+ *  @brief Get version information of components used by rdc.
+ *
+ *  @details Given a component type, return its version information.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] component Type of Components. See rdc_component_t definition for details.
+ *
+ *  @param[out] p_rdc_compv Version information of the corresponding component.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component, rdc_component_version_t* p_rdc_compv);
 
 /**
  *  @brief Create a group contains multiple GPUs

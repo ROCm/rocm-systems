@@ -243,6 +243,25 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcStandaloneHandler::rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
+
+  if (!p_rdc_compv) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::GetComponentVersionRequest request;
+  ::rdc::GetComponentVersionResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_component_index(component);
+  ::grpc::Status status = stub_->GetComponentVersion(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  strncpy_with_null(p_rdc_compv->version, reply.version().c_str(), RDC_MAX_VERSION_STR_LENGTH);
+  return RDC_ST_OK;
+}
+
 // Group RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_group_gpu_create(rdc_group_type_t type,
                                                         const char* group_name,

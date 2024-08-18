@@ -44,6 +44,7 @@ class RdcHandler {
                                           uint32_t* count) = 0;
   virtual rdc_status_t rdc_device_get_attributes(uint32_t gpu_index,
                                                  rdc_device_attributes_t* p_rdc_attr) = 0;
+  virtual rdc_status_t rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) = 0;
 
   // Group API
   virtual rdc_status_t rdc_group_gpu_create(rdc_group_type_t type, const char* group_name,

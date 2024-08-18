@@ -194,6 +194,29 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
   return status;
 }
 
+rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
+  if (!p_rdc_compv) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  if (component == RDC_AMDMSI_COMPONENT) {
+    amdsmi_status_t ret;
+    amdsmi_version_t ver = {0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF, nullptr};
+
+    ret = amdsmi_get_lib_version(&ver);
+
+    if (ret != AMDSMI_STATUS_SUCCESS) {
+      RDC_LOG(RDC_ERROR, "Failed to obtain the version of the server's amd-smi library. reason: " << (ret == AMDSMI_STATUS_INVAL ? "Invalid parameters" : "unknown"));
+      return RDC_ST_MSI_ERROR;
+    }
+
+    strncpy_with_null(p_rdc_compv->version, ver.build, RDC_MAX_VERSION_STR_LENGTH);
+    return RDC_ST_OK;
+  } else {
+    return RDC_ST_BAD_PARAMETER;
+  }
+}
+
 // Group API
 rdc_status_t RdcEmbeddedHandler::rdc_group_gpu_create(rdc_group_type_t type, const char* group_name,
                                                       rdc_gpu_group_t* p_rdc_group_id) {

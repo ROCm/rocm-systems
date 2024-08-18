@@ -103,6 +103,23 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   return ::grpc::Status::OK;
 }
 
+::grpc::Status RdcAPIServiceImpl::GetComponentVersion(::grpc::ServerContext* context,
+                                                const ::rdc::GetComponentVersionRequest* request,
+                                                ::rdc::GetComponentVersionResponse* reply) {
+  (void)(context);
+  if (!reply) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty reply");
+  }
+
+  rdc_component_t component = static_cast<rdc_component_t>(request->component_index());
+  rdc_component_version_t compv;
+  rdc_status_t result = rdc_device_get_component_version(rdc_handle_, component, &compv);
+
+  reply->set_version(compv.version);
+  reply->set_status(result);
+  return ::grpc::Status::OK;
+}
+
 ::grpc::Status RdcAPIServiceImpl::CreateGpuGroup(::grpc::ServerContext* context,
                                                  const ::rdc::CreateGpuGroupRequest* request,
                                                  ::rdc::CreateGpuGroupResponse* reply) {
