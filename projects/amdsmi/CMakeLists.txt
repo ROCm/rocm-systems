@@ -115,56 +115,16 @@ set(AMDSMI_INC_DIR "${PROJECT_SOURCE_DIR}/include/amd_smi")
 set(ROCM_INC_DIR "${PROJECT_SOURCE_DIR}/rocm_smi/include/rocm_smi")
 set(SHR_MUTEX_DIR "${PROJECT_SOURCE_DIR}/third_party/shared_mutex")
 if(ENABLE_ESMI_LIB)
-
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/src)
         # TODO: use ExternalProject_Add instead or a submodule
         # as of 2023.10.16 CI builds are broken with an updated submodule
         execute_process(COMMAND git clone --depth=1 -b esmi_pkg_ver-3.0.3 https://github.com/amd/esmi_ib_library.git ${PROJECT_SOURCE_DIR}/esmi_ib_library)
     endif()
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm/amd_hsmp.h)
-
-        # Need to find the correct amd_hsmp.h to use
-        # Use can specify on the cmd line with -DBUILD_KERNEL_ASM_DIR=/usr/include/asm
-        set(BUILD_KERNEL_ASM_DIR ""
-          CACHE PATH "Location of the kernel's asm dir ex/ usr/include/asm")
-        set(AMD_HSMP "")
-        if (NOT ${BUILD_KERNEL_ASM_DIR} STREQUAL "")
-            if (EXISTS ${BUILD_KERNEL_ASM_DIR}/amd_hsmp.h)
-                set(AMD_HSMP ${BUILD_KERNEL_ASM_DIR}/amd_hsmp.h)
-        else()
-            message("Check the value of -DBUILD_KERNEL_ASM_DIR=${BUILD_KERNEL_ASM_DIR}")
-            message(FATAL_ERROR "Could not find ${BUILD_KERNEL_ASM_DIR}/amd_hsmp.h")
-            endif()
-        endif()
-        if (NOT EXISTS ${AMD_HSMP})
-            # Look for the headers in the running kernel, to do this make sure the correct kernel headers
-            # are install.  Do something like what is done for fedora
-            # sudo dnf install "kernel-devel-uname-r == $(uname -r)"
-            # CMAKE_HOST_SYSTEM_VERSION == $(uname -r)
-            execute_process(COMMAND realpath /lib/modules/${CMAKE_HOST_SYSTEM_VERSION}/build OUTPUT_VARIABLE KERNEL_RELEASE_PATH OUTPUT_STRIP_TRAILING_WHITESPACE)
-            if (EXISTS ${KERNEL_RELEASE_PATH}/arch/x86/include/uapi/asm/amd_hsmp.h)
-                set(AMD_HSMP ${INSTALLED_KERNEL_BUILD_DIR}/arch/x86/include/uapi/asm/amd_hsmp.h)
-            endif()
-        endif()
-        if (NOT EXISTS ${AMD_HSMP})
-            # Look in some obvious places
-            find_path(AMD_HSMP_DIR amd_hsmp.h HINTS /usr/include/asm)
-            if (EXISTS ${AMD_HSMP_DIR}/amd_hsmp.h)
-                set(AMD_HSMP ${AMD_HSMP_DIR}/amd_hsmp.h)
-            endif()
-        endif()
-
-        if (EXISTS ${AMD_HSMP})
-            message(STATUS "Copying amd_hsmp.h from ${AMD_HSMP}")
-            file(COPY ${AMD_HSMP} DESTINATION ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm)
-        else()
-            message(STATUS "Downloading amd_hsmp.h")
-            file(DOWNLOAD
+        file(DOWNLOAD
             https://git.kernel.org/pub/scm/linux/kernel/git/pdx86/platform-drivers-x86.git/plain/arch/x86/include/uapi/asm/amd_hsmp.h?h=review-ilpo
             ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm/amd_hsmp.h)
-       endif()
     endif()
-
     add_definitions("-DENABLE_ESMI_LIB=1")
     set(ESMI_INC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/include")
     set(ESMI_SRC_DIR "${PROJECT_SOURCE_DIR}/esmi_ib_library/src")
