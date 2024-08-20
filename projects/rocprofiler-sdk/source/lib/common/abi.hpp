@@ -56,7 +56,7 @@ compute_table_offset(size_t num_funcs)
 // sure these versioning values are appropriately updated -- so commenting out this check, only
 // updating the size field in ROCP_SDK_ENFORCE_ABI_VERSIONING, etc. will result in the
 // rocprofiler-sdk failing to build and you will be forced to do the work anyway.
-#if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) && (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
+#if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK)
 #    define ROCP_SDK_ENFORCE_ABI_VERSIONING(TABLE, NUM)                                            \
         static_assert(                                                                             \
             sizeof(TABLE) == ::rocprofiler::common::abi::compute_table_offset(NUM),                \
@@ -71,4 +71,22 @@ compute_table_offset(size_t num_funcs)
 #else
 #    define ROCP_SDK_ENFORCE_ABI_VERSIONING(TABLE, NUM)
 #    define ROCP_SDK_ENFORCE_ABI(TABLE, ENTRY, NUM)
+#endif
+
+// These are guarded by ROCPROFILER_CI=1
+#if !defined(ROCPROFILER_UNSAFE_NO_VERSION_CHECK) && (defined(ROCPROFILER_CI) && ROCPROFILER_CI > 0)
+#    define INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(TABLE, NUM)                                \
+        static_assert(                                                                             \
+            sizeof(TABLE) == ::rocprofiler::common::abi::compute_table_offset(NUM),                \
+            "size of the API table struct has changed. Update the STEP_VERSION number (or "        \
+            "in rare cases, the MAJOR_VERSION number)");
+
+#    define INTERNAL_CI_ROCP_SDK_ENFORCE_ABI(TABLE, ENTRY, NUM)                                    \
+        static_assert(                                                                             \
+            offsetof(TABLE, ENTRY) == ::rocprofiler::common::abi::compute_table_offset(NUM),       \
+            "ABI break for " #TABLE "." #ENTRY                                                     \
+            ". Only add new function pointers to end of struct and do not rearrange them");
+#else
+#    define INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(TABLE, NUM)
+#    define INTERNAL_CI_ROCP_SDK_ENFORCE_ABI(TABLE, ENTRY, NUM)
 #endif

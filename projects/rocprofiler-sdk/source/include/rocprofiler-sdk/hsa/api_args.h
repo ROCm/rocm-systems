@@ -1407,6 +1407,13 @@ typedef union rocprofiler_hsa_api_args_t
         uint64_t flags;
     } hsa_amd_vmem_address_reserve_align;
 #    endif
+#    if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x04
+    struct
+    {
+        uint8_t* flags;
+        void*    file;
+    } hsa_amd_enable_logging;
+#    endif
 #endif
 } rocprofiler_hsa_api_args_t;
 

@@ -32,6 +32,8 @@ namespace hip
 {
 static_assert(HIP_COMPILER_API_TABLE_MAJOR_VERSION == 0,
               "Major version updated for HIP compiler dispatch table");
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0,
+              "Major version updated for HIP runtime dispatch table");
 
 // These ensure that function pointers are not re-ordered
 ROCP_SDK_ENFORCE_ABI(HipCompilerDispatchTable, __hipPopCallConfiguration_fn, 0)
@@ -46,10 +48,9 @@ ROCP_SDK_ENFORCE_ABI(HipCompilerDispatchTable, __hipUnregisterFatBinary_fn, 8)
 
 #if HIP_COMPILER_API_TABLE_STEP_VERSION == 0
 ROCP_SDK_ENFORCE_ABI_VERSIONING(HipCompilerDispatchTable, 9)
+#else
+ROCP_SDK_ENFORCE_ABI_VERSIONING(HipCompilerDispatchTable, 0)
 #endif
-
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0,
-              "Major version updated for HIP runtime dispatch table");
 
 // These ensure that function pointers are not re-ordered
 ROCP_SDK_ENFORCE_ABI(HipDispatchTable, hipApiName_fn, 0)
@@ -520,7 +521,9 @@ ROCP_SDK_ENFORCE_ABI_VERSIONING(HipDispatchTable, 444)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 3
 ROCP_SDK_ENFORCE_ABI_VERSIONING(HipDispatchTable, 445)
 #elif HIP_RUNTIME_API_TABLE_STEP_VERSION == 4
-ROCP_SDK_ENFORCE_ABI_VERSIONING(HipDispatchTable, 459)
+INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(HipDispatchTable, 458)
+#else
+INTERNAL_CI_ROCP_SDK_ENFORCE_ABI_VERSIONING(HipDispatchTable, 0)
 #endif
 }  // namespace hip
 }  // namespace rocprofiler

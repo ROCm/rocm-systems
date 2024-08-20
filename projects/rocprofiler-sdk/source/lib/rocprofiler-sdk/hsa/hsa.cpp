@@ -29,7 +29,6 @@
 #include "lib/rocprofiler-sdk/hsa/details/ostream.hpp"
 #include "lib/rocprofiler-sdk/hsa/pc_sampling.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
-#include "lib/rocprofiler-sdk/hsa/types.hpp"
 #include "lib/rocprofiler-sdk/hsa/utils.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
