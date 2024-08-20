@@ -67,11 +67,11 @@ namespace common
 {
 #if defined(ROCPROFILER_TESTS_HAS_GHC_LIB_FILESYSTEM) &&                                           \
     ROCPROFILER_TESTS_HAS_GHC_LIB_FILESYSTEM > 0
-namespace fs = ::ghc::filesystem;  // NOLINT
+namespace fs = ::ghc::filesystem;  // NOLINT(misc-unused-alias-decls)
 #elif defined(ROCPROFILER_TESTS_HAS_CPP_LIB_FILESYSTEM) &&                                         \
     ROCPROFILER_TESTS_HAS_CPP_LIB_FILESYSTEM > 0
-namespace fs = ::std::filesystem;  // NOLINT
+namespace fs = ::std::filesystem;  // NOLINT(misc-unused-alias-decls)
 #else
-namespace fs = ::std::experimental::filesystem;  // NOLINT
+namespace fs = ::std::experimental::filesystem;  // NOLINT(misc-unused-alias-decls)
 #endif
 }  // namespace common

@@ -112,7 +112,7 @@ public:
         get_ext().hsa_amd_signal_create_fn(0, 0, nullptr, 0, &signal);
         packet->completion_signal = signal;
         get_core().hsa_signal_store_screlease_fn(signal, 1);
-    };
+    }
     ~Signal()
     {
         WaitOn();
@@ -126,8 +126,8 @@ public:
     void WaitOn() const
     {
         auto* wait_fn = get_core().hsa_signal_wait_scacquire_fn;
-        while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED))
-            ;
+        while(wait_fn(signal, HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED) != 0)
+        {}
     }
 
     hsa_signal_t      signal;
@@ -140,8 +140,9 @@ ThreadTracerQueue::Submit(hsa_ext_amd_aql_pm4_packet_t* packet, bool bWait)
     std::unique_ptr<Signal> signal{};
     const uint64_t          write_idx = add_write_index_relaxed_fn(queue, 1);
 
-    size_t index      = (write_idx % queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
-    auto*  queue_slot = reinterpret_cast<uint32_t*>(size_t(queue->base_address) + index);  // NOLINT
+    size_t index = (write_idx % queue->size) * sizeof(hsa_ext_amd_aql_pm4_packet_t);
+    // NOLINTNEXTLINE(performance-no-int-to-ptr)
+    auto* queue_slot = reinterpret_cast<uint32_t*>(size_t(queue->base_address) + index);
 
     const auto* slot_data = reinterpret_cast<const uint32_t*>(packet);
 
@@ -440,7 +441,7 @@ DispatchThreadTracer::start_context()
 }
 
 void
-DispatchThreadTracer::stop_context()  // NOLINT
+DispatchThreadTracer::stop_context()  // NOLINT(readability-convert-member-functions-to-static)
 {
     client.wlock([&](auto& client_id) {
         if(!client_id) return;
@@ -526,10 +527,8 @@ AgentThreadTracer::stop_context()
         auto packet = tracer->get_control(false);
         packet->populate_after();
 
-        std::optional<uint64_t> write_index{};
-        auto                    signal = tracer->SubmitAndSignalLast(packet->after_krn_pkt);
-        if(signal)
-            wait_list.push_back({tracer.get(), packet->GetHandle(), std::move(signal)});  // NOLINT
+        auto signal = tracer->SubmitAndSignalLast(packet->after_krn_pkt);
+        if(signal) wait_list.emplace_back(tracer.get(), packet->GetHandle(), std::move(signal));
     }
 
     for(auto& [tracer, handle, signal] : wait_list)

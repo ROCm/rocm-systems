@@ -143,7 +143,7 @@ TraceMemoryPool::Alloc(void** ptr, size_t size, desc_t flags, void* data)
     {
         // Return page aligned data to avoid cache flush overlap
         status = pool.allocate_fn(pool.gpu_pool_, size + 0x2000, 0, ptr);
-        *ptr   = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT
+        *ptr = (void*) ((uintptr_t(*ptr) + 0xFFF) & ~0xFFFul);  // NOLINT(performance-no-int-to-ptr)
     }
     return status;
 }

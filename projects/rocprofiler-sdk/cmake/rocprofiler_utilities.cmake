@@ -108,12 +108,12 @@ function(ROCPROFILER_CAPITALIZE str var)
 endfunction()
 
 # ------------------------------------------------------------------------------#
-# function rocprofiler_strip_target(<TARGET> [FORCE] [EXPLICIT])
+# function rocprofiler_strip_target(<TARGET> [FORCE])
 #
 # Creates a post-build command which strips a binary. FORCE flag will override
 #
 function(ROCPROFILER_STRIP_TARGET)
-    cmake_parse_arguments(STRIP "FORCE;EXPLICIT" "" "ARGS" ${ARGN})
+    cmake_parse_arguments(STRIP "FORCE" "" "ARGS" ${ARGN})
 
     list(LENGTH STRIP_UNPARSED_ARGUMENTS NUM_UNPARSED)
 
@@ -131,36 +131,12 @@ function(ROCPROFILER_STRIP_TARGET)
     endif()
 
     if(CMAKE_STRIP AND (STRIP_FORCE OR ROCPROFILER_STRIP_LIBRARIES))
-        if(STRIP_EXPLICIT)
-            add_custom_command(
-                TARGET ${_TARGET}
-                POST_BUILD
-                COMMAND ${CMAKE_STRIP} ${STRIP_ARGS} $<TARGET_FILE:${_TARGET}>
-                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-                COMMENT "Stripping ${_TARGET}...")
-        else()
-            add_custom_command(
-                TARGET ${_TARGET}
-                POST_BUILD
-                COMMAND
-                    ${CMAKE_STRIP} -w --keep-symbol="rocprofiler_init"
-                    --keep-symbol="rocprofiler_finalize"
-                    --keep-symbol="rocprofiler_push_trace"
-                    --keep-symbol="rocprofiler_pop_trace"
-                    --keep-symbol="rocprofiler_push_region"
-                    --keep-symbol="rocprofiler_pop_region"
-                    --keep-symbol="rocprofiler_set_env"
-                    --keep-symbol="rocprofiler_set_mpi"
-                    --keep-symbol="rocprofiler_reset_preload"
-                    --keep-symbol="rocprofiler_set_instrumented"
-                    --keep-symbol="rocprofiler_user_*" --keep-symbol="ompt_start_tool"
-                    --keep-symbol="kokkosp_*" --keep-symbol="OnLoad"
-                    --keep-symbol="OnUnload" --keep-symbol="OnLoadToolProp"
-                    --keep-symbol="OnUnloadTool" --keep-symbol="__libc_start_main"
-                    ${STRIP_ARGS} $<TARGET_FILE:${_TARGET}>
-                WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
-                COMMENT "Stripping ${_TARGET}...")
-        endif()
+        add_custom_command(
+            TARGET ${_TARGET}
+            POST_BUILD
+            COMMAND ${CMAKE_STRIP} ${STRIP_ARGS} $<TARGET_FILE:${_TARGET}>
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+            COMMENT "Stripping ${_TARGET}...")
     endif()
 endfunction()
 

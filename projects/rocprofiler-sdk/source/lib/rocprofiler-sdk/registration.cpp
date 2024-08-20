@@ -860,34 +860,4 @@ rocprofiler_set_api_table(const char* name,
 
     return 0;
 }
-
-// #if 0
-bool
-OnLoad(HsaApiTable*       table,
-       uint64_t           runtime_version,
-       uint64_t           failed_tool_count,
-       const char* const* failed_tool_names)
-{
-    rocprofiler::registration::init_logging();
-
-    (void) runtime_version;
-    (void) failed_tool_count;
-    (void) failed_tool_names;
-
-    fprintf(stderr, "[%s:%i] %s\n", __FILE__, __LINE__, __FUNCTION__);
-
-    void* table_v = static_cast<void*>(table);
-    rocprofiler_set_api_table("hsa", runtime_version, 0, &table_v, 1);
-
-    return true;
-}
-
-void
-OnUnload()
-{
-    ROCP_INFO << "Unloading hsa-runtime...";
-    ::rocprofiler::registration::finalize();
-    ROCP_INFO << "Finalization complete.";
-}
-// #endif
 }

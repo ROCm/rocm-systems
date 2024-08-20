@@ -23,7 +23,6 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/static_object.hpp"
-#include "lib/rocprofiler-sdk/allocator.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <iostream>

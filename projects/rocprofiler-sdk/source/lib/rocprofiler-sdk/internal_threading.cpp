@@ -27,7 +27,6 @@
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/static_object.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/allocator.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"

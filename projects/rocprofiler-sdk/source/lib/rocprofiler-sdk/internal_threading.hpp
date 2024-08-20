@@ -27,7 +27,6 @@
 #include "lib/common/container/stable_vector.hpp"
 #include "lib/common/defines.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk/allocator.hpp"
 
 #include <PTL/TaskManager.hh>
 #include <PTL/ThreadPool.hh>

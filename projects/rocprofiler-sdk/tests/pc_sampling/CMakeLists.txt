@@ -127,16 +127,14 @@ add_test(NAME pc-sampling-integration-test
 
 set_tests_properties(
     pc-sampling-integration-test
-    PROPERTIES
-        TIMEOUT
-        45
-        LABELS
-        "integration-tests;pc-sampling"
-        # ENVIRONMENT
-        # "${ROCPROFILER_MEMCHECK_PRELOAD_ENV};HSA_TOOLS_LIB=$<TARGET_FILE:rocprofiler::rocprofiler-shared-library>"
-        SKIP_REGULAR_EXPRESSION
-        "PC sampling unavailable"
-        ENVIRONMENT
-        "${pc-sampling-integration-test-env}"
-        FAIL_REGULAR_EXPRESSION
-        "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests;pc-sampling"
+               # ENVIRONMENT "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
+               SKIP_REGULAR_EXPRESSION
+               "PC sampling unavailable"
+               ENVIRONMENT
+               "${pc-sampling-integration-test-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

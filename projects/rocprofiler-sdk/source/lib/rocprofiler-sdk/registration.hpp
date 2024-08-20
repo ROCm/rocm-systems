@@ -30,19 +30,6 @@
 #include <vector>
 
 extern "C" {
-struct HsaApiTable;
-
-using on_load_t = bool (*)(HsaApiTable*, uint64_t, uint64_t, const char* const*);
-
-bool
-OnLoad(HsaApiTable*       table,
-       uint64_t           runtime_version,
-       uint64_t           failed_tool_count,
-       const char* const* failed_tool_names) ROCPROFILER_PUBLIC_API;
-
-void
-OnUnload() ROCPROFILER_PUBLIC_API;
-
 // this is the "hidden" function that rocprofiler-register invokes to pass
 // the API tables to rocprofiler
 int

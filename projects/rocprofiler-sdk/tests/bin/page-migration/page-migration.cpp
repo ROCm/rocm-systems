@@ -80,7 +80,7 @@ struct mmap_allocator
                          MAP_ANONYMOUS | MAP_PRIVATE,  // flags: No file handle
                          -1,                           // no fd, use memory "MAP_ANONYMOUS"
                          0);                           // offset into fd
-        if(ret == ((void*) -1))                        // NOLINT performance-no-int-to-ptr
+        if(ret == ((void*) -1))                        // NOLINT(performance-no-int-to-ptr)
         {
             auto ecode = errno;
             fprintf(stderr, "mmap error %d: %s", ecode, strerror(ecode));
