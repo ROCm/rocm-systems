@@ -107,7 +107,7 @@ endif()
 #
 # ----------------------------------------------------------------------------------------#
 
-find_package(rocm_version)
+find_package(rocm_version 6.2)
 
 if(rocm_version_FOUND)
     list(APPEND CMAKE_PREFIX_PATH "${rocm_version_DIR}" "${rocm_version_DIR}/llvm")
@@ -115,7 +115,17 @@ if(rocm_version_FOUND)
          "${rocm_version_DIR}/lib/cmake")
 endif()
 
-find_package(hip REQUIRED CONFIG)
+find_package(
+    hip
+    6.2
+    REQUIRED
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH})
 target_link_libraries(rocprofiler-hip INTERFACE hip::host)
 rocprofiler_config_nolink_target(rocprofiler-hip-nolink hip::host)
 
@@ -127,6 +137,7 @@ rocprofiler_config_nolink_target(rocprofiler-hip-nolink hip::host)
 
 find_package(
     hsa-runtime64
+    1.14
     REQUIRED
     CONFIG
     HINTS
