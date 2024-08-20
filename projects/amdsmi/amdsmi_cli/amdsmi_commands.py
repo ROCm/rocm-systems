@@ -1197,7 +1197,7 @@ class AMDSMICommands():
             current_platform_values += [args.usage, args.power, args.clock, args.temperature, args.pcie]
 
         # Only args that are applicable to Hypervisors and BM Linux
-        if self.helpers.is_hypervisor() and (self.helpers.is_baremetal() and self.helpers.is_linux()):
+        if self.helpers.is_hypervisor() or (self.helpers.is_baremetal() and self.helpers.is_linux()):
             if ecc:
                 args.ecc = ecc
             if ecc_blocks:
