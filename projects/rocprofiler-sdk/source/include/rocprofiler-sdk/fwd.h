@@ -445,7 +445,7 @@ typedef uint64_t rocprofiler_thread_id_t;
  * for that partiular operation. i.e: For ROCProfiler enumeration of HSA AMD Extended API tracing
  * operations, look at source/include/rocprofiler-sdk/hsa/amd_ext_api_id.h
  */
-typedef uint32_t rocprofiler_tracing_operation_t;
+typedef int32_t rocprofiler_tracing_operation_t;
 
 /**
  * @brief Kernel identifier type
@@ -579,7 +579,7 @@ typedef struct rocprofiler_callback_tracing_record_t
     rocprofiler_thread_id_t             thread_id;
     rocprofiler_correlation_id_t        correlation_id;
     rocprofiler_callback_tracing_kind_t kind;
-    uint32_t                            operation;
+    rocprofiler_tracing_operation_t     operation;
     rocprofiler_callback_phase_t        phase;
     void*                               payload;
 } rocprofiler_callback_tracing_record_t;

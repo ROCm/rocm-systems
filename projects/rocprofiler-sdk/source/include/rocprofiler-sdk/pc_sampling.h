@@ -111,13 +111,13 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT counter collection service already
  * setup in the context
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         context_id,
                                           rocprofiler_agent_id_t           agent_id,
                                           rocprofiler_pc_sampling_method_t method,
                                           rocprofiler_pc_sampling_unit_t   unit,
                                           uint64_t                         interval,
-                                          rocprofiler_buffer_id_t          buffer_id);
+                                          rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 
 /**
  * @brief PC sampling configuration supported by a GPU agent.
@@ -188,11 +188,11 @@ typedef rocprofiler_status_t (*rocprofiler_available_pc_sampling_configurations_
  * @retval ::ROCPROFILER_STATUS_ERROR a general error caused by the amdgpu driver
  * @retval ::ROCPROFILER_STATUS_SUCCESS @p cb successfully finished
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_pc_sampling_agent_configurations(
     rocprofiler_agent_id_t                                agent_id,
     rocprofiler_available_pc_sampling_configurations_cb_t cb,
-    void*                                                 user_data) ROCPROFILER_NONNULL(2, 3);
+    void* user_data) ROCPROFILER_API ROCPROFILER_NONNULL(2, 3);
 
 /**
  * @brief The header of the @ref rocprofiler_pc_sampling_record_t, indicating

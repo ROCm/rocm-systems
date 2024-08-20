@@ -79,7 +79,7 @@ enum pcsample_arb_issue_state
     ISSUE_BRMSG,
     ISSUE_LAST
 };
-};  // namespace PCSAMPLE
+}  // namespace PCSAMPLE
 
 union pcsample_header_v1_t
 {

@@ -46,8 +46,9 @@ ROCPROFILER_EXTERN_C_INIT
  * @param [out] context_id Context identifier
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_create_context(rocprofiler_context_id_t* context_id) ROCPROFILER_NONNULL(1);
+rocprofiler_status_t
+rocprofiler_create_context(rocprofiler_context_id_t* context_id) ROCPROFILER_API
+    ROCPROFILER_NONNULL(1);
 
 /**
  * @brief Start context.
@@ -55,8 +56,8 @@ rocprofiler_create_context(rocprofiler_context_id_t* context_id) ROCPROFILER_NON
  * @param [in] context_id Identifier for context to be activated
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_start_context(rocprofiler_context_id_t context_id);
+rocprofiler_status_t
+rocprofiler_start_context(rocprofiler_context_id_t context_id) ROCPROFILER_API;
 
 /**
  * @brief Stop context.
@@ -64,8 +65,8 @@ rocprofiler_start_context(rocprofiler_context_id_t context_id);
  * @param [in] context_id Identifier for context to be deactivated
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_stop_context(rocprofiler_context_id_t context_id);
+rocprofiler_status_t
+rocprofiler_stop_context(rocprofiler_context_id_t context_id) ROCPROFILER_API;
 
 /**
  * @brief Query whether context is currently active.
@@ -77,8 +78,8 @@ rocprofiler_stop_context(rocprofiler_context_id_t context_id);
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND The input context id did not identify a
  * registered context
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
+rocprofiler_status_t
+rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status) ROCPROFILER_API
     ROCPROFILER_NONNULL(2);
 
 /**
@@ -88,8 +89,8 @@ rocprofiler_context_is_active(rocprofiler_context_id_t context_id, int* status)
  * @param [out] status If context is invalid, this will be a nonzero value
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status)
+rocprofiler_status_t
+rocprofiler_context_is_valid(rocprofiler_context_id_t context_id, int* status) ROCPROFILER_API
     ROCPROFILER_NONNULL(2);
 
 /** @} */

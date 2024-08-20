@@ -165,7 +165,7 @@ rocprofiler_status_t
 rocprofiler_att_parse_data(rocprofiler_att_parser_se_data_callback_t se_data_callback,
                            rocprofiler_att_parser_trace_callback_t   trace_callback,
                            rocprofiler_att_parser_isa_callback_t     isa_callback,
-                           void*                                     userdata);
+                           void*                                     userdata) ROCPROFILER_API;
 
 /** @} */
 

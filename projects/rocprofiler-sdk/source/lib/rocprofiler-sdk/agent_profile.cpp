@@ -28,7 +28,7 @@
 #include "rocprofiler-sdk/fwd.h"
 
 extern "C" {
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_configure_agent_profile_counting_service(rocprofiler_context_id_t context_id,
                                                      rocprofiler_buffer_id_t  buffer_id,
                                                      rocprofiler_agent_id_t   agent_id,
@@ -39,7 +39,7 @@ rocprofiler_configure_agent_profile_counting_service(rocprofiler_context_id_t co
         context_id, buffer_id, agent_id, cb, user_data);
 }
 
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_sample_agent_profile_counting_service(rocprofiler_context_id_t   context_id,
                                                   rocprofiler_user_data_t    user_data,
                                                   rocprofiler_counter_flag_t flags)

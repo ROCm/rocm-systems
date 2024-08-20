@@ -189,10 +189,11 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing)
         ROCPROFILER_CALL(rocprofiler_create_context(&cb_data->client_hsa_ctx),
                          "failed to create context");
 
-        auto operations = std::vector<uint32_t>{ROCPROFILER_HSA_CORE_API_ID_hsa_init,
-                                                ROCPROFILER_HSA_CORE_API_ID_hsa_iterate_agents,
-                                                ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_info,
-                                                ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down};
+        auto operations = std::vector<rocprofiler_tracing_operation_t>{
+            ROCPROFILER_HSA_CORE_API_ID_hsa_init,
+            ROCPROFILER_HSA_CORE_API_ID_hsa_iterate_agents,
+            ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_info,
+            ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down};
 
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                              cb_data->client_hsa_ctx,
@@ -338,10 +339,11 @@ TEST(rocprofiler_lib, intercept_table_and_callback_tracing_disable_context)
         ROCPROFILER_CALL(rocprofiler_create_context(&cb_data->client_hsa_ctx),
                          "failed to create context");
 
-        auto operations = std::vector<uint32_t>{ROCPROFILER_HSA_CORE_API_ID_hsa_init,
-                                                ROCPROFILER_HSA_CORE_API_ID_hsa_iterate_agents,
-                                                ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_info,
-                                                ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down};
+        auto operations = std::vector<rocprofiler_tracing_operation_t>{
+            ROCPROFILER_HSA_CORE_API_ID_hsa_init,
+            ROCPROFILER_HSA_CORE_API_ID_hsa_iterate_agents,
+            ROCPROFILER_HSA_CORE_API_ID_hsa_agent_get_info,
+            ROCPROFILER_HSA_CORE_API_ID_hsa_shut_down};
 
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
                              cb_data->client_hsa_ctx,

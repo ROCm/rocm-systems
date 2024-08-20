@@ -197,6 +197,5 @@ initialize(HsaApiTable* table);
 void
 finalize();
 
-};  // namespace thread_trace
-
+}  // namespace thread_trace
 }  // namespace rocprofiler

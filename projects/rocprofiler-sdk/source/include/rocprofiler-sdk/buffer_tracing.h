@@ -301,7 +301,7 @@ typedef int (*rocprofiler_buffer_tracing_kind_cb_t)(rocprofiler_buffer_tracing_k
  */
 typedef int (*rocprofiler_buffer_tracing_kind_operation_cb_t)(
     rocprofiler_buffer_tracing_kind_t kind,
-    uint32_t                          operation,
+    rocprofiler_tracing_operation_t   operation,
     void*                             data);
 
 /**
@@ -324,10 +324,10 @@ typedef int (*rocprofiler_buffer_tracing_kind_operation_cb_t)(
  *
  */
 rocprofiler_status_t
-rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t          context_id,
-                                             rocprofiler_buffer_tracing_kind_t kind,
-                                             rocprofiler_tracing_operation_t*  operations,
-                                             size_t                            operations_count,
+rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t               context_id,
+                                             rocprofiler_buffer_tracing_kind_t      kind,
+                                             const rocprofiler_tracing_operation_t* operations,
+                                             size_t                  operations_count,
                                              rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 
 /**
@@ -374,7 +374,7 @@ rocprofiler_query_buffer_tracing_kind_name(rocprofiler_buffer_tracing_kind_t kin
  */
 rocprofiler_status_t
 rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_kind_t kind,
-                                                     uint32_t                          operation,
+                                                     rocprofiler_tracing_operation_t   operation,
                                                      const char**                      name,
                                                      uint64_t* name_len) ROCPROFILER_API;
 

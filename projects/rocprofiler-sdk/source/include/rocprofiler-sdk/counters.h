@@ -42,9 +42,10 @@ ROCPROFILER_EXTERN_C_INIT
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if id decoded
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
-                                    rocprofiler_counter_id_t* counter_id) ROCPROFILER_NONNULL(2);
+                                    rocprofiler_counter_id_t*         counter_id) ROCPROFILER_API
+    ROCPROFILER_NONNULL(2);
 
 /**
  * @brief Query dimension position from record_id. If the dimension does not exist
@@ -57,10 +58,10 @@ rocprofiler_query_record_counter_id(rocprofiler_counter_instance_id_t id,
  * @return ::rocprofiler_status_t
  * @retval ROCPROFILER_STATUS_SUCCESS if dimension decoded
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_record_dimension_position(rocprofiler_counter_instance_id_t  id,
                                             rocprofiler_counter_dimension_id_t dim,
-                                            size_t* pos) ROCPROFILER_NONNULL(3);
+                                            size_t* pos) ROCPROFILER_API ROCPROFILER_NONNULL(3);
 
 /**
  * @brief Callback that gives a list of available dimensions for a counter
@@ -90,10 +91,10 @@ typedef rocprofiler_status_t (*rocprofiler_available_dimensions_cb_t)(
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter is not found
  * @retval ROCPROFILER_STATUS_ERROR_DIM_NOT_FOUND if counter does not have this dimension
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
                                        rocprofiler_available_dimensions_cb_t info_cb,
-                                       void*                                 user_data);
+                                       void* user_data) ROCPROFILER_API;
 
 /**
  * @brief Query Counter info such as name or description.
@@ -107,10 +108,10 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter not found
  * @retval ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_ABI Version is not supported
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
                                rocprofiler_counter_info_version_id_t version,
-                               void*                                 info) ROCPROFILER_NONNULL(3);
+                               void* info) ROCPROFILER_API ROCPROFILER_NONNULL(3);
 
 /**
  * @brief This call returns the number of instances specific counter contains.
@@ -122,10 +123,11 @@ rocprofiler_query_counter_info(rocprofiler_counter_id_t              counter_id,
  * @retval ROCPROFILER_STATUS_SUCCESS if counter found
  * @retval ROCPROFILER_STATUS_ERROR_COUNTER_NOT_FOUND if counter not found
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_query_counter_instance_count(rocprofiler_agent_id_t   agent_id,
                                          rocprofiler_counter_id_t counter_id,
-                                         size_t* instance_count) ROCPROFILER_NONNULL(3);
+                                         size_t*                  instance_count) ROCPROFILER_API
+    ROCPROFILER_NONNULL(3);
 
 /**
  * @brief Callback that gives a list of counters available on an agent. The
@@ -154,10 +156,11 @@ typedef rocprofiler_status_t (*rocprofiler_available_counters_cb_t)(
  * @retval ROCPROFILER_STATUS_SUCCESS if counters found for agent
  * @retval ROCPROFILER_STATUS_ERROR if no counters found for agent
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t              agent_id,
                                              rocprofiler_available_counters_cb_t cb,
-                                             void* user_data) ROCPROFILER_NONNULL(2);
+                                             void* user_data) ROCPROFILER_API
+    ROCPROFILER_NONNULL(2);
 
 /** @} */
 

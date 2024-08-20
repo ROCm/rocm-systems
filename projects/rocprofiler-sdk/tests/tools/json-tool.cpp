@@ -240,7 +240,7 @@ consume_args(Args&&...)
 
 int
 save_args(rocprofiler_callback_tracing_kind_t domain_idx,
-          uint32_t                            op_idx,
+          rocprofiler_tracing_operation_t     op_idx,
           uint32_t                            arg_num,
           const void* const                   arg_value_addr,
           int32_t                             arg_indirection_count,

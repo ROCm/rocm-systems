@@ -179,11 +179,11 @@ se_data_callback(int* seid, uint8_t** buffer, uint64_t* buffer_size, void* userd
     return table.se_data(seid, buffer, buffer_size, table.user);
 }
 
-};  // namespace att_parser
-};  // namespace rocprofiler
+}  // namespace att_parser
+}  // namespace rocprofiler
 
 extern "C" {
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_att_parse_data(rocprofiler_att_parser_se_data_callback_t user_se_data_callback,
                            rocprofiler_att_parser_trace_callback_t   user_trace_callback,
                            rocprofiler_att_parser_isa_callback_t     user_isa_callback,

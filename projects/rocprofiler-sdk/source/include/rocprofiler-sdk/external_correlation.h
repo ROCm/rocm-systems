@@ -94,7 +94,7 @@ typedef int (*rocprofiler_external_correlation_id_request_cb_t)(
     rocprofiler_thread_id_t                            thread_id,
     rocprofiler_context_id_t                           context_id,
     rocprofiler_external_correlation_id_request_kind_t kind,
-    uint32_t                                           operation,
+    rocprofiler_tracing_operation_t                    operation,
     uint64_t                                           internal_corr_id_value,
     rocprofiler_user_data_t*                           external_corr_id_value,
     void*                                              data);
@@ -121,10 +121,10 @@ typedef int (*rocprofiler_external_correlation_id_request_cb_t)(
  */
 rocprofiler_status_t
 rocprofiler_configure_external_correlation_id_request_service(
-    rocprofiler_context_id_t                            context_id,
-    rocprofiler_external_correlation_id_request_kind_t* kinds,
-    size_t                                              kinds_count,
-    rocprofiler_external_correlation_id_request_cb_t    callback,
+    rocprofiler_context_id_t                                  context_id,
+    const rocprofiler_external_correlation_id_request_kind_t* kinds,
+    size_t                                                    kinds_count,
+    rocprofiler_external_correlation_id_request_cb_t          callback,
     void* callback_args) ROCPROFILER_API ROCPROFILER_NONNULL(4);
 
 /**

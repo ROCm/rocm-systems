@@ -415,8 +415,8 @@ write_otf2(tool_table*                                                      tool
             for(auto agent : itr)
                 agent_memcpy_info[tid].emplace(agent, location_base{pid, tid, agent});
 
-        for(auto [tid, itr] : agent_queue_ids)
-            for(auto [agent, qitr] : itr)
+        for(const auto& [tid, itr] : agent_queue_ids)
+            for(const auto& [agent, qitr] : itr)
                 for(auto queue : qitr)
                     agent_dispatch_info[tid][agent].emplace(queue,
                                                             location_base{pid, tid, agent, queue});

@@ -34,7 +34,7 @@ using DispatchThreadTracer = rocprofiler::thread_trace::DispatchThreadTracer;
 using AgentThreadTracer    = rocprofiler::thread_trace::AgentThreadTracer;
 
 extern "C" {
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_configure_dispatch_thread_trace_service(
     rocprofiler_context_id_t               context_id,
     rocprofiler_att_parameter_t*           parameters,
@@ -95,7 +95,7 @@ rocprofiler_configure_dispatch_thread_trace_service(
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_configure_agent_thread_trace_service(
     rocprofiler_context_id_t               context_id,
     rocprofiler_att_parameter_t*           parameters,

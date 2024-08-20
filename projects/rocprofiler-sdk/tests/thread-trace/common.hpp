@@ -121,6 +121,5 @@ callbacks_init();
 void
 callbacks_fini();
 
-};  // namespace Callbacks
-
-};  // namespace ATTTest
+}  // namespace Callbacks
+}  // namespace ATTTest

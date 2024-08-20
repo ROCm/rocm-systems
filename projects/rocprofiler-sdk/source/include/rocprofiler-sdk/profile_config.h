@@ -57,11 +57,11 @@ ROCPROFILER_EXTERN_C_INIT
  * @retval ROCPROFILER_STATUS_ERROR if profile could not be created
  *
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
                                   rocprofiler_counter_id_t*        counters_list,
                                   size_t                           counters_count,
-                                  rocprofiler_profile_config_id_t* config_id)
+                                  rocprofiler_profile_config_id_t* config_id) ROCPROFILER_API
     ROCPROFILER_NONNULL(4);
 
 /**
@@ -72,8 +72,8 @@ rocprofiler_create_profile_config(rocprofiler_agent_id_t           agent_id,
  * @retval ROCPROFILER_STATUS_SUCCESS if profile destroyed
  * @retval ROCPROFILER_STATUS_ERROR if profile could not be destroyed
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_destroy_profile_config(rocprofiler_profile_config_id_t config_id);
+rocprofiler_status_t
+rocprofiler_destroy_profile_config(rocprofiler_profile_config_id_t config_id) ROCPROFILER_API;
 
 /** @} */
 

@@ -74,14 +74,15 @@ typedef void (*rocprofiler_buffer_tracing_cb_t)(rocprofiler_context_id_t      co
  * @param [out] buffer_id Identification handle for buffer
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_create_buffer(rocprofiler_context_id_t        context,
                           size_t                          size,
                           size_t                          watermark,
                           rocprofiler_buffer_policy_t     policy,
                           rocprofiler_buffer_tracing_cb_t callback,
                           void*                           callback_data,
-                          rocprofiler_buffer_id_t*        buffer_id) ROCPROFILER_NONNULL(5, 7);
+                          rocprofiler_buffer_id_t*        buffer_id) ROCPROFILER_API
+    ROCPROFILER_NONNULL(5, 7);
 
 /**
  * @brief Destroy buffer.
@@ -92,8 +93,8 @@ rocprofiler_create_buffer(rocprofiler_context_id_t        context,
  * Note: This will destroy the buffer even if it is not empty. The user can
  * call @ref ::rocprofiler_flush_buffer before it to make sure the buffer is empty.
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id);
+rocprofiler_status_t
+rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 
 /**
  * @brief Flush buffer.
@@ -101,8 +102,8 @@ rocprofiler_destroy_buffer(rocprofiler_buffer_id_t buffer_id);
  * @param [in] buffer_id
  * @return ::rocprofiler_status_t
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id);
+rocprofiler_status_t
+rocprofiler_flush_buffer(rocprofiler_buffer_id_t buffer_id) ROCPROFILER_API;
 
 /** @} */
 

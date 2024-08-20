@@ -74,11 +74,11 @@ typedef void (*rocprofiler_internal_thread_library_cb_t)(rocprofiler_runtime_lib
  * @retval ::ROCPROFILER_STATUS_SUCCESS There are currently no conditions which result in any other
  * value, even if internal threads have already been created
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_at_internal_thread_create(rocprofiler_internal_thread_library_cb_t precreate,
                                       rocprofiler_internal_thread_library_cb_t postcreate,
                                       int                                      libs,
-                                      void*                                    data);
+                                      void* data) ROCPROFILER_API;
 
 /**
  * @brief opaque handle to an internal thread identifier which delivers callbacks for buffers
@@ -102,8 +102,8 @@ typedef struct
  * post-initialization
  * @retval ::ROCPROFILER_STATUS_ERROR Failed to create thread
  */
-rocprofiler_status_t ROCPROFILER_API
-rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
+rocprofiler_status_t
+rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id) ROCPROFILER_API
     ROCPROFILER_NONNULL(1);
 
 /**
@@ -123,9 +123,9 @@ rocprofiler_create_callback_thread(rocprofiler_callback_thread_t* cb_thread_id)
  * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Buffer identifier did not match any of the
  * buffers registered with rocprofiler
  */
-rocprofiler_status_t ROCPROFILER_API
+rocprofiler_status_t
 rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,
-                                   rocprofiler_callback_thread_t cb_thread_id);
+                                   rocprofiler_callback_thread_t cb_thread_id) ROCPROFILER_API;
 
 /** @} */
 

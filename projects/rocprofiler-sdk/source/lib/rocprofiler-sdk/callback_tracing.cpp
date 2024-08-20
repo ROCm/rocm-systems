@@ -95,12 +95,12 @@ get_kind_name(rocprofiler_callback_tracing_kind_t kind, std::index_sequence<Idx,
 
 extern "C" {
 rocprofiler_status_t
-rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t            context_id,
-                                               rocprofiler_callback_tracing_kind_t kind,
-                                               rocprofiler_tracing_operation_t*    operations,
-                                               size_t                              operations_count,
-                                               rocprofiler_callback_tracing_cb_t   callback,
-                                               void*                               callback_args)
+rocprofiler_configure_callback_tracing_service(rocprofiler_context_id_t               context_id,
+                                               rocprofiler_callback_tracing_kind_t    kind,
+                                               const rocprofiler_tracing_operation_t* operations,
+                                               size_t                            operations_count,
+                                               rocprofiler_callback_tracing_cb_t callback,
+                                               void*                             callback_args)
 {
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
@@ -144,9 +144,9 @@ rocprofiler_query_callback_tracing_kind_name(rocprofiler_callback_tracing_kind_t
 
 rocprofiler_status_t
 rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_tracing_kind_t kind,
-                                                       uint32_t     operation,
-                                                       const char** name,
-                                                       uint64_t*    name_len)
+                                                       rocprofiler_tracing_operation_t operation,
+                                                       const char**                    name,
+                                                       uint64_t*                       name_len)
 {
     if(kind < ROCPROFILER_CALLBACK_TRACING_NONE || kind >= ROCPROFILER_CALLBACK_TRACING_LAST)
         return ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND;

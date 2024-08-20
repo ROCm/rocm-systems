@@ -109,16 +109,17 @@ get_callback_tracing_names()
     //
     // callback for each kind operation
     //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_callback_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<callback_name_info_t<Tp>*>(data_v);
+    static auto tracing_kind_operation_cb = [](rocprofiler_callback_tracing_kind_t kindv,
+                                               rocprofiler_tracing_operation_t     operation,
+                                               void*                               data_v) {
+        auto* name_info_v = static_cast<callback_name_info_t<Tp>*>(data_v);
 
-            const char* name   = nullptr;
-            auto        status = rocprofiler_query_callback_tracing_kind_operation_name(
-                kindv, operation, &name, nullptr);
-            if(status == success_v && name) name_info_v->emplace(kindv, operation, name);
-            return 0;
-        };
+        const char* name   = nullptr;
+        auto        status = rocprofiler_query_callback_tracing_kind_operation_name(
+            kindv, operation, &name, nullptr);
+        if(status == success_v && name) name_info_v->emplace(kindv, operation, name);
+        return 0;
+    };
 
     //
     //  callback for each buffer kind (i.e. domain)
@@ -147,16 +148,17 @@ get_buffer_tracing_names()
     //
     // callback for each kind operation
     //
-    static auto tracing_kind_operation_cb =
-        [](rocprofiler_buffer_tracing_kind_t kindv, uint32_t operation, void* data_v) {
-            auto* name_info_v = static_cast<buffer_name_info_t<Tp>*>(data_v);
+    static auto tracing_kind_operation_cb = [](rocprofiler_buffer_tracing_kind_t kindv,
+                                               rocprofiler_tracing_operation_t   operation,
+                                               void*                             data_v) {
+        auto* name_info_v = static_cast<buffer_name_info_t<Tp>*>(data_v);
 
-            const char* name   = nullptr;
-            auto        status = rocprofiler_query_buffer_tracing_kind_operation_name(
-                kindv, operation, &name, nullptr);
-            if(status == success_v && name) name_info_v->emplace(kindv, operation, name);
-            return 0;
-        };
+        const char* name = nullptr;
+        auto        status =
+            rocprofiler_query_buffer_tracing_kind_operation_name(kindv, operation, &name, nullptr);
+        if(status == success_v && name) name_info_v->emplace(kindv, operation, name);
+        return 0;
+    };
 
     //
     //  callback for each buffer kind (i.e. domain)

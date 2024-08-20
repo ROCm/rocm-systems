@@ -647,7 +647,7 @@ run_reduce_test(
         }
     }
 }
-};  // namespace
+}  // namespace
 
 TEST(evaluate_ast, counter_reduction_sum)
 {

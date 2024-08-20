@@ -121,7 +121,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
          << ", dt_nsec=" << std::setw(6) << dt;
 
     auto info_data_cb = [](rocprofiler_callback_tracing_kind_t,
-                           uint32_t,
+                           rocprofiler_tracing_operation_t,
                            uint32_t          arg_num,
                            const void* const arg_value_addr,
                            int32_t           indirection_count,

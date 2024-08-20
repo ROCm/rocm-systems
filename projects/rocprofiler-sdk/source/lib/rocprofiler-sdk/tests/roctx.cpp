@@ -165,7 +165,7 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     } info_data_v;
 
     auto info_data_cb = [](rocprofiler_callback_tracing_kind_t,
-                           uint32_t,
+                           rocprofiler_tracing_operation_t,
                            uint32_t          arg_num,
                            const void* const arg_value_addr,
                            int32_t           arg_indir_cnt,

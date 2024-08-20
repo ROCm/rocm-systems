@@ -225,11 +225,11 @@ external_correlation::invoke_callback(rocprofiler_thread_id_t thr_id,
 extern "C" {
 rocprofiler_status_t
 rocprofiler_configure_external_correlation_id_request_service(
-    rocprofiler_context_id_t                            context_id,
-    rocprofiler_external_correlation_id_request_kind_t* kinds,
-    size_t                                              kinds_count,
-    rocprofiler_external_correlation_id_request_cb_t    callback,
-    void*                                               callback_args)
+    rocprofiler_context_id_t                                  context_id,
+    const rocprofiler_external_correlation_id_request_kind_t* kinds,
+    size_t                                                    kinds_count,
+    rocprofiler_external_correlation_id_request_cb_t          callback,
+    void*                                                     callback_args)
 {
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx) return ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND;
