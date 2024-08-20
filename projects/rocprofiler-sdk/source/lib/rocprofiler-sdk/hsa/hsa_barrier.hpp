@@ -22,24 +22,27 @@
 
 #pragma once
 
-#include <functional>
-#include <optional>
-#include <unordered_map>
-#include <unordered_set>
+#include "lib/common/synchronized.hpp"
+#include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ext_amd.h>
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
-#include "lib/common/synchronized.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include <atomic>
+#include <functional>
+#include <optional>
+#include <unordered_map>
+#include <unordered_set>
 
 namespace rocprofiler
 {
 namespace hsa
 {
+class Queue;
+
 class hsa_barrier
 {
 public:
@@ -59,14 +62,14 @@ public:
     void remove_queue(const Queue* queue);
 
 private:
-    std::function<void()>                                      _barried_finished;
-    CoreApiTable                                               _core_api;
-    common::Synchronized<std::unordered_map<int64_t, int64_t>> _queue_waiting;
-    common::Synchronized<std::unordered_set<int64_t>>          _barrier_enqueued;
-    std::atomic<bool>                                          _complete{false};
+    std::function<void()>                                      _barried_finished = {};
+    CoreApiTable                                               _core_api         = {};
+    common::Synchronized<std::unordered_map<int64_t, int64_t>> _queue_waiting    = {};
+    common::Synchronized<std::unordered_set<int64_t>>          _barrier_enqueued = {};
+    std::atomic<bool>                                          _complete         = {false};
 
     // Blocks all queues from executing until the barrier is lifted
-    hsa_signal_t _barrier_signal{};
+    hsa_signal_t _barrier_signal = {};
 };
 
 }  // namespace hsa

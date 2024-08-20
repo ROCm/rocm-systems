@@ -22,35 +22,36 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
-// #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
-
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
 #include <hsa/hsa.h>
 
 #include <cstdint>
+#include <optional>
 
 namespace rocprofiler
 {
-namespace context
-{
-struct context;
-}
-
 namespace kernel_dispatch
 {
-using context_t              = context::context;
-using user_data_map_t        = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
-using external_corr_id_map_t = user_data_map_t;
+struct profiling_time
+{
+    hsa_status_t status = HSA_STATUS_ERROR_INVALID_SIGNAL;
+    uint64_t     start  = 0;
+    uint64_t     end    = 0;
 
-struct profiling_time;
+    profiling_time& operator+=(uint64_t offset);
+    profiling_time& operator-=(uint64_t offset);
+    profiling_time& operator*=(uint64_t scale);
+};
 
+// get the profiling time for a signal on an agent, if start time is less than baseline, correct to
+// start at baseline. If kernel_id is provided, it will be included in error log message if there is
+// an issue with
 profiling_time
-get_dispatch_time(const hsa::queue_info_session& session);
-
-void
-dispatch_complete(hsa::queue_info_session&, profiling_time);
+get_dispatch_time(hsa_agent_t             agent,
+                  hsa_signal_t            signal,
+                  rocprofiler_kernel_id_t kernel_id,
+                  std::optional<uint64_t> baseline = {});
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler

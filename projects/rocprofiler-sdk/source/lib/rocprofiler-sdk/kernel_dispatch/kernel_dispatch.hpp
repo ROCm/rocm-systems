@@ -22,10 +22,6 @@
 
 #pragma once
 
-#include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
-
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include <cstdint>
 #include <vector>
 

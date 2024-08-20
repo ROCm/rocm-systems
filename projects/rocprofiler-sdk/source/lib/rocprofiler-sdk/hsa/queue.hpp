@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 #include <hsa/amd_hsa_kernel_code.h>
 #include <hsa/hsa.h>
@@ -87,7 +88,8 @@ public:
     using completed_cb_t = std::function<void(const Queue&,
                                               const rocprofiler_packet&,
                                               const Queue::queue_info_session_t&,
-                                              inst_pkt_t&)>;
+                                              inst_pkt_t&,
+                                              kernel_dispatch::profiling_time)>;
     using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
 
     Queue(const AgentCache& agent, CoreApiTable table);

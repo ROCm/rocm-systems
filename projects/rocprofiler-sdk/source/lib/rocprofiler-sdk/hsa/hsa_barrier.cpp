@@ -21,7 +21,10 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/hsa_barrier.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+
+#include <functional>
 
 namespace rocprofiler
 {

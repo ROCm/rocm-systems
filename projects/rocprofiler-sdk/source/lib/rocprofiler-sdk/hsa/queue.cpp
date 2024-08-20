@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/tracing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
@@ -59,16 +60,6 @@ static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
 static_assert(offsetof(hsa_ext_amd_aql_pm4_packet_t, completion_signal) ==
                   offsetof(hsa_barrier_or_packet_t, completion_signal),
               "unexpected ABI incompatibility");
-
-#define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
-    auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
-    ROCP_##SEVERITY##_IF(ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) !=                   \
-                         HSA_STATUS_SUCCESS)                                                       \
-        << #EXPR << " returned non-zero status code "                                              \
-        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
-        << ::rocprofiler::hsa::get_hsa_status_string(                                              \
-               ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
-        << ". "
 
 namespace rocprofiler
 {
@@ -116,8 +107,9 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     }
 
     auto& queue_info_session = *static_cast<Queue::queue_info_session_t*>(data);
+    auto  dispatch_time      = kernel_dispatch::get_dispatch_time(queue_info_session);
 
-    kernel_dispatch::dispatch_complete(queue_info_session);
+    kernel_dispatch::dispatch_complete(queue_info_session, dispatch_time);
 
     // Calls our internal callbacks to callers who need to be notified post
     // kernel execution.
@@ -127,7 +119,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
             cb_pair.second(queue_info_session.queue,
                            queue_info_session.kernel_pkt,
                            queue_info_session,
-                           queue_info_session.inst_pkt);
+                           queue_info_session.inst_pkt,
+                           dispatch_time);
         }
     });
 

@@ -145,6 +145,9 @@ struct hsa_api_impl
 std::string_view
 get_hsa_status_string(hsa_status_t _status);
 
+uint64_t
+get_hsa_timestamp_period();
+
 template <size_t TableIdx>
 const char*
 name_by_id(uint32_t id);
@@ -181,3 +184,13 @@ int
 get_hsa_ref_count();
 }  // namespace hsa
 }  // namespace rocprofiler
+
+#define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
+    auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
+    ROCP_##SEVERITY##_IF(ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) !=                   \
+                         HSA_STATUS_SUCCESS)                                                       \
+        << #EXPR << " returned non-zero status code "                                              \
+        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
+        << ::rocprofiler::hsa::get_hsa_status_string(                                              \
+               ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
+        << " "

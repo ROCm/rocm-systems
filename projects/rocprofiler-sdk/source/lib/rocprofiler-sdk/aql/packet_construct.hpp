@@ -22,21 +22,21 @@
 
 #pragma once
 
-#include <functional>
-#include <map>
-#include <vector>
+#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
+#include "lib/rocprofiler-sdk/aql/helpers.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
+#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_api_trace.h>
 #include <hsa/hsa_ven_amd_aqlprofile.h>
 
-#include "lib/rocprofiler-sdk/aql/aql_profile_v2.h"
-#include "lib/rocprofiler-sdk/aql/helpers.hpp"
-#include "lib/rocprofiler-sdk/counters/metrics.hpp"
-#include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
-#include "lib/rocprofiler-sdk/hsa/queue.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
-#include "rocprofiler-sdk/fwd.h"
+#include <functional>
+#include <map>
+#include <vector>
 
 inline bool
 operator==(aqlprofile_pmc_event_t lhs, aqlprofile_pmc_event_t rhs)

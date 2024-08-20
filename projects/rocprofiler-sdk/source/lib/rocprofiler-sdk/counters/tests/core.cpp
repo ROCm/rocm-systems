@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/dispatch_profile.h>
@@ -464,7 +465,7 @@ TEST(core, check_callbacks)
             counters::inst_pkt_t pkts;
             pkts.emplace_back(
                 std::make_pair(std::move(ret_pkt), static_cast<counters::ClientID>(0)));
-            completed_cb(&ctx, cb_info, fq, pkt, sess, pkts);
+            completed_cb(&ctx, cb_info, fq, pkt, sess, pkts, kernel_dispatch::profiling_time{});
             rocprofiler_flush_buffer(opt_buff_id);
             rocprofiler_destroy_buffer(opt_buff_id);
         }

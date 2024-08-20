@@ -31,6 +31,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -162,9 +163,10 @@ void
 completed_cb(const context::context*                       ctx,
              const std::shared_ptr<counter_callback_info>& info,
              const hsa::Queue& /*queue*/,
-             hsa::rocprofiler_packet,
+             hsa::rocprofiler_packet /*packet*/,
              const hsa::Queue::queue_info_session_t& session,
-             inst_pkt_t&                             pkts)
+             inst_pkt_t&                             pkts,
+             kernel_dispatch::profiling_time         dispatch_time)
 {
     CHECK(info && ctx);
 
@@ -249,7 +251,12 @@ completed_cb(const context::context*                       ctx,
                 common::init_public_api_struct(rocprofiler_profile_counting_dispatch_record_t{});
             _header.num_records    = out.size();
             _header.correlation_id = _corr_id_v;
-            _header.dispatch_info  = session.callback_record.dispatch_info;
+            if(dispatch_time.status == HSA_STATUS_SUCCESS)
+            {
+                _header.start_timestamp = dispatch_time.start;
+                _header.end_timestamp   = dispatch_time.end;
+            }
+            _header.dispatch_info = session.callback_record.dispatch_info;
             buf->emplace(ROCPROFILER_BUFFER_CATEGORY_COUNTERS,
                          ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,
                          _header);
@@ -267,6 +274,11 @@ completed_cb(const context::context*                       ctx,
 
             dispatch_data.dispatch_info  = session.callback_record.dispatch_info;
             dispatch_data.correlation_id = _corr_id_v;
+            if(dispatch_time.status == HSA_STATUS_SUCCESS)
+            {
+                dispatch_data.start_timestamp = dispatch_time.start;
+                dispatch_data.end_timestamp   = dispatch_time.end;
+            }
 
             info->record_callback(dispatch_data,
                                   out.data(),

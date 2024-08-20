@@ -333,6 +333,8 @@ save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_data_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
     ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
 }
 
@@ -343,6 +345,8 @@ save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(size);
     ROCP_SDK_SAVE_DATA_FIELD(num_records);
     ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(dispatch_info);
 }
 

@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
@@ -45,16 +46,6 @@
 #include <chrono>
 #include <cstdlib>
 #include <type_traits>
-
-#define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
-    auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
-    ROCP_CI_LOG_IF(SEVERITY,                                                                       \
-                   ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) != HSA_STATUS_SUCCESS)     \
-        << #EXPR << " returned non-zero status code "                                              \
-        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
-        << ::rocprofiler::hsa::get_hsa_status_string(                                              \
-               ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
-        << " "
 
 #define ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL 1
 
@@ -361,14 +352,7 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
         return false;
     }
 
-    static auto sysclock_period = []() -> uint64_t {
-        constexpr auto nanosec     = 1000000000UL;
-        uint64_t       sysclock_hz = 0;
-        ROCP_HSA_TABLE_CALL(ERROR,
-                            get_core_table()->hsa_system_get_info_fn(
-                                HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz));
-        return (nanosec / sysclock_hz);
-    }();
+    static auto sysclock_period = hsa::get_hsa_timestamp_period();
 
     auto  ts               = common::timestamp_ns();
     auto* _data            = static_cast<async_copy_data*>(arg);

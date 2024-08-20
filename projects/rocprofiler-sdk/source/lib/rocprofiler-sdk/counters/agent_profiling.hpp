@@ -19,9 +19,9 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
+
 #pragma once
 
-#include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -37,6 +37,8 @@ struct context;
 
 namespace counters
 {
+struct profile_config;
+
 struct agent_callback_data
 {
     uint64_t                               context_idx = 0;

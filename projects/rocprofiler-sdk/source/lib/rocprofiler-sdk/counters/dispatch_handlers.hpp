@@ -24,6 +24,7 @@
 
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 
 namespace rocprofiler
 {
@@ -32,14 +33,6 @@ namespace counters
 using ClientID   = int64_t;
 using inst_pkt_t = common::container::
     small_vector<std::pair<std::unique_ptr<rocprofiler::hsa::AQLPacket>, ClientID>, 4>;
-
-void
-completed_cb(const context::context*                       ctx,
-             const std::shared_ptr<counter_callback_info>& info,
-             const hsa::Queue& /*queue*/,
-             hsa::rocprofiler_packet,
-             const hsa::Queue::queue_info_session_t& session,
-             inst_pkt_t&                             pkts);
 
 std::unique_ptr<rocprofiler::hsa::AQLPacket>
 queue_cb(const context::context*                                         ctx,
@@ -52,5 +45,13 @@ queue_cb(const context::context*                                         ctx,
          const hsa::Queue::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
          const context::correlation_id*                                  correlation_id);
 
+void
+completed_cb(const context::context*                       ctx,
+             const std::shared_ptr<counter_callback_info>& info,
+             const hsa::Queue&                             queue,
+             hsa::rocprofiler_packet                       packet,
+             const hsa::Queue::queue_info_session_t&       session,
+             inst_pkt_t&                                   pkts,
+             kernel_dispatch::profiling_time               dispatch_time);
 }  // namespace counters
 }  // namespace rocprofiler

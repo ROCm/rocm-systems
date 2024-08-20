@@ -22,7 +22,12 @@
 
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 
+#include <rocprofiler-sdk/fwd.h>
+
+#include <cstdint>
 #include <string_view>
+#include <utility>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -65,7 +70,7 @@ id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
     if constexpr(sizeof...(IdxTail) > 0)
         return id_by_name(name, std::index_sequence<IdxTail...>{});
     else
-        return ROCPROFILER_HSA_AMD_EXT_API_ID_NONE;
+        return ROCPROFILER_KERNEL_DISPATCH_LAST;
 }
 
 template <size_t... Idx>
@@ -73,7 +78,7 @@ void
 get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
 {
     auto _emplace = [](auto& _vec, uint32_t _v) {
-        if(_v < static_cast<uint32_t>(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST)) _vec.emplace_back(_v);
+        if(_v < static_cast<uint32_t>(ROCPROFILER_KERNEL_DISPATCH_LAST)) _vec.emplace_back(_v);
     };
 
     (_emplace(_id_list, kernel_dispatch_info<Idx>::operation_idx), ...);
@@ -84,7 +89,7 @@ void
 get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
 {
     auto _emplace = [](auto& _vec, const char* _v) {
-        if(_v != nullptr && strnlen(_v, 1) > 0) _vec.emplace_back(_v);
+        if(_v != nullptr && !std::string_view{_v}.empty()) _vec.emplace_back(_v);
     };
 
     (_emplace(_name_list, kernel_dispatch_info<Idx>::name), ...);

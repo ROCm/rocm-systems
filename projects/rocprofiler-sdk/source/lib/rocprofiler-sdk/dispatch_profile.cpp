@@ -20,9 +20,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/rocprofiler.h>
-
+#include "lib/rocprofiler-sdk/counters/controller.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+
+#include <rocprofiler-sdk/rocprofiler.h>
 
 extern "C" {
 /**

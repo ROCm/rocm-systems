@@ -43,9 +43,11 @@ ROCPROFILER_EXTERN_C_INIT
  */
 typedef struct rocprofiler_profile_counting_dispatch_data_t
 {
-    uint64_t                           size;            ///< Size of this struct
-    rocprofiler_correlation_id_t       correlation_id;  ///< Correlation ID for this dispatch
-    rocprofiler_kernel_dispatch_info_t dispatch_info;   ///< Dispatch info
+    uint64_t                           size;             ///< Size of this struct
+    rocprofiler_correlation_id_t       correlation_id;   ///< Correlation ID for this dispatch
+    rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_kernel_dispatch_info_t dispatch_info;    ///< Dispatch info
 } rocprofiler_profile_counting_dispatch_data_t;
 
 /**
@@ -58,6 +60,8 @@ typedef struct rocprofiler_profile_counting_dispatch_record_t
     uint64_t                     size;         ///< Size of this struct
     uint64_t                     num_records;  ///< number of ::rocprofiler_record_counter_t records
     rocprofiler_correlation_id_t correlation_id;       ///< Correlation ID for this dispatch
+    rocprofiler_timestamp_t      start_timestamp;      ///< start time in nanoseconds
+    rocprofiler_timestamp_t      end_timestamp;        ///< end time in nanoseconds
     rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Contains the `dispatch_id`
 } rocprofiler_profile_counting_dispatch_record_t;
 

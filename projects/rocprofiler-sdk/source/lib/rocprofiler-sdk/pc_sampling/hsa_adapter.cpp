@@ -21,6 +21,7 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/pc_sampling/hsa_adapter.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
@@ -344,7 +345,8 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
         [](const rocprofiler::hsa::Queue&                       q,
            rocprofiler::hsa::rocprofiler_packet                 kern_pkt,
            const rocprofiler::hsa::Queue::queue_info_session_t& session,
-           rocprofiler::hsa::inst_pkt_t&) {
+           rocprofiler::hsa::inst_pkt_t&,
+           kernel_dispatch::profiling_time) {
             kernel_completion_cb(q.get_agent().get_rocp_agent(), kern_pkt, session);
         });
 }

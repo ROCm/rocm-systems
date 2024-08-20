@@ -669,6 +669,25 @@ update_table(const context::context_array_t& _contexts,
     if constexpr(sizeof...(OpIdxTail) > 0)
         update_table<TableIdx>(_contexts, _orig, std::index_sequence<OpIdxTail...>{});
 }
+
+void
+check_hsa_timing_functions_impl()
+{
+    CHECK(hsa::get_core_table() != nullptr);
+    CHECK(hsa::get_core_table()->hsa_system_get_info_fn != nullptr)
+        << "missing non-null function pointer to hsa_system_get_info_fn";
+    CHECK(hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn != nullptr)
+        << "missing non-null function pointer to hsa_amd_profiling_get_dispatch_time";
+    CHECK(hsa::get_amd_ext_table()->hsa_amd_profiling_get_async_copy_time_fn != nullptr)
+        << "missing non-null function pointer to hsa_amd_profiling_get_async_copy_time";
+}
+
+void
+check_hsa_timing_functions()
+{
+    static auto _once = std::once_flag{};
+    std::call_once(_once, check_hsa_timing_functions_impl);
+}
 }  // namespace
 
 std::string_view
@@ -680,6 +699,19 @@ get_hsa_status_string(hsa_status_t _status)
             _status_msg)
                ? std::string_view{_status_msg}
                : std::string_view{"(unknown HSA error)"};
+}
+
+uint64_t
+get_hsa_timestamp_period()
+{
+    check_hsa_timing_functions();
+
+    constexpr auto nanosec     = 1000000000UL;
+    uint64_t       sysclock_hz = 0;
+    ROCP_HSA_TABLE_CALL(ERROR,
+                        hsa::get_core_table()->hsa_system_get_info_fn(
+                            HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz));
+    return (nanosec / sysclock_hz);
 }
 
 // check out the assembly here... this compiles to a switch statement

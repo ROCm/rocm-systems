@@ -30,6 +30,8 @@
 #include "lib/rocprofiler-sdk/hsa/rocprofiler_packet.hpp"
 #include "lib/rocprofiler-sdk/tracing/fwd.hpp"
 
+#include <unordered_map>
+
 namespace rocprofiler
 {
 namespace context

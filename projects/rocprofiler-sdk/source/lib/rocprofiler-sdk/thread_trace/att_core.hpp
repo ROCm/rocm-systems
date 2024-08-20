@@ -22,16 +22,20 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/hsa/agent_cache.hpp"
+#include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/code_object.hpp"
-
-#include <rocprofiler-sdk/cxx/hash.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <rocprofiler-sdk/amd_detail/thread_trace.h>
 #include <rocprofiler-sdk/intercept_table.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
+#include <rocprofiler-sdk/cxx/operators.hpp>
 
+#include <atomic>
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
@@ -149,7 +153,7 @@ public:
                                                     rocprofiler_user_data_t*       user_data,
                                                     const context::correlation_id* corr_id);
 
-    void post_kernel_call(inst_pkt_t& aql, const hsa::Queue::queue_info_session_t& session);
+    void post_kernel_call(inst_pkt_t& aql, const hsa::queue_info_session& session);
 
     std::unordered_map<hsa_agent_t, std::unique_ptr<ThreadTracerQueue>> agents;
 

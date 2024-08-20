@@ -27,6 +27,7 @@
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
+#include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
 #include "lib/rocprofiler-sdk/tracing/tracing.hpp"
 
 #include <rocprofiler-sdk/callback_tracing.h>
@@ -36,16 +37,6 @@
 
 #include <string_view>
 
-#define ROCP_HSA_TABLE_CALL(SEVERITY, EXPR)                                                        \
-    auto ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) = (EXPR);                            \
-    ROCP_##SEVERITY##_IF(ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) !=                   \
-                         HSA_STATUS_SUCCESS)                                                       \
-        << #EXPR << " returned non-zero status code "                                              \
-        << ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__) << " :: "                          \
-        << ::rocprofiler::hsa::get_hsa_status_string(                                              \
-               ROCPROFILER_VARIABLE(rocp_hsa_table_call_, __LINE__))                               \
-        << " "
-
 namespace rocprofiler
 {
 namespace kernel_dispatch
@@ -54,46 +45,24 @@ namespace
 {
 using queue_info_session_t     = hsa::queue_info_session;
 using kernel_dispatch_record_t = rocprofiler_buffer_tracing_kernel_dispatch_record_t;
-
-hsa_amd_profiling_dispatch_time_t&
-operator+=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
-{
-    lhs.start += rhs;
-    lhs.end += rhs;
-    return lhs;
-}
-
-hsa_amd_profiling_dispatch_time_t&
-operator-=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
-{
-    lhs.start -= rhs;
-    lhs.end -= rhs;
-    return lhs;
-}
-
-hsa_amd_profiling_dispatch_time_t&
-operator*=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
-{
-    lhs.start *= rhs;
-    lhs.end *= rhs;
-    return lhs;
-}
 }  // namespace
 
-void
-dispatch_complete(queue_info_session_t& session)
+profiling_time
+get_dispatch_time(const hsa::queue_info_session& session)
 {
-    auto ts = common::timestamp_ns();
+    const auto& callback_record = session.callback_record;
+    const auto* _rocp_agent     = agent::get_agent(callback_record.dispatch_info.agent_id);
+    auto        _hsa_agent      = agent::get_hsa_agent(_rocp_agent);
+    auto        _signal         = session.kernel_pkt.kernel_dispatch.completion_signal;
+    auto        _kern_id        = callback_record.dispatch_info.kernel_id;
 
-    static auto sysclock_period = []() -> uint64_t {
-        constexpr auto nanosec     = 1000000000UL;
-        uint64_t       sysclock_hz = 0;
-        ROCP_HSA_TABLE_CALL(ERROR,
-                            hsa::get_core_table()->hsa_system_get_info_fn(
-                                HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &sysclock_hz));
-        return (nanosec / sysclock_hz);
-    }();
+    return (_hsa_agent) ? get_dispatch_time(*_hsa_agent, _signal, _kern_id, session.enqueue_ts)
+                        : profiling_time{.status = HSA_STATUS_ERROR_INVALID_AGENT};
+}
 
+void
+dispatch_complete(queue_info_session_t& session, profiling_time dispatch_time)
+{
     // get the contexts that were active when the signal was created
     auto& tracing_data_v = session.tracing_data;
     if(tracing_data_v.callback_contexts.empty() && tracing_data_v.buffered_contexts.empty()) return;
@@ -102,57 +71,16 @@ dispatch_complete(queue_info_session_t& session)
     auto* _corr_id = session.correlation_id;
 
     // only do the following work if there are contexts that require this info
-    auto&       callback_record  = session.callback_record;
-    const auto& _extern_corr_ids = session.tracing_data.external_correlation_ids;
-    const auto* _rocp_agent      = agent::get_agent(callback_record.dispatch_info.agent_id);
-    auto        _hsa_agent       = agent::get_hsa_agent(_rocp_agent);
-    auto        _kern_id         = callback_record.dispatch_info.kernel_id;
-    auto        _signal          = session.kernel_pkt.kernel_dispatch.completion_signal;
-    auto        _tid             = session.tid;
+    auto&       callback_record   = session.callback_record;
+    const auto& _extern_corr_ids  = session.tracing_data.external_correlation_ids;
+    auto        _tid              = session.tid;
+    auto        _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
 
-    auto dispatch_time = hsa_amd_profiling_dispatch_time_t{};
-    auto dispatch_time_status =
-        (_hsa_agent) ? hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
-                           *_hsa_agent, _signal, &dispatch_time)
-                     : HSA_STATUS_ERROR;
-
-    if(dispatch_time_status == HSA_STATUS_SUCCESS)
+    if(dispatch_time.status == HSA_STATUS_SUCCESS)
     {
-        // normalize
-        dispatch_time *= sysclock_period;
-
-        // below is a hack for clock skew issues:
-        // the timestamp of this handler for the kernel dispatch will always be after when the
-        // kernel completed
-        if(ts < dispatch_time.end) dispatch_time -= (dispatch_time.end - ts);
-
-        // below is a hack for clock skew issues:
-        // the timestamp of the packet rewriter for the kernel packet will always be before when the
-        // kernel started
-        if(dispatch_time.start < session.enqueue_ts)
-            dispatch_time += (session.enqueue_ts - dispatch_time.start);
-
         callback_record.start_timestamp = dispatch_time.start;
         callback_record.end_timestamp   = dispatch_time.end;
-    }
 
-    // if we encounter this in CI, it will cause test to fail
-    ROCP_CI_LOG_IF(
-        ERROR,
-        dispatch_time_status == HSA_STATUS_SUCCESS && dispatch_time.end < dispatch_time.start)
-        << "hsa_amd_profiling_get_dispatch_time for kernel_id=" << _kern_id
-        << " on rocprofiler_agent=" << _rocp_agent->id.handle
-        << " returned dispatch times where the end time (" << dispatch_time.end
-        << ") was less than the start time (" << dispatch_time.start << ")";
-
-    ROCP_CI_LOG_IF(ERROR, dispatch_time_status != HSA_STATUS_SUCCESS)
-        << "hsa_amd_profiling_get_dispatch_time for kernel id=" << _kern_id << " returned "
-        << dispatch_time_status << " :: " << hsa::get_hsa_status_string(dispatch_time_status);
-
-    auto _internal_corr_id = (_corr_id) ? _corr_id->internal : 0;
-
-    if(dispatch_time_status == HSA_STATUS_SUCCESS)
-    {
         if(!tracing_data_v.callback_contexts.empty())
         {
             auto tracer_data = callback_record;
