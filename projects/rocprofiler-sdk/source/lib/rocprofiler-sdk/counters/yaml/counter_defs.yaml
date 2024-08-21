@@ -15,6 +15,7 @@ AvgNumActiveThreads:
     gfx90a:
       expression: SQ_THREAD_CYCLES_VALU/SQ_ACTIVE_INST_VALU
   description: 'Unit: percent'
+# CPC Block (Command Processor Compute) - The CPC block is responsible for the compute workloads
 CPC_CPC_STAT_BUSY:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -81,6 +82,7 @@ CPC_UTCL1_STALL_ON_TRANSLATION:
       block: CPC
       event: 24
   description: One of the UTCL1s is stalled waiting on translation, XNACK or PENDING response.
+# Block CPF(Command Processor Fetch) - The CPF block is responsible for fetching the compute workloads
 CPF_CMP_UTCL1_STALL_ON_TRANSLATION:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -253,6 +255,7 @@ GDS_UTIL:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       expression: 100*GRBM_GDS_BUSY/GRBM_GUI_ACTIVE
   description: Percentage of the GRBM_GUI_ACTIVE time that the Global Data Share (GDS) is busy.
+# Block GL2C (Graphic L2 Cache) - The GL2C block is a cache that sits between the L1 cache and the memory
 GL2C_EA_RDREQ_128B:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
@@ -378,6 +381,7 @@ GPU_UTIL:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9:
       expression: 100*GRBM_GUI_ACTIVE/GRBM_COUNT
   description: Percentage of the time that GUI is active
+# Block GRBM (Graphics Register Bus Manager Block)
 GRBM_COUNT:
   architectures:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
@@ -623,6 +627,7 @@ SIMD_NUM:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
       expression: simd_per_cu/CU_NUM
   description: SIMD Number
+# SPI Block(Shader Pipe Interpolator- The Shader Processor Input/Interpolator (SPI), is in charge of managing all resources (wave-slots, GPRs, LDS, barrier), in the shader array, as well as launching and tracking waves on SIMDs)
 SPI_CSN_BUSY:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -749,6 +754,7 @@ SPI_VWC_CSC_WR:
   description: Number of clocks to write CSC waves to VGPRs (need to multiply this value by 4) Requires
     SPI_DEBUG_CNTL.DEBUG_PIPE_SEL to select source, DEBUG_PIPE_SEL = 1, source is CS1; DEBUG_PIPE_SEL
     = 2, source is CS2; DEBUG_PIPE_SEL = 3, source is CS3; default, source is CS0;
+# Block SQ( Shader SeQuencer Block)
 SQC_DCACHE_ATOMIC:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -2063,6 +2069,8 @@ SpiUtil:
     gfx90a:
       expression: 100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE
   description: 'Unit: percent'
+
+# TA block( The Texture Addressing block) processes address components and write data from the shaders and passes them to the TCP and texture data TD blocks.
 TA_ADDR_STALLED_BY_TC_CYCLES:
   architectures:
     gfx90a:
@@ -2357,6 +2365,7 @@ TA_UTIL:
       expression: 100*GRBM_TA_BUSY/GRBM_GUI_ACTIVE
   description: Percentage of the GRBM_GUI_ACTIVE time that any of the Texture Pipes (TA) are busy in the
     shader engine(s).
+# TCA block(The Texture Cache Arbiter)
 TCA_BUSY:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -2379,6 +2388,7 @@ TCA_CYCLE_sum:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCA_CYCLE,sum)
   description: 'Number of cycles. Sum over all TCA instances '
+# TCC Block (Texture Cache per Channel)
 TCC_ALL_TC_OP_INV_EVICT:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
@@ -3264,6 +3274,7 @@ TCC_WRREQ_STALL_max:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_STALL,max)
   description: Number of cycles a write request was stalled. Max over TCC instances.
+# TCP Block (Texture Cache per Pipe)
 TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES:
   architectures:
     gfx90a:
@@ -3830,6 +3841,7 @@ TCP_WRITE_TAGCONFLICT_STALL_CYCLES_sum:
     gfx942/gfx941/gfx940/gfx90a:
       expression: reduce(TCP_WRITE_TAGCONFLICT_STALL_CYCLES,sum)
   description: Tagram conflict stall on a write. Sum over TCP instances.
+# Block TD (Texture Data Block)
 TD_ATOMIC_WAVEFRONT:
   architectures:
     gfx90a:
