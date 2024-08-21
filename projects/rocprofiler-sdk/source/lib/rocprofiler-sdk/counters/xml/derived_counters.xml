@@ -132,6 +132,9 @@
   <metric name="LDSBankConflict" expr=100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
 </gfx9>
 
+<gfx900 base="gfx9">
+</gfx900>
+
 <gfx906 base="gfx9">
   # EA1
   <metric name="TCC_EA1_RDREQ_32B_sum" expr=reduce(TCC_EA1_RDREQ_32B,sum) descr="Number of 32-byte TCC/EA read requests. Sum over TCC EA1s."></metric>
