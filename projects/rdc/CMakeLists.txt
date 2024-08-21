@@ -82,6 +82,14 @@ option(CMAKE_VERBOSE_MAKEFILE "Enable verbose output" OFF)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Export compile commands for linters and autocompleters" ON)
 
+execute_process(
+    COMMAND ${GIT} rev-parse --short HEAD
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    OUTPUT_VARIABLE GIT_HASH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+message("The HASH value of the current HEAD submission in this RDC code repository is : " ${GIT_HASH})
+
 # Don't print 'Up-to-date' when installing
 set(CMAKE_INSTALL_MESSAGE LAZY)
 

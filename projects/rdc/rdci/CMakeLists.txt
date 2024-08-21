@@ -75,6 +75,7 @@ set(RDCI_EXE "rdci")
 link_directories(${SMI_LIB_DIR})
 
 add_executable(${RDCI_EXE} "${RDCI_SRC_LIST}")
+target_compile_definitions(${RDCI_EXE} PRIVATE CURRENT_GIT_HASH=${GIT_HASH})
 
 # help find librdc_bootstrap.so at runtime
 set_target_properties(${RDCI_EXE}

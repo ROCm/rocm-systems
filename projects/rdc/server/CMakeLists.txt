@@ -80,6 +80,7 @@ configure_file("${SERVER_CONFIG_FILE}" "${PROJECT_BINARY_DIR}/${SERVER_CONFIG_FI
 link_directories(${SMI_LIB_DIR})
 
 add_executable(${SERVER_DAEMON_EXE} "${SERVER_SRC_LIST}")
+target_compile_definitions(${SERVER_DAEMON_EXE} PRIVATE CURRENT_GIT_HASH=${GIT_HASH})
 
 # help find librdc_bootstrap.so at runtime
 set_target_properties(${SERVER_DAEMON_EXE}
