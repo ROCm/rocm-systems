@@ -391,6 +391,8 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
             asic_shader = &compiled_shader_it->second.compute_942;
             break;
         }
+      } else if(isa_->GetMinorVersion() == 5) {
+        asic_shader = &compiled_shader_it->second.compute_942;
       } else {
         asic_shader = &compiled_shader_it->second.compute_9;
       }
@@ -447,10 +449,10 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     AMD_HSA_BITS_SET(header->compute_pgm_rsrc2,
                      AMD_COMPUTE_PGM_RSRC_TWO_ENABLE_SGPR_WORKGROUP_ID_X, 1);
 
-    // gfx90a, gfx940, gfx941, gfx942
+    // gfx90a, gfx940, gfx941, gfx942, gfx950
     if ((isa_->GetMajorVersion() == 9) &&
         (((isa_->GetMinorVersion() == 0) && (isa_->GetStepping() == 10)) ||
-        (isa_->GetMinorVersion() == 4))) {
+        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
       // Program COMPUTE_PGM_RSRC3.ACCUM_OFFSET for 0 ACC VGPRs on gfx90a.
       // FIXME: Assemble code objects from source at build time
       int gran_accvgprs = ((gran_vgprs + 1) * 8) / 4 - 1;
@@ -1314,7 +1316,8 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   constexpr size_t hsa_name_size = 63;
 
   const bool isa_has_image_support =
-      (isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 4) ? false : true;
+      (isa_->GetMajorVersion() == 9 &&
+      (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5)) ? false : true;
 
   switch (attribute_u) {
     case HSA_AGENT_INFO_NAME: {
@@ -2237,7 +2240,8 @@ void GpuAgent::BindTrapHandler() {
                    trap_code_buf_size_);
   } else {
     if (isa_->GetMajorVersion() >= 11 ||
-       (isa_->GetMajorVersion() == 9 && isa_->GetMinorVersion() == 4)) {
+       (isa_->GetMajorVersion() == 9 &&
+        (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5))) {
       // No trap handler support without exception handling, soft error.
       return;
     }

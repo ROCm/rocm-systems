@@ -588,6 +588,7 @@ namespace code {
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX940:  MI.Name = "gfx940";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX941:  MI.Name = "gfx941";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX942:  MI.Name = "gfx942";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
+      case ELF::EF_AMDGPU_MACH_AMDGCN_GFX950:  MI.Name = "gfx950";  MI.XnackSupported = true;  MI.SrameccSupported = true;  break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: MI.Name = "gfx1010"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: MI.Name = "gfx1011"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
       case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: MI.Name = "gfx1012"; MI.XnackSupported = true;  MI.SrameccSupported = false; break;
