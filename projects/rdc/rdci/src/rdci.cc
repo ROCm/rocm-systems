@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #include <iostream>
 #include <string>
+#include <string.h>
 
 #include "RdciDiagSubSystem.h"
 #include "RdciDiscoverySubSystem.h"
@@ -33,14 +34,37 @@ THE SOFTWARE.
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/rdc_common.h"
 
+#define RDC_CLIENT_VERSION_MAJOR 1
+#define RDC_CLIENT_VERSION_MINOR 0
+#define RDC_CLIENT_VERSION_RELEASE 0
+
+#define RDC_CLIENT_VERSION_CREATE_STRING(MAJOR, MINOR, RELEASE) (#MAJOR "." #MINOR "." #RELEASE)
+#define RDC_CLIENT_VERSION_EXPAND_PARTS(MAJOR_STR, MINOR_STR, RELEASE_STR) RDC_CLIENT_VERSION_CREATE_STRING(MAJOR_STR, MINOR_STR, RELEASE_STR)
+#define RDC_CLIENT_VERSION_STRING RDC_CLIENT_VERSION_EXPAND_PARTS(RDC_CLIENT_VERSION_MAJOR, RDC_CLIENT_VERSION_MINOR, RDC_CLIENT_VERSION_RELEASE)
+
+#define Q(x) #x
+#define QUOTE(x) Q(x)
+
 int main(int argc, char** argv) {
   const std::string usage_help =
-      "Usage:\trdci <subsystem>\nsubsystem: discovery, dmon, group, "
-      "fieldgroup, stats, diag\n";
+      "Usage:\trdci <subsystem>|<options>\n"
+      "subsystem: \n"
+      "          discovery, dmon, group, fieldgroup, stats, diag\n"
+      "options: \n"
+      "        -v(--version) : Print client version information only\n";
 
   if (argc <= 1) {
     std::cout << usage_help;
     exit(0);
+  }
+
+  if (strcmp(argv[1], "-v") == 0 || strcmp(argv[1], "--version") == 0) {
+#ifdef CURRENT_GIT_HASH
+      std::cout << "RDCI : " << RDC_CLIENT_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH) << std::endl;
+#else
+      std::cout << "RDCI : " << RDC_CLIENT_VERSION_STRING << std::endl;
+#endif
+      exit(0);
   }
 
   amd::rdc::RdciSubSystemPtr subsystem;
