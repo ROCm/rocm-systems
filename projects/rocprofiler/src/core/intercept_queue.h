@@ -81,10 +81,17 @@ static bool ck_ctx_inactive(Context* context) {
 class InterceptQueue {
  public:
   typedef std::recursive_mutex mutex_t;
-  typedef std::map<uint64_t, InterceptQueue*> obj_map_t;
+  typedef std::map<uint64_t, std::unique_ptr<InterceptQueue>> obj_map_t;
   typedef hsa_status_t (*queue_callback_t)(hsa_queue_t*, void* data);
   typedef void (*queue_event_callback_t)(hsa_status_t status, hsa_queue_t* queue, void* arg);
   typedef uint32_t queue_id_t;
+
+  InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy)
+      : queue_(queue), proxy_(proxy) {
+    agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
+    queue_event_callback_ = NULL;
+  }
+  ~InterceptQueue() { ProxyQueue::Destroy(proxy_); }
 
   static void HsaIntercept(HsaApiTable* table);
 
@@ -93,7 +100,7 @@ class InterceptQueue {
       void (*callback)(hsa_status_t status, hsa_queue_t* source, void* data), void* data,
       uint32_t private_segment_size, uint32_t group_segment_size, hsa_queue_t** queue,
       const bool& tracker_on) {
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard<mutex_t> lck(get_persistent().mutex_);
     hsa_status_t status = HSA_STATUS_ERROR;
 
     if (in_create_call_) EXC_ABORT(status, "recursive InterceptQueueCreate()");
@@ -112,24 +119,24 @@ class InterceptQueue {
         EXC_ABORT(status, "hsa_amd_profiling_set_profiler_enabled()");
     }
 
-    InterceptQueue* obj = new InterceptQueue(agent, *queue, proxy);
-    obj_map_[(uint64_t)(*queue)] = obj;
+    auto obj = std::make_unique<InterceptQueue>(agent, *queue, proxy);
     if (k_concurrent_ == K_CONC_TRACE) {
-      status = proxy->SetInterceptCB(OnSubmitCB_ctrace, obj);
+      status = proxy->SetInterceptCB(OnSubmitCB_ctrace, obj.get());
     } else if (opt_mode_) {
-      status = proxy->SetInterceptCB(OnSubmitCB_opt, obj);
+      status = proxy->SetInterceptCB(OnSubmitCB_opt, obj.get());
     } else {
-      status = proxy->SetInterceptCB(OnSubmitCB, obj);
+      status = proxy->SetInterceptCB(OnSubmitCB, obj.get());
     }
     obj->queue_event_callback_ = callback;
     obj->queue_id = current_queue_id;
     ++current_queue_id;
 
-    if (callbacks_.create != NULL) {
-      status = callbacks_.create(*queue, callback_data_);
+    if (get_persistent().callbacks_.create != NULL) {
+      status = get_persistent().callbacks_.create(*queue, get_persistent().callback_data_);
     }
 
     in_create_call_ = false;
+    get_persistent().obj_map_[(uint64_t)(*queue)] = std::move(obj);
     return status;
   }
 
@@ -152,7 +159,7 @@ class InterceptQueue {
   }
 
   static hsa_status_t QueueDestroy(hsa_queue_t* queue) {
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard<mutex_t> lck(get_persistent().mutex_);
     hsa_status_t status = HSA_STATUS_SUCCESS;
 
     if (GetObj(queue) == nullptr) {
@@ -161,8 +168,8 @@ class InterceptQueue {
       return hsa_queue_destroy_fn(queue);
     }
 
-    if (callbacks_.destroy != NULL) {
-      status = callbacks_.destroy(queue, callback_data_);
+    if (get_persistent().callbacks_.destroy != NULL) {
+      status = get_persistent().callbacks_.destroy(queue, get_persistent().callback_data_);
     }
 
     if (status == HSA_STATUS_SUCCESS) {
@@ -205,7 +212,7 @@ class InterceptQueue {
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
-        hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
+        hsa_status_t status = (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
         Context* context = reinterpret_cast<Context*>(group.context);
         // Injecting profiling start/stop packets
         if ((status == HSA_STATUS_SUCCESS) && (context != NULL)) {
@@ -266,10 +273,10 @@ class InterceptQueue {
     ////////////////////////////////////////////////
 
     if (submit_callback_fun_) {
-      mutex_.lock();
+      get_persistent().mutex_.lock();
       auto* callback_fun = submit_callback_fun_;
       void* callback_arg = submit_callback_arg_;
-      mutex_.unlock();
+      get_persistent().mutex_.unlock();
 
       if (callback_fun) {
         for (uint64_t j = 0; j < count; ++j) {
@@ -343,7 +350,7 @@ class InterceptQueue {
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
-        hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
+        hsa_status_t status = (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
         // Injecting profiling start/stop/read packets
         if ((status != HSA_STATUS_SUCCESS) || (group.context == NULL)) {
           if (tracker_entry != NULL) {
@@ -428,10 +435,10 @@ class InterceptQueue {
     Queue* proxy = obj->proxy_;
 
     if (submit_callback_fun_) {
-      mutex_.lock();
+      get_persistent().mutex_.lock();
       auto* callback_fun = submit_callback_fun_;
       void* callback_arg = submit_callback_arg_;
-      mutex_.unlock();
+      get_persistent().mutex_.unlock();
 
       if (callback_fun) {
         for (uint64_t j = 0; j < count; ++j) {
@@ -493,7 +500,7 @@ class InterceptQueue {
 
         // Calling dispatch callback
         rocprofiler_group_t group = {};
-        hsa_status_t status = (dispatch_callback_.load())(&data, callback_data_, &group);
+        hsa_status_t status = (dispatch_callback_.load())(&data, get_persistent().callback_data_, &group);
 
         // Injecting profiling start/stop packets
         if ((status == HSA_STATUS_SUCCESS) && (group.context != NULL)) {
@@ -527,28 +534,28 @@ class InterceptQueue {
   }
 
   static void SetCallbacks(rocprofiler_queue_callbacks_t callbacks, void* data) {
-    std::lock_guard<mutex_t> lck(mutex_);
-    if (callback_data_ != NULL) {
+    std::lock_guard<mutex_t> lck(get_persistent().mutex_);
+    if (get_persistent().callback_data_ != NULL) {
       EXC_ABORT(HSA_STATUS_ERROR, "reassigning queue callbacks - not supported");
     }
-    callbacks_ = callbacks;
-    callback_data_ = data;
+    get_persistent().callbacks_ = callbacks;
+    get_persistent().callback_data_ = data;
     Start();
   }
 
   static void RemoveCallbacks() {
-    std::lock_guard<mutex_t> lck(mutex_);
-    callbacks_ = {};
+    std::lock_guard<mutex_t> lck(get_persistent().mutex_);
+    get_persistent().callbacks_ = {};
     Stop();
   }
 
   static inline void Start() {
-    dispatch_callback_.store(callbacks_.dispatch, std::memory_order_release);
+    dispatch_callback_.store(get_persistent().callbacks_.dispatch, std::memory_order_release);
   }
   static inline void Stop() { dispatch_callback_.store(NULL, std::memory_order_relaxed); }
 
   static void SetSubmitCallback(rocprofiler_hsa_callback_fun_t fun, void* arg) {
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard<mutex_t> lck(get_persistent().mutex_);
     submit_callback_fun_ = fun;
     submit_callback_arg_ = arg;
   }
@@ -609,50 +616,49 @@ class InterceptQueue {
 
   // method to get an intercept queue object
   static InterceptQueue* GetObj(const hsa_queue_t* queue) {
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard<mutex_t> lck(get_persistent().mutex_);
     InterceptQueue* obj = NULL;
-    obj_map_t::const_iterator it = obj_map_.find((uint64_t)queue);
-    if (it != obj_map_.end()) {
-      obj = it->second;
-      assert(queue == obj->queue_);
+    obj_map_t::const_iterator it = get_persistent().obj_map_.find((uint64_t)queue);
+    if (it != get_persistent().obj_map_.end()) {
+      obj = it->second.get();
+      if (obj)
+        assert(queue == obj->queue_);
     }
     return obj;
   }
 
   // method to delete an intercept queue object
   static hsa_status_t DelObj(const hsa_queue_t* queue) {
-    std::lock_guard<mutex_t> lck(mutex_);
+    std::lock_guard<mutex_t> lck(get_persistent().mutex_);
+    auto& obj_map_ = get_persistent().obj_map_;
     hsa_status_t status = HSA_STATUS_ERROR;
-    obj_map_t::const_iterator it = obj_map_.find((uint64_t)queue);
+    obj_map_t::iterator it = obj_map_.find((uint64_t)queue);
     if (it != obj_map_.end()) {
-      const InterceptQueue* obj = it->second;
-      assert(queue == obj->queue_);
-      delete obj;
-      // TODO(aelwazir): This doesn't work anymore with the latest update from HIP Runtime
-      // when they delete their queues, that causes double free.
-      // We need another way to solve this issue.
-      // obj_map_.erase(it);
+      assert(queue == it->second->queue_);
+      obj_map_.erase(it);
       status = HSA_STATUS_SUCCESS;
     }
+
     return status;
   }
 
-  InterceptQueue(const hsa_agent_t& agent, hsa_queue_t* const queue, ProxyQueue* proxy)
-      : queue_(queue), proxy_(proxy) {
-    agent_info_ = util::HsaRsrcFactory::Instance().GetAgentInfo(agent);
-    queue_event_callback_ = NULL;
-  }
-
-  ~InterceptQueue() { ProxyQueue::Destroy(proxy_); }
-
   static const packet_word_t header_type_mask = (1ul << HSA_PACKET_HEADER_WIDTH_TYPE) - 1;
 
-  static mutex_t mutex_;
-  static rocprofiler_queue_callbacks_t callbacks_;
-  static void* callback_data_;
+  typedef struct
+  {
+    mutex_t mutex_{};
+    obj_map_t obj_map_{};
+    rocprofiler_queue_callbacks_t callbacks_{};
+    void* callback_data_ = nullptr;
+  } persistent_objects_t;
+
+  static persistent_objects_t& get_persistent() {
+    static auto* obj = new persistent_objects_t{};
+    return *obj;
+  }
+
   static std::atomic<rocprofiler_callback_t> dispatch_callback_;
 
-  static obj_map_t obj_map_;
   static const char* kernel_none_;
   static Tracker* tracker_;
   static bool tracker_on_;

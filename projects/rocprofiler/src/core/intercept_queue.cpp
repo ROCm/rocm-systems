@@ -28,11 +28,7 @@ void InterceptQueue::HsaIntercept(HsaApiTable* table) {
   table->core_->hsa_queue_destroy_fn = rocprofiler::InterceptQueue::QueueDestroy;
 }
 
-InterceptQueue::mutex_t InterceptQueue::mutex_;
-rocprofiler_queue_callbacks_t InterceptQueue::callbacks_ = {};
-void* InterceptQueue::callback_data_ = NULL;
 std::atomic<rocprofiler_callback_t> InterceptQueue::dispatch_callback_{NULL};
-InterceptQueue::obj_map_t InterceptQueue::obj_map_{};
 const char* InterceptQueue::kernel_none_ = "";
 Tracker* InterceptQueue::tracker_ = NULL;
 bool InterceptQueue::tracker_on_ = false;
@@ -45,4 +41,5 @@ void* InterceptQueue::submit_callback_arg_ = NULL;
 bool InterceptQueue::opt_mode_ = false;
 uint32_t InterceptQueue::k_concurrent_ = K_CONC_OFF;
 std::once_flag InterceptQueue::once_flag_;
+
 }  // namespace rocprofiler
