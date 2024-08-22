@@ -18,13 +18,11 @@ ENV NODE_VERSION 20.12.2
 ADD plugins/omniperf_plugin /var/lib/grafana/plugins/omniperf_plugin
 
 # Install Grafana and MongoDB Community Edition
+# Note: Grafana install is stubbed to 10.4.3
 RUN apt-get update && \
-    apt-get install -y apt-transport-https software-properties-common wget && \
-    mkdir -p /etc/apt/keyrings/ && \
-    wget -q -O - https://apt.grafana.com/gpg.key | gpg --dearmor | tee /etc/apt/keyrings/grafana.gpg > /dev/null && \
-    echo "deb [signed-by=/etc/apt/keyrings/grafana.gpg] https://apt.grafana.com stable main" | tee -a /etc/apt/sources.list.d/grafana.list && \
-    apt-get update && \
-    apt-get install -y grafana && \
+    apt-get install -y adduser libfontconfig1 musl wget && \
+    wget -q https://dl.grafana.com/enterprise/release/grafana-enterprise_10.4.3_amd64.deb && \
+    dpkg -i grafana-enterprise_10.4.3_amd64.deb && \
     apt-get install -y gnupg curl && \
     curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg  --dearmor && \
     echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu jammy/mongodb-org/7.0 multiverse" | tee /etc/apt/sources.list.d/mongodb-org-7.0.list && \
