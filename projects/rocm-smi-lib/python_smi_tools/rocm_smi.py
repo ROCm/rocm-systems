@@ -2328,7 +2328,7 @@ def showFwInfo(deviceList, fwType):
         for fw_name in firmware_blocks:
             fw_name = fw_name.upper()
             ret = rocmsmi.rsmi_dev_firmware_version_get(device, fw_block_names_l.index(fw_name), byref(fw_ver))
-            if rsmi_ret_ok(ret, device, 'get_firmware_version_' + str(fw_name)):
+            if rsmi_ret_ok(ret, device, 'get_firmware_version_' + str(fw_name), silent=True):
                 # The VCN, VCE, UVD, SOS and ASD firmware's value needs to be in hexadecimal
                 if fw_name in ['VCN', 'VCE', 'UVD', 'SOS', 'ASD', 'MES', 'MES KIQ']:
                     printLog(device, '%s firmware version' % (fw_name),
