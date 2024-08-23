@@ -276,9 +276,12 @@ if(BUILD_STANDALONE)
                 COMPONENT ${SERVER_COMPONENT})
         endif()
         # Also include dev setup for people do not want to build grpc
-        install(DIRECTORY ${GRPC_ROOT}/bin
-            USE_SOURCE_PERMISSIONS
-            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc
+        file(GLOB install_bin_files "${GRPC_ROOT}/bin/*")
+        foreach(ITEM ${install_bin_files})
+            LIST( APPEND bin_files "${ITEM}" )
+        endforeach()
+        INSTALL( FILES ${bin_files}
+            DESTINATION ${CMAKE_INSTALL_LIBDIR}/${RDC}/grpc/bin
             COMPONENT ${SERVER_COMPONENT})
 
         install(DIRECTORY ${GRPC_ROOT}/include
@@ -361,19 +364,19 @@ endif()
 set(INST_SCR_PERM OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 configure_file(
     "${PROJECT_SOURCE_DIR}/src/DEBIAN_postinst.in"
-    "${PROJECT_SOURCE_DIR}/DEBIAN/postinst" FILE_PERMISSIONS ${INST_SCR_PERM})
+    "${PROJECT_SOURCE_DIR}/DEBIAN/postinst" FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
 configure_file(
     "${PROJECT_SOURCE_DIR}/src/DEBIAN_prerm.in"
-    "${PROJECT_SOURCE_DIR}/DEBIAN/prerm" FILE_PERMISSIONS ${INST_SCR_PERM})
+    "${PROJECT_SOURCE_DIR}/DEBIAN/prerm" FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
 configure_file(
     "${PROJECT_SOURCE_DIR}/src/RPM_rpm_post.in"
-    "${PROJECT_SOURCE_DIR}/RPM/rpm_post" FILE_PERMISSIONS ${INST_SCR_PERM})
+    "${PROJECT_SOURCE_DIR}/RPM/rpm_post" FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
 configure_file(
     "${PROJECT_SOURCE_DIR}/src/RPM_preun.in"
-    "${PROJECT_SOURCE_DIR}/RPM/rpm_preun" FILE_PERMISSIONS ${INST_SCR_PERM})
+    "${PROJECT_SOURCE_DIR}/RPM/rpm_preun" FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
 configure_file(
     "${PROJECT_SOURCE_DIR}/src/RPM_postun.in"
-    "${PROJECT_SOURCE_DIR}/RPM/rpm_postun" FILE_PERMISSIONS ${INST_SCR_PERM})
+    "${PROJECT_SOURCE_DIR}/RPM/rpm_postun" FILE_PERMISSIONS ${INST_SCR_PERM} @ONLY)
 if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
     set(CPACK_PACKAGE_VERSION "${CPACK_PACKAGE_VERSION}.$ENV{ROCM_LIBPATCH_VERSION}")
     message("Using CPACK_PACKAGE_VERSION ${CPACK_PACKAGE_VERSION}")

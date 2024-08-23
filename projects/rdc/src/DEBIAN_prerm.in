@@ -5,9 +5,10 @@ do_update_alternatives(){
     command -v update-alternatives >/dev/null || return 0
     binaries=(
         rdcd
+        rdci
     )
 
-    for i in "$binaries"
+    for i in "${binaries[@]}"
     do
         update-alternatives --remove $i @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/$i
     done

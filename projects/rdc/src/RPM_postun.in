@@ -2,13 +2,14 @@
 do_update_alternatives(){
     # skip update if program doesn't exist
     command -v update-alternatives >/dev/null || return 0
-        binaries=(
+    binaries=(
         rdcd
+        rdci
     )
 
-    for i in "$binaries"
+    for i in "${binaries[@]}"
     do
-        update-alternatives --remove $i @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/$i
+        update-alternatives --remove "$i" @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/$i
     done
 }
 
@@ -35,7 +36,7 @@ reload_systemd() {
     return 0
 }
 
-if [ $1 -le 1 ]; then
+if [ "$1" -le 1 ]; then
     # perform the below actions for rpm remove($1=0) or upgrade($1=1) operations
     stop_rdc
     rm_rdc_service

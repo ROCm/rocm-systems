@@ -104,7 +104,7 @@ This is the preferred mode of operation, as it does not have any external depend
 Start the RDC tool using ``systemd``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If multiple RDC versions are installed, copy `/opt/rocm-<x.y.z>/rdc/lib/rdc.service`, which is installed with the desired RDC version, to the ``systemd`` folder. The capability of RDC can be configured by modifying the ``rdc.service`` system configuration file. Use the ``systemctl`` command to start ``rdcd``.
+If multiple RDC versions are installed, copy `/opt/rocm-<x.y.z>/libexec/rdc/rdc.service`, which is installed with the desired RDC version, to the ``systemd`` folder. The capability of RDC can be configured by modifying the ``rdc.service`` system configuration file. Use the ``systemctl`` command to start ``rdcd``.
 
 .. code-block:: shell
   
