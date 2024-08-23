@@ -1217,6 +1217,10 @@ amdsmi_status_t amdsmi_get_gpu_reg_table_info(
                     num_of_metrics);
 }
 
+void amdsmi_free_name_value_pairs(void *p) {
+    free(p);
+}
+
 amdsmi_status_t
 amdsmi_get_power_cap_info(amdsmi_processor_handle processor_handle,
                     uint32_t sensor_ind,
@@ -1550,6 +1554,16 @@ amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handl
     return rsmi_wrapper(rsmi_dev_clk_range_set, processor_handle,
                 minclkvalue, maxclkvalue,
                 static_cast<rsmi_clk_type_t>(clkType));
+}
+
+amdsmi_status_t amdsmi_set_gpu_clk_limit(amdsmi_processor_handle processor_handle,
+                                         amdsmi_clk_type_t clk_type,
+                                          amdsmi_clk_limit_type_t limit_type,
+                                          uint64_t clk_value) {
+    return rsmi_wrapper(rsmi_dev_clk_extremum_set, processor_handle,
+                static_cast<rsmi_freq_ind_t>(limit_type),
+                clk_value,
+                static_cast<rsmi_clk_type_t>(clk_type));
 }
 
 amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {

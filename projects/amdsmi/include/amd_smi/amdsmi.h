@@ -1003,6 +1003,15 @@ typedef enum {
   AMDSMI_GPU_BLOCK_RESERVED =  0x8000000000000000
 } amdsmi_gpu_block_t;
 
+
+/**
+ * @brief The clk limit type
+ */
+typedef enum  {
+           CLK_LIMIT_MIN,
+           CLK_LIMIT_MAX
+} amdsmi_clk_limit_type_t;
+
 /**
  * @brief The current ECC state
  */
@@ -3122,6 +3131,9 @@ amdsmi_status_t amdsmi_get_gpu_reg_table_info(
  *  @brief This function sets the clock range information. It is not supported on virtual
  *  machine guest
  *
+ *  @deprecated ::amdsmi_set_gpu_clk_limit() should be used, with an
+ *  interface that set the min_value and then max_value.
+ *
  *  @platform{gpu_bm_linux}
  *
  *  @details Given a processor handle @p processor_handle, a minimum clock value @p minclkvalue,
@@ -3144,6 +3156,43 @@ amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handl
                                           uint64_t minclkvalue,
                                           uint64_t maxclkvalue,
                                           amdsmi_clk_type_t clkType);
+
+/**
+ *  @brief This function sets the clock sets the clock min/max level
+ *
+ *  @platform{gpu_bm_linux} @platform{guest_1vf}
+ *
+ *  @details Given a processor handle @p processor_handle, a clock type @p clk_type, 
+ *  a value @p clk_value needs to be set, and the @p level indicates min or max
+ *  clock you want to set, this function the clock limit.
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in] clk_type AMDSMI_CLK_TYPE_SYS, AMDSMI_CLK_TYPE_MEM and so on
+ *
+ *  @param[in] limit_type AMDSMI_FREQ_IND_MIN|AMDSMI_FREQ_IND_MAX to set the
+ *  minimum (0) or maximum (1) speed.
+ *
+ *  @param[in] clk_value value to apply to. Frequency values are in MHz.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_set_gpu_clk_limit(amdsmi_processor_handle processor_handle,
+                                         amdsmi_clk_type_t clk_type,
+                                         amdsmi_clk_limit_type_t limit_type,
+                                         uint64_t clk_value);
+
+/**
+ *  @brief Frees heap memory allocated by reg_table and pm_metrics
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Frees heap memory.
+ *
+ *  @param[in] p a pointer to the memory to free.
+ *
+ */
+void amdsmi_free_name_value_pairs(void *p);
 
 /**
  *  @brief This function sets the clock frequency information. It is not supported on
