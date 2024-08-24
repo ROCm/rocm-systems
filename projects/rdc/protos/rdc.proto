@@ -151,6 +151,9 @@ service RdcAPI {
   //    size_t config_size,
   //    rdc_diag_test_result_t* result);
   rpc DiagnosticTestCaseRun(DiagnosticTestCaseRunRequest) returns (DiagnosticTestCaseRunResponse) {}
+
+  //Just an RPC method not used as an API
+  rpc GetMixedComponentVersion(GetMixedComponentVersionRequest) returns (GetMixedComponentVersionResponse) {}
 }
 
 message Empty {
@@ -473,4 +476,13 @@ message DiagnosticTestCaseRunRequest {
 message DiagnosticTestCaseRunResponse {
   uint32 status = 1;
   DiagnosticTestResult result = 2;
+}
+
+message GetMixedComponentVersionRequest {
+  uint32 component_id = 1;
+}
+
+message GetMixedComponentVersionResponse {
+  uint32 status = 1;
+  string version = 2;
 }
