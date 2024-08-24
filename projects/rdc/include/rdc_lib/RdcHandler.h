@@ -23,6 +23,7 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_RDCHANDLER_H_
 
 #include "rdc/rdc.h"
+#include "rdc/rdc_private.h"
 #include "rdc_lib/rdc_common.h"
 
 namespace amd {
@@ -87,6 +88,10 @@ class RdcHandler {
 
   // Control API
   virtual rdc_status_t rdc_field_update_all(uint32_t wait_for_update) = 0;
+
+  // It is just a client interface under the GRPC framework and is not used as an RDC API.
+  // The reason is that RdcEmbeddedHandler::get_mixed_component_version does not need to be called.
+  virtual rdc_status_t get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) = 0;
 
   virtual ~RdcHandler() {}
 };

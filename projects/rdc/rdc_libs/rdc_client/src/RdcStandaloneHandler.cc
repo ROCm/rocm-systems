@@ -662,5 +662,27 @@ rdc_status_t RdcStandaloneHandler::rdc_field_update_all(uint32_t wait_for_update
   return error_handle(status, reply.status());
 }
 
+// It is only an interface for the client under the GRPC framework and is not used as an RDC API.
+rdc_status_t RdcStandaloneHandler::get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
+
+  if (!p_mixed_compv) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::GetMixedComponentVersionRequest request;
+  ::rdc::GetMixedComponentVersionResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_component_id(component);
+  ::grpc::Status status = stub_->GetMixedComponentVersion(&context, request, &reply);
+
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  strncpy_with_null(p_mixed_compv->version, reply.version().c_str(), USR_MAX_VERSION_STR_LENGTH);
+  return RDC_ST_OK;
+
+}
+
 }  // namespace rdc
 }  // namespace amd

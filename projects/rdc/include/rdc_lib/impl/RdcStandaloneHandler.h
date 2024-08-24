@@ -86,6 +86,10 @@ class RdcStandaloneHandler : public RdcHandler {
   // Control RdcAPI
   rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;
 
+  // It is just a client interface under the GRPC framework and is not used as an RDC API.
+  // Pure virtual functions need to be overridden
+  rdc_status_t get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) override;
+
   explicit RdcStandaloneHandler(const char* ip_and_port, const char* root_ca,
                                 const char* client_cert, const char* client_key);
 

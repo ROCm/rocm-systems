@@ -20,7 +20,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "rdc/rdc_api_service.h"
-
+#include "rdc/rdc_server_main.h"
 #include <assert.h>
 #include <grpcpp/grpcpp.h>
 
@@ -31,6 +31,7 @@ THE SOFTWARE.
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
+#include "rdc/rdc_private.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -658,6 +659,36 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   to_diag_info->set_info(test_result.info);
 
   return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetMixedComponentVersion(::grpc::ServerContext* context,
+                                                const ::rdc::GetMixedComponentVersionRequest* request,
+                                                ::rdc::GetMixedComponentVersionResponse* reply) {
+  (void)(context);
+  if (!reply) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty reply");
+  }
+
+  mixed_component_t component = static_cast<mixed_component_t>(request->component_id());
+
+  if (component == RDCD_COMPONENT) {
+    std::string version = RDC_SERVER_VERSION_STRING;
+    std::string hash;
+    std::string rdcdversion;
+#ifdef CURRENT_GIT_HASH
+    hash = QUOTE(CURRENT_GIT_HASH);
+    rdcdversion = version + "+" + hash;
+#else
+    hash = "";
+    rdcdversion = version;
+#endif
+
+    reply->set_version(rdcdversion);
+    reply->set_status(RDC_ST_OK);
+    return ::grpc::Status::OK;
+  } else {
+    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "The provided request parameters are invalid");
+  }
 }
 
 }  // namespace rdc

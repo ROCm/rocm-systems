@@ -421,5 +421,13 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_update_all(uint32_t wait_for_update) 
   return RDC_ST_OK;
 }
 
+// It is just a client interface under the GRPC framework and is not used as an RDC API.
+// Just write an empty function to solve compilation errors
+rdc_status_t RdcEmbeddedHandler::get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
+  (void)(component);
+  (void)(p_mixed_compv);
+  return RDC_ST_OK;
+}
+
 }  // namespace rdc
 }  // namespace amd
