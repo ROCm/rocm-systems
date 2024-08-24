@@ -343,9 +343,11 @@ if(CPACK_RPM_PACKAGE_RELEASE)
   set(CPACK_RPM_PACKAGE_RELEASE_DIST ON)
 endif()
 
+# don't terminate if bytecompile of python files fails
+set(CPACK_RPM_SPEC_MORE_DEFINE "%define _python_bytecompile_errors_terminate_build 0")
 # Cpack converts !/usr/bin/env python3 to /usr/libexec/platform-python in RHEL8.
 # prevent the BRP(buildroot policy) script from checking and modifying interpreter directives
-set(CPACK_RPM_SPEC_MORE_DEFINE "%undefine __brp_mangle_shebangs")
+string( APPEND CPACK_RPM_SPEC_MORE_DEFINE "\n%undefine __brp_mangle_shebangs")
 
 # The line below doesn't currently work; it may be this issue:
 # https://bugzilla.redhat.com/show_bug.cgi?id=1811358
