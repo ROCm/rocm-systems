@@ -1722,7 +1722,7 @@ def amdsmi_get_gpu_pm_metrics_info(
 
 def amdsmi_get_gpu_reg_table_info(
     processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
-    reg_type: amdsmi_reg_type_t,
+    reg_type: amdsmi_wrapper.amdsmi_reg_type_t,
 ) -> Dict[str, Any]:
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -2175,8 +2175,16 @@ def amdsmi_get_fw_info(
         raise AmdSmiParameterException(
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
     fw_info = amdsmi_wrapper.amdsmi_fw_info_t()
-    _check_res(amdsmi_wrapper.amdsmi_get_fw_info(
-        processor_handle, ctypes.byref(fw_info)))
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_fw_info(
+            processor_handle, ctypes.byref(fw_info)
+        )
+    )
+
+    # Certain FW blocks are padded with 0s in the front intentionally
+    # But the C library converts the hex to an integer which trims the leading 0s
+    # Nor do we have a flag that defines the expected format for each FW block
+    # We can expect the following blocks to have a padded value and a specified format
 
     hex_format_fw = [AmdSmiFwBlock.AMDSMI_FW_ID_PSP_SOSDRV,
                      AmdSmiFwBlock.AMDSMI_FW_ID_TA_RAS,
@@ -2185,20 +2193,33 @@ def amdsmi_get_fw_info(
                      AmdSmiFwBlock.AMDSMI_FW_ID_VCE,
                      AmdSmiFwBlock.AMDSMI_FW_ID_VCN]
 
+    # PM(AKA: SMC) firmware's hex value looks like 0x12345678
+    # However, they are parsed as: int(0x12).int(0x34).int(0x56).int(0x78)
+    # Which results in the following: 12.34.56.78
     dec_format_fw = [AmdSmiFwBlock.AMDSMI_FW_ID_PM]
 
     firmwares = []
     for i in range(0, fw_info.num_fw_info):
         fw_name = AmdSmiFwBlock(fw_info.fw_info_list[i].fw_id)
-        fw_version = fw_info.fw_info_list[i].fw_version
+        fw_version = fw_info.fw_info_list[i].fw_version # This is in int format (base 10)
 
         if fw_name in hex_format_fw:
-            fw_version_string = ".".join(re.findall('..?', hex(fw_version)[2:]))
+            # Convert the fw_version from a int to a hex string padded leading 0s
+            fw_version_string = hex(fw_version)[2:].zfill(8)
+
+            # Join every two hex digits with a dot
+            fw_version_string = ".".join(re.findall('..?', fw_version_string))
         elif fw_name in dec_format_fw:
+            # Convert the fw_version from a int to a hex string padded leading 0s
+            fw_version_string = hex(fw_version)[2:].zfill(8)
+
             # Convert every two hex digits to decimal and join them with a dot
             dec_version_string = ''
-            for ver1,ver2 in zip(hex(fw_version)[2::2], hex(fw_version)[3::2]):
-                dec_version_string += str(int(f"0x{ver1}{ver2}", 0)) + "."
+            for index, _ in enumerate(fw_version_string):
+                if index % 2 != 0:
+                    continue
+                hex_digits = f"0x{fw_version_string[index:index+2]}"
+                dec_version_string += str(int(hex_digits, 16)).zfill(2) + "."
             fw_version_string = dec_version_string.strip('.')
         else:
             fw_version_string = str(fw_version)

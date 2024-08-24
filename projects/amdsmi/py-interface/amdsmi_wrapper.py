@@ -759,19 +759,6 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
-]
-
 class struct_pcie_metric_(Structure):
     pass
 
@@ -788,6 +775,19 @@ struct_pcie_metric_._fields_ = [
     ('pcie_nak_sent_count', ctypes.c_uint64),
     ('pcie_nak_received_count', ctypes.c_uint64),
     ('reserved', ctypes.c_uint64 * 13),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('reserved', ctypes.c_uint64 * 10),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False
@@ -1350,6 +1350,15 @@ AMDSMI_GPU_BLOCK_MPIO = 262144
 AMDSMI_GPU_BLOCK_LAST = 262144
 AMDSMI_GPU_BLOCK_RESERVED = 9223372036854775808
 amdsmi_gpu_block_t = ctypes.c_uint64 # enum
+
+# values for enumeration 'amdsmi_clk_limit_type_t'
+amdsmi_clk_limit_type_t__enumvalues = {
+    0: 'CLK_LIMIT_MIN',
+    1: 'CLK_LIMIT_MAX',
+}
+CLK_LIMIT_MIN = 0
+CLK_LIMIT_MAX = 1
+amdsmi_clk_limit_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_ras_err_state_t'
 amdsmi_ras_err_state_t__enumvalues = {
@@ -2061,6 +2070,9 @@ amdsmi_get_gpu_reg_table_info.argtypes = [amdsmi_processor_handle, amdsmi_reg_ty
 amdsmi_set_gpu_clk_range = _libraries['libamd_smi.so'].amdsmi_set_gpu_clk_range
 amdsmi_set_gpu_clk_range.restype = amdsmi_status_t
 amdsmi_set_gpu_clk_range.argtypes = [amdsmi_processor_handle, uint64_t, uint64_t, amdsmi_clk_type_t]
+amdsmi_set_gpu_clk_limit = _libraries['libamd_smi.so'].amdsmi_set_gpu_clk_limit
+amdsmi_set_gpu_clk_limit.restype = amdsmi_status_t
+amdsmi_set_gpu_clk_limit.argtypes = [amdsmi_processor_handle, amdsmi_clk_type_t, amdsmi_clk_limit_type_t, uint64_t]
 amdsmi_free_name_value_pairs = _libraries['libamd_smi.so'].amdsmi_free_name_value_pairs
 amdsmi_free_name_value_pairs.restype = None
 amdsmi_free_name_value_pairs.argtypes = [ctypes.POINTER(None)]
@@ -2583,11 +2595,12 @@ __all__ = \
     'AMDSMI_VRAM_VENDOR__PLACEHOLDER5', 'AMDSMI_VRAM_VENDOR__SAMSUNG',
     'AMDSMI_VRAM_VENDOR__WINBOND', 'AMDSMI_XGMI_STATUS_ERROR',
     'AMDSMI_XGMI_STATUS_MULTIPLE_ERRORS',
-    'AMDSMI_XGMI_STATUS_NO_ERRORS', 'RD_BW0', 'WR_BW0',
-    'amd_metrics_table_header_t', 'amdsmi_asic_info_t',
-    'amdsmi_bdf_t', 'amdsmi_bit_field_t', 'amdsmi_board_info_t',
-    'amdsmi_cache_property_type_t', 'amdsmi_card_form_factor_t',
-    'amdsmi_clean_gpu_local_data', 'amdsmi_clk_info_t',
+    'AMDSMI_XGMI_STATUS_NO_ERRORS', 'CLK_LIMIT_MAX', 'CLK_LIMIT_MIN',
+    'RD_BW0', 'WR_BW0', 'amd_metrics_table_header_t',
+    'amdsmi_asic_info_t', 'amdsmi_bdf_t', 'amdsmi_bit_field_t',
+    'amdsmi_board_info_t', 'amdsmi_cache_property_type_t',
+    'amdsmi_card_form_factor_t', 'amdsmi_clean_gpu_local_data',
+    'amdsmi_clk_info_t', 'amdsmi_clk_limit_type_t',
     'amdsmi_clk_type_t', 'amdsmi_compute_partition_type_t',
     'amdsmi_container_types_t', 'amdsmi_counter_command_t',
     'amdsmi_counter_value_t', 'amdsmi_cpu_apb_disable',
@@ -2711,7 +2724,8 @@ __all__ = \
     'amdsmi_set_cpu_socket_boostlimit',
     'amdsmi_set_cpu_socket_lclk_dpm_level',
     'amdsmi_set_cpu_socket_power_cap', 'amdsmi_set_cpu_xgmi_width',
-    'amdsmi_set_gpu_clk_range', 'amdsmi_set_gpu_compute_partition',
+    'amdsmi_set_gpu_clk_limit', 'amdsmi_set_gpu_clk_range',
+    'amdsmi_set_gpu_compute_partition',
     'amdsmi_set_gpu_event_notification_mask',
     'amdsmi_set_gpu_fan_speed', 'amdsmi_set_gpu_memory_partition',
     'amdsmi_set_gpu_od_clk_info', 'amdsmi_set_gpu_od_volt_info',
