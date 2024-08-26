@@ -40,14 +40,13 @@
 #define DOORBELL_SIZE(gfxv)	(((gfxv) >= 0x90000) ? 8 : 4)
 #define DOORBELLS_PAGE_SIZE(ds)	(1024 * (ds))
 
-#define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv) 		\
+#define WG_CONTEXT_DATA_SIZE_PER_CU(gfxv, node) 		\
 	(hsakmt_get_vgpr_size_per_cu(gfxv) + SGPR_SIZE_PER_CU +	\
-	 LDS_SIZE_PER_CU + HWREG_SIZE_PER_CU)
+	 (node.LDSSizeInKB << 10) + HWREG_SIZE_PER_CU)
 
 #define CNTL_STACK_BYTES_PER_WAVE(gfxv)	\
 	((gfxv) >= GFX_VERSION_NAVI10 ? 12 : 8)
 
-#define LDS_SIZE_PER_CU		0x10000
 #define HWREG_SIZE_PER_CU	0x1000
 #define DEBUGGER_BYTES_ALIGN	64
 #define DEBUGGER_BYTES_PER_WAVE	32
@@ -295,7 +294,7 @@ static bool update_ctx_save_restore_size(uint32_t nodeid, struct queue *q)
 			: cu_num * 32;
 
 		ctl_stack_size = wave_num * CNTL_STACK_BYTES_PER_WAVE(q->gfxv) + 8;
-		wg_data_size = cu_num * WG_CONTEXT_DATA_SIZE_PER_CU(q->gfxv);
+		wg_data_size = cu_num * WG_CONTEXT_DATA_SIZE_PER_CU(q->gfxv, node);
 		q->ctl_stack_size = PAGE_ALIGN_UP(sizeof(HsaUserContextSaveAreaHeader)
 					+ ctl_stack_size);
 		if ((q->gfxv & 0x3f0000) == 0xA0000) {
