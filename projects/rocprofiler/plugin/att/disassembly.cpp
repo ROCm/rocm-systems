@@ -162,6 +162,15 @@ DisassemblyInstance::DisassemblyInstance(
   uint64_t gpu_id
 )
 {
+  if (
+      codeobj_size <= 4 ||
+      codeobj_data[0] != ELFMAG0 ||
+      codeobj_data[1] != ELFMAG1 ||
+      codeobj_data[2] != ELFMAG2 ||
+      codeobj_data[3] != ELFMAG3
+  )
+    throw std::invalid_argument("Invalid ELF file");
+
   buffer = std::vector<char>(codeobj_size, 0);
   std::memcpy(buffer.data(), codeobj_data, codeobj_size);
 

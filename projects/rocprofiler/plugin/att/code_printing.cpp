@@ -77,6 +77,15 @@ CodeObjDecoderComponent::CodeObjDecoderComponent(
   uint64_t codeobj_size,
   uint64_t gpu_id
 ) {
+  if (
+      codeobj_size <= 4 ||
+      codeobj_data[0] != ELFMAG0 ||
+      codeobj_data[1] != ELFMAG1 ||
+      codeobj_data[2] != ELFMAG2 ||
+      codeobj_data[3] != ELFMAG3
+  )
+    throw std::invalid_argument("Invalid ELF file");
+
   m_fd = -1;
 #if defined(_GNU_SOURCE) && defined(MFD_ALLOW_SEALING) && defined(MFD_CLOEXEC)
   m_fd = ::memfd_create(m_uri.c_str(), MFD_ALLOW_SEALING | MFD_CLOEXEC);
