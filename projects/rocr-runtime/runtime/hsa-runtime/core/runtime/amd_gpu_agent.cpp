@@ -729,7 +729,11 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       break;
     case 11:
     case 12:
-      sdma = new BlitSdmaV5();
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+        sdma = new BlitSdmaV4();
+      } else {
+        sdma = new BlitSdmaV5();
+      }
       copy_size_override = copy_size_overrides[1];
       break;
     default:
