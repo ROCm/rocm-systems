@@ -314,12 +314,7 @@ void
 roctracer::shutdown()
 {
     auto_lock_t _lk{ type_mutex<roctracer>() };
-    if(!roctracer_is_setup())
-    {
-        if(!roctracer_is_init() && tim::storage<comp::roctracer_data>::instance())
-            tim::storage<comp::roctracer_data>::instance()->reset();
-        return;
-    }
+    if(!roctracer_is_setup()) return;
 
     roctracer_is_setup() = false;
 
