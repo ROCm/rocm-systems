@@ -92,6 +92,19 @@ class RdcHandler {
   // It is just a client interface under the GRPC framework and is not used as an RDC API.
   // The reason is that RdcEmbeddedHandler::get_mixed_component_version does not need to be called.
   virtual rdc_status_t get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) = 0;
+  // Policy API
+  virtual rdc_status_t rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) = 0;
+
+  virtual rdc_status_t rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* count,
+                                      rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) = 0;
+
+  virtual rdc_status_t rdc_policy_delete(rdc_gpu_group_t group_id,
+                                         rdc_policy_condition_type_t condition_type) = 0;
+
+  virtual rdc_status_t rdc_policy_register(rdc_gpu_group_t group_id,
+                                           rdc_policy_register_callback callback) = 0;
+
+  virtual rdc_status_t rdc_policy_unregister(rdc_gpu_group_t group_id) = 0;
 
   virtual ~RdcHandler() {}
 };

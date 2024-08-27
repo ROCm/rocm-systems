@@ -23,6 +23,8 @@ THE SOFTWARE.
 
 #include <grpcpp/grpcpp.h>
 
+#include <future>
+
 #include "rdc.grpc.pb.h"  // NOLINT
 
 amd::rdc::RdcHandler* make_handler(const char* ip_and_port, const char* root_ca,
@@ -243,8 +245,8 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcStandaloneHandler::rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
-
+rdc_status_t RdcStandaloneHandler::rdc_device_get_component_version(
+    rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
   if (!p_rdc_compv) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -663,8 +665,8 @@ rdc_status_t RdcStandaloneHandler::rdc_field_update_all(uint32_t wait_for_update
 }
 
 // It is only an interface for the client under the GRPC framework and is not used as an RDC API.
-rdc_status_t RdcStandaloneHandler::get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
-
+rdc_status_t RdcStandaloneHandler::get_mixed_component_version(
+    mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
   if (!p_mixed_compv) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -681,7 +683,153 @@ rdc_status_t RdcStandaloneHandler::get_mixed_component_version(mixed_component_t
 
   strncpy_with_null(p_mixed_compv->version, reply.version().c_str(), USR_MAX_VERSION_STR_LENGTH);
   return RDC_ST_OK;
+}
 
+// Policy RdcAPI
+rdc_status_t RdcStandaloneHandler::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) {
+  ::rdc::SetPolicyRequest request;
+  ::rdc::SetPolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  auto to_policy = request.mutable_policy();
+  to_policy->set_action(static_cast<::rdc::Policy_Action>(policy.action));
+
+  auto to_condition = to_policy->mutable_condition();
+
+  to_condition->set_type(static_cast<::rdc::PolicyCondition_Type>(policy.condition.type));
+  to_condition->set_value(policy.condition.value);
+
+  // call gRPC
+  ::grpc::Status status = stub_->SetPolicy(&context, request, &reply);
+
+  return error_handle(status, reply.status());
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* count,
+                                                  rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) {
+  ::rdc::GetPolicyRequest request;
+  ::rdc::GetPolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  if (count == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  request.set_group_id(group_id);
+
+  // call gRPC
+  ::grpc::Status status = stub_->GetPolicy(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  auto response = reply.response();
+  uint32_t policy_count = response.count();
+
+  for (uint32_t i = 0; i < policy_count; ++i) {
+    const ::rdc::Policy& policy = response.policies(i);
+
+    ::rdc::PolicyCondition cond = policy.condition();
+    policies[i].condition.type = static_cast<rdc_policy_condition_type_t>(cond.type());
+    policies[i].condition.value = cond.value();
+    policies[i].action = static_cast<rdc_policy_action_t>(policy.action());
+  }
+
+  *count = policy_count;
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
+                                                     rdc_policy_condition_type_t condition_type) {
+  ::rdc::DeletePolicyRequest request;
+  ::rdc::DeletePolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+
+  request.set_condition_type(
+      static_cast<::rdc::DeletePolicyRequest_PolicyConditionType>(condition_type));
+
+  // call gRPC
+  ::grpc::Status status = stub_->DeletePolicy(&context, request, &reply);
+
+  return error_handle(status, reply.status());
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
+                                                       rdc_policy_register_callback callback) {
+  // check if a thread for a group is already registered
+  auto it = policy_threads_.find(group_id);
+  if (it != policy_threads_.end()) {
+    return RDC_ST_CONFLICT;
+  }
+
+  // no registered callback, start the thread to read the stream from rdcd
+  struct policy_thread_context ctx = {true,nullptr};
+
+  ctx.t = new std::thread([this, group_id, callback]() {
+    // call rdcd
+    ::rdc::RegisterPolicyRequest request;
+    ::rdc::RegisterPolicyResponse reply;
+    ::grpc::ClientContext context;
+
+    request.set_group_id(group_id);
+
+    // call to gRPC
+    std::unique_ptr<grpc::ClientReader<::rdc::RegisterPolicyResponse>> reader(
+        stub_->RegisterPolicy(&context, request));
+
+    bool start = true;
+    while (start) {
+      auto it = policy_threads_.find(group_id);
+      if (it != policy_threads_.end()) {
+        if (it->second.start == false) start = false;
+      } else {
+        start = false;
+      }
+
+      if (reader->Read(&reply)) {
+        reply.status();
+        ::rdc::PolicyCondition cond = reply.condition();
+
+        rdc_policy_callback_response_t response;
+        response.version = reply.version();
+        response.condition.type = static_cast<rdc_policy_condition_type_t>(cond.type());
+        response.condition.value = cond.value();
+        response.group_id = reply.group_id();
+        response.value = reply.value();
+
+        callback(&response);
+      }
+    }
+
+    reader->Finish();
+  });
+
+  policy_threads_.insert(std::make_pair(group_id, ctx));
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_id) {
+  ::rdc::UnRegisterPolicyRequest request;
+  ::rdc::UnRegisterPolicyResponse reply;
+  ::grpc::ClientContext context;
+
+  // stop the assocaticted thread of a group
+  auto it = policy_threads_.find(group_id);
+  if (it != policy_threads_.end()) {
+    struct policy_thread_context& ctx = it->second;
+    ctx.start = false;
+  }
+
+  // construcut the request
+  request.set_group_id(group_id);
+
+  // call gRPC
+  ::grpc::Status status = stub_->UnRegisterPolicy(&context, request, &reply);
+  return error_handle(status, reply.status());
 }
 
 }  // namespace rdc

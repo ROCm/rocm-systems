@@ -409,3 +409,49 @@ char* strncpy_with_null(char* dest, const char* src, size_t n) {
   dest[n - 1] = '\0';
   return dest;
 }
+
+rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            rdc_policy_t policy) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_policy_set(group_id, policy);
+}
+
+rdc_status_t rdc_policy_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id, uint32_t* count,
+                            rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_policy_get(group_id, count, policies);
+}
+
+
+rdc_status_t rdc_policy_delete(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                                         rdc_policy_condition_type_t condition_type){
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_policy_delete(group_id, condition_type);
+}
+
+
+
+rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                                 rdc_policy_register_callback callback) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_policy_register(group_id, callback);
+}
+rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_policy_unregister(group_id);
+}

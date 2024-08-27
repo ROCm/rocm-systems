@@ -53,6 +53,8 @@ FLD_DESC_ENT(RDC_FI_GPU_MM_ENC_UTIL,     "Mutilmedia encoder busy percentage",  
 FLD_DESC_ENT(RDC_FI_GPU_MM_DEC_UTIL,     "Mutilmedia decoder busy percentage",          "GPU_MM_DEC_UTIL",  true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_ACTIVITY, "Memory busy percentage",                      "GPU_MEM_UTIL",     true)
 
+FLD_DESC_ENT(RDC_FI_GPU_PAGE_RETRIED,    "Retried page of the GPU instance",            "GPU_PAGE_RETRIED", true)
+
 // ECC totals
 FLD_DESC_ENT(RDC_FI_ECC_CORRECT_TOTAL,   "Accumulated Single Error Correction",         "ECC_CORRECT",      true)
 FLD_DESC_ENT(RDC_FI_ECC_UNCORRECT_TOTAL, "Accumulated Double Error Detection",          "ECC_UNCORRECT",    true)

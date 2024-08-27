@@ -20,11 +20,12 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "rdc/rdc_api_service.h"
-#include "rdc/rdc_server_main.h"
+
 #include <assert.h>
 #include <grpcpp/grpcpp.h>
 
 #include <csignal>
+#include <future>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -32,11 +33,14 @@ THE SOFTWARE.
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
 #include "rdc/rdc_private.h"
+#include "rdc/rdc_server_main.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
+
+std::map<uint32_t, RdcAPIServiceImpl::policy_thread_context*> RdcAPIServiceImpl::policy_threads_;
 
 RdcAPIServiceImpl::RdcAPIServiceImpl() : rdc_handle_(nullptr) {}
 
@@ -53,6 +57,14 @@ rdc_status_t RdcAPIServiceImpl::Initialize(uint64_t rdcd_init_flags) {
   }
 
   return result;
+}
+
+void RdcAPIServiceImpl::Shutdown() {
+  // exit policy threads
+  for (auto it : policy_threads_) {
+    policy_thread_context* ctx = it.second;
+    ctx->start = false;
+  }
 }
 
 RdcAPIServiceImpl::~RdcAPIServiceImpl() {
@@ -104,9 +116,9 @@ RdcAPIServiceImpl::~RdcAPIServiceImpl() {
   return ::grpc::Status::OK;
 }
 
-::grpc::Status RdcAPIServiceImpl::GetComponentVersion(::grpc::ServerContext* context,
-                                                const ::rdc::GetComponentVersionRequest* request,
-                                                ::rdc::GetComponentVersionResponse* reply) {
+::grpc::Status RdcAPIServiceImpl::GetComponentVersion(
+    ::grpc::ServerContext* context, const ::rdc::GetComponentVersionRequest* request,
+    ::rdc::GetComponentVersionResponse* reply) {
   (void)(context);
   if (!reply) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty reply");
@@ -661,9 +673,9 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   return ::grpc::Status::OK;
 }
 
-::grpc::Status RdcAPIServiceImpl::GetMixedComponentVersion(::grpc::ServerContext* context,
-                                                const ::rdc::GetMixedComponentVersionRequest* request,
-                                                ::rdc::GetMixedComponentVersionResponse* reply) {
+::grpc::Status RdcAPIServiceImpl::GetMixedComponentVersion(
+    ::grpc::ServerContext* context, const ::rdc::GetMixedComponentVersionRequest* request,
+    ::rdc::GetMixedComponentVersionResponse* reply) {
   (void)(context);
   if (!reply) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty reply");
@@ -687,8 +699,184 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     reply->set_status(RDC_ST_OK);
     return ::grpc::Status::OK;
   } else {
-    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT, "The provided request parameters are invalid");
+    return ::grpc::Status(::grpc::StatusCode::INVALID_ARGUMENT,
+                          "The provided request parameters are invalid");
   }
+}
+
+::grpc::Status RdcAPIServiceImpl::SetPolicy(::grpc::ServerContext* context,
+                                            const ::rdc::SetPolicyRequest* request,
+                                            ::rdc::SetPolicyResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_policy_t policy;
+  // constructure the policy
+  ::rdc::Policy p = request->policy();
+
+  ::rdc::PolicyCondition cond = p.condition();
+  policy.condition.type = static_cast<rdc_policy_condition_type_t>(cond.type());
+  policy.condition.value = cond.value();
+  policy.action = static_cast<rdc_policy_action_t>(p.action());
+
+  // call RDC Policy API
+  rdc_status_t result = rdc_policy_set(rdc_handle_, request->group_id(), policy);
+
+  // set status
+  reply->set_status(result);
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetPolicy(::grpc::ServerContext* context,
+                                            const ::rdc::GetPolicyRequest* request,
+                                            ::rdc::GetPolicyResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  uint32_t count = 0;
+  rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS];
+
+  // call RDC Policy API
+  rdc_status_t result = rdc_policy_get(rdc_handle_, request->group_id(), &count, policies);
+
+  // set status
+  reply->set_status(result);
+  if (result != RDC_ST_OK) {
+    return ::grpc::Status::OK;
+  }
+
+  ::rdc::PolicyResponse* to_response = reply->mutable_response();
+  to_response->set_count(count);
+  for (uint32_t i = 0; i < count; i++) {
+    const rdc_policy_t& policy_ref = policies[i];
+    ::rdc::Policy* policy = to_response->add_policies();
+    policy->set_action(static_cast<::rdc::Policy_Action>(policy_ref.action));
+
+    auto to_conditon = policy->mutable_condition();
+
+    to_conditon->set_type(static_cast<::rdc::PolicyCondition_Type>(policy_ref.condition.type));
+    to_conditon->set_value(policy_ref.condition.value);
+  }
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::DeletePolicy(::grpc::ServerContext* context,
+                                               const ::rdc::DeletePolicyRequest* request,
+                                               ::rdc::DeletePolicyResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  // call RDC Policy API
+  rdc_status_t result =
+      rdc_policy_delete(rdc_handle_, request->group_id(),
+                        static_cast<rdc_policy_condition_type_t>(request->condition_type()));
+
+  // set status
+  reply->set_status(result);
+
+  return ::grpc::Status::OK;
+}
+
+int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) {
+
+  if (userData == nullptr) {
+    std::cerr << "The rdc_policy_callback returns null data\n";
+    return 1;
+  }
+
+  auto it = policy_threads_.find(userData->group_id);
+  if (it != policy_threads_.end()) {
+    policy_thread_context* ctx = it->second;
+
+    pthread_mutex_lock(&ctx->mutex);
+    ctx->response = *userData;
+    pthread_cond_signal(&ctx->cond);
+    pthread_mutex_unlock(&ctx->mutex);
+  }
+
+  return 0;
+}
+
+::grpc::Status RdcAPIServiceImpl::RegisterPolicy(
+    ::grpc::ServerContext* context, const ::rdc::RegisterPolicyRequest* request,
+    ::grpc::ServerWriter<::rdc::RegisterPolicyResponse>* writer) {
+  (void)(context);
+  if (!writer || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  policy_thread_context* data = new policy_thread_context;
+  data->mutex = PTHREAD_MUTEX_INITIALIZER;
+  data->cond = PTHREAD_COND_INITIALIZER;
+  data->start = true;
+  policy_threads_.insert(std::make_pair(request->group_id(), data));
+
+  auto updater = std::async(std::launch::async, [this, request, writer]() {
+    rdc_status_t result = rdc_policy_register(rdc_handle_, request->group_id(), PolicyCallback);
+    if (result == RDC_ST_OK) {
+      auto it = policy_threads_.find(request->group_id());
+      if (it != policy_threads_.end()) {
+        policy_thread_context* ctx = it->second;
+        while (ctx->start) {
+          struct timespec ts;
+          clock_gettime(CLOCK_REALTIME, &ts);
+
+          ts.tv_sec += 1;
+
+          pthread_mutex_lock(&ctx->mutex);
+          int rc = pthread_cond_timedwait(&ctx->cond, &ctx->mutex, &ts);  // wait for the callback
+          if (rc == ETIMEDOUT) {
+            // timeout;
+          } else if (rc == 0) {
+            // reply
+            ::rdc::RegisterPolicyResponse reply;
+            reply.set_status(RDC_ST_OK);
+            reply.set_version(ctx->response.version);
+            reply.set_group_id(ctx->response.group_id);
+            reply.set_value(ctx->response.value);
+
+            ::rdc::PolicyCondition* cond = reply.mutable_condition();
+            cond->set_type(static_cast<::rdc::PolicyCondition_Type>(ctx->response.condition.type));
+            cond->set_value(ctx->response.condition.value);
+
+            writer->Write(reply);
+          }
+
+          pthread_mutex_unlock(&ctx->mutex);
+        }
+      }
+
+    }
+  });
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::UnRegisterPolicy(::grpc::ServerContext* context,
+                                                   const ::rdc::UnRegisterPolicyRequest* request,
+                                                   ::rdc::UnRegisterPolicyResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_status_t result = rdc_policy_unregister(rdc_handle_, request->group_id());
+  if (result == RDC_ST_OK) {
+    auto it = policy_threads_.find(request->group_id());
+    if (it != policy_threads_.end()) {
+      policy_thread_context* ctx = it->second;
+      ctx->start = false;
+    }
+  }
+  return ::grpc::Status::OK;
 }
 
 }  // namespace rdc

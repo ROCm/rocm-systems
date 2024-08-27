@@ -154,6 +154,40 @@ service RdcAPI {
 
   //Just an RPC method not used as an API
   rpc GetMixedComponentVersion(GetMixedComponentVersionRequest) returns (GetMixedComponentVersionResponse) {}
+
+  // rdc_status_t rdc_policy_set(
+  //  rdc_handle_t p_rdc_handle,
+  //   rdc_gpu_group_t group_id,
+  //   rdc_policy_t policy);
+  rpc SetPolicy(SetPolicyRequest) returns (SetPolicyResponse) {}
+
+  // rdc_status_t rdc_policy_get(
+  //  rdc_handle_t p_rdc_handle,
+  //   rdc_gpu_group_t group_id,
+  //   uint32_t* count,
+  //   rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]);
+  rpc GetPolicy(GetPolicyRequest) returns (GetPolicyResponse) {}
+
+  // rdc_status_t rdc_policy_delete(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_type_t condition_type);
+  rpc DeletePolicy(DeletePolicyRequest) returns (DeletePolicyResponse) {}
+
+
+  // rdc_status_t rdc_policy_register(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_t condition,
+  //  rdc_policy_register_callback callback);
+  rpc RegisterPolicy(RegisterPolicyRequest) returns (stream RegisterPolicyResponse) {}
+
+  // rdc_status_t rdc_policy_unregister(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_t condition);
+  rpc UnRegisterPolicy(UnRegisterPolicyRequest) returns (UnRegisterPolicyResponse) {}
+
 }
 
 message Empty {
@@ -485,4 +519,100 @@ message GetMixedComponentVersionRequest {
 message GetMixedComponentVersionResponse {
   uint32 status = 1;
   string version = 2;
+}
+
+
+message PolicyCondition{
+  enum Type {
+    COND_MAX_PAGE_RETRIED = 0;
+    COND_THERMAL = 1;
+    COND_POWER = 2;
+  };
+  Type type = 1;
+  int64 value = 2;
+}
+
+
+message Policy{
+  PolicyCondition condition = 1;
+
+  enum Action {
+    ACTION_NONE = 0;
+    ACTION_GPU_RESET = 1;
+  };
+  Action action = 2;
+}
+
+message SetPolicyResult {
+  uint32 status = 1;
+}
+
+message SetPolicyRequest {
+  uint32 group_id = 1;
+  Policy policy =2;
+}
+
+message SetPolicyResponse {
+  uint32 status = 1;
+}
+
+
+message PolicyResponse {
+  uint32  count= 1;
+  repeated Policy policies = 2;
+}
+
+message GetPolicyRequest {
+  uint32 group_id = 1;
+
+}
+
+message GetPolicyResponse {
+  uint32 status = 1;
+  PolicyResponse response = 2;
+}
+
+message DeletePolicyRequest {
+  uint32 group_id = 1;
+  enum PolicyConditionType{
+  RDC_POLICY_COND_MAX_PAGE_RETRIED = 0;
+  RDC_POLICY_COND_THERMAL = 1;
+  RDC_POLICY_COND_POWER = 2;
+};
+  PolicyConditionType condition_type = 2;
+}
+
+message DeletePolicyResponse {
+  uint32 status = 1;
+}
+
+
+message RegisterPolicyResult {
+  uint32 status = 1;
+}
+
+message RegisterPolicyRequest {
+  uint32 group_id = 1;
+
+}
+
+message RegisterPolicyResponse {
+  uint32 status = 1;
+  uint32 version =2;
+  PolicyCondition condition =3;
+  uint32 group_id =4;
+  uint64 value=5;
+}
+
+message UnRegisterPolicyResult {
+  uint32 status = 1;
+}
+
+message UnRegisterPolicyRequest {
+  uint32 group_id = 1;
+
+}
+
+message UnRegisterPolicyResponse {
+  uint32 status = 1;
 }

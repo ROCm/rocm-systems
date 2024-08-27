@@ -34,6 +34,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
 #include "rdc_lib/impl/RdcModuleMgrImpl.h"
 #include "rdc_lib/impl/RdcNotificationImpl.h"
+#include "rdc_lib/impl/RdcPolicyImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -78,7 +79,8 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
       rdc_module_mgr_(new RdcModuleMgrImpl(metric_fetcher_)),
       rdc_notif_(new RdcNotificationImpl()),
       watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, rdc_module_mgr_, rdc_notif_)),
-      metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_, METIC_UPDATE_FREQUENCY)) {
+      metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_, METIC_UPDATE_FREQUENCY)),
+      policy_(new RdcPolicyImpl(group_settings_,metric_fetcher_)) {
   if (mode == RDC_OPERATION_MODE_AUTO) {
     RDC_LOG(RDC_DEBUG, "Run RDC with RDC_OPERATION_MODE_AUTO");
     metrics_updater_->start();
@@ -427,6 +429,34 @@ rdc_status_t RdcEmbeddedHandler::get_mixed_component_version(mixed_component_t c
   (void)(component);
   (void)(p_mixed_compv);
   return RDC_ST_OK;
+}
+
+// Policy API
+rdc_status_t RdcEmbeddedHandler::rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) {
+  return policy_->rdc_policy_set(group_id, policy);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* count,
+                                                rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) {
+  if (count == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return policy_->rdc_policy_get(group_id, count, policies);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
+                                                   rdc_policy_condition_type_t condition_type) {
+  return policy_->rdc_policy_delete(group_id, condition_type);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_register(rdc_gpu_group_t group_id,
+                                                     rdc_policy_register_callback callback) {
+  return policy_->rdc_policy_register(group_id, callback);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_policy_unregister(rdc_gpu_group_t group_id) {
+  return policy_->rdc_policy_unregister(group_id);
 }
 
 }  // namespace rdc

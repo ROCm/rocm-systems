@@ -190,6 +190,10 @@ typedef enum {
   RDC_FI_GPU_MEMORY_ACTIVITY,  //!< Memory busy percentage
 
   /**
+   * @brief GPU page related fields
+   */
+  RDC_FI_GPU_PAGE_RETRIED = 550,  //!< Retried page of the GPU instance
+  /**
    * @brief ECC related fields
    */
   RDC_FI_ECC_CORRECT_TOTAL = 600,  //!< Accumulated correctable ECC errors
@@ -551,6 +555,31 @@ typedef struct {
   uint32_t results_count;
   rdc_diag_test_result_t diag_info[MAX_TEST_CASES];
 } rdc_diag_response_t;
+
+/**
+ * @brief The policy type to support
+ */
+typedef enum {
+  RDC_POLICY_COND_MAX_PAGE_RETRIED,  //!< Max number of page retired
+  RDC_POLICY_COND_THERMAL,           //!< Temperature threshold, millidegree Celsius
+  RDC_POLICY_COND_POWER,             //!< Power threshold, unit milliwatt
+  RDC_POLICY_COND_MAX
+} rdc_policy_condition_type_t;
+
+typedef struct {
+  rdc_policy_condition_type_t type;
+  int64_t value;
+} rdc_policy_condition_t;
+
+typedef enum { RDC_POLICY_ACTION_NONE, RDC_POLICY_ACTION_GPU_RESET } rdc_policy_action_t;
+
+/**
+ * @brief The structure to define policy to enforce on GPU.
+ */
+typedef struct {
+  rdc_policy_condition_t condition;  //!< condition to meet
+  rdc_policy_action_t action; //!< Action to take
+} rdc_policy_t;
 
 /**
  *  @brief Initialize ROCm RDC.
@@ -1130,6 +1159,107 @@ rdc_field_t get_field_id_from_name(const char* name);
  *  @retval The string to describe the RDC diagnostic result.
  */
 const char* rdc_diagnostic_result_string(rdc_diag_result_t result);
+
+/**
+ *  @brief Set the RDC policy. Each group has multiple policies, these policies can be set by this
+ * API one by one. Multiple calls of this API will override the existing policy.
+ *
+ *  @details Set the RDC policy
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[in] policy  The policy to set
+ *
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            rdc_policy_t policy);
+
+#define RDC_MAX_POLICY_SETTINGS 32
+
+/**
+ *  @brief Get the RDC policy
+ *
+ *  @details Get the RDC policy
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[out] count The size of policies array
+ *
+ *  @param[out] policies  The policies to get
+ *
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_policy_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id, uint32_t* count,
+                            rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]);
+
+/**
+ *  @brief delete the RDC policy for this group based on condition type
+ *
+ *  @details clear the RDC policy for this group based on condition type. In a GPU group, only one
+ * policy can be set for a specific rdc_policy_condition_type_t
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id
+ *
+ *  @param[in] condition_type The condition type to delete
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+
+rdc_status_t rdc_policy_delete(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                               rdc_policy_condition_type_t condition_type);
+
+/**
+ * Define the structure is used in RDC policy callback
+ */
+typedef struct {
+  unsigned int version;
+  rdc_policy_condition_t condition;  //!< the condition that is meet
+  rdc_gpu_group_t group_id;          //!< The group id trigger this callback
+  int64_t value;          //!< The current value that meet the condition
+} rdc_policy_callback_response_t;
+
+/**
+ * The user data is the rdc_policy_callback_response_t
+ */
+typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* userData);
+
+/**
+ *  @brief Register a function to be called when policy condition is meet.
+ *
+ *  @details Register the RDC policy callback
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[in] callback  The callback function to be called when condition meet.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                                 rdc_policy_register_callback callback);
+
+/**
+ *  @brief un-register a policy callback function for a conditioin.
+ *
+ *  @details Un-register the policy callback for a condition.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
 #ifdef __cplusplus
 }

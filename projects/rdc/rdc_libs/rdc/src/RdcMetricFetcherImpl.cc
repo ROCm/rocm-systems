@@ -664,6 +664,15 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     }
+    case RDC_FI_GPU_PAGE_RETRIED:
+      uint32_t num_pages;
+      amdsmi_retired_page_record_t info;
+      value->status = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, &info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = num_pages;
+      }
+      break;
     case RDC_FI_OAM_ID: {
       amdsmi_asic_info_t asic_info;
       value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
