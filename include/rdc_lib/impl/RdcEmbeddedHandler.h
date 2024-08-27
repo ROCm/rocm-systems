@@ -31,6 +31,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcMetricsUpdater.h"
 #include "rdc_lib/RdcModuleMgr.h"
 #include "rdc_lib/RdcNotification.h"
+#include "rdc_lib/RdcPolicy.h"
 #include "rdc_lib/RdcWatchTable.h"
 
 namespace amd {
@@ -94,6 +95,18 @@ class RdcEmbeddedHandler final : public RdcHandler {
   // It is just a client interface under the GRPC framework and is not used as an RDC API.
   // Pure virtual functions need to be overridden.
   rdc_status_t get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) override;
+  // Policy API
+  rdc_status_t rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) override;
+
+  rdc_status_t rdc_policy_get(rdc_gpu_group_t group_id, uint32_t* count,
+                              rdc_policy_t policies[RDC_MAX_POLICY_SETTINGS]) override;
+
+  rdc_status_t rdc_policy_delete(rdc_gpu_group_t group_id,
+                                 rdc_policy_condition_type_t condition_type) override;
+
+  rdc_status_t rdc_policy_register(rdc_gpu_group_t group_id, rdc_policy_register_callback callback) override;
+
+  rdc_status_t rdc_policy_unregister(rdc_gpu_group_t group_id) override;
 
   explicit RdcEmbeddedHandler(rdc_operation_mode_t op_mode);
   ~RdcEmbeddedHandler() final;
@@ -107,6 +120,7 @@ class RdcEmbeddedHandler final : public RdcHandler {
   RdcNotificationPtr rdc_notif_;
   RdcWatchTablePtr watch_table_;
   RdcMetricsUpdaterPtr metrics_updater_;
+  RdcPolicyPtr policy_;
   std::future<void> updater_;
 };
 
