@@ -55,11 +55,11 @@ To use the rocTX API you need the API header and to link your application with `
     `rocTacer` library public API header.
 
   - `roctx.h`
-  
+
     `rocTX` library public API header.
 
 - `src`
-  
+
   Library sources.
 
   - `core`
@@ -100,7 +100,7 @@ To use the rocTX API you need the API header and to link your application with `
 
    ````shell
    apt install python3 python3-pip gcc g++ libatomic1 make \
-    cmake doxygen graphviz texlive-full
+    cmake doxygen graphviz texlive-full rocm-llvm-dev
    ````
 
   2. For CentOS 8.1 and RHEL 8.1 the following adds the needed packages:
@@ -109,7 +109,7 @@ To use the rocTX API you need the API header and to link your application with `
    yum install -y python3 python3-pip gcc gcc-g++ make \
     cmake libatomic doxygen graphviz texlive \
     texlive-xtab texlive-multirow texlive-sectsty \
-    texlive-tocloft texlive-tabu texlive-adjustbox
+    texlive-tocloft texlive-tabu texlive-adjustbox rocm-llvm-devel
    ````
 
   3. For SLES 15 Service Pack 15 the following adds the needed packages:
