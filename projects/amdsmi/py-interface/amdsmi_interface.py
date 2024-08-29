@@ -386,6 +386,10 @@ class AmdSmiIoLinkType(IntEnum):
 class AmdSmiUtilizationCounterType(IntEnum):
     COARSE_GRAIN_GFX_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_GFX_ACTIVITY
     COARSE_GRAIN_MEM_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_GRAIN_MEM_ACTIVITY
+    COARSE_DECODER_ACTIVITY = amdsmi_wrapper.AMDSMI_COARSE_DECODER_ACTIVITY
+    FINE_GRAIN_GFX_ACTIVITY = amdsmi_wrapper.AMDSMI_FINE_GRAIN_GFX_ACTIVITY
+    FINE_GRAIN_MEM_ACTIVITY = amdsmi_wrapper.AMDSMI_FINE_GRAIN_MEM_ACTIVITY
+    FINE_DECODER_ACTIVITY = amdsmi_wrapper.AMDSMI_FINE_DECODER_ACTIVITY
     UTILIZATION_COUNTER_FIRST = amdsmi_wrapper.AMDSMI_UTILIZATION_COUNTER_FIRST
     UTILIZATION_COUNTER_LAST = amdsmi_wrapper.AMDSMI_UTILIZATION_COUNTER_LAST
 
@@ -1639,7 +1643,8 @@ def amdsmi_get_gpu_asic_info(
         "device_id": asic_info_struct.device_id,
         "rev_id": _padHexValue(hex(asic_info_struct.rev_id), 2),
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
-        "oam_id": asic_info_struct.oam_id
+        "oam_id": asic_info_struct.oam_id,
+        "num_compute_units": asic_info_struct.num_of_compute_units
     }
 
     string_values = ["market_name", "vendor_name"]
@@ -1665,6 +1670,10 @@ def amdsmi_get_gpu_asic_info(
     # Check for max value as a sign for not applicable
     if asic_info["oam_id"] == 0xFFFF: # uint 16 max
         asic_info["oam_id"] = "N/A"
+
+    # Check for max value as a sign for not applicable
+    if asic_info["num_compute_units"] == 0xFFFFFFFF: # uint 32 max
+        asic_info["num_compute_units"] = "N/A"
 
     # Remove commas from vendor name for clean output
     asic_info["vendor_name"] = asic_info["vendor_name"].replace(',', '')
@@ -1766,6 +1775,7 @@ def amdsmi_get_gpu_vram_info(
         "vram_type": vram_info.vram_type,
         "vram_vendor": vram_info.vram_vendor,
         "vram_size": vram_info.vram_size,
+        "vram_bit_width": vram_info.vram_bit_width
     }
 
 
@@ -3395,7 +3405,7 @@ def amdsmi_get_utilization_count(
         if counter_type == "AMDSMI_UTILIZATION_COUNTER_FIRST":
             counter_type = "AMDSMI_COARSE_GRAIN_GPU_ACTIVITY"
         if counter_type == "AMDSMI_UTILIZATION_COUNTER_LAST":
-            counter_type = "AMDSMI_COARSE_GRAIN_MEM_ACTIVITY"
+            counter_type = "AMDSMI_FINE_DECODER_ACTIVITY"
         result.append(
             {"type": counter_type, "value": util_counter_list[index].value})
 

@@ -90,6 +90,10 @@ class KFDNode {
     // Get gfx target version from kfd
     int get_gfx_target_version(uint64_t* gfx_target_version);
 
+    // Get simd_per_cu from kfd
+    int32_t get_simd_per_cu(uint64_t* simd_per_cu) const;
+    int32_t get_simd_count(uint64_t* simd_count) const;
+
  private:
     uint32_t node_indx_;
     uint32_t amdgpu_dev_index_;

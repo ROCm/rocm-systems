@@ -693,7 +693,8 @@ class AMDSMICommands():
         if args.vram:
             vram_info_dict = {"type" : "N/A",
                               "vendor" : "N/A",
-                              "size" : "N/A"}
+                              "size" : "N/A",
+                              "bit_width" : "N/A"}
             try:
                 vram_info = amdsmi_interface.amdsmi_get_gpu_vram_info(args.gpu)
 
@@ -728,6 +729,9 @@ class AMDSMICommands():
                 if self.logger.is_json_format():
                     vram_info_dict['size'] = {"value" : vram_info['vram_size'],
                                               "unit" : vram_size_unit}
+
+                # Populate bit width
+                vram_info_dict['bit_width'] = vram_info['vram_bit_width']
 
             except amdsmi_exception.AmdSmiLibraryException as e:
                 logging.debug("Failed to get vram info for gpu %s | %s", gpu_id, e.get_error_info())

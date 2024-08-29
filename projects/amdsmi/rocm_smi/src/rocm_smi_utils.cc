@@ -65,6 +65,7 @@
 #include <vector>
 
 #include "rocm_smi/rocm_smi.h"
+#include "rocm_smi/rocm_smi_kfd.h"
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_exception.h"
 #include "rocm_smi/rocm_smi_main.h"
@@ -1197,6 +1198,25 @@ rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 }
+
+rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_computes)
+{
+  GET_DEV_AND_KFDNODE_FROM_INDX
+
+  auto tmp_simd_per_cu = uint64_t(0);
+  auto tmp_simd_count = uint64_t(0);
+  auto ret_simd_per_cu = kfd_node->get_simd_per_cu(&tmp_simd_per_cu);
+  auto ret_simd_count  = kfd_node->get_simd_count(&tmp_simd_count);
+
+  if (((ret_simd_per_cu != 0) || (ret_simd_count != 0)) ||
+      ((tmp_simd_per_cu == 0) || (tmp_simd_count == 0))) {
+    return rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  *num_computes = (tmp_simd_count / tmp_simd_per_cu);
+  return rsmi_status_t::RSMI_STATUS_SUCCESS;
+}
+
 
 std::queue<std::string> getAllDeviceGfxVers() {
   uint32_t num_monitor_devs = 0;

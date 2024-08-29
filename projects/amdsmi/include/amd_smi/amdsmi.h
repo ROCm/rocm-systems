@@ -588,7 +588,8 @@ typedef struct {
   uint32_t rev_id;
   char asic_serial[AMDSMI_NORMAL_STRING_LENGTH];
   uint32_t oam_id;   //< 0xFFFF if not supported
-  uint32_t reserved[18];
+  uint32_t num_of_compute_units;   //< 0xFFFFFFFF if not supported
+  uint32_t reserved[17];
 } amdsmi_asic_info_t;
 
 typedef enum {
@@ -616,7 +617,8 @@ typedef struct {
   amdsmi_vram_type_t vram_type;
   amdsmi_vram_vendor_type_t vram_vendor;
   uint64_t vram_size;
-  uint64_t reserved[6];
+  uint32_t vram_bit_width;
+  uint64_t reserved[5];
 } amdsmi_vram_info_t;
 
 
@@ -1093,10 +1095,15 @@ typedef enum {
  */
 typedef enum {
   AMDSMI_UTILIZATION_COUNTER_FIRST = 0,
-  //!< GFX Activity
+  //!< Corse grain activity counters
   AMDSMI_COARSE_GRAIN_GFX_ACTIVITY  = AMDSMI_UTILIZATION_COUNTER_FIRST,
   AMDSMI_COARSE_GRAIN_MEM_ACTIVITY,    //!< Memory Activity
-  AMDSMI_UTILIZATION_COUNTER_LAST = AMDSMI_COARSE_GRAIN_MEM_ACTIVITY
+  AMDSMI_COARSE_DECODER_ACTIVITY,      //!< Decoder Activity
+  //!< Fine grain activity counters
+  AMDSMI_FINE_GRAIN_GFX_ACTIVITY = 100,
+  AMDSMI_FINE_GRAIN_MEM_ACTIVITY = 101,
+  AMDSMI_FINE_DECODER_ACTIVITY   = 102,
+  AMDSMI_UTILIZATION_COUNTER_LAST = AMDSMI_FINE_DECODER_ACTIVITY
 } amdsmi_utilization_counter_type_t;
 
 /**
@@ -1111,10 +1118,15 @@ typedef enum {
 /**
  * @brief The utilization counter data
  */
+//! The max number of values per counter type
+#define AMDSMI_MAX_UTILIZATION_VALUES 4
 typedef struct {
-  amdsmi_utilization_counter_type_t type;   //!< Utilization counter type
-  uint64_t value;                       //!< Utilization counter value
+  amdsmi_utilization_counter_type_t type;              //!< Utilization counter type
+  uint64_t value;                                      //!< Coarse grain activity counter value (average)
+  uint64_t fine_value[AMDSMI_MAX_UTILIZATION_VALUES];  //!< Utilization counter value
+  uint16_t fine_value_count;
 } amdsmi_utilization_counter_t;
+
 
 /**
  * @brief Reserved Memory Page Record
@@ -3162,7 +3174,7 @@ amdsmi_status_t amdsmi_set_gpu_clk_range(amdsmi_processor_handle processor_handl
  *
  *  @platform{gpu_bm_linux} @platform{guest_1vf}
  *
- *  @details Given a processor handle @p processor_handle, a clock type @p clk_type, 
+ *  @details Given a processor handle @p processor_handle, a clock type @p clk_type,
  *  a value @p clk_value needs to be set, and the @p level indicates min or max
  *  clock you want to set, this function the clock limit.
  *

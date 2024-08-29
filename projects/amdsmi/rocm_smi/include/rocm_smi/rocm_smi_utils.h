@@ -126,8 +126,8 @@ std::string print_rsmi_od_volt_freq_data_t(rsmi_od_volt_freq_data_t *odv);
 std::string print_rsmi_od_volt_freq_regions(uint32_t num_regions,
                                             rsmi_freq_volt_region_t *regions);
 bool is_sudo_user();
-rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind,
-  std::string *gfx_version);
+rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_version);
+rsmi_status_t rsmi_dev_number_of_computes_get(uint32_t dv_ind, uint32_t* num_computes);
 
 std::string leftTrim(const std::string &s);
 std::string rightTrim(const std::string &s);

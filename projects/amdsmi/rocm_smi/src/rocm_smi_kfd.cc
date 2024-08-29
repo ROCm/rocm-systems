@@ -1077,5 +1077,32 @@ int KFDNode::get_gfx_target_version(uint64_t *gfx_target_version) {
   return ret;
 }
 
+int32_t KFDNode::get_simd_per_cu(uint64_t* simd_per_cu) const
+{
+    const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+                                      std::to_string(this->node_indx_) +
+                                      "/properties");
+
+    auto tmp_simd_per_cu = uint64_t(0);
+    auto ret = read_node_properties(this->node_indx_, "simd_per_cu",
+                                    &tmp_simd_per_cu);
+    *simd_per_cu = tmp_simd_per_cu;
+    return ret;
+}
+
+int32_t KFDNode::get_simd_count(uint64_t* simd_count) const
+{
+    const std::string properties_path("/sys/class/kfd/kfd/topology/nodes/" +
+                                      std::to_string(this->node_indx_) +
+                                      "/properties");
+
+    auto tmp_simd_count = uint64_t(0);
+    auto ret = read_node_properties(this->node_indx_, "simd_count",
+                                    &tmp_simd_count);
+    *simd_count = tmp_simd_count;
+    return ret;
+}
+
+
 }  // namespace smi
 }  // namespace amd

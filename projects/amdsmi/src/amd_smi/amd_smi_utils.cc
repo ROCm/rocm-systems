@@ -615,3 +615,4 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
     *enabled = false;
     return AMDSMI_STATUS_SUCCESS;
 }
+

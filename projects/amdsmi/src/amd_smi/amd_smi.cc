@@ -55,6 +55,7 @@
 #include <set>
 #include <map>
 #include <memory>
+#include <limits>
 #include <xf86drm.h>
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/fdinfo.h"
@@ -756,6 +757,15 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
                     &(tmp_oam_id));
     info->oam_id = tmp_oam_id;
 
+    // default to 0xffffffff as not supported
+    info->num_of_compute_units = std::numeric_limits<uint32_t>::max();
+    auto tmp_num_of_compute_units = uint32_t(0);
+    status = rsmi_wrapper(amd::smi::rsmi_dev_number_of_computes_get, processor_handle,
+                          &tmp_num_of_compute_units);
+    if (status == amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
+        info->num_of_compute_units = tmp_num_of_compute_units;
+    }
+
     return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -799,6 +809,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
     info->vram_type = AMDSMI_VRAM_TYPE_UNKNOWN;
     info->vram_size = 0;
     info->vram_vendor = AMDSMI_VRAM_VENDOR__PLACEHOLDER0;
+    info->vram_bit_width = std::numeric_limits<decltype(info->vram_bit_width)>::max();
 
     // Only can read vram type from libdrm
     if (gpu_device->check_if_drm_is_supported()) {
@@ -808,6 +819,7 @@ amdsmi_status_t amdsmi_get_gpu_vram_info(
             sizeof(struct drm_amdgpu_info_device), &dev_info);
         if (r == AMDSMI_STATUS_SUCCESS) {
             info->vram_type = amd::smi::vram_type_value(dev_info.vram_type);
+            info->vram_bit_width = dev_info.vram_bit_width;
         }
     }
 

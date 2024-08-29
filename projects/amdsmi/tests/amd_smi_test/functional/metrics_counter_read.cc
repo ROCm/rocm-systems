@@ -49,6 +49,7 @@
 #include <iostream>
 #include <string>
 #include <map>
+#include <type_traits>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
@@ -132,28 +133,95 @@ void TestMetricsCounterRead::Run(void) {
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     // Coarse Grain counters
-    amdsmi_utilization_counter_t utilization_counters[2];
+    constexpr uint32_t kUTILIZATION_COUNTERS(3);
+    amdsmi_utilization_counter_t utilization_counters[kUTILIZATION_COUNTERS];
     utilization_counters[0].type = AMDSMI_COARSE_GRAIN_GFX_ACTIVITY;
     utilization_counters[1].type = AMDSMI_COARSE_GRAIN_MEM_ACTIVITY;
+    utilization_counters[2].type = AMDSMI_COARSE_DECODER_ACTIVITY;
+
     err = amdsmi_get_utilization_count(processor_handles_[i], utilization_counters,
-                    2, &timestamp);
+                    kUTILIZATION_COUNTERS, &timestamp);
     if (err != AMDSMI_STATUS_SUCCESS) {
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
           std::cout << "\t**" <<
-          "Not supported on this machine" << std::endl;
+          "amdsmi_get_utilization_count(): Not supported on this machine" << std::endl;
           return;
         }
       }
     } else {
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
-          std::cout << std::dec << "gfx_activity="
-          << utilization_counters[0].value << '\n';
-          std::cout << std::dec << "mem_activity="
-          << utilization_counters[1].value << '\n';
-          std::cout << std::dec << "timestamp="
-          << timestamp << '\n';
+          std::cout << "\n\namdsmi_get_utilization_count() : COARSE GRAIN ACTIVITIES" << "\n";
+          for (auto idx = uint32_t(0); idx < kUTILIZATION_COUNTERS; ++idx) {
+              switch (utilization_counters[idx].type) {
+                  case AMDSMI_COARSE_GRAIN_GFX_ACTIVITY:
+                      std::cout << "-> gfx_activity: [" << utilization_counters[idx].fine_value_count << "]" << "\n";
+                      break;
+
+                  case AMDSMI_COARSE_GRAIN_MEM_ACTIVITY:
+                      std::cout << "-> mem_activity: [" << utilization_counters[idx].fine_value_count << "]" << "\n";;
+                      break;
+
+                  case AMDSMI_COARSE_DECODER_ACTIVITY:
+                      std::cout << "-> decoder_activity: [" << utilization_counters[idx].fine_value_count << "]" << "\n";
+                      break;
+
+                  default:
+                      break;
+              }
+
+              for (auto val_idx = uint16_t(0); val_idx < utilization_counters[idx].fine_value_count; ++val_idx) {
+                  std::cout << "\t" << std::dec << utilization_counters[idx].value << "\n";
+              }
+          }
+
+          std::cout << std::dec << "timestamp=" << timestamp << '\n';
+      }
+    }
+
+    // Fine Grain counters
+    utilization_counters[0].type = AMDSMI_FINE_GRAIN_GFX_ACTIVITY;
+    utilization_counters[1].type = AMDSMI_FINE_GRAIN_MEM_ACTIVITY;
+    utilization_counters[2].type = AMDSMI_FINE_DECODER_ACTIVITY;
+    err = amdsmi_get_utilization_count(processor_handles_[i], utilization_counters,
+                    kUTILIZATION_COUNTERS, &timestamp);
+    if (err != AMDSMI_STATUS_SUCCESS) {
+      if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+        IF_VERB(STANDARD) {
+          std::cout << "\t**" <<
+          "amdsmi_get_utilization_count(): Not supported on this machine" << std::endl;
+          return;
+        }
+      }
+    } else {
+      CHK_ERR_ASRT(err);
+      IF_VERB(STANDARD) {
+          std::cout << "\n\namdsmi_get_utilization_count() : FINE GRAIN ACTIVITIES" << "\n";
+          for (auto idx = uint32_t(0); idx < kUTILIZATION_COUNTERS; ++idx) {
+              switch (utilization_counters[idx].type) {
+                  case AMDSMI_FINE_GRAIN_GFX_ACTIVITY:
+                      std::cout << "-> gfx_activity: [" << utilization_counters[idx].fine_value_count << "]" << "\n";
+                      break;
+
+                  case AMDSMI_FINE_GRAIN_MEM_ACTIVITY:
+                      std::cout << "-> mem_activity: [" << utilization_counters[idx].fine_value_count << "]" << "\n";;
+                      break;
+
+                  case AMDSMI_FINE_DECODER_ACTIVITY:
+                      std::cout << "-> decoder_activity: [" << utilization_counters[idx].fine_value_count << "]" << "\n";
+                      break;
+
+                  default:
+                      break;
+              }
+
+              for (auto val_idx = uint16_t(0); val_idx < utilization_counters[idx].fine_value_count; ++val_idx) {
+                  std::cout << "\t" << std::dec << utilization_counters[idx].fine_value[val_idx] << "\n";
+              }
+          }
+
+          std::cout << std::dec << "timestamp=" << timestamp << '\n';
       }
     }
 

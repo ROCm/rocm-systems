@@ -62,6 +62,7 @@
 #include <iterator>
 #include <map>
 #include <sstream>
+#include <type_traits>
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
@@ -2087,7 +2088,7 @@ rsmi_status_t rsmi_dev_process_isolation_get(uint32_t dv_ind,
   }
 
   /*
-  for 4 partition: enforce isolation is enabled on partition 2 and 
+  for 4 partition: enforce isolation is enabled on partition 2 and
   disabled on partitions 0, 1, 3.
   $ cat /sys/class/drm/cardX/device/enforce_isolation
    0 0 1 0
@@ -4209,6 +4210,7 @@ rsmi_utilization_count_get(uint32_t dv_ind,
   rsmi_status_t ret;
   rsmi_gpu_metrics_t gpu_metrics;
   uint32_t val_ui32;
+  uint16_t val_counter(0);
 
   ret = rsmi_dev_gpu_metrics_info_get(dv_ind, &gpu_metrics);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -4217,21 +4219,61 @@ rsmi_utilization_count_get(uint32_t dv_ind,
 
   for (uint32_t index = 0 ; index < count; index++) {
     switch (utilization_counters[index].type) {
+
       case RSMI_COARSE_GRAIN_GFX_ACTIVITY:
-        val_ui32 = gpu_metrics.gfx_activity_acc;
+      case RSMI_FINE_GRAIN_GFX_ACTIVITY:
+        val_counter = 1;
+        utilization_counters[index].value = gpu_metrics.gfx_activity_acc;
+        utilization_counters[index].fine_value[0] =
+          (gpu_metrics.gfx_activity_acc != std::numeric_limits<decltype(gpu_metrics.gfx_activity_acc)>::max())
+            ? gpu_metrics.gfx_activity_acc : std::numeric_limits<uint64_t>::max();
+        utilization_counters[index].fine_value_count =
+            (gpu_metrics.gfx_activity_acc == std::numeric_limits<decltype(gpu_metrics.gfx_activity_acc)>::max())
+            ? 0 : val_counter;
         break;
+
       case RSMI_COARSE_GRAIN_MEM_ACTIVITY:
-        val_ui32 = gpu_metrics.mem_activity_acc;
+      case RSMI_FINE_GRAIN_MEM_ACTIVITY:
+        val_counter = 1;
+        utilization_counters[index].value = gpu_metrics.mem_activity_acc;
+        utilization_counters[index].fine_value[0] =
+          (gpu_metrics.mem_activity_acc != std::numeric_limits<decltype(gpu_metrics.mem_activity_acc)>::max())
+            ? gpu_metrics.mem_activity_acc : std::numeric_limits<uint64_t>::max();
+        utilization_counters[index].fine_value_count =
+            (gpu_metrics.mem_activity_acc == std::numeric_limits<decltype(gpu_metrics.mem_activity_acc)>::max())
+            ? 0 : val_counter;
         break;
+
+      case RSMI_COARSE_DECODER_ACTIVITY:
+      case RSMI_FINE_DECODER_ACTIVITY:
+        {
+          auto value_count = uint16_t(0);
+          auto value_accum = uint64_t(0);
+          for (const auto& elem : gpu_metrics.vcn_activity) {
+            if (elem != std::numeric_limits<uint16_t>::max()) {
+              ++value_count;
+              value_accum += elem;
+            }
+
+            if (utilization_counters[index].type == RSMI_UTILIZATION_COUNTER_TYPE::RSMI_FINE_DECODER_ACTIVITY) {
+              utilization_counters[index].fine_value[value_count] = elem;
+            }
+          }
+
+          utilization_counters[index].value = 0;
+          utilization_counters[index].fine_value_count = value_count;
+          if (utilization_counters[index].type == RSMI_UTILIZATION_COUNTER_TYPE::RSMI_COARSE_DECODER_ACTIVITY) {
+            if (value_count > 0) {
+              utilization_counters[index].value = (value_accum / value_count);
+            }
+          }
+        }
+        break;
+
       default:
         return RSMI_STATUS_INVALID_ARGS;
     }
-    if (val_ui32 == UINT32_MAX) {
-      return RSMI_STATUS_NOT_SUPPORTED;
-    }
-    utilization_counters[index].value = val_ui32;
   }
-
   *timestamp = gpu_metrics.system_clock_counter;
 
   return ret;

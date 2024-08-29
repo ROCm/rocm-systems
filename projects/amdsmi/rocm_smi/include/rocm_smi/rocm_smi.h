@@ -765,10 +765,15 @@ typedef enum _RSMI_IO_LINK_TYPE {
  */
 typedef enum {
   RSMI_UTILIZATION_COUNTER_FIRST = 0,
-  //!< GFX Activity
+  //!< Corse grain activity counters
   RSMI_COARSE_GRAIN_GFX_ACTIVITY  = RSMI_UTILIZATION_COUNTER_FIRST,
   RSMI_COARSE_GRAIN_MEM_ACTIVITY,    //!< Memory Activity
-  RSMI_UTILIZATION_COUNTER_LAST = RSMI_COARSE_GRAIN_MEM_ACTIVITY
+  RSMI_COARSE_DECODER_ACTIVITY,      //!< Decoder Activity
+  //!< Fine grain activity counters
+  RSMI_FINE_GRAIN_GFX_ACTIVITY = 100,
+  RSMI_FINE_GRAIN_MEM_ACTIVITY = 101,
+  RSMI_FINE_DECODER_ACTIVITY   = 102,
+  RSMI_UTILIZATION_COUNTER_LAST = RSMI_FINE_DECODER_ACTIVITY
 } RSMI_UTILIZATION_COUNTER_TYPE;
 
 /**
@@ -783,10 +788,15 @@ typedef enum {
 /**
  * @brief The utilization counter data
  */
+//! The max number of values per counter type
+#define RSMI_MAX_UTILIZATION_VALUES 4
 typedef struct  {
-  RSMI_UTILIZATION_COUNTER_TYPE type;   //!< Utilization counter type
-  uint64_t value;                       //!< Utilization counter value
+  RSMI_UTILIZATION_COUNTER_TYPE type;           //!< Utilization counter type
+  uint64_t value;                                    //!< Coarse grain activity counter value (average)
+  uint64_t fine_value[RSMI_MAX_UTILIZATION_VALUES];  //!< Utilization counter value (individual values)
+  uint16_t fine_value_count;
 } rsmi_utilization_counter_t;
+
 
 /**
  * @brief Reserved Memory Page Record

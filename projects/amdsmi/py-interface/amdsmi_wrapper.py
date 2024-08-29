@@ -901,7 +901,8 @@ struct_amdsmi_asic_info_t._fields_ = [
     ('rev_id', ctypes.c_uint32),
     ('asic_serial', ctypes.c_char * 32),
     ('oam_id', ctypes.c_uint32),
-    ('reserved', ctypes.c_uint32 * 18),
+    ('num_of_compute_units', ctypes.c_uint32),
+    ('reserved', ctypes.c_uint32 * 17),
 ]
 
 amdsmi_asic_info_t = struct_amdsmi_asic_info_t
@@ -953,7 +954,9 @@ struct_amdsmi_vram_info_t._fields_ = [
     ('vram_type', amdsmi_vram_type_t),
     ('vram_vendor', amdsmi_vram_vendor_type_t),
     ('vram_size', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint64 * 6),
+    ('vram_bit_width', ctypes.c_uint32),
+    ('PADDING_0', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint64 * 5),
 ]
 
 amdsmi_vram_info_t = struct_amdsmi_vram_info_t
@@ -1452,12 +1455,20 @@ amdsmi_utilization_counter_type_t__enumvalues = {
     0: 'AMDSMI_UTILIZATION_COUNTER_FIRST',
     0: 'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
     1: 'AMDSMI_COARSE_GRAIN_MEM_ACTIVITY',
-    1: 'AMDSMI_UTILIZATION_COUNTER_LAST',
+    2: 'AMDSMI_COARSE_DECODER_ACTIVITY',
+    100: 'AMDSMI_FINE_GRAIN_GFX_ACTIVITY',
+    101: 'AMDSMI_FINE_GRAIN_MEM_ACTIVITY',
+    102: 'AMDSMI_FINE_DECODER_ACTIVITY',
+    102: 'AMDSMI_UTILIZATION_COUNTER_LAST',
 }
 AMDSMI_UTILIZATION_COUNTER_FIRST = 0
 AMDSMI_COARSE_GRAIN_GFX_ACTIVITY = 0
 AMDSMI_COARSE_GRAIN_MEM_ACTIVITY = 1
-AMDSMI_UTILIZATION_COUNTER_LAST = 1
+AMDSMI_COARSE_DECODER_ACTIVITY = 2
+AMDSMI_FINE_GRAIN_GFX_ACTIVITY = 100
+AMDSMI_FINE_GRAIN_MEM_ACTIVITY = 101
+AMDSMI_FINE_DECODER_ACTIVITY = 102
+AMDSMI_UTILIZATION_COUNTER_LAST = 102
 amdsmi_utilization_counter_type_t = ctypes.c_uint32 # enum
 
 # values for enumeration 'amdsmi_power_type_t'
@@ -1478,6 +1489,9 @@ struct_amdsmi_utilization_counter_t._fields_ = [
     ('type', amdsmi_utilization_counter_type_t),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('value', ctypes.c_uint64),
+    ('fine_value', ctypes.c_uint64 * 4),
+    ('fine_value_count', ctypes.c_uint16),
+    ('PADDING_1', ctypes.c_ubyte * 6),
 ]
 
 amdsmi_utilization_counter_t = struct_amdsmi_utilization_counter_t
@@ -2411,6 +2425,7 @@ __all__ = \
     'AMDSMI_CLK_TYPE_SYS', 'AMDSMI_CLK_TYPE_VCLK0',
     'AMDSMI_CLK_TYPE_VCLK1', 'AMDSMI_CLK_TYPE__MAX',
     'AMDSMI_CNTR_CMD_START', 'AMDSMI_CNTR_CMD_STOP',
+    'AMDSMI_COARSE_DECODER_ACTIVITY',
     'AMDSMI_COARSE_GRAIN_GFX_ACTIVITY',
     'AMDSMI_COARSE_GRAIN_MEM_ACTIVITY',
     'AMDSMI_COMPUTE_PARTITION_CPX', 'AMDSMI_COMPUTE_PARTITION_DPX',
@@ -2443,25 +2458,27 @@ __all__ = \
     'AMDSMI_EVT_NOTIF_GPU_PRE_RESET', 'AMDSMI_EVT_NOTIF_LAST',
     'AMDSMI_EVT_NOTIF_NONE', 'AMDSMI_EVT_NOTIF_RING_HANG',
     'AMDSMI_EVT_NOTIF_THERMAL_THROTTLE', 'AMDSMI_EVT_NOTIF_VMFAULT',
-    'AMDSMI_FREQ_IND_INVALID', 'AMDSMI_FREQ_IND_MAX',
-    'AMDSMI_FREQ_IND_MIN', 'AMDSMI_FW_ID_ASD', 'AMDSMI_FW_ID_CP_CE',
-    'AMDSMI_FW_ID_CP_ME', 'AMDSMI_FW_ID_CP_MEC1',
-    'AMDSMI_FW_ID_CP_MEC2', 'AMDSMI_FW_ID_CP_MEC_JT1',
-    'AMDSMI_FW_ID_CP_MEC_JT2', 'AMDSMI_FW_ID_CP_MES',
-    'AMDSMI_FW_ID_CP_PFP', 'AMDSMI_FW_ID_CP_PM4', 'AMDSMI_FW_ID_DFC',
-    'AMDSMI_FW_ID_DMCU', 'AMDSMI_FW_ID_DMCU_ERAM',
-    'AMDSMI_FW_ID_DMCU_ISR', 'AMDSMI_FW_ID_DRV_CAP',
-    'AMDSMI_FW_ID_FIRST', 'AMDSMI_FW_ID_IMU_DRAM',
-    'AMDSMI_FW_ID_IMU_IRAM', 'AMDSMI_FW_ID_ISP', 'AMDSMI_FW_ID_MC',
-    'AMDSMI_FW_ID_MES_KIQ', 'AMDSMI_FW_ID_MES_STACK',
-    'AMDSMI_FW_ID_MES_THREAD1', 'AMDSMI_FW_ID_MES_THREAD1_STACK',
-    'AMDSMI_FW_ID_MMSCH', 'AMDSMI_FW_ID_PM', 'AMDSMI_FW_ID_PPTABLE',
-    'AMDSMI_FW_ID_PSP_BL', 'AMDSMI_FW_ID_PSP_DBG',
-    'AMDSMI_FW_ID_PSP_INTF', 'AMDSMI_FW_ID_PSP_KEYDB',
-    'AMDSMI_FW_ID_PSP_SOC', 'AMDSMI_FW_ID_PSP_SOSDRV',
-    'AMDSMI_FW_ID_PSP_SPL', 'AMDSMI_FW_ID_PSP_SYSDRV',
-    'AMDSMI_FW_ID_PSP_TOC', 'AMDSMI_FW_ID_REG_ACCESS_WHITELIST',
-    'AMDSMI_FW_ID_RLC', 'AMDSMI_FW_ID_RLCV_LX7', 'AMDSMI_FW_ID_RLC_P',
+    'AMDSMI_FINE_DECODER_ACTIVITY', 'AMDSMI_FINE_GRAIN_GFX_ACTIVITY',
+    'AMDSMI_FINE_GRAIN_MEM_ACTIVITY', 'AMDSMI_FREQ_IND_INVALID',
+    'AMDSMI_FREQ_IND_MAX', 'AMDSMI_FREQ_IND_MIN', 'AMDSMI_FW_ID_ASD',
+    'AMDSMI_FW_ID_CP_CE', 'AMDSMI_FW_ID_CP_ME',
+    'AMDSMI_FW_ID_CP_MEC1', 'AMDSMI_FW_ID_CP_MEC2',
+    'AMDSMI_FW_ID_CP_MEC_JT1', 'AMDSMI_FW_ID_CP_MEC_JT2',
+    'AMDSMI_FW_ID_CP_MES', 'AMDSMI_FW_ID_CP_PFP',
+    'AMDSMI_FW_ID_CP_PM4', 'AMDSMI_FW_ID_DFC', 'AMDSMI_FW_ID_DMCU',
+    'AMDSMI_FW_ID_DMCU_ERAM', 'AMDSMI_FW_ID_DMCU_ISR',
+    'AMDSMI_FW_ID_DRV_CAP', 'AMDSMI_FW_ID_FIRST',
+    'AMDSMI_FW_ID_IMU_DRAM', 'AMDSMI_FW_ID_IMU_IRAM',
+    'AMDSMI_FW_ID_ISP', 'AMDSMI_FW_ID_MC', 'AMDSMI_FW_ID_MES_KIQ',
+    'AMDSMI_FW_ID_MES_STACK', 'AMDSMI_FW_ID_MES_THREAD1',
+    'AMDSMI_FW_ID_MES_THREAD1_STACK', 'AMDSMI_FW_ID_MMSCH',
+    'AMDSMI_FW_ID_PM', 'AMDSMI_FW_ID_PPTABLE', 'AMDSMI_FW_ID_PSP_BL',
+    'AMDSMI_FW_ID_PSP_DBG', 'AMDSMI_FW_ID_PSP_INTF',
+    'AMDSMI_FW_ID_PSP_KEYDB', 'AMDSMI_FW_ID_PSP_SOC',
+    'AMDSMI_FW_ID_PSP_SOSDRV', 'AMDSMI_FW_ID_PSP_SPL',
+    'AMDSMI_FW_ID_PSP_SYSDRV', 'AMDSMI_FW_ID_PSP_TOC',
+    'AMDSMI_FW_ID_REG_ACCESS_WHITELIST', 'AMDSMI_FW_ID_RLC',
+    'AMDSMI_FW_ID_RLCV_LX7', 'AMDSMI_FW_ID_RLC_P',
     'AMDSMI_FW_ID_RLC_RESTORE_LIST_CNTL',
     'AMDSMI_FW_ID_RLC_RESTORE_LIST_GPM_MEM',
     'AMDSMI_FW_ID_RLC_RESTORE_LIST_SRM_MEM',
