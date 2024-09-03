@@ -99,28 +99,28 @@ const std::vector<const char*> ShaderList = {
  */
 #define SHADER_MACROS_FLAT \
     "   .macro FLAT_LOAD_DWORD_NSS vdst, vaddr arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)\n"\
+    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
     "           flat_load_dword \\vdst, \\vaddr nt sc1 sc0\n"\
     "       .else\n"\
     "           flat_load_dword \\vdst, \\vaddr \\arg0 \\arg1\n"\
     "       .endif\n"\
     "   .endm\n"\
     "   .macro FLAT_LOAD_DWORDX2_NSS vdst, vaddr arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)\n"\
+    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
     "           flat_load_dwordx2 \\vdst, \\vaddr nt sc1 sc0\n"\
     "       .else\n"\
     "           flat_load_dwordx2 \\vdst, \\vaddr \\arg0 \\arg1\n"\
     "       .endif\n"\
     "   .endm\n"\
     "   .macro FLAT_STORE_DWORD_NSS vaddr, vsrc arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)\n"\
+    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
     "           flat_store_dword \\vaddr, \\vsrc nt sc1 sc0\n"\
     "       .else\n"\
     "           flat_store_dword \\vaddr, \\vsrc \\arg0 \\arg1\n"\
     "       .endif\n"\
     "   .endm\n"\
     "   .macro FLAT_ATOMIC_ADD_NSS vdst, vaddr, vsrc arg0 arg1\n"\
-    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)\n"\
+    "       .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)\n"\
     "           flat_atomic_add \\vdst, \\vaddr, \\vsrc nt sc1 sc0\n"\
     "       .else\n"\
     "           flat_atomic_add \\vdst, \\vaddr, \\vsrc \\arg0 \\arg1\n"\
@@ -363,7 +363,7 @@ const char *PollAndCopyIsa =
     R"(
         // Assume src buffer in s[0:1] and dst buffer in s[2:3]
         // Path for Aldebaran, Aqua Vanjaram
-        .if (.amdgcn.gfx_generation_number == 9 && (.amdgcn.gfx_generation_minor == 4 || .amdgcn.gfx_generation_stepping == 10))
+        .if (.amdgcn.gfx_generation_number == 9 && (.amdgcn.gfx_generation_minor >= 4 || .amdgcn.gfx_generation_stepping == 10))
             v_mov_b32 v0, s0
             v_mov_b32 v1, s1
             v_mov_b32 v18, 0x1
@@ -372,7 +372,7 @@ const char *PollAndCopyIsa =
             s_waitcnt vmcnt(0) & lgkmcnt(0)
             v_cmp_eq_i32 vcc, v16, v18
             s_cbranch_vccz LOOP0
-            .if (.amdgcn.gfx_generation_minor == 4)
+            .if (.amdgcn.gfx_generation_minor >= 4)
                 buffer_inv sc1 sc0
             .else
                 buffer_invl2
@@ -410,7 +410,7 @@ const char *WriteFlagAndValueIsa =
     SHADER_MACROS_FLAT
     R"(
         // Assume two inputs buffer in s[0:1] and s[2:3]
-        .if (.amdgcn.gfx_generation_number == 9 && (.amdgcn.gfx_generation_minor == 4 || .amdgcn.gfx_generation_stepping == 10))
+        .if (.amdgcn.gfx_generation_number == 9 && (.amdgcn.gfx_generation_minor >= 4 || .amdgcn.gfx_generation_stepping == 10))
             v_mov_b32 v0, s0
             v_mov_b32 v1, s1
             s_load_dword s18, s[2:3], 0x0 glc
@@ -480,7 +480,7 @@ const char *WriteAndSignalIsa =
 const char *FlushBufferForAcquireReleaseIsa =
     SHADER_START
     R"(
-        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
+        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             s_mov_b32 s11, 0x77
             s_mov_b32 s12, 0x0
             // Store some data on 5 different cache lines
@@ -510,7 +510,7 @@ const char *FlushBufferForAcquireReleaseIsa =
 const char *WriteReleaseVectorIsa =
     SHADER_START
     R"(
-        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
+        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             v_mov_b32 v11, 0x1
             v_mov_b32 v12, 0x2
             v_mov_b32 v13, 0x3
@@ -552,7 +552,7 @@ const char *WriteReleaseVectorIsa =
 const char *WriteReleaseScalarIsa =
     SHADER_START
     R"(
-        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
+        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             s_mov_b32 s11, 0x6
             s_mov_b32 s12, 0x7
             s_mov_b32 s13, 0x8
@@ -595,7 +595,7 @@ const char *WriteReleaseScalarIsa =
 const char *ReadAcquireVectorIsa =
     SHADER_START
     R"(
-        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
+        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             // Read-Acquire
             s_mov_b32 s18, 0x1
             LOOP:
@@ -651,7 +651,7 @@ const char *ReadAcquireVectorIsa =
 const char *ReadAcquireScalarIsa =
     SHADER_START
     R"(
-        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor == 4)
+        .if (.amdgcn.gfx_generation_number == 9 && .amdgcn.gfx_generation_minor >= 4)
             // Read-Acquire
             s_mov_b32 s18, 0x1
             LOOP:
