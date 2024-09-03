@@ -63,7 +63,7 @@ option(BUILD_PROFILER "Build targets for librdc_rocp.so" OFF)
 
 # When cmake -DBUILD_RVS=off, it will not build the librdc_rvs.so
 # which requires the RocmValidationSuite
-option(BUILD_RVS "Build targets for librdc_rvs.so" OFF)
+option(BUILD_RVS "Build targets for librdc_rvs.so" ON)
 
 # When cmake -DBUILD_TESTS=off, it will not build RDC tests.
 option(BUILD_TESTS "Build test suite" OFF)
