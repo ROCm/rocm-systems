@@ -963,6 +963,7 @@ rsmi_dev_oam_id_get(uint32_t dv_ind, uint16_t *id) {
   ss << __PRETTY_FUNCTION__ << "| ======= start =======";
   LOG_TRACE(ss);
   CHK_SUPPORT_NAME_ONLY(id)
+  *id = std::numeric_limits<uint16_t>::max();
 
   ret = get_id(dv_ind, amd::smi::kDevXGMIPhysicalID, id);
   ss << __PRETTY_FUNCTION__ << " | ======= end ======="

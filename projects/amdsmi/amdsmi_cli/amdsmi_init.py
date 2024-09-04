@@ -63,8 +63,8 @@ def check_amd_hsmp_driver():
     return False
 
 
-def init_amdsmi():
-    """ Initializes AMDSMI
+def amdsmi_cli_init():
+    """ Initializes AMDSMI Library for the CLI
 
     Checks for the presence of the amdgpu and amd_hsmp drivers and initializes the
     AMD SMI library based on the live drivers found.
@@ -119,7 +119,7 @@ def init_amdsmi():
 
     return init_flag
 
-def shut_down_amdsmi():
+def amdsmi_cli_shutdown():
     """Shutdown AMDSMI instance
 
     Raises:
@@ -138,8 +138,8 @@ def signal_handler(sig, frame):
 
 
 if not AMDSMI_INITIALIZED:
-    AMDSMI_INIT_FLAG = init_amdsmi()
+    AMDSMI_INIT_FLAG = amdsmi_cli_init()
     AMDSMI_INITIALIZED = True
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    atexit.register(shut_down_amdsmi)
+    atexit.register(amdsmi_cli_shutdown)

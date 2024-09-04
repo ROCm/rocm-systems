@@ -30,6 +30,15 @@ AMD-SMI Commands:
     xgmi              Displays xgmi information of the devices
 ```
 
+Example commands:
+
+``` bash
+amd-smi static --gpu 0
+amd-smi metric
+amd-smi process --gpu 0 1
+amd-smi reset --gpureset --gpu all
+```
+
 More detailed verison information is available from `amd-smi version`
 
 Each command will have detailed information via `amd-smi [command] --help`

@@ -590,6 +590,26 @@ def _padHexValue(value, length):
         return '0x' + value[2:].zfill(length)
     return value
 
+class UIntegerTypes(IntEnum):
+    UINT8_T  = 0xFF
+    UINT16_T = 0xFFFF
+    UINT32_T = 0xFFFFFFFF
+    UINT64_T = 0xFFFFFFFFFFFFFFFF
+
+def _validateIfMaxUint(valToCheck, uintType: UIntegerTypes):
+    return_val = "N/A"
+    if not isinstance(valToCheck, list):
+        if valToCheck == uintType:
+            return return_val
+        else:
+            return valToCheck
+    else:
+        return_val = valToCheck
+        for idx, v in enumerate(valToCheck):
+            if v == uintType:
+                return_val[idx] = "N/A"
+    return return_val
+
 
 def amdsmi_get_socket_handles() -> List[amdsmi_wrapper.amdsmi_socket_handle]:
     """
@@ -1742,7 +1762,7 @@ def amdsmi_get_gpu_reg_table_info(
     num_regs = ctypes.c_uint32;
 
     _check_res(
-        amdsmi_wrapper.amdsmi_get_cpu_reg_table_info(
+        amdsmi_wrapper.amdsmi_get_gpu_reg_table_info(
             processor_handle, reg_type, ctypes.byref(reg_metrics), ctypes.byref(num_regs)
         )
     )
@@ -2277,30 +2297,22 @@ def amdsmi_get_pcie_info(
 
     pcie_info_dict = {
         "pcie_static": {
-            "max_pcie_width": pcie_info.pcie_static.max_pcie_width,
-            "max_pcie_speed": pcie_info.pcie_static.max_pcie_speed,
-            "pcie_interface_version": pcie_info.pcie_static.pcie_interface_version,
+            "max_pcie_width": _validateIfMaxUint(pcie_info.pcie_static.max_pcie_width, UIntegerTypes.UINT16_T),
+            "max_pcie_speed": _validateIfMaxUint(pcie_info.pcie_static.max_pcie_speed, UIntegerTypes.UINT32_T),
+            "pcie_interface_version": _validateIfMaxUint(pcie_info.pcie_static.pcie_interface_version, UIntegerTypes.UINT32_T),
             "slot_type": pcie_info.pcie_static.slot_type,
             },
         "pcie_metric": {
-            "pcie_width": pcie_info.pcie_metric.pcie_width,
-            "pcie_speed": pcie_info.pcie_metric.pcie_speed,
-            "pcie_bandwidth": pcie_info.pcie_metric.pcie_bandwidth,
-            "pcie_replay_count": pcie_info.pcie_metric.pcie_replay_count,
-            "pcie_l0_to_recovery_count": pcie_info.pcie_metric.pcie_l0_to_recovery_count,
-            "pcie_replay_roll_over_count": pcie_info.pcie_metric.pcie_replay_roll_over_count,
-            "pcie_nak_sent_count": pcie_info.pcie_metric.pcie_nak_sent_count,
-            "pcie_nak_received_count": pcie_info.pcie_metric.pcie_nak_received_count,
+            "pcie_width": _validateIfMaxUint(pcie_info.pcie_metric.pcie_width, UIntegerTypes.UINT16_T),
+            "pcie_speed": _validateIfMaxUint(pcie_info.pcie_metric.pcie_speed, UIntegerTypes.UINT32_T),
+            "pcie_bandwidth": _validateIfMaxUint(pcie_info.pcie_metric.pcie_bandwidth, UIntegerTypes.UINT32_T),
+            "pcie_replay_count": _validateIfMaxUint(pcie_info.pcie_metric.pcie_replay_count, UIntegerTypes.UINT64_T),
+            "pcie_l0_to_recovery_count": _validateIfMaxUint(pcie_info.pcie_metric.pcie_l0_to_recovery_count, UIntegerTypes.UINT64_T),
+            "pcie_replay_roll_over_count": _validateIfMaxUint(pcie_info.pcie_metric.pcie_replay_roll_over_count, UIntegerTypes.UINT64_T),
+            "pcie_nak_sent_count": _validateIfMaxUint(pcie_info.pcie_metric.pcie_nak_sent_count, UIntegerTypes.UINT64_T),
+            "pcie_nak_received_count": _validateIfMaxUint(pcie_info.pcie_metric.pcie_nak_received_count, UIntegerTypes.UINT64_T),
         }
     }
-
-    # Check pcie static values for uint max
-    if pcie_info_dict['pcie_static']['max_pcie_width'] == 0xFFFF:
-        pcie_info_dict['pcie_static']['max_pcie_width'] = "N/A"
-    if pcie_info_dict['pcie_static']['max_pcie_speed'] == 0xFFFFFFFF:
-        pcie_info_dict['pcie_static']['max_pcie_speed'] = "N/A"
-    if pcie_info_dict['pcie_static']['pcie_interface_version'] == 0xFFFFFFFF:
-        pcie_info_dict['pcie_static']['pcie_interface_version'] = "N/A"
 
     slot_type = pcie_info_dict['pcie_static']['slot_type']
     if isinstance(slot_type, int):
@@ -2311,29 +2323,6 @@ def amdsmi_get_pcie_info(
             pcie_info_dict['pcie_static']['slot_type'] = "Unknown"
     else:
         pcie_info_dict['pcie_static']['slot_type'] = "N/A"
-
-    # Check pcie metric values for uint max
-    if pcie_info_dict['pcie_metric']['pcie_width'] == 0xFFFF:
-        pcie_info_dict['pcie_metric']['pcie_width'] = "N/A"
-    if pcie_info_dict['pcie_metric']['pcie_speed'] == 0xFFFFFFFF:
-        pcie_info_dict['pcie_metric']['pcie_speed'] = "N/A"
-    if pcie_info_dict['pcie_metric']['pcie_bandwidth'] == 0xFFFFFFFF:
-        pcie_info_dict['pcie_metric']['pcie_bandwidth'] = "N/A"
-
-    # TODO Just Navi 21 has a different uint max size for pcie_bandwidth
-    # if pcie_info_dict['pcie_metric']['pcie_bandwidth'] == 0xFFFFFFFF:
-    #     pcie_info_dict['pcie_metric']['pcie_bandwidth'] = "N/A"
-
-    if pcie_info_dict['pcie_metric']['pcie_replay_count'] == 0xFFFFFFFFFFFFFFFF:
-        pcie_info_dict['pcie_metric']['pcie_replay_count'] = "N/A"
-    if pcie_info_dict['pcie_metric']['pcie_l0_to_recovery_count'] == 0xFFFFFFFFFFFFFFFF:
-        pcie_info_dict['pcie_metric']['pcie_l0_to_recovery_count'] = "N/A"
-    if pcie_info_dict['pcie_metric']['pcie_replay_roll_over_count'] == 0xFFFFFFFFFFFFFFFF:
-        pcie_info_dict['pcie_metric']['pcie_replay_roll_over_count'] = "N/A"
-    if pcie_info_dict['pcie_metric']['pcie_nak_sent_count'] == 0xFFFFFFFFFFFFFFFF:
-        pcie_info_dict['pcie_metric']['pcie_nak_sent_count'] = "N/A"
-    if pcie_info_dict['pcie_metric']['pcie_nak_received_count'] == 0xFFFFFFFFFFFFFFFF:
-        pcie_info_dict['pcie_metric']['pcie_nak_received_count'] = "N/A"
 
     return pcie_info_dict
 
@@ -2414,7 +2403,7 @@ def amdsmi_get_gpu_subsystem_id(processor_handle: amdsmi_wrapper.amdsmi_processo
             processor_handle, ctypes.byref(id))
     )
 
-    return id.value
+    return _padHexValue(hex(id.value), 4)
 
 
 def amdsmi_get_gpu_subsystem_name(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
@@ -3116,17 +3105,18 @@ def amdsmi_get_energy_count(processor_handle: amdsmi_wrapper.amdsmi_processor_ha
             processor_handle, amdsmi_wrapper.amdsmi_processor_handle
         )
 
-    power = ctypes.c_uint64()
+    energy_accumulator= ctypes.c_uint64()
     counter_resolution = ctypes.c_float()
     timestamp = ctypes.c_uint64()
 
     _check_res(
         amdsmi_wrapper.amdsmi_get_energy_count(processor_handle, ctypes.byref(
-            power), ctypes.byref(counter_resolution), ctypes.byref(timestamp))
+            energy_accumulator), ctypes.byref(counter_resolution), ctypes.byref(timestamp))
     )
 
     return {
-        'power': power.value,
+        'power': energy_accumulator.value, # deprecating in 6.4
+        'energy_accumulator': energy_accumulator.value,
         'counter_resolution': counter_resolution.value,
         'timestamp': timestamp.value,
     }
@@ -3466,6 +3456,24 @@ def amdsmi_get_gpu_overdrive_level(
     )
 
     return od_level.value
+
+
+def amdsmi_get_gpu_mem_overdrive_level(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle,
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(
+            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
+        )
+
+    mem_od_level = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_gpu_mem_overdrive_level(
+            processor_handle, ctypes.byref(mem_od_level)
+        )
+    )
+
+    return mem_od_level.value
 
 
 def amdsmi_get_clk_freq(

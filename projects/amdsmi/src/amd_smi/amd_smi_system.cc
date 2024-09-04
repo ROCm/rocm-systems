@@ -56,6 +56,7 @@ namespace smi {
 
 #define  AMD_SMI_INIT_FLAG_RESRV_TEST1 0x800000000000000  //!< Reserved for test
 
+#ifdef ENABLE_ESMI_LIB
 amdsmi_status_t AMDSmiSystem::get_cpu_family(uint32_t *cpu_family) {
     amdsmi_status_t ret;
     ret = static_cast<amdsmi_status_t>(esmi_cpu_family_get(cpu_family));
@@ -111,6 +112,7 @@ static amdsmi_status_t get_nr_cpu_sockets(uint32_t *num_socks) {
     }
     return AMDSMI_STATUS_SUCCESS;
 }
+#endif
 
 amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
     init_flag_ = flags;
@@ -120,9 +122,8 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
         amd_smi_status = populate_amd_gpu_devices();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
             return amd_smi_status;
-#ifdef ENABLE_ESMI_LIB
     }
-
+#ifdef ENABLE_ESMI_LIB
     if (flags & AMDSMI_INIT_AMD_CPUS) {
         amd_smi_status = populate_amd_cpus();
         if (amd_smi_status != AMDSMI_STATUS_SUCCESS)
@@ -130,6 +131,7 @@ amdsmi_status_t AMDSmiSystem::init(uint64_t flags) {
     }
 #endif
     return AMDSMI_STATUS_SUCCESS;
+
 }
 
 #ifdef ENABLE_ESMI_LIB
@@ -175,8 +177,6 @@ amdsmi_status_t AMDSmiSystem::populate_amd_cpus() {
 
     return AMDSMI_STATUS_SUCCESS;
 }
-
-
 #endif
 
 amdsmi_status_t AMDSmiSystem::populate_amd_gpu_devices() {

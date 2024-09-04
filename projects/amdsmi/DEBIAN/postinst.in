@@ -2,6 +2,7 @@
 
 do_updatepciids() {
   update-pciids >/dev/null 2>&1 || true
+  return
 }
 
 do_configureLogrotate() {
@@ -187,9 +188,22 @@ do_install_amdsmi_python_lib() {
   fi
 }
 
+do_install_amdsmi_pytest() {
+  echo -n "Installing pytest... "
+  pip install -U pytest >/dev/null 2>&1
+  if [ $? -ne 0 ]; then
+    echo "[WARNING] Detected pytest could not be installed. Running pytest may not work as documented."
+  else
+    echo -n "[SUCCESS]"
+    echo ""
+  fi
+  return
+}
+
 case "$1" in
   ( configure )
     do_install_amdsmi_python_lib
+    do_install_amdsmi_pytest
     do_ldconfig
     do_updatepciids
     do_configureLogrotate || exit 0

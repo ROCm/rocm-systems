@@ -817,10 +817,10 @@ uint32_t RocmSMI::DiscoverAmdgpuDevices(void) {
       rsmi_status_t ret_unique_id =
           rsmi_dev_unique_id_get(cardAdded, &device_uuid);
       auto temp_numb_nodes = allSystemNodes.count(device_uuid);
-      auto primaryBdfId =
-          allSystemNodes.lower_bound(device_uuid)->second.s_location_id;
-      if (doesDeviceSupportPartitions && temp_numb_nodes > 1
+      auto it = allSystemNodes.lower_bound(device_uuid);
+      if (it != allSystemNodes.end() && doesDeviceSupportPartitions && temp_numb_nodes > 1
           && ret_unique_id == RSMI_STATUS_SUCCESS) {
+        auto primaryBdfId = it->second.s_location_id;
         // helps identify xgmi nodes (secondary nodes) easier
         AddToDeviceList(d_name, primaryBdfId);
       } else {

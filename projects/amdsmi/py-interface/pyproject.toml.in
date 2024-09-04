@@ -29,3 +29,9 @@ packages = ["amdsmi"]
 # install libamd_smi.so
 [tool.setuptools.package-data]
 amdsmi = ["*.so"]
+
+[tool.pytest.ini_options]
+pythonpath = "/opt/rocm/share/amd_smi"
+addopts = [
+    "--import-mode=importlib",
+]

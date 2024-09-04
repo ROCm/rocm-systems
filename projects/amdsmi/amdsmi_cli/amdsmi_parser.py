@@ -740,7 +740,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Help text for Arguments only on Linux Baremetal platforms
         fan_help = "Current fan speed"
         vc_help = "Display voltage curve"
-        overdrive_help = "Current GPU clock overdrive level"
+        overdrive_help = "Current GPU clock overdrive and GPU memory clock overdrive level"
         perf_level_help = "Current DPM performance level"
         xgmi_err_help = "XGMI error information since last read"
         energy_help = "Amount of energy consumed"

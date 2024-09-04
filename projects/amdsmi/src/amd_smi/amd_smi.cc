@@ -470,7 +470,7 @@ amdsmi_status_t amdsmi_get_gpu_board_info(amdsmi_processor_handle processor_hand
         LOG_INFO(ss);
     }
 
-    ss << __PRETTY_FUNCTION__ << "[After rocm smi correction] "
+    ss << __PRETTY_FUNCTION__ << " | [After rocm smi correction] "
        << "Returning status = AMDSMI_STATUS_SUCCESS"
        << "\n; info->model_number: |" << board_info->model_number << "|"
        << "\n; info->product_serial: |" << board_info->product_serial << "|"
@@ -751,10 +751,9 @@ amdsmi_get_gpu_asic_info(amdsmi_processor_handle processor_handle, amdsmi_asic_i
     }
 
     // default to 0xffff as not supported
-    info->oam_id = std::numeric_limits<uint32_t>::max();
+    info->oam_id = std::numeric_limits<uint16_t>::max();
     uint16_t tmp_oam_id = 0;
-    status =  rsmi_wrapper(rsmi_dev_oam_id_get, processor_handle,
-                    &(tmp_oam_id));
+    status =  rsmi_wrapper(rsmi_dev_oam_id_get, processor_handle, &(tmp_oam_id));
     info->oam_id = tmp_oam_id;
 
     // default to 0xffffffff as not supported
@@ -1507,6 +1506,12 @@ amdsmi_status_t amdsmi_get_gpu_overdrive_level(
     return rsmi_wrapper(rsmi_dev_overdrive_level_get, processor_handle, od);
 }
 
+amdsmi_status_t amdsmi_get_gpu_mem_overdrive_level(
+            amdsmi_processor_handle processor_handle,
+            uint32_t *od) {
+    return rsmi_wrapper(rsmi_dev_mem_overdrive_level_get, processor_handle, od);
+}
+
 amdsmi_status_t  amdsmi_set_gpu_overdrive_level(
             amdsmi_processor_handle processor_handle, uint32_t od) {
     return rsmi_wrapper(rsmi_dev_overdrive_level_set_v1, processor_handle, od);
@@ -1592,9 +1597,9 @@ amdsmi_status_t amdsmi_get_utilization_count(amdsmi_processor_handle processor_h
 }
 
 amdsmi_status_t amdsmi_get_energy_count(amdsmi_processor_handle processor_handle,
-            uint64_t *power, float *counter_resolution, uint64_t *timestamp) {
+            uint64_t *energy_accumulator, float *counter_resolution, uint64_t *timestamp) {
     return rsmi_wrapper(rsmi_dev_energy_count_get, processor_handle,
-            power, counter_resolution, timestamp);
+            energy_accumulator, counter_resolution, timestamp);
 }
 
 amdsmi_status_t amdsmi_get_gpu_bdf_id(

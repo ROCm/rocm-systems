@@ -150,6 +150,7 @@ from .amdsmi_interface import amdsmi_get_gpu_volt_metric
 from .amdsmi_interface import amdsmi_get_utilization_count
 from .amdsmi_interface import amdsmi_get_gpu_perf_level
 from .amdsmi_interface import amdsmi_get_gpu_overdrive_level
+from .amdsmi_interface import amdsmi_get_gpu_mem_overdrive_level
 from .amdsmi_interface import amdsmi_get_clk_freq
 from .amdsmi_interface import amdsmi_get_gpu_od_volt_info
 from .amdsmi_interface import amdsmi_get_gpu_metrics_info

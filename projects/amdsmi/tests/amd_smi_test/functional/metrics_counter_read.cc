@@ -104,10 +104,10 @@ void TestMetricsCounterRead::Run(void) {
         std::cout << "\t**GPU METRICS ENERGY COUNTER:\n";
     }
 
-    uint64_t power;
+    uint64_t energy_accumulator;
     uint64_t timestamp;
     float counter_resolution;
-    err = amdsmi_get_energy_count(processor_handles_[i], &power, &counter_resolution, &timestamp);
+    err = amdsmi_get_energy_count(processor_handles_[i], &energy_accumulator, &counter_resolution, &timestamp);
     if (err != AMDSMI_STATUS_SUCCESS) {
       if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
@@ -119,10 +119,10 @@ void TestMetricsCounterRead::Run(void) {
     } else {
       CHK_ERR_ASRT(err);
       IF_VERB(STANDARD) {
-          std::cout << std::dec << "power counter="
-          << power << '\n';
-          std::cout << "power in uJ="
-          << (double)(power * counter_resolution) << '\n';
+          std::cout << std::dec << "energy_accumulator counter="
+          << energy_accumulator << '\n';
+          std::cout << "energy_accumulator in uJ="
+          << (double)(energy_accumulator * counter_resolution) << '\n';
           std::cout << std::dec << "timestamp="
           << timestamp << '\n';
       }

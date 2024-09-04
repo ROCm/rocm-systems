@@ -1534,7 +1534,8 @@ except AmdSmiException as e:
 
 ### amdsmi_get_energy_count
 
-Description: Get the energy accumulator counter of the device.
+Description: Get the energy accumulator counter information of the device.
+energy_accumulator * counter_resolution = total_energy_consumption in micro-Joules
 It is not supported on virtual machine guest
 
 Input parameters:
@@ -1545,7 +1546,8 @@ Output: Dictionary with fields
 
 Field | Content
 ---|---
-`power` |  power
+`power` |  counter for energy accumulation since last restart/gpu rest (Deprecating in 6.4)
+`energy_accumulator` |  counter for energy accumulation since last restart/gpu rest
 `counter_resolution` |  counter resolution
 `timestamp` |  timestamp
 
@@ -1564,8 +1566,8 @@ try:
         print("No GPUs on machine")
     else:
         for device in devices:
-            power = amdsmi_get_energy_count(device)
-            print(power)
+            energy_dict = amdsmi_get_energy_count(device)
+            print(energy_dict)
 except AmdSmiException as e:
     print(e)
 ```
@@ -1608,7 +1610,7 @@ except AmdSmiException as e:
 
 ### amdsmi_set_gpu_od_clk_info
 
-Description: This function sets the clock frequency information
+Description: This function sets the clock frequency information.
 It is not supported on virtual machine guest
 
 Input parameters:
@@ -2149,6 +2151,38 @@ try:
     else:
         for device in devices:
             od_level = amdsmi_get_gpu_overdrive_level(dev)
+            print(od_level)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_gpu_mem_overdrive_level
+
+Description: Get the GPU memory clock overdrive percent associated with the device with provided
+device handle. It is not supported on virtual machine guest
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: Overdrive percentage as integer
+
+Exceptions that can be thrown by `amdsmi_get_gpu_mem_overdrive_level` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            od_level = amdsmi_get_gpu_mem_overdrive_level(dev)
             print(od_level)
 except AmdSmiException as e:
     print(e)

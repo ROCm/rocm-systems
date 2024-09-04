@@ -2382,14 +2382,13 @@ amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *  @p power, and a pointer to a uint64_t @p timestamp, this function will write
  *  amount of energy consumed to the uint64_t pointed to by @p power,
  *  and the timestamp to the uint64_t pointed to by @p timestamp.
- *  The amdsmi_get_power_ave() is an average of a short time. This function
- *  accumulates all energy consumed.
+ *  This function accumulates all energy consumed.
  *
  *  @param[in] processor_handle a processor handle
  *  @param[in,out] counter_resolution resolution of the counter @p power in
  *  micro Joules
  *
- *  @param[in,out] power a pointer to uint64_t to which the energy
+ *  @param[in,out] energy_accumulator a pointer to uint64_t to which the energy
  *  counter will be written
  *  If this parameter is nullptr, this function will return
  *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
@@ -2402,7 +2401,7 @@ amdsmi_status_t amdsmi_set_gpu_pci_bandwidth(amdsmi_processor_handle processor_h
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t
-amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *power,
+amdsmi_get_energy_count(amdsmi_processor_handle processor_handle, uint64_t *energy_accumulator,
                           float *counter_resolution, uint64_t *timestamp);
 
 /** @} End PowerQuer */
@@ -2956,6 +2955,30 @@ amdsmi_set_gpu_perf_determinism_mode(amdsmi_processor_handle processor_handle, u
  */
 
 amdsmi_status_t amdsmi_get_gpu_overdrive_level(amdsmi_processor_handle processor_handle,
+                                                uint32_t *od);
+
+/**
+ *  @brief Get the GPU memory clock overdrive percent associated with the device with provided
+ *  processor handle. It is not supported on virtual machine guest
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t @p od,
+ *  this function will write the overdrive percentage to the uint32_t pointed
+ *  to by @p od
+ *
+ *  @param[in] processor_handle a processor handle
+ *
+ *  @param[in,out] od a pointer to uint32_t to which the GPU memory clock overdrive percentage
+ *  will be written
+ *  If this parameter is nullptr, this function will return
+ *  ::AMDSMI_STATUS_INVAL if the function is supported with the provided,
+ *  arguments and ::AMDSMI_STATUS_NOT_SUPPORTED if it is not supported with the
+ *  provided arguments.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_gpu_mem_overdrive_level(amdsmi_processor_handle processor_handle,
                                                 uint32_t *od);
 
 /**

@@ -2060,6 +2060,9 @@ amdsmi_set_gpu_perf_determinism_mode.argtypes = [amdsmi_processor_handle, uint64
 amdsmi_get_gpu_overdrive_level = _libraries['libamd_smi.so'].amdsmi_get_gpu_overdrive_level
 amdsmi_get_gpu_overdrive_level.restype = amdsmi_status_t
 amdsmi_get_gpu_overdrive_level.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
+amdsmi_get_gpu_mem_overdrive_level = _libraries['libamd_smi.so'].amdsmi_get_gpu_mem_overdrive_level
+amdsmi_get_gpu_mem_overdrive_level.restype = amdsmi_status_t
+amdsmi_get_gpu_mem_overdrive_level.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
 amdsmi_get_clk_freq = _libraries['libamd_smi.so'].amdsmi_get_clk_freq
 amdsmi_get_clk_freq.restype = amdsmi_status_t
 amdsmi_get_clk_freq.argtypes = [amdsmi_processor_handle, amdsmi_clk_type_t, ctypes.POINTER(struct_amdsmi_frequencies_t)]
@@ -2671,7 +2674,8 @@ __all__ = \
     'amdsmi_get_gpu_ecc_enabled', 'amdsmi_get_gpu_ecc_status',
     'amdsmi_get_gpu_event_notification', 'amdsmi_get_gpu_fan_rpms',
     'amdsmi_get_gpu_fan_speed', 'amdsmi_get_gpu_fan_speed_max',
-    'amdsmi_get_gpu_id', 'amdsmi_get_gpu_memory_partition',
+    'amdsmi_get_gpu_id', 'amdsmi_get_gpu_mem_overdrive_level',
+    'amdsmi_get_gpu_memory_partition',
     'amdsmi_get_gpu_memory_reserved_pages',
     'amdsmi_get_gpu_memory_total', 'amdsmi_get_gpu_memory_usage',
     'amdsmi_get_gpu_metrics_header_info',
