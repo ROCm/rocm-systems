@@ -224,6 +224,9 @@ software stack.
       .. code-block:: shell
 
          $ sudo apt install omniperf
+         # Include omniperf in your system PATH
+         $ sudo update-alternatives --install /usr/bin/omniperf omniperf /opt/rocm/bin/omniperf 0
+         # Install Python dependencies
          $ python3 -m pip install -r /opt/rocm/libexec/omniperf/requirements.txt
 
    .. tab-item:: Red Hat Enterprise Linux
@@ -231,6 +234,9 @@ software stack.
       .. code-block:: shell
 
          $ sudo dnf install omniperf
+         # Include omniperf in your system PATH
+         $ sudo update-alternatives --install /usr/bin/omniperf omniperf /opt/rocm/bin/omniperf 0
+         # Install Python dependencies
          $ python3 -m pip install -r /opt/rocm/libexec/omniperf/requirements.txt
 
    .. tab-item:: SUSE Linux Enterprise Server
@@ -238,6 +244,9 @@ software stack.
       .. code-block:: shell
 
          $ sudo zypper install omniperf
+         # Include omniperf in your system PATH
+         $ sudo update-alternatives --install /usr/bin/omniperf omniperf /opt/rocm/bin/omniperf 0
+         # Install Python dependencies
          $ python3 -m pip install -r /opt/rocm/libexec/omniperf/requirements.txt
 
 .. _core-install-rocprof-var:
