@@ -623,6 +623,20 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     }
+    case RDC_FI_OAM_ID: {
+      amdsmi_asic_info_t asic_info;
+      value->status = amdsmi_get_gpu_asic_info(processor_handle, &asic_info);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        // 0xFFFF means not supported for OAM ID
+        if (asic_info.oam_id == 0xFFFF) {
+          value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+        } else {
+          value->value.l_int = asic_info.oam_id;
+        }
+      }
+      break;
+    }
     case RDC_FI_ECC_CORRECT_TOTAL:
     case RDC_FI_ECC_UNCORRECT_TOTAL:
       get_ecc_total(gpu_index, field_id, value);

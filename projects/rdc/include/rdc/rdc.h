@@ -149,6 +149,7 @@ typedef enum {
   //!< @brief Identifier fields
   RDC_FI_GPU_COUNT = 1,  //!< GPU count in the system
   RDC_FI_DEV_NAME,       //!< Name of the device
+  RDC_FI_OAM_ID,         //!< OAM ID of the device
 
   /**
    * @brief Frequency related fields

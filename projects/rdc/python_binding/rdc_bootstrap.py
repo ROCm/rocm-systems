@@ -75,6 +75,7 @@ class rdc_field_t(c_int):
      RDC_FI_INVALID = 0
      RDC_FI_GPU_COUNT = 1
      RDC_FI_DEV_NAME = 2
+     RDC_FI_OAM_ID = 3
      RDC_FI_GPU_CLOCK = 100
      RDC_FI_MEM_CLOCK = 101
      RDC_FI_MEMORY_TEMP = 200
