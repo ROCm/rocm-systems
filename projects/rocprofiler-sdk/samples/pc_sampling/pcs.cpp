@@ -310,7 +310,8 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                 auto* pc_sample =
                     static_cast<rocprofiler_pc_sampling_record_t*>(cur_header->payload);
 
-                ss << "pc: " << std::hex << pc_sample->pc << ", "
+                ss << "(code_obj_id, offset): (" << pc_sample->pc.loaded_code_object_id << ", 0x"
+                   << std::hex << pc_sample->pc.loaded_code_object_offset << "), "
                    << "timestamp: " << std::dec << pc_sample->timestamp << ", "
                    << "exec: " << std::hex << std::setw(16) << pc_sample->exec_mask << ", "
                    << "workgroup_id_(x=" << std::dec << std::setw(5) << pc_sample->workgroup_id.x
@@ -327,17 +328,9 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                    << "external=" << std::setw(5) << pc_sample->correlation_id.external.value << "}"
                    << std::endl;
             }
-            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_LOAD_MARKER)
+            else
             {
-                auto* marker = static_cast<rocprofiler_pc_sampling_code_object_load_marker_t*>(
-                    cur_header->payload);
-                ss << "code object loading: " << marker->code_object_id << std::endl;
-            }
-            else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_UNLOAD_MARKER)
-            {
-                auto* marker = static_cast<rocprofiler_pc_sampling_code_object_unload_marker_t*>(
-                    cur_header->payload);
-                ss << "code object unloading: " << marker->code_object_id << std::endl;
+                assert(false);
             }
         }
         else

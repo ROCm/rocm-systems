@@ -53,8 +53,10 @@ alloc_callback(rocprofiler_pc_sampling_record_t** buffer, uint64_t size, void* u
 static bool
 check_samples(rocprofiler_pc_sampling_record_t* samples, uint64_t size)
 {
+    // TODO: replace with (code_obj_id, pc)
     for(size_t i = 0; i < size; i++)
-        if(samples[i].correlation_id.internal != samples[i].pc) return false;
+        if(samples[i].correlation_id.internal != samples[i].pc.loaded_code_object_offset)
+            return false;
     return true;
 }
 

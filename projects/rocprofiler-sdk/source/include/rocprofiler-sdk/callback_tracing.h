@@ -131,6 +131,11 @@ typedef struct
 } rocprofiler_callback_tracing_code_object_load_data_t;
 
 /**
+ * @brief The NULL value of a code object id. Used when code object is unknown.
+ */
+#define ROCPROFILER_CODE_OBJECT_ID_NONE ROCPROFILER_UINT64_C(0)
+
+/**
  * @brief ROCProfiler Code Object Kernel Symbol Tracer Callback Record.
  *
  */

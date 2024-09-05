@@ -339,7 +339,8 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                     auto* pc_sample =
                         static_cast<rocprofiler_pc_sampling_record_t*>(cur_header->payload);
 
-                    ss << "pc: " << std::hex << pc_sample->pc << ", "
+                    ss << "(code_obj_id, offset): (" << pc_sample->pc.loaded_code_object_id
+                       << ", 0x" << std::hex << pc_sample->pc.loaded_code_object_offset << "), "
                        << "timestamp: " << std::dec << pc_sample->timestamp << ", "
                        << "exec: " << std::hex << std::setw(16) << pc_sample->exec_mask << ", "
                        << "workgroup_id_(x=" << std::dec << std::setw(5)
@@ -372,30 +373,13 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                     assert(corr_id.external.value > 0);
 
                     // Decoding the PC
-                    auto inst = translator.get(pc_sample->pc);
+                    auto inst = translator.get(pc_sample->pc.loaded_code_object_id,
+                                               pc_sample->pc.loaded_code_object_offset);
                     flat_profile.add_sample(std::move(inst), pc_sample->exec_mask);
                 }
-                else if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_LOAD_MARKER)
+                else
                 {
-                    auto* marker = static_cast<rocprofiler_pc_sampling_code_object_load_marker_t*>(
-                        cur_header->payload);
-                    auto code_object_id = marker->code_object_id;
-                    ss << "code object loading: " << code_object_id << std::endl;
-                    // The code object load event can be reported once per code object id.
-                    assert(pc_sampler->active_code_objects.count(code_object_id) == 0);
-                    pc_sampler->active_code_objects.emplace(code_object_id);
-                }
-                else if(cur_header->kind ==
-                        ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_UNLOAD_MARKER)
-                {
-                    auto* marker =
-                        static_cast<rocprofiler_pc_sampling_code_object_unload_marker_t*>(
-                            cur_header->payload);
-                    auto code_object_id = marker->code_object_id;
-                    ss << "code object unloading: " << code_object_id << std::endl;
-                    // The code object unload event can be reported once per code object id.
-                    assert(pc_sampler->active_code_objects.count(code_object_id) == 1);
-                    pc_sampler->active_code_objects.erase(code_object_id);
+                    assert(false);
                 }
             }
             else

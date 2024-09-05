@@ -39,7 +39,6 @@ copySampleHeader(const SType& sample)
     ret.flags      = pcsample_header_v1_t{.raw = 0}.flags;
     ret.flags.type = AMD_SNAPSHOT_V1;
 
-    ret.pc             = sample.pc;
     ret.exec_mask      = sample.exec_mask;
     ret.workgroup_id.x = sample.workgroup_id_x;
     ret.workgroup_id.y = sample.workgroup_id_y;

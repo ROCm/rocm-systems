@@ -23,6 +23,7 @@
 #pragma once
 
 #include "lib/common/logging.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/translation.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
@@ -186,22 +187,37 @@ add_upcoming_samples(const device_handle               device,
                      Parser::CorrelationMap*           corr_map,
                      rocprofiler_pc_sampling_record_t* samples)
 {
-    pcsample_status_t status = PCSAMPLE_STATUS_SUCCESS;
+    pcsample_status_t status     = PCSAMPLE_STATUS_SUCCESS;
+    auto        cache_addr_range = rocprofiler::pc_sampling::code_object::address_range_t{0, 0, 0};
+    const auto* code_object_translator =
+        rocprofiler::pc_sampling::code_object::get_code_object_translator();
     for(uint64_t p = 0; p < available_samples; p++)
     {
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
         samples[p]       = copySample<bHostTrap, GFXIP>((const void*) (buffer + p));
-        samples[p].size  = sizeof(rocprofiler_pc_sampling_record_t);
+
+        auto& pc_sample = samples[p];
+        pc_sample.size  = sizeof(rocprofiler_pc_sampling_record_t);
+
+        // Convert PC -> (loaded code object id containing PC, offset within code object)
+        if(!cache_addr_range.inrange(snap->pc))
+        {
+            cache_addr_range = code_object_translator->find_codeobj_in_range(snap->pc);
+        }
+
+        pc_sample.pc.loaded_code_object_id     = cache_addr_range.id;
+        pc_sample.pc.loaded_code_object_offset = snap->pc - cache_addr_range.addr;
+
         try
         {
             Parser::trap_correlation_id_t trap{.raw = snap->correlation_id};
-            samples[p].correlation_id = corr_map->get(device, trap);
+            pc_sample.correlation_id = corr_map->get(device, trap);
         } catch(std::exception& e)
         {
-            samples[p].correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE,
-                                         .external = rocprofiler_user_data_t{
-                                             .value = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE}};
-            status                    = PCSAMPLE_STATUS_PARSER_ERROR;
+            pc_sample.correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE,
+                                        .external = rocprofiler_user_data_t{
+                                            .value = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE}};
+            status                   = PCSAMPLE_STATUS_PARSER_ERROR;
         }
     }
     return status;

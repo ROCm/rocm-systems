@@ -411,9 +411,7 @@ typedef enum
 typedef enum
 {
     ROCPROFILER_PC_SAMPLING_RECORD_NONE = 0,
-    ROCPROFILER_PC_SAMPLING_RECORD_SAMPLE,                   ///< ::rocprofiler_pc_sampling_record_t
-    ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_LOAD_MARKER,  ///< ::rocprofiler_pc_sampling_code_object_load_marker_t
-    ROCPROFILER_PC_SAMPLING_RECORD_CODE_OBJECT_UNLOAD_MARKER,  ///< ::rocprofiler_pc_sampling_code_object_unload_marker_t
+    ROCPROFILER_PC_SAMPLING_RECORD_SAMPLE,  ///< ::rocprofiler_pc_sampling_record_t
     ROCPROFILER_PC_SAMPLING_RECORD_LAST,
 } rocprofiler_pc_sampling_record_kind_t;
 

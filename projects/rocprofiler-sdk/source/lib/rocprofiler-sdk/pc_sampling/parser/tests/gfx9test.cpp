@@ -299,7 +299,10 @@ class WaveIssueAndErrorTest : public WaveSnapTest
     {
         rocprofiler_pc_sampling_record_t sample;
         ::memset(&sample, 0, sizeof(sample));
-        sample.pc                      = dispatch->unique_id;
+        // TODO: Since code objects are not mocked, use pc.loaded_code_object_offset
+        // as the absolute physical address of the mocked PC.
+        sample.pc.loaded_code_object_offset = dispatch->unique_id;
+
         sample.correlation_id.internal = dispatch->getMockId().raw;
 
         sample.flags.valid              = valid && !error;

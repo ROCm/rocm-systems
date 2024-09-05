@@ -35,7 +35,7 @@ static bool
 Benchmark(bool bWarmup)
 {
     constexpr size_t SAMPLE_PER_DISPATCH = 8192;
-    constexpr size_t DISP_PER_QUEUE      = 12;
+    constexpr size_t DISP_PER_QUEUE      = 8;
     constexpr size_t NUM_QUEUES          = MockDoorBell::num_unique_bells;
 
     std::shared_ptr<MockRuntimeBuffer> buffer = std::make_shared<MockRuntimeBuffer>();
