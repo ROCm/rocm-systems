@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "RdciFieldGroupSubSystem.h"
 #include "RdciGroupSubSystem.h"
 #include "RdciStatsSubSystem.h"
+#include "RdciPolicySubSystem.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/rdc_common.h"
@@ -49,7 +50,7 @@ int main(int argc, char** argv) {
   const std::string usage_help =
       "Usage:\trdci <subsystem>|<options>\n"
       "subsystem: \n"
-      "          discovery, dmon, group, fieldgroup, stats, diag\n"
+      "          discovery, dmon, group, fieldgroup, stats, diag, policy\n"
       "options: \n"
       "        -v(--version) : Print client version information only\n";
 
@@ -82,6 +83,8 @@ int main(int argc, char** argv) {
       subsystem.reset(new amd::rdc::RdciFieldGroupSubSystem());
     } else if (subsystem_name == "stats") {
       subsystem.reset(new amd::rdc::RdciStatsSubSystem());
+    } else if (subsystem_name == "policy") {
+      subsystem.reset(new amd::rdc::RdciPolicySubSystem());
     } else {
       std::cout << usage_help;
       exit(0);
