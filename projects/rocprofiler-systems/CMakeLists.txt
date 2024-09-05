@@ -395,6 +395,12 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/modulefiles/${PROJECT_NAME}
     COMPONENT setup)
 
+install(
+    FILES
+        ${PROJECT_SOURCE_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT setup)
+
 # ------------------------------------------------------------------------------#
 #
 # install
