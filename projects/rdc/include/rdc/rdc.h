@@ -566,9 +566,11 @@ typedef struct {
  * @brief The policy type to support
  */
 typedef enum {
-  RDC_POLICY_COND_MAX_PAGE_RETRIED,  //!< Max number of page retired
-  RDC_POLICY_COND_THERMAL,           //!< Temperature threshold, millidegree Celsius
-  RDC_POLICY_COND_POWER,             //!< Power threshold, unit milliwatt
+  RDC_POLICY_COND_FIRST = 0,
+  RDC_POLICY_COND_MAX_PAGE_RETRIED = RDC_POLICY_COND_FIRST,  //!< Max number of page retired
+  RDC_POLICY_COND_THERMAL,  //!< Temperature threshold, millidegree Celsius
+  RDC_POLICY_COND_POWER,    //!< Power threshold, unit milliwatt
+  RDC_POLICY_COND_LAST = RDC_POLICY_COND_POWER,
   RDC_POLICY_COND_MAX
 } rdc_policy_condition_type_t;
 
