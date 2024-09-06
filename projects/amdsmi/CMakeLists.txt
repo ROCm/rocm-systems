@@ -230,7 +230,7 @@ install(
     COMPONENT dev)
 
 #License file
-set(CPACK_RPM_PACKAGE_LICENSE "NCSA")
+set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 # install license file in share/doc/amd_smi-asan folder
 install(
     FILES ${CPACK_RESOURCE_FILE_LICENSE}

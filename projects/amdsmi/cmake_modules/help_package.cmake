@@ -85,7 +85,7 @@ function(generic_package)
         "${CMAKE_INSTALL_PREFIX}"
         CACHE STRING "Default packaging prefix.")
     set(CPACK_RESOURCE_FILE_LICENSE
-        "${CMAKE_CURRENT_SOURCE_DIR}/License.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE"
         CACHE STRING "")
     set(CPACK_RPM_PACKAGE_LICENSE
         "MIT"

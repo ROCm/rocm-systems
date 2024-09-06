@@ -292,7 +292,6 @@ In order to build the AMD SMI library, the following components are required. No
 
 In order to build the AMD SMI python package, the following components are required:
 
-* clang (14.0 or above)
 * python (3.6.8 or above)
 * virtualenv - `python3 -m pip install virtualenv`
 
