@@ -197,8 +197,10 @@ get_pc_sampling_ioctl_version(uint32_t kfd_gpu_id, pc_sampling_ioctl_version_t& 
  * Other values informs users about the reason why PC sampling is not supported.
  */
 rocprofiler_status_t
-is_pc_sampling_supported(uint32_t kfd_gpu_id)
+is_pc_sampling_supported(const rocprofiler_agent_t* agent)
 {
+    auto             kfd_gpu_id = agent->gpu_id;
+    std::string_view agent_name = agent->name;
     // Verify KFD 1.16 version
     rocprofiler_ioctl_version_info_t ioctl_version = {.major_version = 0, .minor_version = 0};
     auto                             status        = get_ioctl_version(ioctl_version);
@@ -213,7 +215,7 @@ is_pc_sampling_supported(uint32_t kfd_gpu_id)
     }
 
     // TODO: remove once KFD is upstreamed
-    // Verify PC sampling IOCTL 0.1 version
+    // Verify PC sampling IOCTL version
     pc_sampling_ioctl_version_t pcs_ioctl_version = {.major_version = 0, .minor_version = 0};
     status = get_pc_sampling_ioctl_version(kfd_gpu_id, pcs_ioctl_version);
     if(status != ROCPROFILER_STATUS_SUCCESS)
@@ -226,16 +228,27 @@ is_pc_sampling_supported(uint32_t kfd_gpu_id)
         // that support this feature.
         return status;
     }
-    else if(pcs_ioctl_version.major_version < 1 && pcs_ioctl_version.minor_version < 1)
+    else if(agent_name == "gfx90a")
     {
-        // The PC sampling IOCTL version is the same for all available devices.
-        // Thus, emit the message and skip all tests and samples on the system in use.
-        ROCP_ERROR << "PC sampling unavailable\n";
-        return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+        // For gfx90a, we expect PC sampling IOCTL to be at least 0.1.
+        if(pcs_ioctl_version.major_version > 0 || pcs_ioctl_version.minor_version >= 1)
+            return ROCPROFILER_STATUS_SUCCESS;
+        else
+            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
     }
-
-    // PC sampling is supported on the device with `kfd_gpu_id`.
-    return ROCPROFILER_STATUS_SUCCESS;
+    else if(agent_name.find("gfx94") == 0)
+    {
+        // We expect PC sampling IOCTL to be at least 0.3 for gfx940, gfx941, gfx942, etc.
+        if(pcs_ioctl_version.major_version > 0 || pcs_ioctl_version.minor_version >= 3)
+            return ROCPROFILER_STATUS_SUCCESS;
+        else
+            return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
+    }
+    else
+    {
+        // The agent does not support PC sampling.
+        return ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE;
+    }
 }
 
 /**
@@ -342,7 +355,7 @@ convert_ioctl_pcs_config_to_rocp(const rocprofiler_ioctl_pc_sampling_info_t& ioc
 rocprofiler_status_t
 ioctl_query_pcs_configs(const rocprofiler_agent_t* agent, rocp_pcs_cfgs_vec_t& rocp_configs)
 {
-    if(auto status = is_pc_sampling_supported(agent->gpu_id); status != ROCPROFILER_STATUS_SUCCESS)
+    if(auto status = is_pc_sampling_supported(agent); status != ROCPROFILER_STATUS_SUCCESS)
         return status;
 
     uint32_t kfd_gpu_id = agent->gpu_id;
@@ -444,7 +457,7 @@ ioctl_pcs_create(const rocprofiler_agent_t*       agent,
                  uint64_t                         interval,
                  uint32_t*                        ioctl_pcs_id)
 {
-    if(auto status = is_pc_sampling_supported(agent->gpu_id); status != ROCPROFILER_STATUS_SUCCESS)
+    if(auto status = is_pc_sampling_supported(agent); status != ROCPROFILER_STATUS_SUCCESS)
         return status;
 
     rocprofiler_ioctl_pc_sampling_info_t ioctl_cfg;

@@ -20,6 +20,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/utility.hpp"
+
 #include <rocprofiler-sdk/buffer.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
@@ -322,9 +324,11 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
                                                static_cast<void*>(&cb_data->gpu_pcs_agents)),
             "Failed to find GPU agents");
 
-        // TODO-VLAINDIC: Can we dynamically skip the test if the underlying
-        //   HW does not support PC sampling
-        if(cb_data->gpu_pcs_agents.size() == 0) exit(0);
+        if(cb_data->gpu_pcs_agents.size() == 0)
+        {
+            ROCP_ERROR << "PC sampling unavailable\n";
+            exit(0);
+        }
 
         ROCPROFILER_CALL(rocprofiler_create_context(&cb_data->client_ctx),
                          "failed to create context");
