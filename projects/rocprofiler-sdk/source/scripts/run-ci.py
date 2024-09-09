@@ -15,7 +15,7 @@ import multiprocessing
 # _PROJECT_NAME = "rocprofiler-v2-internal"
 # _BASE_URL = "10.194.116.31/cdash"
 _PROJECT_NAME = "rocprofiler-sdk-internal"
-_BASE_URL = "cdash.mariadb.svc.cluster.local"
+_BASE_URL = "cdash.rocprofiler.amd.com"
 _GCOVR_GENERATE_CMD = None
 
 # these are various default values
