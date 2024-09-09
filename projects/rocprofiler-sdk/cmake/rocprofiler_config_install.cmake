@@ -21,6 +21,11 @@ install(
     COMPONENT tests)
 
 install(
+    FILES ${PROJECT_SOURCE_DIR}/requirements.txt
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PACKAGE_NAME}/tests
+    COMPONENT tests)
+
+install(
     EXPORT ${PACKAGE_NAME}-targets
     FILE ${PACKAGE_NAME}-targets.cmake
     NAMESPACE ${PACKAGE_NAME}::
