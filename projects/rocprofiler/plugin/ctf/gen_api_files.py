@@ -656,6 +656,19 @@ def _process_file(api_prefix, path):
     # Get return value information dictionary.
     retval_info = _get_retval_info(path)
 
+    # add support for structures defined inside union.
+    new_items = []
+    for struct_name, struct in cpp_header.classes.items():
+        # Check if the struct_name starts with 'union '.
+        if re.match(r'^union \w+', struct_name) is not None:
+            parts = struct_name.split('::')
+            simplified = parts[-1] 
+            if simplified != "union ":
+                new_items.append((simplified, cpp_header.classes.get(struct_name)))
+
+    for key, value in new_items:
+        cpp_header.classes[key] = value
+
     # Find callback data structure.
     for struct_name, struct in cpp_header.classes.items():
         if re.match(r'^' + api_prefix + r'_api_data\w+$', struct_name) is not None:
