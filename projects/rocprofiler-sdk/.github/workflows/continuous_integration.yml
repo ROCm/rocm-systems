@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi3', 'vega20', 'mi200', 'mi300']
+        runner: ['mi200', 'mi300']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -41,7 +41,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: navi3
+      CORE_EXT_RUNNER: mi200
 
     steps:
     - uses: actions/checkout@v4
@@ -511,17 +511,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['navi3', 'vega20', 'mi300']
+        runner: ['mi200', 'mi300']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         exclude:
-          - { runner: 'navi3',  sanitizer: 'ThreadSanitizer' }
-          - { runner: 'navi3',  sanitizer: 'LeakSanitizer' }
-          - { runner: 'vega20', sanitizer: 'AddressSanitizer' }
-          - { runner: 'vega20', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi300',  sanitizer: 'AddressSanitizer' }
-          - { runner: 'mi300',  sanitizer: 'ThreadSanitizer' }
+        #   - { runner: 'navi3',  sanitizer: 'ThreadSanitizer' }
+        #   - { runner: 'navi3',  sanitizer: 'LeakSanitizer' }
+        #   - { runner: 'vega20', sanitizer: 'AddressSanitizer' }
+        #   - { runner: 'vega20', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi200', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi200', sanitizer: 'AddressSanitizer' }
+        #   - { runner: 'mi300',  sanitizer: 'AddressSanitizer' }
+          - { runner: 'mi300', sanitizer: 'ThreadSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-runner-set
