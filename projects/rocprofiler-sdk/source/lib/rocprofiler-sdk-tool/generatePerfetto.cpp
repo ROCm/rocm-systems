@@ -272,6 +272,7 @@ write_perfetto(
                               itr.correlation_id.internal);
             TRACE_EVENT_END(
                 sdk::perfetto_category<sdk::category::hsa_api>::name, track, itr.end_timestamp);
+            tracing_session->FlushBlocking();
         }
 
         for(auto itr : *hip_api_data)
@@ -300,6 +301,7 @@ write_perfetto(
                               itr.correlation_id.internal);
             TRACE_EVENT_END(
                 sdk::perfetto_category<sdk::category::hip_api>::name, track, itr.end_timestamp);
+            tracing_session->FlushBlocking();
         }
 
         for(auto itr : *marker_api_data)
@@ -331,6 +333,7 @@ write_perfetto(
                               itr.correlation_id.internal);
             TRACE_EVENT_END(
                 sdk::perfetto_category<sdk::category::marker_api>::name, track, itr.end_timestamp);
+            tracing_session->FlushBlocking();
         }
 
         for(auto itr : *memory_copy_data)
@@ -365,6 +368,7 @@ write_perfetto(
                               itr.thread_id);
             TRACE_EVENT_END(
                 sdk::perfetto_category<sdk::category::memory_copy>::name, track, itr.end_timestamp);
+            tracing_session->FlushBlocking();
         }
 
         for(auto itr : *kernel_dispatch_data)
@@ -424,6 +428,7 @@ write_perfetto(
             TRACE_EVENT_END(sdk::perfetto_category<sdk::category::kernel_dispatch>::name,
                             track,
                             itr.end_timestamp);
+            tracing_session->FlushBlocking();
         }
     }
 
@@ -495,6 +500,7 @@ write_perfetto(
                               mem_cpy_tracks.at(mitr.first),
                               itr.first,
                               itr.second / bytes_multiplier);
+                tracing_session->FlushBlocking();
             }
         }
     }
