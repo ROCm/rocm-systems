@@ -72,7 +72,7 @@ struct async_copy_info;
     struct async_copy_info<ROCPROFILER_MEMORY_COPY_##DIRECTION>                                    \
     {                                                                                              \
         static constexpr auto operation_idx = ROCPROFILER_MEMORY_COPY_##DIRECTION;                 \
-        static constexpr auto name          = #DIRECTION;                                          \
+        static constexpr auto name          = "MEMORY_COPY_" #DIRECTION;                           \
     };
 
 SPECIALIZE_ASYNC_COPY_INFO(NONE)

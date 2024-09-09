@@ -22,6 +22,13 @@
 
 #pragma once
 
+#include "domain_type.hpp"
+
+#include "lib/common/logging.hpp"
+#include "lib/common/mpl.hpp"
+
+#include <rocprofiler-sdk/cxx/serialization.hpp>
+
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -29,7 +36,9 @@
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <type_traits>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -93,6 +102,8 @@ public:
     }
 
     float_type get_stddev() const { return ::std::sqrt(::std::abs(get_variance())); }
+    float_type get_percent(float_type _total) const;
+    float_type get_percent(const this_type&) const;
 
     // Modifications
     void reset()
@@ -209,6 +220,107 @@ public:
     {
         return statistics(lhs) -= rhs;
     }
+
+    template <typename ArchiveT>
+    void serialize(ArchiveT& ar, const unsigned int) const
+    {
+        ar(cereal::make_nvp("count", m_cnt));
+        ar(cereal::make_nvp("sum", m_sum));
+        ar(cereal::make_nvp("sqr", m_sqr));
+        ar(cereal::make_nvp("min", m_min));
+        ar(cereal::make_nvp("max", m_max));
+        ar(cereal::make_nvp("mean", get_mean()));
+        ar(cereal::make_nvp("stddev", get_stddev()));
+        ar(cereal::make_nvp("variance", get_variance()));
+    }
+};
+
+template <typename Tp, typename Fp>
+typename statistics<Tp, Fp>::float_type
+statistics<Tp, Fp>::get_percent(float_type _total) const
+{
+    constexpr float_type one_hundred = 100.0;
+    const float_type     _sum        = get_sum();
+
+    ROCP_WARNING_IF(static_cast<int64_t>(_sum) > static_cast<int64_t>(_total))
+        << "percentage calculation > 100%. sum=" << _sum << " > total=" << _total;
+
+    return (_sum / _total) * one_hundred;
+}
+
+template <typename Tp, typename Fp>
+typename statistics<Tp, Fp>::float_type
+statistics<Tp, Fp>::get_percent(const statistics<Tp, Fp>& _rhs) const
+{
+    return get_percent(_rhs.get_sum());
+}
+
+using float_type        = double;
+using stats_data_t      = statistics<uint64_t, float_type>;
+using stats_map_t       = std::map<std::string_view, stats_data_t>;
+using stats_pair_t      = std::pair<std::string_view, stats_data_t>;
+using stats_entry_vec_t = std::vector<stats_pair_t>;
+
+inline bool
+default_stats_sorter(const stats_pair_t& lhs, const stats_pair_t& rhs)
+{
+    return (lhs.second.get_sum() > rhs.second.get_sum());
+}
+
+struct stats_entry_t
+{
+    using sort_predicate_t = bool (*)(const stats_pair_t&, const stats_pair_t&);
+
+    stats_entry_t()                         = default;
+    ~stats_entry_t()                        = default;
+    stats_entry_t(const stats_entry_t&)     = default;
+    stats_entry_t(stats_entry_t&&) noexcept = default;
+    stats_entry_t& operator=(const stats_entry_t&) = default;
+    stats_entry_t& operator=(stats_entry_t&&) noexcept = default;
+
+    template <typename FuncT = sort_predicate_t>
+    stats_entry_t& sort(FuncT&& _predicate = default_stats_sorter);
+
+    explicit operator bool() const { return (total.get_count() > 0 && !entries.empty()); }
+
+    stats_data_t      total   = {};
+    stats_entry_vec_t entries = {};
+
+    template <typename ArchiveT>
+    void serialize(ArchiveT& ar, const unsigned int) const
+    {
+        total.serialize(ar, 0);
+        auto _entries_map = std::map<std::string, stats_data_t>{};
+        for(const auto& itr : entries)
+            _entries_map.emplace(std::string{itr.first}, itr.second);
+        ar(cereal::make_nvp("operations", _entries_map));
+    }
+};
+
+template <typename FuncT>
+stats_entry_t&
+stats_entry_t::sort(FuncT&& _predicate)
+{
+    std::sort(entries.begin(), entries.end(), std::forward<FuncT>(_predicate));
+    return *this;
+}
+
+using domain_stats_t     = std::pair<domain_type, stats_entry_t>;
+using domain_stats_vec_t = std::vector<domain_stats_t>;
+
+struct stats_formatter
+{
+    template <typename Tp>
+    std::ostream& operator()(std::ostream& ofs, const Tp& _val) const;
+};
+
+struct percentage
+{
+    float_type           value = {};
+    friend std::ostream& operator<<(std::ostream& os, percentage val)
+    {
+        return (stats_formatter{}(os, val) << val.value);
+    }
 };
 }  // namespace tool
 }  // namespace rocprofiler
@@ -227,5 +339,13 @@ template <typename Tp>
 min(::rocprofiler::tool::statistics<Tp> lhs, const Tp& rhs)
 {
     return lhs.get_min(rhs);
+}
+
+inline std::string
+to_string(::rocprofiler::tool::percentage val)
+{
+    auto _ss = std::stringstream{};
+    _ss << val;
+    return _ss.str();
 }
 }  // namespace std

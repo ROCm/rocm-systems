@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "generateStats.hpp"
 #include "helper.hpp"
 #include "statistics.hpp"
 
@@ -31,41 +32,45 @@ namespace rocprofiler
 {
 namespace tool
 {
-using float_type   = double;
-using stats_data_t = statistics<uint64_t, float_type>;
-
 void
 generate_csv(tool_table* tool_functions, std::vector<rocprofiler_agent_v0_t>& data);
 
-stats_data_t
+void
 generate_csv(tool_table*                                                            tool_functions,
-             const std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& data);
-
-stats_data_t
-generate_csv(tool_table*                                                    tool_functions,
-             const std::deque<rocprofiler_buffer_tracing_hip_api_record_t>& data);
-
-stats_data_t
-generate_csv(tool_table*                                                    tool_functions,
-             const std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>& data);
-
-stats_data_t
-generate_csv(tool_table*                                                        tool_functions,
-             const std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>& data);
-
-stats_data_t
-generate_csv(tool_table*                                                       tool_functions,
-             const std::deque<rocprofiler_buffer_tracing_marker_api_record_t>& data);
-
-stats_data_t
-generate_csv(tool_table*                                                     tool_functions,
-             const std::deque<rocprofiler_tool_counter_collection_record_t>& data);
-
-stats_data_t
-generate_csv(tool_table*                                                           tool_functions,
-             const std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>& data);
+             const std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& data,
+             const stats_entry_t&                                                   stats);
 
 void
-generate_csv(tool_table* tool_functions, std::unordered_map<domain_type, stats_data_t>& data);
+generate_csv(tool_table*                                                    tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_hip_api_record_t>& data,
+             const stats_entry_t&                                           stats);
+
+void
+generate_csv(tool_table*                                                    tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>& data,
+             const stats_entry_t&                                           stats);
+
+void
+generate_csv(tool_table*                                                        tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>& data,
+             const stats_entry_t&                                               stats);
+
+void
+generate_csv(tool_table*                                                       tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_marker_api_record_t>& data,
+             const stats_entry_t&                                              stats);
+
+void
+generate_csv(tool_table*                                                     tool_functions,
+             const std::deque<rocprofiler_tool_counter_collection_record_t>& data,
+             const stats_entry_t&                                            stats);
+
+void
+generate_csv(tool_table*                                                           tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>& data,
+             const stats_entry_t&                                                  stats);
+
+void
+generate_csv(tool_table* tool_functions, const domain_stats_vec_t& data);
 }  // namespace tool
 }  // namespace rocprofiler

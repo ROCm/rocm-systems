@@ -83,8 +83,8 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
-    def add_parser_bool_argument(*args, **kwargs):
-        parser.add_argument(
+    def add_parser_bool_argument(gparser, *args, **kwargs):
+        gparser.add_argument(
             *args,
             **kwargs,
             action=booleanArgAction,
@@ -95,90 +95,15 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
             metavar="BOOL",
         )
 
-    # Add the arguments
-    add_parser_bool_argument(
-        "--hip-trace",
-        help="For Collecting HIP Traces (runtime + compiler)",
-    )
-    add_parser_bool_argument(
-        "--hip-runtime-trace",
-        help="For Collecting HIP Runtime API Traces",
-    )
-    add_parser_bool_argument(
-        "--hip-compiler-trace",
-        help="For Collecting HIP Compiler generated code Traces",
-    )
-    add_parser_bool_argument(
-        "--marker-trace",
-        help="For Collecting Marker (ROCTx) Traces",
-    )
-    add_parser_bool_argument(
-        "--kernel-trace",
-        help="For Collecting Kernel Dispatch Traces",
-    )
-    add_parser_bool_argument(
-        "--memory-copy-trace",
-        help="For Collecting Memory Copy Traces",
-    )
-    add_parser_bool_argument(
-        "--scratch-memory-trace",
-        help="For Collecting Scratch Memory operations Traces",
-    )
-    add_parser_bool_argument(
-        "--stats",
-        help="For Collecting statistics of enabled tracing types",
-    )
-    add_parser_bool_argument(
-        "--hsa-trace",
-        help="For Collecting HSA Traces (core + amd + image + finalizer)",
-    )
-    add_parser_bool_argument(
-        "--hsa-core-trace",
-        help="For Collecting HSA API Traces (core API)",
-    )
-    add_parser_bool_argument(
-        "--hsa-amd-trace",
-        help="For Collecting HSA API Traces (AMD-extension API)",
-    )
-    add_parser_bool_argument(
-        "--hsa-image-trace",
-        help="For Collecting HSA API Traces (Image-extenson API)",
-    )
-    add_parser_bool_argument(
-        "--hsa-finalizer-trace",
-        help="For Collecting HSA API Traces (Finalizer-extension API)",
-    )
-    add_parser_bool_argument(
-        "-s",
-        "--sys-trace",
-        help="For Collecting HIP, HSA, Marker (ROCTx), Memory copy, Scratch memory, and Kernel dispatch traces",
-    )
-    add_parser_bool_argument(
-        "-M",
-        "--mangled-kernels",
-        help="Do not demangle the kernel names",
-    )
-    add_parser_bool_argument(
-        "-T",
-        "--truncate-kernels",
-        help="Truncate the demangled kernel names",
-    )
-    add_parser_bool_argument(
-        "-L",
-        "--list-metrics",
-        help="List metrics for counter collection",
-    )
-    add_parser_bool_argument(
-        "--kernel-rename",
-        help="Use region names defined by roctxRangePush/roctxRangePop regions to rename the kernels",
-    )
-    parser.add_argument(
+    io_options = parser.add_argument_group("I/O options")
+
+    io_options.add_argument(
         "-i",
         "--input",
         help="Input file for counter collection",
         required=False,
     )
-    parser.add_argument(
+    io_options.add_argument(
         "-o",
         "--output-file",
         help="For the output file name",
@@ -186,7 +111,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         type=str,
         required=False,
     )
-    parser.add_argument(
+    io_options.add_argument(
         "-d",
         "--output-directory",
         help="For adding output path where the output files will be saved",
@@ -194,7 +119,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         type=str,
         required=False,
     )
-    parser.add_argument(
+    io_options.add_argument(
         "--output-format",
         help="For adding output format (supported formats: csv, json, pftrace, otf2)",
         nargs="+",
@@ -202,41 +127,188 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         choices=("csv", "json", "pftrace", "otf2"),
         type=str.lower,
     )
-    parser.add_argument(
+    io_options.add_argument(
         "--log-level",
         help="Set the log level",
         default=None,
         choices=("fatal", "error", "warning", "info", "trace", "env"),
         type=str.lower,
     )
-    parser.add_argument(
+
+    aggregate_tracing_options = parser.add_argument_group("Aggregate tracing options")
+
+    add_parser_bool_argument(
+        aggregate_tracing_options,
+        "-r",
+        "--runtime-trace",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, Memory operations (copies and scratch), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+    )
+    add_parser_bool_argument(
+        aggregate_tracing_options,
+        "-s",
+        "--sys-trace",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, Memory operations (copies and scratch), and Kernel dispatches.",
+    )
+
+    basic_tracing_options = parser.add_argument_group("Basic tracing options")
+
+    # Add the arguments
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hip-trace",
+        help="For collecting HIP Traces (runtime + compiler)",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--marker-trace",
+        help="For collecting Marker (ROCTx) Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--kernel-trace",
+        help="For collecting Kernel Dispatch Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--memory-copy-trace",
+        help="For collecting Memory Copy Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--scratch-memory-trace",
+        help="For collecting Scratch Memory operations Traces",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--hsa-trace",
+        help="For collecting HSA Traces (core + amd + image + finalizer)",
+    )
+
+    extended_tracing_options = parser.add_argument_group("Granular tracing options")
+
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--hip-runtime-trace",
+        help="For collecting HIP Runtime API Traces, e.g. public HIP API functions starting with 'hip' (i.e. hipSetDevice).",
+    )
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--hip-compiler-trace",
+        help="For collecting HIP Compiler generated code Traces, e.g. HIP API functions starting with '__hip' (i.e. __hipRegisterFatBinary).",
+    )
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--hsa-core-trace",
+        help="For collecting HSA API Traces (core API), e.g. HSA functions prefixed with only 'hsa_' (i.e. hsa_init).",
+    )
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--hsa-amd-trace",
+        help="For collecting HSA API Traces (AMD-extension API), e.g. HSA function prefixed with 'hsa_amd_' (i.e. hsa_amd_coherency_get_type).",
+    )
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--hsa-image-trace",
+        help="For collecting HSA API Traces (Image-extenson API), e.g. HSA functions prefixed with only 'hsa_ext_image_' (i.e. hsa_ext_image_get_capability).",
+    )
+    add_parser_bool_argument(
+        extended_tracing_options,
+        "--hsa-finalizer-trace",
+        help="For collecting HSA API Traces (Finalizer-extension API), e.g. HSA functions prefixed with only 'hsa_ext_program_' (i.e. hsa_ext_program_create).",
+    )
+
+    post_processing_options = parser.add_argument_group("Post-processing tracing options")
+
+    add_parser_bool_argument(
+        post_processing_options,
+        "--stats",
+        help="For collecting statistics of enabled tracing types",
+    )
+    add_parser_bool_argument(
+        post_processing_options,
+        "-S",
+        "--summary",
+        help="Output single summary of tracing data at the conclusion of the profiling session",
+    )
+    add_parser_bool_argument(
+        post_processing_options,
+        "-D",
+        "--summary-per-domain",
+        help="Output summary for each tracing domain at the conclusion of the profiling session",
+    )
+    post_processing_options.add_argument(
+        "--summary-groups",
+        help="Output a summary for each set of domains matching the regular expression, e.g. 'KERNEL_DISPATCH|MEMORY_COPY' will generate a summary from all the tracing data in the KERNEL_DISPATCH and MEMORY_COPY domains; '*._API' will generate a summary from all the tracing data in the HIP_API, HSA_API, and MARKER_API domains",
+        nargs="+",
+        default=None,
+        type=str,
+        metavar="REGULAR_EXPRESSION",
+    )
+
+    summary_options = parser.add_argument_group("Summary options")
+
+    summary_options.add_argument(
+        "--summary-output-file",
+        help="Output summary to a file, stdout, or stderr (default: stderr)",
+        default=None,
+        type=str,
+    )
+    summary_options.add_argument(
+        "-u",
+        "--summary-units",
+        help="Timing units for output summary",
+        default=None,
+        type=str,
+        choices=("sec", "msec", "usec", "nsec"),
+    )
+
+    kernel_naming_options = parser.add_argument_group("Kernel naming options")
+
+    add_parser_bool_argument(
+        kernel_naming_options,
+        "-M",
+        "--mangled-kernels",
+        help="Do not demangle the kernel names",
+    )
+    add_parser_bool_argument(
+        kernel_naming_options,
+        "-T",
+        "--truncate-kernels",
+        help="Truncate the demangled kernel names",
+    )
+    add_parser_bool_argument(
+        kernel_naming_options,
+        "--kernel-rename",
+        help="Use region names defined by roctxRangePush/roctxRangePop regions to rename the kernels",
+    )
+
+    filter_options = parser.add_argument_group("Filtering options")
+
+    filter_options.add_argument(
         "--kernel-include-regex",
-        help="Include the kernels matching this filter",
+        help="Include the kernels matching this filter from counter-collection and thread-trace data (non-matching kernels will be excluded)",
         default=None,
         type=str,
         metavar="REGULAR_EXPRESSION",
     )
-    parser.add_argument(
+    filter_options.add_argument(
         "--kernel-exclude-regex",
-        help="Exclude the kernels matching this filter",
+        help="Exclude the kernels matching this filter from counter-collection and thread-trace data (applied after --kernel-include-regex option)",
         default=None,
         type=str,
         metavar="REGULAR_EXPRESSION",
     )
-    parser.add_argument(
+    filter_options.add_argument(
         "--kernel-iteration-range",
         help="Iteration range",
         nargs="+",
         default=None,
         type=str,
     )
-    parser.add_argument(
-        "--preload",
-        help="Libraries to prepend to LD_PRELOAD (usually for sanitizers)",
-        default=os.environ.get("ROCPROF_PRELOAD", "").split(":"),
-        nargs="*",
-    )
-    parser.add_argument(
+
+    perfetto_options = parser.add_argument_group("Perfetto-specific options")
+
+    perfetto_options.add_argument(
         "--perfetto-backend",
         help="Perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons",
         default=None,
@@ -244,26 +316,44 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         nargs=1,
         choices=("inprocess", "system"),
     )
-    parser.add_argument(
+    perfetto_options.add_argument(
         "--perfetto-buffer-size",
         help="Size of buffer for perfetto output in KB. default: 1 GB",
         default=None,
         type=int,
         metavar="KB",
     )
-    parser.add_argument(
+    perfetto_options.add_argument(
         "--perfetto-buffer-fill-policy",
         help="Policy for handling new records when perfetto has reached the buffer limit",
         default=None,
         type=str,
         choices=("discard", "ring_buffer"),
     )
-    parser.add_argument(
+    perfetto_options.add_argument(
         "--perfetto-shmem-size-hint",
         help="Perfetto shared memory size hint in KB. default: 64 KB",
         default=None,
         type=int,
         metavar="KB",
+    )
+
+    display_options = parser.add_argument_group("Display options")
+
+    add_parser_bool_argument(
+        display_options,
+        "-L",
+        "--list-metrics",
+        help="List metrics for counter collection",
+    )
+
+    advanced_options = parser.add_argument_group("Advanced options")
+
+    advanced_options.add_argument(
+        "--preload",
+        help="Libraries to prepend to LD_PRELOAD (useful for sanitizer libraries)",
+        default=os.environ.get("ROCPROF_PRELOAD", "").split(":"),
+        nargs="*",
     )
 
     if args is None:
@@ -488,9 +578,13 @@ def run(app_args, args, **kwargs):
             if not _overwrite:
                 pass
             elif _prepend:
-                app_env[env_var] = "{}{}{}".format(_val, _join_char, _curr_val)
+                app_env[env_var] = (
+                    "{}{}{}".format(_val, _join_char, _curr_val) if _val else _curr_val
+                )
             elif _append:
-                app_env[env_var] = "{}{}{}".format(_curr_val, _join_char, _val)
+                app_env[env_var] = (
+                    "{}{}{}".format(_curr_val, _join_char, _val) if _val else _curr_val
+                )
             elif _overwrite:
                 _write_env_value()
         else:
@@ -504,12 +598,13 @@ def run(app_args, args, **kwargs):
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)
     ROCPROF_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     ROCPROF_SDK_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk.so"
+    ROCPROF_ROCTX_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-roctx.so"
 
-    args.preload = [itr for itr in args.preload if itr]
-    if args.preload:
-        update_env("LD_PRELOAD", ":".join(args.preload), prepend=True)
+    prepend_preload = [itr for itr in args.preload if itr]
+    append_preload = [ROCPROF_TOOL_LIBRARY, ROCPROF_SDK_LIBRARY]
 
-    update_env("LD_PRELOAD", f"{ROCPROF_TOOL_LIBRARY}:{ROCPROF_SDK_LIBRARY}", append=True)
+    update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
+    update_env("LD_PRELOAD", ":".join(append_preload), append=True)
 
     update_env(
         "ROCP_TOOL_LIBRARIES",
@@ -555,6 +650,16 @@ def run(app_args, args, **kwargs):
         ):
             setattr(args, itr, True)
 
+    if args.runtime_trace:
+        for itr in (
+            "hip_runtime_trace",
+            "marker_trace",
+            "kernel_trace",
+            "memory_copy_trace",
+            "scratch_memory_trace",
+        ):
+            setattr(args, itr, True)
+
     if args.hip_trace:
         for itr in ("compiler", "runtime"):
             setattr(args, f"hip_{itr}_trace", True)
@@ -584,14 +689,54 @@ def run(app_args, args, **kwargs):
         trace_count += 1 if val else 0
         trace_opts += ["--{}".format(opt.replace("_", "-"))]
 
-    if trace_count == 0 and args.stats:
-        fatal_error(
-            "No tracing options were enabled for --stats option. Tracing options:\n\t{}".format(
-                "\n\t".join(trace_opts)
-            )
-        )
+    # if marker tracing was requested, LD_PRELOAD the rocprofiler-sdk-roctx library
+    # to override the roctx symbols of an app linked to the old roctracer roctx
+    # if args.marker_trace:
+    #    update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
+
+    if trace_count == 0:
+        # if no tracing was enabled but the options below were enabled, raise an error
+        for oitr in [
+            "stats",
+            "summary",
+            "summary-per-domain",
+            "summary-groups",
+            "summary-output-file",
+            "summary-units",
+        ]:
+            _attr = oitr.replace("-", "_")
+            if not hasattr(args, _attr):
+                fatal_error(
+                    f"Internal error. parser does not support --{oitr} argument (i.e. args.{_attr})"
+                )
+            elif getattr(args, _attr):
+                _len = max([len(f"{key}") for key in args.keys()])
+                _args = "\n\t".join(
+                    sorted([f"{key:<{_len}} = {val}" for key, val in args.items()])
+                )
+                fatal_error(
+                    "No tracing options were enabled for --{} option.\nConfiguration argument values:\n\t{}\nTracing options:\n\t{}".format(
+                        oitr, f"{_args}", "\n\t".join(trace_opts)
+                    )
+                )
+
+    _summary_groups = "##@@##".join(args.summary_groups) if args.summary_groups else None
+    _summary_output_fname = args.summary_output_file
+    if _summary_output_fname is None:
+        _summary_output_fname = "stderr"
+    elif _summary_output_fname.lower() in ("stdout", "stderr"):
+        _summary_output_fname = _summary_output_fname.lower()
 
     update_env("ROCPROF_STATS", args.stats, overwrite_if_true=True)
+    update_env("ROCPROF_STATS_SUMMARY", args.summary, overwrite_if_true=True)
+    update_env("ROCPROF_STATS_SUMMARY_UNITS", args.summary_units, overwrite=True)
+    update_env("ROCPROF_STATS_SUMMARY_OUTPUT", _summary_output_fname, overwrite=True)
+    update_env("ROCPROF_STATS_SUMMARY_GROUPS", _summary_groups, overwrite=True)
+    update_env(
+        "ROCPROF_STATS_SUMMARY_PER_DOMAIN",
+        args.summary_per_domain,
+        overwrite_if_true=True,
+    )
     update_env(
         "ROCPROF_DEMANGLE_KERNELS",
         not args.mangled_kernels,

@@ -392,16 +392,19 @@ def test_memory_copy_trace(
 
     for row in memory_copy_input_data:
         assert row["Kind"] == "MEMORY_COPY"
-        assert row["Direction"] in ("HOST_TO_DEVICE", "DEVICE_TO_HOST")
+        assert row["Direction"] in (
+            "MEMORY_COPY_HOST_TO_DEVICE",
+            "MEMORY_COPY_DEVICE_TO_HOST",
+        )
 
         src_agent = get_agent(row["Source_Agent_Id"])
         dst_agent = get_agent(row["Destination_Agent_Id"])
         assert src_agent is not None and dst_agent is not None, f"{agent_info_input_data}"
 
-        if row["Direction"] == "HOST_TO_DEVICE":
+        if row["Direction"] == "MEMORY_COPY_HOST_TO_DEVICE":
             assert src_agent["Agent_Type"] == "CPU"
             assert dst_agent["Agent_Type"] == "GPU"
-        elif row["Direction"] == "DEVICE_TO_HOST":
+        elif row["Direction"] == "MEMORY_COPY_DEVICE_TO_HOST":
             assert src_agent["Agent_Type"] == "GPU"
             assert dst_agent["Agent_Type"] == "CPU"
 

@@ -35,18 +35,65 @@ set(CMAKE_HIP_EXTENSIONS OFF)
 set(CMAKE_HIP_STANDARD_REQUIRED ON)
 
 set_source_files_properties(transpose.cpp PROPERTIES LANGUAGE HIP)
-add_executable(transpose)
-target_sources(transpose PRIVATE transpose.cpp)
-target_compile_options(transpose PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+
+function(transpose_build_target _NAME _COMPILE_DEFS _LINK_TARGETS)
+    add_executable(${_NAME})
+    target_sources(${_NAME} PRIVATE transpose.cpp)
+    target_compile_definitions(${_NAME} PRIVATE ${_COMPILE_DEFS})
+    target_compile_options(${_NAME} PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
+    target_link_libraries(
+        ${_NAME} PRIVATE Threads::Threads rocprofiler-sdk::tests-build-flags
+                         ${_LINK_TARGETS})
+
+    if(TRANSPOSE_USE_MPI)
+        find_package(MPI REQUIRED)
+        target_compile_definitions(${_NAME} PRIVATE USE_MPI=1)
+        target_link_libraries(${_NAME} PRIVATE MPI::MPI_C)
+    endif()
+
+endfunction()
 
 find_package(Threads REQUIRED)
-target_link_libraries(transpose PRIVATE Threads::Threads)
-
 find_package(rocprofiler-sdk-roctx REQUIRED)
-target_link_libraries(transpose PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
 
-if(TRANSPOSE_USE_MPI)
-    find_package(MPI REQUIRED)
-    target_compile_definitions(transpose PRIVATE USE_MPI)
-    target_link_libraries(transpose PRIVATE MPI::MPI_C)
+transpose_build_target(transpose "" rocprofiler-sdk-roctx::rocprofiler-sdk-roctx)
+
+#
+# using old roctracer roctx
+#
+find_path(
+    roctracer_roctx_ROOT_DIR
+    NAMES include/roctracer/roctx.h
+    HINTS ${hip_DIR}
+    PATHS ${hip_DIR})
+
+find_path(
+    roctracer_roctx_INCLUDE_DIR
+    NAMES roctracer/roctx.h
+    HINTS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
+    PATHS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
+    PATH_SUFFIXES include)
+
+find_library(
+    roctracer_roctx_LIBRARY
+    NAMES roctx64
+    HINTS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
+    PATHS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
+    PATH_SUFFIXES lib lib64)
+
+include(FindPackageHandleStandardArgs)
+
+find_package_handle_standard_args(roctracer-roctx DEFAULT_MSG roctracer_roctx_ROOT_DIR
+                                  roctracer_roctx_INCLUDE_DIR roctracer_roctx_LIBRARY)
+
+if(roctracer-roctx_FOUND)
+    add_library(roctracer-roctx INTERFACE IMPORTED)
+    add_library(roctracer-roctx::roctracer-roctx ALIAS roctracer-roctx)
+    target_include_directories(roctracer-roctx INTERFACE ${roctracer_roctx_INCLUDE_DIR})
+    target_link_libraries(roctracer-roctx INTERFACE ${roctracer_roctx_LIBRARY})
+endif()
+
+if(TARGET roctracer-roctx::roctracer-roctx)
+    transpose_build_target(transpose-roctracer-roctx "USE_ROCTRACER_ROCTX=1"
+                           roctracer-roctx::roctracer-roctx)
 endif()

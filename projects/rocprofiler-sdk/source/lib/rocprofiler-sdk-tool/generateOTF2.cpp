@@ -21,13 +21,14 @@
 // SOFTWARE.
 
 #include "generateOTF2.hpp"
+#include "config.hpp"
 #include "helper.hpp"
+#include "output_file.hpp"
+
 #include "lib/common/filesystem.hpp"
 #include "lib/common/mpl.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk-tool/config.hpp"
-#include "output_file.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -510,6 +511,10 @@ write_otf2(tool_table*                                                      tool
             if(!_inp) return;
             for(auto itr : *_inp)
             {
+                if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API &&
+                   itr.operation == ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA)
+                    continue;
+
                 using value_type = common::mpl::unqualified_type_t<decltype(itr)>;
                 auto name        = buffer_names.at(itr.kind, itr.operation);
                 auto paradigm    = OTF2_PARADIGM_HIP;

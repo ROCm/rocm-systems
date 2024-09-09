@@ -105,6 +105,64 @@ tokenize(
     return _result;
 }
 
+/// \brief tokenize a string into a set
+///
+template <typename ContainerT = std::vector<std::string>,
+          typename DelimT     = std::string_view,
+          typename ValueT     = typename ContainerT::value_type,
+          typename PredicateT = ValueT (*)(DelimT&&)>
+inline ContainerT
+tokenize(
+    std::string_view           line,
+    const std::vector<DelimT>& delimiters,
+    PredicateT&&               predicate = [](DelimT&& s) -> ValueT { return ValueT{s}; })
+{
+    ContainerT _result = {};
+    size_t     _start  = 0;
+    size_t     _end    = std::string::npos;
+
+    while(_start != std::string::npos)
+    {
+        _end = std::string::npos;
+
+        // Find the earliest occurrence of any delimiter
+        for(const auto& itr : delimiters)
+        {
+            size_t pos = line.find(itr, _start);
+            if(pos != std::string::npos && (_end == std::string::npos || pos < _end))
+            {
+                _end = pos;
+            }
+        }
+
+        // Extract token and update start position
+        if(_end != std::string::npos)
+        {
+            mpl::emplace(_result,
+                         std::forward<PredicateT>(predicate)(line.substr(_start, _end - _start)));
+            _start = _end;
+
+            // Move start past the delimiter
+            for(const auto& delimiter : delimiters)
+            {
+                if(line.compare(_start, delimiter.size(), delimiter) == 0)
+                {
+                    _start += delimiter.size();
+                    break;
+                }
+            }
+        }
+        else
+        {
+            // Last token after the final delimiter
+            mpl::emplace(_result, std::forward<PredicateT>(predicate)(line.substr(_start)));
+            break;
+        }
+    }
+
+    return _result;
+}
+
 ///  \brief apply a string transformation to substring in between a common delimiter.
 ///
 template <typename PredicateT = std::function<std::string(const std::string&)>>

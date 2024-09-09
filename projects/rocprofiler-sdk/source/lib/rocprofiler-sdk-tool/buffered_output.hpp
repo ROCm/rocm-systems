@@ -59,7 +59,7 @@ struct buffered_output
     operator bool() const { return enabled; }
 
     std::deque<Tp> element_data = {};
-    stats_data_t   stats        = {};
+    stats_entry_t  stats        = {};
 
 private:
     bool enabled = false;

@@ -1,0 +1,11 @@
+jobs:
+  - output_directory: "@CMAKE_CURRENT_BINARY_DIR@/%env{ARBITRARY_ENV_VARIABLE}%"
+    output_file: out
+    output_format: [pftrace, json, otf2]
+    log_level: env
+    runtime_trace: True
+    kernel_rename: True
+    summary: True
+    summary_per_domain: True
+    summary_groups: ["KERNEL_DISPATCH|MEMORY_COPY"]
+    summary_output_file: "summary"

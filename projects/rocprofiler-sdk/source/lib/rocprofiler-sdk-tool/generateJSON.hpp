@@ -23,6 +23,7 @@
 #pragma once
 
 #include "helper.hpp"
+#include "statistics.hpp"
 
 namespace rocprofiler
 {
@@ -31,6 +32,7 @@ namespace tool
 void
 write_json(tool_table*                                                      tool_functions,
            uint64_t                                                         pid,
+           const domain_stats_vec_t&                                        domain_stats,
            std::vector<rocprofiler_agent_v0_t>                              agent_data,
            std::vector<rocprofiler_tool_counter_info_t>                     counter_data,
            std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_deque,

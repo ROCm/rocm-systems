@@ -33,6 +33,12 @@ namespace tool
 {
 namespace fs = common::filesystem;
 
+namespace
+{
+const auto stdout_names = std::unordered_set<std::string_view>{"stdout", "STDOUT"};
+const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR"};
+}  // namespace
+
 std::string
 get_output_filename(std::string_view fname, std::string_view ext)
 {
@@ -55,16 +61,17 @@ get_output_filename(std::string_view fname, std::string_view ext)
 
     return tool::format(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
 }
-std::pair<std::ostream*, output_stream_dtor_t>
+
+output_stream_t
 get_output_stream(std::string_view fname, std::string_view ext)
 {
     auto cfg_output_path = tool::format(tool::get_config().output_path);
 
-    if(cfg_output_path == "stdout" || cfg_output_path == "STDOUT")
+    if(stdout_names.count(cfg_output_path) > 0 || stdout_names.count(fname) > 0)
         return {&std::cout, [](auto*&) {}};
-    else if(cfg_output_path == "stderr" || cfg_output_path == "STDERR")
+    else if(stderr_names.count(cfg_output_path) > 0 || stderr_names.count(fname) > 0)
         return {&std::cout, [](auto*&) {}};
-    else if(cfg_output_path.empty())
+    else if(cfg_output_path.empty() || fname.empty())
         return {&std::clog, [](auto*&) {}};
 
     auto  output_file = get_output_filename(fname, ext);
@@ -82,12 +89,12 @@ get_output_stream(std::string_view fname, std::string_view ext)
 
 output_file::~output_file()
 {
-    if(m_stream)
+    if(m_os.stream)
         ROCP_INFO << "Closing result file: " << m_name;
     else
         ROCP_WARNING << "output_file::~output_file does not have a output stream instance!";
 
-    m_dtor(m_stream);
+    m_os.close();
 }
 }  // namespace tool
 }  // namespace rocprofiler

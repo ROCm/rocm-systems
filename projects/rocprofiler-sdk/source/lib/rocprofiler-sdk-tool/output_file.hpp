@@ -26,7 +26,6 @@
 #include "csv.hpp"
 
 #include "lib/common/filesystem.hpp"
-#include "lib/rocprofiler-sdk-tool/csv.hpp"
 
 #include <array>
 #include <iostream>
@@ -41,12 +40,48 @@ namespace rocprofiler
 {
 namespace tool
 {
-using output_stream_dtor_t = void (*)(std::ostream*&);
+using ostream_dtor_t = void (*)(std::ostream*&);
+
+using output_stream_pair_t = std::pair<std::ostream*, ostream_dtor_t>;
+
+struct output_stream_t
+{
+    output_stream_t() = default;
+    output_stream_t(std::ostream* _os, ostream_dtor_t _dtor)
+    : stream{_os}
+    , dtor{_dtor}
+    {}
+
+    ~output_stream_t() { close(); }
+    output_stream_t(const output_stream_t&)     = delete;
+    output_stream_t(output_stream_t&&) noexcept = default;
+    output_stream_t& operator=(const output_stream_t&) = delete;
+    output_stream_t& operator=(output_stream_t&&) noexcept = default;
+
+    explicit operator bool() const { return stream != nullptr; }
+
+    template <typename Tp>
+    std::ostream& operator<<(Tp&& value)
+    {
+        return ((stream) ? *stream : std::cerr) << std::forward<Tp>(value) << std::flush;
+    }
+
+    void close()
+    {
+        if(stream) (*stream) << std::flush;
+        if(dtor) dtor(stream);
+    }
+
+    bool writes_to_file() const { return (dynamic_cast<std::ofstream*>(stream) != nullptr); }
+
+    std::ostream*  stream = nullptr;
+    ostream_dtor_t dtor   = nullptr;
+};
 
 std::string
 get_output_filename(std::string_view fname, std::string_view ext);
 
-std::pair<std::ostream*, output_stream_dtor_t>
+output_stream_t
 get_output_stream(std::string_view fname, std::string_view ext);
 
 struct output_file
@@ -65,16 +100,15 @@ struct output_file
     std::ostream& operator<<(T&& value)
     {
         auto _lk = std::unique_lock<std::mutex>{m_mutex};
-        return ((m_stream) ? *m_stream : std::cerr) << std::forward<T>(value) << std::flush;
+        return ((m_os.stream) ? *m_os.stream : std::cerr) << std::forward<T>(value) << std::flush;
     }
 
-    operator bool() const { return m_stream != nullptr; }
+    operator bool() const { return m_os.stream != nullptr; }
 
 private:
-    const std::string    m_name   = {};
-    std::mutex           m_mutex  = {};
-    std::ostream*        m_stream = nullptr;
-    output_stream_dtor_t m_dtor   = [](std::ostream*&) {};
+    const std::string m_name  = {};
+    std::mutex        m_mutex = {};
+    output_stream_t   m_os    = {};
 };
 
 template <size_t N>
@@ -82,9 +116,8 @@ output_file::output_file(std::string                       name,
                          csv::csv_encoder<N>               encoder,
                          std::array<std::string_view, N>&& header)
 : m_name{std::move(name)}
+, m_os{get_output_stream(m_name, ".csv")}
 {
-    std::tie(m_stream, m_dtor) = get_output_stream(m_name, ".csv");
-
     for(auto& itr : header)
     {
         ROCP_FATAL_IF(itr.empty())
@@ -92,7 +125,7 @@ output_file::output_file(std::string                       name,
     }
 
     // write the csv header
-    if(m_stream) encoder.write_row(*m_stream, header);
+    if(m_os.stream) encoder.write_row(*m_os.stream, header);
 }
 }  // namespace tool
 }  // namespace rocprofiler

@@ -13,6 +13,7 @@ set(TOOL_HEADERS
     generateJSON.hpp
     generateOTF2.hpp
     generatePerfetto.hpp
+    generateStats.hpp
     helper.hpp
     output_file.hpp
     statistics.hpp
@@ -26,9 +27,11 @@ set(TOOL_SOURCES
     generateJSON.cpp
     generateOTF2.cpp
     generatePerfetto.cpp
+    generateStats.cpp
     helper.cpp
     main.c
     output_file.cpp
+    statistics.cpp
     tmp_file_buffer.cpp
     tmp_file.cpp
     tool.cpp)

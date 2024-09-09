@@ -20,8 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "hip/hip_runtime.h"
-#include "rocprofiler-sdk-roctx/roctx.h"
+#include <hip/hip_runtime.h>
+#include <sstream>
+
+#if defined(USE_ROCTRACER_ROCTX)
+#    include <roctracer/roctx.h>
+#else
+#    include <rocprofiler-sdk-roctx/roctx.h>
+#endif
 
 #include <chrono>
 #include <cstdio>
@@ -99,6 +105,15 @@ main(int argc, char** argv)
     printf("[transpose] Number of iterations: %zu\n", nitr);
     printf("[transpose] Syncing every %zu iterations\n", nsync);
 
+#if defined(USE_ROCTRACER_ROCTX)
+    {
+        auto _roctracer_roctx_ss = std::stringstream{};
+        _roctracer_roctx_ss << "roctracer/roctx v" << roctx_version_major() << "."
+                            << roctx_version_minor();
+        roctxMark(_roctracer_roctx_ss.str().c_str());
+    }
+#endif
+
 #if defined(USE_MPI)
     MPI_Init(&argc, &argv);
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -174,7 +189,15 @@ transpose(const int* in, int* out, int M, int N)
 void
 run(int rank, int tid, int devid, int argc, char** argv)
 {
-    roctxRangePush("run");
+    auto roctx_run_id = roctxRangeStart("run");
+
+    const auto mark = [rank, tid, devid](std::string_view suffix) {
+        auto _ss = std::stringstream{};
+        _ss << "run/rank-" << rank << "/thread-" << tid << "/device-" << devid << "/" << suffix;
+        roctxMark(_ss.str().c_str());
+    };
+
+    mark("begin");
 
     constexpr unsigned int M = 4960 * 2;
     constexpr unsigned int N = 4960 * 2;
@@ -219,9 +242,16 @@ run(int rank, int tid, int devid, int argc, char** argv)
     auto t1 = std::chrono::high_resolution_clock::now();
     for(size_t i = 0; i < nitr; ++i)
     {
+        roctxRangePush("run/iteration");
         transpose<<<grid, block, 0, stream>>>(in, out, M, N);
         check_hip_error();
-        if(i % nsync == (nsync - 1)) HIP_API_CALL(hipStreamSynchronize(stream));
+        if(i % nsync == (nsync - 1))
+        {
+            roctxRangePush("run/iteration/sync");
+            HIP_API_CALL(hipStreamSynchronize(stream));
+            roctxRangePop();
+        }
+        roctxRangePop();
     }
     auto t2 = std::chrono::high_resolution_clock::now();
     HIP_API_CALL(hipStreamSynchronize(stream));
@@ -251,7 +281,9 @@ run(int rank, int tid, int devid, int argc, char** argv)
     delete[] inp_matrix;
     delete[] out_matrix;
 
-    roctxRangePop();
+    mark("end");
+
+    roctxRangeStop(roctx_run_id);
 }
 
 namespace

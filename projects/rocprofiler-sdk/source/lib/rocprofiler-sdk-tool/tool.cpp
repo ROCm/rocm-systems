@@ -28,8 +28,10 @@
 #include "generateJSON.hpp"
 #include "generateOTF2.hpp"
 #include "generatePerfetto.hpp"
+#include "generateStats.hpp"
 #include "helper.hpp"
 #include "output_file.hpp"
+#include "statistics.hpp"
 #include "tmp_file.hpp"
 
 #include "lib/common/environment.hpp"
@@ -1335,7 +1337,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             "buffer tracing service for memory copy configure");
     }
 
-    if(tool::get_config().scratch_memory)
+    if(tool::get_config().scratch_memory_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
                                                    buffer_size,
@@ -1500,21 +1502,32 @@ api_registration_callback(rocprofiler_intercept_table_t,
                      "Iterate rocporfiler agents")
 }
 
-using stats_data_t = ::rocprofiler::tool::stats_data_t;
+using stats_data_t       = ::rocprofiler::tool::stats_data_t;
+using stats_entry_t      = ::rocprofiler::tool::stats_entry_t;
+using domain_stats_vec_t = ::rocprofiler::tool::domain_stats_vec_t;
 
 template <typename Tp, domain_type DomainT>
 void
 generate_output(rocprofiler::tool::buffered_output<Tp, DomainT>& output_v,
-                std::unordered_map<domain_type, stats_data_t>&   contributions_v)
+                domain_stats_vec_t&                              contributions_v)
 {
     if(!output_v) return;
 
     output_v.read();
 
+    if(tool::get_config().stats || tool::get_config().summary_output)
+    {
+        output_v.stats = rocprofiler::tool::generate_stats(tool_functions, output_v.element_data);
+    }
+
+    if(output_v.stats)
+    {
+        contributions_v.emplace_back(output_v.buffer_type_v, output_v.stats);
+    }
+
     if(tool::get_config().csv_output)
     {
-        output_v.stats = rocprofiler::tool::generate_csv(tool_functions, output_v.element_data);
-        contributions_v.emplace(output_v.buffer_type_v, output_v.stats);
+        rocprofiler::tool::generate_csv(tool_functions, output_v.element_data, output_v.stats);
     }
 }
 
@@ -1543,7 +1556,7 @@ tool_fini(void* /*tool_data*/)
     auto counters_output =
         counter_collection_buffered_output_t{tool::get_config().counter_collection};
     auto scratch_memory_output =
-        scratch_memory_buffered_output_t{tool::get_config().scratch_memory};
+        scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
 
     auto node_id_sort = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
 
@@ -1561,7 +1574,7 @@ tool_fini(void* /*tool_data*/)
         rocprofiler::tool::generate_csv(tool_functions, _agents);
     }
 
-    auto contributions = std::unordered_map<domain_type, stats_data_t>{};
+    auto contributions = domain_stats_vec_t{};
 
     generate_output(kernel_dispatch_output, contributions);
     generate_output(hsa_output, contributions);
@@ -1580,6 +1593,7 @@ tool_fini(void* /*tool_data*/)
     {
         rocprofiler::tool::write_json(tool_functions,
                                       getpid(),
+                                      contributions,
                                       _agents,
                                       _counters,
                                       &hip_output.element_data,
@@ -1615,6 +1629,11 @@ tool_fini(void* /*tool_data*/)
                                       &memory_copy_output.element_data,
                                       &marker_output.element_data,
                                       &scratch_memory_output.element_data);
+    }
+
+    if(tool::get_config().summary_output)
+    {
+        rocprofiler::tool::generate_stats(tool_functions, contributions);
     }
 
     auto destroy_output = [](auto& _buffered_output_v) { _buffered_output_v.destroy(); };

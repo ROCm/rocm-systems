@@ -170,13 +170,13 @@ def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
     assert len(memory_copy_input_data) == 2
 
     def test_row(idx, direction):
-        assert direction in ("HOST_TO_DEVICE", "DEVICE_TO_HOST")
+        assert direction in ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
         row = memory_copy_input_data[idx]
         assert row["Direction"] == direction
         src_agent = get_agent(row["Source_Agent_Id"])
         dst_agent = get_agent(row["Destination_Agent_Id"])
         assert src_agent is not None and dst_agent is not None, f"{agent_info_input_data}"
-        if direction == "HOST_TO_DEVICE":
+        if direction == "MEMORY_COPY_HOST_TO_DEVICE":
             assert src_agent["Agent_Type"] == "CPU"
             assert dst_agent["Agent_Type"] == "GPU"
         else:
@@ -185,8 +185,8 @@ def test_memory_copy_trace(agent_info_input_data, memory_copy_input_data):
         assert int(row["Correlation_Id"]) > 0
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
-    test_row(0, "HOST_TO_DEVICE")
-    test_row(1, "DEVICE_TO_HOST")
+    test_row(0, "MEMORY_COPY_HOST_TO_DEVICE")
+    test_row(1, "MEMORY_COPY_DEVICE_TO_HOST")
 
 
 def test_memory_copy_json_trace(json_data):
@@ -208,14 +208,14 @@ def test_memory_copy_json_trace(json_data):
     assert len(memory_copy_data) == 2
 
     def test_row(idx, direction):
-        assert direction in ("HOST_TO_DEVICE", "DEVICE_TO_HOST")
+        assert direction in ("MEMORY_COPY_HOST_TO_DEVICE", "MEMORY_COPY_DEVICE_TO_HOST")
         row = memory_copy_data[idx]
         src_agent = get_agent(row["src_agent_id"])
         dst_agent = get_agent(row["dst_agent_id"])
         assert get_kind_name(row["kind"]) == "MEMORY_COPY"
         assert src_agent is not None, f"{row}"
         assert dst_agent is not None, f"{row}"
-        if direction == "HOST_TO_DEVICE":
+        if direction == "MEMORY_COPY_HOST_TO_DEVICE":
             assert src_agent["type"] == 1
             assert dst_agent["type"] == 2
         else:
@@ -224,8 +224,8 @@ def test_memory_copy_json_trace(json_data):
         assert row["correlation_id"]["internal"] > 0
         assert row["end_timestamp"] >= row["start_timestamp"]
 
-    test_row(0, "HOST_TO_DEVICE")
-    test_row(1, "DEVICE_TO_HOST")
+    test_row(0, "MEMORY_COPY_HOST_TO_DEVICE")
+    test_row(1, "MEMORY_COPY_DEVICE_TO_HOST")
 
 
 def test_marker_api_trace(marker_input_data):

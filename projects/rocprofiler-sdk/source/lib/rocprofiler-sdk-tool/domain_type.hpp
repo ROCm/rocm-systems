@@ -28,11 +28,11 @@ enum class domain_type
 {
     HSA = 0,
     HIP,
-    MEMORY_COPY,
-    COUNTER_COLLECTION,
-    KERNEL_DISPATCH,
     MARKER,
+    KERNEL_DISPATCH,
+    MEMORY_COPY,
     SCRATCH_MEMORY,
+    COUNTER_COLLECTION,
     LAST,
 };
 

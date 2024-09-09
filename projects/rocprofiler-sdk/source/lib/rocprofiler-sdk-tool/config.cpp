@@ -28,12 +28,14 @@
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
 
-#include <rocprofiler-sdk/cxx/details/delimit.hpp>
+#include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
 #include <fmt/core.h>
 
+#include <linux/limits.h>
 #include <unistd.h>
 #include <algorithm>
 #include <chrono>
@@ -44,6 +46,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace rocprofiler
@@ -67,8 +70,14 @@ const auto*  launch_clock = as_pointer(std::chrono::system_clock::now());
 const auto*  launch_datetime =
     get_local_datetime(get_env("ROCP_TIME_FORMAT", "%F_%H.%M"), launch_time);
 const auto env_regexes =
-    new std::array<std::regex, 2>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
-                                  std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"}};
+    new std::array<std::regex, 3>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
+                                  std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
+                                  std::regex{"(.*)%q\\{([A-Z0-9_]+)\\}(.*)"}};
+// env regex examples:
+//  - %env{USER}%       Consistent with other output key formats (start+end with %)
+//  - $ENV{USER}        Similar to CMake
+//  - %q{USER}          Compatibility with NVIDIA
+//
 
 std::string*
 get_local_datetime(const std::string& dt_format, std::time_t*& _dt_curr)
@@ -84,6 +93,22 @@ get_local_datetime(const std::string& dt_format, std::time_t*& _dt_curr)
         return new std::string{mbstr};
 
     return nullptr;
+}
+
+std::string
+get_hostname()
+{
+    auto _hostname_buff = std::array<char, PATH_MAX>{};
+    _hostname_buff.fill('\0');
+    if(gethostname(_hostname_buff.data(), _hostname_buff.size() - 1) != 0)
+    {
+        auto _err = errno;
+        ROCP_WARNING << "Hostname unknown. gethostname failed with error code " << _err << ": "
+                     << strerror(_err);
+        return std::string{"UNKNOWN_HOSTNAME"};
+    }
+
+    return std::string{_hostname_buff.data()};
 }
 
 inline bool
@@ -279,6 +304,34 @@ config::config()
     const auto supported_perfetto_backends = std::set<std::string_view>{"inprocess", "system"};
     LOG_IF(FATAL, supported_perfetto_backends.count(perfetto_backend) == 0)
         << "Unsupported perfetto backend type: " << perfetto_backend;
+
+    if(stats_summary_unit == "sec")
+        stats_summary_unit_value = common::units::sec;
+    else if(stats_summary_unit == "msec")
+        stats_summary_unit_value = common::units::msec;
+    else if(stats_summary_unit == "usec")
+        stats_summary_unit_value = common::units::usec;
+    else if(stats_summary_unit == "nsec")
+        stats_summary_unit_value = common::units::nsec;
+    else
+    {
+        ROCP_FATAL << "Unsupported summary units value: " << stats_summary_unit;
+    }
+
+    if(auto _summary_grps = get_env("ROCPROF_STATS_SUMMARY_GROUPS", ""); !_summary_grps.empty())
+    {
+        stats_summary_groups =
+            sdk::parse::tokenize(_summary_grps, std::vector<std::string_view>{"##@@##"});
+
+        // remove any empty strings (just in case these slipped through)
+        stats_summary_groups.erase(std::remove_if(stats_summary_groups.begin(),
+                                                  stats_summary_groups.end(),
+                                                  [](const auto& itr) { return itr.empty(); }),
+                                   stats_summary_groups.end());
+    }
+
+    // enable summary output if any of these are enabled
+    summary_output = (stats_summary || stats_summary_per_domain || !stats_summary_groups.empty());
 }
 
 std::vector<output_key>
@@ -374,8 +427,10 @@ output_keys(std::string _tag)
     }
 
     auto _launch_time = (launch_datetime) ? *launch_datetime : std::string{".UNKNOWN_LAUNCH_TIME."};
+    auto _hostname    = get_hostname();
 
     for(auto&& itr : std::initializer_list<output_key>{
+            {"%hostname%", _hostname, "Network hostname"},
             {"%pid%", _proc_id, "Process identifier"},
             {"%ppid%", _parent_id, "Parent process identifier"},
             {"%pgid%", _pgroup_id, "Process group identifier"},
@@ -392,6 +447,7 @@ output_keys(std::string _tag)
     }
 
     for(auto&& itr : std::initializer_list<output_key>{
+            {"%h", _hostname, "Shorthand for %hostname%"},
             {"%p", _proc_id, "Shorthand for %pid%"},
             {"%j", _slurm_job_id, "Shorthand for %job%"},
             {"%r", _slurm_proc_id, "Shorthand for %rank%"},
@@ -404,8 +460,10 @@ output_keys(std::string _tag)
     return _options;
 }
 
+namespace
+{
 std::string
-format(std::string _fpath, const std::string& _tag)
+format_impl(std::string _fpath, const std::vector<output_key>& _keys)
 {
     if(_fpath.find('%') == std::string::npos && _fpath.find('$') == std::string::npos)
         return _fpath;
@@ -416,20 +474,36 @@ format(std::string _fpath, const std::string& _tag)
             _v.replace(pos, pitr.key.length(), pitr.value);
     };
 
-    for(auto&& itr : output_keys(_tag))
+    for(auto&& itr : _keys)
         _replace(_fpath, itr);
 
     // environment and configuration variables
     try
     {
+        auto strip_leading_and_replace =
+            [](std::string_view inp_v, std::initializer_list<char> keys, const char* val) {
+                auto inp = std::string{inp_v};
+                for(auto key : keys)
+                {
+                    auto pos = std::string::npos;
+                    while((pos = inp.find(key)) == 0)
+                        inp = inp.substr(pos + 1);
+
+                    while((pos = inp.find(key)) != std::string::npos)
+                        inp = inp.replace(pos, 1, val);
+                }
+                return inp;
+            };
+
         for(const auto& _re : *env_regexes)
         {
             while(std::regex_search(_fpath, _re))
             {
                 auto        _var = std::regex_replace(_fpath, _re, "$3");
                 std::string _val = get_env<std::string>(_var, "");
-                auto        _beg = std::regex_replace(_fpath, _re, "$1");
-                auto        _end = std::regex_replace(_fpath, _re, "$4");
+                _val             = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
+                auto _beg        = std::regex_replace(_fpath, _re, "$1");
+                auto _end        = std::regex_replace(_fpath, _re, "$4");
                 _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
             }
         }
@@ -452,6 +526,25 @@ format(std::string _fpath, const std::string& _tag)
     }
 
     return _fpath;
+}
+
+std::string
+format(std::string _fpath, const std::vector<output_key>& _keys)
+{
+    if(_fpath.find('%') == std::string::npos && _fpath.find('$') == std::string::npos)
+        return _fpath;
+
+    auto _ref = _fpath;
+    _fpath    = format_impl(std::move(_fpath), _keys);
+
+    return (_fpath == _ref) ? _fpath : format(std::move(_fpath), _keys);
+}
+}  // namespace
+
+std::string
+format(std::string _fpath, const std::string& _tag)
+{
+    return format(std::move(_fpath), output_keys(_tag));
 }
 
 std::string

@@ -21,11 +21,11 @@
 // SOFTWARE.
 
 #include "generatePerfetto.hpp"
+#include "config.hpp"
 #include "helper.hpp"
 #include "output_file.hpp"
 
 #include "lib/common/utility.hpp"
-#include "lib/rocprofiler-sdk-tool/config.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
@@ -503,23 +503,20 @@ write_perfetto(
     tracing_session->FlushBlocking();
     tracing_session->StopBlocking();
 
-    auto          filename = std::string{"results"};
-    auto          cleanup  = std::function<void(std::ostream*&)>{};
-    std::ostream* ofs      = nullptr;
-
-    std::tie(ofs, cleanup) = get_output_stream(filename, ".pftrace");
+    auto filename = std::string{"results"};
+    auto ofs      = get_output_stream(filename, ".pftrace");
 
     auto amount_read = std::atomic<size_t>{0};
     auto is_done     = std::promise<void>{};
     auto _mtx        = std::mutex{};
-    auto _reader     = [ofs, &_mtx, &is_done, &amount_read](
+    auto _reader     = [&ofs, &_mtx, &is_done, &amount_read](
                        ::perfetto::TracingSession::ReadTraceCallbackArgs _args) {
         auto _lk = std::unique_lock<std::mutex>{_mtx};
         if(_args.data && _args.size > 0)
         {
             ROCP_TRACE << "Writing " << _args.size << " B to trace...";
             // Write the trace data into file
-            ofs->write(_args.data, _args.size);
+            ofs.stream->write(_args.data, _args.size);
             amount_read += _args.size;
         }
         ROCP_INFO_IF(!_args.has_more && amount_read > 0)
@@ -540,10 +537,10 @@ write_perfetto(
     tracing_session.reset();
 
     ROCP_TRACE << "Flushing trace output stream...";
-    (*ofs) << std::flush;
+    (*ofs.stream) << std::flush;
 
     ROCP_TRACE << "Destroying trace output stream...";
-    if(cleanup) cleanup(ofs);
+    ofs.close();
 }
 
 }  // namespace tool

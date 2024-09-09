@@ -53,8 +53,10 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_agent_info.csv
         --kernel-stats
         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_stats.csv
-        --hip-stats ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_stats.csv
-        --hsa-stats ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_stats.csv
+        --hip-stats
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_stats.csv
+        --hsa-stats
+        ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_stats.csv
         --memory-copy-stats
         ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv
         --json-input ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_results.json
@@ -71,8 +73,8 @@ set(VALIDATION_FILES
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_trace.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_agent_info.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_kernel_stats.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_stats.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_stats.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hip_api_stats.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_hsa_api_stats.csv
     ${CMAKE_CURRENT_BINARY_DIR}/hip-in-libraries-trace/out_memory_copy_stats.csv)
 
 set_tests_properties(

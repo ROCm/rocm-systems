@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "domain_type.hpp"
 #include "helper.hpp"
 #include "tmp_file.hpp"
 
@@ -35,6 +36,7 @@
 #include <mutex>
 #include <string>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 
 template <typename Tp>
@@ -71,15 +73,60 @@ void
 write_ring_buffer(Tp _v, domain_type type)
 {
     auto [_tmp_buf, _tmp_file] = get_tmp_file_buffer<ring_buffer_t<Tp>>(type);
-    if(_tmp_buf->capacity() == 0) return;
+
+    if(_tmp_buf->capacity() == 0)
+    {
+        ROCP_INFO << "rocprofv3 is dropping record from domain " << get_domain_column_name(type)
+                  << ". Buffer has a capacity of zero.";
+        return;
+    }
+
     auto* ptr = _tmp_buf->request(false);
     if(ptr == nullptr)
     {
         offload_buffer<ring_buffer_t<Tp>>(type);
         ptr = _tmp_buf->request(false);
-        CHECK(ptr != nullptr);
+
+        // if failed, try again
+        if(!ptr) ptr = _tmp_buf->request(false);
+
+        // after second failure, emit warning message
+        ROCP_CI_LOG_IF(WARNING, !ptr)
+            << "rocprofv3 is dropping record from domain " << get_domain_column_name(type)
+            << ". No space in buffer: "
+            << fmt::format(
+                   "capacity={}, record_size={}, used_count={}, free_count={} | raw_info=[{}]",
+                   _tmp_buf->capacity(),
+                   _tmp_buf->data_size(),
+                   _tmp_buf->count(),
+                   _tmp_buf->free(),
+                   _tmp_buf->as_string());
     }
-    *ptr = std::move(_v);
+
+    if(ptr)
+    {
+        if constexpr(std::is_move_constructible<Tp>::value)
+        {
+            new(ptr) Tp{std::move(_v)};
+        }
+        else if constexpr(std::is_move_assignable<Tp>::value)
+        {
+            *ptr = std::move(_v);
+        }
+        else if constexpr(std::is_copy_constructible<Tp>::value)
+        {
+            new(ptr) Tp{_v};
+        }
+        else if constexpr(std::is_copy_assignable<Tp>::value)
+        {
+            *ptr = _v;
+        }
+        else
+        {
+            static_assert(std::is_void<Tp>::value,
+                          "data type is neither move/copy constructible nor move/copy assignable");
+        }
+    }
 }
 
 template <typename Tp>

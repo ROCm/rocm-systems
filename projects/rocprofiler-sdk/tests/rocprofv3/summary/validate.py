@@ -1,33 +1,9 @@
 #!/usr/bin/env python3
 
+import os
 import re
 import sys
 import pytest
-
-
-def test_hsa_api_trace(json_data):
-    data = json_data["rocprofiler-sdk-tool"]
-
-    def get_operation_name(kind_id, op_id):
-        return data["strings"]["buffer_records"][kind_id]["operations"][op_id]
-
-    def get_kind_name(kind_id):
-        return data["strings"]["buffer_records"][kind_id]["kind"]
-
-    valid_domain_names = ("HSA_CORE_API",)
-
-    hsa_api_data = data["buffer_records"]["hsa_api"]
-
-    functions = []
-    for api in hsa_api_data:
-        kind = get_kind_name(api["kind"])
-        assert kind in valid_domain_names
-        assert api["end_timestamp"] >= api["start_timestamp"]
-        functions.append(get_operation_name(api["kind"], api["operation"]))
-
-    functions = list(set(functions))
-    assert "hsa_amd_memory_async_copy_on_engine" not in functions
-    assert "hsa_signal_destroy" in functions
 
 
 def test_hip_api_trace(json_data):
@@ -123,7 +99,7 @@ def test_kernel_trace(json_data):
         ), f"renamed kernel '{kernel_rename}' does not match regular expression '{valid_kernel_names}'"
 
 
-def test_memory_copy_json_trace(json_data):
+def test_memory_copy_trace(json_data):
     data = json_data["rocprofiler-sdk-tool"]
 
     buffer_records = data["buffer_records"]
@@ -151,11 +127,130 @@ def test_memory_copy_json_trace(json_data):
         assert row["end_timestamp"] >= row["start_timestamp"]
 
 
+def test_metadata_data(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    # patch summary groups for testing purposes
+    # (it appears sometimes these contain single quotes and other times it doesn't)
+    data.metadata.config.summary_groups = [
+        f"{itr}".strip("'") for itr in data.metadata.config.summary_groups
+    ]
+
+    num_summary_grps = len(data.metadata.config.summary_groups)
+    expected_summary_grps = (
+        [
+            "KERNEL_DISPATCH|MEMORY_COPY",
+        ]
+        if num_summary_grps == 1
+        else [
+            "KERNEL_DISPATCH|MEMORY_COPY",
+            ".*_API",
+        ]
+    )
+
+    assert data.metadata.config.summary is True
+    assert data.metadata.config.summary_per_domain is True
+    assert data.metadata.config.summary_unit == "nsec"
+    assert data.metadata.config.summary_file == "summary"
+    assert data.metadata.config.summary_groups == expected_summary_grps
+
+    assert len(data.metadata.command) == 4
+
+    # patch command to make it easier to test
+    data.metadata.command[0] = os.path.basename(data.metadata.command[0])
+
+    assert data.metadata.command == ["transpose", "2", "500", "10"]
+
+
+def test_summary_data(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    domains = []
+    for itr in data.summary:
+        domains.append(itr.domain)
+        if itr.domain == "KERNEL_DISPATCH":
+            assert itr.stats.count == 1004
+            expected = dict([["run/iteration", 1000]])
+            for oitr in itr.stats.operations:
+                if oitr.key in expected.keys():
+                    assert oitr.value.count == expected[oitr.key]
+                else:
+                    assert oitr.key.startswith("run/rank-")
+                    assert (
+                        re.match(
+                            r"run/rank-([0-9]+)/thread-([0-9]+)/device-([0-9]+)/begin",
+                            oitr.key,
+                        )
+                        is not None
+                    )
+                    assert oitr.value.count == 2
+        elif itr.domain == "HIP_API":
+            assert itr.stats.count == 2135
+        elif itr.domain == "MEMORY_COPY":
+            assert itr.stats.count == 12
+        elif itr.domain == "MARKER_API":
+            assert itr.stats.count == 1106
+            expected = dict(
+                [
+                    ["run", 2],
+                    ["run/iteration", 1000],
+                    ["run/iteration/sync", 100],
+                ]
+            )
+            for oitr in itr.stats.operations:
+                if oitr.key in expected.keys():
+                    assert oitr.value.count == expected[oitr.key]
+                else:
+                    assert oitr.key.startswith("run/rank-")
+                    assert (
+                        re.match(
+                            r"run/rank-([0-9]+)/thread-([0-9]+)/device-([0-9]+)/(begin|end)",
+                            oitr.key,
+                        )
+                        is not None
+                    )
+                    assert oitr.value.count == 1
+        else:
+            assert False, f"unhandled domain: {itr.domain}"
+
+    assert len(list(set(domains))) == len(domains)
+
+
+def test_summary_display_data(json_data, summary_data):
+    data = json_data["rocprofiler-sdk-tool"]
+    num_summary_grps = len(data.metadata.config.summary_groups)
+
+    def get_df(domain):
+        return summary_data[domain]
+
+    def get_dims(df):
+        # return rows x cols
+        return [df.shape[0], df.shape[1]] if df is not None else [0, 0]
+
+    hip = get_df("HIP_API")
+    marker = get_df("MARKER_API")
+    dispatch = get_df("KERNEL_DISPATCH")
+    memcpy = get_df("MEMORY_COPY")
+    dispatch_and_copy = get_df("KERNEL_DISPATCH + MEMORY_COPY")
+    hip_and_marker = get_df("HIP_API + MARKER_API") if num_summary_grps > 1 else None
+    total = get_df("SUMMARY")
+
+    expected_hip_and_marker_dims = [20, 9] if hip_and_marker is not None else [0, 0]
+
+    assert get_dims(hip) == [13, 9]
+    assert get_dims(marker) == [7, 9]
+    assert get_dims(dispatch) == [3, 9]
+    assert get_dims(memcpy) == [2, 9]
+    assert get_dims(dispatch_and_copy) == [5, 9]
+    assert get_dims(hip_and_marker) == expected_hip_and_marker_dims
+    assert get_dims(total) == [22, 9]
+
+
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
     rocprofv3.test_perfetto_data(
-        pftrace_data, json_data, ("hip", "hsa", "kernel", "memory_copy")
+        pftrace_data, json_data, ("hip", "marker", "kernel", "memory_copy")
     )
 
 
@@ -163,7 +258,7 @@ def test_otf2_data(otf2_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
     rocprofv3.test_otf2_data(
-        otf2_data, json_data, ("hip", "hsa", "kernel", "memory_copy")
+        otf2_data, json_data, ("hip", "marker", "kernel", "memory_copy")
     )
 
 
