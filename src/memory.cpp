@@ -59,7 +59,14 @@ struct Allocation {
 };
 
 static std::map<const void *, Allocation> allocation_map_;
-static std::mutex allocation_map_lock_;
+static std::unique_ptr<std::mutex> allocation_map_lock_ = std::make_unique<std::mutex>();
+
+void clear_allocation_map(void)
+{
+  allocation_map_lock_ = std::make_unique<std::mutex>();
+  std::lock_guard<std::mutex> lock(*allocation_map_lock_);
+  allocation_map_.clear();
+}
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicy(HSAuint32 Node,
                                               HSAuint32 DefaultPolicy,
@@ -159,7 +166,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
     *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
-    std::lock_guard<std::mutex> gard(allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     allocation_map_[*MemoryAddress] = Allocation(
         gpu_mem->GetGpuMemoryHandle(), *MemoryAddress, (uint64_t)*MemoryAddress,
         create_info.size, false, nullptr, SizeInBytes,
@@ -179,7 +186,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtFreeMemory(void *MemoryAddress,
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
-    std::lock_guard<std::mutex> gard(allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     auto it = allocation_map_.find(MemoryAddress);
     if (it == allocation_map_.end()) {
       return HSAKMT_STATUS_ERROR;
@@ -350,7 +357,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
   size_t aligned_size = end - start;
 
   {
-    std::lock_guard<std::mutex> gard(allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     // GTT mem
     auto it_gtt = allocation_map_.find(aligned_ptr);
     if (it_gtt != allocation_map_.end()) {
@@ -397,7 +404,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
   }
 
   {
-    std::lock_guard<std::mutex> guard(allocation_map_lock_);
+    std::lock_guard<std::mutex> guard(*allocation_map_lock_);
     allocation_map_[MemoryAddress] =
         Allocation(handle, aligned_ptr, addr, aligned_size, true, MemoryAddress,
                    MemorySizeInBytes);
@@ -430,7 +437,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
 
   wsl::thunk::GpuMemoryHandle handle = nullptr;
   {
-    std::lock_guard<std::mutex> gard(allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     auto it = allocation_map_.find(MemoryAddress);
     if (it == allocation_map_.end()) {
       return HSAKMT_STATUS_ERROR;
@@ -495,7 +502,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
 
   Allocation allocation_info;
   {
-    std::lock_guard<std::mutex> gard(allocation_map_lock_);
+    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     auto it = allocation_map_.find(Pointer);
     if (it == allocation_map_.end()) {
       PointerInfo->Type = HSA_POINTER_UNKNOWN;

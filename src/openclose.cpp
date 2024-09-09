@@ -96,7 +96,7 @@ static void child_fork_handler(void) {
  * in the child process so it is not cleared
  */
 static void clear_after_fork(void) {
-  // TODO: fmm_clear_all_mem();
+  clear_allocation_map();
   if (dxg_fd) {
     close(dxg_fd);
     dxg_fd = -1;

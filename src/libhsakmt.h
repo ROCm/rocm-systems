@@ -151,6 +151,8 @@ uint32_t get_num_sysfs_nodes(void);
 
 bool is_forked_child(void);
 
+void clear_allocation_map(void);
+
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 #define SGPR_SIZE_PER_CU 0x4000
