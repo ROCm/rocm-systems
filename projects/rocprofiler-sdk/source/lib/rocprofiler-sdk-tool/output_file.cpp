@@ -22,6 +22,8 @@
 
 #include "output_file.hpp"
 #include "config.hpp"
+
+#include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 
 #include <fmt/core.h>
@@ -54,12 +56,31 @@ get_output_filename(std::string_view fname, std::string_view ext)
     auto output_prefix = tool::format(tool::get_config().output_file);
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
-        throw std::runtime_error{
-            fmt::format("ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
-                        output_path.string())};
-    if(!fs::exists(output_path)) fs::create_directories(output_path);
+    {
+        ROCP_FATAL << fmt::format(
+            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
+            output_path.string());
+    }
+    else if(!fs::exists(output_path))
+    {
+        fs::create_directories(output_path);
+    }
 
-    return tool::format(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
+    auto _ofname = tool::format(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
+
+    // the prefix may contain a subdirectory
+    if(auto _ofname_path = fs::path{_ofname}.parent_path(); !fs::exists(_ofname_path))
+    {
+        fs::create_directories(_ofname_path);
+    }
+    else if(fs::exists(_ofname_path) && !fs::is_directory(fs::status(_ofname_path)))
+    {
+        ROCP_FATAL << fmt::format(
+            "ROCPROFILER_OUTPUT_PATH ({}) already exists and is not a directory",
+            output_path.string());
+    }
+
+    return _ofname;
 }
 
 output_stream_t

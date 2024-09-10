@@ -157,10 +157,16 @@ write_perfetto(
             tids.emplace(itr.thread_id);
 
         for(auto itr : *memory_copy_data)
+        {
+            tids.emplace(itr.thread_id);
             agent_thread_ids[itr.dst_agent_id].emplace(itr.thread_id);
+        }
 
         for(auto itr : *kernel_dispatch_data)
+        {
+            tids.emplace(itr.thread_id);
             agent_queue_ids[itr.dispatch_info.agent_id].emplace(itr.dispatch_info.queue_id);
+        }
     }
 
     uint64_t nthrn = 0;

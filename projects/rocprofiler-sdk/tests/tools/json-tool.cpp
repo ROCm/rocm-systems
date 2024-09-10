@@ -1568,13 +1568,17 @@ write_perfetto()
 
         for(auto itr : memory_copy_bf_records)
         {
+            tids.emplace(itr.thread_id);
             agent_ids.emplace(itr.dst_agent_id.handle);
             agent_ids.emplace(itr.src_agent_id.handle);
         }
 
         for(auto itr : kernel_dispatch_bf_records)
+        {
+            tids.emplace(itr.thread_id);
             agent_queue_ids[itr.dispatch_info.agent_id.handle].emplace(
                 itr.dispatch_info.queue_id.handle);
+        }
     }
 
     auto thread_tracks = std::unordered_map<rocprofiler_thread_id_t, ::perfetto::Track>{};

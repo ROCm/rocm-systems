@@ -5,7 +5,7 @@
             "kernel_trace": true,
             "memory_copy_trace": true,
             "marker_trace": true,
-            "output_file": "out",
+            "output_file": "json-input/out",
             "output_format": [
                 "csv",
                 "json",

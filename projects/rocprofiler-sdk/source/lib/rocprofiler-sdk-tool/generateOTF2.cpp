@@ -401,11 +401,17 @@ write_otf2(tool_table*                                                      tool
             tids.emplace(itr.thread_id);
 
         for(auto itr : *memory_copy_data)
+        {
+            tids.emplace(itr.thread_id);
             agent_thread_ids[itr.thread_id].emplace(itr.dst_agent_id);
+        }
 
         for(auto itr : *kernel_dispatch_data)
+        {
+            tids.emplace(itr.thread_id);
             agent_queue_ids[itr.thread_id][itr.dispatch_info.agent_id].emplace(
                 itr.dispatch_info.queue_id);
+        }
     }
 
     {

@@ -29,7 +29,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -M --hsa-trace --kernel-trace
         --memory-copy-trace --marker-trace -d ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o
-        out --output-format pftrace csv json --log-level ${LOG_LEVEL} --
+        cmdl-input/out --output-format pftrace csv json --log-level ${LOG_LEVEL} --
         $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
@@ -50,7 +50,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input_trace.json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace-input-json --log-level ${LOG_LEVEL} --
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace --log-level ${LOG_LEVEL} --
         $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
@@ -70,52 +70,53 @@ add_test(
     NAME rocprofv3-test-trace-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --hsa-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_hsa_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_hsa_api_trace.csv
         --kernel-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_kernel_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_kernel_trace.csv
         --memory-copy-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_memory_copy_trace.csv
         --marker-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_marker_api_trace.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv
-        --json-input ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_results.json
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_agent_info.csv
+        --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace)
 
 add_test(
     NAME rocprofv3-test-trace-input-json-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --hsa-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_hsa_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_hsa_api_trace.csv
         --kernel-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_kernel_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_kernel_trace.csv
         --memory-copy-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_memory_copy_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_memory_copy_trace.csv
         --marker-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_marker_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_marker_api_trace.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_agent_info.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_agent_info.csv
         --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_results.json
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.pftrace)
 
 set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace-input-json/out_agent_info.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.pftrace
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_results.json
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_memory_copy_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_hsa_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_kernel_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_marker_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/cmdl-input/out_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.pftrace
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_results.json
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_memory_copy_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_hsa_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_kernel_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_marker_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-trace/json-input/out_agent_info.csv)
 
 set_tests_properties(
     rocprofv3-test-trace-validate
@@ -150,8 +151,8 @@ add_test(
     NAME rocprofv3-test-systrace-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --sys-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o out --output-format pftrace csv
-        json -- $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -o cmdl-input/out --output-format
+        pftrace csv json -- $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
     rocprofv3-test-systrace-execute
@@ -171,8 +172,7 @@ add_test(
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input_systrace.json -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace-input-json --
-        $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/%argt%-systrace -- $<TARGET_FILE:simple-transpose>)
 
 set_tests_properties(
     rocprofv3-test-systrace-input-json-execute
@@ -191,55 +191,56 @@ add_test(
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k
         "not test_hsa_api_trace" --hsa-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_hsa_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_hsa_api_trace.csv
         --kernel-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_kernel_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_kernel_trace.csv
         --memory-copy-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_memory_copy_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_memory_copy_trace.csv
         --marker-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_marker_api_trace.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_agent_info.csv
         --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_results.json
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_results.pftrace)
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.pftrace
+    )
 
 add_test(
     NAME rocprofv3-test-systrace-input-json-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py -k
         "not test_hsa_api_trace" --hsa-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_hsa_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_hsa_api_trace.csv
         --kernel-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_kernel_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_kernel_trace.csv
         --memory-copy-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_memory_copy_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_memory_copy_trace.csv
         --marker-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_marker_api_trace.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_marker_api_trace.csv
         --agent-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_agent_info.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_agent_info.csv
         --json-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_results.json
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.json
         --pftrace-input
-        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_results.pftrace
+        ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.pftrace
     )
 
 set(SYS_VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/out_agent_info.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_memory_copy_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_hsa_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_kernel_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_marker_api_trace.csv
-    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace-input-json/out_agent_info.csv)
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.pftrace
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_results.json
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_memory_copy_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_hsa_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_kernel_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_marker_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/cmdl-input/out_agent_info.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.pftrace
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_results.json
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_memory_copy_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_hsa_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_kernel_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_marker_api_trace.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/simple-transpose-systrace/json-input/out_agent_info.csv)
 
 set_tests_properties(
     rocprofv3-test-systrace-validate
