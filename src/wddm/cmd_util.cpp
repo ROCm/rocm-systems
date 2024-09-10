@@ -164,6 +164,10 @@ size_t CmdUtil::BuildDispatch(
 
   GenerateSetShRegHeader(&dispatch.program_resource_regs, mmCOMPUTE_PGM_RSRC1);
   dispatch.program_resource_regs.compute_pgm_rsrc1 = pInfo->pKernelObject->compute_pgm_rsrc1;
+  if (pInfo->major == 11) {
+    AMD_HSA_BITS_SET(dispatch.program_resource_regs.compute_pgm_rsrc1,
+        AMD_COMPUTE_PGM_RSRC_ONE_PRIV, 1);
+  }
   dispatch.program_resource_regs.compute_pgm_rsrc2 =
     (pInfo->ldsBlks << 15) | pInfo->pKernelObject->compute_pgm_rsrc2;
 
