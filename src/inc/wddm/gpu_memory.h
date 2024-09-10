@@ -50,8 +50,8 @@
 #include "inc/wddm/thunks.h"
 #include "inc/rocr_proxy/rocr_proxy.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 class WDDMDevice;
 
@@ -212,7 +212,7 @@ private:
   DISALLOW_COPY_AND_ASSIGN(GpuMemory);
 };
 
-} // namespace core
-} // namespace rocr
+} // namespace thunk
+} // namespace wsl
 
 #endif

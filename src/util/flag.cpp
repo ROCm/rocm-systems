@@ -50,7 +50,7 @@
 #include <algorithm>
 #include <locale>
 
-namespace rocr {
+namespace wsl {
 FILE* log_file = stderr;
 uint8_t log_flags[8];
 
@@ -223,4 +223,4 @@ void Flag::parse_masks(std::string& var, uint32_t maxGpu, uint32_t maxCU) {
   }
 }
 
-}  // namespace rocr
+} // namespace wsl

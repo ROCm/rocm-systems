@@ -2,8 +2,8 @@
 
 #include "inc/wddm/cmd_util.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 /*
  * Builds a COPY_DATA packet that copies data.
@@ -277,5 +277,5 @@ size_t CmdUtil::BuildAtomicMem(
   return sizeof(atom);
 }
 
-}  // namespace core
-} // namespace rocr
+} // namespace thunk
+} // namespace wsl

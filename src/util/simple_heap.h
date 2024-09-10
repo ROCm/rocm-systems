@@ -53,7 +53,7 @@
 
 #include "core/util/utils.h"
 
-namespace rocr {
+namespace wsl {
 
 template <typename Allocator> class SimpleHeap {
  private:
@@ -358,6 +358,6 @@ template <typename Allocator> class SimpleHeap {
   }
 };
 
-}  // namespace rocr
+} // namespace wsl
 
 #endif  // HSA_RUNTME_CORE_UTIL_SIMPLE_HEAP_H_

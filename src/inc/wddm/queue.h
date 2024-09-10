@@ -52,8 +52,8 @@
 #include "hsa-runtime/inc/amd_hsa_signal.h"
 #include "inc/wddm/cmd_util.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 class Queue;
 class WDDMDevice;
@@ -278,7 +278,7 @@ private:
   uint64_t ib_start_addr;
 };
 
-}
-}
+} // namespace thunk
+} // namespace wsl
 
 #endif

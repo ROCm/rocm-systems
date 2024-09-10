@@ -38,7 +38,7 @@ struct Allocation {
   Allocation()
       : handle(0), cpu_addr(0), gpu_addr(0), size(0), userptr(false),
         user_data(nullptr), size_requested(0), node_id(0), mem_flags_value(0) {}
-  Allocation(rocr::core::GpuMemoryHandle handle_arg, void *cpu_addr_arg,
+  Allocation(wsl::thunk::GpuMemoryHandle handle_arg, void *cpu_addr_arg,
              uint64_t gpu_addr_arg, size_t size_arg, bool userptr_arg = false,
              void *user_data_arg = nullptr, size_t user_size_arg = 0,
              HSAuint32 node_id_arg = 0, HSAuint32 mem_flags_value_arg = 0)
@@ -47,7 +47,7 @@ struct Allocation {
         size_requested(user_size_arg), node_id(node_id_arg),
         mem_flags_value(mem_flags_value_arg) {}
 
-  rocr::core::GpuMemoryHandle handle;
+  wsl::thunk::GpuMemoryHandle handle;
   void *cpu_addr;
   uint64_t gpu_addr;
   bool userptr;
@@ -105,7 +105,7 @@ bool isSystemMemoryAvailable(HSAuint64 SizeInBytes) {
   return SizeInBytes <= info.freeram;
 }
 
-bool isLocalMemoryAvailable(rocr::core::WDDMDevice *dev,
+bool isLocalMemoryAvailable(wsl::thunk::WDDMDevice *dev,
                             HSAuint64 SizeInBytes) {
   return SizeInBytes <= dev->VramAvail();
 }
@@ -126,12 +126,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   } else
     *MemoryAddress = nullptr;
 
-  rocr::core::WDDMDevice *dev = get_wddmdev(1);
+  wsl::thunk::WDDMDevice *dev = get_wddmdev(1);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
-  rocr::core::GpuMemory *gpu_mem = nullptr;
-  rocr::core::GpuMemoryCreateInfo create_info{};
+  wsl::thunk::GpuMemory *gpu_mem = nullptr;
+  wsl::thunk::GpuMemoryCreateInfo create_info{};
   create_info.size = SizeInBytes;
 
   if (!MemFlags.ui32.NonPaged || zfb_support || MemFlags.ui32.GTTAccess) {
@@ -177,7 +177,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtFreeMemory(void *MemoryAddress,
   if (!MemoryAddress)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  rocr::core::GpuMemory *gpu_mem = nullptr;
+  wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
     std::lock_guard<std::mutex> gard(allocation_map_lock_);
     auto it = allocation_map_.find(MemoryAddress);
@@ -185,7 +185,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtFreeMemory(void *MemoryAddress,
       return HSAKMT_STATUS_ERROR;
     }
 
-    gpu_mem = rocr::core::GpuMemory::Convert(it->second.handle);
+    gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
     allocation_map_.erase(it);
   }
 
@@ -201,7 +201,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
   if (!AvailableBytes)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  rocr::core::WDDMDevice *dev = get_wddmdev(Node);
+  wsl::thunk::WDDMDevice *dev = get_wddmdev(Node);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
@@ -342,9 +342,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
     return HSAKMT_STATUS_ERROR;
   }
 
-  uint64_t start = rocr::AlignDown((uint64_t)MemoryAddress, 4096);
+  uint64_t start = wsl::AlignDown((uint64_t)MemoryAddress, 4096);
   uint64_t end =
-      rocr::AlignUp((uint64_t)MemoryAddress + MemorySizeInBytes, 4096);
+      wsl::AlignUp((uint64_t)MemoryAddress + MemorySizeInBytes, 4096);
 
   void *aligned_ptr = (void *)start;
   size_t aligned_size = end - start;
@@ -376,14 +376,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
     }
   }
 
-  rocr::core::WDDMDevice *dev = get_wddmdev(1);
+  wsl::thunk::WDDMDevice *dev = get_wddmdev(1);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
 
-  rocr::core::GpuMemory *gpu_mem = nullptr;
-  rocr::core::GpuMemoryHandle handle = 0;
+  wsl::thunk::GpuMemory *gpu_mem = nullptr;
+  wsl::thunk::GpuMemoryHandle handle = 0;
   uint64_t addr;
-  rocr::core::GpuMemoryCreateInfo create_info{};
+  wsl::thunk::GpuMemoryCreateInfo create_info{};
   create_info.domain = rocr_proxy::kUserMemory;
   create_info.size = aligned_size;
   create_info.user_ptr = aligned_ptr;
@@ -428,7 +428,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
 
   pr_debug("[%s] address %p\n", __func__, MemoryAddress);
 
-  rocr::core::GpuMemoryHandle handle = nullptr;
+  wsl::thunk::GpuMemoryHandle handle = nullptr;
   {
     std::lock_guard<std::mutex> gard(allocation_map_lock_);
     auto it = allocation_map_.find(MemoryAddress);
@@ -445,7 +445,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
     allocation_map_.erase((void *)it->second.gpu_addr);
     allocation_map_.erase(it);
   }
-  auto gpu_mem = rocr::core::GpuMemory::Convert(handle);
+  auto gpu_mem = wsl::thunk::GpuMemory::Convert(handle);
   delete gpu_mem;
 
   return HSAKMT_STATUS_SUCCESS;

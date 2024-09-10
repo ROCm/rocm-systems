@@ -53,8 +53,8 @@
 #include "inc/wddm/device.h"
 #include "inc/wddm/queue.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 const uint32_t WDDMDevice::cmdbuf_aql_frame_num_ = 0x1000;
 
@@ -294,7 +294,7 @@ bool WDDMDevice::ReserveLocalHeapSpace(void) {
 
     sys_va[i] = (uint64_t)ptr;
 
-    if (thunk::ReserveGpuVirtualAddress(
+    if (d3dthunk::ReserveGpuVirtualAddress(
           adapter_, local_heap_space_size_,
           (uint64_t)ptr,
           (uint64_t)ptr + sys_va_size, &local_va) == ErrorCode::Success) {
@@ -337,7 +337,7 @@ bool WDDMDevice::ReserveLocalHeapSpace(void) {
 }
 
 bool WDDMDevice::FreeLocalHeapSpace(void) {
-  thunk::FreeGpuVirtualAddress(adapter_, local_heap_space_start_, local_heap_space_size_);
+  d3dthunk::FreeGpuVirtualAddress(adapter_, local_heap_space_start_, local_heap_space_size_);
   void *cpu = (void *)local_heap_space_start_;
   return munmap(cpu, local_heap_space_size_) == 0;
 }
@@ -377,7 +377,7 @@ ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const rocr_proxy::AllocDomain dom
 
   if (domain == rocr_proxy::kSystem) {
 
-    code = thunk::ReserveGpuVirtualAddress(adapter_, size,
+    code = d3dthunk::ReserveGpuVirtualAddress(adapter_, size,
                                           system_heap_space_start_,
                                           system_heap_space_start_ + system_heap_space_size_,
                                           &gpu_addr);
@@ -385,7 +385,7 @@ ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const rocr_proxy::AllocDomain dom
       return code;
 
     if (!CommitSystemHeapSpace((void*)gpu_addr, size, lock)) {
-      thunk::FreeGpuVirtualAddress(adapter_, gpu_addr, size);
+      d3dthunk::FreeGpuVirtualAddress(adapter_, gpu_addr, size);
       code = ErrorCode::SyscallFail;
     }
   } else {
@@ -411,12 +411,12 @@ ErrorCode WDDMDevice::FreeGpuVirtualAddress(const rocr_proxy::AllocDomain domain
 
       DecommitSystemHeapSpace((void *)gpu_addr, size);
 
-      thunk::FreeGpuVirtualAddressArgs free_args{};
+      d3dthunk::FreeGpuVirtualAddressArgs free_args{};
       free_args.hAdapter = adapter_;
       free_args.BaseAddress = gpu_addr;
       free_args.Size = size;
 
-      code = thunk::FreeGpuVirtualAddress(&free_args);
+      code = d3dthunk::FreeGpuVirtualAddress(&free_args);
   } else {
     local_va_mgr_->Free(gpu_addr);
   }
@@ -875,5 +875,5 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   return true;
 }
 
-}  // namespace core
-}  // namespace rocr
+} // namespace thunk
+} // namespace wsl

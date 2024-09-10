@@ -49,7 +49,7 @@
 #include <vector>
 #include "utils.h"
 
-namespace rocr {
+namespace wsl {
 namespace os {
 typedef void* LibHandle;
 typedef void* Semaphore;
@@ -322,6 +322,6 @@ typedef struct cpuid_s {
 bool ParseCpuID(cpuid_t* cpuinfo);
 
 }   //  namespace os
-}   //  namespace rocr
+} // namespace wsl
 
 #endif  // HSA_RUNTIME_CORE_UTIL_OS_H_

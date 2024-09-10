@@ -52,7 +52,7 @@
 #include "core/util/os.h"
 #include "core/util/utils.h"
 
-namespace rocr {
+namespace wsl {
 
 class Flag {
  public:
@@ -355,6 +355,6 @@ class Flag {
   DISALLOW_COPY_AND_ASSIGN(Flag);
 };
 
-}  // namespace rocr
+} // namespace wsl
 
 #endif  // header guard

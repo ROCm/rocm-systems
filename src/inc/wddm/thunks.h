@@ -46,8 +46,8 @@
 #include "inc/wddm/status.h"
 #include "inc/wddm/types.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 inline ErrorCode TranslateNtStatus(NTSTATUS status) {
   switch (status) {
@@ -71,7 +71,7 @@ inline ErrorCode TranslateNtStatus(NTSTATUS status) {
   return ErrorCode::Unknown;
 }
 
-namespace thunk {
+namespace d3dthunk {
 
 typedef D3DKMT_CREATEALLOCATION                      CreateAllocationArgs;
 typedef D3DKMT_CREATECONTEXT                         CreateContextArgs;
@@ -225,8 +225,8 @@ inline ErrorCode OpenResourceFromNtHandle(D3DKMT_OPENRESOURCEFROMNTHANDLE *args)
   return TranslateNtStatus(D3DKMTOpenResourceFromNtHandle(args));
 }
 
+} // namespace d3dthunk
 } // namespace thunk
-} // namespace core
-} // namespace rocr
+} // namespace wsl
 
 #endif // _ROCR_CORE_INC_WDDM_THUNKS_H_

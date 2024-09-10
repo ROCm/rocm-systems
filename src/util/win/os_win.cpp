@@ -57,7 +57,7 @@
 #undef Yield
 #undef CreateMutex
 
-namespace rocr {
+namespace wsl {
 namespace os {
 
 static_assert(sizeof(LibHandle) == sizeof(HMODULE),
@@ -322,6 +322,6 @@ bool ParseCpuID(cpuid_t* cpuinfo) {
 }
 
 }   //  namespace os
-}   //  namespace rocr
+}   //  namespace wsl
 
 #endif

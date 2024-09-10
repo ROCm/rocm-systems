@@ -42,7 +42,7 @@
 
 #include "small_heap.h"
 
-namespace rocr {
+namespace wsl {
 
 // Inserts node into freelist after place.
 // Assumes node will not be an end of the list (list has guard nodes).
@@ -182,4 +182,4 @@ void* SmallHeap::alloc_high(size_t bytes) {
   return nullptr;
 }
 
-}  // namespace rocr
+} // namespace wsl

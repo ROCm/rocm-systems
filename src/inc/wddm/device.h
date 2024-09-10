@@ -58,8 +58,8 @@
 #include "inc/wddm/gpu_memory.h"
 #include "inc/wddm/cmd_util.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 //class Queue;
 class WDDMQueue;
@@ -239,7 +239,7 @@ private:
 
 NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters);
 
-}  // namespace core
-}  // namespace rocr
+} // namespace thunk
+} // namespace wsl
 
 #endif

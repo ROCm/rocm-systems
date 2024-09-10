@@ -57,7 +57,7 @@
 #include <sstream>
 #include <thread>
 
-namespace rocr {
+namespace wsl {
 extern FILE* log_file;
 extern uint8_t log_flags[8];
 
@@ -154,7 +154,7 @@ static __forceinline unsigned long long int strtoull(const char* str,
 #define LogPrint(flag, format, ...)                                                                \
   do {                                                                                             \
     if (hsa_flag_isset64(log_flags, flag))                                                         \
-      rocr::log_printf(__FILENAME__, __LINE__, format, ##__VA_ARGS__);                             \
+      wsl::log_printf(__FILENAME__, __LINE__, format, ##__VA_ARGS__);                             \
   } while (false);
 
 
@@ -354,7 +354,7 @@ static __forceinline std::string& rtrim(std::string& s) {
 
 static __forceinline std::string& trim(std::string& s) { return ltrim(rtrim(s)); }
 
-}  // namespace rocr
+}  // namespace wsl
 
 template <uint32_t lowBit, uint32_t highBit, typename T>
 static __forceinline uint32_t BitSelect(T p) {

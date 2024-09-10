@@ -48,8 +48,8 @@
 #include "inc/registers.h"
 #include "libhsakmt.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 hsa_status_t WDDMQueue::SwsInit(void) {
   if (!device->CreateSyncobj(&syncobj, &sync_addr))
@@ -985,5 +985,5 @@ hsa_status_t SDMAQueue::Submit(void) {
   return HSA_STATUS_SUCCESS;
 }
 
-}
-}
+} // namespace thunk
+} // namespace wsl

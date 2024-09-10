@@ -10,8 +10,8 @@
 #include "inc/pm4_cmds.h"
 #include "util/utils.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 struct DispatchInfo {
   uint8_t                       major;
@@ -71,7 +71,7 @@ public:
     uint64_t  srcData = 1);
 };
 
-}   // namespace core
-}   // namespace rocr
+} // namespace thunk
+} // namespace wsl
 
 #endif

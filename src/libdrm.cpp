@@ -51,7 +51,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(
     HSAuint32 NodeId, HsaAMDGPUDeviceHandle *DeviceHandle) {
   CHECK_DXG_OPEN();
 
-  rocr::core::WDDMDevice *pDevice = get_wddmdev(NodeId);
+  wsl::thunk::WDDMDevice *pDevice = get_wddmdev(NodeId);
   if (pDevice != nullptr) {
     *DeviceHandle = reinterpret_cast<HsaAMDGPUDeviceHandle>(pDevice);
     return HSAKMT_STATUS_SUCCESS;
@@ -61,8 +61,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(
 
 HSAKMTAPI int hsaKmtamdgpu_query_gpu_info(void *dev,
                                           struct amdgpu_gpu_info *info) {
-  rocr::core::WDDMDevice *pDevice =
-      reinterpret_cast<rocr::core::WDDMDevice *>(dev);
+  wsl::thunk::WDDMDevice *pDevice =
+      reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
   memset(info, 0, sizeof(*info));
   info->gpu_counter_freq = pDevice->GPUCounterFrequency() / 1000ull;
   return 0;

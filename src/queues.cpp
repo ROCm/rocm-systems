@@ -51,7 +51,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(
       Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  rocr::core::WDDMDevice *device_ = get_wddmdev(NodeId);
+  wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   assert(device_);
 
   switch (Type) {
@@ -61,7 +61,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(
     uint32_t cmdbuf_size = device_->GetCmdbufSize();
     uint32_t queue_engine = device_->GetComputeEngine();
     bool use_hws = device_->IsHwsEnabled(queue_engine);
-    auto queue_ = new rocr::core::ComputeQueue(
+    auto queue_ = new wsl::thunk::ComputeQueue(
         device_, QueueAddress, pkg_num,
         reinterpret_cast<std::atomic<uint64_t> *>(QueueResource->Queue_write_ptr_aql),
         reinterpret_cast<std::atomic<uint64_t> *>(QueueResource->Queue_read_ptr_aql),
@@ -91,7 +91,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(
       Priority > HSA_QUEUE_PRIORITY_MAXIMUM)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  auto queue_ = reinterpret_cast<rocr::core::ComputeQueue *>(QueueId);
+  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
@@ -101,7 +101,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(
 HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<rocr::core::ComputeQueue *>(QueueId);
+  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
 
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -115,7 +115,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
                                              HSAuint32 *QueueCUMask) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<rocr::core::ComputeQueue *>(QueueId);
+  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
@@ -154,7 +154,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
                                             HSAuint32 *firstGWS) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<rocr::core::ComputeQueue *>(QueueId);
+  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
@@ -165,7 +165,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
 HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<rocr::core::ComputeQueue *>(QueueId);
+  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 

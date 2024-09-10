@@ -65,7 +65,7 @@
 #include <cpuid.h>
 #endif
 
-namespace rocr {
+namespace wsl {
 namespace os {
 
 struct ThreadArgs {
@@ -766,6 +766,6 @@ bool ParseCpuID(cpuid_t* cpuinfo) {
 }
 
 }   //  namespace os
-}   //  namespace rocr
+}   //  namespace wsl
 
 #endif

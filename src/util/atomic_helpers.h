@@ -64,7 +64,7 @@
 #endif
 #endif
 
-namespace rocr {
+namespace wsl {
 namespace atomic {
 
 static constexpr int c11ToBuiltInFlags(std::memory_order order)
@@ -506,7 +506,7 @@ static __forceinline T
   return ret;
 }
 }   //  namespace atomic
-}   //  namespace rocr
+}   //  namespace wsl
 
 #ifdef X64_ORDER_WC
 #undef X64_ORDER_WC

@@ -5,8 +5,8 @@
 
 using namespace std;
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 VaMgr::VaMgr(uint64_t start, uint64_t size, uint64_t min_align) {
   min_align_ = min_align;
@@ -159,5 +159,5 @@ void VaMgr::Free(uint64_t addr) {
   set_free(frag_it->second, it);
 }
 
-}  // namespace core
-}  // namespace rocr
+} // namespace thunk
+} // namespace wsl

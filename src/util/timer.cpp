@@ -42,7 +42,7 @@
 
 #include "core/util/timer.h"
 
-namespace rocr {
+namespace wsl {
 namespace timer {
 
 accurate_clock::init::init() {
@@ -108,4 +108,4 @@ double fast_clock::period_ps;
 fast_clock::raw_frequency fast_clock::freq;
 fast_clock::init fast_clock::fast_clock_init;
 }   //  namespace timer
-}   //  namespace rocr
+}   // namespace wsl

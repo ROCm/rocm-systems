@@ -64,7 +64,7 @@ typedef struct {
 static HsaSystemProperties *g_system;
 static node_props_t *g_props;
 
-static std::vector<rocr::core::WDDMDevice *> wdevices_;
+static std::vector<wsl::thunk::WDDMDevice *> wdevices_;
 static uint32_t wdevice_num_;
 static uint32_t num_sysfs_nodes;
 
@@ -355,7 +355,7 @@ static int get_cpu_cache_info(const char *prefix, struct proc_cpuinfo *cpuinfo,
 }
 
 static HSAKMT_STATUS topology_map_node_id(uint32_t node_id,
-                                          rocr::core::WDDMDevice *&device) {
+                                          wsl::thunk::WDDMDevice *&device) {
   uint32_t idx = node_id;
   if ((!wdevices_.size()) || (!node_id) || (node_id >= num_sysfs_nodes))
     return HSAKMT_STATUS_NOT_SUPPORTED;
@@ -374,7 +374,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties *props) {
 
   D3DKMT_ADAPTERINFO *adapters;
   int num_adapters;
-  if (rocr::core::WDDMGetAdapters(adapters, num_adapters) != STATUS_SUCCESS) {
+  if (wsl::thunk::WDDMGetAdapters(adapters, num_adapters) != STATUS_SUCCESS) {
     pr_err("Failed to get adapters\n");
     ret = HSAKMT_STATUS_ERROR;
     goto err;
@@ -387,7 +387,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties *props) {
   wdevices_.clear();
 
   for (uint32_t i = 0; i < num_adapters; i++) {
-    rocr::core::WDDMDevice *device = new rocr::core::WDDMDevice(
+    wsl::thunk::WDDMDevice *device = new wsl::thunk::WDDMDevice(
         adapters[i].hAdapter, adapters[i].AdapterLuid);
     assert(device && "Create WDDM Device fail");
     wdevices_.push_back(device);
@@ -644,7 +644,7 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
   }
 
   /* gpu node */
-  rocr::core::WDDMDevice *device;
+  wsl::thunk::WDDMDevice *device;
   ret = topology_map_node_id(node_id, device);
   if (ret != HSAKMT_STATUS_SUCCESS)
     return ret;
@@ -756,7 +756,7 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
     return HSAKMT_STATUS_SUCCESS;
   }
 
-  rocr::core::WDDMDevice *device;
+  wsl::thunk::WDDMDevice *device;
   ret = topology_map_node_id(node_id, device);
   if (ret != HSAKMT_STATUS_SUCCESS)
     return ret;
@@ -955,7 +955,7 @@ static HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
                                                      uint32_t iolink_id,
                                                      HsaIoLinkProperties *props,
                                                      bool p2pLink) {
-  rocr::core::WDDMDevice *device;
+  wsl::thunk::WDDMDevice *device;
   topology_map_node_id(node_id, device);
 
   std::memset(props, 0, sizeof(*props));
@@ -1216,7 +1216,7 @@ HSAKMT_STATUS topology_take_snapshot(void) {
       goto err;
     }
     for (i = 0; i < sys_props.NumNodes; i++) {
-      rocr::core::WDDMDevice *device_;
+      wsl::thunk::WDDMDevice *device_;
       topology_map_node_id(i, device_);
 
       ret = topology_sysfs_get_node_props(i, &temp_props[i].node, &p2p_links,
@@ -1518,7 +1518,7 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
   }
 
   /* The following memory banks does not apply to CPU only node */
-  rocr::core::WDDMDevice *device_ = get_wddmdev(NodeId);
+  wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   if (device_ == nullptr)
     goto out;
 
@@ -1690,7 +1690,7 @@ HSAKMT_STATUS validate_nodeid_array(uint32_t **gpu_id_array,
 
 uint32_t get_num_sysfs_nodes(void) { return num_sysfs_nodes; }
 
-rocr::core::WDDMDevice *get_wddmdev(uint32_t node_id) {
+wsl::thunk::WDDMDevice *get_wddmdev(uint32_t node_id) {
   if ((!wdevices_.size()) || (!node_id) || (node_id >= num_sysfs_nodes))
     return nullptr;
 

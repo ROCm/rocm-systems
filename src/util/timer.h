@@ -49,7 +49,7 @@
 #include <time.h>
 #include <type_traits>
 
-namespace rocr {
+namespace wsl {
 namespace timer {
 
 // Needed to patch around a mixed arithmetic bug in MSVC's duration_cast as of
@@ -168,6 +168,6 @@ class fast_clock {
   static init fast_clock_init;
 };
 }   //  namespace timer
-}   //  namespace rocr
+}   //  namespace wsl
 
 #endif

@@ -37,7 +37,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
 
   std::memset(Counters, 0, sizeof(*Counters));
 
-  rocr::core::WDDMDevice *device_ = get_wddmdev(NodeId);
+  wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   assert(device_);
   device_->GetClockCounters(&Counters->GPUClockCounter, nullptr);
 

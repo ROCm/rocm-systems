@@ -34,7 +34,7 @@
 #include "inc/wddm/types.h"
 #include "inc/wddm/device.h"
 
-rocr::core::WDDMDevice* get_wddmdev(uint32_t node_id);
+wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
 
 extern unsigned long dxg_open_count;
 extern bool hsakmt_forked;

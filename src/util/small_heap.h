@@ -52,7 +52,7 @@
 
 #include "utils.h"
 
-namespace rocr {
+namespace wsl {
 
 class SmallHeap {
  private:
@@ -126,6 +126,6 @@ class SmallHeap {
   void* high_split() const { return *high.begin(); }
 };
 
-}  // namespace rocr
+} // namespace wsl
 
 #endif

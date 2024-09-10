@@ -48,7 +48,7 @@
 #include "utils.h"
 #include "os.h"
 
-namespace rocr {
+namespace wsl {
 
 class HybridMutex {
  public:
@@ -285,6 +285,6 @@ template <class LockType> class ScopedAcquire {
   DISALLOW_COPY_AND_ASSIGN(ScopedAcquire);
 };
 
-}  // namespace rocr
+} // namespace wsl
 
 #endif  // HSA_RUNTIME_CORE_SUTIL_LOCKS_H_

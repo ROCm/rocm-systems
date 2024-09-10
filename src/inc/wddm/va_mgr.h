@@ -5,8 +5,8 @@
 #include <map>
 #include "util/utils.h"
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 class VaMgr {
 public:
@@ -81,6 +81,6 @@ private:
   DISALLOW_COPY_AND_ASSIGN(VaMgr);
 };
 
-}  // namespace core
-}  // namespace rocr
+} // namespace thunk
+} // namespace wsl
 #endif  // VA_MGR_H_

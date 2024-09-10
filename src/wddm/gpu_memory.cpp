@@ -6,11 +6,11 @@
 
 using namespace std;
 
-namespace rocr {
-namespace core {
+namespace wsl {
+namespace thunk {
 
 size_t GpuMemory::CalcChunkNumbers(gpusize size) {
-  const auto chunk_size = core::WDDMDevice::GpuMemoryChunkSize;
+  const auto chunk_size = WDDMDevice::GpuMemoryChunkSize;
   return (size + chunk_size - 1) / chunk_size;
 }
 
@@ -123,13 +123,13 @@ ErrorCode GpuMemory::UnmapGpuVirtualAddress(const gpusize addr, const gpusize si
   auto map_addr = addr;
   auto map_size = size;
 
-  while (offset >= core::WDDMDevice::GpuMemoryChunkSize) {
-    offset -= core::WDDMDevice::GpuMemoryChunkSize;
+  while (offset >= WDDMDevice::GpuMemoryChunkSize) {
+    offset -= WDDMDevice::GpuMemoryChunkSize;
     i += 1;
   }
 
   while (map_size > 0) {
-    auto block_size = std::min(map_size, core::WDDMDevice::GpuMemoryChunkSize);
+    auto block_size = std::min(map_size, WDDMDevice::GpuMemoryChunkSize);
 
     D3DDDI_MAPGPUVIRTUALADDRESS args{};
 
@@ -139,7 +139,7 @@ ErrorCode GpuMemory::UnmapGpuVirtualAddress(const gpusize addr, const gpusize si
     args.SizeInPages = block_size / 0x1000;
     args.Protection.NoAccess = 1;
 
-    code = thunk::MapGpuVirtualAddress(&args);
+    code = d3dthunk::MapGpuVirtualAddress(&args);
 
     if (code == ErrorCode::NotReady)
       device_->UpdatePageFence(args.PagingFenceValue);
@@ -163,8 +163,8 @@ ErrorCode GpuMemory::MapGpuVirtualAddress(const gpusize addr, const gpusize size
   auto map_size = size;
   const size_t _4K = 0x1000;
 
-  while (offset >= core::WDDMDevice::GpuMemoryChunkSize) {
-    offset -= core::WDDMDevice::GpuMemoryChunkSize;
+  while (offset >= WDDMDevice::GpuMemoryChunkSize) {
+    offset -= WDDMDevice::GpuMemoryChunkSize;
     i += 1;
   }
   const size_t first_chunk = i;
@@ -174,7 +174,7 @@ ErrorCode GpuMemory::MapGpuVirtualAddress(const gpusize addr, const gpusize size
    * 2. visible vram can not be cpu mapped when command submission or after gpu mapped
    */
   while (map_size > 0) {
-    auto block_size = std::min(map_size, core::WDDMDevice::GpuMemoryChunkSize);
+    auto block_size = std::min(map_size, WDDMDevice::GpuMemoryChunkSize);
 
     D3DDDI_MAPGPUVIRTUALADDRESS args{};
 
@@ -185,7 +185,7 @@ ErrorCode GpuMemory::MapGpuVirtualAddress(const gpusize addr, const gpusize size
     args.SizeInPages = block_size / _4K;
     args.Protection.Write = 1;
 
-    code = thunk::MapGpuVirtualAddress(&args);
+    code = d3dthunk::MapGpuVirtualAddress(&args);
 
     if (code != ErrorCode::Success) {
       if (code == ErrorCode::NotReady) {
@@ -208,7 +208,7 @@ ErrorCode GpuMemory::MapGpuVirtualAddress(const gpusize addr, const gpusize size
     map_addr = addr;
     map_size = size;
     for (size_t j = first_chunk; j < i; j++) {
-      auto block_size = std::min(map_size, core::WDDMDevice::GpuMemoryChunkSize);
+      auto block_size = std::min(map_size, WDDMDevice::GpuMemoryChunkSize);
 
       D3DDDI_MAPGPUVIRTUALADDRESS args{};
 
@@ -219,7 +219,7 @@ ErrorCode GpuMemory::MapGpuVirtualAddress(const gpusize addr, const gpusize size
       args.SizeInPages = block_size / _4K;
       args.Protection.NoAccess = 1;
 
-      auto unmap_code = thunk::MapGpuVirtualAddress(&args);
+      auto unmap_code = d3dthunk::MapGpuVirtualAddress(&args);
       if (unmap_code == ErrorCode::NotReady)
         device_->UpdatePageFence(args.PagingFenceValue);
 
@@ -274,7 +274,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
   for (size_t i = 0; i < num_allocations; i++) {
 
     void* priv_data = (void*)((char*)priv_drv_data + priv_drv_data_size * i);
-    size_t block_size = std::min(size, core::WDDMDevice::GpuMemoryChunkSize);
+    size_t block_size = std::min(size, WDDMDevice::GpuMemoryChunkSize);
 
     if (IsUserMemory() || IsSystem()) {
       rocr_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
@@ -314,7 +314,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     args.Flags.CreateResource = 1;
   }
 
-  auto status = thunk::CreateAllocation(&args);
+  auto status = d3dthunk::CreateAllocation(&args);
   if (status == ErrorCode::Success) {
     for (size_t i = 0; i < num_allocations; i++)
       alloc_handles_ptr_[i] = alloc_info[i].hAllocation;
@@ -331,7 +331,7 @@ ErrorCode GpuMemory::FreePhysicalMemory() {
   if (alloc_handles_ptr_ == nullptr || (NumChunks() == 1 && *alloc_handles_ptr_ == 0))
       return code;
 
-  code = thunk::DestroyAllocation(device_->DeviceHandle(),
+  code = d3dthunk::DestroyAllocation(device_->DeviceHandle(),
                                   resource_,
                                   NumChunks(),
                                   alloc_handles_ptr_);
@@ -350,7 +350,7 @@ ErrorCode GpuMemory::MakeResident() {
   args.AllocationList = alloc_handles_ptr_;
   args.Flags.CantTrimFurther = 1;
 
-  auto code = thunk::MakeResident(&args);
+  auto code = d3dthunk::MakeResident(&args);
   if (code == ErrorCode::NotReady) {
     const auto fence_value = args.PagingFenceValue;
     device_->UpdatePageFence(fence_value);
@@ -366,12 +366,12 @@ ErrorCode GpuMemory::Evict() {
   args.NumAllocations = NumChunks();
   args.AllocationList = alloc_handles_ptr_;
 
-  return thunk::Evict(&args);
+  return d3dthunk::Evict(&args);
 }
 
 ErrorCode GpuMemory::ExportPhysicalHandle(int* dmabuf_fd, uint32_t flags) {
   if (IsShared())
-    return thunk::ShareObjects(num_allocations_, resource_, flags, dmabuf_fd);
+    return d3dthunk::ShareObjects(num_allocations_, resource_, flags, dmabuf_fd);
   else
     return ErrorCode::UnSupported;
 }
@@ -386,7 +386,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
   memset(&query_args, 0, sizeof(query_args));
   query_args.hDevice = device_->DeviceHandle();
   query_args.hNtHandle = reinterpret_cast<HANDLE>(dmabuf_fd);
-  auto ret = thunk::QueryResourceInfoFromNtHandle(&query_args);
+  auto ret = d3dthunk::QueryResourceInfoFromNtHandle(&query_args);
   if (ret != ErrorCode::Success) {
     debug_print("%s query resource info from nt handle failed %d\n", __FUNCTION__, static_cast<int>(ret));
     return ErrorCode::InvalidateParams;
@@ -435,7 +435,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
   open_args.PrivateRuntimeDataSize = query_args.PrivateRuntimeDataSize;
   open_args.pPrivateRuntimeData = reinterpret_cast<void*> (&shared_info);
 
-  ret = thunk::OpenResourceFromNtHandle(&open_args);
+  ret = d3dthunk::OpenResourceFromNtHandle(&open_args);
   if (ret != ErrorCode::Success) {
     ret = ErrorCode::InvalidateParams;
     debug_print("%s open resource failed %d\n", __FUNCTION__, static_cast<int>(ret));
@@ -463,5 +463,5 @@ err_out:
   return ret;
 }
 
-} // namespace code
-} // namespace rocr
+} // namespace thunk
+} // namespace wsl
