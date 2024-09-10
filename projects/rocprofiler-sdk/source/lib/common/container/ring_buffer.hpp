@@ -75,7 +75,7 @@ struct ring_buffer
     void destroy();
 
     /// Request a pointer for writing at least \param n bytes.
-    void* request(size_t n, bool wrap = true);
+    void* request(size_t n, size_t align, bool wrap = true);
 
     /// Retrieve a pointer for reading at least \param n bytes.
     void* retrieve(size_t n) const;
@@ -174,8 +174,9 @@ ring_buffer::write(Tp* in, std::enable_if_t<std::is_class<Tp>::value, int>)
 {
     if(in == nullptr || m_ptr == nullptr) return {0, nullptr};
 
-    auto  _length = sizeof(Tp);
-    void* _out_p  = request(_length);
+    constexpr auto _length = sizeof(Tp);
+    constexpr auto _align  = alignof(Tp);
+    void*          _out_p  = request(_length, _align, true);
 
     if(_out_p == nullptr) return {0, nullptr};
 
@@ -194,8 +195,9 @@ ring_buffer::write(Tp* in, std::enable_if_t<!std::is_class<Tp>::value, int>)
 {
     if(in == nullptr || m_ptr == nullptr) return {0, nullptr};
 
-    auto  _length = sizeof(Tp);
-    void* _out_p  = request(_length);
+    constexpr auto _length = sizeof(Tp);
+    constexpr auto _align  = alignof(Tp);
+    void*          _out_p  = request(_length, _align, true);
 
     if(_out_p == nullptr) return {0, nullptr};
 
@@ -214,7 +216,7 @@ ring_buffer::request(bool wrap)
 {
     if(m_ptr == nullptr) return nullptr;
 
-    return reinterpret_cast<Tp*>(request(sizeof(Tp), wrap));
+    return reinterpret_cast<Tp*>(request(sizeof(Tp), alignof(Tp), wrap));
 }
 //
 template <typename Tp>

@@ -4,7 +4,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR I
 
-## Additions
+### Additions
 
 - HSA API Tracing
 - Kernel Dispatch Tracing
@@ -14,7 +14,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR II
 
-## Additions
+### Additions
 
 - HIP API Tracing
 - ROCTx Tracing
@@ -25,7 +25,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR III
 
-## Additions
+### Additions
 
 - Kernel Dispatch Counter Collection – (includes serialization and multidimensional instances)
 - Kernel serialization
@@ -43,7 +43,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR IV
 
-## Additions
+### Additions
 
 - Page Migration Reporting (API)
 - Scratch Memory Reporting (API)
@@ -55,7 +55,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ## ROCprofiler-SDK for AFAR V
 
-## Additions
+### Additions
 
 - Agent/Device Counter Collection (API)
 - Single JSON output format support (tool)
@@ -67,17 +67,17 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - ROCProf V3 Multi-GPU Support:
   - Multi-process (multiple files)
 
-## Fixes
+### Fixes
 
 - SQ_ACCUM_PREV and SQ_ACCUM_PREV_HIRE overwriting issue
 
-## Changes
+### Changes
 
 - rocprofv3 tool now needs `--` in front of application. For detailed uses, please [Click Here](source/docs/rocprofv3.md)
-  
+
 ## ROCprofiler-SDK for AFAR VI
 
-## Additions
+### Additions
 
 - OTF2 Tool Support
 - Kernel and Range Filtering
@@ -90,6 +90,16 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
   - Dispatch_Id
 - Added CSV column for counter_collection
 
-## Fixes
+### Fixes
 
 - Miscellaneous bug fixes
+
+## ROCprofiler-SDK for AFAR VII
+
+### Additions
+
+### Fixes
+
+### Changes
+
+- Fix misaligned stores (undefined behavior) for buffer records

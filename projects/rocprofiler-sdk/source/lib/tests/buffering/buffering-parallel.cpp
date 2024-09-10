@@ -156,7 +156,8 @@ validate(const std::vector<rocprofiler_record_header_t*>& _headers)
         if(itr->hash == typeid(data_type).hash_code())
         {
             auto* _data = static_cast<data_type*>(itr->payload);
-            EXPECT_EQ(_ref_data, *_data);
+            EXPECT_EQ(_ref_data, *_data)
+                << "\nREF: " << _ref_data.to_string() << "\nINP: " << _data->to_string();
         }
     }
 }

@@ -218,7 +218,7 @@ TEST(buffering, save_load)
 
     // verify the data, at a high-level is correct
     EXPECT_EQ(_buffer.size(), num_variants);
-    EXPECT_EQ(_buffer.count(), data_size);
+    EXPECT_GE(_buffer.count(), data_size);
     EXPECT_GE(_buffer.free(), 0);
     EXPECT_GE(_buffer.capacity(), data_size);
     EXPECT_FALSE(_buffer.is_empty());

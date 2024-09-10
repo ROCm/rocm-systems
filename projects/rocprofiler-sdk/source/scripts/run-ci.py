@@ -117,6 +117,17 @@ def generate_custom(args, cmake_args, ctest_args):
                 os.environ.get("TSAN_OPTIONS", ""),
             ]
         )
+    elif MEMCHECK_TYPE == "UndefinedBehaviorSanitizer":
+        MEMCHECK_SUPPRESSION_FILE = (
+            f"{SOURCE_DIR}/source/scripts/undef-behavior-sanitizer-suppr.txt"
+        )
+        os.environ["UBSAN_OPTIONS"] = " ".join(
+            [
+                "print_stacktrace=1",
+                f"suppressions={SOURCE_DIR}/source/scripts/undef-behavior-sanitizer-suppr.txt",
+                os.environ.get("UBSAN_OPTIONS", ""),
+            ]
+        )
 
     codecov_exclude = [
         "/usr/.*",
@@ -235,12 +246,12 @@ def generate_dashboard_script(args):
                              RETRY_DELAY 10
                              CAPTURE_CMAKE_ERROR _cdash_submit_err)
 
-                if("{STRICT_SUBMIT}" GREATER 0)
-                    if(NOT _cdash_submit_err EQUAL 0)
+                if(NOT _cdash_submit_err EQUAL 0)
+                    if("{STRICT_SUBMIT}" GREATER 0)
                         message(FATAL_ERROR "CDash submission failed: {SUBMIT_ERR}")
+                    else()
+                        message(AUTHOR_WARNING "CDash submission failure ignored due to absence of --require-cdash-submission")
                     endif()
-                else()
-                    message(AUTHOR_WARNING "CDash submission failure ignored due to absence of --require-cdash-submission")
                 endif()
             endif()
         endmacro()

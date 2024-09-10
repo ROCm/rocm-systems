@@ -235,6 +235,7 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
     if(m_headers.empty()) return false;
 
     constexpr auto request_size = sizeof(Tp);
+    constexpr auto align_size   = alignof(Tp);
 
     // notify there was a request
     m_requested.fetch_add(1);
@@ -242,7 +243,7 @@ record_header_buffer::emplace(uint64_t _hash, Tp& _v)
     // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
     // the lock will be short-lived so hopefully, it will scale fine
     write_lock();
-    auto* _addr = m_buffer.request(request_size, false);
+    auto* _addr = m_buffer.request(request_size, align_size, false);
     write_unlock();
 
     read_lock();
@@ -277,6 +278,7 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
     if(m_headers.empty()) return false;
 
     constexpr auto request_size = sizeof(Tp);
+    constexpr auto align_size   = alignof(Tp);
 
     // notify there was a request
     m_requested.fetch_add(1);
@@ -284,7 +286,7 @@ record_header_buffer::emplace(uint32_t _category, uint32_t _kind, Tp& _v)
     // in theory, we shouldn't need to lock here but the thread sanitizer says there is a race.
     // the lock will be short-lived so hopefully, it will scale fine
     write_lock();
-    auto* _addr = m_buffer.request(request_size, false);
+    auto* _addr = m_buffer.request(request_size, align_size, false);
     write_unlock();
 
     read_lock();
