@@ -152,7 +152,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   if (!MemFlags.ui32.CoarseGrain)
     create_info.mem_flags = rocr_proxy::kFineGrain;
 
-  // create_info.mem_flags |= rocr_proxy::kKernarg;
+  //In hsa-runtime, only kernarg region set Uncached.
+  if (MemFlags.ui32.Uncached)
+    create_info.mem_flags |= rocr_proxy::kKernarg;
+
   create_info.flags.physical_only = MemFlags.ui32.NoAddress;
   create_info.flags.interprocess = MemFlags.ui32.NoAddress;
   create_info.flags.locked = MemFlags.ui32.NoSubstitute;//AllocatePinned
