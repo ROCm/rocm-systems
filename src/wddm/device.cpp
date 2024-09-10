@@ -445,6 +445,8 @@ ErrorCode WDDMDevice::CreateGpuMemory(const GpuMemoryCreateInfo &create_info, Gp
     ret = mem->Init(create_info);
   if (ret == ErrorCode::Success)
     *gpu_mem = mem;
+  else
+    delete mem;
 
   return ret;
 }
