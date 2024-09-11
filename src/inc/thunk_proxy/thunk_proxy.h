@@ -30,9 +30,6 @@ enum SchedLevel {
 };
 
 enum AsicFamilyType {
-  kVega10,
-  kNavi10,
-  kSiennaCichlid,
   kPlumBONITO,
   kNavi44,
   kNavi48
