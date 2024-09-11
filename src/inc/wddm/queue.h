@@ -171,7 +171,7 @@ public:
   }
 
   hsa_status_t Process(void);
-  uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_.value; }
+  uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
   void RingDoorbell();
 private:
   hsa_status_t KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet);
@@ -235,7 +235,7 @@ private:
   GpuMemoryHandle amd_queue_mem_;
   amd_queue_t *amd_queue_;
   amd_queue_t *amd_queue_rocr_;
-  amd_signal_t doorbell_signal_;
+  uint64_t doorbell_signal_value_;
   volatile std::atomic<int64_t> *error_code_;
   std::thread aql_to_pm4_thread_;
   bool thread_stop_;
