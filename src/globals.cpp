@@ -45,3 +45,5 @@ bool is_svm_api_supported;
 int zfb_support;
 /* handle vendor specific packet */
 int vendor_packet_support;
+
+size_t max_single_alloc_size = 0;

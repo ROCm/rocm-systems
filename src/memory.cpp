@@ -105,18 +105,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemory(HSAuint32 PreferredNode,
 
 #define POWER_OF_2(x) ((x && (!(x & (x - 1)))) ? 1 : 0)
 
-bool isSystemMemoryAvailable(HSAuint64 SizeInBytes) {
-  struct sysinfo info;
-  if (sysinfo(&info) != 0)
-    return false;
-  return SizeInBytes <= info.freeram;
-}
-
-bool isLocalMemoryAvailable(wsl::thunk::WDDMDevice *dev,
-                            HSAuint64 SizeInBytes) {
-  return SizeInBytes <= dev->VramAvail();
-}
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
                                                HSAuint64 SizeInBytes,
                                                HSAuint64 Alignment,
@@ -149,17 +137,16 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   create_info.va_hint = reinterpret_cast<gpusize>(*MemoryAddress);
   if ((PreferredNode == 0 && !MemFlags.ui32.NonPaged)
     || zfb_support || MemFlags.ui32.GTTAccess) {
+    if (SizeInBytes > max_single_alloc_size)
+      return HSAKMT_STATUS_NO_MEMORY;
+
     /* If allocate VRAM under ZFB mode */
     if (zfb_support && MemFlags.ui32.NonPaged == 1)
       MemFlags.ui32.CoarseGrain = 1;
 
     create_info.domain = rocr_proxy::AllocDomain::kSystem;
-    if (!MemFlags.ui32.OnlyAddress && !isSystemMemoryAvailable(SizeInBytes))
-      return HSAKMT_STATUS_NO_MEMORY;
   } else {
     create_info.domain = rocr_proxy::AllocDomain::kLocal;
-    if (!MemFlags.ui32.OnlyAddress && !isLocalMemoryAvailable(dev, SizeInBytes))
-      return HSAKMT_STATUS_NO_MEMORY;
   }
 
   if (!MemFlags.ui32.CoarseGrain)

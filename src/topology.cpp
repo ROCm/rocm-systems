@@ -750,6 +750,11 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
     sysinfo(&info);
     props->SizeInBytes = info.totalram;
 
+    /* props->SizeInBytes is the actual physical system
+     * memory size. Reserve 1/16th for WSL system usage.
+     */
+    max_single_alloc_size = info.totalram - (info.totalram >> 4);
+
     props->Flags.MemoryProperty = 0;
     props->Width = 64;
     props->MemoryClockMax = 2133;

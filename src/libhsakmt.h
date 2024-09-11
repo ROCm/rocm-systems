@@ -43,6 +43,7 @@ extern bool is_dgpu;
 extern bool is_svm_api_supported;
 extern int zfb_support;
 extern int vendor_packet_support;
+extern size_t max_single_alloc_size;
 
 #undef HSAKMTAPI
 #define HSAKMTAPI __attribute__((visibility ("default")))
