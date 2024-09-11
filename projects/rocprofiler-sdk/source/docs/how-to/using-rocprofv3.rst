@@ -130,7 +130,31 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Truncates the demangled kernel names for improved readability.
     - Output control
 
-You can see the full list of all the ``rocprofv3`` options using:
+  * - ``--output-format``
+    - For adding output format (supported formats: csv, json, pftrace, otf2)
+    - Output control
+
+  * - ``--preload``
+    - Libraries to prepend to LD_PRELOAD (usually for sanitizers)
+    - Extension
+  
+  * - ``--perfetto-backend {inprocess,system}``
+    - Perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons
+    - Extension
+  
+  * - ``--perfetto-buffer-size KB``
+    - Size of buffer for perfetto output in KB. default: 1 GB
+    - Extension
+  
+  * - ``--perfetto-buffer-fill-policy {discard,ring_buffer}``
+    - Policy for handling new records when perfetto has reached the buffer limit
+    - Extension
+  
+  * - ``--perfetto-shmem-size-hint KB``
+    - Perfetto shared memory size hint in KB. default: 64 KB
+    - Extension
+
+You can also see all the ``rocprofv3`` options using:
 
 .. code-block:: bash
 
@@ -457,7 +481,7 @@ Properties
       -  **``output_directory``** *(string)*: For adding output path
          where the output files will be saved.
       -  **``output_format``** *(array)*: For adding output format
-         (supported formats: csv, json, pftrace).
+         (supported formats: csv, json, pftrace, otf2).
       -  **``list_metrics``** *(boolean)*: List the metrics.
       -  **``log_level``** *(string)*: fatal, error, warning, info,
          trace.
@@ -533,7 +557,7 @@ Here are the contents of ``counter_collection.csv`` file:
 
 .. csv-table:: Counter collection
    :file: /data/counter_collection.csv
-   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
@@ -662,14 +686,20 @@ Output formats
 ``rocprofv3`` supports the following output formats:
 
 - CSV (default)
-- JSON
-- PFTrace
+- JSON (custom format for programmatic analysis)
+- PFTrace (Perfetto trace)
+- OTF2 (Open Trace Format )
 
 You can specify the output format using the ``--output-format`` command-line option. Format selection is case-insensitive
 and multiple output formats are supported. For example: ``--output-format json`` enables JSON output exclusively whereas
-``--output-format csv json pftrace`` enables all three output formats for the run.
+``--output-format csv json pftrace otf2`` enables all four output formats for the run.
 
-For trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
+For .pftrace trace visualization, use the PFTrace format and open the trace in `ui.perfetto.dev <https://ui.perfetto.dev/>`_.
+
+For .otf2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>`_ or any supported visualizer.
+
+.. note::
+  For large trace files(> 10GB), its recommended to use otf2 format.
 
 JSON output schema
 ++++++++++++++++++++
@@ -713,7 +743,7 @@ Properties
             - **`simd_per_cu`** `(integer)`: SIMDs per CU.
             - **`max_slots_scratch_cu`** `(integer)`: Maximum slots for scratch CU.
             - **`gfx_target_version`** `(integer)`: GFX target version.
-            - **`vendor_id`** `(integer)`: Vendor ID.
+            - **`vendor_id`** `(integer)`: Vendor ID. 
             - **`device_id`** `(integer)`: Device ID.
             - **`location_id`** `(integer)`: Location ID.
             - **`domain`** `(integer)`: Domain identifier.
