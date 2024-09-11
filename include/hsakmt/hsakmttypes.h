@@ -149,6 +149,7 @@ typedef struct _HsaVersionCapability
             unsigned int Vmem               :1;
             unsigned int dmabuf             :1;
             unsigned int XNack              :1; // HSA_XNACK
+            unsigned int Reserved           :55;
         }ui64;
     };
 } HsaVersionCapability;
