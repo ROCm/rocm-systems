@@ -141,17 +141,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   wsl::thunk::GpuMemoryCreateInfo create_info{};
   create_info.size = SizeInBytes;
 
+  /* If initialize scratch pool of GpuAgent, treat it as SVM reserve */
+  if (MemFlags.ui32.Scratch && MemFlags.ui32.HostAccess && SizeInBytes > 0x80000000)
+    MemFlags.ui32.OnlyAddress = 1;
+
   if (!MemFlags.ui32.NonPaged || zfb_support || MemFlags.ui32.GTTAccess) {
     /* If allocate VRAM under ZFB mode */
     if (zfb_support && MemFlags.ui32.NonPaged == 1)
       MemFlags.ui32.CoarseGrain = 1;
 
     create_info.domain = rocr_proxy::AllocDomain::kSystem;
-    if (!isSystemMemoryAvailable(SizeInBytes))
+    if (!MemFlags.ui32.OnlyAddress && !isSystemMemoryAvailable(SizeInBytes))
       return HSAKMT_STATUS_NO_MEMORY;
   } else {
     create_info.domain = rocr_proxy::AllocDomain::kLocal;
-    if (!isLocalMemoryAvailable(dev, SizeInBytes))
+    if (!MemFlags.ui32.OnlyAddress && !isLocalMemoryAvailable(dev, SizeInBytes))
       return HSAKMT_STATUS_NO_MEMORY;
   }
 
