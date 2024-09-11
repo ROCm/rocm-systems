@@ -40,7 +40,9 @@ hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
   VersionCapInfo->Value = 0;
   /*VersionCapInfo->ui64.InterruptSignal = 0;
   VersionCapInfo->ui64.Sdma = 0;
-  VersionCapInfo->ui64.SdmaXgmi = 0;
+  VersionCapInfo->ui64.SdmaUserQueue = 0;
+  VersionCapInfo->ui64.SdmaPeer = 0;
+  VersionCapInfo->ui64.SdmaGang = 0;
   VersionCapInfo->ui64.Image = 0;
   VersionCapInfo->ui64.EventAge = 0;
   VersionCapInfo->ui64.Scratch = 0;
