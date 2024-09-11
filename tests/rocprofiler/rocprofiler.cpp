@@ -1,6 +1,7 @@
 
 #include <amdhip/amdhip.hpp>
 #include <hsa-runtime/hsa-runtime.hpp>
+#include <rccl/rccl.hpp>
 #include <roctx/roctx.hpp>
 
 #include <dlfcn.h>
@@ -27,6 +28,13 @@ void
 hsa_init()
 {
     printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+}
+
+ncclResult_t
+ncclGetVersion(int*)
+{
+    printf("[%s] %s\n", ROCP_REG_FILE_NAME, __FUNCTION__);
+    return {};
 }
 
 void
@@ -78,6 +86,7 @@ rocprofiler_set_api_table(const char* name,
     using hip_table_t   = hip::HipApiTable;
     using hsa_table_t   = hsa::HsaApiTable;
     using roctx_table_t = roctx::ROCTxApiTable;
+    using rccl_table_t  = rccl::rcclApiFuncTable;
 
     auto* _wrap_v = std::getenv("ROCP_REG_TEST_WRAP");
     bool  _wrap   = (_wrap_v != nullptr && std::stoi(_wrap_v) != 0);
@@ -106,6 +115,11 @@ rocprofiler_set_api_table(const char* name,
             roctx_table_t* _table     = static_cast<roctx_table_t*>(tables[0]);
             _table->roctxRangePush_fn = &rocprofiler::roctx_range_push;
             _table->roctxRangePop_fn  = &rocprofiler::roctx_range_pop;
+        }
+        else if(std::string_view{ name } == "rccl")
+        {
+            rccl_table_t* _table      = static_cast<rccl_table_t*>(tables[0]);
+            _table->ncclGetVersion_fn = &rocprofiler::ncclGetVersion;
         }
     }
 

@@ -12,6 +12,7 @@ extern "C" {
 #    pragma weak hsa_init
 #    pragma weak roctxRangePush
 #    pragma weak roctxRangePop
+#    pragma weak ncclGetVersion
 #endif
 
 extern void
@@ -25,6 +26,13 @@ roctxRangePush(const char*);
 
 extern void
 roctxRangePop(const char*);
+
+enum ncclResult_t
+{
+};
+
+extern ncclResult_t
+ncclGetVersion(int* version);
 
 #ifdef __cplusplus
 }

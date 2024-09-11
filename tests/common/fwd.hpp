@@ -18,6 +18,7 @@ namespace
 {
 decltype(hip_init)*       hip_init_fn       = nullptr;
 decltype(hsa_init)*       hsa_init_fn       = nullptr;
+decltype(ncclGetVersion)* ncclGetVersion_fn = nullptr;
 decltype(roctxRangePush)* roctxRangePush_fn = nullptr;
 decltype(roctxRangePush)* roctxRangePop_fn  = nullptr;
 
@@ -27,6 +28,7 @@ enum rocp_reg_test_modes : uint8_t
     ROCP_REG_TEST_HIP   = (1 << 0),
     ROCP_REG_TEST_HSA   = (1 << 1),
     ROCP_REG_TEST_ROCTX = (1 << 2),
+    ROCP_REG_TEST_RCCL  = (1 << 3),
 };
 
 template <uint8_t Idx = ROCP_REG_TEST_NONE>
@@ -73,6 +75,7 @@ resolve_symbols(int _open_mode = RTLD_LOCAL | RTLD_LAZY)
     void* amdhip_handle = nullptr;
     void* hsart_handle  = nullptr;
     void* roctx_handle  = nullptr;
+    void* rccl_handle   = nullptr;
 
     if constexpr((Idx & ROCP_REG_TEST_HIP) == ROCP_REG_TEST_HIP)
     {
@@ -96,6 +99,13 @@ resolve_symbols(int _open_mode = RTLD_LOCAL | RTLD_LAZY)
             _resolve_dlopen(roctx_handle, "libroctx64.so");
         _resolve_dlsym(roctxRangePush_fn, roctx_handle, "roctxRangePush");
         _resolve_dlsym(roctxRangePop_fn, roctx_handle, "roctxRangePop");
+    }
+
+    if constexpr((Idx & ROCP_REG_TEST_RCCL) == ROCP_REG_TEST_RCCL)
+    {
+        ncclGetVersion_fn = ncclGetVersion;
+        if(!ncclGetVersion_fn) _resolve_dlopen(rccl_handle, "librccl.so");
+        _resolve_dlsym(ncclGetVersion_fn, rccl_handle, "ncclGetVersion");
     }
 }
 }  // namespace
