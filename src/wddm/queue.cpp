@@ -222,7 +222,7 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
                uint32_t cmdbuf_size,
                uint32_t engine,
                bool use_hws) :
-               WDDMQueue(device, cmdbuf_size, engine, use_hws),
+               WDDMQueue(device, 0, cmdbuf_size, engine, use_hws),
                ring(ring),
                ring_size(ring_size),
                ring_wptr(ring_wptr),
@@ -240,9 +240,8 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
                scratch_size_per_wave_(0),
                scratch_size_(0),
                scratch_base_(nullptr) {
-
-	bool ret = device->CreateQueue(this);
-	assert(ret);
+  bool ret = device->CreateQueue(this);
+  assert(ret);
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = PAGE_SIZE;
@@ -948,6 +947,108 @@ hsa_status_t ComputeQueue::Process(void) {
   }
 
   return HSA_STATUS_SUCCESS;
+}
+
+void SDMAQueue::SdmaThread(SDMAQueue *queue) {
+  // This timing system is used for sleeping this Thread
+  // when one packet is invalid for about 2 seconds.
+  std::chrono::steady_clock::time_point start_time, time;
+  // Set the polling timeout value for 2 seconds
+  const std::chrono::milliseconds kMaxElapsed(2000);
+  bool sleep = false;
+  start_time = std::chrono::steady_clock::now();
+
+  while (true) {
+    if (!queue->wptr_queue_.empty()) {
+      uint64_t start = queue->wptr_queue_.front().first;
+      uint64_t end = queue->wptr_queue_.front().second;
+      queue->wptr_queue_.pop();
+      debug_print("SDMA: wptr %lx %lx\n", start, end);
+
+      SDMA_PKT_POLL_REGMEM* poll_pkt = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(queue->cmdbuf_addr + queue->WrapIntoRocrRing(start));
+      SDMA_PKT_POLL_REGMEM* poll_next_pkt = poll_pkt + 1;
+      while (queue->IsPollPacket(poll_pkt) && queue->IsPollPacket(poll_next_pkt)) {
+        uint64_t poll_addr;
+        uint64_t poll_val;
+        if (poll_pkt->ADDR_LO_UNION.addr_31_0 > poll_next_pkt->ADDR_LO_UNION.addr_31_0) {
+          poll_addr = poll_next_pkt->ADDR_LO_UNION.addr_31_0 |
+                             (uint64_t)poll_next_pkt->ADDR_HI_UNION.addr_63_32 << 32;
+          poll_val = poll_next_pkt->VALUE_UNION.value |
+                            (uint64_t)poll_pkt->VALUE_UNION.value << 32;
+        } else {
+          poll_addr = poll_pkt->ADDR_LO_UNION.addr_31_0 |
+                             (uint64_t)poll_pkt->ADDR_HI_UNION.addr_63_32 << 32;
+          poll_val = poll_pkt->VALUE_UNION.value |
+                            (uint64_t)poll_next_pkt->VALUE_UNION.value << 32;
+        }
+        amd_signal_t* signal = (amd_signal_t*)((char*)poll_addr - offsetof(amd_signal_t, value));
+        uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
+        debug_print("SDMA: poll signal %#lx addr %#lx val %d\n", signal_handle, poll_addr, poll_val);
+        hsa_signal_t hsa_signal = {signal_handle};
+        hsa_signal_value_t value =
+          fn_hsa_signal_wait_relaxed(hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+        assert(value == poll_val);
+
+        poll_pkt += 2;
+        poll_next_pkt += 2;
+      }
+      queue->PreparePacket(queue->WrapIntoRocrRing(start), end - start);
+      std::atomic_thread_fence(std::memory_order_release);
+      queue->Submit();
+    } else {
+      time = std::chrono::steady_clock::now();
+      if (time - start_time > kMaxElapsed)
+        sleep = true;
+    }
+
+    std::unique_lock<std::mutex> lock(queue->thread_cond_lock_);
+    if (sleep && queue->wptr_queue_.empty()) {
+      while (!queue->thread_stop_ && queue->wptr_queue_.empty()) {
+        queue->thread_cond_.wait(lock);
+      }
+      if (queue->thread_stop_)
+        break;
+      sleep = false;
+      start_time = std::chrono::steady_clock::now();
+    }
+  }
+  debug_print("sdma thread exit\n");
+}
+
+SDMAQueue::SDMAQueue(WDDMDevice *device,
+          void *ring,
+          uint64_t cmdbuf_size,
+          uint32_t engine,
+          bool use_hws) :
+          WDDMQueue(device, reinterpret_cast<uint64_t>(ring), cmdbuf_size, engine, use_hws),
+          wptr_next_(0),
+          wptr_pre_(0),
+          rptr_next(0),
+          thread_stop_(false),
+          ib_size(0),
+          ib_start_addr(0) {
+  bool ret = device->CreateQueue(this);
+  assert(ret);
+
+  thread_ = std::thread(SdmaThread, this);
+}
+
+SDMAQueue::~SDMAQueue() {
+  thread_cond_lock_.lock();
+  thread_stop_ = true;
+  thread_cond_lock_.unlock();
+  thread_cond_.notify_one();
+  thread_.join();
+
+  device->DestroyQueue(this);
+}
+
+void SDMAQueue::RingDoorbell() {
+  debug_print("SDMA: ringdoorbell %#llx %#llx\n", wptr_pre_, wptr_next_);
+
+  wptr_queue_.emplace(wptr_pre_, wptr_next_);
+  thread_cond_.notify_one();
+  wptr_pre_ = wptr_next_;
 }
 
 hsa_status_t SDMAQueue::Init(void) {

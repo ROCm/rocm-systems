@@ -63,15 +63,27 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(
     bool use_hws = device_->IsHwsEnabled(queue_engine);
     auto queue_ = new wsl::thunk::ComputeQueue(
         device_, QueueAddress, pkg_num,
-        reinterpret_cast<std::atomic<uint64_t> *>(QueueResource->Queue_write_ptr_aql),
-        reinterpret_cast<std::atomic<uint64_t> *>(QueueResource->Queue_read_ptr_aql),
+        reinterpret_cast<std::atomic<uint64_t> *>(
+            QueueResource->Queue_write_ptr_aql),
+        reinterpret_cast<std::atomic<uint64_t> *>(
+            QueueResource->Queue_read_ptr_aql),
         QueueResource->ErrorReason, cmdbuf_size, queue_engine, use_hws);
 
     QueueResource->QueueId = reinterpret_cast<HSA_QUEUEID>(queue_);
     // for doorbell_signal.hardware_doorbell_ptr
     QueueResource->Queue_DoorBell_aql = queue_->GetDoorbellPtr();
   } break;
-  case HSA_QUEUE_SDMA:
+  case HSA_QUEUE_SDMA: {
+    uint32_t queue_engine = device_->GetSdmaEngine(0); // TODO:
+    bool use_hws = device_->IsHwsEnabled(queue_engine);
+    auto queue_ = new wsl::thunk::SDMAQueue(
+		device_, QueueAddress, QueueSizeInBytes,
+		queue_engine, use_hws);
+    QueueResource->QueueId = reinterpret_cast<HSA_QUEUEID>(queue_);
+    QueueResource->Queue_DoorBell_aql = queue_->GetDoorbellPtr();
+    QueueResource->Queue_write_ptr_aql = queue_->GetRingWptr();
+    QueueResource->Queue_read_ptr_aql = queue_->GetRingRptr();
+  } break;
   default:
     assert(false);
     QueueResource->QueueId = 0;
@@ -101,7 +113,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUpdateQueue(
 HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
+  auto queue_ = reinterpret_cast<wsl::thunk::WDDMQueue *>(QueueId);
 
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -165,7 +177,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
 HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId) {
   CHECK_DXG_OPEN();
 
-  auto queue_ = reinterpret_cast<wsl::thunk::ComputeQueue *>(QueueId);
+  auto queue_ = reinterpret_cast<wsl::thunk::WDDMQueue *>(QueueId);
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 

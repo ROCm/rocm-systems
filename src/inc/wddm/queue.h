@@ -44,6 +44,9 @@
 
 #include <cinttypes>
 #include <condition_variable>
+#include <iostream>
+#include <queue>
+#include <utility>
 #include "inc/wddm/types.h"
 #include "inc/wddm/device.h"
 #include "inc/wddm/gpu_memory.h"
@@ -61,6 +64,7 @@ class WDDMDevice;
 class WDDMQueue {
 public:
   WDDMQueue(WDDMDevice *device,
+            uint64_t cmdbuf_addr,
             uint32_t cmdbuf_size,
             uint32_t engine,
             bool use_hws = true) :
@@ -70,7 +74,7 @@ public:
             syncobj(NULL),
             sync_addr(NULL),
             cmdbuf(0),
-            cmdbuf_addr(0),
+            cmdbuf_addr(cmdbuf_addr),
             cmdbuf_size(cmdbuf_size),
             queue_engine(engine),
             use_hws(use_hws),
@@ -80,8 +84,9 @@ public:
 
   virtual ~WDDMQueue() { }
 
-  virtual hsa_status_t Init(void) = 0;
-  virtual hsa_status_t Fini(void) = 0;
+  virtual hsa_status_t Init(void) { return HSA_STATUS_SUCCESS; }
+  virtual hsa_status_t Fini(void) { return HSA_STATUS_SUCCESS; }
+  virtual void RingDoorbell() { }
 
   hsa_status_t SwsInit(void);
   hsa_status_t SwsFini(void);
@@ -250,17 +255,12 @@ private:
 class SDMAQueue : public WDDMQueue {
 public:
   SDMAQueue(WDDMDevice *device,
+            void *ring,
             uint64_t cmdbuf_size,
             uint32_t engine,
-            bool use_hws = true) :
-            WDDMQueue(device, cmdbuf_size, engine, use_hws),
-            rptr_next(0),
-            ib_size(0),
-            ib_start_addr(0) {
+            bool use_hws = true);
 
-  }
-
-  virtual ~SDMAQueue() { }
+  virtual ~SDMAQueue();
 
   hsa_status_t Init(void);
   hsa_status_t Fini(void);
@@ -272,10 +272,84 @@ public:
     device->CpuWait(&syncobj, &rptr_next, 1, false);
   }
 
+  uint64_t * GetRingWptr(void) { return &wptr_next_; }
+  uint64_t * GetRingRptr(void) { return WDDMQueue::GetSyncAddr(); }
+  uint64_t * GetDoorbellPtr() { return &doorbell_; }
+  void RingDoorbell();
+
 private:
+  uint64_t wptr_next_;
+  uint64_t wptr_pre_;
   uint64_t rptr_next;
+  uint64_t doorbell_;
+  std::queue<std::pair<uint64_t, uint64_t>> wptr_queue_;
   uint64_t ib_size;
   uint64_t ib_start_addr;
+
+  std::thread thread_;
+  bool thread_stop_;
+  std::mutex thread_cond_lock_;
+  std::condition_variable thread_cond_;
+  static void SdmaThread(SDMAQueue *queue);
+
+  struct SDMA_PKT_POLL_REGMEM {
+    union {
+      struct {
+        unsigned int op : 8;
+        unsigned int sub_op : 8;
+        unsigned int reserved_0 : 10;
+        unsigned int hdp_flush : 1;
+        unsigned int reserved_1 : 1;
+        unsigned int func : 3;
+        unsigned int mem_poll : 1;
+      };
+      unsigned int DW_0_DATA;
+    } HEADER_UNION;
+
+    union {
+      struct {
+        unsigned int addr_31_0 : 32;
+      };
+      unsigned int DW_1_DATA;
+    } ADDR_LO_UNION;
+
+    union {
+      struct {
+        unsigned int addr_63_32 : 32;
+      };
+      unsigned int DW_2_DATA;
+    } ADDR_HI_UNION;
+
+    union {
+      struct {
+        unsigned int value : 32;
+      };
+      unsigned int DW_3_DATA;
+    } VALUE_UNION;
+
+    union {
+      struct {
+        unsigned int mask : 32;
+      };
+      unsigned int DW_4_DATA;
+    } MASK_UNION;
+
+    union {
+      struct {
+        unsigned int interval : 16;
+        unsigned int retry_count : 12;
+        unsigned int reserved_0 : 4;
+      };
+      unsigned int DW_5_DATA;
+    } DW5_UNION;
+  };
+  const unsigned int SDMA_OP_POLL_REGMEM = 8;
+  bool IsPollPacket(SDMA_PKT_POLL_REGMEM* pkt) {
+    return pkt->HEADER_UNION.op == SDMA_OP_POLL_REGMEM &&
+          pkt->HEADER_UNION.mem_poll == 1 &&
+          pkt->HEADER_UNION.func == 3;
+  }
+  uint32_t WrapIntoRocrRing(uint64_t idx) { return (idx & (cmdbuf_size - 1)); }
 };
 
 } // namespace thunk

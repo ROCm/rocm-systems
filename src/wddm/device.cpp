@@ -739,17 +739,19 @@ bool WDDMDevice::CreateQueue(WDDMQueue *queue) {
   if (!CreateContext(queue->queue_engine, &queue->context))
     return false;
 
-  GpuMemoryCreateInfo create_info{};
-  create_info.size = queue->cmdbuf_size;
-  create_info.domain = thunk_proxy::kSystem;
-
   GpuMemory *gpu_mem = nullptr;
-  auto code = CreateGpuMemory(create_info, &gpu_mem);
-  if (code != ErrorCode::Success)
-      goto err_out0;
+  if (queue->cmdbuf_addr == 0) {
+    GpuMemoryCreateInfo create_info{};
+    create_info.size = queue->cmdbuf_size;
+    create_info.domain = thunk_proxy::kSystem;
 
-  queue->cmdbuf = gpu_mem->GetGpuMemoryHandle();
-  queue->cmdbuf_addr = gpu_mem->GpuAddress();
+    auto code = CreateGpuMemory(create_info, &gpu_mem);
+    if (code != ErrorCode::Success)
+        goto err_out0;
+
+    queue->cmdbuf = gpu_mem->GetGpuMemoryHandle();
+    queue->cmdbuf_addr = gpu_mem->GpuAddress();
+  }
 
   if (queue->Init())
      goto err_out1;
