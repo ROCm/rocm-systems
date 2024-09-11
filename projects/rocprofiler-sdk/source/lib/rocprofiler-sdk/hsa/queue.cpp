@@ -374,12 +374,6 @@ WriteInterceptor(const void* packets,
             }
         }
 
-        // Barrier packet is last packet inserted into queue
-        if(inserted_before)
-        {
-            CreateBarrierPacket(nullptr, nullptr, transformed_packets);
-        }
-
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         if(pc_sampling::is_pc_sample_service_configured(queue.get_agent().get_rocp_agent()->id))
         {
@@ -390,6 +384,9 @@ WriteInterceptor(const void* packets,
 
         // emplace the kernel packet
         transformed_packets.emplace_back(kernel_pkt);
+        // If a profiling packet was inserted, wait for completion before executing the dispatch
+        if(inserted_before)
+            transformed_packets.back().kernel_dispatch.header |= 1 << HSA_PACKET_HEADER_BARRIER;
 
         // if the original completion signal exists, trigger it via a barrier packet
         if(existing_completion_signal)
