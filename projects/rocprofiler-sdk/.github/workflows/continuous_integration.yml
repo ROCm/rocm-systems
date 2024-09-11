@@ -512,7 +512,7 @@ jobs:
       fail-fast: false
       matrix:
         runner: ['mi200', 'mi300']
-        sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer']
+        sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         exclude:
@@ -524,6 +524,7 @@ jobs:
           - { runner: 'mi200', sanitizer: 'AddressSanitizer' }
         #   - { runner: 'mi300',  sanitizer: 'AddressSanitizer' }
           - { runner: 'mi300', sanitizer: 'ThreadSanitizer' }
+          - { runner: 'mi300', sanitizer: 'UndefinedBehaviorSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-runner-set

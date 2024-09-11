@@ -1565,8 +1565,6 @@ tool_fini(void* /*tool_data*/)
     for(auto& itr : *agent_info)
         _agents.emplace_back(itr.second);
 
-    auto _counters = get_tool_counter_info();
-
     std::sort(_agents.begin(), _agents.end(), node_id_sort);
 
     if(tool::get_config().csv_output)
@@ -1591,6 +1589,7 @@ tool_fini(void* /*tool_data*/)
 
     if(tool::get_config().json_output)
     {
+        auto _counters = get_tool_counter_info();
         rocprofiler::tool::write_json(tool_functions,
                                       getpid(),
                                       contributions,

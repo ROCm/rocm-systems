@@ -16,6 +16,14 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
+# disable this test for thread sanitizers because of "signal-unsafe call inside signal"
+# issues on mi200 and mi300 (works fine on vega20 and navi32)
+if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
+    set(IS_THREAD_SANITIZER ON)
+else()
+    set(IS_THREAD_SANITIZER OFF)
+endif()
+
 set(aborted-app-env "${PRELOAD_ENV}" ROCPROF_TESTING_RAISE_SIGNAL=1
                     ROCPROF_INTERNAL_TEST_SIGNAL_HANDLER_VIA_EXIT=1)
 
@@ -29,8 +37,16 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-execute-app-abort
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${aborted-app-env}"
-               WILL_FAIL TRUE)
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${aborted-app-env}"
+               WILL_FAIL
+               TRUE
+               DISABLED
+               "${IS_THREAD_SANITIZER}")
 
 add_test(
     NAME rocprofv3-test-validate-app-abort
@@ -39,6 +55,13 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-validate-app-abort
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-execute-app-abort" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               "rocprofv3-test-execute-app-abort"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_THREAD_SANITIZER}")

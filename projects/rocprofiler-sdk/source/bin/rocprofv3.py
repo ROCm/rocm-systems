@@ -355,6 +355,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         default=os.environ.get("ROCPROF_PRELOAD", "").split(":"),
         nargs="*",
     )
+    # below is available for CI because LD_PRELOADing a library linked to a sanitizer library
+    # causes issues in apps where HIP is part of shared library.
+    add_parser_bool_argument(
+        advanced_options,
+        "--suppress-marker-preload",
+        help=argparse.SUPPRESS,
+    )
 
     if args is None:
         args = sys.argv[1:]
@@ -580,11 +587,11 @@ def run(app_args, args, **kwargs):
             elif _prepend:
                 app_env[env_var] = (
                     "{}{}{}".format(_val, _join_char, _curr_val) if _val else _curr_val
-                )
+                ).strip(":")
             elif _append:
                 app_env[env_var] = (
                     "{}{}{}".format(_curr_val, _join_char, _val) if _val else _curr_val
-                )
+                ).strip(":")
             elif _overwrite:
                 _write_env_value()
         else:
@@ -691,8 +698,8 @@ def run(app_args, args, **kwargs):
 
     # if marker tracing was requested, LD_PRELOAD the rocprofiler-sdk-roctx library
     # to override the roctx symbols of an app linked to the old roctracer roctx
-    # if args.marker_trace:
-    #    update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
+    if args.marker_trace and not args.suppress_marker_preload:
+        update_env("LD_PRELOAD", ROCPROF_ROCTX_LIBRARY, append=True)
 
     if trace_count == 0:
         # if no tracing was enabled but the options below were enabled, raise an error

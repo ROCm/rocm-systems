@@ -98,8 +98,11 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ### Additions
 
-### Fixes
-
 ### Changes
 
+- Support `--marker-trace` on application linked against old (roctracer) ROCTx (i.e. `libroctx64.so`)
+
+### Fixes
+
+- Creation of subdirection when rocprofv3 `--output-file` contains a folder path
 - Fix misaligned stores (undefined behavior) for buffer records

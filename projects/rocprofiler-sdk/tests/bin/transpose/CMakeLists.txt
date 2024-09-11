@@ -64,21 +64,22 @@ transpose_build_target(transpose "" rocprofiler-sdk-roctx::rocprofiler-sdk-roctx
 find_path(
     roctracer_roctx_ROOT_DIR
     NAMES include/roctracer/roctx.h
-    HINTS ${hip_DIR}
-    PATHS ${hip_DIR})
+          lib/${CMAKE_SHARED_LIBRARY_PREFIX}roctx64${CMAKE_SHARED_LIBRARY_SUFFIX}
+    HINTS ${hip_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm
+    PATHS ${hip_DIR} ${ROCM_PATH} ENV ROCM_PATH /opt/rocm)
 
 find_path(
     roctracer_roctx_INCLUDE_DIR
     NAMES roctracer/roctx.h
-    HINTS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
-    PATHS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
+    HINTS ${roctracer_roctx_ROOT_DIR}
+    PATHS ${roctracer_roctx_ROOT_DIR}
     PATH_SUFFIXES include)
 
 find_library(
     roctracer_roctx_LIBRARY
     NAMES roctx64
-    HINTS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
-    PATHS ${roctracer_roctx_ROOT_DIR} ${hip_DIR}
+    HINTS ${roctracer_roctx_ROOT_DIR}
+    PATHS ${roctracer_roctx_ROOT_DIR}
     PATH_SUFFIXES lib lib64)
 
 include(FindPackageHandleStandardArgs)

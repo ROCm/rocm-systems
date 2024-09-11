@@ -12,10 +12,15 @@ find_package(rocprofiler-sdk REQUIRED)
 
 rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.py)
 
-string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
-               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+string(REPLACE "LD_PRELOAD=" "" PRELOAD_ENV "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
 
-set(tracing-env "${PRELOAD_ENV}")
+if(PRELOAD_ENV)
+    set(PRELOAD_ARGS --suppress-marker-preload --preload ${PRELOAD_ENV})
+else()
+    set(PRELOAD_ARGS)
+endif()
+
+set(tracing-env)
 
 set(VALIDATION_DEPENDS)
 foreach(_OUTPUT_FORMAT csv json pftrace otf2)
@@ -25,7 +30,7 @@ foreach(_OUTPUT_FORMAT csv json pftrace otf2)
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-runtime-trace
             --hsa-core-trace --hsa-amd-trace --marker-trace --kernel-trace
             --memory-copy-trace --stats --output-format ${_OUTPUT_FORMAT} -d
-            ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out --
+            ${CMAKE_CURRENT_BINARY_DIR}/%argt%-trace -o out ${PRELOAD_ARGS} --
             $<TARGET_FILE:hip-in-libraries>)
 
     set_tests_properties(
