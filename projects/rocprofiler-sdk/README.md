@@ -1,11 +1,14 @@
 # ROCprofiler-SDK:  Application Profiling, Tracing, and Performance Analysis
 
 > [!NOTE]
-Note: rocprofiler-sdk is currently considered a beta version and is subject to change in future releases
+rocprofiler-sdk is currently considered a beta version and is subject to change in future releases
 
 ## Overview
 
-ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a hardware-specific low-level performance analysis interface for profiling and tracing GPU compute applications. To see what's changed [Click Here](source/docs/what-is-rocprof-sdk.rst)
+ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a hardware-specific low-level performance analysis interface for profiling and tracing GPU compute applications. To see what's changed [Click Here](source/docs/conceptual/comparing-with-legacy-tools.rst)
+
+> [!NOTE]
+> The published documentation is available at [ROCprofiler-SDK documentation](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html) in an organized, easy-to-read format, with search and a table of contents. The documentation source files reside in the `rocprofiler-sdk/source/docs` folder of this repository. As with all ROCm projects, the documentation is open source. For more information on contributing to the documentation, see [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html).
 
 ## GPU Metrics
 

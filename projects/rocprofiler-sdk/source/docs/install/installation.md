@@ -45,7 +45,7 @@ export PATH=${HOME}/.local/bin:${PATH}
 ## Building ROCprofiler-SDK
 
 ```bash
-git clone https://git@github.com:ROCm/rocprofiler-sdk.git rocprofiler-sdk-source  
+git clone https://github.com/ROCm/rocprofiler-sdk.git rocprofiler-sdk-source
 cmake                                         \
       -B rocprofiler-sdk-build                \
       -D ROCPROFILER_BUILD_TESTS=ON           \
