@@ -40,8 +40,9 @@ find_package(Threads REQUIRED)
 add_executable(buffered-api-tracing)
 target_sources(buffered-api-tracing PRIVATE main.cpp)
 target_link_libraries(
-    buffered-api-tracing PRIVATE buffered-api-tracing-client Threads::Threads
-                                 rocprofiler-sdk::samples-build-flags)
+    buffered-api-tracing
+    PRIVATE buffered-api-tracing-client Threads::Threads
+            rocprofiler-sdk::samples-build-flags rocprofiler-sdk::samples-common-library)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV buffered-api-tracing-client)
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)

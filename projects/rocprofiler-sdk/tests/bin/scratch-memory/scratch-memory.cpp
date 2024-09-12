@@ -27,6 +27,8 @@
 #include <iostream>
 #include <vector>
 
+#include "common/defines.hpp"
+
 #define hipCheckErr(errval)                                                                        \
     do                                                                                             \
     {                                                                                              \
@@ -166,7 +168,7 @@ int
 test_scratch()
 {
     uint64_t* data_ptr;
-    hipCheckErr(hipHostMalloc(&data_ptr, sizeof(uint64_t), 0));
+    hipCheckErr(HIP_HOST_ALLOC_FUNC(&data_ptr, sizeof(uint64_t), 0));
 
     std::vector<float> host_floats(1024);
     float*             dev;

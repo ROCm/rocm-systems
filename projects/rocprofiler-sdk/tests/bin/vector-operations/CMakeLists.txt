@@ -38,4 +38,5 @@ target_sources(vector-ops PRIVATE vector-ops.cpp)
 target_compile_options(vector-ops PRIVATE -W -Wall -Wextra -Wpedantic -Wshadow -Werror)
 
 find_package(Threads REQUIRED)
-target_link_libraries(vector-ops PRIVATE Threads::Threads)
+target_link_libraries(vector-ops PRIVATE Threads::Threads
+                                         rocprofiler-sdk::tests-common-library)

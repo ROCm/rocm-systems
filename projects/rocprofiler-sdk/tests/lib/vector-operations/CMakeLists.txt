@@ -41,4 +41,5 @@ target_include_directories(vector-ops-shared-library PUBLIC ${CMAKE_CURRENT_SOUR
 set_target_properties(vector-ops-shared-library PROPERTIES OUTPUT_NAME vector-ops)
 
 find_package(Threads REQUIRED)
-target_link_libraries(vector-ops-shared-library PRIVATE Threads::Threads)
+target_link_libraries(vector-ops-shared-library
+                      PRIVATE Threads::Threads rocprofiler-sdk::tests-common-library)

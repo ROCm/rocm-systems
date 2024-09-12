@@ -39,8 +39,10 @@ find_package(Threads REQUIRED)
 
 add_executable(pc-sampling)
 target_sources(pc-sampling PRIVATE main.cpp)
-target_link_libraries(pc-sampling PRIVATE pc-sampling-client Threads::Threads
-                                          rocprofiler-sdk::samples-build-flags)
+target_link_libraries(
+    pc-sampling
+    PRIVATE pc-sampling-client Threads::Threads rocprofiler-sdk::samples-build-flags
+            rocprofiler-sdk::samples-common-library)
 
 rocprofiler_samples_get_preload_env(PRELOAD_ENV pc-sampling-client)
 rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)

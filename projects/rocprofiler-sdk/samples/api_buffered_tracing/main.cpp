@@ -22,6 +22,7 @@
 
 #include "client.hpp"
 
+#include "common/defines.hpp"
 #include "hip/hip_runtime.h"
 
 #include <chrono>
@@ -315,7 +316,7 @@ run_scratch(int rank, int tid, hipStream_t stream, int, char** argv)
     const auto* exe_name = ::basename(argv[0]);
 
     uint64_t* data_ptr = nullptr;
-    HIP_API_CALL(hipHostMalloc(&data_ptr, sizeof(uint64_t), 0));
+    HIP_API_CALL(HIP_HOST_ALLOC_FUNC(&data_ptr, sizeof(uint64_t), 0));
     *data_ptr = 0;
 
     test_kern_small<<<1000, 1, 0, stream>>>(data_ptr);

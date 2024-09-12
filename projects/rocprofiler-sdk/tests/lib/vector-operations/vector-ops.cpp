@@ -30,6 +30,8 @@
 #include <mutex>
 #include <vector>
 
+#include "common/defines.hpp"
+
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \
         hipError_t error_ = (CALL);                                                                \
@@ -170,9 +172,9 @@ run_vector_ops_impl(int num_queue, int device_id)
     {
         HIP_API_CALL(hipStreamCreateWithFlags(&streams[q], hipStreamNonBlocking));
 
-        HIP_API_CALL(hipHostMalloc(&hostA[q], NUM * sizeof(float), 0));
-        HIP_API_CALL(hipHostMalloc(&hostB[q], NUM * sizeof(float), 0));
-        HIP_API_CALL(hipHostMalloc(&hostC[q], NUM * sizeof(float), 0));
+        HIP_API_CALL(HIP_HOST_ALLOC_FUNC(&hostA[q], NUM * sizeof(float), 0));
+        HIP_API_CALL(HIP_HOST_ALLOC_FUNC(&hostB[q], NUM * sizeof(float), 0));
+        HIP_API_CALL(HIP_HOST_ALLOC_FUNC(&hostC[q], NUM * sizeof(float), 0));
 
         // initialize the input data
         for(int i = 0; i < NUM; i++)
@@ -253,9 +255,9 @@ run_vector_ops_impl(int num_queue, int device_id)
         HIP_API_CALL(hipFree(deviceB[q]));
         HIP_API_CALL(hipFree(deviceC[q]));
 
-        HIP_API_CALL(hipHostFree(hostA[q]));
-        HIP_API_CALL(hipHostFree(hostB[q]));
-        HIP_API_CALL(hipHostFree(hostC[q]));
+        HIP_API_CALL(HIP_HOST_FREE_FUNC(hostA[q]));
+        HIP_API_CALL(HIP_HOST_FREE_FUNC(hostB[q]));
+        HIP_API_CALL(HIP_HOST_FREE_FUNC(hostC[q]));
 
         HIP_API_CALL(hipStreamDestroy(streams[q]));
     }
