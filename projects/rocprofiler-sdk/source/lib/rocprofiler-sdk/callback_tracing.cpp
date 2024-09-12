@@ -98,10 +98,10 @@ get_unsupported()
 {
     auto unsupported = std::unordered_set<rocprofiler_callback_tracing_kind_t>{};
 
-#if ROCPROFILER_SDK_RCCL_HAS_API_TRACE == 0
-    // Built against RCCL which does not support API tracing
-    unsupported.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
-#endif
+    // #if ROCPROFILER_SDK_USE_SYSTEM_RCCL == 0
+    //     // Built against RCCL which does not support API tracing
+    //     unsupported.emplace(ROCPROFILER_CALLBACK_TRACING_RCCL_API);
+    // #endif
 
     return unsupported;
 }

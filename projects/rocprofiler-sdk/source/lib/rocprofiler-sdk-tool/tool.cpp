@@ -1444,15 +1444,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                    &get_buffers().rccl_api_trace),
                          "buffer creation");
 
-        auto _status =
+        ROCPROFILER_CALL(
             rocprofiler_configure_buffer_tracing_service(get_client_ctx(),
                                                          ROCPROFILER_BUFFER_TRACING_RCCL_API,
                                                          nullptr,
                                                          0,
-                                                         get_buffers().rccl_api_trace);
-
-        if(_status != ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
-            ROCPROFILER_CALL(_status, "buffer tracing service for rccl api configure");
+                                                         get_buffers().rccl_api_trace),
+            "buffer tracing service for rccl api configure");
     }
 
     if(tool::get_config().counter_collection)

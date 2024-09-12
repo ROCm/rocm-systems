@@ -22,27 +22,27 @@
 
 #pragma once
 
-#if !defined(ROCPROFILER_SDK_RCCL_HAS_API_TRACE)
+#if !defined(ROCPROFILER_SDK_USE_SYSTEM_RCCL)
 #    if defined __has_include
 #        if __has_include(<rccl/amd_detail/api_trace.h>)
-#            define ROCPROFILER_SDK_RCCL_HAS_API_TRACE 1
+#            define ROCPROFILER_SDK_USE_SYSTEM_RCCL 1
 #        else
-#            define ROCPROFILER_SDK_RCCL_HAS_API_TRACE 0
+#            define ROCPROFILER_SDK_USE_SYSTEM_RCCL 0
 #        endif
 #    else
-#        define ROCPROFILER_SDK_RCCL_HAS_API_TRACE 0
+#        define ROCPROFILER_SDK_USE_SYSTEM_RCCL 0
 #    endif
 #endif
 
-#if ROCPROFILER_SDK_RCCL_HAS_API_TRACE > 0
+#if ROCPROFILER_SDK_USE_SYSTEM_RCCL > 0
 #    include <rccl/amd_detail/api_trace.h>
+#    include <rccl/rccl.h>
 #else
-#    include "lib/rocprofiler-sdk/rccl/details/api_trace.h"
+#    include <rocprofiler-sdk/rccl/details/api_trace.h>
+#    include <rocprofiler-sdk/rccl/details/rccl.h>
 #endif
 
 #include <rocprofiler-sdk/rocprofiler.h>
-
-#include <rccl/rccl.h>
 
 #include <cstdint>
 #include <vector>

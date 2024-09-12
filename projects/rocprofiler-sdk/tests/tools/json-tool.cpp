@@ -1101,17 +1101,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "scratch memory tracing service configure");
 
-    {
-        auto _status =
-            rocprofiler_configure_callback_tracing_service(rccl_api_callback_ctx,
-                                                           ROCPROFILER_CALLBACK_TRACING_RCCL_API,
-                                                           nullptr,
-                                                           0,
-                                                           tool_tracing_callback,
-                                                           nullptr);
-        if(_status != ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
-            ROCPROFILER_CALL(_status, "rccl api callback tracing service configure");
-    }
+    ROCPROFILER_CALL(
+        rocprofiler_configure_callback_tracing_service(rccl_api_callback_ctx,
+                                                       ROCPROFILER_CALLBACK_TRACING_RCCL_API,
+                                                       nullptr,
+                                                       0,
+                                                       tool_tracing_callback,
+                                                       nullptr),
+        "rccl api callback tracing service configure");
 
     constexpr auto buffer_size = 8192;
     constexpr auto watermark   = 7936;
@@ -1297,16 +1294,13 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                          corr_id_retire_buffer),
                      "buffer tracing service for memory copy configure");
 
-    {
-        auto _status =
-            rocprofiler_configure_buffer_tracing_service(rccl_api_buffered_ctx,
-                                                         ROCPROFILER_BUFFER_TRACING_RCCL_API,
-                                                         nullptr,
-                                                         0,
-                                                         rccl_api_buffered_buffer);
-        if(_status != ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED)
-            ROCPROFILER_CALL(_status, "buffer tracing service configure");
-    }
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(rccl_api_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_RCCL_API,
+                                                     nullptr,
+                                                     0,
+                                                     rccl_api_buffered_buffer),
+        "buffer tracing service for rccl api configure");
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffered_dispatch_profile_counting_service(

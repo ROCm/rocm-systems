@@ -40,5 +40,6 @@ install(
 add_subdirectory(hip)
 add_subdirectory(hsa)
 add_subdirectory(marker)
+add_subdirectory(rccl)
 add_subdirectory(cxx)
 add_subdirectory(amd_detail)

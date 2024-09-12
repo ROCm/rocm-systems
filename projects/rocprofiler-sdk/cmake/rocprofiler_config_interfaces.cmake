@@ -301,9 +301,9 @@ target_link_libraries(rocprofiler-otf2 INTERFACE otf2::otf2)
 # RCCL
 #
 # ----------------------------------------------------------------------------------------#
+
 find_package(
     rccl
-    REQUIRED
     CONFIG
     HINTS
     ${rocm_version_DIR}
@@ -314,4 +314,14 @@ find_package(
     PATH_SUFFIXES
     lib/cmake/rccl)
 
-rocprofiler_config_nolink_target(rocprofiler-rccl-nolink rccl::rccl)
+if(rccl_FOUND
+   AND rccl_INCLUDE_DIR
+   AND EXISTS "${rccl_INCLUDE_DIR}/rccl/amd_detail/api_trace.h")
+    set(rccl_API_TRACE_FOUND ON)
+    rocprofiler_config_nolink_target(rocprofiler-rccl-nolink rccl::rccl)
+else()
+    set(rccl_API_TRACE_FOUND OFF)
+    target_compile_definitions(rocprofiler-rccl-nolink
+                               INTERFACE ROCPROFILER_SDK_USE_SYSTEM_RCCL=0)
+
+endif()

@@ -99,6 +99,13 @@ else()
 
     add_library(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink INTERFACE IMPORTED)
 
+    # if rccl not found or <rccl/amd_detail/api_trace.h> not found when rocprofiler-sdk
+    # was built, use the packaged rccl.h and api_trace.h
+    if(NOT @rccl_FOUND@ OR NOT @rccl_API_TRACE_FOUND@)
+        target_compile_definitions(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink
+                                   INTERFACE ROCPROFILER_SDK_USE_SYSTEM_RCCL=0)
+    endif()
+
     include("${@PACKAGE_NAME@_CMAKE_DIR}/@PACKAGE_NAME@-targets.cmake")
 
     @PROJECT_NAME@_config_nolink_target(@PACKAGE_NAME@::@PACKAGE_NAME@-external-nolink hip::host)

@@ -25,7 +25,23 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/version.h>
 
-#include <rccl/rccl.h>
+#if !defined(ROCPROFILER_SDK_USE_SYSTEM_RCCL)
+#    if defined __has_include
+#        if __has_include(<rccl/rccl.h>)
+#            define ROCPROFILER_SDK_USE_SYSTEM_RCCL 1
+#        else
+#            define ROCPROFILER_SDK_USE_SYSTEM_RCCL 0
+#        endif
+#    else
+#        define ROCPROFILER_SDK_USE_SYSTEM_RCCL 0
+#    endif
+#endif
+
+#if ROCPROFILER_SDK_USE_SYSTEM_RCCL > 0
+#    include <rccl/rccl.h>
+#else
+#    include <rocprofiler-sdk/rccl/details/rccl.h>
+#endif
 
 #include <stdint.h>
 
