@@ -39,8 +39,6 @@ set(TOOL_SOURCES
 add_library(rocprofiler-sdk-tool SHARED)
 target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
 
-add_subdirectory(plugins)
-
 target_link_libraries(
     rocprofiler-sdk-tool
     PRIVATE rocprofiler-sdk::rocprofiler-shared-library
@@ -81,3 +79,5 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
     COMPONENT tools
     EXPORT rocprofiler-sdk-tool-targets)
+
+add_subdirectory(kokkosp)

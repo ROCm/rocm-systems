@@ -188,6 +188,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         "--rccl-trace",
         help="For collecting RCCL Traces",
     )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--kokkos-trace",
+        help="Enable built-in Kokkos Tools support (implies --marker-trace and --kernel-rename)",
+    )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
 
@@ -611,6 +616,9 @@ def run(app_args, args, **kwargs):
     ROCPROF_TOOL_LIBRARY = f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool.so"
     ROCPROF_SDK_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk.so"
     ROCPROF_ROCTX_LIBRARY = f"{ROCM_DIR}/lib/librocprofiler-sdk-roctx.so"
+    ROCPROF_KOKKOSP_LIBRARY = (
+        f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool-kokkosp.so"
+    )
 
     prepend_preload = [itr for itr in args.preload if itr]
     append_preload = [ROCPROF_TOOL_LIBRARY, ROCPROF_SDK_LIBRARY]
@@ -650,6 +658,14 @@ def run(app_args, args, **kwargs):
     update_env(
         "ROCPROF_OUTPUT_FORMAT", ",".join(args.output_format), append=True, join_char=","
     )
+
+    if args.kokkos_trace:
+        update_env("KOKKOS_TOOLS_LIBS", ROCPROF_KOKKOSP_LIBRARY, append=True)
+        for itr in (
+            "marker_trace",
+            "kernel_rename",
+        ):
+            setattr(args, itr, True)
 
     if args.sys_trace:
         for itr in (
