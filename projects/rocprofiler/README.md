@@ -255,6 +255,24 @@ input.txt content Example (Details of what is needed inside input.txt will be me
 
   `pmc: SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE SQ_INSTS_VALU`
 
+By default, rocprofv2 runs counter-collection mode with kernel serialization enabled. With serialization enabled, there is a possibility of deadlock occurring if a program that is being profiled attempts to launch two kernels that rely on each other to progress (e.g. kernel A waits in a while-loop until kernel B modifies a location in memory, but, due to kernel serialization, kernel B will not be launched until kernel A finishes executing). When encountering this issue, kernel serialization can be disabled with the following option:
+
+```bash
+rocprofv2 -ns -i samples/input.txt <app_relative_path>
+```
+
+or 
+
+```bash
+rocprofv2 --no-serialization -i samples/input.txt <app_relative_path>
+```
+
+Alternatively, an environment variable can be set as follows:
+
+```bash
+export ROCPROFILER_NO_SERIALIZATION = 1
+```
+
 ### Application Trace Support
 
 Different trace options are available while profiling an app:
