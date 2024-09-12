@@ -270,14 +270,15 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
             "If you added a new field to context struct, make sure there is a check here if it "
             "requires queue interception. Once you have done so, increment expected_context_size");
 
-        bool has_kernel_tracing =
-            (itr->callback_tracer &&
-             itr->callback_tracer->domains(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH)) ||
-            (itr->buffered_tracer &&
-             itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH));
+        bool has_kernel_tracing = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH) ||
+                                  itr->is_tracing(ROCPROFILER_BUFFER_TRACING_KERNEL_DISPATCH);
+
+        bool has_scratch_reporting = itr->is_tracing(ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY) ||
+                                     itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
         if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           itr->agent_counter_collection || itr->agent_thread_trace || itr->dispatch_thread_trace)
+           has_scratch_reporting || itr->agent_counter_collection || itr->agent_thread_trace ||
+           itr->dispatch_thread_trace)
         {
             enable_intercepter = true;
             break;

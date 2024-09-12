@@ -130,6 +130,9 @@ struct context
 
     std::unique_ptr<thread_trace::DispatchThreadTracer> dispatch_thread_trace = {};
     std::unique_ptr<thread_trace::AgentThreadTracer>    agent_thread_trace    = {};
+
+    template <typename KindT>
+    bool is_tracing(KindT _kind) const;
 };
 
 // set the client index needs to be called before allocate_context()
