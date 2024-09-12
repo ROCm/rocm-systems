@@ -169,6 +169,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,  ///< @see ::rocprofiler_scratch_memory_operation_t
     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,      ///< @see ::rocprofiler_memory_copy_operation_t
+    ROCPROFILER_CALLBACK_TRACING_RCCL_API,         ///< @RCCL tracing
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -193,6 +194,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,      ///< Buffer page migration info
     ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
+    ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
     ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_buffer_tracing_kind_t;
 
@@ -350,7 +352,8 @@ typedef enum
     ROCPROFILER_HSA_LIBRARY    = (1 << 1),
     ROCPROFILER_HIP_LIBRARY    = (1 << 2),
     ROCPROFILER_MARKER_LIBRARY = (1 << 3),
-    ROCPROFILER_LIBRARY_LAST   = ROCPROFILER_MARKER_LIBRARY,
+    ROCPROFILER_RCCL_LIBRARY   = (1 << 4),
+    ROCPROFILER_LIBRARY_LAST   = ROCPROFILER_RCCL_LIBRARY,
 } rocprofiler_runtime_library_t;
 
 /**
@@ -365,7 +368,8 @@ typedef enum
     ROCPROFILER_MARKER_CORE_TABLE    = (1 << 3),
     ROCPROFILER_MARKER_CONTROL_TABLE = (1 << 4),
     ROCPROFILER_MARKER_NAME_TABLE    = (1 << 5),
-    ROCPROFILER_TABLE_LAST           = ROCPROFILER_MARKER_NAME_TABLE,
+    ROCPROFILER_RCCL_TABLE           = (1 << 6),
+    ROCPROFILER_TABLE_LAST           = ROCPROFILER_RCCL_TABLE,
 } rocprofiler_intercept_table_t;
 
 /**

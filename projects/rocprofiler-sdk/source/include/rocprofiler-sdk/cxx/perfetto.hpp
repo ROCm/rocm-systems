@@ -77,6 +77,7 @@ struct perfetto_category;
 ROCPROFILER_DEFINE_CATEGORY(category, hsa_api, "HSA API function")
 ROCPROFILER_DEFINE_CATEGORY(category, hip_api, "HIP API function")
 ROCPROFILER_DEFINE_CATEGORY(category, marker_api, "Marker API region")
+ROCPROFILER_DEFINE_CATEGORY(category, rccl_api, "RCCL API function")
 ROCPROFILER_DEFINE_CATEGORY(category, kernel_dispatch, "GPU kernel dispatch")
 ROCPROFILER_DEFINE_CATEGORY(category, memory_copy, "Async memory copy")
 
@@ -84,6 +85,7 @@ ROCPROFILER_DEFINE_CATEGORY(category, memory_copy, "Async memory copy")
     ROCPROFILER_PERFETTO_CATEGORY(category::hsa_api),                                              \
         ROCPROFILER_PERFETTO_CATEGORY(category::hip_api),                                          \
         ROCPROFILER_PERFETTO_CATEGORY(category::marker_api),                                       \
+        ROCPROFILER_PERFETTO_CATEGORY(category::rccl_api),                                         \
         ROCPROFILER_PERFETTO_CATEGORY(category::kernel_dispatch),                                  \
         ROCPROFILER_PERFETTO_CATEGORY(category::memory_copy)
 

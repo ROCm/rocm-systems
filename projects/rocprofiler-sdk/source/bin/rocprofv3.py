@@ -141,13 +141,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         aggregate_tracing_options,
         "-r",
         "--runtime-trace",
-        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, Memory operations (copies and scratch), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
+        help="Collect tracing data for HIP runtime API, Marker (ROCTx) API, RCCL API, Memory operations (copies and scratch), and Kernel dispatches. Similar to --sys-trace but without tracing HIP compiler API and the underlying HSA API.",
     )
     add_parser_bool_argument(
         aggregate_tracing_options,
         "-s",
         "--sys-trace",
-        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, Memory operations (copies and scratch), and Kernel dispatches.",
+        help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, Memory operations (copies and scratch), and Kernel dispatches.",
     )
 
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
@@ -182,6 +182,11 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         basic_tracing_options,
         "--hsa-trace",
         help="For collecting HSA Traces (core + amd + image + finalizer)",
+    )
+    add_parser_bool_argument(
+        basic_tracing_options,
+        "--rccl-trace",
+        help="For collecting RCCL Traces",
     )
 
     extended_tracing_options = parser.add_argument_group("Granular tracing options")
@@ -654,6 +659,7 @@ def run(app_args, args, **kwargs):
             "kernel_trace",
             "memory_copy_trace",
             "scratch_memory_trace",
+            "rccl_trace",
         ):
             setattr(args, itr, True)
 
@@ -664,6 +670,7 @@ def run(app_args, args, **kwargs):
             "kernel_trace",
             "memory_copy_trace",
             "scratch_memory_trace",
+            "rccl_trace",
         ):
             setattr(args, itr, True)
 
@@ -686,6 +693,7 @@ def run(app_args, args, **kwargs):
             ["hsa_image_trace", "HSA_IMAGE_EXT_API_TRACE"],
             ["hsa_finalizer_trace", "HSA_FINALIZER_EXT_API_TRACE"],
             ["marker_trace", "MARKER_API_TRACE"],
+            ["rccl_trace", "RCCL_API_TRACE"],
             ["kernel_trace", "KERNEL_TRACE"],
             ["memory_copy_trace", "MEMORY_COPY_TRACE"],
             ["scratch_memory_trace", "SCRATCH_MEMORY_TRACE"],

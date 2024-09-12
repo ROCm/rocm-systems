@@ -24,6 +24,7 @@
 #include <rocprofiler-sdk/hip/table_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/marker/table_id.h>
+#include <rocprofiler-sdk/rccl/table_id.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
 #include "lib/common/logging.hpp"
@@ -36,6 +37,7 @@
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
+#include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <atomic>
@@ -82,6 +84,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(KERNEL_DISPATCH)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(PAGE_MIGRATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(CORRELATION_ID_RETIREMENT)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(RCCL_API)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -91,6 +94,19 @@ get_kind_name(rocprofiler_buffer_tracing_kind_t kind, std::index_sequence<Idx, T
     // recursion until tail empty
     if constexpr(sizeof...(Tail) > 0) return get_kind_name(kind, std::index_sequence<Tail...>{});
     return {nullptr, 0};
+}
+
+auto
+get_unsupported()
+{
+    auto unsupported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
+
+#if ROCPROFILER_SDK_RCCL_HAS_API_TRACE == 0
+    // Built against RCCL which does not support API tracing
+    unsupported.emplace(ROCPROFILER_BUFFER_TRACING_RCCL_API);
+#endif
+
+    return unsupported;
 }
 }  // namespace
 }  // namespace buffer_tracing
@@ -104,10 +120,11 @@ rocprofiler_configure_buffer_tracing_service(rocprofiler_context_id_t           
                                              size_t                  operations_count,
                                              rocprofiler_buffer_id_t buffer_id)
 {
+    static auto unsupported = ::rocprofiler::buffer_tracing::get_unsupported();
+
     if(rocprofiler::registration::get_init_status() > -1)
         return ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED;
 
-    static auto unsupported = std::unordered_set<rocprofiler_buffer_tracing_kind_t>{};
     if(unsupported.count(kind) > 0) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 
     auto* ctx = rocprofiler::context::get_mutable_registered_context(context_id);
@@ -221,6 +238,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::marker::name_by_id<ROCPROFILER_MARKER_TABLE_ID_RoctxName>(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_RCCL_API:
+        {
+            val = rocprofiler::rccl::name_by_id<ROCPROFILER_RCCL_TABLE_ID>(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:
         {
             val = rocprofiler::hip::name_by_id<ROCPROFILER_HIP_TABLE_ID_Runtime>(operation);
@@ -330,6 +352,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_MARKER_NAME_API:
         {
             ops = rocprofiler::marker::get_ids<ROCPROFILER_MARKER_TABLE_ID_RoctxName>();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_RCCL_API:
+        {
+            ops = rocprofiler::rccl::get_ids<ROCPROFILER_RCCL_TABLE_ID>();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_HIP_RUNTIME_API:

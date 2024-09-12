@@ -92,6 +92,7 @@ struct config
     bool        counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
     bool        hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
     bool        hip_compiler_api_trace      = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
+    bool        rccl_api_trace              = get_env("ROCPROF_RCCL_API_TRACE", false);
     bool        list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
     bool        list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
     bool        stats                       = get_env("ROCPROF_STATS", false);

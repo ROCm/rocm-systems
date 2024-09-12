@@ -57,6 +57,10 @@ stats_entry_t
 generate_stats(tool_table*                                                           tool_functions,
                const std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>& data);
 
+stats_entry_t
+generate_stats(tool_table*                                                     tool_functions,
+               const std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>& data);
+
 void
 generate_stats(tool_table* tool_functions, const domain_stats_vec_t& data);
 }  // namespace tool

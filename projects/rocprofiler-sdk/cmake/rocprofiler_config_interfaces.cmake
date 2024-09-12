@@ -295,3 +295,23 @@ target_link_libraries(rocprofiler-elfio INTERFACE elfio::elfio)
 # ----------------------------------------------------------------------------------------#
 
 target_link_libraries(rocprofiler-otf2 INTERFACE otf2::otf2)
+
+# ----------------------------------------------------------------------------------------#
+#
+# RCCL
+#
+# ----------------------------------------------------------------------------------------#
+find_package(
+    rccl
+    REQUIRED
+    CONFIG
+    HINTS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATHS
+    ${rocm_version_DIR}
+    ${ROCM_PATH}
+    PATH_SUFFIXES
+    lib/cmake/rccl)
+
+rocprofiler_config_nolink_target(rocprofiler-rccl-nolink rccl::rccl)

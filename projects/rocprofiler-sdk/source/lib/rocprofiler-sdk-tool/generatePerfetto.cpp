@@ -71,7 +71,8 @@ write_perfetto(
     std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
     std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_data,
     std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*      marker_api_data,
-    std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* /*scratch_memory_data*/)
+    std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* /*scratch_memory_data*/,
+    std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>* rccl_api_data)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -154,6 +155,8 @@ write_perfetto(
         for(auto itr : *hip_api_data)
             tids.emplace(itr.thread_id);
         for(auto itr : *marker_api_data)
+            tids.emplace(itr.thread_id);
+        for(auto itr : *rccl_api_data)
             tids.emplace(itr.thread_id);
 
         for(auto itr : *memory_copy_data)
@@ -339,6 +342,35 @@ write_perfetto(
                               itr.correlation_id.internal);
             TRACE_EVENT_END(
                 sdk::perfetto_category<sdk::category::marker_api>::name, track, itr.end_timestamp);
+            tracing_session->FlushBlocking();
+        }
+
+        for(auto itr : *rccl_api_data)
+        {
+            auto  name  = buffer_names.at(itr.kind, itr.operation);
+            auto& track = thread_tracks.at(itr.thread_id);
+
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::rccl_api>::name,
+                              ::perfetto::StaticString(name.data()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "end_ns",
+                              itr.end_timestamp,
+                              "delta_ns",
+                              (itr.end_timestamp - itr.start_timestamp),
+                              "tid",
+                              itr.thread_id,
+                              "kind",
+                              itr.kind,
+                              "operation",
+                              itr.operation,
+                              "corr_id",
+                              itr.correlation_id.internal);
+            TRACE_EVENT_END(
+                sdk::perfetto_category<sdk::category::rccl_api>::name, track, itr.end_timestamp);
             tracing_session->FlushBlocking();
         }
 

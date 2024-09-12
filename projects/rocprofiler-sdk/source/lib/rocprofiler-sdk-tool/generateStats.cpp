@@ -22,15 +22,17 @@
 
 #include "generateStats.hpp"
 #include "config.hpp"
+#include "domain_type.hpp"
 #include "helper.hpp"
-#include "lib/common/logging.hpp"
-#include "lib/rocprofiler-sdk-tool/domain_type.hpp"
 #include "output_file.hpp"
 #include "statistics.hpp"
 
-#include <fmt/format.h>
+#include "lib/common/logging.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
+
+#include <fmt/format.h>
 
 #include <unistd.h>
 #include <cstdint>
@@ -164,6 +166,20 @@ generate_stats(tool_table*                                                      
     }
 
     return get_stats(scratch_memory_stats);
+}
+
+stats_entry_t
+generate_stats(tool_table*                                                     tool_functions,
+               const std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>& data)
+{
+    auto rccl_stats = stats_map_t{};
+    for(const auto& record : data)
+    {
+        auto api_name = tool_functions->tool_get_operation_name_fn(record.kind, record.operation);
+        rccl_stats[api_name] += (record.end_timestamp - record.start_timestamp);
+    }
+
+    return get_stats(rccl_stats);
 }
 
 namespace

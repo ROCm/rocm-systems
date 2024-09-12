@@ -40,6 +40,7 @@ write_perfetto(
     std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
     std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_data,
     std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*      marker_api_data,
-    std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>*  scratch_memory_data);
+    std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>*  scratch_memory_data,
+    std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*        rccl_api_data);
 }  // namespace tool
 }  // namespace rocprofiler

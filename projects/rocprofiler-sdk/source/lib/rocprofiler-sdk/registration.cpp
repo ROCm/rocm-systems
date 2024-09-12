@@ -43,6 +43,7 @@
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
+#include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 
 #include <rocprofiler-sdk/context.h>
 #include <rocprofiler-sdk/fwd.h>
@@ -845,6 +846,25 @@ rocprofiler_set_api_table(const char* name,
 
         rocprofiler::intercept_table::notify_intercept_table_registration(
             ROCPROFILER_MARKER_NAME_TABLE, lib_version, lib_instance, std::make_tuple(roctx_name));
+    }
+    else if(std::string_view{name} == "rccl")
+    {
+        // pass to rccl init
+        ROCP_ERROR_IF(num_tables > 1)
+            << "rocprofiler expected RCCL library to pass 1 API table, not " << num_tables;
+
+        auto* rccl_api = static_cast<rcclApiFuncTable*>(tables[0]);
+
+        // any internal modifications to the rcclApiFuncTable need to be done before we make the
+        // copy or else those modifications will be lost when RCCL API tracing is enabled
+        // because the RCCL API tracing invokes the function pointers from the copy below
+        rocprofiler::rccl::copy_table(rccl_api, lib_instance);
+
+        // install rocprofiler API wrappers
+        rocprofiler::rccl::update_table(rccl_api);
+
+        rocprofiler::intercept_table::notify_intercept_table_registration(
+            ROCPROFILER_RCCL_TABLE, lib_version, lib_instance, std::make_tuple(rccl_api));
     }
     else
     {

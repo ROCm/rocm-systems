@@ -47,12 +47,14 @@ add_subdirectory(thread_trace)
 add_subdirectory(tracing)
 add_subdirectory(kernel_dispatch)
 add_subdirectory(page_migration)
+add_subdirectory(rccl)
 add_subdirectory(details)
 
 target_link_libraries(
     rocprofiler-object-library
     PUBLIC rocprofiler-sdk::rocprofiler-headers rocprofiler-sdk::rocprofiler-hip-nolink
            rocprofiler-sdk::rocprofiler-hsa-runtime-nolink
+           rocprofiler-sdk::rocprofiler-rccl-nolink
     PRIVATE rocprofiler-sdk::rocprofiler-build-flags
             rocprofiler-sdk::rocprofiler-memcheck
             rocprofiler-sdk::rocprofiler-common-library

@@ -324,6 +324,9 @@ using memory_copy_buffered_output_t =
 using marker_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler_buffer_tracing_marker_api_record_t,
                                          domain_type::MARKER>;
+using rccl_buffered_output_t =
+    ::rocprofiler::tool::buffered_output<rocprofiler_buffer_tracing_rccl_api_record_t,
+                                         domain_type::RCCL>;
 using counter_collection_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler_tool_counter_collection_record_t,
                                          domain_type::COUNTER_COLLECTION>;

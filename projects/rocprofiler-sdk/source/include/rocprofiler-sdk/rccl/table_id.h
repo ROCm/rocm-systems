@@ -9,36 +9,23 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 
 #pragma once
 
-#include <string_view>
-
-enum class domain_type
+// NOLINTNEXTLINE(performance-enum-size)
+typedef enum
 {
-    HSA = 0,
-    HIP,
-    MARKER,
-    KERNEL_DISPATCH,
-    MEMORY_COPY,
-    SCRATCH_MEMORY,
-    COUNTER_COLLECTION,
-    RCCL,
-    LAST,
-};
-
-std::string_view
-get_domain_file_name(domain_type val);
-
-std::string_view
-get_domain_column_name(domain_type _buffer_type);
+    ROCPROFILER_RCCL_TABLE_ID_NONE = -1,
+    ROCPROFILER_RCCL_TABLE_ID      = 0,
+    ROCPROFILER_RCCL_TABLE_ID_LAST,
+} rocprofiler_rccl_table_id_t;

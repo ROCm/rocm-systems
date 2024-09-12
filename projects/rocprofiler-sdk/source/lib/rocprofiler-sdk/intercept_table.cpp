@@ -33,6 +33,7 @@
 
 #include <hsa/hsa_api_trace.h>
 #include <hip/amd_detail/hip_api_trace.hpp>
+#include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 
 #include <cstdint>
 #include <mutex>
@@ -55,7 +56,8 @@ constexpr auto intercept_library_seq = library_sequence_t<ROCPROFILER_HSA_TABLE,
                                                           ROCPROFILER_HIP_COMPILER_TABLE,
                                                           ROCPROFILER_MARKER_CORE_TABLE,
                                                           ROCPROFILER_MARKER_CONTROL_TABLE,
-                                                          ROCPROFILER_MARKER_NAME_TABLE>{};
+                                                          ROCPROFILER_MARKER_NAME_TABLE,
+                                                          ROCPROFILER_RCCL_TABLE>{};
 
 // check that intercept_library_seq is up to date
 static_assert((1 << (intercept_library_seq.size() - 1)) == ROCPROFILER_TABLE_LAST,
@@ -185,6 +187,11 @@ template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
                                                   uint64_t,
                                                   uint64_t,
                                                   std::tuple<HipCompilerDispatchTable*>);
+
+template void notify_intercept_table_registration(rocprofiler_intercept_table_t,
+                                                  uint64_t,
+                                                  uint64_t,
+                                                  std::tuple<rcclApiFuncTable*>);
 }  // namespace intercept_table
 }  // namespace rocprofiler
 

@@ -22,23 +22,6 @@
 
 #pragma once
 
-#include <string_view>
-
-enum class domain_type
-{
-    HSA = 0,
-    HIP,
-    MARKER,
-    KERNEL_DISPATCH,
-    MEMORY_COPY,
-    SCRATCH_MEMORY,
-    COUNTER_COLLECTION,
-    RCCL,
-    LAST,
-};
-
-std::string_view
-get_domain_file_name(domain_type val);
-
-std::string_view
-get_domain_column_name(domain_type _buffer_type);
+#include <rocprofiler-sdk/rccl/api_args.h>
+#include <rocprofiler-sdk/rccl/api_id.h>
+#include <rocprofiler-sdk/rccl/table_id.h>

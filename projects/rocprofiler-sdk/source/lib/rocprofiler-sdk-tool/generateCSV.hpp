@@ -24,6 +24,7 @@
 
 #include "generateStats.hpp"
 #include "helper.hpp"
+#include "rocprofiler-sdk/buffer_tracing.h"
 #include "statistics.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -69,6 +70,11 @@ void
 generate_csv(tool_table*                                                           tool_functions,
              const std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>& data,
              const stats_entry_t&                                                  stats);
+
+void
+generate_csv(tool_table*                                                     tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>& data,
+             const stats_entry_t&                                            stats);
 
 void
 generate_csv(tool_table* tool_functions, const domain_stats_vec_t& data);

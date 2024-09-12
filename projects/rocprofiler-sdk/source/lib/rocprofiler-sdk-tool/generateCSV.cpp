@@ -576,6 +576,43 @@ generate_csv(tool_table*                                                        
 }
 
 void
+generate_csv(tool_table*                                                     tool_functions,
+             const std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>& data,
+             const stats_entry_t&                                            stats)
+{
+    if(data.empty()) return;
+
+    if(tool::get_config().stats && stats)
+        write_stats(get_stats_output_file("rccl_api_stats"), stats.entries);
+
+    auto ofs = tool::output_file{"rccl_api_trace",
+                                 tool::csv::api_csv_encoder{},
+                                 {"Domain",
+                                  "Function",
+                                  "Process_Id",
+                                  "Thread_Id",
+                                  "Correlation_Id",
+                                  "Start_Timestamp",
+                                  "End_Timestamp"}};
+    for(const auto& record : data)
+    {
+        auto row_ss   = std::stringstream{};
+        auto api_name = tool_functions->tool_get_operation_name_fn(record.kind, record.operation);
+        rocprofiler::tool::csv::api_csv_encoder::write_row(
+            row_ss,
+            tool_functions->tool_get_domain_name_fn(record.kind),
+            api_name,
+            getpid(),
+            record.thread_id,
+            record.correlation_id.internal,
+            record.start_timestamp,
+            record.end_timestamp);
+
+        ofs << row_ss.str();
+    }
+}
+
+void
 generate_csv(tool_table* /*tool_functions*/, const domain_stats_vec_t& data_v)
 {
     using csv_encoder_t = rocprofiler::tool::csv::stats_csv_encoder;
