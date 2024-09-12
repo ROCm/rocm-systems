@@ -74,11 +74,17 @@ struct ring_buffer
     /// Destroy ring buffer.
     void destroy();
 
-    /// Request a pointer for writing at least \param n bytes.
+    /// Request a pointer for writing at least \param n bytes. If the current write pointer is not
+    /// perfectly divisible by \param align (i.e. if write_addr % align != 0), the returned address
+    /// will be shifted to an address that is a multiple of that alignment to prevent undefined
+    /// behavior.
     void* request(size_t n, size_t align, bool wrap = true);
 
-    /// Retrieve a pointer for reading at least \param n bytes.
-    void* retrieve(size_t n) const;
+    /// Retrieve a pointer for reading at least \param n bytes. If the current read pointer is not
+    /// perfectly divisible by \param align (i.e. if read_addr % align != 0), the returned address
+    /// will be shifted to an address that is a multiple of that alignment to prevent undefined
+    /// behavior.
+    void* retrieve(size_t n, size_t align) const;
 
     /// Write class-type data to buffer (uses placement new).
     template <typename Tp>
@@ -225,8 +231,9 @@ ring_buffer::read(Tp* _dest, std::enable_if_t<std::is_class<Tp>::value, int>) co
 {
     if(is_empty() || _dest == nullptr) return {0, nullptr};
 
-    auto  _length = sizeof(Tp);
-    void* _out_p  = retrieve(_length);
+    constexpr auto _length = sizeof(Tp);
+    constexpr auto _align  = alignof(Tp);
+    void*          _out_p  = retrieve(_length, _align);
 
     if(_out_p == nullptr) return {0, nullptr};
 
@@ -245,8 +252,9 @@ ring_buffer::read(Tp* _dest, std::enable_if_t<!std::is_class<Tp>::value, int>) c
 {
     if(is_empty() || _dest == nullptr) return {0, nullptr};
 
-    auto  _length = sizeof(Tp);
-    void* _out_p  = retrieve(_length);
+    constexpr auto _length = sizeof(Tp);
+    constexpr auto _align  = alignof(Tp);
+    void*          _out_p  = retrieve(_length, _align);
 
     if(_out_p == nullptr) return {0, nullptr};
 
@@ -268,7 +276,7 @@ ring_buffer::retrieve() const
 {
     if(m_ptr == nullptr) return nullptr;
 
-    return reinterpret_cast<Tp*>(retrieve(sizeof(Tp)));
+    return reinterpret_cast<Tp*>(retrieve(sizeof(Tp), alignof(Tp)));
 }
 //
 }  // namespace base
