@@ -78,6 +78,7 @@ hsaKmtSetXNACKMode;
 hsaKmtGetXNACKMode;
 hsaKmtOpenSMI;
 hsaKmtExportDMABufHandle;
+hsaKmtImportDMABufHandle;
 hsaKmtWaitOnEvent_Ext;
 hsaKmtWaitOnMultipleEvents_Ext;
 hsaKmtReplaceAsanHeaderPage;
@@ -92,6 +93,9 @@ hsaKmtPcSamplingSupport;
 hsaKmtGetVersionCapInfo;
 hsaKmtQueueRingDoorbell;
 hsaKmtamdgpu_query_gpu_info;
+hsaKmtamdgpu_bo_import;
+hsaKmtamdgpu_bo_va_op;
+
 local: *;
 };
 

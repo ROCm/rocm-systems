@@ -145,7 +145,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   if (MemFlags.ui32.Scratch && MemFlags.ui32.HostAccess && SizeInBytes > 0x80000000)
     MemFlags.ui32.OnlyAddress = 1;
 
-  if (!MemFlags.ui32.NonPaged || zfb_support || MemFlags.ui32.GTTAccess) {
+  create_info.alignment = Alignment;
+  create_info.va_hint = reinterpret_cast<gpusize>(*MemoryAddress);
+  if ((PreferredNode == 0 && !MemFlags.ui32.NonPaged)
+    || zfb_support || MemFlags.ui32.GTTAccess) {
     /* If allocate VRAM under ZFB mode */
     if (zfb_support && MemFlags.ui32.NonPaged == 1)
       MemFlags.ui32.CoarseGrain = 1;
@@ -165,12 +168,22 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   // create_info.mem_flags |= rocr_proxy::kKernarg;
   create_info.flags.physical_only = MemFlags.ui32.NoAddress;
   create_info.flags.interprocess = MemFlags.ui32.NoAddress;
-  create_info.flags.locked = 0; //!!(alloc_flags & AllocatePinned);
+  create_info.flags.locked = MemFlags.ui32.NoSubstitute;//AllocatePinned
+  create_info.flags.virtual_alloc = MemFlags.ui32.OnlyAddress;
+  /*when only alloc virtual or only physical, it's vmm allocation, force to local*/
+  if (create_info.flags.virtual_alloc || create_info.flags.physical_only)
+    create_info.domain = rocr_proxy::AllocDomain::kLocal;
 
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
-    *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+
+    /* For these physical allcations, use GpuMemory object's address as thunk handle*/
+    if (create_info.flags.physical_only || create_info.dmabuf_fd > 0)
+      *MemoryAddress = reinterpret_cast<void *>(gpu_mem);
+    else
+      *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
+
     allocation_map_[*MemoryAddress] = Allocation(
         gpu_mem->GetGpuMemoryHandle(), *MemoryAddress, (uint64_t)*MemoryAddress,
         create_info.size, false, nullptr, SizeInBytes,
@@ -261,25 +274,71 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodes(
-    HSAuint64 GraphicsResourceHandle,
-    HsaGraphicsResourceInfo *GraphicsResourceInfo, HSAuint64 NumberOfNodes,
-    HSAuint32 *NodeArray) {
+HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodes(HSAuint64 GraphicsResourceHandle,
+                                                            HsaGraphicsResourceInfo *GraphicsResourceInfo,
+                                                            HSAuint64 NumberOfNodes,
+                                                            HSAuint32 *NodeArray) {
   CHECK_DXG_OPEN();
+  uint32_t *gpu_id_array = NULL;
+  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
-  assert(false);
-  return HSAKMT_STATUS_SUCCESS;
+  pr_debug("[%s] number of nodes %lu\n", __func__, NumberOfNodes);
+
+  GraphicsResourceInfo->NodeId = 1;
+  return hsaKmtImportDMABufHandle(GraphicsResourceHandle, &GraphicsResourceInfo->MemoryAddress);
 }
+
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
                                                  HSAuint64 MemorySizeInBytes,
                                                  int *DMABufFd,
                                                  HSAuint64 *Offset) {
   CHECK_DXG_OPEN();
-  assert(false);
+
+  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+  auto it = allocation_map_.find(MemoryAddress);
+  if (it == allocation_map_.end())
+    return HSAKMT_STATUS_ERROR;
+
+  auto gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+  auto code = gpu_mem->ExportPhysicalHandle(DMABufFd);
+  if (code != ErrorCode::Success)
+    return HSAKMT_STATUS_ERROR;
 
   return HSAKMT_STATUS_SUCCESS;
 }
+
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtImportDMABufHandle(int DMABufFd,
+                                                 void **MemoryAddress) {
+
+  CHECK_DXG_OPEN();
+
+  wsl::thunk::WDDMDevice* dev = get_wddmdev(1);
+  wsl::thunk::GpuMemory *gpu_mem = nullptr;
+  wsl::thunk::GpuMemoryCreateInfo create_info{};
+  create_info.dmabuf_fd = DMABufFd;
+
+  auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
+  if (code == ErrorCode::Success) {
+    *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
+    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+    /*
+     * the gpu_mem->Flags() need convert back from GpuMemoryCreateFlags to
+     * HsaMemFlags, reference hsaKmtAllocMemoryAlign
+     * */
+    allocation_map_[*MemoryAddress] = Allocation(
+      gpu_mem->GetGpuMemoryHandle(), *MemoryAddress, (uint64_t)*MemoryAddress,
+      gpu_mem->Size(), false, nullptr, gpu_mem->ClientSize(),
+      1, gpu_mem->Flags());
+
+    return HSAKMT_STATUS_SUCCESS;
+  }
+
+  return HSAKMT_STATUS_ERROR;
+
+}
+
 
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtShareMemory(void *MemoryAddress, HSAuint64 SizeInBytes,

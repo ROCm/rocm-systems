@@ -67,3 +67,53 @@ HSAKMTAPI int hsaKmtamdgpu_query_gpu_info(void *dev,
   info->gpu_counter_freq = pDevice->GPUCounterFrequency() / 1000ull;
   return 0;
 }
+
+HSAKMTAPI int hsaKmtamdgpu_bo_import(amdgpu_device_handle dev,
+                                     enum amdgpu_bo_handle_type type,
+                                     uint32_t shared_handle,
+                                     struct amdgpu_bo_import_result *output) {
+  void *MemoryAddress = nullptr;
+  HSAKMT_STATUS ret = hsaKmtImportDMABufHandle(shared_handle, &MemoryAddress);
+  if (ret == HSAKMT_STATUS_SUCCESS) {
+    //use GpuMemory object's address as drm buf handle
+    output->buf_handle = reinterpret_cast<amdgpu_bo*>(MemoryAddress);
+    return 0;
+  } else {
+    return -1;
+  }
+}
+
+
+HSAKMTAPI int hsaKmtamdgpu_bo_va_op(amdgpu_bo_handle bo,
+                                    uint64_t offset,
+                                    uint64_t size,
+                                    uint64_t addr,
+                                    uint64_t flags,
+                                    uint32_t ops) {
+  switch(ops) {
+    case AMDGPU_VA_OP_MAP:
+      {
+        wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(bo);
+        assert(gpu_mem != nullptr);
+        auto code = gpu_mem->MapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
+        if (code != ErrorCode::Success)
+          return -1;
+
+        code = gpu_mem->MakeResident();
+        if (code != ErrorCode::Success)
+          return -1;
+      }
+      break;
+    case AMDGPU_VA_OP_UNMAP:
+      {
+        wsl::thunk::GpuMemory *gpu_mem = reinterpret_cast<wsl::thunk::GpuMemory *>(bo);
+        assert(gpu_mem != nullptr);
+        auto code = gpu_mem->UnmapGpuVirtualAddress(reinterpret_cast<gpusize>(addr), size, offset);
+        if (code != ErrorCode::Success)
+          return -1;
+        gpu_mem->Evict();
+      }
+      break;
+  }
+  return 0;
+}

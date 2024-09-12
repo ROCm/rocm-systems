@@ -26,6 +26,8 @@
 #ifndef _HSAKMT_H_
 #define _HSAKMT_H_
 
+#include <amdgpu.h>
+#include <amdgpu_drm.h>
 #include "hsakmttypes.h"
 
 #ifdef __cplusplus
@@ -529,6 +531,12 @@ hsaKmtExportDMABufHandle(
     int *DMABufFd,			//OUT
     HSAuint64 *Offset			//OUT
     );
+
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtImportDMABufHandle(int DMABufFd,
+                         void **MemoryAddress);
 
 /**
  Export a memory buffer for sharing with other processes
@@ -1196,6 +1204,19 @@ hsaKmtPcSamplingStop(
 */
 HSAKMTAPI int hsaKmtamdgpu_query_gpu_info(void* dev,
 				     struct amdgpu_gpu_info *info);
+
+
+HSAKMTAPI int hsaKmtamdgpu_bo_import(amdgpu_device_handle dev,
+                                     enum amdgpu_bo_handle_type type,
+                                     uint32_t shared_handle,
+                                     struct amdgpu_bo_import_result *output);
+
+HSAKMTAPI int hsaKmtamdgpu_bo_va_op(amdgpu_bo_handle bo,
+                                    uint64_t offset,
+                                    uint64_t size,
+                                    uint64_t addr,
+                                    uint64_t flags,
+                                    uint32_t ops);
 
 #ifdef __cplusplus
 }   //extern "C"
