@@ -48,6 +48,11 @@ public:
     uint32_t  eventIndex = event_index__mec_event_write__cs_partial_flush,
     uint32_t  eventType = CS_PARTIAL_FLUSH);
 
+  size_t BuildWriteData64Command(
+    void      *pBuffer,
+    uint64_t* write_addr,
+    uint64_t write_value);
+
   size_t BuildAcquireMem(
     uint8_t major,
     void    *pBuffer);

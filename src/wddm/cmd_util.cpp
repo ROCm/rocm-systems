@@ -53,6 +53,41 @@ size_t CmdUtil::BuildBarrier(
   return sizeof(barrier);
 }
 
+/**
+ * Builds a WRITE_DATA packet.
+ * Writes two DWORDs into the GPU memory address "write_addr"
+ */
+
+size_t CmdUtil::BuildWriteData64Command(
+  void*     pBuffer,
+  uint64_t* write_addr,
+  uint64_t  write_value) {
+  WriteDataTemplate command = {0};
+  GenerateCmdHeader(&command.write_data, IT_WRITE_DATA);
+
+  // Encode the user specified address to write to
+  uint64_t addr = uintptr_t(write_addr);
+  assert(!(addr & 0x3) && "WriteData address must be 4 byte aligned");
+
+  // Set the bit to confirm the write operation and cache policy
+  command.write_data.bitfields2.wr_confirm = wr_confirm__mec_write_data__wait_for_write_confirmation;
+  command.write_data.bitfields2.cache_policy = cache_policy__mec_write_data__bypass;
+
+  // Specify the command to increment address if writing more than one DWord
+  command.write_data.bitfields2.addr_incr = addr_incr__mec_write_data__increment_address;
+  // Specify the class to which the write destination belongs
+  command.write_data.bitfields2.dst_sel = dst_sel__mec_write_data__memory;
+
+  command.write_data.bitfields3c.dst_mem_addr_lo = (PtrLow32(write_addr) >> 2);
+  command.write_data.dst_mem_addr_hi = PtrHigh32(write_addr);
+
+  // Specify the value to write
+  command.write_data.write_data_value = write_value;
+
+  memcpy(pBuffer, &command, sizeof(command));
+  return sizeof(command);
+}
+
 /*
  * Builds a ACQUIRE_MEM packet.
  * Users can submit this command to

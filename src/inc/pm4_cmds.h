@@ -37,6 +37,7 @@ union PM4_MEC_TYPE_3_HEADER {
 
 #define IT_DISPATCH_DIRECT 0x15
 #define IT_ATOMIC_MEM      0x1E
+#define IT_WRITE_DATA      0x37
 #define IT_INDIRECT_BUFFER  0x3F
 #define IT_COPY_DATA       0x40
 #define IT_EVENT_WRITE     0x46
@@ -238,6 +239,7 @@ struct PM4_MEC_WRITE_DATA {
     uint32_t ordinal3;
   };
   uint32_t dst_mem_addr_hi;
+  uint64_t write_data_value;
 };
 
 #define PERSISTENT_SPACE_START         0x00002c00
@@ -484,7 +486,6 @@ struct AtomicTemplate {
 /// location accessible to Gpu
 struct WriteDataTemplate {
   PM4_MEC_WRITE_DATA write_data;
-  uint64_t write_data_value;
 };
 
 // ---------------------------------- MEC_COPY_DATA_src_sel_enum ----------------------------------
@@ -547,6 +548,31 @@ enum MEC_COPY_DATA_pq_exe_status_enum {
   pq_exe_status__mec_copy_data__default      =  0,
   pq_exe_status__mec_copy_data__phase_update =  1,
 };
+
+// ------------------------------- MEC_WRITE_DATA_dst_sel_enum -------------------------------
+enum MEC_WRITE_DATA_dst_sel_enum {
+     dst_sel__mec_write_data__mem_mapped_register = 0,
+     dst_sel__mec_write_data__tc_l2 = 2,
+     dst_sel__mec_write_data__gds = 3,
+     dst_sel__mec_write_data__memory = 5,
+     dst_sel__mec_write_data__memory_mapped_adc_persistent_state = 6 };
+
+// ------------------------------- MEC_WRITE_DATA_addr_incr_enum -------------------------------
+enum MEC_WRITE_DATA_addr_incr_enum {
+     addr_incr__mec_write_data__increment_address = 0,
+     addr_incr__mec_write_data__do_not_increment_address = 1 };
+
+// ------------------------------- MEC_WRITE_DATA_wr_confirm_enum -------------------------------
+enum MEC_WRITE_DATA_wr_confirm_enum {
+     wr_confirm__mec_write_data__do_not_wait_for_write_confirmation = 0,
+     wr_confirm__mec_write_data__wait_for_write_confirmation = 1 };
+
+// ------------------------------- MEC_WRITE_DATA_cache_policy_enum -------------------------------
+enum MEC_WRITE_DATA_cache_policy_enum {
+     cache_policy__mec_write_data__lru = 0,
+     cache_policy__mec_write_data__stream = 1,
+     cache_policy__mec_write_data__noa    =  2,
+     cache_policy__mec_write_data__bypass =  3 };
 
 typedef struct PM4_MEC_COPY_DATA {
   union {
