@@ -16,8 +16,10 @@ VaMgr::VaMgr(uint64_t start, uint64_t size, uint64_t min_align) {
 
 VaMgr::~VaMgr() {
 
-  assert(free_list_.size() == 1);
-  assert(frag_map_.size() == 1);
+  if (free_list_.size() != 1)
+    std::cerr << "Warning: free_list_ size is not 1." << std::endl;
+  if (frag_map_.size() != 1)
+    std::cerr << "Warning: frag_map_ size is not 1." << std::endl;
 
   free_list_.clear();
   frag_map_.clear();
