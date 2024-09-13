@@ -1,23 +1,36 @@
 #!/usr/bin/env python3
 
 import sys
+import os
 import argparse
-from perfetto.trace_processor import TraceProcessor
+from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
 
 
-def load_trace(inp, max_tries=5, retry_wait=1):
+def load_trace(inp, max_tries=5, retry_wait=1, bin_path=None):
     """Occasionally connecting to the trace processor fails with HTTP errors
     so this function tries to reduce spurious test failures"""
 
     n = 0
     tp = None
+
+    # Check if bin_path is set and if it exists
+    print("trace_processor path: ", bin_path)
+    if bin_path and not os.path.isfile(bin_path):
+        print(f"Path {bin_path} does not exist. Using the default path.")
+        bin_path = None
+
     while tp is None:
         try:
-            tp = TraceProcessor(trace=(inp))
+            if bin_path:
+                config = TraceProcessorConfig(bin_path=bin_path)
+                tp = TraceProcessor(trace=inp, config=config)
+            else:
+                tp = TraceProcessor(trace=inp)
             break
-        except Exception as e:
-            sys.stderr.write(f"{e}\n")
+        except Exception as ex:
+            sys.stderr.write(f"{ex}\n")
             sys.stderr.flush()
+
             if n >= max_tries:
                 raise
             else:
@@ -72,6 +85,9 @@ if __name__ == "__main__":
     )
     parser.add_argument("-i", "--input", type=str, help="Input file", required=True)
     parser.add_argument(
+        "-t", "--trace_processor_shell", type=str, help="Path of trace_processor_shell"
+    )
+    parser.add_argument(
         "--key-names",
         type=str,
         help="Require debug args contain a specific key",
@@ -93,7 +109,7 @@ if __name__ == "__main__":
             "The same number of labels, counts, and depths must be specified"
         )
 
-    tp = load_trace(args.input)
+    tp = load_trace(args.input, bin_path=args.trace_processor_shell)
 
     if tp is None:
         raise ValueError(f"trace {args.input} could not be loaded")

@@ -67,10 +67,10 @@ if(CMAKE_CXX_COMPILER_IS_CLANG)
 else()
     set(PERFETTO_IS_CLANG false)
     set(OMNITRACE_PERFETTO_C_FLAGS
-        "-static-libgcc -Wno-maybe-uninitialized"
+        "-static-libgcc -Wno-maybe-uninitialized -Wno-stringop-overflow"
         CACHE STRING "Perfetto C flags")
     set(OMNITRACE_PERFETTO_CXX_FLAGS
-        "-static-libgcc -Wno-maybe-uninitialized"
+        "-static-libgcc -Wno-maybe-uninitialized -Wno-stringop-overflow -Wno-mismatched-new-delete"
         CACHE STRING "Perfetto C++ flags")
 endif()
 

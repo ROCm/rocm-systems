@@ -642,14 +642,14 @@ mark_perfetto_ts(CategoryT, const char* name, uint64_t _ts, Args&&... args)
 
 template <typename CategoryT, typename... Args>
 inline void
-mark_perfetto_track(CategoryT, const char*, ::perfetto::Track _track, uint64_t _ts,
+mark_perfetto_track(CategoryT, const char* name, ::perfetto::Track _track, uint64_t _ts,
                     Args&&... args)
 {
     // skip if category is disabled
     if(category_mark_disabled<CategoryT>()) return;
 
-    TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, _track, _ts,
-                        std::forward<Args>(args)...);
+    TRACE_EVENT_INSTANT(trait::name<CategoryT>::value, ::perfetto::DynamicString{ name },
+                        _track, _ts, std::forward<Args>(args)...);
 }
 }  // namespace tracing
 }  // namespace omnitrace

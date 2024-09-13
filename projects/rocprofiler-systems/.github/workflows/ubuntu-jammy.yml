@@ -110,8 +110,10 @@ jobs:
           apt-get install -y software-properties-common &&
           apt-get upgrade -y &&
           apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libomp-dev libopenmpi-dev libfabric-dev openmpi-bin environment-modules ${{ matrix.compiler }} &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v46.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install numpy &&
+          python3 -m pip install numpy perfetto dataclasses &&
           python3 -m pip install 'cmake==3.21.4' &&
           for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
