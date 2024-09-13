@@ -326,7 +326,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtImportDMABufHandle(int DMABufFd,
 
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
-    *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
+    *MemoryAddress = reinterpret_cast<void *>(gpu_mem);
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     /*
      * the gpu_mem->Flags() need convert back from GpuMemoryCreateFlags to
