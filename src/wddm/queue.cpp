@@ -198,18 +198,23 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue *queue) {
         queue->HandleError(status);
         break;
       }
+      sleep = false;
+    } else {
+      if (current_position == cq->GetAqlWriteIndex()) {
+        time = std::chrono::steady_clock::now();
+        if (time - start_time > kMaxElapsed)
+          sleep = true;
+      } else {
+        start_time = std::chrono::steady_clock::now();
+        current_position = cq->GetAqlWriteIndex();
+        sleep = false;
+      }
     }
 
+    if ((cq->GetRingWptr()->load() > cq->GetRingRptr()->load()) && !sleep)
+      continue;
+
     std::unique_lock<std::mutex> lock(queue->thread_cond_lock_);
-    if (current_position == cq->GetAqlWriteIndex()) {
-      time = std::chrono::steady_clock::now();
-      if (time - start_time > kMaxElapsed)
-        sleep = true;
-    } else {
-      start_time = std::chrono::steady_clock::now();
-      current_position = cq->GetAqlWriteIndex();
-      sleep = false;
-    }
     // CPU wait for valid packet
     if (cq->GetRingWptr()->load() <= cq->GetRingRptr()->load() ||
         (sleep && cq->IsInvalidPacket())) {
