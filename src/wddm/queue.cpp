@@ -251,6 +251,8 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
                cmdbuf_aql_frame_size(0),
                needs_barrier(true),
                ready_to_submit(false),
+               platform_atomic_support_(false),
+               signal_addr_(NULL),
                thread_stop_(false),
                scratch_waves_(device->MaxScratchSlotsPerCu() * device->ComputeUnitCount()),
                scratch_size_per_wave_(0),
@@ -548,6 +550,7 @@ hsa_status_t ComputeQueue::Init(void) {
 
   ib_start_addr = cmdbuf_addr;
   cmdbuf_aql_frame_size = device->GetAqlFrameSize();
+  platform_atomic_support_ = device->SupportPlatformAtomic();
 
   return ret;
 }
@@ -704,13 +707,19 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
     uint64_t *signal_addr = (uint64_t *)&signal->value;
     debug_print("signal value=%" PRIx64 "\n", signal->value);
 
-    i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
+    if (platform_atomic_support_)
+      i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
+    else
+      signal_addr_ = signal_addr;
   }
 
   // The ring_rptr is used to record pm4 queue rptr value,
   // dispatch readptr position, this is used to share rptr with
   // aql queue.
-  i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
+  if (platform_atomic_support_)
+    i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
+  else
+    i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t *)ring_rptr, cmdbuf_aql_frame_write_index + 1);
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
@@ -786,13 +795,19 @@ ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet
     // flush cache
     i += cmd_util.BuildAcquireMem(major, cpu + i);
 
-    i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
+    if (platform_atomic_support_)
+      i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
+    else
+      signal_addr_ = signal_addr;
   }
 
   // The ring_rptr is used to record pm4 queue rptr value,
   // dispatch readptr position, this is used to share rptr with
   // aql queue.
-  i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
+  if (platform_atomic_support_)
+    i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
+  else
+    i += cmd_util.BuildWriteData64Command(cpu + i, (uint64_t *)ring_rptr, cmdbuf_aql_frame_write_index + 1);
 
   ib_size = i;
   cmdbuf_aql_frame_write_index++;
@@ -943,6 +958,16 @@ hsa_status_t ComputeQueue::Process(void) {
     ret = Submit();
     if (ret != HSA_STATUS_SUCCESS)
       return ret;
+
+    // CPU wait for GPU fence, and cpu update the signal.
+    if (!platform_atomic_support_ && signal_addr_) {
+      // CPU wait for GPU fence
+      if (!device->CpuWait(&syncobj, &cmdbuf_aql_frame_write_index, 1, false))
+        return HSA_STATUS_ERROR;
+      //CPU update completional signal
+      atomic::Decrement(signal_addr_);
+      signal_addr_ = NULL;
+    }
 
     ready_to_submit = false;
 
