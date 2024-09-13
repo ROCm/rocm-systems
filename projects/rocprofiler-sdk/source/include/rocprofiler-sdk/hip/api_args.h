@@ -2888,30 +2888,6 @@ typedef union rocprofiler_hip_api_args_t
         hipFunction_t* functionPtr;
         const void*    symbolPtr;
     } hipGetFuncBySymbol;
-#endif
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 4
-    struct
-    {
-        hipGraphNode_t*       phGraphNode;
-        hipGraph_t            hGraph;
-        const hipGraphNode_t* dependencies;
-        size_t                numDependencies;
-        hipDeviceptr_t        dptr;
-    } hipDrvGraphAddMemFreeNode;
-    struct
-    {
-        hipGraphExec_t      hGraphExec;
-        hipGraphNode_t      hNode;
-        const HIP_MEMCPY3D* copyParams;
-        hipCtx_t            ctx;
-    } hipDrvGraphExecMemcpyNodeSetParams;
-    struct
-    {
-        hipGraphExec_t                hGraphExec;
-        hipGraphNode_t                hNode;
-        const HIP_MEMSET_NODE_PARAMS* memsetParams;
-        hipCtx_t                      ctx;
-    } hipDrvGraphExecMemsetNodeSetParams;
     struct
     {
         int* device_arr;
@@ -2967,6 +2943,30 @@ typedef union rocprofiler_hip_api_args_t
         size_t           height;
         hipMemcpyKind    kind;
     } hipMemcpy2DArrayToArray;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 4
+    struct
+    {
+        hipGraphNode_t*       phGraphNode;
+        hipGraph_t            hGraph;
+        const hipGraphNode_t* dependencies;
+        size_t                numDependencies;
+        hipDeviceptr_t        dptr;
+    } hipDrvGraphAddMemFreeNode;
+    struct
+    {
+        hipGraphExec_t      hGraphExec;
+        hipGraphNode_t      hNode;
+        const HIP_MEMCPY3D* copyParams;
+        hipCtx_t            ctx;
+    } hipDrvGraphExecMemcpyNodeSetParams;
+    struct
+    {
+        hipGraphExec_t                hGraphExec;
+        hipGraphNode_t                hNode;
+        const HIP_MEMSET_NODE_PARAMS* memsetParams;
+        hipCtx_t                      ctx;
+    } hipDrvGraphExecMemsetNodeSetParams;
     struct
     {
         hipGraphExec_t      graphExec;
@@ -2989,6 +2989,32 @@ typedef union rocprofiler_hip_api_args_t
         hipExternalMemory_t                        extMem;
         const hipExternalMemoryMipmappedArrayDesc* mipmapDesc;
     } hipExternalMemoryGetMappedMipmappedArray;
+    struct
+    {
+        hipGraphNode_t hNode;
+        HIP_MEMCPY3D*  nodeParams;
+    } hipDrvGraphMemcpyNodeGetParams;
+    struct
+    {
+        hipGraphNode_t      hNode;
+        const HIP_MEMCPY3D* nodeParams;
+    } hipDrvGraphMemcpyNodeSetParams;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 5
+    struct
+    {
+        void**       ptr;
+        size_t       size;
+        unsigned int flags;
+    } hipExtHostAlloc;
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 6
+    struct
+    {
+        size_t*                     maxWidthInElements;
+        const hipChannelFormatDesc* fmtDesc;
+        int                         device;
+    } hipDeviceGetTexture1DLinearMaxWidth;
 #endif
 } rocprofiler_hip_api_args_t;
 

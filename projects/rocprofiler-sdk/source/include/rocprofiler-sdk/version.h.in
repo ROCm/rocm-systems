@@ -23,6 +23,10 @@
 #pragma once
 
 /**
+ * @def ROCPROFILER_IS_ROCPROFILER_SDK
+ * @brief Preprocessor define indicating the rocprofiler header is a rocprofiler-sdk project
+ * @addtogroup VERSIONING_GROUP
+ *
  * @def ROCPROFILER_VERSION_MAJOR
  * @brief The major version of the interface as a macro so it can be used
  * by the preprocessor.
@@ -83,6 +87,8 @@
  * @brief C++ compiler version which built rocprofiler
  * @addtogroup VERSIONING_GROUP
  */
+
+#define ROCPROFILER_IS_ROCPROFILER_SDK 1
 
 // clang-format off
 #define ROCPROFILER_VERSION_MAJOR   @PROJECT_VERSION_MAJOR@

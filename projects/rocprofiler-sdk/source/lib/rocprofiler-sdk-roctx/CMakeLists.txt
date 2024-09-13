@@ -34,7 +34,7 @@ set_target_properties(
                SKIP_BUILD_RPATH OFF
                BUILD_RPATH "\$ORIGIN"
                INSTALL_RPATH "\$ORIGIN"
-               DEFINE_SYMBOL rocprofiler_EXPORTS)
+               DEFINE_SYMBOL roctx_EXPORTS)
 
 install(
     TARGETS rocprofiler-sdk-roctx-shared-library

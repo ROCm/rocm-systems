@@ -24,6 +24,7 @@
 
 #include "lib/common/defines.hpp"
 #include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
 
 #include <array>
 #include <cstddef>
@@ -35,29 +36,8 @@ namespace rocprofiler
 {
 namespace common
 {
-using static_dtor_func_t = void (*)();
-
 void
-destroy_static_objects();
-
-void
-register_static_dtor(static_dtor_func_t&&);
-
-namespace
-{
-struct anonymous
-{};
-}  // namespace
-
-template <typename Tp>
-constexpr size_t
-static_buffer_size()
-{
-    constexpr auto type_sz = sizeof(Tp);
-    constexpr auto void_sz = sizeof(void*);
-    if constexpr(void_sz > type_sz) return void_sz;
-    return type_sz;
-}
+destroy_static_tl_objects();
 
 /**
  * @brief This struct is used to create static singleton objects which have the properties of a
@@ -73,14 +53,14 @@ static_buffer_size()
  * object is an address in between the library load address and the load address + size of library.
  */
 template <typename Tp, typename ContextT = anonymous>
-struct static_object
+struct static_tl_object
 {
-    static_object()                         = delete;
-    ~static_object()                        = delete;
-    static_object(const static_object&)     = delete;
-    static_object(static_object&&) noexcept = delete;
-    static_object& operator=(const static_object&) = delete;
-    static_object& operator=(static_object&&) noexcept = delete;
+    static_tl_object()                            = delete;
+    ~static_tl_object()                           = delete;
+    static_tl_object(const static_tl_object&)     = delete;
+    static_tl_object(static_tl_object&&) noexcept = delete;
+    static_tl_object& operator=(const static_tl_object&) = delete;
+    static_tl_object& operator=(static_tl_object&&) noexcept = delete;
 
     template <typename... Args>
     static Tp*& construct(Args&&... args);
@@ -90,19 +70,20 @@ struct static_object
     static constexpr bool is_trivial_standard_layout();
 
 private:
-    static Tp*                                             m_object;
-    static std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
+    static thread_local Tp*                                             m_object;
+    static thread_local std::array<std::byte, static_buffer_size<Tp>()> m_buffer;
 };
 
 template <typename Tp, typename ContextT>
-Tp* static_object<Tp, ContextT>::m_object = nullptr;
+thread_local Tp* static_tl_object<Tp, ContextT>::m_object = nullptr;
 
 template <typename Tp, typename ContextT>
-std::array<std::byte, static_buffer_size<Tp>()> static_object<Tp, ContextT>::m_buffer = {};
+thread_local std::array<std::byte, static_buffer_size<Tp>()>
+    static_tl_object<Tp, ContextT>::m_buffer = {};
 
 template <typename Tp, typename ContextT>
 constexpr bool
-static_object<Tp, ContextT>::is_trivial_standard_layout()
+static_tl_object<Tp, ContextT>::is_trivial_standard_layout()
 {
     return (std::is_standard_layout<Tp>::value && std::is_trivially_destructible<Tp>::value);
 }
@@ -110,17 +91,17 @@ static_object<Tp, ContextT>::is_trivial_standard_layout()
 template <typename Tp, typename ContextT>
 template <typename... Args>
 Tp*&
-static_object<Tp, ContextT>::construct(Args&&... args)
+static_tl_object<Tp, ContextT>::construct(Args&&... args)
 {
     if constexpr(!is_trivial_standard_layout())
     {
-        static auto _once = std::once_flag{};
+        static thread_local auto _once = std::once_flag{};
         std::call_once(_once, []() {
             register_static_dtor([]() {
-                if(static_object<Tp, ContextT>::m_object)
+                if(static_tl_object<Tp, ContextT>::m_object)
                 {
-                    static_object<Tp, ContextT>::m_object->~Tp();
-                    static_object<Tp, ContextT>::m_object = nullptr;
+                    static_tl_object<Tp, ContextT>::m_object->~Tp();
+                    static_tl_object<Tp, ContextT>::m_object = nullptr;
                 }
             });
         });

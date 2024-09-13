@@ -39,10 +39,10 @@
  */
 
 /**
- * @brief The function was introduced in version 10.0 of the interface and has the
- * symbol version string of ``"ROCTX_10.0"``.
+ * @brief The function was introduced in version 0.0 of the interface and has the
+ * symbol version string of ``"ROCPROFILER_SDK_ROCTX_0.0"``.
  */
-#define ROCTX_VERSION_10_0
+#define ROCPROFILER_SDK_ROCTX_VERSION_0_0
 
 /** @} */
 
@@ -86,7 +86,7 @@
 #define ROCTX_IMPORT ROCTX_IMPORT_DECORATOR
 
 #if !defined(ROCTX_API)
-#    if defined(rocprofiler_EXPORTS)
+#    if defined(roctx_EXPORTS)
 #        define ROCTX_API ROCTX_EXPORT
 #    else
 #        define ROCTX_API ROCTX_IMPORT

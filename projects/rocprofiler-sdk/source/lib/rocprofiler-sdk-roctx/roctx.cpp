@@ -20,14 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include "lib/common/logging.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/common/utility.hpp"
+
 #include <rocprofiler-sdk-roctx/api_trace.h>
 #include <rocprofiler-sdk-roctx/defines.h>
 #include <rocprofiler-sdk-roctx/roctx.h>
 #include <rocprofiler-sdk-roctx/types.h>
-
-#include "lib/common/logging.hpp"
-#include "lib/common/static_object.hpp"
-#include "lib/common/utility.hpp"
 
 #include <rocprofiler-register/rocprofiler-register.h>
 
@@ -93,18 +93,25 @@ static_assert(
     sizeof(roctxNameApiTable_t) == compute_table_size(4),
     "Update table major/step version and add a new offset assertion if this fails to compile");
 
+using ::rocprofiler::common::static_buffer_size;
+using atomic_roctx_range_id_t = std::atomic<roctx_range_id_t>;
+
+constexpr auto    atomic_range_id_size_v     = static_buffer_size<atomic_roctx_range_id_t>();
+thread_local auto nested_range_level_buffer  = std::array<std::byte, static_buffer_size<int>()>{};
+auto              start_stop_range_id_buffer = std::array<std::byte, atomic_range_id_size_v>{};
+
 auto&
 get_nested_range_level()
 {
-    static thread_local int value = 0;
-    return value;
+    static thread_local auto* value = new(nested_range_level_buffer.data()) int{0};
+    return *value;
 }
 
 auto&
 get_start_stop_range_id()
 {
-    static auto value = std::atomic<roctx_range_id_t>{};
-    return value;
+    static auto* value = new(start_stop_range_id_buffer.data()) atomic_roctx_range_id_t{0};
+    return *value;
 }
 
 int

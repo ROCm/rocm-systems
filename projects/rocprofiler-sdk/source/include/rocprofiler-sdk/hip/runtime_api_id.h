@@ -482,11 +482,6 @@ typedef enum  // NOLINT(performance-enum-size)
 #endif
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 3
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGetFuncBySymbol,
-#endif
-#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 4
-    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphAddMemFreeNode,
-    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphExecMemcpyNodeSetParams,
-    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphExecMemsetNodeSetParams,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipSetValidDevices,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAtoD,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyDtoA,
@@ -494,10 +489,23 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyAtoHAsync,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpyHtoAAsync,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipMemcpy2DArrayToArray,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 4
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphAddMemFreeNode,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphExecMemcpyNodeSetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphExecMemsetNodeSetParams,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecGetFlags,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphNodeSetParams,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipGraphExecNodeSetParams,
     ROCPROFILER_HIP_RUNTIME_API_ID_hipExternalMemoryGetMappedMipmappedArray,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphMemcpyNodeGetParams,
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDrvGraphMemcpyNodeSetParams,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 5
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipExtHostAlloc,
+#endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 6
+    ROCPROFILER_HIP_RUNTIME_API_ID_hipDeviceGetTexture1DLinearMaxWidth,
 #endif
     ROCPROFILER_HIP_RUNTIME_API_ID_LAST,
 } rocprofiler_hip_runtime_api_id_t;
