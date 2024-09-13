@@ -791,7 +791,7 @@ def printEmptyLine():
         print()
 
 
-def printErrLog(device, err):
+def printErrLog(device, err, is_warning=False):
     """ Print out an error to the SMI log
 
     :param device: DRM device identifier
@@ -802,7 +802,10 @@ def printErrLog(device, err):
     for line in err.split('\n'):
         errstr = 'GPU[%s]\t: %s' % (devName, line)
         if not PRINT_JSON:
-            logging.error(errstr)
+            if not is_warning:
+                logging.error(errstr)
+            else:
+                logging.warning(errstr)
         else:
             logging.debug(errstr)
 
@@ -2856,7 +2859,7 @@ def showRange(deviceList, rangeType):
                 int(odvf.curr_mclk_range.lower_bound / 1000000), int(odvf.curr_mclk_range.upper_bound / 1000000)), None)
             if rangeType == 'voltage':
                 if odvf.num_regions == 0:
-                    printErrLog(device, 'Voltage curve regions unsupported.')
+                    printErrLog(device, 'Voltage curve regions unsupported.', is_warning=True)
                     continue
                 num_regions = c_uint32(odvf.num_regions)
                 regions = (rsmi_freq_volt_region_t * odvf.num_regions)()
@@ -3201,7 +3204,7 @@ def showVoltageCurve(deviceList):
                 position, int(list(odvf.curve.vc_points)[position].frequency / 1000000),
                 int(list(odvf.curve.vc_points)[position].voltage)), None)
         else:
-            printErrLog(device, 'Voltage curve Points unsupported.')
+            printErrLog(device, 'Voltage curve Points unsupported.', is_warning=True)
     printLogSpacer()
 
 
