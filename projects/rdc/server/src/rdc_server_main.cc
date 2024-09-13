@@ -476,10 +476,11 @@ static const struct option long_options[] = {{"address", required_argument, null
                                              {"unauth_comm", no_argument, nullptr, 'u'},
                                              {"pinned_cert", no_argument, nullptr, 'i'},
                                              {"debug", no_argument, nullptr, 'd'},
+                                             {"version", no_argument, nullptr, 'v'},
                                              {"help", no_argument, nullptr, 'h'},
 
                                              {nullptr, 0, nullptr, 0}};
-static const char* short_options = "a:p:uidh";
+static const char* short_options = "a:p:uidvh";
 
 static void PrintHelp(void) {
   std::cout << "Optional rdctst Arguments:\n"
@@ -493,6 +494,7 @@ static void PrintHelp(void) {
                "--pinned_cert, -i used \"pinned\" certificates instead of PKI "
                "authentication. This is for test purposes.\n"
                "--debug, -d output debug messages\n"
+               "--version, -v Output version information\n"
                "--help, -h print this message\n";
 }
 
@@ -537,6 +539,14 @@ uint32_t ProcessCmdline(RdcdCmdLineOpts* cmdl_opts, int arg_cnt, char** arg_list
       case 'd':
         cmdl_opts->log_dbg = true;
         break;
+
+      case 'v':
+#ifdef CURRENT_GIT_HASH
+        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << "+" << QUOTE(CURRENT_GIT_HASH) << std::endl;
+#else
+        std::cout << "RDCD : " << RDC_SERVER_VERSION_STRING << std::endl;
+#endif
+        exit(0);
 
       case 'h':
         PrintHelp();

@@ -243,6 +243,25 @@ rdc_status_t RdcStandaloneHandler::rdc_device_get_attributes(uint32_t gpu_index,
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcStandaloneHandler::rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
+
+  if (!p_rdc_compv) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::GetComponentVersionRequest request;
+  ::rdc::GetComponentVersionResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_component_index(component);
+  ::grpc::Status status = stub_->GetComponentVersion(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  strncpy_with_null(p_rdc_compv->version, reply.version().c_str(), RDC_MAX_VERSION_STR_LENGTH);
+  return RDC_ST_OK;
+}
+
 // Group RdcAPI
 rdc_status_t RdcStandaloneHandler::rdc_group_gpu_create(rdc_group_type_t type,
                                                         const char* group_name,
@@ -641,6 +660,28 @@ rdc_status_t RdcStandaloneHandler::rdc_field_update_all(uint32_t wait_for_update
   ::grpc::Status status = stub_->UpdateAllFields(&context, request, &reply);
 
   return error_handle(status, reply.status());
+}
+
+// It is only an interface for the client under the GRPC framework and is not used as an RDC API.
+rdc_status_t RdcStandaloneHandler::get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
+
+  if (!p_mixed_compv) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::GetMixedComponentVersionRequest request;
+  ::rdc::GetMixedComponentVersionResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_component_id(component);
+  ::grpc::Status status = stub_->GetMixedComponentVersion(&context, request, &reply);
+
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  strncpy_with_null(p_mixed_compv->version, reply.version().c_str(), USR_MAX_VERSION_STR_LENGTH);
+  return RDC_ST_OK;
+
 }
 
 }  // namespace rdc

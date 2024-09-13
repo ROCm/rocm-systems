@@ -42,6 +42,9 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                                      const ::rdc::GetDeviceAttributesRequest* request,
                                      ::rdc::GetDeviceAttributesResponse* reply) override;
 
+  ::grpc::Status GetComponentVersion(::grpc::ServerContext* context,  const ::rdc::GetComponentVersionRequest* request,
+                               ::rdc::GetComponentVersionResponse* reply) override;
+
   ::grpc::Status CreateGpuGroup(::grpc::ServerContext* context,
                                 const ::rdc::CreateGpuGroupRequest* request,
                                 ::rdc::CreateGpuGroupResponse* reply) override;
@@ -122,6 +125,8 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                                        const ::rdc::DiagnosticTestCaseRunRequest* request,
                                        ::rdc::DiagnosticTestCaseRunResponse* reply) override;
 
+  ::grpc::Status GetMixedComponentVersion(::grpc::ServerContext* context, const ::rdc::GetMixedComponentVersionRequest* request,
+                               ::rdc::GetMixedComponentVersionResponse* reply) override;
  private:
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);
   rdc_handle_t rdc_handle_;

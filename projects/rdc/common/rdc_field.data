@@ -36,6 +36,7 @@ THE SOFTWARE.
 FLD_DESC_ENT(RDC_FI_INVALID,             "Unknown/Invalid field",                       "INVALID",          false)
 FLD_DESC_ENT(RDC_FI_GPU_COUNT,           "GPU count in the system",                     "GPU_COUNT",        true)
 FLD_DESC_ENT(RDC_FI_DEV_NAME,            "Name of the device",                          "DEV_NAME",         true)
+FLD_DESC_ENT(RDC_FI_OAM_ID,              "OAM ID of the device",                        "OAM_ID",           true)
 FLD_DESC_ENT(RDC_FI_GPU_CLOCK,           "Current GPU clock frequencies",               "GPU_CLOCK",        true)
 FLD_DESC_ENT(RDC_FI_MEM_CLOCK,           "Current Memory clock frequencies",            "MEM_CLOCK",        true)
 FLD_DESC_ENT(RDC_FI_MEMORY_TEMP,         "Memory temperature in millidegrees Celsius",  "MEMORY_TEMP",      true)

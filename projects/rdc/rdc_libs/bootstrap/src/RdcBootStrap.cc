@@ -26,6 +26,7 @@ THE SOFTWARE.
 
 #include "common/rdc_fields_supported.h"
 #include "rdc/rdc.h"
+#include "rdc/rdc_private.h"
 #include "rdc_lib/RdcHandler.h"
 #include "rdc_lib/RdcLibraryLoader.h"
 #include "rdc_lib/RdcLogger.h"
@@ -182,6 +183,15 @@ rdc_status_t rdc_device_get_attributes(rdc_handle_t p_rdc_handle, uint32_t gpu_i
       ->rdc_device_get_attributes(gpu_index, p_rdc_attr);
 }
 
+rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
+  if (!p_rdc_handle || !p_rdc_compv) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_device_get_component_version(component, p_rdc_compv);
+}
+
 rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_field_ids,
                                     rdc_field_t* field_ids, const char* field_group_name,
                                     rdc_field_grp_t* rdc_field_group_id) {
@@ -313,6 +323,15 @@ rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_test_case_run(group_id, test_case, config, config_size, result);
+}
+
+rdc_status_t get_mixed_component_version(rdc_handle_t p_rdc_handle, mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
+  if (!p_rdc_handle || !p_mixed_compv) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->get_mixed_component_version(component, p_mixed_compv);
 }
 
 const char* rdc_status_string(rdc_status_t result) {

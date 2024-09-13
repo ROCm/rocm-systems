@@ -56,6 +56,9 @@ service RdcAPI {
   // rdc_status_t rdc_get_device_attributes(uint32_t gpu_index, rdc_device_attributes_t* p_rdc_attr)
   rpc GetDeviceAttributes(GetDeviceAttributesRequest) returns (GetDeviceAttributesResponse) {}
 
+  //rdc_status_t rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv);
+  rpc GetComponentVersion(GetComponentVersionRequest) returns (GetComponentVersionResponse) {}
+
   // Group API
   // rdc_status_t rdc_group_gpu_create(rdc_group_type_t type,
   //               const char* group_name, rdc_gpu_group_t* p_rdc_group_id)
@@ -148,6 +151,9 @@ service RdcAPI {
   //    size_t config_size,
   //    rdc_diag_test_result_t* result);
   rpc DiagnosticTestCaseRun(DiagnosticTestCaseRunRequest) returns (DiagnosticTestCaseRunResponse) {}
+
+  //Just an RPC method not used as an API
+  rpc GetMixedComponentVersion(GetMixedComponentVersionRequest) returns (GetMixedComponentVersionResponse) {}
 }
 
 message Empty {
@@ -169,6 +175,15 @@ message DeviceAttributes {
 message GetDeviceAttributesResponse {
   uint32 status = 1;
   DeviceAttributes attributes = 2;
+}
+
+message GetComponentVersionRequest {
+  uint32 component_index = 1;
+}
+
+message GetComponentVersionResponse {
+  uint32 status = 1;
+  string version = 2;
 }
 
 message CreateGpuGroupRequest {
@@ -461,4 +476,13 @@ message DiagnosticTestCaseRunRequest {
 message DiagnosticTestCaseRunResponse {
   uint32 status = 1;
   DiagnosticTestResult result = 2;
+}
+
+message GetMixedComponentVersionRequest {
+  uint32 component_id = 1;
+}
+
+message GetMixedComponentVersionResponse {
+  uint32 status = 1;
+  string version = 2;
 }

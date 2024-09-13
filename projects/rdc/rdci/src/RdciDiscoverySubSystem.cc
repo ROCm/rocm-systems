@@ -25,13 +25,17 @@ THE SOFTWARE.
 #include <unistd.h>
 
 #include "rdc/rdc.h"
+#include "rdc/rdc_private.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/rdc_common.h"
 
 namespace amd {
 namespace rdc {
 
-RdciDiscoverySubSystem::RdciDiscoverySubSystem() : show_help_(false) {}
+RdciDiscoverySubSystem::RdciDiscoverySubSystem()
+    : show_help_(false),
+      is_list_(false),
+      show_version_(false) {}
 
 void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
   const int HOST_OPTIONS = 1000;
@@ -39,13 +43,12 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
   const struct option long_options[] = {
       {"host", required_argument, nullptr, HOST_OPTIONS}, {"help", optional_argument, nullptr, 'h'},
       {"unauth", optional_argument, nullptr, 'u'},        {"list", optional_argument, nullptr, 'l'},
-      {"json", optional_argument, nullptr, JSON_OPTIONS}, {nullptr, 0, nullptr, 0}};
+      {"json", optional_argument, nullptr, JSON_OPTIONS}, {"version", optional_argument, nullptr, 'v'}, {nullptr, 0, nullptr, 0}};
 
   int option_index = 0;
   int opt = 0;
-  bool is_list = false;
 
-  while ((opt = getopt_long(argc, argv, "hlu", long_options, &option_index)) != -1) {
+  while ((opt = getopt_long(argc, argv, "hluv", long_options, &option_index)) != -1) {
     switch (opt) {
       case HOST_OPTIONS:
         ip_port_ = optarg;
@@ -60,7 +63,10 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
         use_auth_ = false;
         break;
       case 'l':
-        is_list = true;
+        is_list_ = true;
+        break;
+      case 'v':
+        show_version_ = true;
         break;
       default:
         show_help();
@@ -68,7 +74,7 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
     }
   }
 
-  if (!is_list) {
+  if ((!is_list_ && !show_version_) || (is_list_ && show_version_)) {
     show_help();
     throw RdcException(RDC_ST_BAD_PARAMETER, "Need to specify operations");
   }
@@ -77,23 +83,21 @@ void RdciDiscoverySubSystem::parse_cmd_opts(int argc, char** argv) {
 void RdciDiscoverySubSystem::show_help() const {
   if (is_json_output()) return;
   std::cout << " discovery -- Used to discover and identify GPUs "
-            << "and their attributes.\n\n";
+            << "and their attributes, as well as server version information.\n\n";
   std::cout << "Usage\n";
   std::cout << "    rdci discovery [--host <IP/FQDN>:port] [--json]"
-            << " [-u] -l\n";
+            << " [-u] -l -v\n";
   std::cout << "\nFlags:\n";
   show_common_usage();
   std::cout << "  --json                         "
             << "Output using json.\n";
   std::cout << "  -l  --list                     list GPU discovered"
             << " on the system\n";
+  std::cout << "  -v  --version                  Display version information of the"
+            << " the server and libraries used by the server\n";
 }
 
-void RdciDiscoverySubSystem::process() {
-  if (show_help_) {
-    return show_help();
-  }
-
+void RdciDiscoverySubSystem::show_attributes() {
   uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES];
   uint32_t count = 0;
   rdc_status_t result = rdc_device_get_all(rdc_handle_, gpu_index_list, &count);
@@ -138,6 +142,47 @@ void RdciDiscoverySubSystem::process() {
   } else {
     std::cout << "------------------------------------------------"
               << "-----------------\n";
+  }
+}
+
+void RdciDiscoverySubSystem::show_version() {
+  rdc_component_version_t smiv;
+  rdc_status_t result = rdc_device_get_component_version(rdc_handle_, RDC_AMDMSI_COMPONENT, &smiv);
+  if (result != RDC_ST_OK) {
+    return;
+  }
+
+  mixed_component_version_t rdcdv;
+  uint32_t ret = get_mixed_component_version(rdc_handle_, RDCD_COMPONENT, &rdcdv);
+  if (ret) {
+    std::cout << "get rdcd version fail"<< std::endl;
+    return;
+  }
+
+   if (is_json_output()) {
+    std::cout << "\"version\" : ";
+    std::cout << '{';
+    std::cout << "\"rdcd\": " << "\"" << rdcdv.version << "\", ";
+    std::cout << "\"amdsmi_lib\": " << "\"" << smiv.version << "\"";
+    std::cout << '}';
+  } else {
+    std::cout << "RDCD : " << rdcdv.version << "  |  " << "AMDSMI Library : " << smiv.version << std::endl;
+  }
+
+  return;
+}
+
+void RdciDiscoverySubSystem::process() {
+  if (show_help_) {
+    return show_help();
+  }
+
+  if (is_list_) {
+    return show_attributes();
+  }
+
+  if (show_version_) {
+    return show_version();
   }
 }
 
