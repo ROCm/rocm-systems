@@ -10,7 +10,7 @@
 ## Overview
 
 AMD Research is seeking to improve observability and performance analysis for software running on AMD heterogeneous systems.
-If you are familiar with [rocprof](https://rocmdocs.amd.com/en/latest/ROCm_Tools/ROCm-Tools.html) and/or [uProf](https://developer.amd.com/amd-uprof/),
+If you are familiar with [rocprof](https://rocm.docs.amd.com/projects/rocprofiler/en/latest/how-to/using-rocprof.html) and/or [uProf](https://developer.amd.com/amd-uprof/),
 you will find many of the capabilities of these tools available via Omnitrace in addition to many new capabilities.
 
 Omnitrace is a comprehensive profiling and tracing tool for parallel applications written in C, C++, Fortran, HIP, OpenCL, and Python which execute on the CPU or CPU+GPU.
@@ -18,6 +18,11 @@ It is capable of gathering the performance information of functions through any 
 Omnitrace supports interactive visualization of comprehensive traces in the web browser in addition to high-level summary profiles with mean/min/max/stddev statistics.
 In addition to runtimes, omnitrace supports the collection of system-level metrics such as the CPU frequency, GPU temperature, and GPU utilization, process-level metrics
 such as the memory usage, page-faults, and context-switches, and thread-level metrics such as memory usage, CPU time, and numerous hardware counters.
+
+> [!NOTE]
+> Full documentation is available at [Omnitrace documentation](https://rocm.docs.amd.com/projects/omnitrace/en/latest/index.html) in an organized, easy-to-read, searchable format.
+The documentation source files reside in the [`/docs`](/docs) folder of this repository. For information on contributing to the documentation, see
+[Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html)
 
 ### Data Collection Modes
 
@@ -82,11 +87,6 @@ such as the memory usage, page-faults, and context-switches, and thread-level me
 - I/O metrics
 - ... many more
 
-## Documentation
-
-The full documentation for [omnitrace](https://github.com/ROCm/omnitrace) is available at [the ROCm Omnitrace documentation repository](https://rocm.docs.amd.com/projects/omnitrace/en/latest/index.html).
-See the [Getting Started documentation](https://rocm.docs.amd.com/projects/omnitrace/en/conceptual/how-omnitrace-works.html) for general tips and a detailed discussion about sampling vs. binary instrumentation.
-
 ## Quick Start
 
 ### Installation
@@ -106,7 +106,7 @@ wget https://github.com/ROCm/omnitrace/releases/latest/download/omnitrace-instal
 python3 ./omnitrace-install.py --prefix /opt/omnitrace/rocm-5.4 --rocm 5.4
 ```
 
-See the [Installation Documentation](https://rocm.docs.amd.com/projects/omnitrace/en/install/install.html) for detailed information.
+See the [Omnitrace installation guide](https://rocm.docs.amd.com/projects/omnitrace/en/latest/install/install.html) for detailed information.
 
 ### Setup
 
