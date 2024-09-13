@@ -112,6 +112,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_NOT_AVAILABLE,
                           "this status code for more information.")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_EXCEEDS_HW_LIMIT,
                           "Request exceeds the capabilities of the hardware to collect")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED,
+                          "Agent HW architecture is not supported, no counter metrics found.")
 
 template <size_t Idx, size_t... Tail>
 const char*

@@ -125,6 +125,8 @@ rocprofiler_iterate_agent_supported_counters(rocprofiler_agent_id_t             
     if(!agent) return ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND;
 
     auto metrics = rocprofiler::counters::getMetricsForAgent(agent->name);
+    if(metrics.empty()) return ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED;
+
     std::vector<rocprofiler_counter_id_t> ids;
     ids.reserve(metrics.size());
     for(const auto& metric : metrics)
