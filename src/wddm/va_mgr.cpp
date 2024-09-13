@@ -40,7 +40,7 @@ uint64_t VaMgr::Alloc(uint64_t bytes, uint64_t align, uint64_t addr) {
       const uint64_t size = frag_it->second.size;
 
       // Cannot find free fragment contains the target `addr`
-      if (bytes > size || addr < base || addr + bytes >= base + size ||
+      if (bytes > size || addr < base || addr + bytes > base + size ||
           !is_free(frag_it->second)) {
         --frag_it;
         continue;
