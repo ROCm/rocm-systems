@@ -32,18 +32,14 @@ fetchcontent_declare(
     URL https://perftools.pages.jsc.fz-juelich.de/cicd/otf2/tags/otf2-${OTF2_VERSION}/otf2-${OTF2_VERSION}.tar.gz
     URL_HASH ${OTF2_URL_HASH})
 
-fetchcontent_getproperties(ot2f-source)
-
-if(NOT ot2f-source_POPULATED)
-    message(STATUS "Downloading OTF2...")
-    fetchcontent_populate(otf2-source)
-endif()
+fetchcontent_makeavailable(otf2-source)
 
 set(_otf2_root ${ROCPROFILER_BINARY_DIR}/external/otf2)
 set(_otf2_inc_dirs $<BUILD_INTERFACE:${_otf2_root}/include>)
 set(_otf2_lib_dirs $<BUILD_INTERFACE:${_otf2_root}/lib>)
 set(_otf2_libs $<BUILD_INTERFACE:${_otf2_root}/lib/libotf2${CMAKE_STATIC_LIBRARY_SUFFIX}>)
-set(_otf2_build_byproducts "${_otf2_root}/lib/libotf2${CMAKE_STATIC_LIBRARY_SUFFIX}")
+set(_otf2_build_byproducts "${_otf2_root}/include/otf2/otf2.h"
+                           "${_otf2_root}/lib/libotf2${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
 find_program(
     MAKE_COMMAND
@@ -56,12 +52,12 @@ externalproject_add(
     SOURCE_DIR ${otf2-source_SOURCE_DIR}
     BUILD_IN_SOURCE 1
     DOWNLOAD_COMMAND ""
-    PATCH_COMMAND
+    PATCH_COMMAND ""
+    CONFIGURE_COMMAND
         ${CMAKE_COMMAND} -E env CC=${CMAKE_C_COMPILER} CXX=${CMAKE_CXX_COMPILER}
-        <SOURCE_DIR>/configure -q --prefix=${_otf2_root} CFLAGS=-fPIC\ -O3\ -g
-        CXXFLAGS=-fPIC\ -O3\ -g LDFLAGS= PYTHON=: SPHINX=:
-    CONFIGURE_COMMAND ${MAKE_COMMAND} install -s
-    BUILD_COMMAND ""
+        <SOURCE_DIR>/configure -q --enable-silent-rules --prefix=${_otf2_root}
+        CFLAGS=-fPIC\ -O3\ -g CXXFLAGS=-fPIC\ -O3\ -g LDFLAGS= PYTHON=: SPHINX=:
+    BUILD_COMMAND ${MAKE_COMMAND} install -s
     BUILD_BYPRODUCTS "${_otf2_build_byproducts}"
     INSTALL_COMMAND "")
 
@@ -70,3 +66,5 @@ add_library(otf2::otf2 ALIAS otf2)
 target_include_directories(otf2 SYSTEM INTERFACE ${_otf2_inc_dirs})
 target_link_directories(otf2 INTERFACE ${_otf2_lib_dirs})
 target_link_libraries(otf2 INTERFACE ${_otf2_libs})
+
+add_dependencies(otf2 otf2-build)
