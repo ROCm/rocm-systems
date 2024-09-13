@@ -99,7 +99,7 @@ To use the rocTX API you need the API header and to link your application with `
   1. For Ubuntu 18.04 and Ubuntu 20.04 the following adds the needed packages:
 
    ````shell
-   apt install python3 python3-pip gcc g++ libatomic1 make rocm-llvm-dev \
+   apt install python3 python3-pip gcc g++ make rocm-llvm-dev \
     cmake doxygen graphviz texlive-full
    ````
 
@@ -107,7 +107,7 @@ To use the rocTX API you need the API header and to link your application with `
 
    ````shell
    yum install -y python3 python3-pip gcc gcc-g++ make rocm-llvm-devel \
-    cmake libatomic doxygen graphviz texlive \
+    cmake doxygen graphviz texlive \
     texlive-xtab texlive-multirow texlive-sectsty \
     texlive-tocloft texlive-tabu texlive-adjustbox
    ````
@@ -116,7 +116,7 @@ To use the rocTX API you need the API header and to link your application with `
 
    ````shell
    zypper in python3 python3-pip gcc gcc-g++ make rocm-llvm-devel \
-    cmake libatomic doxygen graphviz \
+    cmake doxygen graphviz \
     texlive-scheme-medium texlive-hanging texlive-stackengine \
     texlive-tocloft texlive-etoc texlive-tabu
    ````

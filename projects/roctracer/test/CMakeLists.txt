@@ -141,13 +141,13 @@ add_dependencies(mytest load_unload_reload_test)
 ## Build the trace_buffer test
 add_executable(trace_buffer directed/trace_buffer.cpp)
 target_include_directories(trace_buffer PRIVATE ${PROJECT_SOURCE_DIR}/src/tracer_tool)
-target_link_libraries(trace_buffer Threads::Threads atomic)
+target_link_libraries(trace_buffer Threads::Threads -Wl,-Bstatic atomic -Wl,-Bdynamic)
 add_dependencies(mytest trace_buffer)
 
 ## Build the memory_pool test
 add_executable(memory_pool directed/memory_pool.cpp)
 target_include_directories(memory_pool PRIVATE ${PROJECT_SOURCE_DIR}/src/roctracer ${PROJECT_SOURCE_DIR}/inc)
-target_link_libraries(memory_pool Threads::Threads atomic)
+target_link_libraries(memory_pool Threads::Threads -Wl,-Bstatic atomic -Wl,-Bdynamic)
 add_dependencies(mytest memory_pool)
 
 ## Build the activity_and_callback test
