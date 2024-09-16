@@ -52,7 +52,7 @@ jobs:
 
     - name: Install Packages
       timeout-minutes: 25
-      uses: nick-fields/retry@v2
+      uses: nick-fields/retry@v3
       with:
         retry_wait_seconds: 30
         timeout_minutes: 25
