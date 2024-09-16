@@ -685,10 +685,10 @@ Output formats
 
 ``rocprofv3`` supports the following output formats:
 
-- CSV (default)
-- JSON (custom format for programmatic analysis)
-- PFTrace (Perfetto trace)
-- OTF2 (Open Trace Format )
+- CSV (Default)
+- JSON (Custom format for programmatic analysis only)
+- PFTrace (Perfetto trace for visualization with Perfetto)
+- OTF2 (Open Trace Format for visualization with compatible third party tools)
 
 You can specify the output format using the ``--output-format`` command-line option. Format selection is case-insensitive
 and multiple output formats are supported. For example: ``--output-format json`` enables JSON output exclusively whereas
@@ -704,8 +704,10 @@ For .otf2 trace visualization, open the trace in `vampir.eu <https://vampir.eu/>
 JSON output schema
 ++++++++++++++++++++
 
-``rocprofv3`` supports a custom JSON output format designed for programmatic analysis. The schema is optimized for size
-while factoring in usability. You can generate the JSON output using ``--output-format json`` command-line option.
+``rocprofv3`` supports a **custom** JSON output format designed for programmatic analysis and **NOT** for visualization.
+The schema is optimized for size while factoring in usability. The Perfetto UI does not accept this JSON output format produced by rocprofv3.
+Perfetto is dropping support for the JSON Chrome tracing format in favor of the binary Perfetto protobuf format (.pftrace extension), which is supported by rocprofv3.
+You can generate the JSON output using ``--output-format json`` command-line option.
 
 Properties
 ++++++++++++
