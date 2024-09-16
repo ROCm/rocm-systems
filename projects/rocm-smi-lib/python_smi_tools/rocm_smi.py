@@ -4287,7 +4287,7 @@ if __name__ == '__main__':
             if not JSON_DATA['card' + str(device)]:
                 JSON_DATA.pop('card' + str(device))
         if not JSON_DATA:
-            logging.warn("No JSON data to report")
+            logging.warning("No JSON data to report")
             sys.exit(RETCODE)
 
         if not args.csv:
