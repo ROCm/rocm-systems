@@ -30,6 +30,12 @@ set(GPU_TARGETS
     "${DEFAULT_GPU_TARGETS}"
     CACHE STRING "GPU targets to compile for")
 
+set(AMDGPU_TARGETS
+    "${GPU_TARGETS}"
+    CACHE STRING
+          "GPU targets to compile for AMDGPUs (update GPU_TARGETS, not this variable)"
+          FORCE)
+
 # build flags
 add_library(rocprofiler-tests-build-flags INTERFACE)
 add_library(rocprofiler-sdk::tests-build-flags ALIAS rocprofiler-tests-build-flags)

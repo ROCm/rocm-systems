@@ -18,17 +18,22 @@ set(tracing-env "${PRELOAD_ENV}")
 rocprofiler_configure_pytest_files(CONFIG pytest.ini roctracer-roctx-input.yml
                                    COPY validate.py conftest.py)
 
-add_test(
-    NAME rocprofv3-test-roctracer-roctx-trace-execute
-    COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i roctracer-roctx-input.yml --
-        $<IF:$<TARGET_EXISTS:transpose-roctracer-roctx>,$<TARGET_FILE:transpose-roctracer-roctx>,>
-    )
+if(TARGET transpose-roctracer-roctx)
+    set(TRANSPOSE_ROCTRACER_ROCTX_EXE $<TARGET_FILE:transpose-roctracer-roctx>)
+    set(TRANSPOSE_ROCTRACER_ROCTX_DISABLED OFF)
+else()
+    set(TRANSPOSE_ROCTRACER_ROCTX_EXE)
+    set(TRANSPOSE_ROCTRACER_ROCTX_DISABLED ON)
+endif()
+
+add_test(NAME rocprofv3-test-roctracer-roctx-trace-execute
+         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i roctracer-roctx-input.yml
+                 -- ${TRANSPOSE_ROCTRACER_ROCTX_EXE})
 
 set_tests_properties(
     rocprofv3-test-roctracer-roctx-trace-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${tracing-env}"
-               DISABLED "$<IF:$<TARGET_EXISTS:transpose-roctracer-roctx>,OFF,ON>")
+               DISABLED "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}")
 
 add_test(
     NAME rocprofv3-test-roctracer-roctx-trace-validate
@@ -53,7 +58,7 @@ set_tests_properties(
                DEPENDS
                "rocprofv3-test-roctracer-roctx-trace-execute"
                DISABLED
-               "$<IF:$<TARGET_EXISTS:transpose-roctracer-roctx>,OFF,ON>"
+               "${TRANSPOSE_ROCTRACER_ROCTX_DISABLED}"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
                ATTACHED_FILES_ON_FAIL
