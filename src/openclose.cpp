@@ -173,14 +173,6 @@ static HSAKMT_STATUS init_symbols(void) {
   return HSAKMT_STATUS_SUCCESS;
 }
 
-static void load_libdrm_amdgpu(void) {
-  /* load libdrm_amdgpu */
-  int fd;
-  uint32_t major, minor;
-  amdgpu_device_handle device_handle;
-  amdgpu_device_initialize(fd, &major, &minor, &device_handle);
-}
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   HSAKMT_STATUS result;
   int fd = -1;
@@ -203,8 +195,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     result = init_symbols();
     if (result != HSAKMT_STATUS_SUCCESS)
       goto open_failed;
-
-    load_libdrm_amdgpu();
 
     result = init_vars_from_env();
     if (result != HSAKMT_STATUS_SUCCESS)

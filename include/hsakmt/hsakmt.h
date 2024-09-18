@@ -1199,25 +1199,6 @@ hsaKmtPcSamplingStop(
     HsaPcSamplingTraceId traceId
 );
 
-/**
- * Temp libdrm wrapper to fake libdrm_amdgpu on wsl env
-*/
-HSAKMTAPI int hsaKmtamdgpu_query_gpu_info(void* dev,
-				     struct amdgpu_gpu_info *info);
-
-
-HSAKMTAPI int hsaKmtamdgpu_bo_import(amdgpu_device_handle dev,
-                                     enum amdgpu_bo_handle_type type,
-                                     uint32_t shared_handle,
-                                     struct amdgpu_bo_import_result *output);
-
-HSAKMTAPI int hsaKmtamdgpu_bo_va_op(amdgpu_bo_handle bo,
-                                    uint64_t offset,
-                                    uint64_t size,
-                                    uint64_t addr,
-                                    uint64_t flags,
-                                    uint32_t ops);
-
 #ifdef __cplusplus
 }   //extern "C"
 #endif

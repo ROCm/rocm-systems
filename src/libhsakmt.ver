@@ -92,9 +92,14 @@ hsaKmtPcSamplingStop;
 hsaKmtPcSamplingSupport;
 hsaKmtGetVersionCapInfo;
 hsaKmtQueueRingDoorbell;
-hsaKmtamdgpu_query_gpu_info;
-hsaKmtamdgpu_bo_import;
-hsaKmtamdgpu_bo_va_op;
+amdgpu_query_gpu_info;
+amdgpu_bo_import;
+amdgpu_bo_va_op;
+amdgpu_device_get_fd;
+amdgpu_bo_cpu_map;
+amdgpu_bo_free;
+amdgpu_bo_export;
+drmCommandWriteRead;
 
 local: *;
 };

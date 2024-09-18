@@ -40,6 +40,7 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 #include <cstdint>
+#include <xf86drm.h>
 #include <amdgpu.h>
 #include <amdgpu_drm.h>
 
@@ -59,19 +60,37 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetAMDGPUDeviceHandle(
   return HSAKMT_STATUS_ERROR;
 }
 
-HSAKMTAPI int hsaKmtamdgpu_query_gpu_info(void *dev,
-                                          struct amdgpu_gpu_info *info) {
+HSAKMTAPI int amdgpu_query_gpu_info(amdgpu_device_handle dev,
+                                    struct amdgpu_gpu_info *info) {
   wsl::thunk::WDDMDevice *pDevice =
-      reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
+    reinterpret_cast<wsl::thunk::WDDMDevice *>(dev);
   memset(info, 0, sizeof(*info));
   info->gpu_counter_freq = pDevice->GPUCounterFrequency() / 1000ull;
   return 0;
 }
 
-HSAKMTAPI int hsaKmtamdgpu_bo_import(amdgpu_device_handle dev,
-                                     enum amdgpu_bo_handle_type type,
-                                     uint32_t shared_handle,
-                                     struct amdgpu_bo_import_result *output) {
+HSAKMTAPI int amdgpu_device_get_fd(amdgpu_device_handle dev) {
+  return 0;
+}
+
+HSAKMTAPI int amdgpu_bo_cpu_map(amdgpu_bo_handle bo, void **cpu) {
+  return 0;
+}
+
+HSAKMTAPI int amdgpu_bo_free(amdgpu_bo_handle buf_handle) {
+  return 0;
+}
+
+HSAKMTAPI int amdgpu_bo_export(amdgpu_bo_handle bo,
+                               enum amdgpu_bo_handle_type type,
+                               uint32_t *shared_handle) {
+  *shared_handle = 0;
+  return 0;
+}
+HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
+                               enum amdgpu_bo_handle_type type,
+                               uint32_t shared_handle,
+                               struct amdgpu_bo_import_result *output) {
   void *MemoryAddress = nullptr;
   HSAKMT_STATUS ret = hsaKmtImportDMABufHandle(shared_handle, &MemoryAddress);
   if (ret == HSAKMT_STATUS_SUCCESS) {
@@ -84,12 +103,12 @@ HSAKMTAPI int hsaKmtamdgpu_bo_import(amdgpu_device_handle dev,
 }
 
 
-HSAKMTAPI int hsaKmtamdgpu_bo_va_op(amdgpu_bo_handle bo,
-                                    uint64_t offset,
-                                    uint64_t size,
-                                    uint64_t addr,
-                                    uint64_t flags,
-                                    uint32_t ops) {
+HSAKMTAPI int amdgpu_bo_va_op(amdgpu_bo_handle bo,
+                              uint64_t offset,
+                              uint64_t size,
+                              uint64_t addr,
+                              uint64_t flags,
+                              uint32_t ops) {
   switch(ops) {
     case AMDGPU_VA_OP_MAP:
       {
@@ -115,5 +134,10 @@ HSAKMTAPI int hsaKmtamdgpu_bo_va_op(amdgpu_bo_handle bo,
       }
       break;
   }
+  return 0;
+}
+
+HSAKMTAPI int drmCommandWriteRead(int fd, unsigned long drmCommandIndex,
+                                  void *data, unsigned long size) {
   return 0;
 }
