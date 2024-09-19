@@ -123,7 +123,7 @@ instructions in entry and exit functions are either logging functions or
 depend on the runtime settings and thus might never run). However, 
 due to the number of potential instructions in the entry and exit snippets,
 the default behavior of ``omnitrace-instrument`` is to only instrument functions 
-which contain fewer than 1024 instructions.
+which contain at least 1024 instructions.
 
 However, recording every single invocation of the function can be extremely 
 useful for detecting anomalies, such as profiles that show minimum or maximum values much smaller or larger
