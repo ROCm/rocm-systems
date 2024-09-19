@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _ROCR_WDDM_TYPES_H_
-#define _ROCR_WDDM_TYPES_H_
+#ifndef _WSL_INC_THUNK_PROXY_WDDM_TYPES_H_
+#define _WSL_INC_THUNK_PROXY_WDDM_TYPES_H_
 
 #include <stdint.h>
 

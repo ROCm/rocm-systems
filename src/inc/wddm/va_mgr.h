@@ -1,5 +1,5 @@
-#ifndef VA_MGR_H_
-#define VA_MGR_H_
+#ifndef _WSL_INC_WDDM_VA_MGR_H_
+#define _WSL_INC_WDDM_VA_MGR_H_
 
 #include <mutex>
 #include <map>
@@ -83,4 +83,4 @@ private:
 
 } // namespace thunk
 } // namespace wsl
-#endif  // VA_MGR_H_
+#endif

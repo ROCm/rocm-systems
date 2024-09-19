@@ -1,7 +1,7 @@
 /* Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved. */
 
-#ifndef _CMD_UTIL_H_
-#define _CMD_UTIL_H_
+#ifndef _WSL_INC_WDDM_CMD_UTIL_H_
+#define _WSL_INC_WDDM_CMD_UTIL_H_
 
 #include <string.h>
 #include "hsa-runtime/inc/hsa.h"

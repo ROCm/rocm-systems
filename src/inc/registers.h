@@ -44,8 +44,8 @@
 // register values in amd_aql_queue.cpp then this file won't be required. For
 // now we are using this file where register details are  spelled out in the
 // structs/unions below.
-#ifndef HSA_RUNTME_CORE_INC_REGISTERS_H_
-#define HSA_RUNTME_CORE_INC_REGISTERS_H_
+#ifndef _WSL_INC_REGISTERS_H_
+#define _WSL_INC_REGISTERS_H_
 
 typedef enum SQ_RSRC_BUF_TYPE {
 SQ_RSRC_BUF                              = 0x00000000,

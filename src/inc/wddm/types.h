@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _ROCR_CORE_INC_WDDM_TYPES_H_
-#define _ROCR_CORE_INC_WDDM_TYPES_H_
+#ifndef _WSL_INC_WDDM_TYPES_H_
+#define _WSL_INC_WDDM_TYPES_H_
 
 #include <cstdint>
 #include <ntstatus.h>
@@ -98,4 +98,4 @@ typedef struct _OBJECT_ATTRIBUTES {
     (p)->SecurityQualityOfService = NULL;               \
     }
 
-#endif // _ROCR_CORE_INC_WDDM_TYPES_H_
+#endif

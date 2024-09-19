@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _ROCR_WDDM_H_
-#define _ROCR_WDDM_H_
+#ifndef _WSL_INC_WDDM_DEVICE_H_
+#define _WSL_INC_WDDM_DEVICE_H_
 
 #include <cassert>
 #include <ntstatus.h>

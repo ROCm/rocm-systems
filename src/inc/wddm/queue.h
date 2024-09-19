@@ -39,8 +39,8 @@
 // DEALINGS WITH THE SOFTWARE.
 //
 ////////////////////////////////////////////////////////////////////////////////
-#ifndef _WDDM_QUEUE_H_
-#define _WDDM_QUEUE_H_
+#ifndef _WSL_INC_WDDM_QUEUE_H_
+#define _WSL_INC_WDDM_QUEUE_H_
 
 #include <cinttypes>
 #include <condition_variable>

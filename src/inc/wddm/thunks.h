@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _ROCR_CORE_INC_WDDM_THUNKS_H_
-#define _ROCR_CORE_INC_WDDM_THUNKS_H_
+#ifndef _WSL_INC_WDDM_THUNKS_H
+#define _WSL_INC_WDDM_THUNKS_H
 
 #include "inc/wddm/status.h"
 #include "inc/wddm/types.h"
@@ -229,4 +229,4 @@ inline ErrorCode OpenResourceFromNtHandle(D3DKMT_OPENRESOURCEFROMNTHANDLE *args)
 } // namespace thunk
 } // namespace wsl
 
-#endif // _ROCR_CORE_INC_WDDM_THUNKS_H_
+#endif

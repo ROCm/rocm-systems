@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _ROCR_CORE_INC_WDDM_STATUS_H_
-#define _ROCR_CORE_INC_WDDM_STATUS_H_
+#ifndef _WSL_INC_WDDM_STATUS_H
+#define _WSL_INC_WDDM_STATUS_H
 
 enum class ErrorCode {
   Success,

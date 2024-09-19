@@ -40,8 +40,8 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#ifndef _ROCR_GPU_MEMORY_H_
-#define _ROCR_GPU_MEMORY_H_
+#ifndef _WSL_INC_WDDM_GPU_MEMORY_H_
+#define _WSL_INC_WDDM_GPU_MEMORY_H_
 
 #include <cstddef>
 #include <cstdint>

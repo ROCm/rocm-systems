@@ -1,5 +1,5 @@
-#ifndef _ROCR_PM4_CMDS_H_
-#define _ROCR_PM4_CMDS_H_
+#ifndef _WSL_INC_PM4_CMDS_H_
+#define _WSL_INC_PM4_CMDS_H_
 
 #include <cstdint>
 
