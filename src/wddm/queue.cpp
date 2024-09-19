@@ -180,19 +180,18 @@ void ComputeQueue::HandleError(hsa_status_t status) {
 
 void ComputeQueue::AqlToPm4Thread(ComputeQueue *queue) {
 
-  ComputeQueue *cq = queue;
   // This timing system is used for sleeping this Thread
   // when one packet is invalid for about 2 seconds.
   std::chrono::steady_clock::time_point start_time, time;
   // Set the polling timeout value for 2 seconds
   const std::chrono::milliseconds kMaxElapsed(2000);
-  uint64_t current_position = cq->GetAqlWriteIndex();
+  uint64_t current_position = queue->GetAqlWriteIndex();
   bool sleep = false;
   start_time = std::chrono::steady_clock::now();
 
   while (true) {
-    if (!cq->IsInvalidPacket()) {
-      hsa_status_t status = cq->Process();
+    if (!queue->IsInvalidPacket()) {
+      hsa_status_t status = queue->Process();
       if (status != HSA_STATUS_SUCCESS) {
         fprintf(stderr, "process compute queue fail status = %08x\n", status);
         queue->HandleError(status);
@@ -200,28 +199,28 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue *queue) {
       }
       sleep = false;
     } else {
-      if (current_position == cq->GetAqlWriteIndex()) {
+      if (current_position == queue->GetAqlWriteIndex()) {
         time = std::chrono::steady_clock::now();
         if (time - start_time > kMaxElapsed)
           sleep = true;
       } else {
         start_time = std::chrono::steady_clock::now();
-        current_position = cq->GetAqlWriteIndex();
+        current_position = queue->GetAqlWriteIndex();
         sleep = false;
       }
     }
 
-    if ((cq->GetRingWptr()->load() > cq->GetRingRptr()->load()) && !sleep)
+    if ((queue->GetRingWptr()->load() > queue->GetRingRptr()->load()) && !sleep)
       continue;
 
     std::unique_lock<std::mutex> lock(queue->thread_cond_lock_);
     // CPU wait for valid packet
-    if (cq->GetRingWptr()->load() <= cq->GetRingRptr()->load() ||
-        (sleep && cq->IsInvalidPacket())) {
+    if (queue->GetRingWptr()->load() <= queue->GetRingRptr()->load() ||
+        (sleep && queue->IsInvalidPacket())) {
       if (queue->thread_stop_)
         break;
       debug_print("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
-		  queue->ring, cq->GetRingWptr()->load(), cq->GetRingRptr()->load());
+		  queue->ring, queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
       queue->thread_cond_.wait(lock);
     }
   }
