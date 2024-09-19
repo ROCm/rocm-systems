@@ -663,20 +663,18 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // Detach the thread, sys will recycle the resource
+  thr_ret = pthread_detach(sig_listen_thread);
+  // Don't fail if detach is not successful
+  if (thr_ret !=0) {
+    std::cerr << "Failed to detach ProcessSignalLoop. pthread_detach() returned " << thr_ret;
+  }
+
   // TODO(cfreehil): Eventually, set these by reading a config file
   rdc_server.set_start_rdc_admin_service(true);
   rdc_server.set_start_api_service(true);
 
   rdc_server.Run();
-
-  // join the thread to prevent the program terminated
-  void* ret = nullptr;
-  thr_ret = pthread_join(sig_listen_thread, &ret);
-
-  // don't fail if it doesn't succeed
-  if (thr_ret != 0) {
-    std::cerr << "Failed to terminate ProcessSignalLoop. pthread_join() returned " << thr_ret;
-  }
 
   if (sShutDownServer) {
     std::cout << "RDC server successfully shut down." << std::endl;
