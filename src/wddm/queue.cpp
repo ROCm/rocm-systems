@@ -830,10 +830,10 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
     debug_print("pm4_addr[%d]=%#x\n", i, pm4_addr[i]);
   }
 
+  int i = ib_size;
+
   if (vendor_packet_support) {
     int major = device->Major();
-    int i = ib_size;
-
     memcpy(cpu+i, pm4_addr, pm4_size * sizeof(uint32_t));
     i += pm4_size * sizeof(uint32_t);
 
@@ -861,18 +861,18 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
 
       i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
     }
-
-    // The ring_rptr is used to record pm4 queue rptr value,
-    // dispatch readptr position, this is used to share rptr with
-    // aql queue.
-    i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
-
-    ib_size = i;
   } else {
     if (packet->completion_signal.handle != 0) {
       hsakmt_hsa_signal_store_screlease(packet->completion_signal, 0);
     }
   }
+
+  // The ring_rptr is used to record pm4 queue rptr value,
+  // dispatch readptr position, this is used to share rptr with
+  // aql queue.
+  i += cmd_util.BuildAtomicMem((uint64_t *)ring_rptr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i);
+
+  ib_size = i;
 
   cmdbuf_aql_frame_write_index++;
   packet->header = HSA_PACKET_TYPE_INVALID;
