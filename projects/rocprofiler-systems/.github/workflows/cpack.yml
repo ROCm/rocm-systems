@@ -4,7 +4,7 @@ run-name: cpack
 on:
   workflow_dispatch:
   push:
-    branches: [main, releases/**]
+    branches: [main, amd-mainline, release/**]
     tags:
       - v*
     paths-ignore:
@@ -12,7 +12,7 @@ on:
       - 'docs/**'
       - 'source/docs/**'
   pull_request:
-    branches: [main]
+    branches: [main, amd-mainline]
     paths:
       - '.github/workflows/cpack.yml'
       - 'docker/**'

@@ -4,9 +4,9 @@ run-name: formatting
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}

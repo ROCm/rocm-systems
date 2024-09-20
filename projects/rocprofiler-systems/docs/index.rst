@@ -30,7 +30,7 @@ The documentation is structured as follows:
 
   .. grid-item-card:: Tutorials
 
-    * `GitHub examples <https://github.com/ROCm/omnitrace/tree/main/examples>`_
+    * `GitHub examples <https://github.com/ROCm/omnitrace/tree/amd-mainline/examples>`_
     * :doc:`Video tutorials <./tutorials/video-tutorials>`
 
   .. grid-item-card:: How to

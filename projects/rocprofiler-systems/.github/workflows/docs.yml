@@ -3,14 +3,14 @@ name: Documentation
 on:
   workflow_dispatch:
   push:
-    branches: [main, gh-pages]
+    branches: [main, amd-mainline, gh-pages]
     paths:
       - '*.md'
       - 'source/docs/**'
       - '.github/workflows/docs.yml'
       - 'VERSION'
   pull_request:
-    branches: [main]
+    branches: [main, amd-mainline]
     paths:
       - '*.md'
       - 'source/docs/**'

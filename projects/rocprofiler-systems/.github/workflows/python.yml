@@ -3,12 +3,12 @@ run-name: Python
 
 on:
   push:
-    branches: [ main, develop ]
+    branches: [ main, develop, amd-mainline, amd-staging ]
     paths:
       - 'source/python/gui/*.py'
       - 'source/python/gui/**/*.py'
   pull_request:
-    branches: [ main, develop ]
+    branches: [ main, develop, amd-mainline, amd-staging ]
     paths:
       - 'source/python/gui/*.py'
       - 'source/python/gui/**/*.py'

@@ -7,7 +7,7 @@ on:
   schedule:
     - cron: 0 5 * * *
   push:
-    branches: [main]
+    branches: [main, amd-mainline]
     paths:
       - '.github/workflows/containers.yml'
       - 'docker/**'

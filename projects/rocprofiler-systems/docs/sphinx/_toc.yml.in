@@ -17,7 +17,7 @@ subtrees:
 
   - caption: Tutorials
     entries:
-    - url: https://github.com/ROCm/omnitrace/tree/main/examples
+    - url: https://github.com/ROCm/omnitrace/tree/amd-mainline/examples
       title: GitHub examples
     - file: tutorials/video-tutorials.rst
       title: Video tutorials

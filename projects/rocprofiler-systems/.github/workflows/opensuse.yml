@@ -3,7 +3,7 @@ run-name: opensuse-15
 
 on:
   push:
-    branches: [ main, develop, release/** ]
+    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -15,7 +15,7 @@ on:
       - '.github/workflows/formatting.yml'
       - 'docker/**'
   pull_request:
-    branches: [ main, develop, release/** ]
+    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'

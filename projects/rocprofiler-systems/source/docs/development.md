@@ -7,7 +7,7 @@
 
 ## Executables
 
-### omnitrace-avail: [source/bin/omnitrace-avail](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-avail)
+### omnitrace-avail: [source/bin/omnitrace-avail](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/bin/omnitrace-avail)
 
 The main of `omnitrace-avail` has three important sections:
 
@@ -15,7 +15,7 @@ The main of `omnitrace-avail` has three important sections:
 2. Printing options
 3. Printing hardware counters
 
-### omnitrace-sample: [source/bin/omnitrace-sample](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-sample)
+### omnitrace-sample: [source/bin/omnitrace-sample](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/bin/omnitrace-sample)
 
 General design:
 
@@ -24,7 +24,7 @@ General design:
 - Adds `libomnitrace-dl.so` to `LD_PRELOAD`
 - Application is launched via `execvpe` with `<command> <command-args>` and modified environment
 
-### omnitrace-casual: [source/bin/omnitrace-causal](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-causal)
+### omnitrace-casual: [source/bin/omnitrace-causal](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/bin/omnitrace-causal)
 
 Nearly identical design to [omnitrace-sample](#omnitrace-sample-sourcebinomnitrace-sample) when
 there is exactly one causal profiling configuration variant (this enables debugging).
@@ -36,7 +36,7 @@ for each variant:
 - child process launches `<command> <command-args>` via `execvpe` which modified environment for variant
 - parent process waits for child process to finish
 
-### omnitrace-instrument: [source/bin/omnitrace-instrument](https://github.com/ROCm/omnitrace/tree/main/source/bin/omnitrace-instrument)
+### omnitrace-instrument: [source/bin/omnitrace-instrument](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/bin/omnitrace-instrument)
 
 - Requires a command-line format of `omnitrace-instrument <options> -- <command> <command-args>`
 - User specifies in options whether they want to do runtime instrumentation, binary rewrite, or attach to process
@@ -52,24 +52,24 @@ for each variant:
 
 ## Libraries
 
-### Common Library: [source/lib/common](https://github.com/ROCm/omnitrace/tree/main/source/lib/common)
+### Common Library: [source/lib/common](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/lib/common)
 
 General header-only functionality used in multiple executables and/or libraries. Not installed or exported outside of the build tree.
 
-### Core Library: [source/lib/core](https://github.com/ROCm/omnitrace/tree/main/source/lib/core)
+### Core Library: [source/lib/core](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/lib/core)
 
 Static PIC library with functionality that does not depend on any components. Not installed or exported outside of the build tree.
 
-### Binary Library: [source/lib/binary](https://github.com/ROCm/omnitrace/tree/main/source/lib/binary)
+### Binary Library: [source/lib/binary](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/lib/binary)
 
 Static PIC library with functionality for reading/analyzing binary info. Mostly used by the causal profiling sections
 of [libomnitrace](#libomnitrace-sourcelibomnitrace). Not installed or exported outside of the build tree.
 
-### libomnitrace: [source/lib/omnitrace](https://github.com/ROCm/omnitrace/tree/main/source/lib/omnitrace)
+### libomnitrace: [source/lib/omnitrace](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/lib/omnitrace)
 
 This is the main library encapsulating all the capabilities.
 
-### libomnitrace-dl: [source/lib/omnitrace-dl](https://github.com/ROCm/omnitrace/tree/main/source/lib/omnitrace-dl)
+### libomnitrace-dl: [source/lib/omnitrace-dl](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/lib/omnitrace-dl)
 
 Lightweight, front-end library for [libomnitrace](#libomnitrace-sourcelibomnitrace) which serves 3 primary purposes:
 
@@ -77,7 +77,7 @@ Lightweight, front-end library for [libomnitrace](#libomnitrace-sourcelibomnitra
 2. Prevents re-entry if [libomnitrace](#libomnitrace-sourcelibomnitrace) calls an instrumentated function internally)
 3. Coordinates communication between [libomnitrace-user](#libomnitrace-user-sourcelibomnitrace-user) and [libomnitrace](#libomnitrace-sourcelibomnitrace)
 
-### libomnitrace-user: [source/lib/omnitrace-user](https://github.com/ROCm/omnitrace/tree/main/source/lib/omnitrace-user)
+### libomnitrace-user: [source/lib/omnitrace-user](https://github.com/ROCm/omnitrace/tree/amd-mainline/source/lib/omnitrace-user)
 
 Provides a set of functions and types for the users to add to their code, e.g. disabling data collection globally or on a specific thread,
 user-defined regions, etc. If [libomnitrace-dl](#libomnitrace-dl-sourcelibomnitrace-dl) is not loaded, the user API is effectively no-op
