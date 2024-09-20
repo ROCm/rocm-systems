@@ -218,7 +218,7 @@ typedef union
         unsigned int CoherentHostAccess: 1;      // Whether or not device memory can be coherently accessed by the host CPU
         unsigned int DebugSupportedFirmware : 1; // Indicates if HWS firmware supports GPU debugging
         unsigned int PreciseALUOperationsSupported : 1; //Indicates if precise ALU operations are supported for GPU debugging
-        unsigned int Reserved            : 1;
+        unsigned int PerQueueResetSupported : 1; // Indicates per-queue reset supported
     } ui32;
 } HSA_CAPABILITY;
 
