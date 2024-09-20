@@ -13,72 +13,35 @@ Follow our install/build guides to ensure the Python API is installed correctly 
 ## How to Run
 ### Basic How To
 The 2 tests are in this PATH:  
-```/opt/rocm/share/amd_smi/tests/pytest/integration_test.py```  
-```/opt/rocm/share/amd_smi/tests/pytest/unit_tests.py```
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py```  
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py```
 
-
-The recommended method to run the tests:  
-<u>Pytest verbose</u>  
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -s -v```  
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -s -v```
-
-<u>Pytest only (not verbose)</u>  
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -v```  
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -v```
+The recommended method to run the tests:
 
 <u>Unittest verbose</u>  
-```/opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -v```  
-```/opt/rocm/share/amd_smi/tests/pytest/integration_test.py -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```  
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v```
 
 <u>Unittest only (not verbose)</u>  
-```/opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -b -v```  
-```/opt/rocm/share/amd_smi/tests/pytest/integration_test.py -b -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```  
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v```
 
 See sections below for more detailed options with examples.
-
-### Unittest or Pytest Run
-The Unittest Run calls the tests directly, assuming pytest is correctly installed in the PATH.  
-This is more straightforward and intuitive but with less control for options. For example, the cache provider will always be used.
-
-```/opt/rocm/share/amd_smi/tests/pytest/*```
-
-options:
-  -  -h, --help           show this help message and exit
-  -  -v, --verbose        Verbose output
-  -  -q, --quiet          Quiet output
-  -  -b, --buffer         Buffer stdout and stderr during tests
-  -  -k "TESTNAME"        Only run tests which match the given substring
-
-The Pytest Run could be more reliable and consistent, especially if pytest is not in the PATH.  
-This offers more options and flexibility, such as the option to disable the cache provider, ensuring completely independent runs.
-
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/*```
-
-options:
-  -  -h, --help           show this help message and exit
-  -  --co                 Collect and list tests
-  -  -p no:cacheprovider  Disable cache provider
-  -  -v, --verbose        Verbose output
-  -  -q, --quiet          Quiet output
-  -  -s, --capture=no     Disables output capturing, stdout output
-  -  -k "TESTNAME"        Only run tests which match the given substring
-
-The complete list of options can be accessed here [Pytest command-line flags](https://docs.pytest.org/en/latest/reference/reference.html#command-line-flags).
 
 ## Unittest Run Options
 ### Unittest Run: Verbose on
 Helpful to see print outs of Python.
 
-```/opt/rocm/share/amd_smi/tests/pytest/integration_test.py -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v```
 
-```/opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```
 
 ex.
 <details open>
   <summary>Click for example: <i><b>Unittest run: verbose on</i></b></summary>
 
 ~~~shell
-/opt/rocm/share/amd_smi/tests/pytest/integration_test.py -v
+/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
 test_init (__main__.TestAmdSmiInit) ... ok
 test_bad_page_info (__main__.TestAmdSmiPythonInterface) ... ###Test amdsmi_get_gpu_bad_page_info
 
@@ -403,16 +366,16 @@ OK
 
 ### Unittest Run: Verbose on + Filter (or exclude) a test
 
-```/opt/rocm/share/amd_smi/tests/pytest/integration_test.py -k "test_walkthrough" -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_walkthrough" -v```
 
-```/opt/rocm/share/amd_smi/tests/pytest/integration_test.py -k "not test_walkthrough" -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "not test_walkthrough" -v```
 
 ex.
 <details open>
   <summary>Click for example: <i><b>Unittest Run: Verbose on + Filter (or exclude) a Test</b></i></summary>
 
 ~~~shell
-> /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -k "test_bdf_device_id" -v
+> /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_bdf_device_id" -v
 test_bdf_device_id (__main__.TestAmdSmiPythonInterface) ... ###Test Processor 0, bdf: 0000:08:00.0
 
 ###Test amdsmi_get_gpu_vbios_info
@@ -453,16 +416,16 @@ OK
  Runs all tests. Silence print statements to stdout. Lists tests results.
  This is also the best way to list all tests available.
 
-```/opt/rocm/share/amd_smi/tests/pytest/integration_test.py -b -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -b -v```
 
-```/opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -b -v```
+```/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v```
 
 ex.
 <details open>
   <summary>Click for example: <i><b>Unittest Run: Silence stdout (print statements) and run all tests</i></b></summary>
 
 ~~~shell
-/opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -b -v
+/opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -b -v
 test_check_res (__main__.TestAmdSmiPythonBDF) ... ok
 test_format_bdf (__main__.TestAmdSmiPythonBDF) ... ok
 test_parse_bdf (__main__.TestAmdSmiPythonBDF) ... ok
@@ -477,16 +440,16 @@ OK
 
 ## Pytest Run Options
 ### Pytest: List tests
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py --co```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py --co```
 
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/unit_tests.py --co```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py --co```
 
 ex.
 <details open>
   <summary>Click for example: <b><i>Pytest: List tests</i></b></summary>
 
 ~~~shell
-python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py --co
+python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py --co
 ===================================================== test session starts =====================================================
 platform linux -- Python 3.8.10, pytest-8.2.2, pluggy-1.5.0
 rootdir: /opt/rocm/share/amd_smi
@@ -511,53 +474,53 @@ collected 6 items
 </details>
 
 ### Pytest Run: Verbose on
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -v```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v```
 
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -v```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v```
 
 ex.
 <details open>
   <summary>Click for example: <b><i>Pytest Run: verbose on</i></b></summary>
 
 ~~~shell
- python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -v
+ python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
 ===================================================== test session starts =====================================================
 platform linux -- Python 3.8.10, pytest-8.2.2, pluggy-1.5.0 -- /usr/bin/python3
 rootdir: /opt/rocm/share/amd_smi
 configfile: pyproject.toml
 collected 3 items
 
-../../opt/rocm/share/amd_smi/tests/pytest/unit_tests.py::TestAmdSmiPythonBDF::test_check_res PASSED                     [ 33%]
-../../opt/rocm/share/amd_smi/tests/pytest/unit_tests.py::TestAmdSmiPythonBDF::test_format_bdf PASSED                    [ 66%]
-../../opt/rocm/share/amd_smi/tests/pytest/unit_tests.py::TestAmdSmiPythonBDF::test_parse_bdf PASSED                     [100%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py::TestAmdSmiPythonBDF::test_check_res PASSED                     [ 33%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py::TestAmdSmiPythonBDF::test_format_bdf PASSED                    [ 66%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py::TestAmdSmiPythonBDF::test_parse_bdf PASSED                     [100%]
 
 ====================================================== 3 passed in 0.04s ======================================================
 ~~~
 </details>
 
 ### Pytest Run: Verbose on + stdout (print statements)
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -s -v```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -s -v```
 
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -s -v```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -s -v```
 
 ex.
 <details open>
   <summary>Click for example: <b><i> Pytest Run: verbose on + stdout (print statements)</i></b></summary>
 
 ~~~shell
-python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -s -v
+python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -s -v
 ===================================================== test session starts =====================================================
 platform linux -- Python 3.8.10, pytest-8.2.2, pluggy-1.5.0 -- /usr/bin/python3
 rootdir: /opt/rocm/share/amd_smi
 configfile: pyproject.toml
 collected 6 items
 
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiInit::test_init PASSED
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_bad_page_info ###Test amdsmi_get_gpu_bad_page_info
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiInit::test_init PASSED
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_bad_page_info ###Test amdsmi_get_gpu_bad_page_info
 
 **** [ERROR] | Test: test_bad_page_info | Caught AmdSmiLibraryException
 PASSED
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_bdf_device_id ###Test Processor 0, bdf: 0000:08:00.0
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_bdf_device_id ###Test Processor 0, bdf: 0000:08:00.0
 
 ###Test amdsmi_get_gpu_vbios_info
 
@@ -584,13 +547,13 @@ PASSED
 
   uuid is: 1fff73a3-0000-1000-8075-223e5e64eac1
 PASSED
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_ecc ###Test Processor 0, bdf: 0000:08:00.0
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_ecc ###Test Processor 0, bdf: 0000:08:00.0
 
 ###Test amdsmi_get_gpu_ras_feature_info
 
 **** [ERROR] | Test: test_ecc | Caught AmdSmiLibraryException
 PASSED
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_gpu_performance ###Test Processor 0, bdf: 0000:08:00.0
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_gpu_performance ###Test Processor 0, bdf: 0000:08:00.0
 
 ###Test amdsmi_get_gpu_activity
   engine_usage['gfx_activity'] is: 1 %
@@ -725,7 +688,7 @@ PASSED
   pcie_info['pcie_metric']['pcie_nak_sent_count'] is: N/A
   pcie_info['pcie_metric']['pcie_nak_received_count'] is: N/A
 PASSED
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_walkthrough ###Test amdsmi_get_processor_handles()
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_walkthrough ###Test amdsmi_get_processor_handles()
 ###Test amdsmi_get_gpu_device_bdf() | START walk_through | processor i = 0
 ###Test Processor 0, bdf: 0000:08:00.0
 
@@ -871,27 +834,27 @@ PASSED
 ### Pytest Run: Verbose on + Filter (or exclude) a Test
 Use [Pytest: List tests](###-Pytest:-List-tests) then either exclude (with "not") or only run the specified test.
 
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -k "test_gpu_performance" -v```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "test_gpu_performance" -v```
 
-```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -k "not test_gpu_performance" -v```
+```python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "not test_gpu_performance" -v```
 
 ex.
 <details open>
   <summary>Click for example: <b><i>Pytest Run: Verbose on + Filter (or exclude) a Test</i></b></summary>
 
 ~~~shell
-python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -k "not test_gpu_performance" -v
+python3 -m pytest -p no:cacheprovider /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "not test_gpu_performance" -v
 ===================================================== test session starts =====================================================
 platform linux -- Python 3.8.10, pytest-8.2.2, pluggy-1.5.0 -- /usr/bin/python3
 rootdir: /opt/rocm/share/amd_smi
 configfile: pyproject.toml
 collected 6 items / 1 deselected / 5 selected
 
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiInit::test_init PASSED                         [ 20%]
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_bad_page_info PASSED     [ 40%]
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_bdf_device_id PASSED     [ 60%]
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_ecc PASSED               [ 80%]
-../../opt/rocm/share/amd_smi/tests/pytest/integration_test.py::TestAmdSmiPythonInterface::test_walkthrough PASSED       [100%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiInit::test_init PASSED                         [ 20%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_bad_page_info PASSED     [ 40%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_bdf_device_id PASSED     [ 60%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_ecc PASSED               [ 80%]
+../../opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py::TestAmdSmiPythonInterface::test_walkthrough PASSED       [100%]
 
 =============================================== 5 passed, 1 deselected in 0.09s ===============================================
 ~~~
@@ -902,14 +865,14 @@ collected 6 items / 1 deselected / 5 selected
 Please refer to Python's UnitTest documentation for better overview of commands to run.
 
 ```shell
-python3 /opt/rocm/share/amd_smi/tests/pytest/unit_tests.py -v
+python3 /opt/rocm/share/amd_smi/tests/python_unittest/unit_tests.py -v
 test_check_res (tests.amd_smi_test.py-test.unit_tests.TestAmdSmiPythonBDF) ... ok
 test_format_bdf (tests.amd_smi_test.py-test.unit_tests.TestAmdSmiPythonBDF) ... ok
 test_parse_bdf (tests.amd_smi_test.py-test.unit_tests.TestAmdSmiPythonBDF) ... ok
 ```
 
 ```shell
-python3 /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -v
+python3 /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -v
 test_init (__main__.TestAmdSmiInit) ... ok
 test_bad_page_info (__main__.TestAmdSmiPythonInterface) ... ###Test amdsmi_get_gpu_bad_page_info
 
@@ -1229,7 +1192,7 @@ OK
 ```
 
 ```shell
-(Tue Jul-7 12:07:47am)-(CPU 0.3%:0:Net 18)-(charpoag@mlsetools2:/opt/rocm/share/amd_smi/tests/pytest)-(44K:3)
+(Tue Jul-7 12:07:47am)-(CPU 0.3%:0:Net 18)-(charpoag@mlsetools2:/opt/rocm/share/amd_smi/tests/python_unittest)-(44K:3)
 > python3 -m pytest -s -ra -vvv -p no:cacheprovider
 ==================================== test session starts =====================================
 platform linux -- Python 3.8.10, pytest-8.2.2, pluggy-1.5.0 -- /usr/bin/python3
@@ -1553,7 +1516,7 @@ PASSED
 ```
 
 ```shell
-$ python3 /opt/rocm/share/amd_smi/tests/pytest/integration_test.py -k "*test_init" -vvv
+$ python3 /opt/rocm/share/amd_smi/tests/python_unittest/integration_test.py -k "*test_init" -vvv
 test_init (__main__.TestAmdSmiInit) ... ok
 
 ----------------------------------------------------------------------
@@ -1564,7 +1527,7 @@ OK
 ```
 
 ```shell
-(Tue Jul-7 12:10:10am)-(CPU 0.3%:0:Net 16)-(charpoag@mlsetools2:/opt/rocm/share/amd_smi/tests/pytest)-(44K:3)
+(Tue Jul-7 12:10:10am)-(CPU 0.3%:0:Net 16)-(charpoag@mlsetools2:/opt/rocm/share/amd_smi/tests/python_unittest)-(44K:3)
 > python3 -m pytest -ra -vvv -p no:cacheprovider
 ==================================== test session starts =====================================
 platform linux -- Python 3.8.10, pytest-8.2.2, pluggy-1.5.0 -- /usr/bin/python3

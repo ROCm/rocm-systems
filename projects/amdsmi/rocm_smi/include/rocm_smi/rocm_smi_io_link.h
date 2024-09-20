@@ -85,7 +85,8 @@ typedef enum _LINK_DIRECTORY_TYPE {
 class IOLink {
  public:
     explicit IOLink(uint32_t node_indx, uint32_t link_indx, LINK_DIRECTORY_TYPE link_dir_type) :
-                    node_indx_(node_indx), link_indx_(link_indx), link_dir_type_(link_dir_type) {}
+                    node_indx_(node_indx), link_indx_(link_indx), link_dir_type_(link_dir_type),
+                    link_cap_{UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX} {}
     ~IOLink();
 
     int Initialize();
@@ -96,23 +97,28 @@ class IOLink {
     IO_LINK_TYPE type(void) const {return type_;}
     uint32_t node_from(void) const {return node_from_;}
     uint32_t node_to(void) const {return node_to_;}
+    uint32_t flag(void) const {return flags_;}
     uint64_t weight(void) const {return weight_;}
     LINK_DIRECTORY_TYPE get_directory_type(void) const {return link_dir_type_;}
     uint64_t min_bandwidth(void) const {return min_bandwidth_;}
     uint64_t max_bandwidth(void) const {return max_bandwidth_;}
+    const rsmi_p2p_capability_t& get_link_capability(void) const {return link_cap_;}
 
-
+ protected:
+    virtual int UpdateP2pCapability(void);
  private:
     uint32_t node_indx_;
     uint32_t link_indx_;
     IO_LINK_TYPE type_;
     uint32_t node_from_;
     uint32_t node_to_;
+    uint32_t flags_;
     uint64_t weight_;
     uint64_t min_bandwidth_;
     uint64_t max_bandwidth_;
     std::map<std::string, uint64_t> properties_;
     LINK_DIRECTORY_TYPE link_dir_type_;
+    rsmi_p2p_capability_t link_cap_;
 };
 
 int

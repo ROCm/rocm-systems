@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2024, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -361,7 +361,6 @@ typedef enum {
   RSMI_EVT_NOTIF_NONE = KFD_SMI_EVENT_NONE,        //!< Unused
   RSMI_EVT_NOTIF_VMFAULT = KFD_SMI_EVENT_VMFAULT,  //!< VM page fault
   RSMI_EVT_NOTIF_FIRST = RSMI_EVT_NOTIF_VMFAULT,
-
   RSMI_EVT_NOTIF_THERMAL_THROTTLE = KFD_SMI_EVENT_THERMAL_THROTTLE,
   RSMI_EVT_NOTIF_GPU_PRE_RESET = KFD_SMI_EVENT_GPU_PRE_RESET,
   RSMI_EVT_NOTIF_GPU_POST_RESET = KFD_SMI_EVENT_GPU_POST_RESET,
@@ -415,8 +414,6 @@ typedef rsmi_clk_type_t rsmi_clk_type;
  */
 typedef enum {
   RSMI_COMPUTE_PARTITION_INVALID = 0,
-  RSMI_COMPUTE_PARTITION_CPX, //!< Core mode (CPX)- Per-chip XCC with
-                              //!< shared memory
   RSMI_COMPUTE_PARTITION_SPX, //!< Single GPU mode (SPX)- All XCCs work
                               //!< together with shared memory
   RSMI_COMPUTE_PARTITION_DPX, //!< Dual GPU mode (DPX)- Half XCCs work
@@ -425,6 +422,8 @@ typedef enum {
                               //!< work together with shared memory
   RSMI_COMPUTE_PARTITION_QPX, //!< Quad GPU mode (QPX)- Quarter XCCs
                               //!< work together with shared memory
+  RSMI_COMPUTE_PARTITION_CPX  //!< Core mode (CPX)- Per-chip XCC with
+                              //!< shared memory
 } rsmi_compute_partition_type_t;
 /// \cond Ignore in docs.
 typedef rsmi_compute_partition_type_t rsmi_compute_partition_type;
@@ -797,7 +796,6 @@ typedef struct  {
   uint16_t fine_value_count;
 } rsmi_utilization_counter_t;
 
-
 /**
  * @brief Reserved Memory Page Record
  */
@@ -867,6 +865,17 @@ typedef rsmi_frequencies_t rsmi_frequencies;
 /// \endcond
 
 /**
+ * @brief IO Link P2P Capability
+ */
+typedef struct {
+  uint8_t is_iolink_coherent;    // 1 = true, 0 = false, UINT8_MAX = Not defined.
+  uint8_t is_iolink_atomics_32bit;
+  uint8_t is_iolink_atomics_64bit;
+  uint8_t is_iolink_dma;
+  uint8_t is_iolink_bi_directional;
+} rsmi_p2p_capability_t;
+
+/**
  * @brief This structure holds information about the possible PCIe
  * bandwidths. Specifically, the possible transfer rates and their
  * associated numbers of lanes are stored here.
@@ -894,7 +903,7 @@ typedef rsmi_pcie_bandwidth_t rsmi_pcie_bandwidth;
  */
 typedef struct {
   /* Utilization */
-  uint16_t average_gfx_activity;
+  uint16_t average_gfx_activity;  //!< Average graphics activity
   uint16_t average_umc_activity;  //!< memory controller
   uint16_t average_mm_activity;   //!< UVD or VCN
 } rsmi_activity_metric_counter_t;
@@ -1028,10 +1037,6 @@ typedef struct metrics_table_header_t metrics_table_header_t;
 /// \endcond
 
 /**
- * @brief The following structure holds the gpu metrics values for a device.
- */
-
-/**
  * @brief Unit conversion factor for HBM temperatures
  */
 #define CENTRIGRADE_TO_MILLI_CENTIGRADE 1000
@@ -1087,7 +1092,7 @@ typedef struct {
    */
   struct metrics_table_header_t common_header;
 
-  // Temperature
+  // Temperature (C)
   uint16_t temperature_edge;
   uint16_t temperature_hotspot;
   uint16_t temperature_mem;
@@ -1095,19 +1100,19 @@ typedef struct {
   uint16_t temperature_vrsoc;
   uint16_t temperature_vrmem;
 
-  // Utilization
+  // Utilization (%)
   uint16_t average_gfx_activity;
   uint16_t average_umc_activity;    // memory controller
   uint16_t average_mm_activity;     // UVD or VCN
 
-  // Power/Energy
+  // Power (W) /Energy (15.259uJ per 1ns)
   uint16_t average_socket_power;
   uint64_t energy_accumulator;      // v1 mod. (32->64)
 
   // Driver attached timestamp (in ns)
   uint64_t system_clock_counter;    // v1 mod. (moved from top of struct)
 
-  // Average clocks
+  // Average clocks (MHz)
   uint16_t average_gfxclk_frequency;
   uint16_t average_socclk_frequency;
   uint16_t average_uclk_frequency;
@@ -1116,7 +1121,7 @@ typedef struct {
   uint16_t average_vclk1_frequency;
   uint16_t average_dclk1_frequency;
 
-  // Current clocks
+  // Current clocks (MHz)
   uint16_t current_gfxclk;
   uint16_t current_socclk;
   uint16_t current_uclk;
@@ -1128,10 +1133,10 @@ typedef struct {
   // Throttle status
   uint32_t throttle_status;
 
-  // Fans
+  // Fans (RPM)
   uint16_t current_fan_speed;
 
-  // Link width/speed
+  // Link width (number of lanes) /speed (0.1 GT/s)
   uint16_t pcie_link_width;         // v1 mod.(8->16)
   uint16_t pcie_link_speed;         // in 0.1 GT/s; v1 mod. (8->16)
 
@@ -1147,7 +1152,7 @@ typedef struct {
   /*
    * v1.2 additions
    */
-	// PMFW attached timestamp (10ns resolution)
+  // PMFW attached timestamp (10ns resolution)
   uint64_t firmware_timestamp;
 
 
@@ -1170,19 +1175,19 @@ typedef struct {
   uint16_t current_socket_power;
 
   // Utilization (%)
-  uint16_t vcn_activity[RSMI_MAX_NUM_VCNS]; // VCN instances activity percent (encode/decode)
+  uint16_t vcn_activity[RSMI_MAX_NUM_VCNS];  // VCN instances activity percent (encode/decode)
 
   // Clock Lock Status. Each bit corresponds to clock instance
   uint32_t gfxclk_lock_status;
 
-	// XGMI bus width and bitrate (in Gbps)
+  // XGMI bus width and bitrate (in GB/s)
   uint16_t xgmi_link_width;
   uint16_t xgmi_link_speed;
 
   // PCIE accumulated bandwidth (GB/sec)
   uint64_t pcie_bandwidth_acc;
 
-	// PCIE instantaneous bandwidth (GB/sec)
+  // PCIE instantaneous bandwidth (GB/sec)
   uint64_t pcie_bandwidth_inst;
 
   // PCIE L0 to recovery state transition accumulated count
@@ -1436,7 +1441,7 @@ rsmi_status_t rsmi_dev_revision_get(uint32_t dv_ind, uint16_t *revision);
  *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
  *
  */
-rsmi_status_t rsmi_dev_sku_get(uint32_t dv_ind, char *sku);
+rsmi_status_t rsmi_dev_sku_get(uint32_t dv_ind, uint16_t *sku);
 
 /**
  *  @brief Get the device vendor id associated with the device with provided
@@ -1819,13 +1824,62 @@ rsmi_status_t rsmi_dev_unique_id_get(uint32_t dv_ind, uint64_t *id);
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[inout] revision a pointer to uint32_t to which the XGMI physical id
+ *  @param[inout] id a pointer to uint32_t to which the XGMI physical id
  *  will be written
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *
  */
-rsmi_status_t rsmi_dev_oam_id_get(uint32_t dv_ind, uint16_t *id);
+rsmi_status_t rsmi_dev_xgmi_physical_id_get(uint32_t dv_ind, uint16_t *id);
+
+/**
+ *  @brief Get the GUID, also known as the GPU device id,
+ *  associated with the provided device index indicated by KFD.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint64_t
+ *  @p guid, this function will write the KFD GPU id value to the
+ *  uint64_t pointed to by @p guid.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] guid a pointer to uint64_t to which the KFD gpu id will be
+ *  written. If the @p guid parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS. If the GPU ID is not supported with
+ *  the device index queried, gpu_id will return MAX UINT64 value an
+ *  arguments and ::RSMI_STATUS_NOT_SUPPORTED as a response.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS call was successful
+ * @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ * support this function with the given arguments
+ * @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_guid_get(uint32_t dv_ind, uint64_t *guid);
+
+/**
+ *  @brief Get the node id associated with the provided device index
+ *  indicated by KFD.
+ *
+ *  @details Given a device index @p dv_ind and a pointer to a uint32_t
+ *  @p node_id, this function will write the KFD node id value to the
+ *  uint32_t pointed to by @p node_id.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] node_id a pointer to uint64_t to which the KFD gpu id will be
+ *  written. If the @p node_id parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS. If @p node_id is not supported with
+ *  the device index queried, @p node_id will return MAX UINT64 value as an
+ *  argument and ::RSMI_STATUS_NOT_SUPPORTED as a response.
+ *
+ * @retval ::RSMI_STATUS_SUCCESS call was successful
+ * @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ * support this function with the given arguments
+ * @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_node_id_get(uint32_t dv_ind, uint32_t *node_id);
+
 
 /** @} */  // end of IDQuer
 
@@ -1866,16 +1920,18 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *bandwidth);
  *
  *  The format of @p bdfid will be as follows:
  *
- *      BDFID = ((DOMAIN & 0xffffffff) << 32) | ((BUS & 0xff) << 8) |
- *                                   ((DEVICE & 0x1f) <<3 ) | (FUNCTION & 0x7)
+ *      BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((Partition & 0xF) << 28)
+ *              | ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 )
+ *              | (FUNCTION & 0x7)
  *
- *  | Name     | Field   |
- *  ---------- | ------- |
- *  | Domain   | [64:32] |
- *  | Reserved | [31:16] |
- *  | Bus      | [15: 8] |
- *  | Device   | [ 7: 3] |
- *  | Function | [ 2: 0] |
+ *  | Name         | Field   | KFD property       KFD -> PCIe ID (uint64_t)
+ *  -------------- | ------- | ---------------- | ---------------------------- |
+ *  | Domain       | [63:32] | "domain"         | (DOMAIN & 0xFFFFFFFF) << 32  |
+ *  | Partition id | [31:28] | "location id"    | (LOCATION & 0xF0000000)      |
+ *  | Reserved     | [27:16] | "location id"    | N/A                          |
+ *  | Bus          | [15: 8] | "location id"    | (LOCATION & 0xFF00)          |
+ *  | Device       | [ 7: 3] | "location id"    | (LOCATION & 0xF8)            |
+ *  | Function     | [ 2: 0] | "location id"    | (LOCATION & 0x7)             |
  *
  *  @param[in] dv_ind a device index
  *
@@ -2022,6 +2078,11 @@ rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
  *  @p power, this function will write the current average power consumption
  *  (in microwatts) to the uint64_t pointed to by @p power.
  *
+ *  @deprecated ::rsmi_dev_power_get() is preferred due to providing
+ *  backwards compatibility, which looks at both average and current power
+ *  values. Whereas ::rsmi_dev_power_ave_get only looks for average power
+ *  consumption. Newer ASICs will support current power only.
+ *
  *  @param[in] dv_ind a device index
  *
  *  @param[in] sensor_ind a 0-based sensor index. Normally, this will be 0.
@@ -2090,7 +2151,10 @@ rsmi_dev_current_socket_power_get(uint32_t dv_ind, uint64_t *socket_power);
  *  @param[inout] type a pointer to RSMI_POWER_TYPE object. Returns the type
  *  of power retrieved from the device. Current power is ::RSMI_CURRENT_POWER
  *  and average power is ::RSMI_AVERAGE_POWER. If an error occurs,
- *  returns an invalid power type ::RSMI_INVALID_POWER.
+ *  returns an invalid power type ::RSMI_INVALID_POWER - example device
+ *  neither supports average power or current power.
+ *  If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
@@ -3068,7 +3132,6 @@ rsmi_status_t rsmi_dev_clk_extremum_set(uint32_t dv_ind, rsmi_freq_ind_t level,
                                        uint64_t clkvalue,
                                        rsmi_clk_type_t clkType);
 
-
 /**
  *  @brief This function sets the clock frequency information
  *
@@ -3613,6 +3676,29 @@ rsmi_dev_vbios_version_get(uint32_t dv_ind, char *vbios, uint32_t len);
 rsmi_status_t
 rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t block,
                                                         uint64_t *fw_version);
+
+/**
+ *  @brief Get the target graphics version for a GPU device
+ *
+ *  @details Given a device ID @p dv_ind and a uint64_t pointer
+ *  @p gfx_version, this function will write the graphics version.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] gfx_version The device graphics version number indicated by
+ *  KFD. If this parameter is nullptr, this function will return
+ *  ::RSMI_STATUS_INVALID_ARGS. If device does not support this value,
+ *  will return ::RSMI_STATUS_NOT_SUPPORTED and a maximum UINT64 value as
+ *  @p gfx_version.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function with the given arguments
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *
+ */
+rsmi_status_t rsmi_dev_target_graphics_version_get(uint32_t dv_ind,
+                                                  uint64_t *gfx_version);
 
 /** @} */  // end of VersQuer
 
@@ -4326,6 +4412,37 @@ rsmi_status_t
 rsmi_is_P2P_accessible(uint32_t dv_ind_src, uint32_t dv_ind_dst,
                        bool *accessible);
 
+/**
+ *  @brief Retrieve connection type and P2P capabilities between 2 GPUs
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf}  @platform{guest_mvf}
+ *
+ *  @details Given a source processor handle @p processor_handle_src and
+ *  a destination processor handle @p processor_handle_dst, a pointer to an amdsmi_io_link_type_t @p type,
+ *  and a pointer to rsmi_p2p_capability_t @p cap. This function will write the connection type,
+ *  and io link capabilities between the device
+ *  @p processor_handle_src and @p processor_handle_dst to the memory
+ *  pointed to by @p cap and @p type.
+ *
+ *  @param[in] dv_ind_src the source device index
+ *
+ *  @param[in] dv_ind_dst the destination device index
+ *
+ *  @param[inout] type A pointer to an ::RSMI_IO_LINK_TYPE to which the
+ *  type for the connection should be written.
+ *
+ *  @param[in,out] cap A pointer to an ::rsmi_p2p_capability_t to which the
+ *  io link capabilities should be written.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ */
+rsmi_status_t
+rsmi_topo_get_p2p_status(uint32_t dv_ind_src, uint32_t dv_ind_dst,
+                         RSMI_IO_LINK_TYPE *type, rsmi_p2p_capability_t *cap);
+
 /** @} */  // end of HWTopo
 
 /*****************************************************************************/
@@ -4413,6 +4530,30 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
  *
  */
 rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind);
+
+/**
+ *  @brief Retrieves the partition_id for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a uint32_t pointer @p partition_id ,
+ *  this function will attempt to obtain the device's partition ID.
+ *  Upon successful retreival, the obtained device's partition will be stored
+ *  in the passed @p partition_id uint32_t variable. If device does
+ *  not support partitions or is in SPX, a @p partition_id ID of 0 shall
+ *  be returned.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] partition_id a uint32_t variable,
+ *  which the device's partition_id will be written to.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *
+ */
+rsmi_status_t rsmi_dev_partition_id_get(uint32_t dv_ind, uint32_t *partition_id);
 
 /** @} */  // end of ComputePartition
 
@@ -4856,995 +4997,6 @@ rsmi_status_t rsmi_event_notification_stop(uint32_t dv_ind);
  */
 
 /**
- * Metric multi-valued counter types
- */
-typedef uint16_t GPUMetricTempHbm_t[RSMI_NUM_HBM_INSTANCES];
-typedef uint16_t GPUMetricVcnActivity_t[RSMI_MAX_NUM_VCNS];
-typedef uint16_t GPUMetricJpegActivity_t[RSMI_MAX_NUM_JPEG_ENGS];
-typedef uint64_t GPUMetricXgmiReadDataAcc_t[RSMI_MAX_NUM_XGMI_LINKS];
-typedef uint64_t GPUMetricXgmiWriteDataAcc_t[RSMI_MAX_NUM_XGMI_LINKS];
-typedef uint16_t GPUMetricCurrGfxClk_t[RSMI_MAX_NUM_GFX_CLKS];
-typedef uint16_t GPUMetricCurrSocClk_t[RSMI_MAX_NUM_CLKS];
-typedef uint16_t GPUMetricCurrVClk0_t[RSMI_MAX_NUM_CLKS];
-typedef uint16_t GPUMetricCurrDClk0_t[RSMI_MAX_NUM_CLKS];
-
-
-/******
- * Metric single-valued counter types
- */
-
-/**
- *  @brief Get the 'temp_hotspot' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'temp_hotspot' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] hotspot_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_temp_hotspot_get(uint32_t dv_ind, uint16_t* hotspot_value);
-
-/**
- *  @brief Get the 'temp_mem' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'temp_mem' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] mem_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_temp_mem_get(uint32_t dv_ind, uint16_t* mem_value);
-
-/**
- *  @brief Get the 'temp_vrsoc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'temp_vrsoc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] vrsoc_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_temp_vrsoc_get(uint32_t dv_ind, uint16_t* vrsoc_value);
-
-/**
- *  @brief Get the 'curr_socket_power' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'socket_power' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] socket_power_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_socket_power_get(uint32_t dv_ind, uint16_t* socket_power_value);
-
-/**
- *  @brief Get the 'avg_gfx_activity' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'gfx_activity' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] gfx_activity_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_gfx_activity_get(uint32_t dv_ind, uint16_t* gfx_activity_value);
-
-/**
- *  @brief Get the 'avg_umc_activity' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'umc_activity' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] umc_activity_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_umc_activity_get(uint32_t dv_ind, uint16_t* umc_activity_value);
-
-/**
- *  @brief Get the 'energy_acc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'energy_acc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] energy_acc_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_energy_acc_get(uint32_t dv_ind, uint64_t* energy_acc_value);
-
-/**
- *  @brief Get the 'system_clock_counter' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'system_clock_counter' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] system_clock_counter_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_system_clock_counter_get(uint32_t dv_ind, uint64_t* system_clock_counter_value);
-
-/**
- *  @brief Get the 'firmware_timestamp' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'firmware_timestamp' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] firmware_timestamp_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_firmware_timestamp_get(uint32_t dv_ind, uint64_t* firmware_timestamp_value);
-
-/**
- *  @brief Get the 'throttle_status' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t in which
- *  the 'throttle_status' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] throttle_status_value a pointer to uint32_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_throttle_status_get(uint32_t dv_ind, uint32_t* throttle_status_value);
-
-/**
- *  @brief Get the 'pcie_link_width' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'pcie_link_width' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] pcie_link_width_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_pcie_link_width_get(uint32_t dv_ind, uint16_t* pcie_link_width_value);
-
-/**
- *  @brief Get the 'pcie_link_speed' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'pcie_link_speed' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] pcie_link_speed_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_pcie_link_speed_get(uint32_t dv_ind, uint16_t* pcie_link_speed_value);
-
-/**
- *  @brief Get the 'xgmi_link_width' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'xgmi_link_width' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] xgmi_link_width_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_xgmi_link_width_get(uint32_t dv_ind, uint16_t* xgmi_link_width_value);
-
-/**
- *  @brief Get the 'xgmi_link_speed' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'xgmi_link_speed' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] xgmi_link_speed_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_xgmi_link_speed_get(uint32_t dv_ind, uint16_t* xgmi_link_speed_value);
-
-/**
- *  @brief Get the 'gfxclk_lock_status' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t in which
- *  the 'gfxclk_lock_status' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] gfxclk_lock_status_value a pointer to uint32_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_gfxclk_lock_status_get(uint32_t dv_ind, uint32_t* gfxclk_lock_status_value);
-
-/**
- *  @brief Get the 'gfx_activity_acc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t in which
- *  the 'gfx_activity_acc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] gfx_activity_acc_value a pointer to uint32_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_gfx_activity_acc_get(uint32_t dv_ind, uint32_t* gfx_activity_acc_value);
-
-/**
- *  @brief Get the 'mem_activity_acc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint32_t in which
- *  the 'mem_activity_acc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] mem_activity_acc_value a pointer to uint32_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_mem_activity_acc_get(uint32_t dv_ind, uint32_t* mem_activity_acc_value);
-
-/**
- *  @brief Get the 'pcie_bandwidth_acc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'pcie_bandwidth_acc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] pcie_bandwidth_acc_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_pcie_bandwidth_acc_get(uint32_t dv_ind, uint64_t* pcie_bandwidth_acc_value);
-
-/**
- *  @brief Get the 'pcie_bandwidth_inst' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'pcie_bandwidth_inst' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] pcie_bandwidth_inst_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_pcie_bandwidth_inst_get(uint32_t dv_ind, uint64_t* pcie_bandwidth_inst_value);
-
-/**
- *  @brief Get the 'pcie_l0_recov_count_acc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'pcie_l0_recov_count_acc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] pcie_count_acc_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_pcie_l0_recov_count_acc_get(uint32_t dv_ind, uint64_t* pcie_count_acc_value);
-
-/**
- *  @brief Get the 'pcie_replay_count_acc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'pcie_replay_count_acc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] pcie_count_acc_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_pcie_replay_count_acc_get(uint32_t dv_ind, uint64_t* pcie_count_acc_value);
-
-/**
- *  @brief Get the 'pcie_replay_rover_count_acc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'pcie_replay_rover_count_acc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] pcie_count_acc_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_pcie_replay_rover_count_acc_get(uint32_t dv_ind, uint64_t* pcie_count_acc_value);
-
-/**
- *  @brief Get the 'curr_uclk' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'curr_uclk' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] uclk_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_uclk_get(uint32_t dv_ind, uint16_t* uclk_value);
-
-
-/******
- * Metric multi-valued counter types
- */
-
-/**
- *  @brief Get the 'temp_hbm' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'temp_hbm' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] temp_hbm_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding a 4 (RSMI_NUM_HBM_INSTANCES)
- *        element array (GPUMetricTempHbm_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_temp_hbm_get(uint32_t dv_ind, GPUMetricTempHbm_t* temp_hbm_value);
-
-/**
- *  @brief Get the 'vcn_activity' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'vcn_activity' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] vcn_activity_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding a 4 (RSMI_MAX_NUM_VCNS)
- *        element array (GPUMetricVcnActivity_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_vcn_activity_get(uint32_t dv_ind, GPUMetricVcnActivity_t* vcn_activity_value);
-
-/**
- *  @brief Get the 'xgmi_read_data' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'xgmi_read_data' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] xgmi_read_data_acc_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding an 8 (RSMI_MAX_NUM_XGMI_LINKS)
- *        element array (GPUMetricXgmiReadDataAcc_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_xgmi_read_data_get(uint32_t dv_ind, GPUMetricXgmiReadDataAcc_t* xgmi_read_data_acc_value);
-
-/**
- *  @brief Get the 'xgmi_write_data' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'xgmi_write_data' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] xgmi_write_data_acc_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding an 8 (RSMI_MAX_NUM_XGMI_LINKS)
- *        element array (GPUMetricXgmiWriteDataAcc_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_xgmi_write_data_get(uint32_t dv_ind, GPUMetricXgmiWriteDataAcc_t* xgmi_write_data_acc_value);
-
-/**
- *  @brief Get the 'curr_gfxclk' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'curr_gfxclk' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] current_gfxclk_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding an 8 (RSMI_MAX_NUM_GFX_CLKS)
- *        element array (GPUMetricCurrGfxClk_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_gfxclk_get(uint32_t dv_ind, GPUMetricCurrGfxClk_t* current_gfxclk_value);
-
-/**
- *  @brief Get the 'curr_socclk' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'curr_socclk' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] current_socclk_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding a 4 (RSMI_MAX_NUM_CLKS)
- *        element array (GPUMetricCurrSocClk_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_socclk_get(uint32_t dv_ind, GPUMetricCurrSocClk_t* current_socclk_value);
-
-/**
- *  @brief Get the 'curr_vclk0' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'curr_vclk0' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] current_vclk_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding a 4 (RSMI_MAX_NUM_CLKS)
- *        element array (GPUMetricCurrVClk0_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_vclk0_get(uint32_t dv_ind, GPUMetricCurrVClk0_t* current_vclk_value);
-
-/**
- *  @brief Get the 'curr_dclk0' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'curr_dclk0' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] current_dclk_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *      - This is a multi-valued counter holding a 4 (RSMI_MAX_NUM_CLKS)
- *        element array (GPUMetricCurrDClk0_t)
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_dclk0_get(uint32_t dv_ind, GPUMetricCurrDClk0_t* current_dclk_value);
-
-/**
- *  @brief Get the 'temp_edge' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'temp_edge' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] edge_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_temp_edge_get(uint32_t dv_ind, uint16_t* edge_value);
-
-/**
- *  @brief Get the 'temp_vrgfx' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'temp_vrgfx' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] vrgfx_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_temp_vrgfx_get(uint32_t dv_ind, uint16_t* vrgfx_value);
-
-/**
- *  @brief Get the 'temp_vrmem' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'temp_vrmem' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] vrmem_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_temp_vrmem_get(uint32_t dv_ind, uint16_t* vrmem_value);
-
-/**
- *  @brief Get the 'avg_mm_activity' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_mm_activity' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] mm_activity_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_mm_activity_get(uint32_t dv_ind, uint16_t* mm_activity_value);
-
-/**
- *  @brief Get the 'curr_vclk1' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'curr_vclk1' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] current_vclk_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_vclk1_get(uint32_t dv_ind, uint16_t* current_vclk_value);
-
-/**
- *  @brief Get the 'curr_dclk1' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'curr_dclk1' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] current_dclk_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_dclk1_get(uint32_t dv_ind, uint16_t* current_dclk_value);
-
-/**
- *  @brief Get the 'indep_throttle_status' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint64_t in which
- *  the 'indep_throttle_status' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] throttle_status_value a pointer to uint64_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_indep_throttle_status_get(uint32_t dv_ind, uint64_t* throttle_status_value);
-
-/**
- *  @brief Get the 'avg_socket_power' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_socket_power' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] socket_power_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_socket_power_get(uint32_t dv_ind, uint16_t* socket_power_value);
-
-/**
- *  @brief Get the 'curr_fan_speed' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'curr_fan_speed' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] fan_speed_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_curr_fan_speed_get(uint32_t dv_ind, uint16_t* fan_speed_value);
-
-/**
- *  @brief Get the 'avg_gfx_clock_frequency' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_gfx_clock_frequency' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] clock_frequency_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_gfx_clock_frequency_get(uint32_t dv_ind, uint16_t* clock_frequency_value);
-
-/**
- *  @brief Get the 'avg_soc_clock_frequency' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_soc_clock_frequency' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] clock_frequency_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_soc_clock_frequency_get(uint32_t dv_ind, uint16_t* clock_frequency_value);
-
-/**
- *  @brief Get the 'avg_uclock_frequency' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_uclock_frequency' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] clock_frequency_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_uclock_frequency_get(uint32_t dv_ind, uint16_t* clock_frequency_value);
-
-/**
- *  @brief Get the 'avg_vclock0_frequency' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_vclock0_frequency' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] clock_frequency_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_vclock0_frequency_get(uint32_t dv_ind, uint16_t* clock_frequency_value);
-
-/**
- *  @brief Get the 'avg_dclock0_frequency' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_dclock0_frequency' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] clock_frequency_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_dclock0_frequency_get(uint32_t dv_ind, uint16_t* clock_frequency_value);
-
-/**
- *  @brief Get the 'avg_vclock1_frequency' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_vclock1_frequency' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] clock_frequency_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_vclock1_frequency_get(uint32_t dv_ind, uint16_t* clock_frequency_value);
-
-/**
- *  @brief Get the 'avg_dclock1_frequency' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'avg_dclock1_frequency' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] clock_frequency_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_avg_dclock1_frequency_get(uint32_t dv_ind, uint16_t* clock_frequency_value);
-
-/**
- *  @brief Get the 'volt_soc' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'volt_soc' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] voltage_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_volt_soc_get(uint32_t dv_ind, uint16_t* voltage_value);
-
-/**
- *  @brief Get the 'volt_gfx' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'volt_gfx' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] voltage_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_volt_gfx_get(uint32_t dv_ind, uint16_t* voltage_value);
-
-/**
- *  @brief Get the 'volt_mem' from the GPU metrics associated with the device
- *
- *  @details Given a device index @p dv_ind and a pointer to a uint16_t in which
- *  the 'volt_mem' will stored
- *
- *  @param[in] dv_ind a device index
- *
- *  @param[inout] voltage_value a pointer to uint16_t to which the device gpu
- *  metric unit will be stored
- *
- *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
- *          ::RSMI_STATUS_NOT_SUPPORTED is returned in case the metric unit
- *            does not exist for the given device
- *
- */
-rsmi_status_t
-rsmi_dev_metrics_volt_mem_get(uint32_t dv_ind, uint16_t* voltage_value);
-
-/**
  *  @brief Get the 'metrics_header_info' from the GPU metrics associated with the device
  *
  *  @details Given a device index @p dv_ind and a pointer to a metrics_table_header_t in which
@@ -5896,6 +5048,7 @@ rsmi_dev_metrics_xcd_counter_get(uint32_t dv_ind, uint16_t* xcd_counter_value);
 rsmi_status_t
 rsmi_dev_metrics_log_get(uint32_t dv_ind);
 
+/** @} */  // end of DevMetricsHeaderInfoGet
 
 #ifdef __cplusplus
 }

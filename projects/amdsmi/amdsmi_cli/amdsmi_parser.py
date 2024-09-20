@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (C) 2023 Advanced Micro Devices. All rights reserved.
+# Copyright (C) 2024 Advanced Micro Devices. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -26,6 +26,9 @@ import errno
 import os
 import sys
 import time
+import collections
+from typing import Optional
+from typing import Union
 
 from pathlib import Path
 
@@ -170,6 +173,27 @@ class AMDSMIParser(argparse.ArgumentParser):
             raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(string_value, outputformat)
         else:
             raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(string_value, outputformat)
+
+
+    def _limit_select(self):
+        """Custom action for setting clock limits"""
+        output_format = self.helpers.get_output_format()
+
+        class AMDSMILimitArgs(argparse.Action):
+            def __call__(self, parser: AMDSMIParser, namespace: argparse.Namespace,
+                         values: Union[str, list, None], option_string: Optional[str] = None) -> None:
+                # valid values
+                valid_clk_types = ('sclk', 'mclk')
+                valid_lim_types = ('min', 'max')
+                clk_type, lim_type, val = values
+                if clk_type not in valid_clk_types:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(clk_type, output_format)
+                if lim_type not in valid_lim_types:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(lim_type, output_format)
+                val = int(val)
+                clk_limit_args = collections.namedtuple('clk_limit_args', ['clk_type', 'lim_type', 'val'])
+                setattr(namespace, self.dest, clk_limit_args(clk_type, lim_type, val))
+        return AMDSMILimitArgs
 
 
     def _check_output_file_path(self):
@@ -398,15 +422,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         return value
 
 
-    def _validate_positive(self, value):
-        i_value = int(value)
-        if i_value < 0:
-            outputformat = self.helpers.get_output_format()
-            raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(i_value, outputformat)
-
-        return i_value
-
-
     def _add_device_arguments(self, subcommand_parser, required=False):
         # Device arguments help text
         gpu_help = f"Select a GPU ID, BDF, or UUID from the possible choices:\n{self.gpu_choices_str}"
@@ -551,9 +566,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         list_help = "List GPU information"
-        list_subcommand_help = "Lists all the devices on the system and the links between devices.\
-                            \nLists all the sockets and for each socket, GPUs and/or CPUs associated to\
-                            \nthat socket alongside some basic information for each device.\
+        list_subcommand_help = "Lists all detected devices on the system\
+                            \nLists the BDF, UUID, KFD_ID, and NODE_ID for each GPU and/or CPUs\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
 
@@ -834,7 +848,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             cpu_group.add_argument('--cpu-prochot', action='store_true', required=False, help=cpu_proc_help)
             cpu_group.add_argument('--cpu-freq-metrics', action='store_true', required=False, help=cpu_freq_help)
             cpu_group.add_argument('--cpu-c0-res', action='store_true', required=False, help=cpu_c0_res_help)
-            cpu_group.add_argument('--cpu-lclk-dpm-level', action='append', required=False, type=self._validate_positive,
+            cpu_group.add_argument('--cpu-lclk-dpm-level', action='append', required=False, type=self._not_negative_int,
                                     nargs=1, metavar=("NBIOID"), help=cpu_lclk_dpm_help)
             cpu_group.add_argument('--cpu-pwr-svi-telemtry-rails', action='store_true', required=False,
                                     help=cpu_pwr_svi_telemtry_rails_help)
@@ -972,6 +986,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         hops_help = "Displays the number of hops between GPUs"
         link_type_help = "Displays the link type between GPUs"
         numa_bw_help = "Display max and min bandwidth between nodes"
+        coherent_help = "Display cache coherant (or non-coherant) link capability between nodes"
+        atomics_help = "Display 32 and 64-bit atomic io link capability between nodes"
+        dma_help = "Display P2P direct memory access (DMA) link capability between nodes"
+        bi_dir_help = "Display P2P bi-directional link capability between nodes"
 
         # Create topology subparser
         topology_parser = subparsers.add_parser('topology', help=topology_help, description=topology_subcommand_help)
@@ -989,6 +1007,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         topology_parser.add_argument('-o', '--hops', action='store_true', required=False, help=hops_help)
         topology_parser.add_argument('-t', '--link-type', action='store_true', required=False, help=link_type_help)
         topology_parser.add_argument('-b', '--numa-bw', action='store_true', required=False, help=numa_bw_help)
+        topology_parser.add_argument('-c', '--coherent', action='store_true', required=False, help=coherent_help)
+        topology_parser.add_argument('-n', '--atomics', action='store_true', required=False, help=atomics_help)
+        topology_parser.add_argument('-d', '--dma', action='store_true', required=False, help=dma_help)
+        topology_parser.add_argument('-z', '--bi-dir', action='store_true', required=False, help=bi_dir_help)
 
 
     def _add_set_value_parser(self, subparsers, func):
@@ -1015,6 +1037,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_soc_pstate_help = "Set the GPU soc pstate policy using policy id\n"
         set_xgmi_plpd_help = "Set the GPU XGMI per-link power down policy using policy id\n"
         set_process_isolation_help = "Enable or disable the GPU process isolation: 0 for disable and 1 for enable.\n"
+        set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \nOf form: amd-smi set -L (sclk | mclk) (min | max) value"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
@@ -1053,6 +1076,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_parser.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
                 set_value_parser.add_argument('-p', '--soc-pstate', action='store', required=False,  type=self._not_negative_int, help=set_soc_pstate_help, metavar='POLICY_ID')
                 set_value_parser.add_argument('-x', '--xgmi-plpd', action='store', required=False,  type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
+                set_value_parser.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
 
             set_value_parser.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=self._not_negative_int, required=False, help=set_process_isolation_help, metavar='STATUS')
 
@@ -1060,20 +1084,20 @@ class AMDSMIParser(argparse.ArgumentParser):
             if self.helpers.is_baremetal():
                 # Optional CPU Args
                 cpu_group = set_value_parser.add_argument_group("CPU Arguments")
-                cpu_group.add_argument('--cpu-pwr-limit', action='append', required=False, type=self._validate_positive, nargs=1, metavar=("PWR_LIMIT"), help=set_cpu_pwr_limit_help)
-                cpu_group.add_argument('--cpu-xgmi-link-width', action='append', required=False, type=self._validate_positive, nargs=2, metavar=("MIN_WIDTH", "MAX_WIDTH"), help=set_cpu_xgmi_link_width_help)
-                cpu_group.add_argument('--cpu-lclk-dpm-level', action='append', required=False, type=self._validate_positive, nargs=3, metavar=("NBIOID", "MIN_DPM", "MAX_DPM"), help=set_cpu_lclk_dpm_level_help)
-                cpu_group.add_argument('--cpu-pwr-eff-mode', action='append', required=False, type=self._validate_positive, nargs=1, metavar=("MODE"), help=set_cpu_pwr_eff_mode_help)
-                cpu_group.add_argument('--cpu-gmi3-link-width', action='append', required=False, type=self._validate_positive, nargs=2, metavar=("MIN_LW", "MAX_LW"), help=set_cpu_gmi3_link_width_help)
-                cpu_group.add_argument('--cpu-pcie-link-rate', action='append', required=False, type=self._validate_positive, nargs=1, metavar=("LINK_RATE"), help=set_cpu_pcie_link_rate_help)
-                cpu_group.add_argument('--cpu-df-pstate-range', action='append', required=False, type=self._validate_positive, nargs=2, metavar=("MAX_PSTATE", "MIN_PSTATE"), help=set_cpu_df_pstate_range_help)
+                cpu_group.add_argument('--cpu-pwr-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("PWR_LIMIT"), help=set_cpu_pwr_limit_help)
+                cpu_group.add_argument('--cpu-xgmi-link-width', action='append', required=False, type=self._not_negative_int, nargs=2, metavar=("MIN_WIDTH", "MAX_WIDTH"), help=set_cpu_xgmi_link_width_help)
+                cpu_group.add_argument('--cpu-lclk-dpm-level', action='append', required=False, type=self._not_negative_int, nargs=3, metavar=("NBIOID", "MIN_DPM", "MAX_DPM"), help=set_cpu_lclk_dpm_level_help)
+                cpu_group.add_argument('--cpu-pwr-eff-mode', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("MODE"), help=set_cpu_pwr_eff_mode_help)
+                cpu_group.add_argument('--cpu-gmi3-link-width', action='append', required=False, type=self._not_negative_int, nargs=2, metavar=("MIN_LW", "MAX_LW"), help=set_cpu_gmi3_link_width_help)
+                cpu_group.add_argument('--cpu-pcie-link-rate', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("LINK_RATE"), help=set_cpu_pcie_link_rate_help)
+                cpu_group.add_argument('--cpu-df-pstate-range', action='append', required=False, type=self._not_negative_int, nargs=2, metavar=("MAX_PSTATE", "MIN_PSTATE"), help=set_cpu_df_pstate_range_help)
                 cpu_group.add_argument('--cpu-enable-apb', action='store_true', required=False, help=set_cpu_enable_apb_help)
-                cpu_group.add_argument('--cpu-disable-apb', action='append', required=False, type=self._validate_positive, nargs=1, metavar=("DF_PSTATE"), help=set_cpu_disable_apb_help)
-                cpu_group.add_argument('--soc-boost-limit', action='append', required=False, type=self._validate_positive, nargs=1, metavar=("BOOST_LIMIT"), help=set_soc_boost_limit_help)
+                cpu_group.add_argument('--cpu-disable-apb', action='append', required=False, type=self._not_negative_int, nargs=1, metavar=("DF_PSTATE"), help=set_cpu_disable_apb_help)
+                cpu_group.add_argument('--soc-boost-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("BOOST_LIMIT"), help=set_soc_boost_limit_help)
 
                 # Optional CPU Core Args
                 core_group = set_value_parser.add_argument_group("CPU Core Arguments")
-                core_group.add_argument('--core-boost-limit', action='append', required=False, type=self._validate_positive, nargs=1, metavar=("BOOST_LIMIT"), help=set_core_boost_limit_help)
+                core_group.add_argument('--core-boost-limit', action='append', required=False, type=self._positive_int, nargs=1, metavar=("BOOST_LIMIT"), help=set_core_boost_limit_help)
 
         # Add command modifiers to the bottom
         self._add_command_modifiers(set_value_parser)

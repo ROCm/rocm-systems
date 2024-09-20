@@ -8,28 +8,359 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changes
 
+- **Moved python tests directory path install location**.  
+  - `/opt/<rocm-path>/share/amd_smi/pytest/..` to `/opt/<rocm-path>/share/amd_smi/tests/python_unittest/..`
+  - On amd-smi-lib-tests uninstall, the amd_smi tests folder is removed.
+  - Removed pytest dependency, our python testing now only depends on the unittest framework.
+
+- **Added more supported utilization count types to `amdsmi_get_utilization_count()`**.  
+
+- **Added `amd-smi set -L/--clk-limit ...` command**.  
+  - Equivalent to rocm-smi's '--extremum' command which sets sclk's or mclk's soft minimum or soft maximum clock frequency.
+
 - **Added Pytest functionality to test amdsmi API calls in Python**.  
 
 - **Changed the `power` parameter in `amdsmi_get_energy_count()` to `energy_accumulator`**.  
-Changes propagate forwards into the python interface as well, however we are maintaing backwards compatibility and keeping the `power` field in the python API until ROCm 6.4.
+  - Changes propagate forwards into the python interface as well, however we are maintaing backwards compatibility and keeping the `power` field in the python API until ROCm 6.4.
 
-- **Added GPU memory overdrive percentage to `amd-smi metric -o`**.
-Added `amdsmi_get_gpu_mem_overdrive_level()` function to amd-smi C and Python Libraries.
+- **Added GPU memory overdrive percentage to `amd-smi metric -o`**.  
+  - Added `amdsmi_get_gpu_mem_overdrive_level()` function to amd-smi C and Python Libraries.
 
-- **Added Subsystem Device ID to `amd-smi static --asic`**.
-No underlying changes to amdsmi_get_gpu_asic_info
+- **Added retrieving connection type and P2P capabilities between two GPUs**.  
+  - Added `amdsmi_topo_get_p2p_status` function to amd-smi C and Python Libraries.
+  - Added retrieving P2P link capabilities to CLI `amd-smi topology`.
+
+```shell
+$ amd-smi topology -h
+usage: amd-smi topology [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
+                        [-g GPU [GPU ...]] [-a] [-w] [-o] [-t] [-b]
+
+If no GPU is specified, returns information for all GPUs on the system.
+If no topology argument is provided all topology information will be displayed.
+
+Topology arguments:
+  -h, --help               show this help message and exit
+  -g, --gpu GPU [GPU ...]  Select a GPU ID, BDF, or UUID from the possible choices:
+                           ID: 0 | BDF: 0000:0c:00.0 | UUID: <redacted>
+                           ID: 1 | BDF: 0000:22:00.0 | UUID: <redacted>
+                           ID: 2 | BDF: 0000:38:00.0 | UUID: <redacted>
+                           ID: 3 | BDF: 0000:5c:00.0 | UUID: <redacted>
+                           ID: 4 | BDF: 0000:9f:00.0 | UUID: <redacted>
+                           ID: 5 | BDF: 0000:af:00.0 | UUID: <redacted>
+                           ID: 6 | BDF: 0000:bf:00.0 | UUID: <redacted>
+                           ID: 7 | BDF: 0000:df:00.0 | UUID: <redacted>
+                             all | Selects all devices
+
+
+  -a, --access             Displays link accessibility between GPUs
+  -w, --weight             Displays relative weight between GPUs
+  -o, --hops               Displays the number of hops between GPUs
+  -t, --link-type          Displays the link type between GPUs
+  -b, --numa-bw            Display max and min bandwidth between nodes
+  -c, --coherent           Display cache coherant (or non-coherant) link capability between nodes
+  -n, --atomics            Display 32 and 64-bit atomic io link capability between nodes
+  -d, --dma                Display P2P direct memory access (DMA) link capability between nodes
+  -z, --bi-dir             Display P2P bi-directional link capability between nodes
+
+
+Command Modifiers:
+  --json                   Displays output in JSON format (human readable by default).
+  --csv                    Displays output in CSV format (human readable by default).
+  --file FILE              Saves output into a file on the provided path (stdout by default).
+  --loglevel LEVEL         Set the logging level from the possible choices:
+                                DEBUG, INFO, WARNING, ERROR, CRITICAL
+```
+
+```shell
+$ amd-smi topology -cndz
+CACHE COHERANCY TABLE:
+             0000:0c:00.0 0000:22:00.0 0000:38:00.0 0000:5c:00.0 0000:9f:00.0 0000:af:00.0 0000:bf:00.0 0000:df:00.0
+0000:0c:00.0 SELF         C            NC           NC           C            C            C            NC
+0000:22:00.0 C            SELF         NC           C            C            C            NC           C
+0000:38:00.0 NC           NC           SELF         C            C            NC           C            NC
+0000:5c:00.0 NC           C            C            SELF         NC           C            NC           NC
+0000:9f:00.0 C            C            C            NC           SELF         NC           NC           C
+0000:af:00.0 C            C            NC           C            NC           SELF         C            C
+0000:bf:00.0 C            NC           C            NC           NC           C            SELF         NC
+0000:df:00.0 NC           C            NC           NC           C            C            NC           SELF
+
+ATOMICS TABLE:
+             0000:0c:00.0 0000:22:00.0 0000:38:00.0 0000:5c:00.0 0000:9f:00.0 0000:af:00.0 0000:bf:00.0 0000:df:00.0
+0000:0c:00.0 SELF         64,32        64,32        64           32           32           N/A          64,32
+0000:22:00.0 64,32        SELF         64           32           32           N/A          64,32        64,32
+0000:38:00.0 64,32        64           SELF         32           N/A          64,32        64,32        64,32
+0000:5c:00.0 64           32           32           SELF         64,32        64,32        64,32        32
+0000:9f:00.0 32           32           N/A          64,32        SELF         64,32        32           32
+0000:af:00.0 32           N/A          64,32        64,32        64,32        SELF         32           N/A
+0000:bf:00.0 N/A          64,32        64,32        64,32        32           32           SELF         64,32
+0000:df:00.0 64,32        64,32        64,32        32           32           N/A          64,32        SELF
+
+DMA TABLE:
+             0000:0c:00.0 0000:22:00.0 0000:38:00.0 0000:5c:00.0 0000:9f:00.0 0000:af:00.0 0000:bf:00.0 0000:df:00.0
+0000:0c:00.0 SELF         T            T            F            F            T            F            T
+0000:22:00.0 T            SELF         F            F            T            F            T            T
+0000:38:00.0 T            F            SELF         T            F            T            T            T
+0000:5c:00.0 F            F            T            SELF         T            T            T            F
+0000:9f:00.0 F            T            F            T            SELF         T            F            F
+0000:af:00.0 T            F            T            T            T            SELF         F            T
+0000:bf:00.0 F            T            T            T            F            F            SELF         F
+0000:df:00.0 T            T            T            F            F            T            F            SELF
+
+BI-DIRECTIONAL TABLE:
+             0000:0c:00.0 0000:22:00.0 0000:38:00.0 0000:5c:00.0 0000:9f:00.0 0000:af:00.0 0000:bf:00.0 0000:df:00.0
+0000:0c:00.0 SELF         T            T            F            F            T            F            T
+0000:22:00.0 T            SELF         F            F            T            F            T            T
+0000:38:00.0 T            F            SELF         T            F            T            T            T
+0000:5c:00.0 F            F            T            SELF         T            T            T            F
+0000:9f:00.0 F            T            F            T            SELF         T            F            F
+0000:af:00.0 T            F            T            T            T            SELF         F            T
+0000:bf:00.0 F            T            T            T            F            F            SELF         F
+0000:df:00.0 T            T            T            F            F            T            F            SELF
+
+
+Legend:
+ SELF = Current GPU
+ ENABLED / DISABLED = Link is enabled or disabled
+ N/A = Not supported
+ T/F = True / False
+ C/NC = Coherant / Non-Coherant io links
+ 64,32 = 64 bit and 32 bit atomic support
+ <BW from>-<BW to>
+```
+
+- **Created new amdsmi_kfd_info_t and added information under `amd-smi list`**.  
+  - Due to fixes needed to properly enumerate all logical GPUs in CPX, new device identifiers were added in to a new `amdsmi_kfd_info_t` which gets populated via the API `amdsmi_get_gpu_kfd_info`.
+  - This info has been added to the `amd-smi list`.
+  - These new fields are only available for BM/Guest Linux devices at this time.
+
+```C
+typedef struct {
+  uint64_t kfd_id;  //< 0xFFFFFFFFFFFFFFFF if not supported
+  uint32_t node_id;  //< 0xFFFFFFFF if not supported
+  uint32_t reserved[13];
+} amdsmi_kfd_info_t;
+```
+
+```shell
+$ amd-smi list
+GPU: 0
+    BDF: 0000:23:00.0
+    UUID: <redacted>
+    KFD_ID: 45412
+    NODE_ID: 1
+    PARTITION_ID: 0
+
+GPU: 1
+    BDF: 0000:26:00.0
+    UUID: <redacted>
+    KFD_ID: 59881
+    NODE_ID: 2
+    PARTITION_ID: 0
+```
+
+- **Added Subsystem Device ID to `amd-smi static --asic`**.  
+  - No underlying changes to amdsmi_get_gpu_asic_info
+
+```shell
+$ amd-smi static --asic
+GPU: 0
+    ASIC:
+        MARKET_NAME: MI308X
+        VENDOR_ID: 0x1002
+        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
+        SUBVENDOR_ID: 0x1002
+        DEVICE_ID: 0x74a2
+        SUBSYSTEM_ID: 0x74a2
+        REV_ID: 0x00
+        ASIC_SERIAL: <redacted>
+        OAM_ID: 5
+        NUM_COMPUTE_UNITS: 20
+        TARGET_GRAPHICS_VERSION: gfx942
+```
+
+- **Added Target_Graphics_Version to `amd-smi static --asic` and `amdsmi_get_gpu_asic_info()`**.  
+
+```C
+typedef struct {
+  char  market_name[AMDSMI_256_LENGTH];
+  uint32_t vendor_id;   //< Use 32 bit to be compatible with other platform.
+  char vendor_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t subvendor_id;   //< The subsystem vendor id
+  uint64_t device_id;   //< The device id of a GPU
+  uint32_t rev_id;
+  char asic_serial[AMDSMI_NORMAL_STRING_LENGTH];
+  uint32_t oam_id;   //< 0xFFFF if not supported
+  uint32_t num_of_compute_units;   //< 0xFFFFFFFF if not supported
+  uint64_t target_graphics_version;  //< 0xFFFFFFFFFFFFFFFF if not supported
+  uint32_t reserved[15];
+} amdsmi_asic_info_t;
+```
+
+```shell
+$ amd-smi static --asic
+GPU: 0
+    ASIC:
+        MARKET_NAME: MI308X
+        VENDOR_ID: 0x1002
+        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
+        SUBVENDOR_ID: 0x1002
+        DEVICE_ID: 0x74a2
+        SUBSYSTEM_ID: 0x74a2
+        REV_ID: 0x00
+        ASIC_SERIAL: <redacted>
+        OAM_ID: 5
+        NUM_COMPUTE_UNITS: 20
+        TARGET_GRAPHICS_VERSION: gfx942
+```
+
+- **Udpated Partition APIs and struct information and added and partition_id to `amd-smi static --partition` & `amd-smi list`**.  
+  - As part of an overhaul to partition information, some partition information will be made available in the `amdsmi_accelerator_partition_profile_t`.
+  - This struct will be filled out by a new API, `amdsmi_get_gpu_accelerator_partition_profile()`.
+  - Future data from these APIs wil will eventually get added to `static --partition`.
+
+```C
+#define AMDSMI_MAX_ACCELERATOR_PROFILE    32
+#define AMDSMI_MAX_CP_PROFILE_RESOURCES   32
+#define AMDSMI_MAX_ACCELERATOR_PARTITIONS 8
+
+/**
+ * @brief Accelerator Partition. This enum is used to identify
+ * various accelerator partitioning settings.
+ */
+typedef enum {
+  AMDSMI_ACCELERATOR_PARTITION_INVALID = 0,
+  AMDSMI_ACCELERATOR_PARTITION_SPX,        //!< Single GPU mode (SPX)- All XCCs work
+                                       //!< together with shared memory
+  AMDSMI_ACCELERATOR_PARTITION_DPX,        //!< Dual GPU mode (DPX)- Half XCCs work
+                                       //!< together with shared memory
+  AMDSMI_ACCELERATOR_PARTITION_TPX,        //!< Triple GPU mode (TPX)- One-third XCCs
+                                       //!< work together with shared memory
+  AMDSMI_ACCELERATOR_PARTITION_QPX,        //!< Quad GPU mode (QPX)- Quarter XCCs
+                                       //!< work together with shared memory
+  AMDSMI_ACCELERATOR_PARTITION_CPX,        //!< Core mode (CPX)- Per-chip XCC with
+                                       //!< shared memory
+} amdsmi_accelerator_partition_type_t;
+
+/**
+ * @brief Possible Memory Partition Modes.
+ * This union is used to identify various memory partitioning settings.
+ */
+typedef union {
+    struct {
+        uint32_t nps1_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t nps2_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t nps4_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t nps8_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+        uint32_t reserved :28;
+    } amdsmi_nps_flags_t;
+
+    uint32_t nps_cap_mask;
+} amdsmi_nps_caps_t;
+
+
+typedef struct {
+  amdsmi_accelerator_partition_type_t  profile_type;   // SPX, DPX, QPX, CPX and so on
+  uint32_t num_partitions;  // On MI300X, SPX: 1, DPX: 2, QPX: 4, CPX: 8, length of resources array
+  uint32_t profile_index;
+  amdsmi_nps_caps_t memory_caps;             // Possible memory partition capabilities
+  uint32_t num_resources;                    // length of index_of_resources_profile
+  uint32_t resources[AMDSMI_MAX_ACCELERATOR_PARTITIONS][AMDSMI_MAX_CP_PROFILE_RESOURCES];
+  uint64_t reserved[6];
+} amdsmi_accelerator_partition_profile_t;
+```
+
+```shell
+$ amd-smi static --partition
+GPU: 0
+    PARTITION:
+        COMPUTE_PARTITION: CPX
+        MEMORY_PARTITION: NPS4
+        PARTITION_ID: 0
+
+$ amd-smi list
+GPU: 0
+    BDF: 0000:23:00.0
+    UUID: <redacted>
+    KFD_ID: 45412
+    NODE_ID: 1
+    PARTITION_ID: 0
+
+GPU: 1
+    BDF: 0000:26:00.0
+    UUID: <redacted>
+    KFD_ID: 59881
+    NODE_ID: 2
+    PARTITION_ID: 0
+```
 
 ### Removals
 
-- N/A
+- **Removed usage of _validate_positive in Parser and replaced with _positive_int and _not_negative_int as appropriate**.  
+  - This will allow 0 to be a valid input for several options in setting CPUs where appropriate (for example, as a mode or NBIOID)
 
 ### Optimizations
 
-- N/A
+- **Adjusted ordering of gpu_metrics calls to ensure that pcie_bw values remain stable in `amd-smi metric` & `amd-smi monitor`**.  
+  - With this change additional padding was added to PCIE_BW `amd-smi monitor --pcie`
 
 ### Resolved issues
 
-- N/A
+- **Improved Offline install process & lowered dependency for PyYAML**.  
+
+- **Fixed CPX not showing total number of logical GPUs**.  
+  - Updates were made to `amdsmi_init()` and `amdsmi_get_gpu_bdf_id(..)`. In order to display all logical devices, we needed a way to provide order to GPU's enumerated. This was done by adding a partition_id within the BDF optional pci_id bits.
+  - Due to driver changes in KFD, some devices may report bits [31:28] or [2:0]. With the newly added `amdsmi_get_gpu_bdf_id(..)`, we provided this fallback to properly retreive partition ID. We
+plan to eventually remove partition ID from the function portion of the BDF (Bus Device Function). See below for PCI ID description.
+
+    - bits [63:32] = domain
+    - bits [31:28] or bits [2:0] = partition id
+    - bits [27:16] = reserved
+    - bits [15:8]  = Bus
+    - bits [7:3] = Device
+    - bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
+
+Previously in non-SPX modes (ex. CPX/TPX/DPX/etc) some MI3x ASICs would not report all logical GPU devices within AMD SMI.
+
+```shell
+$ amd-smi monitor -p -t -v
+GPU  POWER  GPU_TEMP  MEM_TEMP  VRAM_USED  VRAM_TOTAL
+  0  248 W     55 °C     48 °C     283 MB   196300 MB
+  1  247 W     55 °C     48 °C     283 MB   196300 MB
+  2  247 W     55 °C     48 °C     283 MB   196300 MB
+  3  247 W     55 °C     48 °C     283 MB   196300 MB
+  4  221 W     50 °C     42 °C     283 MB   196300 MB
+  5  221 W     50 °C     42 °C     283 MB   196300 MB
+  6  222 W     50 °C     42 °C     283 MB   196300 MB
+  7  221 W     50 °C     42 °C     283 MB   196300 MB
+  8  239 W     53 °C     46 °C     283 MB   196300 MB
+  9  239 W     53 °C     46 °C     283 MB   196300 MB
+ 10  239 W     53 °C     46 °C     283 MB   196300 MB
+ 11  239 W     53 °C     46 °C     283 MB   196300 MB
+ 12  219 W     51 °C     48 °C     283 MB   196300 MB
+ 13  219 W     51 °C     48 °C     283 MB   196300 MB
+ 14  219 W     51 °C     48 °C     283 MB   196300 MB
+ 15  219 W     51 °C     48 °C     283 MB   196300 MB
+ 16  222 W     51 °C     47 °C     283 MB   196300 MB
+ 17  222 W     51 °C     47 °C     283 MB   196300 MB
+ 18  222 W     51 °C     47 °C     283 MB   196300 MB
+ 19  222 W     51 °C     48 °C     283 MB   196300 MB
+ 20  241 W     55 °C     48 °C     283 MB   196300 MB
+ 21  241 W     55 °C     48 °C     283 MB   196300 MB
+ 22  241 W     55 °C     48 °C     283 MB   196300 MB
+ 23  240 W     55 °C     48 °C     283 MB   196300 MB
+ 24  211 W     51 °C     45 °C     283 MB   196300 MB
+ 25  211 W     51 °C     45 °C     283 MB   196300 MB
+ 26  211 W     51 °C     45 °C     283 MB   196300 MB
+ 27  211 W     51 °C     45 °C     283 MB   196300 MB
+ 28  227 W     51 °C     49 °C     283 MB   196300 MB
+ 29  227 W     51 °C     49 °C     283 MB   196300 MB
+ 30  227 W     51 °C     49 °C     283 MB   196300 MB
+ 31  227 W     51 °C     49 °C     283 MB   196300 MB
+```
+
+- **Fixed incorrect implementation of the Python API `amdsmi_get_gpu_metrics_header_info()`**.  
+
+- **`amd-smi static --partition` will have updates with additional partition information from `amdsmi_get_gpu_accelerator_partition_profile()`**.  
 
 ### Known issues
 
@@ -672,7 +1003,7 @@ $ /opt/rocm/bin/amd-smi topology -a -t --json
 Previously our reset could attempting to reset non-amd GPUS- resuting in "Unable to reset non-amd GPU" error. Fix
 updates CLI to target only AMD ASICs.
 
-- **Fix for `amd-smi metric --pcie` and `amdsmi_get_pcie_info()`Navi32/31 cards**.
+- **Fix for `amd-smi static --pcie` and `amdsmi_get_pcie_info()`Navi32/31 cards**.  
 Updated API to include `amdsmi_card_form_factor_t.AMDSMI_CARD_FORM_FACTOR_CEM`. Prevously, this would report "UNKNOWN". This fix
 provides the correct board `SLOT_TYPE` associated with these ASICs (and other Navi cards).
 
@@ -707,7 +1038,7 @@ Use the watch arguments to run continuously
 Monitor Arguments:
   -h, --help                   show this help message and exit
   -g, --gpu GPU [GPU ...]      Select a GPU ID, BDF, or UUID from the possible choices:
-                               ID: 0 | BDF: 0000:01:00.0 | UUID: 4eff74a0-0000-1000-802d-1d762a397f73
+                               ID: 0 | BDF: 0000:01:00.0 | UUID: <redacted>
                                  all | Selects all devices
   -U, --cpu CPU [CPU ...]      Select a CPU ID from the possible choices:
                                ID: 0

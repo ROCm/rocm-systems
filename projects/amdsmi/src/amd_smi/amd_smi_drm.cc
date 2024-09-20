@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2023, Advanced Micro Devices, Inc.
+ * Copyright (c) 2024, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -52,6 +52,8 @@
 #include "amd_smi/impl/amd_smi_common.h"
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_main.h"
+#include "rocm_smi/rocm_smi_utils.h"
+#include "rocm_smi/rocm_smi_logger.h"
 
 namespace amd {
 namespace smi {
@@ -173,10 +175,26 @@ amdsmi_status_t AMDSmiDrm::init() {
         }
 
         has_valid_fds = true;
-        bdf.function_number = device->businfo.pci->func;
-        bdf.device_number = device->businfo.pci->dev;
-        bdf.bus_number = device->businfo.pci->bus;
-        bdf.domain_number = device->businfo.pci->domain;
+        std::ostringstream ss;
+        uint64_t bdf_rocm = 0;
+        rsmi_dev_pci_id_get(i, &bdf_rocm);
+        ss << __PRETTY_FUNCTION__ << " | "
+           << "bdf_rocm | Received bdf: "
+           << "\nWhole BDF: " << amd::smi::print_unsigned_hex_and_int(bdf_rocm)
+           << "\nDomain = "
+           << amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0xFFFFFFFF00000000) >> 32)
+           << "; \nBus# = " << amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0xFF00) >> 8)
+           << "; \nDevice# = "<< amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0xF8) >> 3)
+           << "; \nFunction# = " << amd::smi::print_unsigned_hex_and_int((bdf_rocm & 0x7));
+        LOG_INFO(ss);
+        bdf.function_number = ((bdf_rocm & 0x7));
+        bdf.device_number = ((bdf_rocm & 0xF8) >> 3);
+        bdf.bus_number = ((bdf_rocm & 0xFF00) >> 8);
+        bdf.domain_number = ((bdf_rocm & 0xFFFFFFFF00000000) >> 32);
+        ss << __PRETTY_FUNCTION__ << " | " << "Received bdf: Domain = " << bdf.domain_number
+           << "; Bus# = " << bdf.bus_number << "; Device# = "<< bdf.device_number
+           << "; Function# = " << bdf.function_number;
+        LOG_INFO(ss);
 
         vendor_id = device->deviceinfo.pci->vendor_id;
 
@@ -309,6 +327,14 @@ amdsmi_status_t AMDSmiDrm::get_drm_fd_by_index(uint32_t gpu_index, uint32_t *fd_
 amdsmi_status_t AMDSmiDrm::get_bdf_by_index(uint32_t gpu_index, amdsmi_bdf_t *bdf_info) const {
     if (gpu_index + 1 > drm_bdfs_.size()) return AMDSMI_STATUS_NOT_SUPPORTED;
     *bdf_info = drm_bdfs_[gpu_index];
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | gpu_index = " << gpu_index
+    << "; \nreceived bdf: Domain = " << bdf_info->domain_number
+    << "; \nBus# = " << bdf_info->bus_number
+    << "; \nDevice# = " << bdf_info->device_number
+    << "; \nFunction# = " << bdf_info->function_number
+    << "\nReturning = AMDSMI_STATUS_SUCCESS";
+    LOG_INFO(ss);
     return AMDSMI_STATUS_SUCCESS;
 }
 

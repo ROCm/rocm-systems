@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2023, Advanced Micro Devices, Inc.
+ * Copyright (c) 2024, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -60,6 +60,7 @@ typedef struct {
   uint64_t hops;
   uint64_t weight;
   bool accessible;
+  amdsmi_p2p_capability_t cap;
 } gpu_link_t;
 
 TestHWTopologyRead::TestHWTopologyRead() : TestBase() {
@@ -136,9 +137,11 @@ void TestHWTopologyRead::Run(void) {
         gpu_links[dv_ind_src][dv_ind_dst].hops = 0;
         gpu_links[dv_ind_src][dv_ind_dst].weight = 0;
         gpu_links[dv_ind_src][dv_ind_dst].accessible = true;
+        gpu_links[dv_ind_src][dv_ind_dst].cap =
+          {UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX, UINT8_MAX};
       } else {
         amdsmi_io_link_type_t type;
-        err = amdsmi_topo_get_link_type(processor_handles_[dv_ind_src], 
+        err = amdsmi_topo_get_link_type(processor_handles_[dv_ind_src],
                 processor_handles_[dv_ind_dst],
                 &gpu_links[dv_ind_src][dv_ind_dst].hops, &type);
         if (err != AMDSMI_STATUS_SUCCESS) {
@@ -162,6 +165,34 @@ void TestHWTopologyRead::Run(void) {
               gpu_links[dv_ind_src][dv_ind_dst].type = "XGMI";
               break;
 
+            default:
+              gpu_links[dv_ind_src][dv_ind_dst].type = "XXXX";
+              IF_VERB(STANDARD) {
+                std::cout << "\t**Invalid IO LINK type. type=" << type <<
+                                                                    std::endl;
+              }
+          }
+        }
+        err = amdsmi_topo_get_p2p_status(processor_handles_[dv_ind_src],
+                processor_handles_[dv_ind_dst],
+                &type, &gpu_links[dv_ind_src][dv_ind_dst].cap);
+        if (err != AMDSMI_STATUS_SUCCESS) {
+          if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
+            IF_VERB(STANDARD) {
+              std::cout <<
+                  "\t**Link Type. read: Not supported on this machine"
+                                                                 << std::endl;
+              return;
+            }
+          } else {
+            CHK_ERR_ASRT(err)
+          }
+        } else {
+          switch (type) {
+            case AMDSMI_IOLINK_TYPE_PCIEXPRESS:
+            case AMDSMI_IOLINK_TYPE_XGMI:
+              // Do nothing, the type is printed by the previous test for amdsmi_topo_get_link_type
+              break;
             default:
               gpu_links[dv_ind_src][dv_ind_dst].type = "XXXX";
               IF_VERB(STANDARD) {
@@ -286,6 +317,7 @@ void TestHWTopologyRead::Run(void) {
     std::cout << std::endl;
   }
   std::cout << std::endl;
+
   std::cout << "**Access between two GPUs**" << std::endl;
   std::cout << "      ";
   for (i = 0; i < num_devices; ++i) {
@@ -299,6 +331,127 @@ void TestHWTopologyRead::Run(void) {
     for (j = 0; j < num_devices; j++) {
       std::cout << std::boolalpha;
       std::cout << std::setw(12) << std::left << gpu_links[i][j].accessible;
+    }
+    std::cout << std::endl;
+  }
+  std::cout << std::endl;
+
+  std::cout << "**Cache coherency between two GPUs**" << std::endl;
+  std::cout << "      ";
+  for (i = 0; i < num_devices; ++i) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(12) << std::left << tmp;
+  }
+  std::cout << std::endl;
+  for (i = 0; i < num_devices; i++) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(6) << std::left << tmp;
+    for (j = 0; j < num_devices; j++) {
+      if (i == j) {
+        std::cout << std::setw(12) << std::left << "X";
+        continue;
+      }
+
+      if (gpu_links[i][j].cap.is_iolink_coherent == UINT8_MAX) {
+        std::cout << std::setw(12) << std::left << "N/A";
+        continue;
+      }
+
+      std::cout << std::setw(12) << std::left
+                << (gpu_links[i][j].cap.is_iolink_coherent ? "C" : "NC");
+    }
+    std::cout << std::endl;
+  }
+  std::cout << std::endl;
+
+  std::cout << "**Atomics between two GPUs**" << std::endl;
+  std::cout << "      ";
+  for (i = 0; i < num_devices; ++i) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(12) << std::left << tmp;
+  }
+  std::cout << std::endl;
+  for (i = 0; i < num_devices; i++) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(6) << std::left << tmp;
+    for (j = 0; j < num_devices; j++) {
+      if (i == j) {
+        std::cout << std::setw(12) << std::left << "X";
+        continue;
+      }
+
+      if (gpu_links[i][j].cap.is_iolink_atomics_64bit == UINT8_MAX ||
+          gpu_links[i][j].cap.is_iolink_atomics_32bit == UINT8_MAX) {
+        std::cout << std::setw(12) << std::left << "N/A";
+        continue;
+      }
+
+      tmp = gpu_links[i][j].cap.is_iolink_atomics_64bit ? "64" : "";
+      if (gpu_links[i][j].cap.is_iolink_atomics_32bit) {
+        if (!tmp.empty()) {
+          tmp += ",";
+        }
+        tmp += "32";
+      }
+      std::cout << std::setw(12) << std::left << (tmp.empty() ? "N/A" : tmp);
+    }
+    std::cout << std::endl;
+  }
+  std::cout << std::endl;
+
+  std::cout << "**DMA between two GPUs**" << std::endl;
+  std::cout << "      ";
+  for (i = 0; i < num_devices; ++i) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(12) << std::left << tmp;
+  }
+  std::cout << std::endl;
+  for (i = 0; i < num_devices; i++) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(6) << std::left << tmp;
+    for (j = 0; j < num_devices; j++) {
+      if (i == j) {
+        std::cout << std::setw(12) << std::left << "X";
+        continue;
+      }
+
+      if (gpu_links[i][j].cap.is_iolink_dma == UINT8_MAX) {
+        std::cout << std::setw(12) << std::left << "N/A";
+        continue;
+      }
+
+      std::cout << std::boolalpha;
+      std::cout << std::setw(12) << std::left
+                << static_cast<bool>(gpu_links[i][j].cap.is_iolink_dma);
+    }
+    std::cout << std::endl;
+  }
+  std::cout << std::endl;
+
+  std::cout << "**BI-Directional between two GPUs**" << std::endl;
+  std::cout << "      ";
+  for (i = 0; i < num_devices; ++i) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(12) << std::left << tmp;
+  }
+  std::cout << std::endl;
+  for (i = 0; i < num_devices; i++) {
+    tmp = "GPU" + std::to_string(i);
+    std::cout << std::setw(6) << std::left << tmp;
+    for (j = 0; j < num_devices; j++) {
+      if (i == j) {
+        std::cout << std::setw(12) << std::left << "X";
+        continue;
+      }
+
+      if (gpu_links[i][j].cap.is_iolink_dma == UINT8_MAX) {
+        std::cout << std::setw(12) << std::left << "N/A";
+        continue;
+      }
+
+      std::cout << std::boolalpha;
+      std::cout << std::setw(12) << std::left
+                << static_cast<bool>(gpu_links[i][j].cap.is_iolink_bi_directional);
     }
     std::cout << std::endl;
   }

@@ -23,15 +23,13 @@
 # This is not meant to serve best practices for development.
 # Run this post install with python3 -i quick_start.py
 
-
-from amdsmi import *
-from pathlib import Path
-
 import atexit
 import logging
 import signal
 import sys
 
+from amdsmi import *
+from pathlib import Path
 
 # Make exit & quit work without parens because it's annoying
 type(exit).__repr__ = sys.exit
@@ -45,6 +43,8 @@ signal.signal(signal.SIGINT, signal_handler)
 signal.signal(signal.SIGTERM, signal_handler)
 atexit.register(amdsmi_shut_down)
 
-devices = amdsmi_get_processor_handles()
+gpus = amdsmi_get_processor_handles()
+cpus = amdsmi_get_cpusocket_handles()
 
-print(f"devices variable populated with:{devices}")
+print(f"gpus variable populated with:{gpus}")
+print(f"cpus variable populated with:{cpus}")

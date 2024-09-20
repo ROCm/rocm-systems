@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2018-2023, Advanced Micro Devices, Inc.
+ * Copyright (c) 2018-2024, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -48,8 +48,11 @@
 #include <algorithm>
 #include <cstdint>
 #include <iomanip>
+#include <iosfwd>
 #include <iostream>
+#include <iterator>
 #include <limits>
+#include <ostream>
 #include <queue>
 #include <sstream>
 #include <string>
@@ -594,6 +597,7 @@ class TagTextContents_t
                 }
             }
         }
+
 };
 
 using TextFileTagContents_t = TagTextContents_t<std::string, std::string,

@@ -15,9 +15,19 @@ rm_leftovers() {
   fi
 }
 
+
 rm_logFolder() {
   rm -rf /var/log/amd_smi_lib
 }
+
+
+rm_rocm_tests_dir(){
+  if [ -d "@CPACK_PACKAGING_INSTALL_PREFIX@/share/amd_smi/tests/" ]; then
+    rm -rf "@CPACK_PACKAGING_INSTALL_PREFIX@/share/amd_smi/tests/"
+    echo "Removed ROCm tests directory."
+  fi
+}
+
 
 return_logrotateToOrigConfig() {
   local logrotateConfFile=/etc/logrotate.d/amd_smi.conf
@@ -77,5 +87,6 @@ if [ "$1" -le 1 ]; then
     rm_python_lib
     rm_leftovers
     rm_logFolder
+    rm_rocm_tests_dir
     return_logrotateToOrigConfig
 fi

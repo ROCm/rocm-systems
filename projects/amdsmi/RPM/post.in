@@ -132,6 +132,7 @@ do_install_amdsmi_python_lib() {
   local PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES="$PIP_BREAK_SYSTEM_PACKAGES"
   export PIP_BREAK_SYSTEM_PACKAGES=1
 
+
   # Remove old python library
   local pip_list_output
   pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
@@ -148,7 +149,7 @@ do_install_amdsmi_python_lib() {
   fi
 
   # upgrade pip if it's an ancient version
-  # otherwise the amdsmi install will fail
+  # otherwise amdsmi install will fail
   local pip_version
   pip_version=$(python3 -m pip --version | grep -Eo '^[^\ ]+ ([0-9]+)' | grep -Eo '[0-9]+$')
   if [[ "$pip_version" -lt 19 ]]; then
@@ -157,10 +158,10 @@ do_install_amdsmi_python_lib() {
   fi
   unset pip_version
 
-  # Check PyYAML dependency
+  # Check PyYAML dependency, typically should not execute
   local pyyaml_version
-  pyyaml_version=$(pip show pyyaml | grep -Po '(?<=Version: )[0-9]')
-  if [[ "$pyyaml_version" -lt 5 ]]; then
+  pyyaml_version=$(python3 -m pip show pyyaml | grep -Po '(?<=Version: )[0-9]')
+  if [[ "$pyyaml_version" -lt 3 ]]; then
     echo "Detected ancient pyyaml version ($pyyaml_version)... Upgrading..."
     python3 -m pip install 'PyYAML>=5.1' --quiet --disable-pip-version-check --ignore-installed
   fi
@@ -168,7 +169,7 @@ do_install_amdsmi_python_lib() {
 
   # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
   local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
-  python3 -m pip install "$python_lib_path" --quiet --disable-pip-version-check
+  python3 -m pip install "$python_lib_path" --quiet --disable-pip-version-check --no-build-isolation
 
   export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
   export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
@@ -187,22 +188,10 @@ do_install_amdsmi_python_lib() {
   fi
 }
 
-do_install_amdsmi_pytest() {
-  echo -n "Installing pytest... "
-  pip install -U pytest >/dev/null 2>&1
-  if [ $? -ne 0 ]; then
-    echo "[WARNING] Detected pytest could not be installed. Running pytest may not work as documented."
-  else
-    echo -n "[SUCCESS]"
-    echo ""
-  fi
-  return
-}
 
 # post install or upgrade, $i is 1 or 2 -> do these actions
 if [ "$1" -ge 1 ]; then
   do_install_amdsmi_python_lib
-  do_install_amdsmi_pytest
   do_ldconfig
   do_updatepciids
   do_configureLogrotate || exit 0

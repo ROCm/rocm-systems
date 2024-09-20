@@ -81,7 +81,7 @@ AMD-SMI reports the version and current platform detected when running the comma
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.6.3.0 | ROCm version: 6.2.1 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 24.6.5.0 | ROCm version: 6.2.2 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -1225,4 +1225,4 @@ The information contained herein is for informational purposes only, and is subj
 
 AMD, the AMD Arrow logo, and combinations thereof are trademarks of Advanced Micro Devices, Inc. Other product names used in this publication are for identification purposes only and may be trademarks of their respective companies.
 
-Copyright (c) 2014-2023 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2014-2024 Advanced Micro Devices, Inc. All rights reserved.

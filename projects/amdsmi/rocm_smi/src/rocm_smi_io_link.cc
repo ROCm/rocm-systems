@@ -57,6 +57,15 @@
 #include "rocm_smi/rocm_smi_utils.h"
 #include "rocm_smi/rocm_smi_io_link.h"
 
+
+#define CRAT_IOLINK_FLAGS_ENABLED                 (1 << 0)
+#define CRAT_IOLINK_FLAGS_NON_COHERENT            (1 << 1)
+#define CRAT_IOLINK_FLAGS_NO_ATOMICS_32_BIT       (1 << 2)
+#define CRAT_IOLINK_FLAGS_NO_ATOMICS_64_BIT       (1 << 3)
+#define CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA     (1 << 4)
+#define CRAT_IOLINK_FLAGS_BI_DIRECTIONAL          (1 << 31)
+#define CRAT_IOLINK_FLAGS_RESERVED_MASK           0x7fffffe0
+
 namespace amd {
 namespace smi {
 
@@ -76,7 +85,7 @@ static const char *kIOLinkPropMIN_BANDWIDTHStr = "min_bandwidth";
 static const char *kIOLinkPropMAX_BANDWIDTHStr = "max_bandwidth";
 // static const char *kIOLinkPropRECOMMENDED_TRANSFER_SIZEStr =
 // "recommended_transfer_size";
-// static const char *kIOLinkPropFLAGSStr = "flags";
+static const char *kIOLinkPropFLAGSStr = "flags";
 
 static bool is_number(const std::string &s) {
   return !s.empty() && std::all_of(s.begin(), s.end(), ::isdigit);
@@ -380,6 +389,12 @@ IOLink::Initialize(void) {
   ret = get_property_value(kIOLinkPropWEIGHTStr, &weight_);
   if (ret) {return ret;}
 
+  ret = get_property_value(kIOLinkPropFLAGSStr, reinterpret_cast<uint64_t *>(&flags_));
+  if (ret) {return ret;}
+
+  ret = UpdateP2pCapability();
+  if (ret) {return ret;}
+
   ret = get_property_value(kIOLinkPropMIN_BANDWIDTHStr, &min_bandwidth_);
   if (ret) {return ret;}
 
@@ -399,6 +414,32 @@ IOLink::get_property_value(std::string property, uint64_t *value) {
   }
   *value = properties_[property];
   return 0;
+}
+
+int IOLink::UpdateP2pCapability(void) {
+    const uint8_t cap_true = 1;
+    const uint8_t cap_false = 0;
+
+    if (!(flags_ & CRAT_IOLINK_FLAGS_ENABLED)) {
+        return 0;
+    }
+
+    link_cap_.is_iolink_coherent =
+      (flags_ & CRAT_IOLINK_FLAGS_NON_COHERENT) ? cap_false : cap_true;
+
+    link_cap_.is_iolink_atomics_32bit =
+      (flags_ & CRAT_IOLINK_FLAGS_NO_ATOMICS_32_BIT) ? cap_false : cap_true;
+
+    link_cap_.is_iolink_atomics_64bit =
+      (flags_ & CRAT_IOLINK_FLAGS_NO_ATOMICS_64_BIT) ? cap_false : cap_true;
+
+    link_cap_.is_iolink_bi_directional =
+      (flags_ & CRAT_IOLINK_FLAGS_BI_DIRECTIONAL) ? cap_true : cap_false;
+
+    link_cap_.is_iolink_dma =
+      (flags_ & CRAT_IOLINK_FLAGS_NO_PEER_TO_PEER_DMA) ? cap_false : cap_true;
+
+    return 0;
 }
 
 }  // namespace smi

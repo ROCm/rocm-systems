@@ -377,6 +377,8 @@ Field | Content
 `rev_id` |  revision id
 `asic_serial` | asic serial
 `oam_id` | oam id
+`num_of_compute_units` | number of compute units on asic
+`target_graphics_version` | hardware graphics version
 
 Exceptions that can be thrown by `amdsmi_get_gpu_asic_info` function:
 
@@ -394,13 +396,44 @@ try:
     else:
         for device in devices:
             asic_info = amdsmi_get_gpu_asic_info(device)
-            print(asic_info['market_name'])
-            print(hex(asic_info['vendor_id']))
-            print(asic_info['vendor_name'])
-            print(hex(asic_info['device_id']))
-            print(hex(asic_info['rev_id']))
-            print(asic_info['asic_serial'])
-            print(asic_info['oam_id'])
+            print(asic_info)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_gpu_kfd_info
+
+Description: Returns KFD(kernel fusion driver) information for the given GPU
+This correlates to GUID in rocm-smi
+
+Input parameters:
+
+* `processor_handle` device which to query
+
+Output: Dictionary with fields
+
+Field | Content
+---|---
+`kfd_id` | KFD's unique GPU identifier
+`node_id` | KFD's internal GPU index
+
+Exceptions that can be thrown by `amdsmi_get_gpu_kfd_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            kfd_info = amdsmi_get_gpu_kfd_info(device)
+            print(kfd_info)
 except AmdSmiException as e:
     print(e)
 ```
@@ -810,7 +843,7 @@ except AmdSmiException as e:
 
 ### amdsmi_get_pcie_info
 
-Description: Returns the pcie metric and static information for the given GPU.
+Description: Returns the pcie metric and static information for the given GPU. For accurate PCIe Bandwidth measurements it is recommended to use this function once per 1000ms
 It is not supported on virtual machine guest
 
 Input parameters:
@@ -1925,19 +1958,19 @@ except AmdSmiException as e:
 
 ### amdsmi_get_utilization_count
 
-Description: Get coarse grain utilization counter of the specified device
+Description: Get coarse/fine grain utilization counter of the specified device
 
 Input parameters:
 
 * `processor_handle` handle for the given device
-* `counter_types` variable number of counter types desired
+* `counter_types` List of AmdSmiUtilizationCounterType counters requested
 
 Output: List containing dictionaries with fields
 
 Field | Description
 ---|---
 `timestamp` | The timestamp when the counter is retreived - Resolution: 1 ns
-`Dictionary for each counter` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`type`</td><td>Type of utilization counter</td></tr><tr><td>`value`</td><td>Value gotten for utilization counter</td></tr></tbody></table>
+`Dictionary for each counter` | <table> <thead><tr><th> Subfield </th><th>Description</th></tr></thead><tbody><tr><td>`type`</td><td>Counter that was requested</td></tr><tr><td>`value`</td><td>Value gotten for utilization counter</td></tr></tbody></table>
 
 Exceptions that can be thrown by `amdsmi_get_utilization_count` function:
 
@@ -1957,13 +1990,17 @@ try:
             utilization = amdsmi_get_utilization_count(
                             device,
                             AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY
-                            )
+                        )
             print(utilization)
             utilization = amdsmi_get_utilization_count(
                             device,
-                            AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
-                            AmdSmiUtilizationCounterType.COARSE_GRAIN_MEM_ACTIVITY
-                            )
+                            [AmdSmiUtilizationCounterType.COARSE_GRAIN_GFX_ACTIVITY,
+                            AmdSmiUtilizationCounterType.COARSE_GRAIN_MEM_ACTIVITY,
+                            AmdSmiUtilizationCounterType.COARSE_DECODER_ACTIVITY,
+                            AmdSmiUtilizationCounterType.FINE_GRAIN_GFX_ACTIVITY,
+                            AmdSmiUtilizationCounterType.FINE_GRAIN_MEM_ACTIVITY,
+                            AmdSmiUtilizationCounterType.FINE_DECODER_ACTIVITY]
+                        )
             print(utilization)
 except AmdSmiException as e:
     print(e)

@@ -3,7 +3,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2017-2023, Advanced Micro Devices, Inc.
+ * Copyright (c) 2017-2024, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -453,7 +453,7 @@ AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::str
       value = (metric);
     }
 
-    auto amdgpu_dynamic_metric_value = [&]() {
+    auto amdgpu_dynamic_metric_value = [&, data_type=data_type]() {
       AMDGpuDynamicMetricsValue_t amdgpu_dynamic_metric_value_init{};
       amdgpu_dynamic_metric_value_init.m_value = value;
       amdgpu_dynamic_metric_value_init.m_info  = (value_title + " : " + std::to_string(idx));

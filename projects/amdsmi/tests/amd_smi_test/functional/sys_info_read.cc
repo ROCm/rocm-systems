@@ -5,7 +5,7 @@
  * The University of Illinois/NCSA
  * Open Source License (NCSA)
  *
- * Copyright (c) 2023, Advanced Micro Devices, Inc.
+ * Copyright (c) 2024, Advanced Micro Devices, Inc.
  * All rights reserved.
  *
  * Developed by:
@@ -48,6 +48,7 @@
 
 #include <iostream>
 #include <string>
+#include <limits>
 
 #include <gtest/gtest.h>
 #include "amd_smi/amdsmi.h"
@@ -58,7 +59,9 @@
 TestSysInfoRead::TestSysInfoRead() : TestBase() {
   set_title("AMDSMI System Info Read Test");
   set_description("This test verifies that system information such as the "
-             "BDFID, AMDSMI version, VBIOS version, etc. can be read properly.");
+             "BDFID, AMDSMI version, VBIOS version, "
+             "vendor_id, unique_id, target_gfx_version, kfd_id, node_id, etc. "
+             "can be read properly.");
 }
 
 TestSysInfoRead::~TestSysInfoRead(void) {
@@ -150,22 +153,27 @@ void TestSysInfoRead::Run(void) {
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
 
-       // vendor_id, unique_id
-    amdsmi_asic_info_t asci_info;
-    err = amdsmi_get_gpu_asic_info(processor_handles_[0], &asci_info);
+    // vendor_id, unique_id, target_gfx_version
+    amdsmi_asic_info_t asic_info = {};
+    err = amdsmi_get_gpu_asic_info(processor_handles_[i], &asic_info);
     if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
         std::cout <<
             "\t**amdsmi_dev_unique_id() is not supported"
             " on this machine" << std::endl;
+        EXPECT_EQ(asic_info.target_graphics_version, std::numeric_limits<uint64_t>::max());
         // Verify api support checking functionality is working
         err = amdsmi_get_gpu_asic_info(processor_handles_[i], nullptr);
         ASSERT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
     } else {
         if (err == AMDSMI_STATUS_SUCCESS) {
             IF_VERB(STANDARD) {
-              std:: cout << "\t**GPU PCIe Vendor : " 
-                  << asci_info.vendor_name << std::endl;
+              std:: cout << "\t**GPU PCIe Vendor : "
+                  << asic_info.vendor_name << std::endl;
+              std::cout << "\t**Target GFX version: " << std::dec
+                        << asic_info.target_graphics_version << "\n";
             }
+            EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
+            EXPECT_NE(asic_info.target_graphics_version, std::numeric_limits<uint64_t>::max());
             // Verify api support checking functionality is working
             err = amdsmi_get_gpu_asic_info(processor_handles_[i], nullptr);
             ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
@@ -174,6 +182,27 @@ void TestSysInfoRead::Run(void) {
                                                                err << std::endl;
         }
     }
+
+    // kfd_id, node_id
+    amdsmi_kfd_info_t kfd_info = {};
+    err = amdsmi_get_gpu_kfd_info(processor_handles_[i], &kfd_info);
+    if (err != AMDSMI_STATUS_SUCCESS) {
+        EXPECT_EQ(kfd_info.kfd_id, std::numeric_limits<uint64_t>::max());
+        EXPECT_EQ(kfd_info.node_id, std::numeric_limits<uint32_t>::max());
+    } else {
+          IF_VERB(STANDARD) {
+            std::cout << "\t**KFD ID: " << std::dec
+                      << kfd_info.kfd_id << "\n";
+            std::cout << "\t**Node ID: " << std::dec
+                      << kfd_info.node_id << "\n";
+          }
+          EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
+          EXPECT_NE(kfd_info.kfd_id, std::numeric_limits<uint64_t>::max());
+          EXPECT_NE(kfd_info.node_id, std::numeric_limits<uint32_t>::max());
+    }
+    // Verify api support checking functionality is working
+    err = amdsmi_get_gpu_kfd_info(processor_handles_[i], nullptr);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
   err = amdsmi_get_lib_version(&ver);
   CHK_ERR_ASRT(err)
