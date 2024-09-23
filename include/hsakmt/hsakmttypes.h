@@ -146,8 +146,6 @@ typedef struct _HsaVersionCapability
             unsigned int Image              :1; // image ext supported
             unsigned int EventAge           :1;
             unsigned int Scratch            :1; // HSA_SCRATCH_SINGLE_LIMIT, HSA_SCRATCH_SINGLE_LIMIT_ASYNC
-            unsigned int Vmem               :1;
-            unsigned int dmabuf             :1;
             unsigned int XNack              :1; // HSA_XNACK
             unsigned int Reserved           :55;
         }ui64;

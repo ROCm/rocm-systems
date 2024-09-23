@@ -38,8 +38,6 @@ hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
   CHECK_DXG_OPEN();
 
   VersionCapInfo->Value = 0;
-  VersionCapInfo->ui64.Vmem = 1;
-  VersionCapInfo->ui64.dmabuf = 1;
   /*VersionCapInfo->ui64.InterruptSignal = 0;
   VersionCapInfo->ui64.Sdma = 0;
   VersionCapInfo->ui64.SdmaXgmi = 0;
