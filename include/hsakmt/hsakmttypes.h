@@ -140,14 +140,14 @@ typedef struct _HsaVersionCapability
     union {
         HSAuint64 Value;
         struct {
-            unsigned int InterruptSignal    :1; // HSA_ENABLE_INTERRUPT
-            unsigned int Sdma               :1; // HSA_ENABLE_SDMA
-            unsigned int SdmaXgmi           :1;
-            unsigned int Image              :1; // image ext supported
-            unsigned int EventAge           :1;
-            unsigned int Scratch            :1; // HSA_SCRATCH_SINGLE_LIMIT, HSA_SCRATCH_SINGLE_LIMIT_ASYNC
-            unsigned int XNack              :1; // HSA_XNACK
-            unsigned int Reserved           :55;
+            HSAuint64 InterruptSignal    :1; // HSA_ENABLE_INTERRUPT
+            HSAuint64 Sdma               :1; // HSA_ENABLE_SDMA
+            HSAuint64 SdmaXgmi           :1;
+            HSAuint64 Image              :1; // image ext supported
+            HSAuint64 EventAge           :1;
+            HSAuint64 Scratch            :1; // HSA_SCRATCH_SINGLE_LIMIT, HSA_SCRATCH_SINGLE_LIMIT_ASYNC
+            HSAuint64 XNack              :1; // HSA_XNACK
+            HSAuint64 Reserved           :57;
         }ui64;
     };
 } HsaVersionCapability;
