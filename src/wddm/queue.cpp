@@ -269,8 +269,8 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
   amd_queue_mem_ = gpu_mem->GetGpuMemoryHandle();
   amd_queue_ = reinterpret_cast<amd_queue_t*>(gpu_mem->GpuAddress());
 
-	aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
   amd_queue_rocr_ = (amd_queue_t*)((char*)ring_rptr - offsetof(amd_queue_t, read_dispatch_id));
+  aql_to_pm4_thread_ = std::thread(AqlToPm4Thread, this);
 }
 
 ComputeQueue::~ComputeQueue() {
