@@ -403,6 +403,13 @@ class MachineSpecs:
             "name": "Workgroup Max Size",
         },
     )
+    chip_id: str = field(
+        default=None,
+        metadata={
+            "doc": "<>",
+            "name": "Chip ID",
+        },
+    )
     max_waves_per_cu: str = field(
         default=None,
         metadata={

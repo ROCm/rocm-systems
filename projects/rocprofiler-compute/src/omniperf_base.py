@@ -55,6 +55,12 @@ SUPPORTED_ARCHS = {
     "gfx942": {"mi300": ["MI300A_A1", "MI300X_A1"]},
 }
 
+MI300_CHIP_IDS = {
+    "29856": "MI300A_A1",
+    "29857": "MI300X_A1",
+    "29858": "MI308X",
+}
+
 
 class Omniperf:
     def __init__(self):
