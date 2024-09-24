@@ -13,7 +13,8 @@ target_sources(rocprofiler-sdk-tool-kokkosp PRIVATE ${KOKKOSP_SOURCES} ${KOKKOSP
 target_link_libraries(
     rocprofiler-sdk-tool-kokkosp
     PRIVATE rocprofiler-sdk-roctx::rocprofiler-sdk-roctx-shared-library
-            rocprofiler-sdk::rocprofiler-headers rocprofiler-sdk::rocprofiler-glog)
+            rocprofiler-sdk::rocprofiler-headers
+            rocprofiler-sdk::rocprofiler-common-library rocprofiler-sdk::rocprofiler-glog)
 
 set_target_properties(
     rocprofiler-sdk-tool-kokkosp
