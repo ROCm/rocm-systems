@@ -28,6 +28,9 @@ if repoCheck == tag:
 elif tag.startswith(repoCheck + "-"):
     print("OK: allowed match with extra delimiter")
     exit(0)
+elif tag.startswith("rocm-"):
+    print("OK: allowed match with 'rocm-' prefix")
+    exit(0)
 else:
     print("FAIL: no match - double check top-level VERSION file")
     exit(1)
