@@ -29,30 +29,6 @@ PCINFO = 15
 WAVE_ENDED = 16
 DONT_KNOW = 100
 
-WaveInstCategory = {
-    SKIP: "SKIP",
-    SMEM: "SMEM",
-    SALU: "SALU",
-    VMEM: "VMEM",
-    FLAT: "FLAT",
-    LDS: "LDS",
-    VALU: "VALU",
-    JUMP: "JUMP",
-    NEXT: "NEXT",
-    IMMED: "IMMED",
-    JUMP: "JUMP",
-    NEXT: "NEXT",
-    IMMED: "IMMED",
-    BRANCH: "BRANCH",
-    GETPC: "GETPC",
-    SETPC: "SETPC",
-    SWAPPC: "SWAPPC",
-    LANEIO: "LANEIO",
-    PCINFO: "PCINFO",
-    WAVE_ENDED: "WAVE_ENDED",
-    DONT_KNOW: "DONT_KNOW",
-}
-
 # Keeps track of register states for hipcc-generated assembly
 class RegisterWatchList:
     def __init__(self, labels, code, jump_map, insts):
@@ -559,7 +535,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 result.append(inst)
                 i += 1
                 num_failed_stitches = 0
-            elif not bGFX9 and inst.type == IMMED and line != next:
+            elif not bGFX9 and inst.type == IMMED and line != next and as_line[1] != SKIP:
                 skipped_immed += 1
                 inst.asmline = reverse_map[line]
                 result.append(inst)
@@ -577,7 +553,6 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
         print('Warning - Wave ended.')
     elif i < N:
         print('Warning - Stitching rate: '+str(i * 100 / N)+'% matched', i, ' of ', N)
-        print('Leftovers:', [WaveInstCategory[insts[i+k].type] for k in range(20) if i+k < len(insts)])
         try:
             print(line, code[line])
         except:
