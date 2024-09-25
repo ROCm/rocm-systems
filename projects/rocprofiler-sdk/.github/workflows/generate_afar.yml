@@ -15,30 +15,26 @@ on:
         description: 'ROCm CI Build Job Name'
         required: true
         type: string
-      aqlprofile-change:
-        description: 'If AQLProfile Needs to be changed'
-        required: false
-        type: boolean
-      aqlprofile-revision:
-        description: 'AQLProfile Commit Hash'
-        required: false
-        type: string
       rocprofiler-sdk-revision:
         description: 'ROCProfiler-SDK Commit Hash'
+        default: 'amd-staging'
         required: true
+        type: string
+      extra-cmake-args:
+        description: 'Extra Arguments to give to cmake configuration'
+        required: false
+        type: string
+      package-types:
+        description: 'Package types provided to `CPACK_GENERATOR`'
+        required: true
+        default: 'STGZ'
         type: string
 
 jobs:
-  generate-packages:
-    runs-on: gpuless-runner-set
+  generate-packages-ubuntu-22:
+    runs-on: rocprofiler-cluster-runner-set
 
     steps:
-
-    - uses: actions/checkout@v4
-      if: ${{ inputs.aqlprofile-change }}
-      with:
-        ref: '${{ inputs.aqlprofile-revision }}'
-        path: 'aqlprofile'
 
     - uses: actions/checkout@v4
       with:
@@ -56,19 +52,10 @@ jobs:
         apt-get install -y build-essential cmake rocm-llvm-dev python3-pip libdw-dev
         python3 -m pip install -r ${{github.workspace}}/rocprofiler-sdk/requirements.txt
 
-    - name: Building AQLProfile Packages
-      if: ${{ inputs.aqlprofile-change }}
-      shell: bash
-      run: |
-        cmake -B build-aqlprofile -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/opt/rocm -DCPACK_GENERATOR="STGZ" ${{github.workspace}}/aqlprofile
-        cmake --build build-aqlprofile --parallel 16
-        cmake --build build-aqlprofile --target install --parallel 16
-        cmake --build build-aqlprofile --target package --parallel 16
-
     - name: Building ROCProfiler-SDK Packages
       shell: bash
       run: |
-        cmake -B build-rocprofiler-sdk -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/opt/rocm -DCPACK_GENERATOR="STGZ" -DROCPROFILER_BUILD_{TESTS,SAMPLES}=ON ${{github.workspace}}/rocprofiler-sdk
+        cmake -B build-rocprofiler-sdk -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_INSTALL_PREFIX=/opt/rocm -DCPACK_GENERATOR="${{ inputs.package-types }}" -DROCPROFILER_BUILD_{TESTS,SAMPLES}=ON ${{ inputs.extra-cmake-args }} ${{github.workspace}}/rocprofiler-sdk
         cmake --build build-rocprofiler-sdk --parallel 16
         cmake --build build-rocprofiler-sdk --target package --parallel 16
 
@@ -78,4 +65,6 @@ jobs:
         name: Packages-${{ inputs.rocm-release }}
         path: |
           ${{github.workspace}}/build-*/*.sh
-
+          ${{github.workspace}}/build-*/*.deb
+          ${{github.workspace}}/build-*/*.rpm
+          ${{github.workspace}}/build-*/*.tar.gz
