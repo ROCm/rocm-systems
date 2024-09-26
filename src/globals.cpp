@@ -45,5 +45,7 @@ bool is_svm_api_supported;
 int zfb_support;
 /* handle vendor specific packet */
 int vendor_packet_support;
+/* enable vendor packet in hsa-runtime*/
+int enable_vendor_packet;
 
 size_t max_single_alloc_size = 0;

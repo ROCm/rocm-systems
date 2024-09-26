@@ -48,5 +48,7 @@ hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
   VersionCapInfo->ui64.Scratch = 0;
   VersionCapInfo->ui64.XNack = 0;*/
 
+  VersionCapInfo->ui64.VendorPacket = enable_vendor_packet;
+
   return HSAKMT_STATUS_SUCCESS;
 }

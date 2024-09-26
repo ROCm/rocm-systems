@@ -140,6 +140,11 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if (envvar)
     vendor_packet_support = atoi(envvar);
 
+  /* Decide whether hsa-runtime dispatch vendor packet */
+  envvar = getenv("WSL_ENABLE_VENDOR_PACKET");
+  if (envvar)
+    enable_vendor_packet = atoi(envvar);
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
