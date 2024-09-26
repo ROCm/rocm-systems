@@ -124,7 +124,7 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 /**
  * @brief Max number of GPUs supported by RDC
  */
-#define RDC_MAX_NUM_DEVICES 16
+#define RDC_MAX_NUM_DEVICES 128
 
 /**
  * @brief The max fields in a field group
