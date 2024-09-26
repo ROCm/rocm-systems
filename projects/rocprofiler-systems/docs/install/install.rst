@@ -18,8 +18,8 @@ Release links
 
 To review and install either the current Omnitrace release or earlier releases, use these links:
 
-* Latest Omnitrace Release: `<https://github.com/ROCm/omnitrace/releases/latest>`_ 
-* All Omnitrace Releases: `<https://github.com/ROCm/omnitrace/releases>`_ 
+* Latest Omnitrace Release: `<https://github.com/ROCm/omnitrace/releases/latest>`_
+* All Omnitrace Releases: `<https://github.com/ROCm/omnitrace/releases>`_
 
 Operating system support
 ========================================
@@ -39,7 +39,7 @@ Other OS distributions might function but are not supported or tested.
 Identifying the operating system
 -----------------------------------
 
-If you are unsure of the operating system and version, the ``/etc/os-release`` and 
+If you are unsure of the operating system and version, the ``/etc/os-release`` and
 ``/usr/lib/os-release`` files contain operating system identification data for Linux systems.
 
 .. code-block:: shell
@@ -84,8 +84,8 @@ For example,
    ...
    omnitrace-1.0.0-ubuntu-20.04-ROCm-50000-OMPT-PAPI-Python3.sh
 
-Any of the ``EXTRA`` fields with a CMake build option 
-(for example, PAPI, as referenced in a following section) or 
+Any of the ``EXTRA`` fields with a CMake build option
+(for example, PAPI, as referenced in a following section) or
 with no link requirements (such as OMPT) have
 self-contained support for these packages.
 
@@ -113,17 +113,17 @@ Installing Omnitrace from source
 ========================================
 
 Omnitrace needs a GCC compiler with full support for C++17 and CMake v3.16 or higher.
-The Clang compiler may be used in lieu of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_  
+The Clang compiler may be used in lieu of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
 is already installed.
 
 Build requirements
 -----------------------------------
 
 * GCC compiler v7+
-  
+
   * Older GCC compilers may be supported but are not tested
   * Clang compilers are generally supported for Omnitrace but not Dyninst
-  
+
 * `CMake <https://cmake.org/>`_ v3.16+
 
   .. note::
@@ -139,7 +139,7 @@ Build requirements
 Required third-party packages
 -----------------------------------
 
-* `Dyninst <https://github.com/dyninst/dyninst>`_ for dynamic or static instrumentation. 
+* `Dyninst <https://github.com/dyninst/dyninst>`_ for dynamic or static instrumentation.
   Dyninst uses the following required and optional components.
 
   * `TBB <https://github.com/oneapi-src/oneTBB>`_ (required)
@@ -155,7 +155,7 @@ during the Omnitrace build. The following list indicates the package, the versio
 the application that requires the package (for example, Omnitrace requires Dyninst
 while Dyninst requires TBB), and the CMake option to build the package alongside Omnitrace:
 
-.. csv-table:: 
+.. csv-table::
    :header: "Third-Party Library", "Minimum Version", "Required By", "CMake Option"
    :widths: 15, 10, 12, 40
 
@@ -182,13 +182,13 @@ Optional third-party packages
 
   * ``OMNITRACE_USE_MPI`` enables full MPI support
   * ``OMNITRACE_USE_MPI_HEADERS`` enables wrapping of the dynamically-linked MPI C function calls.
-    (By default, if Omnitrace cannot find an OpenMPI MPI distribution, it uses a local copy 
+    (By default, if Omnitrace cannot find an OpenMPI MPI distribution, it uses a local copy
     of the OpenMPI ``mpi.h``.)
 
-* Several optional third-party profiling tools supported by Timemory 
+* Several optional third-party profiling tools supported by Timemory
   (for example, `Caliper <https://github.com/LLNL/Caliper>`_, `TAU <https://www.cs.uoregon.edu/research/tau/home.php>`_, CrayPAT, and others)
 
-.. csv-table:: 
+.. csv-table::
    :header: "Third-Party Library", "CMake Enable Option", "CMake Build Option"
    :widths: 15, 45, 40
 
@@ -204,10 +204,10 @@ The easiest way to install Dyninst is alongside Omnitrace, but it can also be in
 Building Dyninst alongside Omnitrace
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To install Dyninst alongside Omnitrace, configure Omnitrace with ``OMNITRACE_BUILD_DYNINST=ON``. 
+To install Dyninst alongside Omnitrace, configure Omnitrace with ``OMNITRACE_BUILD_DYNINST=ON``.
 Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
-versions of the Dyninst Boost, TBB, and LibIberty dependencies 
-(use ``apt-get install libtbb-dev libiberty-dev libboost-dev``). 
+versions of the Dyninst Boost, TBB, and LibIberty dependencies
+(use ``apt-get install libtbb-dev libiberty-dev libboost-dev``).
 However, it is possible to request Dyninst to install
 its dependencies via ``DYNINST_BUILD_<DEP>=ON``, as follows:
 
@@ -216,7 +216,7 @@ its dependencies via ``DYNINST_BUILD_<DEP>=ON``, as follows:
    git clone https://github.com/ROCm/omnitrace.git omnitrace-source
    cmake -B omnitrace-build -DOMNITRACE_BUILD_DYNINST=ON -DDYNINST_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON omnitrace-source
 
-where ``-DDYNINST_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON`` is expanded by 
+where ``-DDYNINST_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON`` is expanded by
 the shell to ``-DDYNINST_BUILD_TBB=ON -DDYNINST_BUILD_BOOST=ON ...``
 
 Installing Dyninst via Spack
@@ -237,18 +237,23 @@ Installing Dyninst via Spack
 Installing Omnitrace
 -----------------------------------
 
-Omnitrace has CMake configuration options for MPI support (``OMNITRACE_USE_MPI`` or 
-``OMNITRACE_USE_MPI_HEADERS``), HIP kernel tracing (``OMNITRACE_USE_ROCTRACER``), 
-ROCm device sampling (``OMNITRACE_USE_ROCM_SMI``), OpenMP-Tools (``OMNITRACE_USE_OMPT``), 
+Omnitrace has CMake configuration options for MPI support (``OMNITRACE_USE_MPI`` or
+``OMNITRACE_USE_MPI_HEADERS``), HIP kernel tracing (``OMNITRACE_USE_ROCTRACER``),
+ROCm device sampling (``OMNITRACE_USE_ROCM_SMI``), OpenMP-Tools (``OMNITRACE_USE_OMPT``),
 hardware counters via PAPI (``OMNITRACE_USE_PAPI``), among other features.
-Various additional features can be enabled via the 
+Various additional features can be enabled via the
 ``TIMEMORY_USE_*`` `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_.
-Any ``OMNITRACE_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>`` 
+Any ``OMNITRACE_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>``
 option means that the Timemory support for this feature has been integrated
-into Perfetto support for Omnitrace, for example, ``OMNITRACE_USE_PAPI=<VAL>`` also configures 
+into Perfetto support for Omnitrace, for example, ``OMNITRACE_USE_PAPI=<VAL>`` also configures
 ``TIMEMORY_USE_PAPI=<VAL>``. This means the data that Timemory is able to collect via this package
-is passed along to Perfetto and is displayed when the ``.proto`` file is visualized 
+is passed along to Perfetto and is displayed when the ``.proto`` file is visualized
 in `the Perfetto UI <https://ui.perfetto.dev>`_.
+
+.. important::
+   Perfetto validation is done with trace_processor v46.0 as there is a known issue with v47.0.
+   If you are experiencing problems viewing your trace in the latest version of `Perfetto <http://ui.perfetto.dev>`_,
+   then try using `Perfetto UI v46.0 <https://ui.perfetto.dev/v46.0-35b3d9845/#!/>`_.
 
 .. code-block:: shell
 
@@ -280,26 +285,26 @@ MPI support within Omnitrace
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Omnitrace can have full (``OMNITRACE_USE_MPI=ON``) or partial (``OMNITRACE_USE_MPI_HEADERS=ON``) MPI support.
-The only difference between these two modes is whether or not the results collected 
+The only difference between these two modes is whether or not the results collected
 via Timemory and/or Perfetto can be aggregated into a single
-output file during finalization. When full MPI support is enabled, combining the 
+output file during finalization. When full MPI support is enabled, combining the
 Timemory results always occurs, whereas combining the Perfetto
 results is configurable via the ``OMNITRACE_PERFETTO_COMBINE_TRACES`` setting.
 
-The primary benefits of partial or full MPI support are the automatic wrapping 
+The primary benefits of partial or full MPI support are the automatic wrapping
 of MPI functions and the ability
-to label output with suffixes which correspond to the ``MPI_COMM_WORLD`` rank ID 
+to label output with suffixes which correspond to the ``MPI_COMM_WORLD`` rank ID
 instead of having to use the system process identifier (i.e. ``PID``).
-In general, it's recommended to use partial MPI support with the OpenMPI 
+In general, it's recommended to use partial MPI support with the OpenMPI
 headers as this is the most portable configuration.
-If full MPI support is selected, make sure your target application is built 
+If full MPI support is selected, make sure your target application is built
 against the same MPI distribution as Omnitrace.
 For example, do not build Omnitrace with MPICH and use it on a target application built against OpenMPI.
 If partial support is selected, the reason the OpenMPI headers are recommended instead of the MPICH headers is
-because the ``MPI_COMM_WORLD`` in OpenMPI is a pointer to ``ompi_communicator_t`` (8 bytes), 
-whereas ``MPI_COMM_WORLD`` in MPICH is an ``int`` (4 bytes). Building Omnitrace with partial MPI support 
+because the ``MPI_COMM_WORLD`` in OpenMPI is a pointer to ``ompi_communicator_t`` (8 bytes),
+whereas ``MPI_COMM_WORLD`` in MPICH is an ``int`` (4 bytes). Building Omnitrace with partial MPI support
 and the MPICH headers and then using
-Omnitrace on an application built against OpenMPI causes a segmentation fault. 
+Omnitrace on an application built against OpenMPI causes a segmentation fault.
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
 
@@ -330,7 +335,7 @@ Alternatively, you can directly source the ``setup-env.sh`` script:
 Test the executables
 -----------------------------------
 
-Successful execution of these commands confirms that the installation does not have any 
+Successful execution of these commands confirms that the installation does not have any
 issues locating the installed libraries:
 
 .. code-block:: shell
@@ -353,7 +358,7 @@ This section explains how to resolve certain issues that might happen when you f
 Issues with RHEL and SELinux
 ----------------------------------------------------
 
-RHEL (Red Hat Enterprise Linux) and related distributions of Linux automatically enable a security feature 
+RHEL (Red Hat Enterprise Linux) and related distributions of Linux automatically enable a security feature
 named SELinux (Security-Enhanced Linux) that prevents Omnitrace from running.
 This issue applies to any Linux distribution with SELinux installed, including RHEL,
 CentOS, Fedora, and Rocky Linux. The problem can happen with any GPU, or even without a GPU.
@@ -367,7 +372,7 @@ run ``omnitrace-run`` with the instrumented program.
    omniperf-instrument -M sampling -o hello.instr -- ./hello
    omnitrace-run -- ./hello.instr
 
-Instead of successfully running the binary with call-stack sampling, 
+Instead of successfully running the binary with call-stack sampling,
 Omnitrace crashes with a segmentation fault.
 
 .. note::
@@ -375,10 +380,10 @@ Omnitrace crashes with a segmentation fault.
    If you are physically logged in on the system (not using SSH or a remote connection),
    the operating system might display an SELinux pop-up warning in the notifications.
 
-To workaround this problem, either disable SELinux or configure it to use a more 
+To workaround this problem, either disable SELinux or configure it to use a more
 permissive setting.
 
-To avoid this problem for the duration of the current session, run this command 
+To avoid this problem for the duration of the current session, run this command
 from the shell:
 
 .. code-block:: shell
@@ -386,25 +391,25 @@ from the shell:
    sudo setenforce 0
 
 For a permanent workaround, edit the SELinux configuration file using the command
-``sudo vim /etc/sysconfig/selinux`` and change the ``SELINUX`` setting to 
+``sudo vim /etc/sysconfig/selinux`` and change the ``SELINUX`` setting to
 either ``Permissive`` or ``Disabled``.
 
 .. note::
 
-   Permanently changing the SELinux settings can have security implications. 
+   Permanently changing the SELinux settings can have security implications.
    Ensure you review your system security settings before making any changes.
 
 Modifying RPATH details
 ----------------------------------------------------
 
-If you're experiencing problems loading your application with an instrumented library, 
-then you might have to check and modify the RPATH specified in your application. 
+If you're experiencing problems loading your application with an instrumented library,
+then you might have to check and modify the RPATH specified in your application.
 See the section on `troubleshooting RPATHs <../how-to/instrumenting-rewriting-binary-application.html#rpath-troubleshooting>`_
 for further details.
 
 Configuring PAPI to collect hardware counters
 ----------------------------------------------------
 
-To use PAPI to collect the majority of hardware counters, ensure 
-the ``/proc/sys/kernel/perf_event_paranoid`` setting has a value less than or equal to ``2``. 
+To use PAPI to collect the majority of hardware counters, ensure
+the ``/proc/sys/kernel/perf_event_paranoid`` setting has a value less than or equal to ``2``.
 For more information, see the :ref:`omnitrace_papi_events` section.

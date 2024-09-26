@@ -25,7 +25,7 @@ The ``main`` routine of ``omnitrace-avail`` has three important sections:
 * Printing hardware counters
 
 omnitrace-sample: `source/bin/omnitrace-sample <https://github.com/ROCm/omnitrace/tree/amd-mainline/source/bin/omnitrace-sample>`_
--------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``omnitrace-sample <options> -- <command> <command-args>``
 * Translates command-line options into environment variables
@@ -33,7 +33,7 @@ omnitrace-sample: `source/bin/omnitrace-sample <https://github.com/ROCm/omnitrac
 * Is launched by using ``execvpe`` with ``<command> <command-args>`` and a modified environment
 
 omnitrace-casual: `source/bin/omnitrace-causal <https://github.com/ROCm/omnitrace/tree/amd-mainline/source/bin/omnitrace-causal>`_
--------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------------------
 
 When there is exactly one causal profiling configuration variant (which enables debugging),
 ``omnitrace-casual`` has a nearly identical design to ``omnitrace-sample``
@@ -46,7 +46,7 @@ the following actions take place for each variant:
 * the parent process waits for the child process to finish
 
 omnitrace-instrument: `source/bin/omnitrace-instrument <https://github.com/ROCm/omnitrace/tree/amd-mainline/source/bin/omnitrace-instrument>`_
--------------------------------------------------------------------------------------------------------------------------------------------
+----------------------------------------------------------------------------------------------------------------------------------------------
 
 * Requires a command-line format of ``omnitrace-instrument <options> -- <command> <command-args>``
 * Allows the user to provide options specifying whether to perform runtime instrumentation, use binary rewrite, or 

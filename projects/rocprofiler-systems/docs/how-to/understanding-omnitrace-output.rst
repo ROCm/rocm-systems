@@ -28,7 +28,7 @@ For example, starting with the following base configuration:
    [omnitrace] Outputting 'omnitrace-example-output/wall-clock.txt'...
    [omnitrace] Outputting 'omnitrace-example-output/wall-clock.json'...
 
-If the ``OMNITRACE_USE_PID`` option is enabled, then running a non-MPI executable 
+If the ``OMNITRACE_USE_PID`` option is enabled, then running a non-MPI executable
 with a PID of ``63453`` results in the following output:
 
 .. code-block:: shell
@@ -58,7 +58,7 @@ Metadata
 ========================================
 
 Omnitrace outputs a ``metadata.json`` file. This metadata file contains
-information about the settings, environment variables, output files, and info 
+information about the settings, environment variables, output files, and info
 about the system and the run, as follows:
 
 * Hardware cache sizes
@@ -240,14 +240,14 @@ Metadata JSON Sample
 Configuring the Omnitrace output
 ========================================
 
-Omnitrace includes a core set of options for controlling the format 
+Omnitrace includes a core set of options for controlling the format
 and contents of the output files. For additional information, see the guide on
 :doc:`configuring runtime options <./configuring-runtime-options>`.
 
 Core configuration settings
 -----------------------------------
 
-.. csv-table:: 
+.. csv-table::
    :header: "Setting", "Value", "Description"
    :widths: 30, 30, 100
 
@@ -261,20 +261,20 @@ Core configuration settings
 Output prefix keys
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Output prefix keys have many uses but are most helpful when dealing with multiple 
+Output prefix keys have many uses but are most helpful when dealing with multiple
 profiling runs or large MPI jobs.
-They are included in Omnitrace because they were introduced into Timemory 
+They are included in Omnitrace because they were introduced into Timemory
 for `compile-time-perf <https://github.com/jrmadsen/compile-time-perf>`_.
-They are needed to create different output files for a generic wrapper around 
+They are needed to create different output files for a generic wrapper around
 compilation commands while still
 overwriting the output from the last time a file was compiled.
 
-When doing scaling studies and specifying options via the command line, 
+When doing scaling studies and specifying options via the command line,
 the recommended process is to
 use a common ``OMNITRACE_OUTPUT_PATH``, disable ``OMNITRACE_TIME_OUTPUT``,
 set ``OMNITRACE_OUTPUT_PREFIX="%argt%-"``, and let Omnitrace cleanly organize the output.
 
-.. csv-table:: 
+.. csv-table::
    :header: "String", "Encoding"
    :widths: 20, 120
 
@@ -311,16 +311,22 @@ set ``OMNITRACE_OUTPUT_PREFIX="%argt%-"``, and let Omnitrace cleanly organize th
 .. note::
 
    In any output prefix key which contains a ``/`` character, the ``/`` characters
-   are replaced with ``_`` and any leading underscores are stripped. For example, 
-   an ``%arg0%`` of ``/usr/bin/foo`` translates to ``usr_bin_foo``. Additionally, any ``%arg<N>%`` keys which 
+   are replaced with ``_`` and any leading underscores are stripped. For example,
+   an ``%arg0%`` of ``/usr/bin/foo`` translates to ``usr_bin_foo``. Additionally, any ``%arg<N>%`` keys which
    do not have a command line argument at position ``<N>`` are ignored.
 
 Perfetto output
 ========================================
 
-Use the ``OMNITRACE_OUTPUT_FILE`` to specify a specific location. If this is an 
+Use the ``OMNITRACE_OUTPUT_FILE`` to specify a specific location. If this is an
 absolute path, then all ``OMNITRACE_OUTPUT_PATH`` and similar
-settings are ignored. Visit `ui.perfetto.dev <https://ui.perfetto.dev>`_ and open this file.
+settings are ignored. Visit `ui.perfetto.dev <https://ui.perfetto.dev>`_ and open
+this file.
+
+.. important::
+   Perfetto validation is done with trace_processor v46.0 as there is a known issue with v47.0.
+   If you are experiencing problems viewing your trace in the latest version of `Perfetto <http://ui.perfetto.dev>`_,
+   then try using `Perfetto UI v46.0 <https://ui.perfetto.dev/v46.0-35b3d9845/#!/>`_.
 
 .. image:: ../data/omnitrace-perfetto.png
    :alt: Visualization of a performance graph in Perfetto
@@ -349,20 +355,20 @@ Use ``omnitrace-avail --components --filename`` to view the base filename for ea
    | sampling_wall_clock             |     true      | sampling_wall_clock    |
    |---------------------------------|---------------|------------------------|
 
-The ``OMNITRACE_COLLAPSE_THREADS`` and ``OMNITRACE_COLLAPSE_PROCESSES`` settings are 
-only valid when full `MPI support is enabled <../install/install.html#mpi-support-within-omnitrace>`_. 
-When they are set, Timemory combines the per-thread and per-rank data (respectively) of 
+The ``OMNITRACE_COLLAPSE_THREADS`` and ``OMNITRACE_COLLAPSE_PROCESSES`` settings are
+only valid when full `MPI support is enabled <../install/install.html#mpi-support-within-omnitrace>`_.
+When they are set, Timemory combines the per-thread and per-rank data (respectively) of
 identical call stacks.
 
-The ``OMNITRACE_FLAT_PROFILE`` setting removes all call stack hierarchy. 
+The ``OMNITRACE_FLAT_PROFILE`` setting removes all call stack hierarchy.
 Using ``OMNITRACE_FLAT_PROFILE=ON`` in combination
-with ``OMNITRACE_COLLAPSE_THREADS=ON`` is a useful configuration for identifying 
+with ``OMNITRACE_COLLAPSE_THREADS=ON`` is a useful configuration for identifying
 min/max measurements regardless of the calling context.
-The ``OMNITRACE_TIMELINE_PROFILE`` setting (with ``OMNITRACE_FLAT_PROFILE=OFF``) effectively 
+The ``OMNITRACE_TIMELINE_PROFILE`` setting (with ``OMNITRACE_FLAT_PROFILE=OFF``) effectively
 generates similar data to that found
-in Perfetto. Enabling timeline and flat profiling effectively generates 
+in Perfetto. Enabling timeline and flat profiling effectively generates
 similar data to ``strace``. However, while Timemory generally
-requires significantly less memory than Perfetto, this is not the case in timeline 
+requires significantly less memory than Perfetto, this is not the case in timeline
 mode, so use this setting with caution.
 
 Timemory text output
@@ -381,11 +387,11 @@ The truncation settings be changed through the ``OMNITRACE_MAX_WIDTH`` setting.
 Timemory text output example
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-In the following example, the ``NN`` field in ``|NN>>>`` is the thread ID. If MPI support is enabled, 
+In the following example, the ``NN`` field in ``|NN>>>`` is the thread ID. If MPI support is enabled,
 this becomes ``|MM|NN>>>`` where ``MM`` is the rank.
-If ``OMNITRACE_COLLAPSE_THREADS=ON`` and ``OMNITRACE_COLLAPSE_PROCESSES=ON`` are configured, 
+If ``OMNITRACE_COLLAPSE_THREADS=ON`` and ``OMNITRACE_COLLAPSE_PROCESSES=ON`` are configured,
 neither the ``MM`` nor the ``NN`` are present unless the
-component explicitly sets type traits. Type traits specify that the data is only 
+component explicitly sets type traits. Type traits specify that the data is only
 relevant per-thread or per-process, such as the ``thread_cpu_clock`` clock component.
 
 .. code-block:: shell
@@ -573,15 +579,15 @@ relevant per-thread or per-process, such as the ``thread_cpu_clock`` clock compo
 Timemory JSON output
 -------------------------------------------------------------------------
 
-Timemory represents the data within the JSON output in two forms: 
+Timemory represents the data within the JSON output in two forms:
 a flat structure and a hierarchical structure.
 The flat JSON data represents the data similar to the text files, where the hierarchical information
 is represented by the indentation of the ``prefix`` field and the ``depth`` field.
-The hierarchical JSON contains additional information with respect 
+The hierarchical JSON contains additional information with respect
 to inclusive and exclusive values. However,
 its structure must be processed using recursion. This section of the JSON output supports analysis
 by `hatchet <https://github.com/hatchet/hatchet>`_.
-All the data entries for the flat structure are in a single JSON array. It is easier to 
+All the data entries for the flat structure are in a single JSON array. It is easier to
 write a simple Python script for post-processing using this format than with the hierarchical structure.
 
 .. note::
@@ -929,7 +935,7 @@ Timemory JSON output Python post-processing example
                      )
                   )
 
-The result of applying this script to the corresponding JSON output from the :ref:`text-output-example-label` 
+The result of applying this script to the corresponding JSON output from the :ref:`text-output-example-label`
 section is as follows:
 
 .. code-block:: shell
