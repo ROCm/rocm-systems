@@ -62,8 +62,13 @@ RdcRocpLib::RdcRocpLib()
 
   status = rdc_module_init_(0);
   if (status != RDC_ST_OK) {
-    RDC_LOG(RDC_ERROR, "Fail to init librdc_rocp.so:" << rdc_status_string(status)
-                                                      << ". ROCP related function will not work.");
+    if (status == RDC_ST_DISABLED_MODULE) {
+      RDC_LOG(RDC_INFO, "Module: librdc_rocp.so is intentionally disabled!");
+    } else {
+      RDC_LOG(RDC_ERROR,
+              "Fail to init librdc_rocp.so:" << rdc_status_string(status)
+                                             << ". ROCP related function will not work.");
+    }
     return;
   }
 

@@ -23,6 +23,7 @@ THE SOFTWARE.
 #include <dirent.h>
 #include <gtest/gtest.h>
 
+#include <cstdlib>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -190,6 +191,9 @@ static int startRDCD(std::string* rdcd_path, char* envp[]) {
 }
 int main(int argc, char** argv, char* envp[]) {
   ::testing::InitGoogleTest(&argc, argv);
+  // disable ROCProfiler because its RDC plugin implementation does not work
+  // with GTest
+  setenv("RDC_DISABLE_ROCP", "yes", 0);
 
   RDCTstGlobals settings;
   int ret;

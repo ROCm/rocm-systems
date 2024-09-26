@@ -79,6 +79,7 @@ typedef enum {
                             //!<   but none was found
   RDC_ST_PERM_ERROR,        //!< Insufficient permission to complete
                             //!<   operation
+  RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
 
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;

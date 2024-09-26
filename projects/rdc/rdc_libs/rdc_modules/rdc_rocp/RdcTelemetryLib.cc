@@ -38,7 +38,32 @@ THE SOFTWARE.
 
 std::unique_ptr<amd::rdc::RdcRocpBase> rocp_p;
 
+bool is_rocp_disabled() {
+  const char* value = std::getenv("RDC_DISABLE_ROCP");
+  if (value == nullptr) return false;
+
+  std::string value_str = value;
+  std::transform(value_str.begin(), value_str.end(), value_str.begin(),
+                 [](unsigned char c) { return std::tolower(c); });
+
+  const std::vector<const char*> positive_list = {"yes", "true", "1", "on", "y", "t"};
+
+  return std::any_of(positive_list.begin(), positive_list.end(),
+                     [&value_str](const char* val) { return value_str == val; });
+}
+
 rdc_status_t rdc_module_init(uint64_t flags) {
+  if (is_rocp_disabled()) {
+    // rocprofiler does NOT work in gtest.
+    // GTest starts up multiple instances of the progam under test,
+    // however HSA does not allow for multiple instances. Since hsa_init() is called at the very
+    // top of RdcRocpBase constructor - easiest to disable it alltogether when RDC_DISABLE_ROCP is
+    // set.
+    //
+    // We cannot rely on GTEST_DECLARE_bool_ variable because RDC is compiled
+    // before the tests are. Utilize an env var instead.
+    return RDC_ST_DISABLED_MODULE;
+  }
   rocp_p = std::unique_ptr<amd::rdc::RdcRocpBase>(new amd::rdc::RdcRocpBase);
   return RDC_ST_OK;
 }
