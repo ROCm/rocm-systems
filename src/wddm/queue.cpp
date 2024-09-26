@@ -989,9 +989,11 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
 
   while (true) {
     if (!queue->wptr_queue_.empty()) {
+      std::unique_lock<std::mutex> lock(queue->wptr_queue_lock_);
       uint64_t start = queue->wptr_queue_.front().first;
       uint64_t end = queue->wptr_queue_.front().second;
       queue->wptr_queue_.pop();
+      lock.unlock();
       debug_print("SDMA: wptr %lx %lx\n", start, end);
 
       SDMA_PKT_POLL_REGMEM* poll_pkt = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(queue->cmdbuf_addr + queue->WrapIntoRocrRing(start));
@@ -1081,7 +1083,10 @@ SDMAQueue::~SDMAQueue() {
 void SDMAQueue::RingDoorbell() {
   debug_print("SDMA: ringdoorbell %#llx %#llx\n", wptr_pre_, wptr_next_);
 
-  wptr_queue_.emplace(wptr_pre_, wptr_next_);
+  {
+    std::lock_guard<std::mutex> lock(wptr_queue_lock_);
+    wptr_queue_.emplace(wptr_pre_, wptr_next_);
+  }
   thread_cond_.notify_one();
   wptr_pre_ = wptr_next_;
 }

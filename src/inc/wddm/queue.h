@@ -285,6 +285,7 @@ private:
   uint64_t rptr_next;
   uint64_t doorbell_;
   std::queue<std::pair<uint64_t, uint64_t>> wptr_queue_;
+  std::mutex wptr_queue_lock_;
   uint64_t ib_size;
   uint64_t ib_start_addr;
 
