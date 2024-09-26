@@ -625,15 +625,15 @@ typedef struct {
  * This union is used to identify various memory partitioning settings.
  */
 typedef union {
-    struct nps_flags_ {
-        uint32_t nps1_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-        uint32_t nps2_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-        uint32_t nps4_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-        uint32_t nps8_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
-        uint32_t reserved :28;
-    } amdsmi_nps_flags_t;
+  struct nps_flags_ {
+    uint32_t nps1_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+    uint32_t nps2_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+    uint32_t nps4_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+    uint32_t nps8_cap :1;  // bool 1 = true; 0 = false; Max uint32 means unsupported
+    uint32_t reserved :28;
+  } amdsmi_nps_flags_t;
 
-    uint32_t nps_cap_mask;
+  uint32_t nps_cap_mask;
 } amdsmi_nps_caps_t;
 
 /**

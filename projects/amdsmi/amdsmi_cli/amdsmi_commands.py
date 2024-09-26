@@ -64,7 +64,7 @@ class AMDSMICommands():
 
             if len(self.device_handles) == 0:
                 # No GPU's found post amdgpu driver initialization
-                logging.error('Unable to detect any GPU devices, check amdgpu version and module status')
+                logging.error('Unable to detect any GPU devices, check amdgpu version and module status (sudo modprobe amdgpu)')
                 exit_flag = True
 
         if self.helpers.is_amd_hsmp_initialized():
@@ -73,7 +73,7 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DRV):
-                    logging.info('Unable to get CPU devices, amd_hsmp driver not loaded')
+                    logging.info('Unable to detect any CPU devices, check amd_hsmp version and module status (sudo modprobe amd_hsmp)')
                 else:
                     raise e
 
@@ -83,13 +83,13 @@ class AMDSMICommands():
             except amdsmi_exception.AmdSmiLibraryException as e:
                 if e.err_code in (amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_INIT,
                                 amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_DRV):
-                    logging.info('Unable to get CORE devices, amd_hsmp driver not loaded')
+                    logging.info('Unable to get CORE devices, amd_hsmp driver not loaded (sudo modprobe amd_hsmp)')
                 else:
                     raise e
 
             if len(self.cpu_handles) == 0 and len(self.core_handles) == 0:
                 # No CPU's found post amd_hsmp driver initialization
-                logging.error('Unable to detect any CPU devices, check amd_hsmp version and module status')
+                logging.error('Unable to detect any CPU devices, check amd_hsmp version and module status (sudo modprobe amd_hsmp)')
                 exit_flag = True
 
         if exit_flag:

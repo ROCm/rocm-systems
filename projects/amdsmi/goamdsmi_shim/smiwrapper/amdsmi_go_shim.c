@@ -39,13 +39,10 @@
 #include <stdint.h>
 #include <string.h>
 #include "amdsmi_go_shim.h"
-#ifdef AMDSMI_BUILD
 #include <amd_smi/amdsmi.h>
-#endif
 #include <unistd.h>
 #define nullptr ((void*)0)
 
-#ifdef AMDSMI_BUILD
 #define MAX_SOCKET_ACROSS_SYSTEM         4
 #define CPU_0                            0
 #define GPU_SENSOR_0                     0
@@ -94,15 +91,6 @@ goamdsmi_status_t is_file_present(const char* driver_name, const char* file_name
     return GOAMDSMI_STATUS_FAILURE;
 }
 
-goamdsmi_status_t go_shim_amdsmi_present()
-{
-    if((GOAMDSMI_STATUS_SUCCESS == is_file_present(AMDSMI_DRIVER_NAME, AMDSMI_LIB_FILE)) || (GOAMDSMI_STATUS_SUCCESS == is_file_present(AMDSMI_DRIVER_NAME, AMDSMI_LIB64_FILE)))
-    {
-        return GOAMDSMI_STATUS_SUCCESS;
-    }
-    return GOAMDSMI_STATUS_FAILURE;
-}
-
 goamdsmi_status_t check_amdgpu_driver()
 {
     return is_file_present(AMDGPU_DRIVER_NAME, AMDGPU_INITSTATE_FILE);
@@ -143,13 +131,6 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
         }
     }
 
-#if 0
-    if(GOAMDSMI_STATUS_FAILURE == go_shim_amdsmi_present())
-    {
-        if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, Failed, AMDSMI not present in the System, missing \"%s\" (or) \"%s\"\n", AMDSMI_LIB_FILE, AMDSMI_LIB64_FILE);}
-        return GOAMDSMI_STATUS_FAILURE;
-    }
-#endif
 
     if ((GOAMDSMI_STATUS_SUCCESS == check_amdgpu_driver()) && (GOAMDSMI_STATUS_SUCCESS == check_hsmp_driver())) 
     {
@@ -693,42 +674,3 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind)
         
     return gpu_memory_total;
 }
-#else
-////////////////////////////////////////////////------------CPU------------////////////////////////////////////////////////
-bool goamdsmi_cpu_init()                                           {return false;}
-uint32_t goamdsmi_cpu_threads_per_core_get()                       {return GOAMDSMI_VALUE_0;}
-uint32_t goamdsmi_cpu_number_of_threads_get()                      {return GOAMDSMI_VALUE_0;}
-uint32_t goamdsmi_cpu_number_of_sockets_get()                      {return GOAMDSMI_VALUE_0;}
-uint64_t goamdsmi_cpu_core_energy_get(uint32_t thread_index)       {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_cpu_socket_energy_get(uint32_t socket_index)     {return GOAMDSMI_UINT64_MAX;}
-uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_index)    {return GOAMDSMI_UINT32_MAX;}
-uint32_t goamdsmi_cpu_socket_power_get(uint32_t socket_index)      {return GOAMDSMI_UINT32_MAX;}
-uint32_t goamdsmi_cpu_socket_power_cap_get(uint32_t socket_index)  {return GOAMDSMI_UINT32_MAX;}
-uint32_t goamdsmi_cpu_core_boostlimit_get(uint32_t thread_index)   {return GOAMDSMI_UINT32_MAX;}
-
-////////////////////////////////////////////////------------GPU------------////////////////////////////////////////////////
-bool goamdsmi_gpu_init()                                           {return false;}
-bool goamdsmi_gpu_shutdown()                                       {return false;}
-uint32_t goamdsmi_gpu_num_monitor_devices()                        {return GOAMDSMI_VALUE_0;}
-char* goamdsmi_gpu_dev_name_get(uint32_t dv_ind)                   {return NULL;}
-uint16_t goamdsmi_gpu_dev_id_get(uint32_t dv_ind)                  {return GOAMDSMI_UINT16_MAX;}
-uint64_t goamdsmi_gpu_dev_pci_id_get(uint32_t dv_ind)              {return GOAMDSMI_UINT64_MAX;}
-char* goamdsmi_gpu_dev_vendor_name_get(uint32_t dv_ind)            {return NULL;}
-char* goamdsmi_gpu_dev_vbios_version_get(uint32_t dv_ind)          {return NULL;}
-uint64_t goamdsmi_gpu_dev_power_cap_get(uint32_t dv_ind)           {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_dev_power_get(uint32_t dv_ind)               {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_dev_temp_metric_get(uint32_t dv_ind, uint32_t sensor, uint32_t metric)    {return GOAMDSMI_UINT64_MAX;}
-uint32_t goamdsmi_gpu_dev_overdrive_level_get(uint32_t dv_ind)     {return GOAMDSMI_UINT32_MAX;}
-uint32_t goamdsmi_gpu_dev_mem_overdrive_level_get(uint32_t dv_ind) {return GOAMDSMI_UINT32_MAX;}
-uint32_t goamdsmi_gpu_dev_perf_level_get(uint32_t dv_ind)          {return GOAMDSMI_UINT32_MAX;}
-uint64_t goamdsmi_gpu_dev_gpu_clk_freq_get_sclk(uint32_t dv_ind)           {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_dev_gpu_clk_freq_get_mclk(uint32_t dv_ind)           {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_od_volt_freq_range_min_get_sclk(uint32_t dv_ind)     {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_od_volt_freq_range_min_get_mclk(uint32_t dv_ind)     {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_od_volt_freq_range_max_get_sclk(uint32_t dv_ind)     {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_od_volt_freq_range_max_get_mclk(uint32_t dv_ind)     {return GOAMDSMI_UINT64_MAX;}
-uint32_t goamdsmi_gpu_dev_gpu_busy_percent_get(uint32_t dv_ind)            {return GOAMDSMI_UINT32_MAX;}
-uint64_t goamdsmi_gpu_dev_gpu_memory_busy_percent_get(uint32_t dv_ind)     {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_dev_gpu_memory_usage_get(uint32_t dv_ind)            {return GOAMDSMI_UINT64_MAX;}
-uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind)            {return GOAMDSMI_UINT64_MAX;}
-#endif

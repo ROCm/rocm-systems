@@ -218,7 +218,7 @@ amdsmi_status_t smi_amdgpu_get_power_cap(amd::smi::AMDSmiGPUDevice* device, int 
     if (!device->check_if_drm_is_supported()) {
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
-    constexpr int DATA_SIZE = 10;
+    constexpr int DATA_SIZE = 16;
     char val[DATA_SIZE];
     std::string fullpath;
     amdsmi_status_t ret = AMDSMI_STATUS_SUCCESS;

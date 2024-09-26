@@ -6,19 +6,11 @@
 #
 cmake_minimum_required(VERSION 3.5.0)
 
-message("*******************************************************************")
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                  CMake AMD goamdsmi_shim Library                  ")
-message("*******************************************************************")
-
-option(WITH_AMDSMI       "Support unified cpu and gpu"		ON)
+message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 
 set(AMDSMI_DIR "" CACHE PATH "path to amdsmi installation")
-
-if(WITH_AMDSMI)
-add_definitions(-DAMDSMI_BUILD)
-add_definitions(-DENABLE_ESMI_LIB)
-#include(deps/SetupAmdsmi.cmake)
-endif()
 
 if(ENABLE_DEBUG_LEVEL)
 add_definitions(-DENABLE_DEBUG_LEVEL=${ENABLE_DEBUG_LEVEL})
@@ -50,11 +42,6 @@ set(${GOAMDSMI_SHIM}_VERSION_BUILD "0")
 message("SOVERSION: ${SO_VERSION_STRING}")
 
 project(${GOAMDSMI_SHIM_TARGET})
-
-# Create a configure file to get version info from within library
-configure_file(
-	"${PROJECT_SOURCE_DIR}/${GOAMDSMI_SHIM_TARGET}Config.in"
-	"${PROJECT_SOURCE_DIR}/include/${GOAMDSMI_SHIM_TARGET}Config.h")
 
 if (NOT DEFINED CPACK_PACKAGE_VENDOR)
     set(CPACK_PACKAGE_VENDOR "AMD")
@@ -109,11 +96,9 @@ add_library(${GOAMDSMI_SHIM_TARGET} SHARED
 
 target_link_libraries(${GOAMDSMI_SHIM_TARGET} pthread rt m)
 
-if(WITH_AMDSMI)
-    target_link_libraries(${GOAMDSMI_SHIM_TARGET} amd_smi)
-    target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib)
-    target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib64)
-endif()
+target_link_libraries(${GOAMDSMI_SHIM_TARGET} amd_smi)
+target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib)
+target_link_libraries(${GOAMDSMI_SHIM_TARGET} -L${AMDSMI_DIR}/lib64)
 
 ## Set the VERSION and SOVERSION values
 set_property(TARGET ${GOAMDSMI_SHIM_TARGET} PROPERTY

@@ -148,29 +148,9 @@ do_install_amdsmi_python_lib() {
     return
   fi
 
-  # upgrade pip if it's an ancient version
-  # otherwise amdsmi install will fail
-  local pip_version
-  pip_version=$(python3 -m pip --version | grep -Eo '^[^\ ]+ ([0-9]+)' | grep -Eo '[0-9]+$')
-  if [[ "$pip_version" -lt 19 ]]; then
-    echo "Detected ancient pip version ($pip_version)... Upgrading..."
-    python3 -m pip install --upgrade pip --quiet --disable-pip-version-check
-  fi
-  unset pip_version
-
-  # Check PyYAML dependency, typically should not execute
-  local pyyaml_version
-  pyyaml_version=$(python3 -m pip show pyyaml | grep -Po '(?<=Version: )[0-9]')
-  if [[ "$pyyaml_version" -lt 3 ]]; then
-    echo "Detected ancient pyyaml version ($pyyaml_version)... Upgrading..."
-    python3 -m pip install 'PyYAML>=5.1' --quiet --disable-pip-version-check --ignore-installed
-  fi
-  unset pyyaml_version
-
   # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
   local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
-  python3 -m pip install "$python_lib_path" --quiet --disable-pip-version-check --no-build-isolation
-
+  python3 -m pip install "$python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index
   export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
   export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"
 
