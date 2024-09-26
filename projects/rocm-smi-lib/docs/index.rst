@@ -6,17 +6,19 @@
 ROCm System Management Interface (ROCm SMI) library
 ****************************************************
 
-The ROCm System Management Interface library, or ROCm SMI library, is part of the ROCm software stack. It is a C library for Linux that provides a user space interface for applications to monitor and control GPU applications.
+The ROCm SMI library, is part of the ROCm software stack. It is a C++ library for Linux that provides a user space interface for applications to monitor and control GPU applications.
 
-For more information, refer to `GitHub. <https://github.com/ROCm/rocm_smi_lib>`_
+For more information, refer to `<https://github.com/ROCm/rocm_smi_lib>`__.
 
-.. NOTE::
+.. note::
 
-The AMD System Management Interface Library (AMD SMI library) is a C library for Linux that provides a user space interface for applications to monitor and control AMD devices. This library will replace rocm_smi_lib over time. We recommend that users transition to the AMD SMI library.
+   The AMD System Management Interface Library (AMD SMI) is a successor to ROCm SMI. It is a unified system management
+   interface tool that provides a user space interface for applications to monitor and control GPU applications and gives
+   users the ability to query information about drivers and GPUs on the system.
 
-For more information, refer to the `GitHub repository <https://github.com/ROCm/amdsmi>`_.
+   AMD SMI will replace ``rocm_smi_lib`` over time. We recommend that users transition to AMD SMI.
 
-
+   For more information, refer to `<https://github.com/ROCm/amdsmi>`__ and the :doc:`AMD SMI documentation <amdsmi:index>`.
 
 .. grid:: 2
   :gutter: 3

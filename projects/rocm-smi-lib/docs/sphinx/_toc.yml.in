@@ -14,9 +14,7 @@ subtrees:
 - caption: How to 
   entries:
   - file: how-to/use-cpp
-    title: Use C++ in ROCm SMI 
   - file: how-to/use-python
-    title: Use Python in ROCm SMI 
     
 - caption: API Reference
   entries:
