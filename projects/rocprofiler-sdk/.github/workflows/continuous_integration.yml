@@ -64,6 +64,7 @@ jobs:
         echo "LD_LIBRARY_PATH: ${LD_LIBRARY_PATH}"
         which-realpath() { echo -e "\n$1 resolves to $(realpath $(which $1))"; echo "$($(which $1) --version &> /dev/stdout | head -n 1)"; }
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
+        cat /opt/rocm/.info/version
         ls -la
 
     - name: Exclude PC Sampling Tests
