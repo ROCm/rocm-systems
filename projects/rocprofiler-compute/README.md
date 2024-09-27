@@ -50,11 +50,11 @@ style reference is provided below for convenience:
                   Keith Lowery and
                   Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {AMDResearch/omniperf: v2.0.1 (03 June 2024)},
-  month        = june,
+  title        = {AMDResearch/omniperf: v2.1.0 (27 Sept 2024)},
+  month        = sept,
   year         = 2024,
   publisher    = {Zenodo},
-  version      = {v2.0.1},
+  version      = {v2.1.0},
   doi          = {10.5281/zenodo.7314631},
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }
