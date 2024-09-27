@@ -142,6 +142,29 @@ typedef enum {
  */
 #define AMDSMI_MAX_NUM_JPEG 32
 
+/**
+ * @brief This should match AMDSMI_MAX_NUM_XCC;
+ * XCC - Accelerated Compute Core, the collection of compute units,
+ * ACE (Asynchronous Compute Engines), caches,
+ * and global resources organized as one unit.
+ *
+ * Refer to amd.com documentation for more detail:
+ * https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
+ */
+#define AMDSMI_MAX_NUM_XCC 8
+
+/**
+ * @brief This should match AMDSMI_MAX_NUM_XCP;
+ * XCP - Accelerated Compute Processor,
+ * also referred to as the Graphics Compute Partitions.
+ * Each physical gpu could have a maximum of 8 separate partitions
+ * associated with each (depending on ASIC support).
+ *
+ * Refer to amd.com documentation for more detail:
+ * https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
+ */
+#define AMDSMI_MAX_NUM_XCP 8
+
 /* string format */
 #define AMDSMI_TIME_FORMAT "%02d:%02d:%02d.%03d"
 #define AMDSMI_DATE_FORMAT "%04d-%02d-%02d:%02d:%02d:%02d.%03d"
@@ -154,10 +177,10 @@ typedef enum {
 #define AMDSMI_LIB_VERSION_YEAR 24
 
 //! Major version should be changed for every header change (adding/deleting APIs, changing names, fields of structures, etc.)
-#define AMDSMI_LIB_VERSION_MAJOR 6
+#define AMDSMI_LIB_VERSION_MAJOR 7
 
 //! Minor version should be updated for each API change, but without changing headers
-#define AMDSMI_LIB_VERSION_MINOR 5
+#define AMDSMI_LIB_VERSION_MINOR 0
 
 //! Release version should be set to 0 as default and can be updated by the PMs for each CSP point release
 #define AMDSMI_LIB_VERSION_RELEASE 0
@@ -503,7 +526,25 @@ typedef struct {
   uint32_t vram_used;
   uint32_t reserved[2];
 } amdsmi_vram_usage_t;
-
+/**
+ * @brief This structure hold violation status information.
+ *        Note: for MI3x asics and higher, older ASICs will show unsupported.
+ */
+typedef struct {
+  uint64_t reference_timestamp;  //!< Represents CPU timestamp in microseconds (uS)
+  uint64_t violation_timestamp;  //!< Violation time in milliseconds (ms)
+  uint64_t per_prochot_thrm;     //!< Processor hot violation % (greater than 0% is a violation); Max uint64 means unsupported
+  uint64_t per_ppt_pwr;          //!< PVIOL; Package Power Tracking (PPT) violation % (greater than 0% is a violation); Max uint64 means unsupported
+  uint64_t per_socket_thrm;      //!< TVIOL; Socket thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
+  uint64_t per_vr_thrm;          //!< Voltage regulator violation % (greater than 0% is a violation); Max uint64 means unsupported
+  uint64_t per_hbm_thrm;         //!< High Bandwidth Memory (HBM) thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
+  uint8_t active_prochot_thrm;   //!< Processor hot violation; 1 = active 0 = not active; Max uint8 means unsupported
+  uint8_t active_ppt_pwr;        //!< Package Power Tracking (PPT) violation; 1 = active 0 = not active; Max uint8 means unsupported
+  uint8_t active_socket_thrm;    //!< Socket thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
+  uint8_t active_vr_thrm;        //!< Voltage regulator violation; 1 = active 0 = not active; Max uint8 means unsupported
+  uint8_t active_hbm_thrm;       //!< High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
+  uint64_t reserved[24];         // Reserved for new violation info
+} amdsmi_violation_status_t;
 typedef struct {
   amdsmi_range_t supported_freq_range;
   amdsmi_range_t current_freq_range;
@@ -544,7 +585,8 @@ typedef struct {
     uint64_t pcie_replay_roll_over_count; //!< total number of replay rollovers issued on the PCIe link
     uint64_t pcie_nak_sent_count;         //!< total number of NAKs issued on the PCIe link by the device
     uint64_t pcie_nak_received_count;     //!< total number of NAKs issued on the PCIe link by the receiver
-    uint64_t reserved[13];
+    uint32_t pcie_lc_perf_other_end_recovery_count;  //!< PCIe other end recovery counter
+    uint64_t reserved[12];
   } pcie_metric;
   uint64_t reserved[32];
 } amdsmi_pcie_info_t;
@@ -617,7 +659,8 @@ typedef struct {
 typedef struct {
   uint64_t kfd_id;  //< 0xFFFFFFFFFFFFFFFF if not supported
   uint32_t node_id;  //< 0xFFFFFFFF if not supported
-  uint32_t reserved[13];
+  uint32_t current_partition_id;  //< 0xFFFFFFFF if not supported
+  uint32_t reserved[12];
 } amdsmi_kfd_info_t;
 
 /**
@@ -651,8 +694,9 @@ typedef struct {
 } amdsmi_accelerator_partition_profile_t;
 
 typedef enum {
-  AMDSMI_LINK_TYPE_PCIE,
+  AMDSMI_LINK_TYPE_INTERNAL,
   AMDSMI_LINK_TYPE_XGMI,
+  AMDSMI_LINK_TYPE_PCIE,
   AMDSMI_LINK_TYPE_NOT_APPLICABLE,
   AMDSMI_LINK_TYPE_UNKNOWN
 } amdsmi_link_type_t;
@@ -1382,6 +1426,21 @@ typedef struct {
   /// \endcond
 } amd_metrics_table_header_t;
 
+
+/**
+ * @brief The following structures hold the gpu statistics for a device.
+ */
+struct amdsmi_gpu_xcp_metrics_t {
+  /* Utilization Instantaneous (%) */
+  uint32_t gfx_busy_inst[AMDSMI_MAX_NUM_XCC];
+  uint16_t jpeg_busy[AMDSMI_MAX_NUM_JPEG];
+  uint16_t vcn_busy[AMDSMI_MAX_NUM_VCN];
+
+  /* Utilization Accumulated (%) */
+  uint64_t gfx_busy_acc[AMDSMI_MAX_NUM_XCC];
+};
+
+
 typedef struct {
   // TODO(amd) Doxygen documents
   // Note:  This structure is extended to fit the needs of different GPU metric
@@ -1401,6 +1460,7 @@ typedef struct {
   /*
    * v1.0 Base
    */
+
   // Temperature (C)
   uint16_t temperature_edge;
   uint16_t temperature_hotspot;
@@ -1493,10 +1553,10 @@ typedef struct {
   uint16_t xgmi_link_width;
   uint16_t xgmi_link_speed;
 
-  // PCIe accumulated bandwidth (GB/sec)
+  // PCIE accumulated bandwidth (GB/sec)
   uint64_t pcie_bandwidth_acc;
 
-  // PCIe instantaneous bandwidth (GB/sec)
+  // PCIE instantaneous bandwidth (GB/sec)
   uint64_t pcie_bandwidth_inst;
 
   // PCIE L0 to recovery state transition accumulated count
@@ -1508,20 +1568,20 @@ typedef struct {
   // PCIE replay rollover accumulated count
   uint64_t pcie_replay_rover_count_acc;
 
-  // XGMI accumulated data transfer size (KB)
+  // XGMI accumulated data transfer size(KiloBytes)
   uint64_t xgmi_read_data_acc[AMDSMI_MAX_NUM_XGMI_LINKS];
   uint64_t xgmi_write_data_acc[AMDSMI_MAX_NUM_XGMI_LINKS];
 
-  // Current clock frequencies (MHz)
+  // XGMI accumulated data transfer size(KiloBytes)
   uint16_t current_gfxclks[AMDSMI_MAX_NUM_GFX_CLKS];
   uint16_t current_socclks[AMDSMI_MAX_NUM_CLKS];
   uint16_t current_vclk0s[AMDSMI_MAX_NUM_CLKS];
   uint16_t current_dclk0s[AMDSMI_MAX_NUM_CLKS];
 
-   /*
+  /*
    * v1.5 additions
    */
-  // JPEG activity % per AID
+  // JPEG activity percent (encode/decode)
   uint16_t jpeg_activity[AMDSMI_MAX_NUM_JPEG];
 
   // PCIE NAK sent accumulated count
@@ -1529,6 +1589,59 @@ typedef struct {
 
   // PCIE NAK received accumulated count
   uint32_t pcie_nak_rcvd_count_acc;
+
+  /*
+   * v1.6 additions
+   */
+  /* Accumulation cycle counter */
+  uint64_t accumulation_counter;
+
+  /**
+   * Accumulated throttler residencies
+   */
+  uint64_t prochot_residency_acc;
+  /**
+   * Accumulated throttler residencies
+   *
+   * Prochot (thermal) - PPT (power)
+   * Package Power Tracking (PPT) violation % (greater than 0% is a violation);
+   * aka PVIOL
+   *
+   * Ex. PVIOL/TVIOL calculations
+   * Where A and B are measurments recorded at prior points in time.
+   * Typically A is the earlier measured value and B is the latest measured value.
+   *
+   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
+   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+  */
+  uint64_t ppt_residency_acc;
+  /**
+   * Accumulated throttler residencies
+   *
+   * Socket (thermal)	-
+   * Socket thermal violation % (greater than 0% is a violation);
+   * aka TVIOL
+   *
+   * Ex. PVIOL/TVIOL calculations
+   * Where A and B are measurments recorded at prior points in time.
+   * Typically A is the earlier measured value and B is the latest measured value.
+   *
+   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
+   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+  */
+  uint64_t socket_thm_residency_acc;
+  uint64_t vr_thm_residency_acc;
+  uint64_t hbm_thm_residency_acc;
+
+  /* Number of current partition */
+  uint16_t num_partition;
+
+  /* XCP (Graphic Cluster Partitions) metrics stats */
+  struct amdsmi_gpu_xcp_metrics_t xcp_stats[AMDSMI_MAX_NUM_XCP];
+
+  /* PCIE other end recovery counter */
+  uint32_t pcie_lc_perf_other_end_recovery;
+
   /// \endcond
 } amdsmi_gpu_metrics_t;
 
@@ -1584,6 +1697,14 @@ typedef struct {
     uint64_t sdma_usage;      //!< SDMA usage in microseconds
     uint32_t cu_occupancy;    //!< Compute Unit usage in percent
 } amdsmi_process_info_t;
+
+
+typedef struct {
+    uint32_t count;
+    amdsmi_processor_handle processor_list[AMDSMI_MAX_DEVICES];
+    uint64_t reserved[15];
+} amdsmi_topology_nearest_t;
+
 
 //! Place-holder "variant" for functions that have don't have any variants,
 //! but do have monitors or sensors.
@@ -5013,6 +5134,23 @@ amdsmi_get_clock_info(amdsmi_processor_handle processor_handle, amdsmi_clk_type_
 amdsmi_status_t
 amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle, amdsmi_vram_usage_t *info);
 
+/**
+ *  @brief          Returns the violations for a processor
+ *
+ *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
+ *
+ *  @param[in]      processor_handle Device which to query
+ *
+ *
+ *  @param[in,out]  info Reference to all violation status details available.
+ *                  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t
+amdsmi_get_violation_status(amdsmi_processor_handle processor_handle,
+                            amdsmi_violation_status_t *info);
+
 
 /** @} End gpumon */
 
@@ -5096,6 +5234,35 @@ amdsmi_status_t
 amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor_handle, amdsmi_error_count_t *ec);
 
 /** @} End eccinfo */
+
+/**
+ *  @brief          Retrieve the set of GPUs that are nearest to a given device
+ *                  at a specific interconnectivity level.
+ *
+ *  @platform{gpu_bm_linux}  @platform{host}
+ *
+ *  @details        Once called topology_nearest_info will get populated with a list of
+ *                  all nearest devices for a given link_type. The list has a count of
+ *                  the number of devices found and their respective handles/identifiers.
+ *
+ *  @param[in]      processor_handle The identifier of the given device.
+ *
+ *  @param[in]      link_type The amdsmi_link_type_t level to search for nearest GPUs.
+ *
+ *  @param[in,out]  topology_nearest_info
+ *                  .count;
+ *                    - When zero, is set to the number of matching GPUs such that .device_list can
+ *                    be malloc'd.
+ *                    - When non-zero, .device_list will be filled with count number of processor_handle.
+ *
+ *  @param[out]     .device_list An array of processor_handle for GPUs found at level.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ */
+amdsmi_status_t
+amdsmi_get_link_topology_nearest(amdsmi_processor_handle processor_handle,
+                                 amdsmi_link_type_t link_type,
+                                 amdsmi_topology_nearest_t* topology_nearest_info);
 
 
 #ifdef ENABLE_ESMI_LIB

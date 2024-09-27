@@ -94,7 +94,8 @@ if __name__ == "__main__":
                                     amd_smi_commands.reset,
                                     amd_smi_commands.monitor,
                                     amd_smi_commands.rocm_smi,
-                                    amd_smi_commands.xgmi)
+                                    amd_smi_commands.xgmi,
+                                    amd_smi_commands.partition)
     try:
         try:
             argcomplete.autocomplete(amd_smi_parser)
@@ -128,7 +129,6 @@ if __name__ == "__main__":
             sys.tracebacklimit = 10
         else:
             sys.tracebacklimit = -1
-
         # Execute subcommands
         args.func(args)
     except amdsmi_cli_exceptions.AmdSmiException as e:

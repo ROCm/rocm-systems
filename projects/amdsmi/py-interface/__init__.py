@@ -106,6 +106,7 @@ from .amdsmi_interface import amdsmi_get_clock_info
 
 from .amdsmi_interface import amdsmi_get_pcie_info
 from .amdsmi_interface import amdsmi_get_gpu_bad_page_info
+from .amdsmi_interface import amdsmi_get_violation_status
 
 # # Process Information
 from .amdsmi_interface import amdsmi_get_gpu_process_list
@@ -216,6 +217,7 @@ from .amdsmi_interface import amdsmi_topo_get_link_type
 from .amdsmi_interface import amdsmi_topo_get_p2p_status
 from .amdsmi_interface import amdsmi_is_P2P_accessible
 from .amdsmi_interface import amdsmi_get_xgmi_info
+from .amdsmi_interface import amdsmi_get_link_topology_nearest
 
 # # Partition Functions
 from .amdsmi_interface import amdsmi_get_gpu_compute_partition
@@ -255,6 +257,7 @@ from .amdsmi_interface import AmdSmiFreqInd
 from .amdsmi_interface import AmdSmiXgmiStatus
 from .amdsmi_interface import AmdSmiMemoryPageStatus
 from .amdsmi_interface import AmdSmiIoLinkType
+from .amdsmi_interface import AmdSmiLinkType
 from .amdsmi_interface import AmdSmiUtilizationCounterType
 from .amdsmi_interface import AmdSmiProcessorType
 

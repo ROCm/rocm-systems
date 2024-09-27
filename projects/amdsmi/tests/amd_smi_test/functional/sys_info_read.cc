@@ -183,22 +183,26 @@ void TestSysInfoRead::Run(void) {
         }
     }
 
-    // kfd_id, node_id
+    // kfd_id, node_id, current_partition_id
     amdsmi_kfd_info_t kfd_info = {};
     err = amdsmi_get_gpu_kfd_info(processor_handles_[i], &kfd_info);
     if (err != AMDSMI_STATUS_SUCCESS) {
         EXPECT_EQ(kfd_info.kfd_id, std::numeric_limits<uint64_t>::max());
         EXPECT_EQ(kfd_info.node_id, std::numeric_limits<uint32_t>::max());
+        EXPECT_EQ(kfd_info.current_partition_id, std::numeric_limits<uint32_t>::max());
     } else {
           IF_VERB(STANDARD) {
             std::cout << "\t**KFD ID: " << std::dec
                       << kfd_info.kfd_id << "\n";
             std::cout << "\t**Node ID: " << std::dec
                       << kfd_info.node_id << "\n";
+            std::cout << "\t**Current Parition ID: " << std::dec
+                      << kfd_info.current_partition_id << "\n";
           }
           EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
           EXPECT_NE(kfd_info.kfd_id, std::numeric_limits<uint64_t>::max());
           EXPECT_NE(kfd_info.node_id, std::numeric_limits<uint32_t>::max());
+          EXPECT_NE(kfd_info.current_partition_id, std::numeric_limits<uint32_t>::max());
     }
     // Verify api support checking functionality is working
     err = amdsmi_get_gpu_kfd_info(processor_handles_[i], nullptr);

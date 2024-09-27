@@ -150,8 +150,32 @@ class AMDSMILogger():
                 table_values += string_value.ljust(14)
             elif key == "link_type":
                 table_values += string_value.ljust(10)
+            elif key == "memory":
+                table_values += string_value.ljust(8)
+            elif key == "accelerator_type":
+                table_values += string_value.ljust(18)
+            elif key == "partition_id":
+                table_values += string_value.ljust(14)
+            elif key == "accelerator_profile_index":
+                table_values += string_value.ljust(27)
+            elif key == "profile_index":
+                table_values += string_value.ljust(15)
+            elif key == "memory_partition_caps":
+                table_values += string_value.ljust(23)
+            elif key == "num_partitions":
+                table_values += string_value.ljust(16)
+            elif key == "num_resources":
+                table_values += string_value.ljust(15)
+            elif key == "resource_index":
+                table_values += string_value.ljust(16)
+            elif key == "resource_type":
+                table_values += string_value.ljust(15)
+            elif key == "resource_instances":
+                table_values += string_value.ljust(20)
+            elif key == "resources_shared":
+                table_values += string_value.ljust(18)
             elif key == "RW":
-                table_values += " " + string_value.ljust(52)
+                table_values += string_value.ljust(52)
             elif key == "process_list":
                 #Add an additional padding between the first instance of GPU and NAME
                 table_values += '  '

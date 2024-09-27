@@ -3906,6 +3906,54 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_link_topology_nearest
+
+Description: Retrieve the set of GPUs that are nearest to a given device
+             at a specific interconnectivity level.
+
+Input parameters:
+* `processor_handle` The identifier of the given device.
+* `link_type` The AmdSmiLinkType level to search for nearest devices
+
+Output: Dictionary holding the following fields.
+* `count` number of nearest devices found based on given topology level
+* `processor_list` list of all nearest device handlers found
+
+
+Exceptions that can be thrown by `amdsmi_get_link_topology_nearest` function:
+
+* `AmdSmiLibraryException`
+
+Example:
+
+```python
+try:
+    amdsmi_init()
+
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs found on machine")
+        exit()
+    else:
+        print(amdsmi_get_gpu_device_uuid(devices[0]))
+
+    nearest_gpus = amdsmi_get_link_topology_nearest(devices[0], AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE)
+    if (nearest_gpus['count']) == 0:
+        print("No nearest GPUs found on machine")
+    else:
+        print("Nearest GPUs")
+        for gpu in nearest_gpus['processor_list']:
+            print(amdsmi_get_gpu_device_uuid(gpu))
+
+except AmdSmiException as e:
+    print(e)
+finally:
+    try:
+        amdsmi_shut_down()
+    except AmdSmiException as e:
+        print(e)
+```
+
 ## CPU APIs
 
 ### amdsmi_get_processor_info

@@ -17,6 +17,8 @@ include/amd_smi/amd_smi64Config.h
 include/amd_smi/amd_smiConfig.h
 rocm_smi/include/rocm_smi/rocm_smi64Config.h
 docs/*.pdf
+goamdsmi_shim/include/goamdsmi_shimConfig.h
+goamdsmi_shim/include/goamdsmi_shim64Config.h
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

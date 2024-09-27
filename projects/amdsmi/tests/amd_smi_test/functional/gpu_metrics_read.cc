@@ -46,7 +46,10 @@
 #include <stdint.h>
 #include <stddef.h>
 
+#include <algorithm>
 #include <iostream>
+#include <iterator>
+#include <sstream>
 #include <string>
 #include <map>
 
@@ -54,6 +57,7 @@
 #include "amd_smi/amdsmi.h"
 #include "gpu_metrics_read.h"
 #include "../test_common.h"
+#include "rocm_smi/rocm_smi_utils.h"
 
 
 TestGpuMetricsRead::TestGpuMetricsRead() : TestBase() {
@@ -87,6 +91,7 @@ void TestGpuMetricsRead::Close() {
 }
 
 
+
 void TestGpuMetricsRead::Run(void) {
   amdsmi_status_t err;
 
@@ -101,9 +106,10 @@ void TestGpuMetricsRead::Run(void) {
     std::cout << "Device #" << std::to_string(i) << "\n";
 
     IF_VERB(STANDARD) {
+        std::cout << "\n\n";
         std::cout << "\t**GPU METRICS: Using static struct (Backwards Compatibility):\n";
     }
-    amdsmi_gpu_metrics_t smu;
+    amdsmi_gpu_metrics_t smu = {};
     err =  amdsmi_get_gpu_metrics_info(processor_handles_[i], &smu);
     const char *status_string;
     amdsmi_status_code_to_string(err, &status_string);
@@ -122,250 +128,250 @@ void TestGpuMetricsRead::Run(void) {
       IF_VERB(STANDARD) {
           std::cout << "METRIC TABLE HEADER:\n";
           std::cout << "structure_size=" << std::dec
-          << static_cast<int>(smu.common_header.structure_size) << '\n';
+          << static_cast<uint16_t>(smu.common_header.structure_size) << "\n";
           std::cout << "format_revision=" << std::dec
-          << static_cast<int>(smu.common_header.format_revision) << '\n';
+          << static_cast<uint16_t>(smu.common_header.format_revision) << "\n";
           std::cout << "content_revision=" << std::dec
-          << static_cast<int>(smu.common_header.content_revision) << '\n';
+          << static_cast<uint16_t>(smu.common_header.content_revision) << "\n";
+
           std::cout << "\n";
           std::cout << "TIME STAMPS (ns):\n";
-          std::cout << std::dec << "system_clock_counter="
-          << smu.system_clock_counter << '\n';
-          std::cout << "firmware_timestamp (10ns resolution)=" << std::dec
-          << smu.firmware_timestamp << '\n';
+          std::cout << std::dec << "system_clock_counter=" << smu.system_clock_counter << "\n";
+          std::cout << "firmware_timestamp (10ns resolution)=" << std::dec << smu.firmware_timestamp
+                    << "\n";
+
           std::cout << "\n";
           std::cout << "TEMPERATURES (C):\n";
-          std::cout << std::dec << "temperature_edge= "
-          << static_cast<uint16_t>(smu.temperature_edge) << '\n';
-          std::cout << std::dec << "temperature_hotspot= "
-          << static_cast<uint16_t>(smu.temperature_hotspot) << '\n';
-          std::cout << std::dec << "temperature_mem= "
-          << static_cast<uint16_t>(smu.temperature_mem) << '\n';
-          std::cout << std::dec << "temperature_vrgfx= "
-          << static_cast<uint16_t>(smu.temperature_vrgfx) << '\n';
-          std::cout << std::dec << "temperature_vrsoc= "
-          << static_cast<uint16_t>(smu.temperature_vrsoc) << '\n';
-          std::cout << std::dec << "temperature_vrmem= "
-          << static_cast<uint16_t>(smu.temperature_vrmem) << '\n';
-          for (int i = 0; i < AMDSMI_NUM_HBM_INSTANCES; ++i) {
-            std::cout << "temperature_hbm[" << i << "]= " << std::dec
-            << static_cast<uint16_t>(smu.temperature_hbm[i]) << '\n';
-          }
+          std::cout << std::dec << "temperature_edge= " << smu.temperature_edge << "\n";
+          std::cout << std::dec << "temperature_hotspot= " << smu.temperature_hotspot << "\n";
+          std::cout << std::dec << "temperature_mem= " << smu.temperature_mem << "\n";
+          std::cout << std::dec << "temperature_vrgfx= " << smu.temperature_vrgfx << "\n";
+          std::cout << std::dec << "temperature_vrsoc= " << smu.temperature_vrsoc << "\n";
+          std::cout << std::dec << "temperature_vrmem= " << smu.temperature_vrmem << "\n";
+          std::cout << "temperature_hbm = [";
+          std::copy(std::begin(smu.temperature_hbm),
+                    std::end(smu.temperature_hbm),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
+          std::cout << std::dec << "]\n";
+
           std::cout << "\n";
           std::cout << "UTILIZATION (%):\n";
-          std::cout << std::dec << "average_gfx_activity="
-          << static_cast<uint16_t>(smu.average_gfx_activity) << '\n';
-          std::cout << std::dec << "average_umc_activity="
-          << static_cast<uint16_t>(smu.average_umc_activity) << '\n';
-          std::cout << std::dec << "average_mm_activity="
-          << static_cast<uint16_t>(smu.average_mm_activity) << '\n';
+          std::cout << std::dec << "average_gfx_activity=" << smu.average_gfx_activity << "\n";
+          std::cout << std::dec << "average_umc_activity=" << smu.average_umc_activity << "\n";
+          std::cout << std::dec << "average_mm_activity=" << smu.average_mm_activity << "\n";
           std::cout << std::dec << "vcn_activity= [";
-          uint16_t size = static_cast<uint16_t>(
-            sizeof(smu.vcn_activity)/sizeof(smu.vcn_activity[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint16_t>(smu.vcn_activity[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint16_t>(smu.vcn_activity[i]);
-            }
-          }
+          std::copy(std::begin(smu.vcn_activity),
+                    std::end(smu.vcn_activity),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
+
           std::cout << "\n";
           std::cout << std::dec << "jpeg_activity= [";
-          size = static_cast<uint16_t>(
-            sizeof(smu.jpeg_activity)/sizeof(smu.jpeg_activity[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint16_t>(smu.jpeg_activity[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint16_t>(smu.jpeg_activity[i]);
-            }
-          }
+          std::copy(std::begin(smu.jpeg_activity),
+                    std::end(smu.jpeg_activity),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
+
           std::cout << "\n";
           std::cout << "POWER (W)/ENERGY (15.259uJ per 1ns):\n";
-          std::cout << std::dec << "average_socket_power="
-          << static_cast<uint16_t>(smu.average_socket_power) << '\n';
-          std::cout << std::dec << "current_socket_power="
-          << static_cast<uint16_t>(smu.current_socket_power) << '\n';
-          std::cout << std::dec << "energy_accumulator="
-          << static_cast<uint16_t>(smu.energy_accumulator) << '\n';
+          std::cout << std::dec << "average_socket_power=" << smu.average_socket_power << "\n";
+          std::cout << std::dec << "current_socket_power=" << smu.current_socket_power << "\n";
+          std::cout << std::dec << "energy_accumulator=" << smu.energy_accumulator << "\n";
+
           std::cout << "\n";
           std::cout << "AVG CLOCKS (MHz):\n";
-          std::cout << std::dec << "average_gfxclk_frequency="
-          << static_cast<uint16_t>(smu.average_gfxclk_frequency) << '\n';
-          std::cout << std::dec << "average_gfxclk_frequency="
-          << static_cast<uint16_t>(smu.average_gfxclk_frequency) << '\n';
-          std::cout << std::dec << "average_uclk_frequency="
-          << static_cast<uint16_t>(smu.average_uclk_frequency) << '\n';
-          std::cout << std::dec << "average_vclk0_frequency="
-          << static_cast<uint16_t>(smu.average_vclk0_frequency) << '\n';
-          std::cout << std::dec << "average_dclk0_frequency="
-          << static_cast<uint16_t>(smu.average_dclk0_frequency) << '\n';
-          std::cout << std::dec << "average_vclk1_frequency="
-          << static_cast<uint16_t>(smu.average_vclk1_frequency) << '\n';
-          std::cout << std::dec << "average_dclk1_frequency="
-          << static_cast<uint16_t>(smu.average_dclk1_frequency) << '\n';
+          std::cout << std::dec << "average_gfxclk_frequency=" << smu.average_gfxclk_frequency
+                    << "\n";
+          std::cout << std::dec << "average_gfxclk_frequency=" << smu.average_gfxclk_frequency
+                    << "\n";
+          std::cout << std::dec << "average_uclk_frequency=" << smu.average_uclk_frequency << "\n";
+          std::cout << std::dec << "average_vclk0_frequency=" << smu.average_vclk0_frequency
+                    << "\n";
+          std::cout << std::dec << "average_dclk0_frequency=" << smu.average_dclk0_frequency
+                    << "\n";
+          std::cout << std::dec << "average_vclk1_frequency=" << smu.average_vclk1_frequency
+                    << "\n";
+          std::cout << std::dec << "average_dclk1_frequency=" << smu.average_dclk1_frequency
+                    << "\n";
+
           std::cout << "\n";
           std::cout << "CURRENT CLOCKS (MHz):\n";
-          std::cout << std::dec << "current_gfxclk="
-          << smu.current_gfxclk << '\n';
+          std::cout << std::dec << "current_gfxclk=" << smu.current_gfxclk << "\n";
           std::cout << std::dec << "current_gfxclks= [";
-          size = static_cast<uint16_t>(
-            sizeof(smu.current_gfxclks)/sizeof(smu.current_gfxclks[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_gfxclks[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_gfxclks[i]);
-            }
-          }
+          std::copy(std::begin(smu.current_gfxclks),
+                    std::end(smu.current_gfxclks),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
-          std::cout << std::dec << "current_socclk="
-          << smu.current_socclk << '\n';
+
+          std::cout << std::dec << "current_socclk=" << smu.current_socclk << "\n";
           std::cout << std::dec << "current_socclks= [";
-          size = static_cast<uint16_t>(
-            sizeof(smu.current_socclks)/sizeof(smu.current_socclks[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_socclks[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_socclks[i]);
-            }
-          }
+          std::copy(std::begin(smu.current_socclks),
+                    std::end(smu.current_socclks),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
-          std::cout << std::dec << "current_uclk="
-          << static_cast<uint16_t>(smu.current_uclk) << '\n';
-          std::cout << std::dec << "current_vclk0="
-          << static_cast<uint16_t>(smu.current_vclk0) << '\n';
+
+          std::cout << std::dec << "current_uclk=" << smu.current_uclk << "\n";
+          std::cout << std::dec << "current_vclk0=" << smu.current_vclk0 << "\n";
           std::cout << std::dec << "current_vclk0s= [";
-          size = static_cast<uint16_t>(
-            sizeof(smu.current_vclk0s)/sizeof(smu.current_vclk0s[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_vclk0s[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_vclk0s[i]);
-            }
-          }
+          std::copy(std::begin(smu.current_vclk0s),
+                    std::end(smu.current_vclk0s),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
-          std::cout << std::dec << "current_dclk0="
-          << smu.current_dclk0 << '\n';
+
+          std::cout << std::dec << "current_dclk0=" << smu.current_dclk0 << "\n";
           std::cout << std::dec << "current_dclk0s= [";
-          size = static_cast<uint16_t>(
-            sizeof(smu.current_dclk0s)/sizeof(smu.current_dclk0s[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_dclk0s[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint16_t>(smu.current_dclk0s[i]);
-            }
-          }
+          std::copy(std::begin(smu.current_dclk0s),
+                    std::end(smu.current_dclk0s),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
-          std::cout << std::dec << "current_vclk1="
-          << static_cast<uint16_t>(smu.current_vclk1) << '\n';
-          std::cout << std::dec << "current_dclk1="
-          << static_cast<uint16_t>(smu.current_dclk1) << '\n';
+
+          std::cout << std::dec << "current_vclk1=" << smu.current_vclk1 << "\n";
+          std::cout << std::dec << "current_dclk1=" << smu.current_dclk1 << "\n";
+
           std::cout << "\n";
           std::cout << "TROTTLE STATUS:\n";
-          std::cout << std::dec << "throttle_status="
-          << static_cast<uint32_t>(smu.throttle_status) << '\n';
+          std::cout << std::dec << "throttle_status=" << smu.throttle_status << "\n";
+
           std::cout << "\n";
           std::cout << "FAN SPEED:\n";
-          std::cout << std::dec << "current_fan_speed="
-          << static_cast<uint16_t>(smu.current_fan_speed) << '\n';
+          std::cout << std::dec << "current_fan_speed=" << smu.current_fan_speed << "\n";
+
           std::cout << "\n";
           std::cout << "LINK WIDTH (number of lanes) /SPEED (0.1 GT/s):\n";
-          std::cout << "pcie_link_width="
-          << std::to_string(smu.pcie_link_width) << '\n';
-          std::cout << "pcie_link_speed="
-          << std::to_string(smu.pcie_link_speed) << '\n';
-          std::cout << "xgmi_link_width="
-          << std::to_string(smu.xgmi_link_width) << '\n';
-          std::cout << "xgmi_link_speed="
-          << std::to_string(smu.xgmi_link_speed) << '\n';
+          std::cout << "pcie_link_width=" << smu.pcie_link_width << "\n";
+          std::cout << "pcie_link_speed=" << smu.pcie_link_speed << "\n";
+          std::cout << "xgmi_link_width=" << smu.xgmi_link_width << "\n";
+          std::cout << "xgmi_link_speed=" << smu.xgmi_link_speed << "\n";
 
           std::cout << "\n";
           std::cout << "Utilization Accumulated(%):\n";
-          std::cout << "gfx_activity_acc="
-          << std::dec << static_cast<uint32_t>(smu.gfx_activity_acc) << '\n';
-          std::cout << "mem_activity_acc="
-          << std::dec << static_cast<uint32_t>(smu.mem_activity_acc)  << '\n';
+          std::cout << "gfx_activity_acc=" << std::dec << smu.gfx_activity_acc << "\n";
+          std::cout << "mem_activity_acc=" << std::dec << smu.mem_activity_acc  << "\n";
 
           std::cout << "\n";
           std::cout << "XGMI ACCUMULATED DATA TRANSFER SIZE (KB):\n";
           std::cout << std::dec << "xgmi_read_data_acc= [";
-          size = static_cast<uint16_t>(
-            sizeof(smu.xgmi_read_data_acc)/sizeof(smu.xgmi_read_data_acc[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_read_data_acc[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_read_data_acc[i]);
-            }
-          }
+          std::copy(std::begin(smu.xgmi_read_data_acc),
+                    std::end(smu.xgmi_read_data_acc),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
+
           std::cout << std::dec << "xgmi_write_data_acc= [";
-          size = static_cast<uint16_t>(
-            sizeof(smu.xgmi_write_data_acc)/sizeof(smu.xgmi_write_data_acc[0]));
-          for (uint16_t i= 0; i < size; i++) {
-            if (i+1 < size) {
-              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_write_data_acc[i]) << ", ";
-            } else {
-              std::cout << std::dec << static_cast<uint64_t>(smu.xgmi_write_data_acc[i]);
-            }
-          }
+          std::copy(std::begin(smu.xgmi_write_data_acc),
+                    std::end(smu.xgmi_write_data_acc),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
 
           // Voltage (mV)
-          std::cout << "voltage_soc = "
-          << std::dec << static_cast<uint16_t>(smu.voltage_soc) << "\n";
-          std::cout << "voltage_soc = "
-          << std::dec << static_cast<uint16_t>(smu.voltage_gfx) << "\n";
-          std::cout << "voltage_mem = "
-          << std::dec << static_cast<uint16_t>(smu.voltage_mem) << "\n";
+          std::cout << "voltage_soc = " << std::dec << smu.voltage_soc << "\n";
+          std::cout << "voltage_gfx = " << std::dec << smu.voltage_gfx << "\n";
+          std::cout << "voltage_mem = " << std::dec << smu.voltage_mem << "\n";
 
-          std::cout << "indep_throttle_status = "
-          << std::dec << static_cast<uint64_t>(smu.indep_throttle_status) << "\n";
+          std::cout << "indep_throttle_status = " << std::dec << smu.indep_throttle_status << "\n";
 
           // Clock Lock Status. Each bit corresponds to clock instance
-          std::cout << "gfxclk_lock_status (in hex) = "
-          << std::hex << static_cast<uint32_t>(smu.gfxclk_lock_status) << std::dec <<"\n";
+          std::cout << "gfxclk_lock_status (in hex) = " << std::hex
+                    << smu.gfxclk_lock_status << std::dec <<"\n";
 
           // Bandwidth (GB/sec)
-          std::cout << "pcie_bandwidth_acc=" << std::dec
-          << static_cast<uint64_t>(smu.pcie_bandwidth_acc) << "\n";
-          std::cout << "pcie_bandwidth_inst=" << std::dec
-          << static_cast<uint64_t>(smu.pcie_bandwidth_inst) << "\n";
+          std::cout << "pcie_bandwidth_acc=" << std::dec << smu.pcie_bandwidth_acc << "\n";
+          std::cout << "pcie_bandwidth_inst=" << std::dec << smu.pcie_bandwidth_inst << "\n";
 
           // Counts
-          std::cout << "pcie_l0_to_recov_count_acc= " << std::dec
-          << static_cast<uint64_t>(smu.pcie_l0_to_recov_count_acc) << "\n";
-          std::cout << "pcie_replay_count_acc= " << std::dec
-          << static_cast<uint64_t>(smu.pcie_replay_count_acc) << "\n";
+          std::cout << "pcie_l0_to_recov_count_acc= " << std::dec << smu.pcie_l0_to_recov_count_acc
+                    << "\n";
+          std::cout << "pcie_replay_count_acc= " << std::dec << smu.pcie_replay_count_acc << "\n";
           std::cout << "pcie_replay_rover_count_acc= " << std::dec
-          << static_cast<uint64_t>(smu.pcie_replay_rover_count_acc) << "\n";
-          std::cout << "pcie_nak_rcvd_count_acc= " << std::dec
-          << static_cast<uint32_t>(smu.pcie_nak_rcvd_count_acc) << "\n";
-          std::cout << "pcie_replay_rover_count_acc= " << std::dec
-          << static_cast<uint64_t>(smu.pcie_replay_rover_count_acc) << "\n";
+                    << smu.pcie_replay_rover_count_acc << "\n";
+          std::cout << "pcie_nak_sent_count_acc= " << std::dec << smu.pcie_nak_sent_count_acc
+                    << "\n";
+          std::cout << "pcie_nak_rcvd_count_acc= " << std::dec << smu.pcie_nak_rcvd_count_acc
+                    << "\n";
 
-          // Check for constant changes/refresh metrics
+          // Accumulation cycle counter
+          // Accumulated throttler residencies
           std::cout << "\n";
+          std::cout << "RESIDENCY ACCUMULATION / COUNTER:\n";
+          std::cout << "accumulation_counter = " << std::dec << smu.accumulation_counter << "\n";
+          std::cout << "prochot_residency_acc = " << std::dec << smu.prochot_residency_acc << "\n";
+          std::cout << "ppt_residency_acc = " << std::dec << smu.ppt_residency_acc << "\n";
+          std::cout << "socket_thm_residency_acc = " << std::dec << smu.socket_thm_residency_acc
+                    << "\n";
+          std::cout << "vr_thm_residency_acc = " << std::dec << smu.vr_thm_residency_acc
+                    << "\n";
+          std::cout << "hbm_thm_residency_acc = " << std::dec << smu.hbm_thm_residency_acc << "\n";
+
+          // Number of current partitions
+          std::cout << "num_partition = " << std::dec << smu.num_partition << "\n";
+
+          // PCIE other end recovery counter
+          std::cout << "pcie_lc_perf_other_end_recovery = "
+                    << std::dec << smu.pcie_lc_perf_other_end_recovery << "\n";
+
+          std::cout << std::dec << "xcp_stats.gfx_busy_inst = \n";
+          auto xcp = 0;
+          for (auto& row : smu.xcp_stats) {
+            std::cout << "XCP[" << xcp << "] = " << "[ ";
+            std::copy(std::begin(row.gfx_busy_inst),
+                    std::end(row.gfx_busy_inst),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
+            std::cout << " ]\n";
+            xcp++;
+          }
+
+          xcp = 0;
+          std::cout << std::dec << "xcp_stats.jpeg_busy = \n";
+          for (auto& row : smu.xcp_stats) {
+            std::cout << "XCP[" << xcp << "] = " << "[ ";
+            std::copy(std::begin(row.jpeg_busy),
+                    std::end(row.jpeg_busy),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
+            std::cout << " ]\n";
+            xcp++;
+          }
+
+          xcp = 0;
+          std::cout << std::dec << "xcp_stats.vcn_busy = \n";
+          for (auto& row : smu.xcp_stats) {
+            std::cout << "XCP[" << xcp << "] = " << "[ ";
+            std::copy(std::begin(row.vcn_busy),
+                    std::end(row.vcn_busy),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
+            std::cout << " ]\n";
+            xcp++;
+          }
+
+          xcp = 0;
+          std::cout << std::dec << "xcp_stats.gfx_busy_acc = \n";
+          for (auto& row : smu.xcp_stats) {
+            std::cout << "XCP[" << xcp << "] = " << "[ ";
+            std::copy(std::begin(row.gfx_busy_acc),
+                    std::end(row.gfx_busy_acc),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
+            std::cout << " ]\n";
+            xcp++;
+          }
+
+          std::cout << "\n\n";
           std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
           constexpr uint16_t kMAX_ITER_TEST = 10;
-          amdsmi_gpu_metrics_t gpu_metrics_check;
+          amdsmi_gpu_metrics_t gpu_metrics_check = {};
           for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-            amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
-            std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
+              amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+              std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: "
+                        << gpu_metrics_check.firmware_timestamp << "\n";
           }
 
           std::cout << "\n";
           for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
-            amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
-            std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.system_clock_counter << "\n";
+              amdsmi_get_gpu_metrics_info(processor_handles_[i], &gpu_metrics_check);
+              std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: "
+                        << gpu_metrics_check.system_clock_counter << "\n";
           }
+
           std::cout << "\n";
+          std::cout << " ** Note: Values MAX'ed out "
+                    << "(UINTX MAX are unsupported for the version in question) ** " << "\n\n";
       }
     }
 
@@ -377,5 +383,13 @@ void TestGpuMetricsRead::Run(void) {
     amdsmi_status_code_to_string(err, &status_string);
     std::cout << "\t\t** amdsmi_get_gpu_metrics_info(nullptr check): " << status_string << "\n";
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+
+    // TODO(AMD_SMI_team): add xcd_counter_get for amd smi
+    // auto temp_xcd_counter_value = uint16_t(0);
+    // err = rsmi_dev_metrics_xcd_counter_get(i, &temp_xcd_counter_value);
+    // if (err != RSMI_STATUS_NOT_SUPPORTED) {
+    //   CHK_ERR_ASRT(err);
+    // }
   }
 }

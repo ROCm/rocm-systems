@@ -937,6 +937,22 @@ int main() {
               << gpu_metrics.pcie_replay_count_acc << "\n";
     std::cout << "\t**.pcie_replay_rover_count_acc : " << std::dec
               << gpu_metrics.pcie_replay_rover_count_acc << "\n";
+    std::cout << "\t**.accumulation_counter : " << std::dec
+              << gpu_metrics.accumulation_counter << "\n";
+    std::cout << "\t**.prochot_residency_acc : " << std::dec
+              << gpu_metrics.prochot_residency_acc << "\n";
+    std::cout << "\t**.ppt_residency_acc : " << std::dec
+              << gpu_metrics.ppt_residency_acc << "\n";
+    std::cout << "\t**.socket_thm_residency_acc : " << std::dec
+              << gpu_metrics.socket_thm_residency_acc << "\n";
+    std::cout << "\t**.vr_thm_residency_acc : " << std::dec
+              << gpu_metrics.vr_thm_residency_acc << "\n";
+    std::cout << "\t**.hbm_thm_residency_acc : " << std::dec
+              << gpu_metrics.hbm_thm_residency_acc << "\n";
+    std::cout  << "\t**.num_partition: " << std::dec
+               << gpu_metrics.num_partition << "\n";
+    std::cout << "\t**.pcie_lc_perf_other_end_recovery: "
+              << gpu_metrics.pcie_lc_perf_other_end_recovery << "\n";
 
     std::cout << "\t**.temperature_hbm[] : " << std::dec << "\n";
     for (const auto& temp : gpu_metrics.temperature_hbm) {
@@ -976,6 +992,50 @@ int main() {
     std::cout << "\t**.current_dclk0s[] : " << std::dec << "\n";
     for (const auto& dclk : gpu_metrics.current_dclk0s) {
       std::cout << "\t  -> " << std::dec << dclk << "\n";
+    }
+
+    std::cout << std::dec << "xcp_stats.gfx_busy_inst = \n";
+    auto xcp = 0;
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.gfx_busy_inst),
+                std::end(row.gfx_busy_inst),
+                amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.jpeg_busy = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.jpeg_busy),
+                std::end(row.jpeg_busy),
+                amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.vcn_busy = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.vcn_busy),
+                std::end(row.vcn_busy),
+                amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.gfx_busy_acc = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+        std::copy(std::begin(row.gfx_busy_acc),
+                  std::end(row.gfx_busy_acc),
+                  amd::smi::make_ostream_joiner(&std::cout, ", "));
+        std::cout << " ]\n";
+        xcp++;
     }
 
     std::cout << "\n";

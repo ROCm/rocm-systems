@@ -456,4 +456,58 @@ void TestHWTopologyRead::Run(void) {
     std::cout << std::endl;
   }
   std::cout << std::endl;
+
+  char *topology_link_type_str[] = {
+      "AMDSMI_LINK_TYPE_INTERNAL",
+      "AMDSMI_LINK_TYPE_XGMI",
+      "AMDSMI_LINK_TYPE_PCIE",
+      "AMDSMI_LINK_TYPE_NOT_APPLICABLE",
+      "AMDSMI_LINK_TYPE_UNKNOWN",
+  };
+
+  auto ret(amdsmi_status_t::AMDSMI_STATUS_SUCCESS);
+  for (uint32_t dv_ind_src = 0; dv_ind_src < num_devices; dv_ind_src++) {
+    std::cout <<"** Nearest GPUs for GPU" << dv_ind_src << " **" << "\n";
+    for (uint32_t topo_link_type = AMDSMI_LINK_TYPE_INTERNAL; topo_link_type <= AMDSMI_LINK_TYPE_UNKNOWN; topo_link_type++) {
+
+
+      /*
+       *  Note:   We should get AMDSMI_STATUS_INVAL for the first call with amdsmi_topology_nearest_t = nullptr
+       */
+      ret = amdsmi_get_link_topology_nearest(processor_handles_[dv_ind_src],
+                                             static_cast<amdsmi_link_type_t>(topo_link_type),
+                                             nullptr);
+      ASSERT_EQ(ret, amdsmi_status_t::AMDSMI_STATUS_INVAL);
+
+
+      /*
+       *
+       */
+      auto topology_nearest_info = amdsmi_topology_nearest_t();
+      ret = amdsmi_get_link_topology_nearest(processor_handles_[dv_ind_src],
+                                             static_cast<amdsmi_link_type_t>(topo_link_type),
+                                             &topology_nearest_info);
+      if (ret != amdsmi_status_t::AMDSMI_STATUS_SUCCESS) {
+        continue;
+      }
+
+      std::cout <<"Nearest GPUs found for Link Type: " << topology_link_type_str[topo_link_type] << "\n";
+      if (topology_nearest_info.count > 0) {
+        for (uint32_t k = 0; k < topology_nearest_info.count; k++) {
+          amdsmi_bdf_t bdf = {};
+          ret = amdsmi_get_gpu_device_bdf(topology_nearest_info.processor_list[k], &bdf);
+          if (ret != AMDSMI_STATUS_SUCCESS) {
+            continue;
+          }
+
+          printf("\tGPU BDF %04lx:%02x:%02x.%d\n", bdf.domain_number,
+                bdf.bus_number, bdf.device_number, bdf.function_number);
+        }
+      }
+      else {
+        std::cout << "\tNot found" << "\n";
+      }
+    }
+    std::cout << "\n";
+  }
 }

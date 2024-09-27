@@ -225,7 +225,6 @@ class Device {
     void set_drm_render_minor(uint32_t minor) {drm_render_minor_ = minor;}
     static rsmi_dev_perf_level perfLvlStrToEnum(std::string s);
     uint64_t bdfid(void) const {return bdfid_;}
-    int get_partition_id() const {return (bdfid_ >> 28) & 0xf; }  // location_id[31:28]
     void set_bdfid(uint64_t val) {bdfid_ = val;}
     pthread_mutex_t *mutex(void) {return mutex_.ptr;}
     evt::dev_evt_grp_set_t* supported_event_groups(void) {
@@ -261,6 +260,8 @@ class Device {
     AMGpuMetricsPublicLatestTupl_t dev_copy_internal_to_external_metrics();
 
     static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
+    void set_smi_device_id(uint32_t device_id) { m_device_id = device_id; }
+    void set_smi_partition_id(uint32_t partition_id) { m_partition_id = partition_id; }
     static const char* get_type_string(DevInfoTypes type);
 
  private:
@@ -298,6 +299,8 @@ class Device {
     GpuMetricsBasePtr m_gpu_metrics_ptr;
     AMDGpuMetricsHeader_v1_t m_gpu_metrics_header;
     uint64_t m_gpu_metrics_updated_timestamp;
+    uint32_t m_device_id;
+    uint32_t m_partition_id;
 };
 
 

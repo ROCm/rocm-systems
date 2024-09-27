@@ -1071,6 +1071,41 @@ typedef struct metrics_table_header_t metrics_table_header_t;
  */
 #define RSMI_MAX_NUM_GFX_CLKS 8
 
+/**
+ * @brief This should match kRSMI_MAX_NUM_XCC;
+ * XCC - Accelerated Compute Core, the collection of compute units,
+ * ACE (Asynchronous Compute Engines), caches,
+ * and global resources organized as one unit.
+ *
+ * Refer to amd.com documentation for more detail:
+ * https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
+ */
+#define RSMI_MAX_NUM_XCC 8
+
+/**
+ * @brief This should match kRSMI_MAX_NUM_XCP;
+ * XCP - Accelerated Compute Processor,
+ * also referred to as the Graphics Compute Partitions.
+ * Each physical gpu could have a maximum of 8 separate partitions
+ * associated with each (depending on ASIC support).
+ *
+ * Refer to amd.com documentation for more detail:
+ * https://www.amd.com/content/dam/amd/en/documents/instinct-tech-docs/white-papers/amd-cdna-3-white-paper.pdf
+ */
+#define RSMI_MAX_NUM_XCP 8
+
+/**
+ * @brief The following structures hold the gpu statistics for a device.
+ */
+struct amdgpu_xcp_metrics_t {
+  /* Utilization Instantaneous (%) */
+  uint32_t gfx_busy_inst[RSMI_MAX_NUM_XCC];
+  uint16_t jpeg_busy[RSMI_MAX_NUM_JPEG_ENGS];
+  uint16_t vcn_busy[RSMI_MAX_NUM_VCNS];
+
+  /* Utilization Accumulated (%) */
+  uint64_t gfx_busy_acc[RSMI_MAX_NUM_XCC];
+};
 
 typedef struct {
   // TODO(amd) Doxygen documents
@@ -1221,6 +1256,57 @@ typedef struct {
   // PCIE NAK received accumulated count
   uint32_t pcie_nak_rcvd_count_acc;
 
+  /*
+   * v1.6 additions
+   */
+  /* Accumulation cycle counter */
+  uint64_t accumulation_counter;
+
+  /**
+   * Accumulated throttler residencies
+   */
+  uint64_t prochot_residency_acc;
+  /**
+   * Accumulated throttler residencies
+   *
+   * Prochot (thermal) - PPT (power)
+   * Package Power Tracking (PPT) violation % (greater than 0% is a violation);
+   * aka PVIOL
+   *
+   * Ex. PVIOL/TVIOL calculations
+   * Where A and B are measurments recorded at prior points in time.
+   * Typically A is the earlier measured value and B is the latest measured value.
+   *
+   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
+   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+  */
+  uint64_t ppt_residency_acc;
+  /**
+   * Accumulated throttler residencies
+   *
+   * Socket (thermal)	-
+   * Socket thermal violation % (greater than 0% is a violation);
+   * aka TVIOL
+   *
+   * Ex. PVIOL/TVIOL calculations
+   * Where A and B are measurments recorded at prior points in time.
+   * Typically A is the earlier measured value and B is the latest measured value.
+   *
+   * PVIOL % = (PptResidencyAcc (B) - PptResidencyAcc (A)) * 100/ (AccumulationCounter (B) - AccumulationCounter (A))
+   * TVIOL % = (SocketThmResidencyAcc (B) -  SocketThmResidencyAcc (A)) * 100 / (AccumulationCounter (B) - AccumulationCounter (A))
+  */
+  uint64_t socket_thm_residency_acc;
+  uint64_t vr_thm_residency_acc;
+  uint64_t hbm_thm_residency_acc;
+
+  /* Number of current partition */
+  uint16_t num_partition;
+
+  /* XCP (Graphic Cluster Partitions) metrics stats */
+  struct amdgpu_xcp_metrics_t xcp_stats[RSMI_MAX_NUM_XCP];
+
+  /* PCIE other end recovery counter */
+  uint32_t pcie_lc_perf_other_end_recovery;
 
   /// \endcond
 } rsmi_gpu_metrics_t;
@@ -3080,6 +3166,7 @@ rsmi_status_t rsmi_dev_reg_table_info_get(uint32_t dv_ind,
                       rsmi_reg_type_t reg_type,
                       rsmi_name_value_t** reg_metrics,
                       uint32_t *num_of_metrics);
+
 
 /**
  *  @brief This function sets the clock range information

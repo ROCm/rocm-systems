@@ -237,7 +237,20 @@ amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index,
         return amd::smi::rsmi_to_amdsmi_status(ret);
     }
 
+/**
+*  | Name         | Field   | KFD property       KFD -> PCIe ID (uint64_t)
+*  -------------- | ------- | ---------------- | ---------------------------- |
+*  | Domain       | [63:32] | "domain"         | (DOMAIN & 0xFFFFFFFF) << 32  |
+*  | Partition id | [31:28] | "location id"    | (LOCATION & 0xF0000000)      |
+*  | Reserved     | [27:16] | "location id"    | N/A                          |
+*  | Bus          | [15: 8] | "location id"    | (LOCATION & 0xFF00)          |
+*  | Device       | [ 7: 3] | "location id"    | (LOCATION & 0xF8)            |
+*  | Function     | [ 2: 0] | "location id"    | (LOCATION & 0x7)             |
+*/
+
     uint64_t domain = (bdfid >> 32) & 0xffffffff;
+    // may need to identify with partition_id in the future as well... TBD
+    uint64_t partition_id = (bdfid >> 28) & 0xf;
     uint64_t bus = (bdfid >> 8) & 0xff;
     uint64_t device_id = (bdfid >> 3) & 0x1f;
     uint64_t function = bdfid & 0x7;
@@ -246,8 +259,8 @@ amdsmi_status_t AMDSmiSystem::get_gpu_socket_id(uint32_t index,
     // represents a physical device.
     std::stringstream ss;
     ss << std::setfill('0') << std::uppercase << std::hex
-        << std::setw(4) << domain << ":" << std::setw(2) << bus << ":"
-        << std::setw(2) << device_id;
+       << std::setw(4) << domain << ":" << std::setw(2) << bus << ":"
+       << std::setw(2) << device_id;
     socket_id = ss.str();
     return AMDSMI_STATUS_SUCCESS;
 }

@@ -395,7 +395,6 @@ Monitor::setVoltSensorLabelMap(void) {
       volt_type_index_map_[t_type] = file_index;
       index_volt_type_map_.insert({file_index, t_type});
     }
-
     return 0;
   };
 

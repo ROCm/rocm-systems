@@ -71,7 +71,7 @@ class AMDSMIParser(argparse.ArgumentParser):
     """
     def __init__(self, version, list, static, firmware, bad_pages, metric,
                  process, profile, event, topology, set_value, reset, monitor,
-                 rocmsmi, xgmi):
+                 rocmsmi, xgmi, partition):
 
         # Helper variables
         self.helpers = AMDSMIHelpers()
@@ -117,7 +117,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Store possible subcommands & aliases for later errors
         self.possible_commands = ['version', 'list', 'static', 'firmware', 'ucode', 'bad-pages',
                                   'metric', 'process', 'profile', 'event', 'topology', 'set',
-                                  'reset', 'monitor', 'dmon', 'xgmi']
+                                  'reset', 'monitor', 'dmon', 'xgmi', 'partition']
 
         # Add all subparsers
         self._add_version_parser(self.subparsers, version)
@@ -135,6 +135,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         self._add_monitor_parser(self.subparsers, monitor)
         self._add_rocm_smi_parser(self.subparsers, rocmsmi)
         self._add_xgmi_parser(self.subparsers, xgmi)
+        self._add_partition_parser(self.subparsers, partition)
 
 
     def _not_negative_int(self, int_value):
@@ -758,6 +759,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         perf_level_help = "Current DPM performance level"
         xgmi_err_help = "XGMI error information since last read"
         energy_help = "Amount of energy consumed"
+        throttle_help = "Displays throttle accumulators; Only available for MI300 or newer ASICs"
 
         # Help text for Arguments only on Hypervisors
         schedule_help = "All scheduling information"
@@ -832,6 +834,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-l', '--perf-level', action='store_true', required=False, help=perf_level_help)
                 metric_parser.add_argument('-x', '--xgmi-err', action='store_true', required=False, help=xgmi_err_help)
                 metric_parser.add_argument('-E', '--energy', action='store_true', required=False, help=energy_help)
+                metric_parser.add_argument('-T', '--throttle', action='store_true', required=False, help=throttle_help)
 
             # Options to only display to Hypervisors
             if self.helpers.is_hypervisor():
@@ -1184,6 +1187,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         mem_usage_help = "Monitor memory usage in MB"
         pcie_bandwidth_help = "Monitor PCIe bandwidth in Mb/s"
         process_help = "Enable Process information table below monitor output"
+        violation_help = "Monitor power and thermal violation status (%%); Only available for MI300 or newer ASICs"
 
         # Create monitor subparser
         monitor_parser = subparsers.add_parser('monitor', help=monitor_help, description=monitor_subcommand_help, aliases=["dmon"])
@@ -1207,6 +1211,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-v', '--vram-usage', action='store_true', required=False, help=mem_usage_help)
         monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_bandwidth_help)
         monitor_parser.add_argument('-q', '--process', action='store_true', required=False, help=process_help)
+        monitor_parser.add_argument('-V', '--violation', action='store_true', required=False, help=violation_help)
 
 
     def _add_rocm_smi_parser(self, subparsers, func):
@@ -1280,6 +1285,40 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Optional Args
         xgmi_parser.add_argument('-m', '--metric', action='store_true', required=False, help=metrics_help)
+
+
+    def _add_partition_parser(self, subparsers, func):
+        if not self.helpers.is_amdgpu_initialized():
+            # The partition subcommand is only applicable to systems with amdgpu initialized
+            return
+
+        # Subparser help text
+        partition_help = "Displays partition information of the devices"
+        partition_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
+                                \nIf no partition argument is provided all partition information will be displayed."
+        partition_optionals_title = "partition arguments"
+
+        # Options help text
+        current_help = "display the current partition information"
+        memory_help = "display the current memory partition mode and capabilities"
+        accelerator_help = "display accelerator partition information"
+
+        # Create partition subparser
+        partition_parser = subparsers.add_parser('partition', help=partition_help, description=partition_subcommand_help)
+        partition_parser._optionals.title = partition_optionals_title
+        partition_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
+        partition_parser.set_defaults(func=func)
+
+        # Add Universal Arguments
+        self._add_device_arguments(partition_parser, required=False)
+
+        # Handle GPU Options
+        partition_parser.add_argument('-c', '--current', action='store_true', required=False, help=current_help)
+        partition_parser.add_argument('-m', '--memory', action='store_true', required=False, help=memory_help)
+        partition_parser.add_argument('-a', '--accelerator', action='store_true', required=False, help=accelerator_help)
+
+        # Add command modifiers to the bottom
+        self._add_command_modifiers(partition_parser)
 
 
     def error(self, message):
