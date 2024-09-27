@@ -117,7 +117,7 @@ static void free_properties(node_props_t *props, int size) {
  *		Use blank string, "", to count all.
  *	Return - number of sub-directories
  */
-static int num_subdirs(char *dirpath, char *prefix) {
+static int num_subdirs(char *dirpath, const char *prefix) {
   int count = 0;
   DIR *dirp;
   struct dirent *dir;
