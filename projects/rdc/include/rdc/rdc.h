@@ -79,6 +79,7 @@ typedef enum {
                             //!<   but none was found
   RDC_ST_PERM_ERROR,        //!< Insufficient permission to complete
                             //!<   operation
+  RDC_ST_DISABLED_MODULE,   //!< Attempted loading disabled module
 
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
@@ -124,7 +125,7 @@ typedef enum { INTEGER = 0, DOUBLE, STRING, BLOB } rdc_field_type_t;
 /**
  * @brief Max number of GPUs supported by RDC
  */
-#define RDC_MAX_NUM_DEVICES 16
+#define RDC_MAX_NUM_DEVICES 128
 
 /**
  * @brief The max fields in a field group

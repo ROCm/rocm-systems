@@ -19,6 +19,16 @@ Or read the concise guide under authentication/readme.txt
 
 RDC can run on AMD ROCm supported platforms, please refer to the [List of Supported Operating Systems](https://rocm.docs.amd.com/projects/install-on-linux/en/latest/reference/system-requirements.html#supported-operating-systems)
 
+## Important notes
+
+### RocProfiler metrics usage
+
+When using rocprofiler fields (800-899) you must call
+`export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1`
+before starting a compute load.
+
+[***See: dmon-rocprofiler-fields-return-zeros***](#dmon-rocprofiler-fields-return-zeros)
+
 ## Building RDC from source
 
 ### Dependencies
@@ -167,6 +177,49 @@ RDCI provides command-line interface to all RDC features. This CLI can be run lo
     ./rdci dmon -u --list-all                   ## list all GPU counters
     ./rdci dmon -u -i 0 -c 1 -e 100             ## monitor field 100 on gpu 0 for count of 1
     ./rdci dmon -u -i 0 -c 1 -e 1,2             ## monitor fields 1,2 on gpu 0 for count of 1
+
+## Known issues
+
+### dmon fields return N/A
+
+1. An optional library might be missing. Do you have
+   `/opt/rocm/lib/rdc/librdc_*.so`? Do you have the library it's related to?
+   (rocprofiler, rocruntime...)
+2. The GPU you're using might not be supported. As a rule of thumb - most
+   metrics should work on MI300 and up. Less metrics are supported for MI200.
+   NV21 (aka RX6800) and other consumer GPUs have even less metrics.
+
+### dmon rocprofiler fields return zeros
+
+Due to a rocprofiler limitation - you must set `HSA_TOOLS_LIB` environmental
+variable *before* running a compute job.
+
+If `HSA_TOOLS_LIB` is not set - most rocprofiler metrics will return all zeros.
+
+E.g. Correct output on MI300 using [gpu-burn](https://github.com/ROCm/HIP-Examples/tree/master/gpu-burn)
+
+    # terminal 1
+    rdcd -u
+    # terminal 2
+    export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
+    gpu-burn
+    # terminal 3
+    rdci dmon -u -e 800,801,803 -i 0 -c 1
+    # output:
+    # GPU   MN_OCC_PER_CU       MN_OCC_PER_ACT_CU   ACTIVE_WAVES
+    # 0     1683.422            6479.242            32640.000
+
+### `HSA_STATUS_ERROR_OUT_OF_RESOURCES`
+
+error:
+
+    terminate called after throwing an instance of 'std::runtime_error'
+      what():  hsa error code: 4104 HSA_STATUS_ERROR_OUT_OF_RESOURCES: The runtime failed to allocate the necessary resources. This error may also occur when the core runtime library needs to spawn threads or create internal OS-specific events.
+    Aborted (core dumped)
+
+1. Missing groups. Run `groups`. You're expected to have `video` and `render`.
+   This can be fixed with `sudo usermod -aG video,render $USER` followed by
+   logging out and logging back in.
 
 ## Troubleshooting rdcd
 
