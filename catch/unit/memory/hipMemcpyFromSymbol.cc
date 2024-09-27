@@ -127,12 +127,17 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
   }
   INFO("Stream :: " << streamType);
 
+  hipError_t memcpy_err = hipSuccess;
+
   SECTION("Singular Value") {
     int set{42};
     int result{0};
     if (streamType == StreamTestType::NoStream) {
-      HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), &set, sizeof(int)));
-      HIP_CHECK(hipMemcpyFromSymbol(&result, HIP_SYMBOL(devSymbol), sizeof(int)));
+      memcpy_err = hipSuccess;
+      BEGIN_CAPTURE_SYNC(memcpy_err, false);
+      HIP_CHECK_ERROR(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), &set, sizeof(int)), memcpy_err);
+      HIP_CHECK_ERROR(hipMemcpyFromSymbol(&result, HIP_SYMBOL(devSymbol), sizeof(int)), memcpy_err);
+      END_CAPTURE_SYNC(memcpy_err);
     } else {
       HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), &set, sizeof(int), 0,
                                        hipMemcpyHostToDevice, stream));
@@ -141,7 +146,9 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
                                          hipMemcpyDeviceToHost, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
     }
-    REQUIRE(result == set);
+    if (memcpy_err == hipSuccess) {
+      REQUIRE(result == set);
+    }
   }
 
   SECTION("Array Values") {
@@ -149,8 +156,13 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
     int set[size] = {4, 2, 4, 2, 4, 2, 4, 2, 4, 2};
     int result[size] = {0};
     if (streamType == StreamTestType::NoStream) {
-      HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set, sizeof(int) * size));
-      HIP_CHECK(hipMemcpyFromSymbol(&result, HIP_SYMBOL(devSymbol), sizeof(int) * size));
+      memcpy_err = hipSuccess;
+      BEGIN_CAPTURE_SYNC(memcpy_err, false);
+      HIP_CHECK_ERROR(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set, sizeof(int) * size),
+                      memcpy_err);
+      HIP_CHECK_ERROR(hipMemcpyFromSymbol(&result, HIP_SYMBOL(devSymbol), sizeof(int) * size),
+                      memcpy_err);
+      END_CAPTURE_SYNC(memcpy_err);
     } else {
       HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set, sizeof(int) * size, 0,
                                        hipMemcpyHostToDevice, stream));
@@ -159,8 +171,10 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
                                          hipMemcpyDeviceToHost, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
     }
-    for (size_t i = 0; i < size; i++) {
-      REQUIRE(result[i] == set[i]);
+    if (memcpy_err == hipSuccess) {
+      for (size_t i = 0; i < size; i++) {
+        REQUIRE(result[i] == set[i]);
+      }
     }
   }
 
@@ -170,9 +184,14 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
     int set[size] = {9, 9, 9, 9, 9, 2, 4, 2, 4, 2};
     int result[size] = {0};
     if (streamType == StreamTestType::NoStream) {
-      HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set, offset));
-      HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set + 5, offset, offset));
-      HIP_CHECK(hipMemcpyFromSymbol(result, HIP_SYMBOL(devSymbol), sizeof(int) * size));
+      memcpy_err = hipSuccess;
+      BEGIN_CAPTURE_SYNC(memcpy_err, false);
+      HIP_CHECK_ERROR(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set, offset), memcpy_err);
+      HIP_CHECK_ERROR(hipMemcpyToSymbol(HIP_SYMBOL(devSymbol), set + 5, offset, offset),
+                      memcpy_err);
+      HIP_CHECK_ERROR(hipMemcpyFromSymbol(result, HIP_SYMBOL(devSymbol), sizeof(int) * size),
+                      memcpy_err);
+      END_CAPTURE_SYNC(memcpy_err);
     } else {
       HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(devSymbol), set, offset, 0, hipMemcpyHostToDevice,
                                        stream));
@@ -184,8 +203,10 @@ TEST_CASE("Unit_hipMemcpyToFromSymbol_SyncAndAsync") {
                                          hipMemcpyDeviceToHost, stream));
       HIP_CHECK(hipStreamSynchronize(stream));
     }
-    for (size_t i = 0; i < size; i++) {
-      REQUIRE(result[i] == set[i]);
+    if (memcpy_err == hipSuccess) {
+      for (size_t i = 0; i < size; i++) {
+        REQUIRE(result[i] == set[i]);
+      }
     }
   }
 }

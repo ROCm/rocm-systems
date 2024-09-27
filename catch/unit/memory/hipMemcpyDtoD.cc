@@ -77,19 +77,22 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "",
     HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
 
     HIP_CHECK(hipSetDevice(1));
-    HIP_CHECK(hipMemcpyDtoD((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d,
-                            Nbytes));
-    HIP_CHECK(hipMemcpyDtoD((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d,
-                            Nbytes));
 
-    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
-                        dim3(1), 0, 0,
-                        static_cast<const TestType*>(X_d),
-                        static_cast<const TestType*>(Y_d), Z_d, NUM_ELM);
-    HIP_CHECK(hipGetLastError());
-    HIP_CHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)Z_d, Nbytes));
-    HIP_CHECK(hipDeviceSynchronize());
-    HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
+    hipError_t memcpy_err = hipSuccess;
+    BEGIN_CAPTURE_SYNC(memcpy_err, false);
+    HIP_CHECK_ERROR(hipMemcpyDtoD((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d, Nbytes), memcpy_err);
+    HIP_CHECK_ERROR(hipMemcpyDtoD((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d, Nbytes), memcpy_err);
+    END_CAPTURE_SYNC(memcpy_err);
+
+    if (memcpy_err == hipSuccess) {
+      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1), dim3(1), 0, 0,
+                         static_cast<const TestType*>(X_d), static_cast<const TestType*>(Y_d), Z_d,
+                         NUM_ELM);
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)Z_d, Nbytes));
+      HIP_CHECK(hipDeviceSynchronize());
+      HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
+    }
 
     HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
     HIP_CHECK(hipFree(X_d));

@@ -65,12 +65,18 @@ TEST_CASE("Unit_hipMemcpyAtoA_Basic") {
   HIP_CHECK(hipMallocArray(&B_a, &desc, col, row, hipArrayDefault));
   HIP_CHECK(hipMemcpy2DToArray(A_a, 0, 0, A_h, col * sizeof(int),
                                col * sizeof(int), row, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemcpyAtoA(B_a, 0, A_a, 0, sizeof(int) * row * col));
-  HIP_CHECK(hipMemcpy2DFromArray(B_h, sizeof(int) * col, B_a, 0, 0,
-                                 sizeof(int) * col, row,
-                                 hipMemcpyDeviceToHost));
-  for (int i = 0; i < (row * col); i++) {
-    REQUIRE(A_h[i] == B_h[i]);
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpyAtoA(B_a, 0, A_a, 0, sizeof(int) * row * col), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+
+  if (memcpy_err == hipSuccess) {
+    HIP_CHECK(hipMemcpy2DFromArray(B_h, sizeof(int) * col, B_a, 0, 0, sizeof(int) * col, row,
+                                   hipMemcpyDeviceToHost));
+    for (int i = 0; i < (row * col); i++) {
+      REQUIRE(A_h[i] == B_h[i]);
+    }
   }
   HIP_CHECK(hipFreeArray(A_a));
   HIP_CHECK(hipFreeArray(B_a));

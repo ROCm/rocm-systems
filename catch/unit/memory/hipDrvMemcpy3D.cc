@@ -85,7 +85,7 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Parameters") {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
-  Memcpy3DZeroWidthHeightDepth<async>(DrvMemcpy3DWrapper<async>);
+  Memcpy3DZeroWidthHeightDepth<async>(DrvMemcpy3DWrapper<>);
 }
 
 // Disabled on AMD due to defect - EXSWHTEC-238
@@ -93,8 +93,8 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Positive_Array") {
   CHECK_IMAGE_SUPPORT
 
   constexpr bool async = false;
-  SECTION("Array from/to Host") { DrvMemcpy3DArrayHostShell<async>(DrvMemcpy3DWrapper<async>); }
-  SECTION("Array from/to Device") { DrvMemcpy3DArrayDeviceShell<async>(DrvMemcpy3DWrapper<async>); }
+  SECTION("Array from/to Host") { DrvMemcpy3DArrayHostShell<async>(DrvMemcpy3DWrapper<>); }
+  SECTION("Array from/to Device") { DrvMemcpy3DArrayDeviceShell<async>(DrvMemcpy3DWrapper<>); }
 }
 
 TEST_CASE("Unit_hipDrvMemcpy3D_Negative_Parameters") {
@@ -234,4 +234,24 @@ TEST_CASE("Unit_hipDrvMemcpy3D_Negative_Parameters") {
     NegativeTests(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                   make_hipPos(0, 0, 0), extent, hipMemcpyDeviceToDevice);
   }
+}
+
+TEST_CASE("Unit_hipDrvMemcpy3D_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  constexpr hipExtent extent{128 * sizeof(int), 128, 8};
+  LinearAllocGuard3D<int> device_alloc(extent);
+  LinearAllocGuard<int> host_alloc(
+      LinearAllocs::hipHostMalloc,
+      device_alloc.pitch() * device_alloc.height() * device_alloc.depth());
+
+  auto params = GetDrvMemcpy3DParms(device_alloc.pitched_ptr(), make_hipPos(0, 0, 0),
+                                    make_hipPitchedPtr(host_alloc.ptr(), device_alloc.pitch(),
+                                                       device_alloc.width(), device_alloc.height()),
+                                    make_hipPos(0, 0, 0), extent, hipMemcpyHostToDevice);
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipDrvMemcpy3D(&params), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
 }

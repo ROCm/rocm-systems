@@ -172,7 +172,6 @@ template <bool should_synchronize, typename T, typename F>
 void Memcpy2DHosttoAShell(F memcpy_func, size_t width, size_t height,
                           const hipStream_t kernel_stream = nullptr) {
   const unsigned int flag = hipArrayDefault;
-  ;
 
   size_t allocation_size = width * height * sizeof(T);
 

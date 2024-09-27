@@ -190,3 +190,25 @@ TEST_CASE("Unit_hipMemcpyParam2D_Negative_Parameters") {
                   dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToDevice);
   }
 }
+
+TEST_CASE("Unit_hipMemcpyParam2D_Capture") { 
+  CHECK_IMAGE_SUPPORT
+
+  constexpr size_t cols = 128;
+  constexpr size_t rows = 128;
+
+  LinearAllocGuard2D<int> device_alloc(cols, rows);
+  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, device_alloc.pitch() * rows);
+
+  hip_Memcpy2D params = {};
+  memset(&params, 0x0, sizeof(hip_Memcpy2D));
+
+  InitializeMemcpy2DParams(&params, device_alloc.ptr(), device_alloc.pitch(), host_alloc.ptr(),
+                           device_alloc.pitch(), device_alloc.width(), device_alloc.height(),
+                           hipMemcpyHostToDevice);
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpyParam2D(&params), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+}

@@ -127,9 +127,9 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight") {
           width, height);
     }
     SECTION("Width is 0") {
-      Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArray, _1, 0, 0, _2, _3, 0, height, hipMemcpyHostToDevice), width,
-          height);
+      Memcpy2DToArrayZeroWidthHeight<false>(std::bind(hipMemcpy2DToArray, _1, 0, 0, _2,
+                                                      _3, 0, height, hipMemcpyHostToDevice),
+                                            width, height);
     }
   }
   SECTION("Array to device") {
@@ -140,9 +140,9 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Positive_ZeroWidthHeight") {
           width, height);
     }
     SECTION("Width is 0") {
-      Memcpy2DToArrayZeroWidthHeight<false>(
-          std::bind(hipMemcpy2DToArray, _1, 0, 0, _2, _3, 0, height, hipMemcpyDeviceToDevice),
-          width, height);
+      Memcpy2DToArrayZeroWidthHeight<false>(std::bind(hipMemcpy2DToArray, _1, 0, 0, _2,
+                                                      _3, 0, height, hipMemcpyDeviceToDevice),
+                                            width, height);
     }
   }
 }
@@ -254,4 +254,22 @@ TEST_CASE("Unit_hipMemcpy2DToArray_Negative_Parameters") {
     }
 #endif
   }
+}
+
+TEST_CASE("Unit_hipMemcpy2DToArray_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  const auto width = 16;
+  const auto height = 16;
+  const auto size = width * height * sizeof(int);
+
+  ArrayAllocGuard<int> array_alloc(make_hipExtent(width, height, 0), hipArrayDefault);
+  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, size);
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpy2DToArray(array_alloc.ptr(), 0, 0, host_alloc.ptr(), width * sizeof(int),
+                                     width * sizeof(int), height, hipMemcpyHostToDevice),
+                  memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
 }

@@ -77,15 +77,21 @@ TEST_CASE("Unit_hipMemcpyPeer_Positive_Default") {
     VectorSet<<<block_count, thread_count, 0>>>(src_alloc.ptr(), expected_value, element_count);
     HIP_CHECK(hipGetLastError());
 
-    HIP_CHECK(
-        hipMemcpyPeer(dst_alloc.ptr(), dst_device, src_alloc.ptr(), src_device, allocation_size));
+    hipError_t memcpy_err = hipSuccess;
+    BEGIN_CAPTURE_SYNC(memcpy_err, false);
+    HIP_CHECK_ERROR(
+        hipMemcpyPeer(dst_alloc.ptr(), dst_device, src_alloc.ptr(), src_device, allocation_size),
+        memcpy_err);
+    END_CAPTURE_SYNC(memcpy_err);
 
-    HIP_CHECK(
-        hipMemcpy(result.host_ptr(), dst_alloc.ptr(), allocation_size, hipMemcpyDeviceToHost));
+    if (memcpy_err == hipSuccess) {
+      HIP_CHECK(
+          hipMemcpy(result.host_ptr(), dst_alloc.ptr(), allocation_size, hipMemcpyDeviceToHost));
 
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+      HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
 
-    ArrayFindIfNot(result.host_ptr(), expected_value, element_count);
+      ArrayFindIfNot(result.host_ptr(), expected_value, element_count);
+    }
   } else {
     INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);
   }
@@ -192,14 +198,21 @@ TEST_CASE("Unit_hipMemcpyPeer_Positive_ZeroSize") {
 
     constexpr int set_value_h = 21;
     std::fill_n(result.host_ptr(), element_count, set_value_h);
-    HIP_CHECK(hipMemcpyPeer(dst_alloc.ptr(), dst_device, src_alloc.ptr(), src_device, 0));
 
-    HIP_CHECK(
-        hipMemcpy(result.host_ptr(), dst_alloc.ptr(), allocation_size, hipMemcpyDeviceToHost));
+    hipError_t memcpy_err = hipSuccess;
+    BEGIN_CAPTURE_SYNC(memcpy_err, false);
+    HIP_CHECK_ERROR(hipMemcpyPeer(dst_alloc.ptr(), dst_device, src_alloc.ptr(), src_device, 0),
+                    memcpy_err);
+    END_CAPTURE_SYNC(memcpy_err);
 
-    HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+    if (memcpy_err == hipSuccess) {
+      HIP_CHECK(
+          hipMemcpy(result.host_ptr(), dst_alloc.ptr(), allocation_size, hipMemcpyDeviceToHost));
 
-    ArrayFindIfNot(result.host_ptr(), expected_value, element_count);
+      HIP_CHECK(hipDeviceDisablePeerAccess(dst_device));
+
+      ArrayFindIfNot(result.host_ptr(), expected_value, element_count);
+    }
   } else {
     INFO("Peer access cannot be enabled between devices " << src_device << " " << dst_device);
   }

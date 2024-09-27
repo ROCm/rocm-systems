@@ -81,7 +81,14 @@ TEST_CASE("Unit_hipMemcpyHtoA_Positive_ZeroCount") {
                                sizeof(int) * width, 1, hipMemcpyHostToDevice));
   fill_value = 41;
   std::fill_n(host_alloc.host_ptr(), width, fill_value);
-  HIP_CHECK(hipMemcpyHtoA(array_alloc.ptr(), 0, host_alloc.ptr(), 0));
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpyHtoA(array_alloc.ptr(), 0, host_alloc.ptr(), 0), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
+  if (memcpy_err = hipErrorStreamCaptureImplicit) {
+    return;
+  }
 
   HIP_CHECK(hipMemcpy2DFromArray(host_alloc.host_ptr(), sizeof(int) * width, array_alloc.ptr(), 0,
                                  0, sizeof(int) * width, 1, hipMemcpyDeviceToHost));
@@ -132,4 +139,19 @@ TEST_CASE("Unit_hipMemcpyHtoA_Negative_Parameters") {
     HIP_CHECK_ERROR(hipMemcpyHtoA(array_alloc_2d.ptr(), 0, host_alloc_2d.ptr(), allocation_size_2d),
                     hipErrorInvalidValue);
   }
+}
+
+TEST_CASE("Unit_hipMemcpyHtoA_Capture") {
+  CHECK_IMAGE_SUPPORT
+
+  const auto width = 512;
+  const auto size = width * sizeof(int);
+
+  ArrayAllocGuard<int> array_alloc(make_hipExtent(width, 0, 0), hipArrayDefault);
+  LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, size);
+
+  hipError_t memcpy_err = hipSuccess;
+  BEGIN_CAPTURE_SYNC(memcpy_err, false);
+  HIP_CHECK_ERROR(hipMemcpyHtoA(array_alloc.ptr(), 0, host_alloc.ptr(), size), memcpy_err);
+  END_CAPTURE_SYNC(memcpy_err);
 }
