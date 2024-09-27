@@ -49,6 +49,18 @@ inline std::string to_string(const LinearAllocs allocation_type) {
   }
 }
 
+inline bool deviceSupportsManagedMemory(int device) {
+  int supportsManagedMem = 0;
+  HIP_CHECK(hipDeviceGetAttribute(&supportsManagedMem, hipDeviceAttributeManagedMemory, device));
+  return supportsManagedMem;
+}
+
+inline bool deviceSupportsConcurrentManagedMemory(int device) {
+  hipDeviceProp_t prop;
+  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  return prop.concurrentManagedAccess && prop.managedMemory;
+}
+
 template <typename T> class LinearAllocGuard {
  public:
   LinearAllocGuard() = default;

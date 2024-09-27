@@ -162,7 +162,10 @@ template <typename TestType, AtomicScopes scope> void AtomicExchSameAddressTest(
     using LA = LinearAllocs;
     const auto allocation_type =
         GENERATE(LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged, LA::mallocAndRegister);
-    AtomicExchSameAddress<TestType, false, AtomicScopes::device>(blocks, threads, allocation_type);
+    if (allocation_type != LA::hipMallocManaged || deviceSupportsManagedMemory(0)) {
+      AtomicExchSameAddress<TestType, false, AtomicScopes::device>(blocks, threads,
+                                                                   allocation_type);
+    }
   }
 
   SECTION("Shared memory") {
@@ -337,8 +340,11 @@ void AtomicExchSingleDeviceSingleKernelTest(const unsigned int width, const unsi
     for (const auto alloc_type :
          {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
       params.alloc_type = alloc_type;
-      DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-        AtomicExch<TestType, false, scope, memory_scope>().run(params);
+
+      if (params.alloc_type != LA::hipMallocManaged || deviceSupportsManagedMemory(0)) {
+        DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
+          AtomicExch<TestType, false, scope, memory_scope>().run(params);
+        }
       }
     }
   }
@@ -372,8 +378,11 @@ void AtomicExchSingleDeviceMultipleKernelTest(const unsigned int kernel_count,
   for (const auto alloc_type :
        {LA::hipMalloc, LA::hipHostMalloc, LA::hipMallocManaged}) {
     params.alloc_type = alloc_type;
-    DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      AtomicExch<TestType, false, scope>().run(params);
+
+    if (params.alloc_type != LA::hipMallocManaged || deviceSupportsManagedMemory(0)) {
+      DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
+        AtomicExch<TestType, false, scope>().run(params);
+      }
     }
   }
 }
@@ -415,8 +424,11 @@ void AtomicExchMultipleDeviceMultipleKernelAndHostTest(const unsigned int num_de
   using LA = LinearAllocs;
   for (const auto alloc_type : {LA::hipHostMalloc , LA::hipMallocManaged}) {
     params.alloc_type = alloc_type;
-    DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
-      AtomicExch<TestType, false, AtomicScopes::system>().run(params);
+
+    if (params.alloc_type != LA::hipMallocManaged || deviceSupportsConcurrentManagedMemory(0)) {
+      DYNAMIC_SECTION("Allocation type: " << to_string(alloc_type)) {
+        AtomicExch<TestType, false, AtomicScopes::system>().run(params);
+      }
     }
   }
 }
