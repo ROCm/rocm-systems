@@ -2,7 +2,7 @@
 
 Full documentation for Omniperf is available at [https://rocm.docs.amd.com/projects/omniperf/en/latest/](https://rocm.docs.amd.com/projects/omniperf/en/latest/).
 
-## (Unreleased) Omniperf 2.1.0 for ROCm 6.2.2
+## Omniperf 2.1.0 for ROCm 6.2.2
 
 ### Changes
 
