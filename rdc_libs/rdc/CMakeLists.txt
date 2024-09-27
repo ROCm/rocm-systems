@@ -19,6 +19,7 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST}
     "${SRC_DIR}/RdcNotificationImpl.cc"
     "${SRC_DIR}/RdcPerfTimer.cc"
     "${SRC_DIR}/RdcPolicyImpl.cc"
+    "${SRC_DIR}/RdcTopologyLinkImpl.cc"
     "${SRC_DIR}/RdcRocpLib.cc"
     "${SRC_DIR}/RdcRocrLib.cc"
     "${SRC_DIR}/RdcRVSLib.cc"

@@ -494,3 +494,18 @@ rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t gr
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_policy_unregister(group_id);
 }
+rdc_status_t rdc_device_topology_get(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
+                                     rdc_device_topology_t* results) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_device_topology_get(gpu_index, results);
+}
+rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* results) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_link_status_get(results);
+}

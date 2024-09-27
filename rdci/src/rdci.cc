@@ -32,6 +32,7 @@ THE SOFTWARE.
 #include "RdciStatsSubSystem.h"
 #include "RdciPolicySubSystem.h"
 #include "RdciHealthSubSystem.h"
+#include "RdciTopologyLinkSubSystem.h"
 #include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/rdc_common.h"
@@ -51,7 +52,7 @@ int main(int argc, char** argv) {
   const std::string usage_help =
       "Usage:\trdci <subsystem>|<options>\n"
       "subsystem: \n"
-      "          discovery, dmon, group, fieldgroup, stats, diag, policy, health\n"
+      "          discovery, dmon, group, fieldgroup, stats, diag, policy, health, topo\n"
       "options: \n"
       "        -v(--version) : Print client version information only\n";
 
@@ -84,6 +85,8 @@ int main(int argc, char** argv) {
       subsystem.reset(new amd::rdc::RdciFieldGroupSubSystem());
     } else if (subsystem_name == "health") {
       subsystem.reset(new amd::rdc::RdciHealthSubSystem());
+    } else if (subsystem_name == "topo") {
+      subsystem.reset(new amd::rdc::RdciTopologyLinkSubSystem());
     } else if (subsystem_name == "stats") {
       subsystem.reset(new amd::rdc::RdciStatsSubSystem());
     } else if (subsystem_name == "policy") {

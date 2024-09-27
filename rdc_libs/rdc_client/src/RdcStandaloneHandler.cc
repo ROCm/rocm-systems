@@ -952,5 +952,40 @@ rdc_status_t RdcStandaloneHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
   return RDC_ST_OK;
 }
 
+rdc_status_t RdcStandaloneHandler::rdc_device_topology_get(uint32_t gpu_index,
+                                                           rdc_device_topology_t* results) {
+  ::rdc::GetTopologyRequest request;
+  ::rdc::GetTopologyResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_gpu_index(gpu_index);
+  ::grpc::Status status = stub_->GetTopology(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  ::rdc::Topology Topology = reply.toppology();
+  results->num_of_gpus= Topology.num_of_gpus();
+  results->numa_node= Topology.numa_node();
+
+  for (uint32_t i = 0; i < Topology.num_of_gpus(); ++i) {
+  ::rdc::TopologyLinkInfo linkinfo = Topology.link_infos(i);
+  results->link_infos[i].gpu_index=linkinfo.gpu_index();
+  results->link_infos[i].weight=linkinfo.weight();
+  results->link_infos[i].min_bandwidth=linkinfo.min_bandwidth();
+  results->link_infos[i].max_bandwidth=linkinfo.max_bandwidth();
+  results->link_infos[i].hops=linkinfo.hops();
+  results->link_infos[i].link_type=static_cast<rdc_topology_link_type_t>(linkinfo.link_type());
+  results->link_infos[i].is_p2p_accessible=linkinfo.p2p_accessible();
+  }
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_link_status_get(rdc_link_status_t* results) {
+  ::rdc::UpdateAllFieldsResponse reply;
+  ::grpc::Status status = grpc::Status::OK;
+  return error_handle(status, reply.status());
+}
+
 }  // namespace rdc
 }  // namespace amd

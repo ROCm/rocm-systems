@@ -854,7 +854,6 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
 }
 
 int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) {
-
   if (userData == nullptr) {
     std::cerr << "The rdc_policy_callback returns null data\n";
     return 1;
@@ -921,7 +920,6 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
           pthread_mutex_unlock(&ctx->mutex);
         }
       }
-
     }
   });
 
@@ -1032,6 +1030,38 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
 
   reply->set_status(result);
 
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetTopology(::grpc::ServerContext* context,
+                                              const ::rdc::GetTopologyRequest* request,
+                                              ::rdc::GetTopologyResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+  rdc_device_topology_t topology_results;
+  // call RDC topology API
+  rdc_status_t result =
+      rdc_device_topology_get(rdc_handle_, request->gpu_index(), &topology_results);
+  reply->set_status(result);
+  if (result != RDC_ST_OK) {
+    return ::grpc::Status::OK;
+  }
+  ::rdc::Topology* topology = reply->mutable_toppology();
+  topology->set_num_of_gpus(topology_results.num_of_gpus);
+  topology->set_numa_node(topology_results.numa_node);
+  for (uint32_t i = 0; i < topology_results.num_of_gpus; ++i) {
+    ::rdc::TopologyLinkInfo* linkinfos = topology->add_link_infos();
+    linkinfos->set_gpu_index(topology_results.link_infos[i].gpu_index);
+    linkinfos->set_weight(topology_results.link_infos[i].weight);
+    linkinfos->set_min_bandwidth(topology_results.link_infos[i].min_bandwidth);
+    linkinfos->set_max_bandwidth(topology_results.link_infos[i].max_bandwidth);
+    linkinfos->set_hops(topology_results.link_infos[i].hops);
+    linkinfos->set_link_type(
+        static_cast<::rdc::TopologyLinkInfo_LinkType>(topology_results.link_infos[i].link_type));
+    linkinfos->set_p2p_accessible(topology_results.link_infos[i].is_p2p_accessible);
+  }
   return ::grpc::Status::OK;
 }
 

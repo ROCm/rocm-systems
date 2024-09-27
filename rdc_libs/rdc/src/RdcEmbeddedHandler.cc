@@ -36,6 +36,7 @@ THE SOFTWARE.
 #include "rdc_lib/impl/RdcModuleMgrImpl.h"
 #include "rdc_lib/impl/RdcNotificationImpl.h"
 #include "rdc_lib/impl/RdcPolicyImpl.h"
+#include "rdc_lib/impl/RdcTopologyLinkImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
 #include "rdc_lib/rdc_common.h"
 
@@ -81,7 +82,8 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
       rdc_notif_(new RdcNotificationImpl()),
       watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, metric_fetcher_, rdc_module_mgr_, rdc_notif_)),
       metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_, METIC_UPDATE_FREQUENCY)),
-      policy_(new RdcPolicyImpl(group_settings_,metric_fetcher_)) {
+      policy_(new RdcPolicyImpl(group_settings_,metric_fetcher_)),
+      topologylink_(new RdcTopologyLinkImpl(group_settings_, metric_fetcher_)) {
   if (mode == RDC_OPERATION_MODE_AUTO) {
     RDC_LOG(RDC_DEBUG, "Run RDC with RDC_OPERATION_MODE_AUTO");
     metrics_updater_->start();
@@ -491,6 +493,15 @@ rdc_status_t RdcEmbeddedHandler::rdc_health_check(rdc_gpu_group_t group_id,
 rdc_status_t RdcEmbeddedHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
 
   return watch_table_->rdc_health_clear(group_id);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_device_topology_get(uint32_t gpu_index,
+                                                         rdc_device_topology_t* results) {
+  return topologylink_->rdc_device_topology_get(gpu_index, results);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_link_status_get(rdc_link_status_t* results) {
+  return topologylink_->rdc_link_status_get(results);
 }
 
 }  // namespace rdc
