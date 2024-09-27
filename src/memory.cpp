@@ -105,6 +105,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemory(HSAuint32 PreferredNode,
 
 #define POWER_OF_2(x) ((x && (!(x & (x - 1)))) ? 1 : 0)
 
+bool isSystemMemoryAvailable(HSAuint64 SizeInBytes) {
+  struct sysinfo info;
+  if (sysinfo(&info) != 0)
+    return false;
+  return SizeInBytes <= info.freeram;
+}
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
                                                HSAuint64 SizeInBytes,
                                                HSAuint64 Alignment,
@@ -138,6 +145,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   if ((PreferredNode == 0 && !MemFlags.ui32.NonPaged)
     || zfb_support || MemFlags.ui32.GTTAccess) {
     if (SizeInBytes > max_single_alloc_size)
+      return HSAKMT_STATUS_NO_MEMORY;
+
+    if (check_avail_sysram && !isSystemMemoryAvailable(SizeInBytes))
       return HSAKMT_STATUS_NO_MEMORY;
 
     /* If allocate VRAM under ZFB mode */

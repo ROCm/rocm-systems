@@ -47,5 +47,7 @@ int zfb_support;
 int vendor_packet_support;
 /* enable vendor packet in hsa-runtime*/
 int enable_vendor_packet;
+/* check available system memory before allocation */
+bool check_avail_sysram = false;
 
 size_t max_single_alloc_size = 0;

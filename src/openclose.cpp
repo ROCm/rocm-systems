@@ -129,6 +129,11 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   if (envvar)
     enable_vendor_packet = atoi(envvar);
 
+  /* Decide whether to check available system memory before allocation */
+  envvar = getenv("WSL_CHECK_AVAIL_SYSRAM");
+  if (envvar)
+    check_avail_sysram = !strcmp(envvar, "1");
+
   return HSAKMT_STATUS_SUCCESS;
 }
 
