@@ -202,6 +202,11 @@ service RdcAPI {
 
   // rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id);
   rpc ClearHealth(ClearHealthRequest) returns (ClearHealthResponse) {}
+  // rdc_status_t rdc_device_topology_get(
+  //  rdc_handle_t p_rdc_handle,
+  //  rdc_gpu_group_t group_id,
+  //  rdc_policy_condition_t condition);
+  rpc GetTopology(GetTopologyRequest) returns (GetTopologyResponse) {}
 }
 
 message Empty {
@@ -684,3 +689,34 @@ message ClearHealthRequest {
 message ClearHealthResponse {
   uint32 status = 1;
 }
+message TopologyLinkInfo{
+  uint32 gpu_index = 1;
+  uint64 weight = 2;
+  uint64 min_bandwidth = 3;
+  uint64 max_bandwidth = 4;
+  uint64 hops = 5;
+  enum LinkType {
+    RDC_IOLINK_TYPE_UNDEFINED = 0;
+    RDC_IOLINK_TYPE_PCIEXPRESS = 1;
+    RDC_IOLINK_TYPE_XGMI = 2;
+    RDCI_IOLINK_TYPE_NUMIOLINKTYPES = 3;
+  };
+  LinkType link_type = 6;
+  bool p2p_accessible = 7;
+}
+message Topology{
+  uint32 num_of_gpus = 1;
+  repeated TopologyLinkInfo link_infos = 2;
+  uint32 numa_node = 3;
+}
+message GetTopologyResult {
+  uint32 status = 1;
+}
+message GetTopologyRequest {
+  uint32 gpu_index = 1;
+}
+message GetTopologyResponse {
+  uint32 status = 1;
+  Topology toppology = 2;
+}
+

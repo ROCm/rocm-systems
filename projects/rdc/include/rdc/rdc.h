@@ -602,6 +602,63 @@ typedef struct {
   rdc_policy_action_t action; //!< Action to take
 } rdc_policy_t;
 
+typedef enum {
+  RDC_IOLINK_TYPE_UNDEFINED = 0,     //!< unknown type.
+  RDC_IOLINK_TYPE_PCIEXPRESS = 1,    //!< PCI Express
+  RDC_IOLINK_TYPE_XGMI = 2,          //!< XGMI
+  RDCI_IOLINK_TYPE_NUMIOLINKTYPES,   //!< Number of IO Link types
+  RDC_IOLINK_TYPE_SIZE = 0xFFFFFFFF  //!< Max of IO Link types
+} rdc_topology_link_type_t;
+
+/**
+ * @brief The link information of the GPU connected to
+ */
+typedef struct {
+  uint32_t gpu_index;
+  // amdsmi_topo_get_link_weight
+  uint64_t weight;  // the weight for a connection between 2 GPUs
+  // minimal and maximal io link bandwidth between 2 GPUs
+  // amdsmi_get_minmax_bandwidth_between_processors
+  uint64_t min_bandwidth;
+  uint64_t max_bandwidth;
+  // amdsmi_topo_get_link_type
+  uint64_t hops;
+  rdc_topology_link_type_t link_type;
+  // amdsmi_is_P2P_accessible
+  bool is_p2p_accessible;
+} rdc_topology_link_info_t;
+
+/**
+ * @brief The data in the data structure will be set to max value if it is N/A or error
+ */
+typedef struct {
+  uint32_t num_of_gpus;  // The length of link_infos array
+  rdc_topology_link_info_t link_infos[RDC_MAX_NUM_DEVICES];
+  // amdsmi_topo_get_numa_node_number
+  uint32_t numa_node;  // the NUMA CPU node number for a device
+} rdc_device_topology_t;
+
+typedef enum {
+  RDC_LINK_STATE_NOT_SUPPORTED = 0,
+  RDC_LINK_STATE_DISABLED,
+  RDC_LINK_STATE_DOWN,
+  RDC_LINK_STATE_UP
+} rdc_link_state_t;
+
+#define RDC_MAX_NUM_OF_LINKS 16
+
+typedef struct {
+  int32_t gpu_index;
+  uint32_t num_of_links;                              // The size of the array link_states
+  rdc_topology_link_type_t link_types;                // XGMI, PCIe, and so on
+  rdc_link_state_t link_states[RDC_MAX_NUM_OF_LINKS];
+} rdc_gpu_link_status_t;
+
+typedef struct {
+  int32_t num_of_gpus;                                // The size of gpus array
+  rdc_gpu_link_status_t gpus[RDC_MAX_NUM_DEVICES];
+} rdc_link_status_t;
+
 /**
  * @brief type of health watches
  */
@@ -1427,6 +1484,36 @@ rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
+
+ /**
+ *  @brief Get the topology of the device
+ *
+ *  @details topology of the device
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] gpu_index The GPU gpu index.
+ *
+ *  @param[out] results  The device topology
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_device_topology_get(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
+                                     rdc_device_topology_t* results);
+/**
+ *  @brief Get the link status
+ *
+ *  @details the link is up or down
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *
+ *  @param[out] resu
+ * lts  The link up or down status
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* results);
 
 #ifdef __cplusplus
 }

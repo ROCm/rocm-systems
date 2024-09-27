@@ -152,6 +152,10 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status UnRegisterPolicy(::grpc::ServerContext* context,
                                   const ::rdc::UnRegisterPolicyRequest* request,
                                   ::rdc::UnRegisterPolicyResponse* reply) override;
+                                  
+  ::grpc::Status GetTopology(::grpc::ServerContext* context,
+                             const ::rdc::GetTopologyRequest* request,
+                             ::rdc::GetTopologyResponse* reply) override;
 
   ::grpc::Status SetHealth(::grpc::ServerContext* context,
                            const ::rdc::SetHealthRequest* request,

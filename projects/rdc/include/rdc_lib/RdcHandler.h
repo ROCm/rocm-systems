@@ -45,7 +45,8 @@ class RdcHandler {
                                           uint32_t* count) = 0;
   virtual rdc_status_t rdc_device_get_attributes(uint32_t gpu_index,
                                                  rdc_device_attributes_t* p_rdc_attr) = 0;
-  virtual rdc_status_t rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) = 0;
+  virtual rdc_status_t rdc_device_get_component_version(rdc_component_t component,
+                                                        rdc_component_version_t* p_rdc_compv) = 0;
 
   // Group API
   virtual rdc_status_t rdc_group_gpu_create(rdc_group_type_t type, const char* group_name,
@@ -111,6 +112,10 @@ class RdcHandler {
   virtual rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) = 0;
   virtual rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t *response) = 0;
   virtual rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) = 0;
+    // topology API
+  virtual rdc_status_t rdc_device_topology_get(uint32_t gpu_index,
+                                               rdc_device_topology_t* results) = 0;
+  virtual rdc_status_t rdc_link_status_get(rdc_link_status_t* results) = 0;
 
   virtual ~RdcHandler() {}
 };

@@ -70,6 +70,7 @@ set(RDCI_SRC_LIST
     "${SRC_DIR}/RdciPolicySubSystem.cc"
     "${SRC_DIR}/RdciHealthSubSystem.cc"
     "${SRC_DIR}/RdciSubSystem.cc"
+    "${SRC_DIR}/RdciTopologyLinkSubSystem.cc"
     "${SRC_DIR}/rdci.cc")
 message("RDCI_SRC_LIST=${RDCI_SRC_LIST}")
 set(RDCI_EXE "rdci")
