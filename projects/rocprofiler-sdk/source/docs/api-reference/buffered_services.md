@@ -248,4 +248,4 @@ function. One can also iterate over all the buffer tracing kinds and operations 
 `rocprofiler_iterate_buffer_tracing_kinds` and `rocprofiler_iterate_buffer_tracing_kind_operations` functions.
 
 The buffer tracing record data types can be found in the `rocprofiler-sdk/buffer_tracing.h` header
-(`source/include/rocprofiler-sdk/buffer_tracing.h` in the [rocprofiler-sdk GitHub repository](https://github.com/ROCm/rocproifler-sdk)).
+(`source/include/rocprofiler-sdk/buffer_tracing.h` in the [rocprofiler-sdk GitHub repository](https://github.com/ROCm/rocprofiler-sdk)).
