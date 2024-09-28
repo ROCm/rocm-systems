@@ -99,11 +99,9 @@ def test_hip_api_trace_json(json_data):
             "hipGetLastError",
         ]
     )
-    # TODO: When tracing support is added for hipExtHostAlloc, replace
-    # hipHostMalloc with hipExtHostAlloc instead of removing hipHostMalloc
-    # as is happening currently
     updated_expected_functions = [
-        func for func in expected_functions if func != "hipHostMalloc"
+        func if func != "hipHostMalloc" else "hipExtHostAlloc"
+        for func in expected_functions
     ]
     assert functions == expected_functions or functions == updated_expected_functions
 

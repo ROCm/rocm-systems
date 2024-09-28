@@ -108,3 +108,4 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - Creation of subdirection when rocprofv3 `--output-file` contains a folder path
 - Fix misaligned stores (undefined behavior) for buffer records
 - Fix crash when only scratch reporting is enabled
+- Fix aborted-app validation test to properly check for hipExtHostAlloc command now that it is supported
