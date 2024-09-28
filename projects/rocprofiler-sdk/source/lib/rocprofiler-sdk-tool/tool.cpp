@@ -1088,100 +1088,100 @@ list_metrics_iterate_agents(rocprofiler_agent_version_t,
         // TODO(aelwazir): To be changed back to use node id once ROCR fixes
         // the hsa_agents to use the real node id
         uint32_t node_id = agent->logical_node_id;
-        ROCPROFILER_CALL(
-            rocprofiler_iterate_agent_supported_counters(
-                agent->id,
-                [](rocprofiler_agent_id_t,
-                   rocprofiler_counter_id_t* counters,
-                   size_t                    num_counters,
-                   void*                     user_data) {
-                    auto* agent_node_id = static_cast<uint32_t*>(user_data);
-                    for(size_t i = 0; i < num_counters; i++)
+        if(agent->type != ROCPROFILER_AGENT_TYPE_GPU) continue;
+
+        auto status = rocprofiler_iterate_agent_supported_counters(
+            agent->id,
+            [](rocprofiler_agent_id_t,
+               rocprofiler_counter_id_t* counters,
+               size_t                    num_counters,
+               void*                     user_data) {
+                auto* agent_node_id = static_cast<uint32_t*>(user_data);
+                for(size_t i = 0; i < num_counters; i++)
+                {
+                    rocprofiler_counter_info_v0_t counter_info;
+                    auto dimensions = std::vector<rocprofiler_record_dimension_info_t>{};
+                    ROCPROFILER_CALL(
+                        rocprofiler_iterate_counter_dimensions(
+                            counters[i], dimensions_info_callback, static_cast<void*>(&dimensions)),
+                        "iterate_dimension_info");
+
+                    ROCPROFILER_CALL(
+                        rocprofiler_query_counter_info(counters[i],
+                                                       ROCPROFILER_COUNTER_INFO_VERSION_0,
+                                                       static_cast<void*>(&counter_info)),
+                        "Could not query counter_id");
+
+                    auto dimensions_info = std::stringstream{};
+                    for(size_t j = 0; j != dimensions.size(); j++)
                     {
-                        rocprofiler_counter_info_v0_t counter_info;
-                        auto dimensions = std::vector<rocprofiler_record_dimension_info_t>{};
-                        ROCPROFILER_CALL(
-                            rocprofiler_iterate_counter_dimensions(counters[i],
-                                                                   dimensions_info_callback,
-                                                                   static_cast<void*>(&dimensions)),
-                            "iterate_dimension_info");
-
-                        ROCPROFILER_CALL(
-                            rocprofiler_query_counter_info(counters[i],
-                                                           ROCPROFILER_COUNTER_INFO_VERSION_0,
-                                                           static_cast<void*>(&counter_info)),
-                            "Could not query counter_id");
-
-                        auto dimensions_info = std::stringstream{};
-                        for(size_t j = 0; j != dimensions.size(); j++)
+                        dimensions_info << dimensions[j].name
+                                        << "[0:" << dimensions[j].instance_size - 1 << "]";
+                        if(j != dimensions.size() - 1) dimensions_info << "\t";
+                    }
+                    if(!counter_info.is_derived && tool::get_config().list_metrics &&
+                       !std::string(counter_info.block).empty())
+                    {
+                        auto counter_info_ss = std::stringstream{};
+                        if(tool::get_config().list_metrics_output_file)
                         {
-                            dimensions_info << dimensions[j].name
-                                            << "[0:" << dimensions[j].instance_size - 1 << "]";
-                            if(j != dimensions.size() - 1) dimensions_info << "\t";
+                            tool::csv::list_basic_metrics_csv_encoder::write_row(
+                                counter_info_ss,
+                                *agent_node_id,
+                                counter_info.name,
+                                counter_info.description,
+                                counter_info.block,
+                                dimensions_info.str());
+                            get_dereference(get_list_basic_metrics_file()) << counter_info_ss.str();
                         }
-                        if(!counter_info.is_derived && tool::get_config().list_metrics &&
-                           !std::string(counter_info.block).empty())
+                        else
                         {
-                            auto counter_info_ss = std::stringstream{};
-                            if(tool::get_config().list_metrics_output_file)
-                            {
-                                tool::csv::list_basic_metrics_csv_encoder::write_row(
-                                    counter_info_ss,
-                                    *agent_node_id,
-                                    counter_info.name,
-                                    counter_info.description,
-                                    counter_info.block,
-                                    dimensions_info.str());
-                                get_dereference(get_list_basic_metrics_file())
-                                    << counter_info_ss.str();
-                            }
-                            else
-                            {
-                                counter_info_ss << "gpu-agent" << *agent_node_id << ":"
-                                                << "\t" << counter_info.name << "\n";
-                                counter_info_ss << "Description:"
-                                                << "\t" << counter_info.description << "\n";
-                                counter_info_ss << "Block:"
-                                                << "\t" << counter_info.block << "\n";
-                                counter_info_ss << "Dimensions:"
-                                                << "\t" << dimensions_info.str() << "\n";
-                                counter_info_ss << "\n";
-                                std::cout << counter_info_ss.str();
-                            }
-                        }
-                        else if(counter_info.is_derived && tool::get_config().list_metrics)
-                        {
-                            auto counter_info_ss = std::stringstream{};
-                            if(tool::get_config().list_metrics_output_file)
-                            {
-                                tool::csv::list_derived_metrics_csv_encoder::write_row(
-                                    counter_info_ss,
-                                    *agent_node_id,
-                                    counter_info.name,
-                                    counter_info.description,
-                                    counter_info.expression,
-                                    dimensions_info.str());
-                                get_dereference(get_list_derived_metrics_file())
-                                    << counter_info_ss.str();
-                            }
-                            else
-                            {
-                                counter_info_ss << "gpu-agent" << *agent_node_id << ":"
-                                                << "\t" << counter_info.name << "\n"
-                                                << "Description: " << counter_info.description
-                                                << "\n";
-                                counter_info_ss << "Expression: " << counter_info.expression
-                                                << "\n";
-                                counter_info_ss << "Dimensions: " << dimensions_info.str() << "\n";
-                                counter_info_ss << "\n";
-                                std::cout << counter_info_ss.str();
-                            }
+                            counter_info_ss << "gpu-agent" << *agent_node_id << ":"
+                                            << "\t" << counter_info.name << "\n";
+                            counter_info_ss << "Description:"
+                                            << "\t" << counter_info.description << "\n";
+                            counter_info_ss << "Block:"
+                                            << "\t" << counter_info.block << "\n";
+                            counter_info_ss << "Dimensions:"
+                                            << "\t" << dimensions_info.str() << "\n";
+                            counter_info_ss << "\n";
+                            std::cout << counter_info_ss.str();
                         }
                     }
-                    return ROCPROFILER_STATUS_SUCCESS;
-                },
-                reinterpret_cast<void*>(&node_id)),
-            "Iterate rocprofiler counters");
+                    else if(counter_info.is_derived && tool::get_config().list_metrics)
+                    {
+                        auto counter_info_ss = std::stringstream{};
+                        if(tool::get_config().list_metrics_output_file)
+                        {
+                            tool::csv::list_derived_metrics_csv_encoder::write_row(
+                                counter_info_ss,
+                                *agent_node_id,
+                                counter_info.name,
+                                counter_info.description,
+                                counter_info.expression,
+                                dimensions_info.str());
+                            get_dereference(get_list_derived_metrics_file())
+                                << counter_info_ss.str();
+                        }
+                        else
+                        {
+                            counter_info_ss << "gpu-agent" << *agent_node_id << ":"
+                                            << "\t" << counter_info.name << "\n"
+                                            << "Description: " << counter_info.description << "\n";
+                            counter_info_ss << "Expression: " << counter_info.expression << "\n";
+                            counter_info_ss << "Dimensions: " << dimensions_info.str() << "\n";
+                            counter_info_ss << "\n";
+                            std::cout << counter_info_ss.str();
+                        }
+                    }
+                }
+                return ROCPROFILER_STATUS_SUCCESS;
+            },
+            reinterpret_cast<void*>(&node_id));
+        if(status != ROCPROFILER_STATUS_SUCCESS)
+        {
+            ROCP_ERROR << "Failed to iterate counters for agent " << node_id;
+        }
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }
