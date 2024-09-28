@@ -165,7 +165,7 @@ void ComputeQueue::HandleError(hsa_status_t status) {
   for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
     if (QueueErrors[i].status == status) {
       val = QueueErrors[i].code;
-      debug_print("error %d, sig_val %d\n", status, val);
+      debug_print("error %d, sig_val %ld\n", status, val);
       break;
     }
   }
@@ -823,7 +823,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
   assert(op == IT_INDIRECT_BUFFER);
   uint32_t* pm4_addr = reinterpret_cast<uint32_t*>((static_cast<uint64_t>(packet->ib_jump_cmd[2]) << 32) | (static_cast<uint64_t>(packet->ib_jump_cmd[1]) & ~3ull));
   uint32_t pm4_size = packet->ib_jump_cmd[3]&0xfffff;
-  debug_print("queue %p %s VENDOR_SPECIFIC pkt pm4_addr %p pm4_size %" PRIx64 " cs=%" PRIx64"\n",
+  debug_print("queue %p %s VENDOR_SPECIFIC pkt pm4_addr %p pm4_size %#x cs=%" PRIx64"\n",
            ring, vendor_packet_process ? "process" : "skip", pm4_addr, pm4_size,
            packet->completion_signal.handle);
   for (int i = 0; i < pm4_size; i++) {
@@ -1019,7 +1019,7 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
 
         amd_signal_t* signal = (amd_signal_t*)((char*)poll_addr - offsetof(amd_signal_t, value));
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
-        debug_print("SDMA: poll signal %#lx addr %#lx val %d\n", signal_handle, poll_addr, poll_val);
+        debug_print("SDMA: poll signal %#lx addr %#lx val %ld\n", signal_handle, poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
         hsa_signal_value_t value =
           hsakmt_hsa_signal_wait_relaxed(hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
@@ -1081,7 +1081,7 @@ SDMAQueue::~SDMAQueue() {
 }
 
 void SDMAQueue::RingDoorbell() {
-  debug_print("SDMA: ringdoorbell %#llx %#llx\n", wptr_pre_, wptr_next_);
+  debug_print("SDMA: ringdoorbell %#lx %#lx\n", wptr_pre_, wptr_next_);
 
   {
     std::lock_guard<std::mutex> lock(wptr_queue_lock_);
