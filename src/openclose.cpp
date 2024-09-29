@@ -37,8 +37,6 @@
 #include "inc/hsa/hsa.h"
 #include "inc/hsa/hsa_ven_amd_loader.h"
 
-int (*fn_amdgpu_device_get_fd)(HsaAMDGPUDeviceHandle device_handle);
-
 hsa_signal_value_t (*fn_hsa_signal_load_relaxed)(hsa_signal_t signal);
 hsa_signal_value_t (*fn_hsa_signal_wait_relaxed)(
     hsa_signal_t signal, hsa_signal_condition_t condition,
