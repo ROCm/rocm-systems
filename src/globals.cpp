@@ -43,8 +43,8 @@ int PAGE_SHIFT;
 bool is_svm_api_supported;
 /* zfb is mainly used during emulation */
 int zfb_support;
-/* handle vendor specific packet */
-int vendor_packet_support;
+/* handle vendor specific packet. :1 process 0:skip */
+int vendor_packet_process;
 /* enable vendor packet in hsa-runtime*/
 int enable_vendor_packet;
 /* check available system memory before allocation */

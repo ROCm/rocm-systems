@@ -122,7 +122,7 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   /* Check whether to handle vendor specific aql packet */
   envvar = getenv("WSLKMT_VENDOR_PACKET");
   if (envvar)
-    vendor_packet_support = atoi(envvar);
+    vendor_packet_process = atoi(envvar);
 
   /* Decide whether hsa-runtime dispatch vendor packet */
   envvar = getenv("WSL_ENABLE_VENDOR_PACKET");
