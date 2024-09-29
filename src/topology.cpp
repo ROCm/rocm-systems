@@ -870,7 +870,14 @@ topology_create_temp_cpu_cache_list(int node, struct proc_cpuinfo *cpuinfo,
       continue;
     if (!isdigit(dir->d_name[3])) /* ignore files like cpulist */
       continue;
-    snprintf(path, MAXPATHSIZE, "%s/%s/cache", node_dir, dir->d_name);
+    if (strlen(node_dir) + strlen(dir->d_name) + strlen("/cache") + 2 < MAXPATHSIZE) {
+      std::string path_str = std::string(node_dir) + "/" + dir->d_name + "/cache";
+      strncpy(path, path_str.c_str(), MAXPATHSIZE);
+      path[MAXPATHSIZE - 1] = '\0';
+    } else {
+      pr_err("Path is too long and was truncated.\n");
+      goto exit;
+    }
     this_cpu->num_caches = num_subdirs(path, "index");
     this_cpu->cache_prop = (HsaCacheProperties *)calloc(
         this_cpu->num_caches, sizeof(HsaCacheProperties));
