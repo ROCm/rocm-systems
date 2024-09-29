@@ -126,6 +126,7 @@ static __forceinline unsigned long long int strtoull(const char* str,
     if (!(exp) && (limit == 0 || count < limit)) {                                                 \
       fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n",       \
               __PRETTY_FUNCTION__);                                                                \
+      fflush(stderr);                                                                              \
       count++;                                                                                     \
     }                                                                                              \
   } while (false)
@@ -140,6 +141,7 @@ static __forceinline unsigned long long int strtoull(const char* str,
 #define debug_print(fmt, ...)                                                                      \
   do {                                                                                             \
     fprintf(stderr, fmt, ##__VA_ARGS__);                                                           \
+    fflush(stderr);                                                                                \
   } while (false)
 #endif
 
