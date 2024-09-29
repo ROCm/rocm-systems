@@ -989,6 +989,7 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
           hsakmt_hsa_signal_wait_relaxed(hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
         assert(value == poll_val);
 
+        memset(poll_pkt, 0, 2 * sizeof(*poll_pkt));
         poll_pkt += 2;
         poll_next_pkt += 2;
       }
