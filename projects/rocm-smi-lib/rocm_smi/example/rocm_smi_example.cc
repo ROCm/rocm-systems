@@ -731,30 +731,6 @@ template<typename T> constexpr float convert_mw_to_w(T mw) {
     return static_cast<float>(mw / 1000.0);
 }
 
-template <typename T>
-auto print_error_or_value(rsmi_status_t status_code, const T& metric) {
-  if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-    if constexpr (std::is_array_v<T>) {
-      auto idx = uint16_t(0);
-      auto str_values = std::string();
-      const auto num_elems = static_cast<uint16_t>(std::end(metric) - std::begin(metric));
-      str_values = ("\n\t\t num of values: " + std::to_string(num_elems) + "\n");
-      for (const auto& el : metric) {
-        str_values += "\t\t  [" + std::to_string(idx) + "]: " + std::to_string(el) + "\n";
-        ++idx;
-      }
-      return str_values;
-    }
-    else if constexpr ((std::is_same_v<T, std::uint16_t>) ||
-                      (std::is_same_v<T, std::uint32_t>) ||
-                      (std::is_same_v<T, std::uint64_t>)) {
-      return std::to_string(metric);
-    }
-  }
-  else {
-    return ("\n\t\tStatus: [" + std::to_string(status_code) + "] " + "-> " + amd::smi::getRSMIStatusString(status_code));
-  }
-};
 
 template <typename T>
 std::string print_unsigned_int(T value) {
@@ -860,8 +836,9 @@ int main() {
     //
     std::cout << "\n";
     print_test_header("GPU METRICS: Using static struct (Backwards Compatibility) ", i);
-    print_function_header_with_rsmi_ret(ret, "rsmi_dev_gpu_metrics_info_get("  + std::to_string(i) + ", &gpu_metrics)");
-    rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics);
+    ret = rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics);
+    print_function_header_with_rsmi_ret(ret, "rsmi_dev_gpu_metrics_info_get("
+      + std::to_string(i) + ", &gpu_metrics)");
 
     std::cout << "\t**.common_header.format_revision : "
               << print_unsigned_int(gpu_metrics.common_header.format_revision) << "\n";
@@ -960,6 +937,22 @@ int main() {
               << gpu_metrics.pcie_replay_count_acc << "\n";
     std::cout << "\t**.pcie_replay_rover_count_acc : " << std::dec
               << gpu_metrics.pcie_replay_rover_count_acc << "\n";
+    std::cout << "\t**.accumulation_counter : " << std::dec
+              << gpu_metrics.accumulation_counter << "\n";
+    std::cout << "\t**.prochot_residency_acc : " << std::dec
+              << gpu_metrics.prochot_residency_acc << "\n";
+    std::cout << "\t**.ppt_residency_acc : " << std::dec
+              << gpu_metrics.ppt_residency_acc << "\n";
+    std::cout << "\t**.socket_thm_residency_acc : " << std::dec
+              << gpu_metrics.socket_thm_residency_acc << "\n";
+    std::cout << "\t**.vr_thm_residency_acc : " << std::dec
+              << gpu_metrics.vr_thm_residency_acc << "\n";
+    std::cout << "\t**.hbm_thm_residency_acc : " << std::dec
+              << gpu_metrics.hbm_thm_residency_acc << "\n";
+    std::cout  << "\t**.num_partition: " << std::dec
+               << gpu_metrics.num_partition << "\n";
+    std::cout << "\t**.pcie_lc_perf_other_end_recovery: "
+              << gpu_metrics.pcie_lc_perf_other_end_recovery << "\n";
 
     std::cout << "\t**.temperature_hbm[] : " << std::dec << "\n";
     for (const auto& temp : gpu_metrics.temperature_hbm) {
@@ -1001,23 +994,70 @@ int main() {
       std::cout << "\t  -> " << std::dec << dclk << "\n";
     }
 
+    std::cout << std::dec << "xcp_stats.gfx_busy_inst = \n";
+    auto xcp = 0;
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.gfx_busy_inst),
+                std::end(row.gfx_busy_inst),
+                amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.jpeg_busy = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.jpeg_busy),
+                std::end(row.jpeg_busy),
+                amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.vcn_busy = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.vcn_busy),
+                std::end(row.vcn_busy),
+                amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.gfx_busy_acc = \n";
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+        std::copy(std::begin(row.gfx_busy_acc),
+                  std::end(row.gfx_busy_acc),
+                  amd::smi::make_ostream_joiner(&std::cout, ", "));
+        std::cout << " ]\n";
+        xcp++;
+    }
+
     std::cout << "\n";
     std::cout << "\t ** -> Checking metrics with constant changes ** " << "\n";
     constexpr uint16_t kMAX_ITER_TEST = 10;
     rsmi_gpu_metrics_t gpu_metrics_check;
     for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
         rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics_check);
-        std::cout << "\t\t -> firmware_timestamp [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
+        std::cout << "\t\t -> firmware_timestamp [" << idx
+        << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.firmware_timestamp << "\n";
     }
 
     std::cout << "\n";
     for (auto idx = uint16_t(1); idx <= kMAX_ITER_TEST; ++idx) {
         rsmi_dev_gpu_metrics_info_get(i, &gpu_metrics_check);
-        std::cout << "\t\t -> system_clock_counter [" << idx << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.system_clock_counter << "\n";
+        std::cout << "\t\t -> system_clock_counter [" << idx
+        << "/" << kMAX_ITER_TEST << "]: " << gpu_metrics_check.system_clock_counter << "\n";
     }
 
     std::cout << "\n\n";
-    std::cout << " ** Note: Values MAX'ed out (UINTX MAX are unsupported for the version in question) ** " << "\n";
+    std::cout << " ** Note: Values MAX'ed out "
+    "(UINTX MAX are unsupported for the version in question) ** " << "\n";
 
 
     std::cout << "\n\n";
@@ -1026,14 +1066,16 @@ int main() {
 
     ret = rsmi_dev_metrics_header_info_get(i, &header_values);
     std::cout << "\t[Metrics Header]" << "\n";
-    std::cout << "\t  -> format_revision  : " << print_unsigned_int(header_values.format_revision) << "\n";
-    std::cout << "\t  -> content_revision : " << print_unsigned_int(header_values.content_revision) << "\n";
+    std::cout << "\t  -> format_revision  : "
+    << print_unsigned_int(header_values.format_revision) << "\n";
+    std::cout << "\t  -> content_revision : "
+    << print_unsigned_int(header_values.content_revision) << "\n";
     std::cout << "\t--------------------" << "\n";
 
     std::cout << "\n";
     std::cout << "\t[XCD CounterVoltage]" << "\n";
     ret = rsmi_dev_metrics_xcd_counter_get(i, &val_ui16);
-    std::cout << "\t  -> xcd_counter(): " << print_error_or_value(ret, val_ui16) << "\n";
+    std::cout << "\t  -> xcd_counter(): " << val_ui16;
     std::cout << "\n\n";
 
     ret = rsmi_dev_perf_level_get(i, &pfl);
@@ -1041,8 +1083,12 @@ int main() {
     std::cout << "\t**Performance Level:" <<
                                           perf_level_string(pfl) << "\n";
     ret = rsmi_dev_overdrive_level_get(i, &val_ui32);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-    std::cout << "\t**OverDrive Level:" << val_ui32 << "\n";
+    std::cout << "\t**OverDrive Level: ";
+    if (ret == RSMI_STATUS_SUCCESS) {
+      std::cout << val_ui32 << "\n";
+    } else {
+      CHK_RSMI_NOT_SUPPORTED_OR_UNEXPECTED_DATA_RET(ret)
+    }
 
     print_test_header("GPU Clocks", i);
     for (int clkType = static_cast<int>(RSMI_CLK_TYPE_SYS);
@@ -1159,9 +1205,6 @@ int main() {
   }
 
   for (uint32_t i = 0; i < num_monitor_devs; ++i) {
-    ret = test_set_overdrive(i);
-    CHK_AND_PRINT_RSMI_ERR_RET(ret)
-
     ret = test_set_perf_level(i);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
 
@@ -1182,6 +1225,9 @@ int main() {
 
     ret = test_set_memory_partition(i);
     CHK_AND_PRINT_RSMI_ERR_RET(ret)
+
+    ret = test_set_overdrive(i);
+    CHK_RSMI_NOT_SUPPORTED_RET(ret)
   }
 
   return 0;
