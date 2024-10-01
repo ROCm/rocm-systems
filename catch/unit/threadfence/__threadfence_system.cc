@@ -89,6 +89,7 @@ TEST_CASE("Unit___threadfence_system_Positive_Basic_Peer") {
     HipTest::launchKernel(WriteKernel, 1, 1, 0, nullptr, in_dev.ptr());
 
     HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
     HipTest::launchKernel(ReadKernel, 1, 1, 0, nullptr, out_dev.ptr(), in_dev.ptr());
     HIP_CHECK(hipDeviceSynchronize());
 

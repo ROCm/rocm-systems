@@ -191,7 +191,7 @@ TEST_CASE("Unit___threadfence_block_Positive_Basic_Peer") {
     HIP_CHECK(hipMemsetD32((hipDeviceptr_t)(&(in_dev.ptr()[1])), kInitVal2, 1));
 
     HIP_CHECK(hipSetDevice(1));
-
+    HIP_CHECK(hipDeviceEnablePeerAccess(0, 0));
     HipTest::launchKernel(ThreadfenceTestKernel<ThreadfenceScope::kBlock, false>, 2, 1, 0, nullptr,
                           out_dev.ptr(), in_dev.ptr());
     HIP_CHECK(hipDeviceSynchronize());
