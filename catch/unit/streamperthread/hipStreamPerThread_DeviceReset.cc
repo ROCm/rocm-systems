@@ -43,6 +43,9 @@ static void Copy_to_device() {
   }
   HIP_CHECK(hipMemcpyAsync(A_d, A_h, ele_size * sizeof(int), hipMemcpyHostToDevice,
                  hipStreamPerThread));
+  // Clean up
+  HIP_CHECK(hipHostFree(A_h));
+  HIP_CHECK(hipFree(A_d));
 }
 
 TEST_CASE("Unit_hipStreamPerThread_DeviceReset_1") {
@@ -88,7 +91,7 @@ TEST_CASE("Unit_hipStreamPerThread_DeviceReset_2") {
   HIP_CHECK(hipDeviceReset());
 
   // After reset all memory objects will be destroyed hence allocating them again
-  // Intension is to use hipStreamPerThread successfully after reset hence not validating
+  // Intention is to use hipStreamPerThread successfully after reset hence not validating
   // values after copy
   status =  hipHostMalloc(&A_h, ele_size*sizeof(int));
   if (status != hipSuccess) return;
@@ -99,4 +102,8 @@ TEST_CASE("Unit_hipStreamPerThread_DeviceReset_2") {
                  hipStreamPerThread);
   if (status != hipSuccess) return;
   HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+
+  // Clean up
+  HIP_CHECK(hipHostFree(A_h));
+  HIP_CHECK(hipFree(A_d));
 }

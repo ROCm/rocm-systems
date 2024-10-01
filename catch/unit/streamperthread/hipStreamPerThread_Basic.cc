@@ -59,6 +59,11 @@ TEST_CASE("Unit_hipStreamPerThread_Basic") {
   for (int i = MEM_SIZE-1; i >= 0; --i) {
     CHECK(hostMem[i] == (i+1+SEED));
   }
+
+  // Clean-up
+  HIP_CHECK(hipHostFree(hostMem));
+  HIP_CHECK(hipFree(devMem));
+
 }
 
 TEST_CASE("Unit_hipStreamPerThread_StreamQuery") {
