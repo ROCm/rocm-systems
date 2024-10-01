@@ -389,7 +389,7 @@ void roctracer_stop();
 ## 4. rocTracer Usage Code Examples
 ### 4.1. HIP API ops, GPU Activity Tracing
 ```
-#include <roctracer_hip.h>
+#include <roctracer/roctracer_hip.h>
 
 // HIP API callback function
 void hip_api_callback(
@@ -609,7 +609,7 @@ int main() {
 /////////////////////////////////////////////////////////////////////////////
 // HIP Callbacks/Activity tracing
 /////////////////////////////////////////////////////////////////////////////
-#include <roctracer_hip.h>
+#include <roctracer/roctracer_hip.h>
 
 // Macro to check ROC-tracer calls status
 #define ROCTRACER_CALL(call)                                               \

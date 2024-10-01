@@ -32,7 +32,7 @@ To use the rocTracer API you need the API header and to link your application wi
 
 To use the rocTX API you need the API header and to link your application with `roctx` .so library:
 
-- `/opt/rocm/roctracer/include/roctx.h`
+- `/opt/rocm/include/roctracer/roctx.h`
 
   API header.
 
@@ -52,7 +52,7 @@ To use the rocTX API you need the API header and to link your application with `
 
   - `roctracer.h`
 
-    `rocTacer` library public API header.
+    `rocTracer` library public API header.
 
   - `roctx.h`
 
@@ -87,8 +87,8 @@ To use the rocTX API you need the API header and to link your application with `
 - API description:
   - ['roctracer' / 'rocTX' profiling C API specification](doc/roctracer_spec.md)
 - Code examples:
-  - [test/MatrixTranspose_test/MatrixTranspose.cpp](testMatrixTranspose_test/MatrixTranspose.cpp)
-  - [test/MatrixTranspose/MatrixTranspose.cpp](test/MatrixTranspose/MatrixTranspose.cpp)
+  - [HIP API ops, GPU Activity Tracing](doc/roctracer_spec.md#41-hip-api-ops-gpu-activity-tracing)
+  - [MatrixTranspose HIP sample with all APIs/activity tracing enabled](doc/roctracer_spec.md#42-matrixtranspose-hip-sample-with-all-apisactivity-tracing-enabled)
 
 ## Build and run tests
 
