@@ -151,7 +151,7 @@ unsigned __stdcall ThreadTrampoline(void* arg) {
 }
 
 Thread CreateThread(ThreadEntry entry_function, void* entry_argument,
-                    uint stack_size) {
+                    uint stack_size, int priority_unused) {
   ThreadArgs* thread_args = new ThreadArgs();
   thread_args->entry_args = entry_argument;
   thread_args->entry_function = entry_function;

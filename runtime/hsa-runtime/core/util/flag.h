@@ -257,6 +257,22 @@ class Flag {
     /* hsa_signal_wait_relaxed abort timeout  */
     var = os::GetEnvVar("HSA_SIGNAL_WAIT_ABORT_TIMEOUT");
     signal_abort_timeout_ = var.empty() ? 0 : atoi(var.c_str());
+
+    /* Valid inputs are 0-99, HIGH, MAX */
+    var = os::GetEnvVar("HSA_ASYNCEVENTS_THREAD_PRIORITY");
+    async_events_thread_priority_ = os::OS_THREAD_PRIORITY_DEFAULT;
+    if (var == "MAX") {
+      async_events_thread_priority_ = os::OS_THREAD_PRIORITY_MAX;
+    } else if (var == "HIGH") {
+      async_events_thread_priority_ = os::OS_THREAD_PRIORITY_HIGH;
+    } else if (var != "") {
+      char* end;
+      int input = strtol(var.c_str(), &end, 10);
+      if (input >= 0 && input <= 99)
+        async_events_thread_priority_ = input;
+      else
+        fprintf(stderr, "Failed to parse HSA_ASYNCEVENTS_THREAD_PRIORITY");
+    }
   }
 
   void parse_masks(uint32_t maxGpu, uint32_t maxCU) {
@@ -373,6 +389,8 @@ class Flag {
 
   uint32_t signal_abort_timeout() const { return signal_abort_timeout_; }
 
+  int async_events_thread_priority() const { return async_events_thread_priority_; }
+
  private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
@@ -404,6 +422,7 @@ class Flag {
   bool wait_any_;
   bool dev_mem_queue_;
   uint32_t signal_abort_timeout_;
+  int  async_events_thread_priority_;
 
   SDMA_OVERRIDE enable_sdma_;
   SDMA_OVERRIDE enable_peer_sdma_;

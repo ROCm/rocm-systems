@@ -58,6 +58,12 @@ typedef void* SharedMutex;
 typedef void* Thread;
 typedef void* EventHandle;
 
+typedef enum {
+  OS_THREAD_PRIORITY_DEFAULT    = -1,
+  OS_THREAD_PRIORITY_HIGH       = 254,
+  OS_THREAD_PRIORITY_MAX        = 255,
+} ThreadPriority;
+
 enum class os_t { OS_WIN = 0, OS_LINUX, COUNT };
 static __forceinline std::underlying_type<os_t>::type os_index(os_t val) {
   return std::underlying_type<os_t>::type(val);
@@ -209,9 +215,10 @@ typedef void (*ThreadEntry)(void*);
 /// @param: entry_argument(Input), a pointer to the argument of the thread
 /// function.
 /// @param: stack_size(Input), size of the thread's stack, 0 by default.
+/// @param: priority(Input), thread priority.
 /// @return: Thread, a handle to thread created.
 Thread CreateThread(ThreadEntry entry_function, void* entry_argument,
-                    uint stack_size = 0);
+                    uint stack_size = 0, int priority = OS_THREAD_PRIORITY_DEFAULT);
 
 /// @brief: Destroys the thread.
 /// @param: thread(Input), thread handle to what will be destroyed.

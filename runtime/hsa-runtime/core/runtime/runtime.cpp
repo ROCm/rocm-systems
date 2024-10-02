@@ -809,14 +809,17 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
                                             void* arg) {
 
   struct AsyncEventsInfo* asyncInfo = &asyncSignals_;
+  int priority = runtime_singleton_->flag().async_events_thread_priority();
 
   if (signal.handle != 0) {
     // Indicate that this signal is in use.
     hsa_signal_handle(signal)->Retain();
 
     core::Signal* coreSignal = core::Signal::Convert(signal);
-    if (coreSignal->EopEvent() && coreSignal->EopEvent()->EventData.EventType != HSA_EVENTTYPE_SIGNAL)
+    if (coreSignal->EopEvent() && coreSignal->EopEvent()->EventData.EventType != HSA_EVENTTYPE_SIGNAL) {
+      priority = os::OS_THREAD_PRIORITY_DEFAULT;
       asyncInfo = &asyncExceptions_;
+    }
   }
 
   ScopedAcquire<HybridMutex> scope_lock(&asyncInfo->control.lock);
@@ -835,7 +838,7 @@ hsa_status_t Runtime::SetAsyncSignalHandler(hsa_signal_t signal,
     // Start event monitoring thread
     asyncInfo->control.exit = false;
     asyncInfo->control.async_events_thread_ =
-        os::CreateThread(AsyncEventsLoop, asyncInfo);
+        os::CreateThread(AsyncEventsLoop, asyncInfo, 0, priority);
     if (asyncInfo->control.async_events_thread_ == NULL) {
       assert(false && "Asyncronous events thread creation error.");
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;

@@ -90,7 +90,10 @@ void* __stdcall ThreadTrampoline(void* arg) {
 // Thread container allows multiple waits and separate close (destroy).
 class os_thread {
  public:
-  explicit os_thread(ThreadEntry function, void* threadArgument, uint stackSize)
+  explicit os_thread(ThreadEntry function,
+                      void* threadArgument,
+                      uint stackSize,
+                      int priority)
       : thread(0), lock(nullptr), state(RUNNING) {
     int err;
     lock = CreateMutex();
@@ -162,6 +165,38 @@ class os_thread {
         return;
       }
     } while (stackSize < 20 * 1024 * 1024);
+
+    struct sched_param param = {};
+    if (priority != OS_THREAD_PRIORITY_DEFAULT) {
+      int set_priority;
+      int max_priority = sched_get_priority_max(SCHED_FIFO);
+
+      if (priority == OS_THREAD_PRIORITY_MAX)
+        set_priority = max_priority;
+      else if (priority == OS_THREAD_PRIORITY_HIGH)
+        set_priority = max_priority - 1;
+      else if (priority > max_priority)
+        set_priority = max_priority;
+      else
+        set_priority = priority;
+
+      param.sched_priority = set_priority;
+      if (pthread_setschedparam(thread, SCHED_FIFO, &param)) {
+        fprintf(stderr, "pthread_setschedparam failed\n");
+        return;
+      }
+
+      int policy = 0;
+      if (pthread_getschedparam(thread, &policy, &param))
+        fprintf(stderr, "pthread_getschedparam failed: %s\n", strerror(err));
+
+      if (policy != SCHED_FIFO || param.sched_priority != set_priority)
+        fprintf(stderr, "Failed to adjust thread priority (policy:%s requested:%d current:%d)\n",
+                          policy == SCHED_FIFO ? "FIFO" :
+                          policy == SCHED_OTHER ? "OTHER" :
+                          policy == SCHED_RR ? "RR" : "Unknown",
+                          set_priority, param.sched_priority);
+    }
   }
 
   os_thread(os_thread&& rhs) {
@@ -413,8 +448,8 @@ void uSleep(int delayInUs) { usleep(delayInUs); }
 
 void YieldThread() { sched_yield(); }
 
-Thread CreateThread(ThreadEntry function, void* threadArgument, uint stackSize) {
-  os_thread* result = new os_thread(function, threadArgument, stackSize);
+Thread CreateThread(ThreadEntry function, void* threadArgument, uint stackSize, int priority) {
+  os_thread* result = new os_thread(function, threadArgument, stackSize, priority);
   if (!result->Valid()) {
     delete result;
     return nullptr;
