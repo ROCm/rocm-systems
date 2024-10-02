@@ -35,7 +35,7 @@ def test_validate_counter_collection_pmc2(counter_input_data):
         assert len(row["Counter_Value"]) > 0
         # assert row["Counter_Name"].contains("SQ_WAVES").all()
         assert row["Counter_Name"] in counter_names
-        assert int(row["Counter_Value"]) > 0
+        assert float(row["Counter_Value"]) > 0
 
         di_list.append(int(row["Dispatch_Id"]))
 

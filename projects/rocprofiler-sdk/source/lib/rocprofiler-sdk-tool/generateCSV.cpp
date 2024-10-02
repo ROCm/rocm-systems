@@ -487,7 +487,7 @@ generate_csv(tool_table*                                                     too
     for(const auto& record : data)
     {
         auto kernel_id          = record.dispatch_data.dispatch_info.kernel_id;
-        auto counter_name_value = std::map<std::string, uint64_t>{};
+        auto counter_name_value = std::map<std::string, double>{};
         for(uint64_t i = 0; i < record.counter_count; i++)
         {
             const auto& count        = record.records.at(i);
@@ -496,7 +496,7 @@ generate_csv(tool_table*                                                     too
             auto        search       = counter_name_value.find(counter_name);
             if(search == counter_name_value.end())
                 counter_name_value.emplace(
-                    std::pair<std::string, uint64_t>{counter_name, rec.counter_value});
+                    std::pair<std::string, double>{counter_name, rec.counter_value});
             else
                 search->second = search->second + rec.counter_value;
         }
