@@ -205,14 +205,18 @@ def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
     buf = io.StringIO()
 
     def handle_output(stream, mask):
-        # Because the process' output is line buffered, there's only ever one
-        # line to read when this function is called
-        line = stream.readline()
-        buf.write(line)
-        if profileMode:
-            console_log(rocprof_cmd, line.strip(), indent_level=1)
-        else:
-            console_log(line.strip())
+        try:
+            # Because the process' output is line buffered, there's only ever one
+            # line to read when this function is called
+            line = stream.readline()
+            buf.write(line)
+            if profileMode:
+                console_log(rocprof_cmd, line.strip(), indent_level=1)
+            else:
+                console_log(line.strip())
+        except UnicodeDecodeError:
+            # Skip this line
+            pass
 
     # Register callback for an "available for read" event from subprocess' stdout stream
     selector = selectors.DefaultSelector()
