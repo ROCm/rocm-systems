@@ -461,8 +461,8 @@ GpuUtil:
   description: 'Unit: percent'
 InstrFetchLatency:
   architectures:
-    gfx90a:
-      expression: SQ_ACCUM_PREV_HIRES/SQ_IFETCH
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_IFETCH_LEVEL, HIGH_RES)/SQ_IFETCH
   description: 'Unit: cycles'
 L1iCacheHitRate:
   architectures:
@@ -508,8 +508,8 @@ LdsBankConflict:
   description: 'Unit: conflicts/access'
 LdsLatency:
   architectures:
-    gfx90a:
-      expression: SQ_ACCUM_PREV_HIRES/SQ_INSTS_LDS
+    gfx942/gfx941/gfx940/gfx90a/gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx11/gfx1100/gfx1101/gfx1102:
+      expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)/SQ_INSTS_LDS
   description: 'Unit: cycles'
 LdsPipeIssueUtil:
   architectures:
@@ -528,19 +528,17 @@ MAX_WAVE_SIZE:
   description: Max wave size constant
 MeanOccupancyPerActiveCU:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
-      expression: GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV*4/SQ_BUSY_CYCLES/CU_NUM
     gfx942/gfx941/gfx940/gfx90a:
-      expression: SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES*4/SQ_BUSY_CYCLES/CU_NUM
+      expression: accumulate(SQ_LEVEL_WAVES, LOW_RES)/SQ_BUSY_CU_CYCLES
+    gfx11/gfx1100/gfx1101/gfx1102:
+      expression: SQ_WAVE_CYCLES/SQ_BUSY_CYCLES
   description: Mean occupancy per active compute unit.
 MeanOccupancyPerCU:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
-      expression: GRBM_COUNT*0+SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV/GRBM_GUI_ACTIVE/CU_NUM
-    gfx90a:
-      expression: SQ_LEVEL_WAVES*0+SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE/CU_NUM
-    gfx942/gfx941/gfx940:
-      expression: reduce(SQ_LEVEL_WAVES,sum)*0+reduce(SQ_ACCUM_PREV_HIRES,sum)/reduce(GRBM_GUI_ACTIVE,sum)/CU_NUM
+    gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx90a/gfx942/gfx941/gfx940:
+      expression: accumulate(SQ_LEVEL_WAVES, HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
+    gfx11/gfx1100/gfx1101/gfx1102:
+      expression: SQ_WAVE_CYCLES/GRBM_GUI_ACTIVE/CU_NUM
   description: Mean occupancy per compute unit.
 MemUnitBusy:
   architectures:
@@ -1063,7 +1061,7 @@ SQ_BUSY_CU_CYCLES:
     with units in quad-cycles(4 cycles).
 SQ_BUSY_CYCLES:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx940/gfx90a:
+    gfx942/gfx941/gfx940/gfx90a/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 3
   description: Number of clock cycles there are active waves in a shader engine (as reported by the distributed
@@ -2061,8 +2059,8 @@ ScaPipeIssueUtil:
   description: 'Unit: percent'
 SmemLatency:
   architectures:
-    gfx90a:
-      expression: SQ_ACCUM_PREV_HIRES/SQ_INSTS_SMEM_NORM
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)/SQ_INSTS_SMEM_NORM
   description: 'Unit: cycles'
 SpiUtil:
   architectures:
@@ -4008,8 +4006,8 @@ ValuPipeIssueUtil:
   description: 'Unit: percent'
 VmemLatency:
   architectures:
-    gfx90a:
-      expression: SQ_ACCUM_PREV_HIRES/SQ_INSTS_VMEM
+    gfx942/gfx941/gfx940/gfx90a:
+      expression: accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)/SQ_INSTS_VMEM
   description: 'Unit: cycles'
 VmemPipeIssueUtil:
   architectures:
