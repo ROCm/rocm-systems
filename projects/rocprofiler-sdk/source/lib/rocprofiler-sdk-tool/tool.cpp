@@ -857,6 +857,9 @@ get_agent_counter_info(const tool_agent_vec_t& _agents)
                 &_data),
             "iterate agent supported counters");
 
+        // Skip unsupported agents
+        if(_data.find(itr.agent->id) == _data.end()) continue;
+
         std::sort(_data.at(itr.agent->id).begin(),
                   _data.at(itr.agent->id).end(),
                   [](const auto& lhs, const auto& rhs) { return (lhs.id.handle < rhs.id.handle); });
