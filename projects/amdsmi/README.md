@@ -19,6 +19,8 @@ installed to query firmware information and hardware IPs.
 
 ## Install CLI Tool and Libraries
 
+**Disclaimer: CLI Tool is provided as an example code to aid the development of telemetry tools and is not guaranteed to be backwards compatible. The Python or C++ Library is recommended as a reliable data source.**  
+
 ### Requirements
 
 * python 3.6.8+ 64-bit

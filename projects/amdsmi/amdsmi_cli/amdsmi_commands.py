@@ -2146,9 +2146,10 @@ class AMDSMICommands():
 
                 for key, value in throttle_status.items():
                     if "active" in key:
-                        throttle_status[key] = "NOT ACTIVE"
-                        if value:
+                        if value is True:
                             throttle_status[key] = "ACTIVE"
+                        elif value is False:
+                            throttle_status[key] = "NOT ACTIVE"
                         continue
 
                     if "percent" not in key:

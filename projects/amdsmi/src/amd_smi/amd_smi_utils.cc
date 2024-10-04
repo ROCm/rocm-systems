@@ -584,7 +584,7 @@ amdsmi_status_t smi_amdgpu_get_market_name_from_dev_id(uint32_t device_id, char 
             break;
         case 0x74a9:
         case 0x74bd:
-            strcpy(market_name, "MI300XHF");
+            strcpy(market_name, "AMD Instinct MI300X HF");
             break;
         default:
             return AMDSMI_STATUS_API_FAILED;
