@@ -129,7 +129,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     )
     io_options.add_argument(
         "--log-level",
-        help="Set the log level",
+        help="Set the desired log level",
         default=None,
         choices=("fatal", "error", "warning", "info", "trace", "env"),
         type=str.lower,
@@ -156,12 +156,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         basic_tracing_options,
         "--hip-trace",
-        help="For collecting HIP Traces (runtime + compiler)",
+        help="Combination of --hip-runtime-trace and --hip-compiler-trace. This option only enables the tracing of the HIP API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
     )
     add_parser_bool_argument(
         basic_tracing_options,
         "--marker-trace",
-        help="For collecting Marker (ROCTx) Traces",
+        help="For collecting Marker (ROCTx) Traces. Similar to --roctx-trace option in earlier rocprof versions but with improved ROCtx library with more features",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -171,22 +171,22 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         basic_tracing_options,
         "--memory-copy-trace",
-        help="For collecting Memory Copy Traces",
+        help="For collecting Memory Copy Traces. This was part of HIP and HSA traces in previous rocprof versions but is now a separate option",
     )
     add_parser_bool_argument(
         basic_tracing_options,
         "--scratch-memory-trace",
-        help="For collecting Scratch Memory operations Traces",
+        help="For collecting Scratch Memory operations Traces. Helps in determining scratch allocations and manage them efficiently",
     )
     add_parser_bool_argument(
         basic_tracing_options,
         "--hsa-trace",
-        help="For collecting HSA Traces (core + amd + image + finalizer)",
+        help="For collecting --hsa-core-trace, --hsa-amd-trace,--hsa-image-trace and --hsa-finalizer-trace. This option only enables the tracing of the HSA API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc"
     )
     add_parser_bool_argument(
         basic_tracing_options,
         "--rccl-trace",
-        help="For collecting RCCL Traces",
+        help="For collecting RCCL(ROCm Communication Collectives Library. Also pronounced as 'Rickle' ) Traces",
     )
     add_parser_bool_argument(
         basic_tracing_options,
@@ -232,7 +232,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         post_processing_options,
         "--stats",
-        help="For collecting statistics of enabled tracing types",
+        help="For collecting statistics of enabled tracing types. Must be combined with one or more tracing options. No default kernel stats unlike previous rocprof versions",
     )
     add_parser_bool_argument(
         post_processing_options,
@@ -284,12 +284,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         kernel_naming_options,
         "-T",
         "--truncate-kernels",
-        help="Truncate the demangled kernel names",
+        help="Truncate the demangled kernel names. In earlier rocprof versions, this was known as --basenames [on/off]",
     )
     add_parser_bool_argument(
         kernel_naming_options,
         "--kernel-rename",
-        help="Use region names defined by roctxRangePush/roctxRangePop regions to rename the kernels",
+        help="Use region names defined by roctxRangePush/roctxRangePop regions to rename the kernels. Known as --roctx-rename in earlier rocprof versions",
     )
 
     filter_options = parser.add_argument_group("Filtering options")
@@ -354,7 +354,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         display_options,
         "-L",
         "--list-metrics",
-        help="List metrics for counter collection",
+        help="List metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters",
     )
 
     advanced_options = parser.add_argument_group("Advanced options")
