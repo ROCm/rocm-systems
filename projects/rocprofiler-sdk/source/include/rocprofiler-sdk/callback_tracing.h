@@ -27,27 +27,7 @@
 #include <rocprofiler-sdk/hip.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
-
-#if !defined(ROCPROFILER_SDK_USE_SYSTEM_RCCL)
-#    if defined __has_include
-#        if __has_include(<rccl/amd_detail/api_trace.h>)
-#            define ROCPROFILER_SDK_USE_SYSTEM_RCCL 1
-#        else
-#            define ROCPROFILER_SDK_USE_SYSTEM_RCCL 0
-#        endif
-#    else
-#        define ROCPROFILER_SDK_USE_SYSTEM_RCCL 0
-#    endif
-#endif
-
-#if ROCPROFILER_SDK_USE_SYSTEM_RCCL > 0
-#    include <rccl/amd_detail/api_trace.h>
-#    include <rccl/rccl.h>
-#else
-#    include <rocprofiler-sdk/rccl/api_args.h>
-#    include <rocprofiler-sdk/rccl/details/api_trace.h>
-#    include <rocprofiler-sdk/rccl/details/rccl.h>
-#endif
+#include <rocprofiler-sdk/rccl.h>
 
 #include <hsa/hsa.h>
 #include <hsa/hsa_amd_tool.h>
