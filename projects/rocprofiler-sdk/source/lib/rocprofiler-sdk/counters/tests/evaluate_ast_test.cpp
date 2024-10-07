@@ -241,9 +241,8 @@ TEST(evaluate_ast, counter_constants)
         {"MAX_WAVE_SIZE", Metric("gfx9", "MAX_WAVE_SIZE", "a", "a", "a", "wave_front_size", "", 0)},
         {"SE_NUM",
          Metric("gfx9", "SE_NUM", "b", "b", "b", "array_count/simd_arrays_per_engine", "", 4)},
-        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "C", "C", "simd_per_cu/CU_NUM", "", 2)},
-        {"CU_NUM",
-         Metric("gfx9", "CU_NUM", "D", "D", "D", "cu_per_simd_array*array_count", "", 5)}};
+        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "C", "C", "simd_count", "", 2)},
+        {"CU_NUM", Metric("gfx9", "CU_NUM", "D", "D", "D", "simd_count/simd_per_cu", "", 5)}};
     add_constants(metrics, 6);
     std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
 
@@ -269,13 +268,14 @@ TEST(evaluate_ast, counter_constants)
     test_data.simd_arrays_per_engine = 5;
     test_data.simd_per_cu            = 104;
     test_data.cu_per_simd_array      = 156;
+    test_data.simd_count             = 156 * 104 * 8;
 
     // Check that required counters is calculated correctly
     std::unordered_map<std::string, std::set<std::string>> required_counters = {
         {"MAX_WAVE_SIZE", {"wave_front_size"}},
         {"SE_NUM", {"array_count", "simd_arrays_per_engine"}},
-        {"SIMD_NUM", {"simd_per_cu", "cu_per_simd_array", "array_count"}},
-        {"CU_NUM", {"cu_per_simd_array", "array_count"}},
+        {"SIMD_NUM", {"simd_count"}},
+        {"CU_NUM", {"simd_count", "simd_per_cu"}},
     };
 
     // Check that the values are being read from agent_t correctly
@@ -285,13 +285,14 @@ TEST(evaluate_ast, counter_constants)
         {"simd_arrays_per_engine", 5},
         {"simd_per_cu", 104},
         {"cu_per_simd_array", 156},
+        {"simd_count", 156 * 104 * 8},
     };
 
     // Check that the evaluation of the special counters is correct
     std::unordered_map<std::string, double> final_computed_values = {
         {"MAX_WAVE_SIZE", 32},
         {"SE_NUM", 8.0 / 5.0},
-        {"SIMD_NUM", 104.0 / (156.0 * 8.0)},
+        {"SIMD_NUM", 156 * 8 * 104},
         {"CU_NUM", 156 * 8},
     };
 
@@ -1024,13 +1025,14 @@ TEST(evaluate_ast, evaluate_mixed_counters)
     test_data.simd_arrays_per_engine = 5;
     test_data.simd_per_cu            = 104;
     test_data.cu_per_simd_array      = 156;
+    test_data.simd_count             = 624;
 
     std::unordered_map<std::string, Metric> metrics = {
         {"MAX_WAVE_SIZE", Metric("gfx9", "MAX_WAVE_SIZE", "a", "a", "a", "wave_front_size", "", 0)},
         {"SE_NUM",
          Metric("gfx9", "SE_NUM", "b", "b", "b", "array_count/simd_arrays_per_engine", "", 1)},
-        {"CU_NUM", Metric("gfx9", "CU_NUM", "D", "D", "D", "cu_per_simd_array*array_count", "", 2)},
-        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "C", "C", "simd_per_cu/CU_NUM", "", 3)},
+        {"CU_NUM", Metric("gfx9", "CU_NUM", "D", "D", "D", "simd_count/simd_per_cu", "", 2)},
+        {"SIMD_NUM", Metric("gfx9", "SIMD_NUM", "C", "C", "C", "simd_count", "", 3)},
         {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 4)},
         {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 5)},
         {"BATES",
@@ -1063,11 +1065,9 @@ TEST(evaluate_ast, evaluate_mixed_counters)
             {"TORRANCE",
              times_vec(
                  sum_vec(base_counter_data["KRUEGER"]),
-                 std::vector<rocprofiler_record_counter_t>{{.id            = 0,
-                                                            .counter_value = 104.0 / (156.0 * 8.0),
-                                                            .dispatch_id   = 0,
-                                                            .user_data     = {.value = 0}}}),
-             4},
+                 std::vector<rocprofiler_record_counter_t>{
+                     {.id = 0, .counter_value = 624, .dispatch_id = 0, .user_data = {.value = 0}}}),
+             2},
         };
 
     std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
@@ -1114,9 +1114,9 @@ TEST(evaluate_ast, evaluate_mixed_counters)
         asts.at("gfx9").at(name).set_out_id(*ret);
         for(const auto& v : *ret)
         {
-            set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
-            EXPECT_EQ(v.id, expected[pos].id);
-            EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
+            set_counter_in_rec(expected.at(pos).id, {.handle = metrics[name].id()});
+            EXPECT_EQ(v.id, expected.at(pos).id);
+            EXPECT_FLOAT_EQ(v.counter_value, expected.at(pos).counter_value);
             pos++;
         }
     }

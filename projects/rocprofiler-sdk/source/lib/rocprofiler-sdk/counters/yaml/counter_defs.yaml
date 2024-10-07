@@ -1,19 +1,19 @@
 ALUStalledByLDS:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
-      expression: 400*SQ_WAIT_INST_LDS/SQ_WAVES/GRBM_GUI_ACTIVE
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: 400*reduce(SQ_WAIT_INST_LDS,sum)/reduce(SQ_WAVES,sum)/reduce(GRBM_GUI_ACTIVE,max)
   description: 'The percentage of GPUTime ALU units are stalled by the LDS input queue being full or the
     output queue being not ready. If there are LDS bank conflicts, reduce them. Otherwise, try reducing
     the number of LDS accesses if possible. Value range: 0% (optimal) to 100% (bad).'
 AggSysCycles:
   architectures:
     gfx90a:
-      expression: GRBM_GUI_ACTIVE*CU_NUM
+      expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
   description: 'Unit: cycles'
 AvgNumActiveThreads:
   architectures:
     gfx90a:
-      expression: SQ_THREAD_CYCLES_VALU/SQ_ACTIVE_INST_VALU
+      expression: reduce(SQ_THREAD_CYCLES_VALU,sum)/reduce(SQ_ACTIVE_INST_VALU,sum)
   description: 'Unit: percent'
 # CPC Block (Command Processor Compute) - The CPC block is responsible for the compute workloads
 CPC_CPC_STAT_BUSY:
@@ -128,34 +128,28 @@ CPF_CPF_TCIU_STALL:
 CP_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
-      expression: 100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_CP_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: Percentage of the GRBM_GUI_ACTIVE time that any of the Command Processor (CPG/CPC/CPF)
     blocks are busy
 CU_NUM:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
-      expression: cu_per_simd_array*array_count
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+      expression: simd_count/simd_per_cu
   description: CU_NUM
-CU_OCCUPANCY:
+SIMD_NUM:
   architectures:
-    gfx942/gfx941/gfx940/gfx90a:
-      expression: (SQ_CYCLES/(SQ_WAVE_CYCLES*4))/MAX_WAVE_SIZE
-  description: The ratio of active waves on a CU to the maximum number of active waves supported by the
-    CU
-CU_UTILIZATION:
-  architectures:
-    gfx942/gfx941/gfx940/gfx908/gfx90a:
-      expression: GRBM_GUI_ACTIVE/GRBM_COUNT
-  description: The total number of active cycles divided by total number of elapsed cycles
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+      expression: simd_count
+  description: SIMD Number
 CpUtil:
   architectures:
     gfx90a:
-      expression: 100*GRBM_CP_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_CP_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: 'Unit: percent'
 EA_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
-      expression: 100*GRBM_EA_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_EA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: Percentage of the GRBM_GUI_ACTIVE time that the Efficiency Arbiter (EA) block is busy.
 EaAtomicLatency:
   architectures:
@@ -185,7 +179,7 @@ EaRdLatency:
 EaUtil:
   architectures:
     gfx90a:
-      expression: 100*GRBM_EA_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_EA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: 'Unit: percent'
 EaWrDramStallRate:
   architectures:
@@ -216,44 +210,47 @@ FETCH_SIZE:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       expression: (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024
-    gfx8:
-      expression: (TCC_MC_RDREQ_sum*32)/1024
     gfx906:
       expression: (TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64+RDATA1_SIZE)/1024
     gfx908/gfx90a/gfx9/gfx900:
       expression: (TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024
     gfx942/gfx941/gfx940:
-      expression: (TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*64)/1024
+      expression: (TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*128)/1024
   description: The total kilobytes fetched from the video memory. This is measured with all extra fetches
     and any cache or memory effects taken into account.
+BANDWIDTH_EA:
+  architectures:
+    gfx90a/gfx940/gfx941/gfx942:
+      expression: 1024*(FETCH_SIZE+WRITE_SIZE)/reduce(GRBM_GUI_ACTIVE,max)
+  description: Memory Bandwidth measured at the TCC_EA interface. In units of bytes/cycle.
 FetchSize:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: FETCH_SIZE
   description: The total kilobytes fetched from the video memory. This is measured with all extra fetches
     and any cache or memory effects taken into account.
 FlatLDSInsts:
   architectures:
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: SQ_INSTS_FLAT_LDS_ONLY/SQ_WAVES
+    gfx906/gfx908/gfx90a/gfx9/gfx900:
+      expression: reduce(SQ_INSTS_FLAT_LDS_ONLY,sum)/reduce(SQ_WAVES,sum)
   description: The average number of FLAT instructions that read or write to LDS executed per work item
     (affected by flow control).
 FlatVMemInsts:
   architectures:
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: (SQ_INSTS_FLAT-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
+    gfx906/gfx908/gfx90a/gfx9/gfx900:
+      expression: (reduce(SQ_INSTS_FLAT,sum)-reduce(SQ_INSTS_FLAT_LDS_ONLY,sum))/reduce(SQ_WAVES,sum)
   description: The average number of FLAT instructions that read from or write to the video memory executed
     per work item (affected by flow control). Includes FLAT instructions that read from or write to scratch.
 GDSInsts:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
-      expression: SQ_INSTS_GDS/SQ_WAVES
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(SQ_INSTS_GDS,sum)/reduce(SQ_WAVES,sum)
   description: The average number of GDS read or GDS write instructions executed per work item (affected
     by flow control).
 GDS_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
-      expression: 100*GRBM_GDS_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_GDS_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: Percentage of the GRBM_GUI_ACTIVE time that the Global Data Share (GDS) is busy.
 # Block GL2C (Graphic L2 Cache) - The GL2C block is a cache that sits between the L1 cache and the memory
 GL2C_EA_RDREQ_128B:
@@ -373,18 +370,18 @@ GL2C_WRREQ_STALL_max:
   description: Number of cycles a write request was stalled. Max over GL2C instances.
 GPUBusy:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: 100*GRBM_GUI_ACTIVE/GRBM_COUNT
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9/gfx900:
+      expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
   description: The percentage of time GPU was busy.
 GPU_UTIL:
   architectures:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
-      expression: 100*GRBM_GUI_ACTIVE/GRBM_COUNT
+      expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
   description: Percentage of the time that GUI is active
 # Block GRBM (Graphics Register Bus Manager Block)
 GRBM_COUNT:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
       block: GRBM
       event: 0
   description: Tie High - Count Number of Clocks
@@ -426,7 +423,7 @@ GRBM_GL2CC_BUSY:
   description: The GL2CC block is busy.
 GRBM_GUI_ACTIVE:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
       block: GRBM
       event: 2
   description: The GUI is Active
@@ -457,31 +454,26 @@ GRBM_UTCL2_BUSY:
 GpuUtil:
   architectures:
     gfx90a:
-      expression: 100*GRBM_GUI_ACTIVE/GRBM_COUNT
+      expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
   description: 'Unit: percent'
 InstrFetchLatency:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
-      expression: accumulate(SQ_IFETCH_LEVEL, HIGH_RES)/SQ_IFETCH
+      expression: reduce(accumulate(SQ_IFETCH_LEVEL, HIGH_RES),sum)/reduce(SQ_IFETCH,sum)
   description: 'Unit: cycles'
 L1iCacheHitRate:
   architectures:
     gfx90a:
-      expression: 100*SQC_ICACHE_HITS/SQC_ICACHE_REQ
+      expression: 100*reduce(SQC_ICACHE_HITS,sum)/reduce(SQC_ICACHE_REQ,sum)
   description: 'Unit: percent'
 L2CacheHit:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
       expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx906/gfx908/gfx90a/gfx9/gfx900:
       expression: 100*reduce(TCC_HIT,sum)/(reduce(TCC_HIT,sum)+reduce(TCC_MISS,sum))
   description: 'The percentage of fetch, write, atomic, and other instructions that hit the data in L2
     cache. Value range: 0% (no hit) to 100% (optimal).'
-L2CacheHitRate:
-  architectures:
-    gfx90a:
-      expression: 100*TCC_HIT_sum/(TCC_HIT_sum+TCC_MISS_sum)
-  description: 'Unit: percent'
 L2CacheTagRamStallRate:
   architectures:
     gfx90a:
@@ -490,105 +482,110 @@ L2CacheTagRamStallRate:
 LDSBankConflict:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
-      expression: 100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: 100*SQ_LDS_BANK_CONFLICT/GRBM_GUI_ACTIVE/CU_NUM
+      expression: 100*reduce(SQC_LDS_BANK_CONFLICT,sum)/reduce(SQC_LDS_IDX_ACTIVE,sum)
+    gfx906/gfx908/gfx90a/gfx9/gfx900:
+      expression: 100*reduce(SQ_LDS_BANK_CONFLICT,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
   description: 'The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal)
     to 100% (bad).'
 LDSInsts:
   architectures:
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: (SQ_INSTS_LDS-SQ_INSTS_FLAT_LDS_ONLY)/SQ_WAVES
+    gfx906/gfx908/gfx90a/gfx9/gfx900:
+      expression: (reduce(SQ_INSTS_LDS,sum)-reduce(SQ_INSTS_FLAT_LDS_ONLY,sum))/reduce(SQ_WAVES,sum)
   description: The average number of LDS read or LDS write instructions executed per work item (affected
     by flow control).  Excludes FLAT instructions that read from or write to LDS.
 LdsBankConflict:
   architectures:
     gfx90a:
-      expression: SQ_LDS_BANK_CONFLICT/(SQ_LDS_IDX_ACTIVE-SQ_LDS_BANK_CONFLICT)
+      expression: reduce(SQ_LDS_BANK_CONFLICT,sum)/(reduce(SQ_LDS_IDX_ACTIVE,sum)-reduce(SQ_LDS_BANK_CONFLICT,sum))
   description: 'Unit: conflicts/access'
 LdsLatency:
   architectures:
     gfx942/gfx941/gfx940/gfx90a/gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx11/gfx1100/gfx1101/gfx1102:
-      expression: accumulate(SQ_INST_LEVEL_LDS, HIGH_RES)/SQ_INSTS_LDS
+      expression: reduce(accumulate(SQ_INST_LEVEL_LDS, HIGH_RES),sum)/reduce(SQ_INSTS_LDS,sum)
   description: 'Unit: cycles'
 LdsPipeIssueUtil:
   architectures:
     gfx90a:
-      expression: 400*SQ_ACTIVE_INST_LDS/(GRBM_GUI_ACTIVE*CU_NUM*2)
+      expression: 400*reduce(SQ_ACTIVE_INST_LDS,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM*2)
   description: 'Unit: percent'
 LdsUtil:
   architectures:
     gfx90a:
-      expression: 100*SQ_LDS_IDX_ACTIVE/(GRBM_GUI_ACTIVE*CU_NUM)
+      expression: 100*reduce(SQ_LDS_IDX_ACTIVE,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   description: 'Unit: percent'
 MAX_WAVE_SIZE:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
       expression: wave_front_size
   description: Max wave size constant
 MeanOccupancyPerActiveCU:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
-      expression: accumulate(SQ_LEVEL_WAVES, LOW_RES)/SQ_BUSY_CU_CYCLES
+      expression: reduce(accumulate(SQ_LEVEL_WAVES, LOW_RES),sum)/reduce(SQ_BUSY_CU_CYCLES,sum)
     gfx11/gfx1100/gfx1101/gfx1102:
-      expression: SQ_WAVE_CYCLES/SQ_BUSY_CYCLES
+      expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(SQ_BUSY_CYCLES,sum)
   description: Mean occupancy per active compute unit.
 MeanOccupancyPerCU:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx90a/gfx942/gfx941/gfx940:
-      expression: accumulate(SQ_LEVEL_WAVES, HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
+      expression: reduce(accumulate(SQ_LEVEL_WAVES, HIGH_RES),sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
     gfx11/gfx1100/gfx1101/gfx1102:
-      expression: SQ_WAVE_CYCLES/GRBM_GUI_ACTIVE/CU_NUM
+      expression: reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
   description: Mean occupancy per compute unit.
+OccupancyPercent:
+  architectures:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx11/gfx1100/gfx1101/gfx1102:
+      expression: 100*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32
+    gfx90a/gfx942/gfx941/gfx940:
+      expression: 400*reduce(SQ_WAVE_CYCLES,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM/32
+  description: GPU Occupancy as % of maximum.
 MemUnitBusy:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
-      expression: 100*reduce(TA_TA_BUSY,max)/GRBM_GUI_ACTIVE/SE_NUM
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: 100*reduce(TA_TA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: 'The percentage of GPUTime the memory unit is active. The result includes the stall time
     (MemUnitStalled). This is measured with all extra fetches and writes and any cache or memory effects
     taken into account. Value range: 0% to 100% (fetch-bound).'
 MemUnitStalled:
   architectures:
-    gfx8:
-      expression: 100*reduce(TCP_TCP_TA_DATA_STALL_CYCLES,max)/GRBM_GUI_ACTIVE/SE_NUM
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
-      expression: 100*TCP_TCP_TA_DATA_STALL_CYCLES_max/GRBM_GUI_ACTIVE/SE_NUM
+      expression: 100*TCP_TCP_TA_DATA_STALL_CYCLES_max/reduce(GRBM_GUI_ACTIVE,max)/SE_NUM
   description: 'The percentage of GPUTime the memory unit is stalled. Try reducing the number or size
     of fetches and writes if possible. Value range: 0% (optimal) to 100% (bad).'
 MemWrites32B:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: WRITE_REQ_32B
   description: The total number of effective 32B write transactions to the memory
 MfmaFlops:
   architectures:
-    gfx90a:
+    gfx90a/gfx942/gfx941/gfx940:
       expression: (SQ_INSTS_VALU_MFMA_MOPS_F16+SQ_INSTS_VALU_MFMA_MOPS_BF16+SQ_INSTS_VALU_MFMA_MOPS_F32+SQ_INSTS_VALU_MFMA_MOPS_F64)*512
   description: 'Unit: FLOP'
 MfmaFlopsBF16:
   architectures:
-    gfx90a:
+    gfx90a/gfx942/gfx941/gfx940:
       expression: SQ_INSTS_VALU_MFMA_MOPS_BF16*512
   description: 'Unit: FLOP'
 MfmaFlopsF16:
   architectures:
-    gfx90a:
+    gfx90a/gfx942/gfx941/gfx940:
       expression: SQ_INSTS_VALU_MFMA_MOPS_F16*512
   description: 'Unit: FLOP'
 MfmaFlopsF32:
   architectures:
-    gfx90a:
+    gfx90a/gfx942/gfx941/gfx940:
       expression: SQ_INSTS_VALU_MFMA_MOPS_F32*512
   description: 'Unit: FLOP'
 MfmaFlopsF64:
   architectures:
-    gfx90a:
+    gfx90a/gfx942/gfx941/gfx940:
       expression: SQ_INSTS_VALU_MFMA_MOPS_F64*512
   description: 'Unit: IOP'
 MfmaUtil:
   architectures:
-    gfx90a:
-      expression: 100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)
+    gfx90a/gfx942/gfx941/gfx940:
+      expression: 100*reduce(SQ_VALU_MFMA_BUSY_CYCLES,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   description: 'Unit: percent'
 RDATA1_SIZE:
   architectures:
@@ -597,34 +594,27 @@ RDATA1_SIZE:
   description: The total kilobytes fetched from the video memory. This is measured on EA1s.
 SALUBusy:
   architectures:
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: 100*SQ_INST_CYCLES_SALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
-    gfx942/gfx941/gfx940:
-      expression: 100*reduce(SQ_INST_CYCLES_SALU,sum)*4/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,sum)
+    gfx906/gfx908/gfx90a/gfx9/gfx900/gfx942/gfx941/gfx940:
+      expression: 100*reduce(SQ_INST_CYCLES_SALU,sum)/CU_NUM/reduce(GRBM_GUI_ACTIVE,max)
   description: 'The percentage of GPUTime scalar ALU instructions are processed. Value range: 0% (bad)
     to 100% (optimal).'
 SALUInsts:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
-      expression: SQ_INSTS_SALU/SQ_WAVES
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(SQ_INSTS_SALU,sum)/reduce(SQ_WAVES,sum)
   description: The average number of scalar ALU instructions executed per work-item (affected by flow
     control).
 SE_NUM:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
       expression: array_count/simd_arrays_per_engine
   description: SE_NUM
 SFetchInsts:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
-      expression: SQ_INSTS_SMEM/SQ_WAVES
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(SQ_INSTS_SMEM,sum)/reduce(SQ_WAVES,sum)
   description: The average number of scalar fetch instructions from the video memory executed per work-item
     (affected by flow control).
-SIMD_NUM:
-  architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
-      expression: simd_per_cu/CU_NUM
-  description: SIMD Number
 # SPI Block(Shader Pipe Interpolator- The Shader Processor Input/Interpolator (SPI), is in charge of managing all resources (wave-slots, GPRs, LDS, barrier), in the shader array, as well as launching and tracking waves on SIMDs)
 SPI_CSN_BUSY:
   architectures:
@@ -741,7 +731,7 @@ SPI_SWC_CSC_WR:
 SPI_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
-      expression: 100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_SPI_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: Percentage of the GRBM_GUI_ACTIVE time that any of the Shader Pipe Interpolators (SPI)
     are busy in the shader engine(s)
 SPI_VWC_CSC_WR:
@@ -927,8 +917,7 @@ SQ_ACCUM_PREV:
       block: SQ
       event: 1
   description: This is a hardware register that can be used for accumulating values for other counters.
-    This is useful in expressions where you want to collect deltas over time. For example SQ_ACCUM_PREV/SQ_WAVES
-    calculates the number of in-flight waves over the previous 4 cycles. Only accumulates once every 4
+    This is useful in expressions where you want to integrate over time. Only accumulates once every 4
     cycles. This counter is primarily for use with derived counters supplied by rocprof.
 SQ_ACCUM_PREV_HIRES:
   architectures:
@@ -939,8 +928,7 @@ SQ_ACCUM_PREV_HIRES:
       block: SQ
       event: 184
   description: This is a hardware register that can be used for accumulating values for other counters.
-    This is useful in expressions where you want to collect deltas over time. For example SQ_ACCUM_PREV_HIRES/SQ_WAVES
-    calculates the number of in-flight waves over the previous cycle. Accumulates once every cycle. This
+    This is useful in expressions where you want to integrate over time. This
     counter is primarily for use with derived counters supplied by rocprof.
 SQ_ACTIVE_INST_ANY:
   architectures:
@@ -1019,9 +1007,6 @@ SQ_ACTIVE_INST_SCA:
     with units in quad-cycles(4 cycles). See AMD ISAs for more information on SALU and SMEM instructions.
 SQ_ACTIVE_INST_VALU:
   architectures:
-    gfx8:
-      block: SQ
-      event: 69
     gfx906/gfx900/gfx9:
       block: SQ
       event: 71
@@ -1133,7 +1118,7 @@ SQ_INSTS_FLAT:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 56
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 32
     gfx908:
@@ -1151,7 +1136,7 @@ SQ_INSTS_FLAT:
     SIMDs in the SE).
 SQ_INSTS_FLAT_LDS_ONLY:
   architectures:
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 33
     gfx908:
@@ -1171,7 +1156,7 @@ SQ_INSTS_GDS:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 54
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 35
     gfx908:
@@ -1194,7 +1179,7 @@ SQ_INSTS_LDS:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 57
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 34
     gfx908:
@@ -1223,7 +1208,7 @@ SQ_INSTS_SALU:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 58
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 30
     gfx908:
@@ -1253,7 +1238,7 @@ SQ_INSTS_SMEM:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 59
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 31
     gfx908:
@@ -1304,7 +1289,7 @@ SQ_INSTS_VALU:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 62
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx900/gfx90a/gfx9:
       block: SQ
       event: 26
   description: The number of VALU (Vector ALU) instructions issued. The value is returned per-SE (aggregate
@@ -1554,7 +1539,7 @@ SQ_INSTS_VMEM:
     of values in SIMDs in the SE).
 SQ_INSTS_VMEM_RD:
   architectures:
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 28
     gfx908:
@@ -1570,7 +1555,7 @@ SQ_INSTS_VMEM_RD:
     The value is returned per-SE (aggregate of values in SIMDs in the SE).
 SQ_INSTS_VMEM_WR:
   architectures:
-    gfx906/gfx8/gfx900/gfx9:
+    gfx906/gfx900/gfx9:
       block: SQ
       event: 27
     gfx908:
@@ -1627,9 +1612,6 @@ SQ_INSTS_WAVE32_VALU:
     issued. {emulated, C1}
 SQ_INST_CYCLES_SALU:
   architectures:
-    gfx8:
-      block: SQ
-      event: 86
     gfx906/gfx900/gfx9:
       block: SQ
       event: 84
@@ -1771,9 +1753,6 @@ SQ_LDS_ATOMIC_RETURN:
     a per-SE (aggregate of values in SIMDs in the SE) basis.
 SQ_LDS_BANK_CONFLICT:
   architectures:
-    gfx8:
-      block: SQ
-      event: 97
     gfx906/gfx900/gfx9:
       block: SQ
       event: 93
@@ -1830,9 +1809,6 @@ SQ_LEVEL_WAVES:
     is returned on a per-SIMD basis.
 SQ_THREAD_CYCLES_VALU:
   architectures:
-    gfx8:
-      block: SQ
-      event: 89
     gfx906/gfx900/gfx9:
       block: SQ
       event: 85
@@ -1896,9 +1872,6 @@ SQ_WAIT_INST_LDS:
     gfx11/gfx1102/gfx1100/gfx1101:
       block: SQ
       event: 29
-    gfx8:
-      block: SQ
-      event: 61
     gfx906/gfx900/gfx9:
       block: SQ
       event: 63
@@ -1933,7 +1906,7 @@ SQ_WAVE64_INSTS:
   description: Number of instructions issued by wave64 waves. Skipped instructions are not counted. {emulated}
 SQ_WAVES:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
       block: SQ
       event: 4
   description: Count number of waves sent to distributed sequencers (SQs). This value represents the number
@@ -2029,7 +2002,7 @@ SQ_WAVES_SAVED:
     space). Returns one value per-SE (aggregates of SIMD values).
 SQ_WAVES_sum:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(SQ_WAVES,sum)
   description: Gives the total number of waves currently enqueued by the application during the collection
     timeframe (for dispatch profiling this is the timeframe of kernel execution, for agent profiling it
@@ -2055,17 +2028,17 @@ SQ_WAVE_CYCLES:
 ScaPipeIssueUtil:
   architectures:
     gfx90a:
-      expression: 100*SQ_ACTIVE_INST_SCA/(GRBM_GUI_ACTIVE*CU_NUM)
+      expression: 100*reduce(SQ_ACTIVE_INST_SCA,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   description: 'Unit: percent'
 SmemLatency:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
-      expression: accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES)/SQ_INSTS_SMEM_NORM
+      expression: reduce(accumulate(SQ_INST_LEVEL_SMEM, HIGH_RES),sum)/reduce(SQ_INSTS_SMEM_NORM,sum)
   description: 'Unit: cycles'
 SpiUtil:
   architectures:
     gfx90a:
-      expression: 100*GRBM_SPI_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_SPI_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: 'Unit: percent'
 
 # TA block( The Texture Addressing block) processes address components and write data from the shaders and passes them to the TCP and texture data TD blocks.
@@ -2221,17 +2194,17 @@ TA_BUFFER_WRITE_WAVEFRONTS_sum:
   description: Number of buffer write wavefronts processed by TA. Sum over TA instances.
 TA_BUSY_avr:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TA_TA_BUSY,avr)
   description: TA block is busy. Average over TA instances.
 TA_BUSY_max:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TA_TA_BUSY,max)
   description: TA block is busy. Max over TA instances.
 TA_BUSY_min:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TA_TA_BUSY,min)
   description: TA block is busy. Min over TA instances.
 TA_DATA_STALLED_BY_TC_CYCLES:
@@ -2277,7 +2250,7 @@ TA_FLAT_LOAD_WAVEFRONTS_sum:
   description: Number of flat load vec32 packets processed by the TA. Sum over TA instances.
 TA_FLAT_READ_WAVEFRONTS:
   architectures:
-    gfx906/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx906/gfx908/gfx900/gfx90a/gfx9:
       block: TA
       event: 101
     gfx942/gfx941/gfx940:
@@ -2286,7 +2259,7 @@ TA_FLAT_READ_WAVEFRONTS:
   description: Number of flat opcode reads processed by the TA.
 TA_FLAT_READ_WAVEFRONTS_sum:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TA_FLAT_READ_WAVEFRONTS,sum)
   description: Number of flat opcode reads processed by the TA. Sum over TA instances.
 TA_FLAT_STORE_WAVEFRONTS:
@@ -2317,7 +2290,7 @@ TA_FLAT_WAVEFRONTS_sum:
   description: Number of flat opcode wavfronts processed by the TA. Sum over TA instances.
 TA_FLAT_WRITE_WAVEFRONTS:
   architectures:
-    gfx906/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx906/gfx908/gfx900/gfx90a/gfx9:
       block: TA
       event: 102
     gfx942/gfx941/gfx940:
@@ -2326,12 +2299,12 @@ TA_FLAT_WRITE_WAVEFRONTS:
   description: Number of flat opcode writes processed by the TA.
 TA_FLAT_WRITE_WAVEFRONTS_sum:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TA_FLAT_WRITE_WAVEFRONTS,sum)
   description: Number of flat opcode writes processed by the TA. Sum over TA instances.
 TA_TA_BUSY:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx900/gfx90a/gfx9:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx900/gfx90a/gfx9:
       block: TA
       event: 15
     gfx942/gfx941/gfx940:
@@ -2360,7 +2333,7 @@ TA_TOTAL_WAVEFRONTS_sum:
 TA_UTIL:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
-      expression: 100*GRBM_TA_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_TA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: Percentage of the GRBM_GUI_ACTIVE time that any of the Texture Pipes (TA) are busy in the
     shader engine(s).
 # TCA block(The Texture Cache Arbiter)
@@ -3017,9 +2990,6 @@ TCC_EA_WR_UNCACHED_32B_sum:
     will be counted as 2. Sum over TCC instances.
 TCC_HIT:
   architectures:
-    gfx8:
-      block: TCC
-      event: 18
     gfx906/gfx900/gfx9:
       block: TCC
       event: 20
@@ -3029,7 +2999,7 @@ TCC_HIT:
   description: Number of cache hits.
 TCC_HIT_sum:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TCC_HIT,sum)
   description: Number of cache hits. Sum over TCC instances.
 TCC_INTERNAL_PROBE:
@@ -3038,48 +3008,18 @@ TCC_INTERNAL_PROBE:
       block: TCC
       event: 11
   description: Number of self-probes spawned by TCC for CC writes/atomic operations. Not windowable.
-TCC_MC_RDREQ:
-  architectures:
-    gfx8:
-      block: TCC
-      event: 35
-  description: Number of 32-byte reads. The hardware actually does 64-byte reads but the number is adjusted
-    to provide uniformity.
-TCC_MC_RDREQ_sum:
-  architectures:
-    gfx8:
-      expression: reduce(TCC_MC_RDREQ,sum)
-  description: Number of 32-byte reads. Sum over TCC instaces.
-TCC_MC_WRREQ:
-  architectures:
-    gfx8:
-      block: TCC
-      event: 26
-  description: Number of 32-byte transactions going over the TC_MC_wrreq interface. Atomics may travel
-    over the same interface and are generally classified as write requests.
-TCC_MC_WRREQ_STALL:
-  architectures:
-    gfx8:
-      block: TCC
-      event: 28
-  description: Number of cycles a write request was stalled.
-TCC_MC_WRREQ_sum:
-  architectures:
-    gfx8:
-      expression: reduce(TCC_MC_WRREQ,sum)
-  description: Number of 32-byte transactions going over the TC_MC_wrreq interface. Sum over TCC instaces.
 TCC_MISS:
   architectures:
     gfx906/gfx900/gfx9:
       block: TCC
       event: 22
-    gfx942/gfx941/gfx940/gfx908/gfx8/gfx90a:
+    gfx942/gfx941/gfx940/gfx908/gfx90a:
       block: TCC
       event: 19
   description: Number of cache misses. UC reads count as misses.
 TCC_MISS_sum:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TCC_MISS,sum)
   description: Number of cache misses. UC reads count as misses. Sum over TCC instances.
 TCC_NC_REQ:
@@ -3265,8 +3205,6 @@ TCC_WRREQ1_STALL_max:
   description: Number of cycles a write request was stalled. Max over TCC instances.
 TCC_WRREQ_STALL_max:
   architectures:
-    gfx8:
-      expression: reduce(TCC_MC_WRREQ_STALL,max)
     gfx906/gfx908/gfx90a/gfx9/gfx900:
       expression: reduce(TCC_EA_WRREQ_STALL,max)
     gfx942/gfx941/gfx940:
@@ -3614,9 +3552,6 @@ TCP_TCP_LATENCY_sum:
     divide by TA_TCP_STATE_READ to avg wave latency Sum over TCP instances.
 TCP_TCP_TA_DATA_STALL_CYCLES:
   architectures:
-    gfx8:
-      block: TCP
-      event: 3
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx900/gfx90a/gfx9:
       block: TCP
       event: 6
@@ -3954,44 +3889,42 @@ TOTAL_64_OPS:
 TaUtil:
   architectures:
     gfx90a:
-      expression: 100*GRBM_TA_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_TA_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: 'Unit: percent'
 TcUtil:
   architectures:
     gfx90a:
-      expression: 100*GRBM_TC_BUSY/GRBM_GUI_ACTIVE
+      expression: 100*reduce(GRBM_TC_BUSY,max)/reduce(GRBM_GUI_ACTIVE,max)
   description: 'Unit: percent'
 VALUBusy:
   architectures:
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: 100*SQ_ACTIVE_INST_VALU*4/SIMD_NUM/GRBM_GUI_ACTIVE
-    gfx942/gfx941/gfx940:
-      expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)*4/SIMD_NUM/reduce(GRBM_GUI_ACTIVE,sum)
+    gfx906/gfx908/gfx90a/gfx9/gfx900/gfx942/gfx941/gfx940:
+      expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/CU_NUM/reduce(GRBM_GUI_ACTIVE,max)
   description: 'The percentage of GPUTime vector ALU instructions are processed. Value range: 0% (bad)
     to 100% (optimal).'
 VALUInsts:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
-      expression: SQ_INSTS_VALU/SQ_WAVES
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(SQ_INSTS_VALU,sum)/reduce(SQ_WAVES,sum)
   description: The average number of vector ALU instructions executed per work-item (affected by flow
     control).
 VALUUtilization:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: 100*SQ_THREAD_CYCLES_VALU/(SQ_ACTIVE_INST_VALU*MAX_WAVE_SIZE)
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
+      expression: 100*reduce(SQ_THREAD_CYCLES_VALU,sum)/(reduce(SQ_ACTIVE_INST_VALU,sum)*MAX_WAVE_SIZE)
   description: 'The percentage of active vector ALU threads in a wave. A lower number can mean either
     more thread divergence in a wave or that the work-group size is not a multiple of 64. Value range:
     0% (bad), 100% (ideal - no thread divergence).'
 VFetchInsts:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: (SQ_INSTS_VMEM_RD-TA_FLAT_READ_WAVEFRONTS_sum)/SQ_WAVES
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
+      expression: (reduce(SQ_INSTS_VMEM_RD,sum)-TA_FLAT_READ_WAVEFRONTS_sum)/reduce(SQ_WAVES,sum)
   description: The average number of vector fetch instructions from the video memory executed per work-item
     (affected by flow control). Excludes FLAT instructions that fetch from video memory.
 VWriteInsts:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: (SQ_INSTS_VMEM_WR-TA_FLAT_WRITE_WAVEFRONTS_sum)/SQ_WAVES
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
+      expression: (reduce(SQ_INSTS_VMEM_WR,sum)-TA_FLAT_WRITE_WAVEFRONTS_sum)/reduce(SQ_WAVES,sum)
   description: The average number of vector write instructions to the video memory executed per work-item
     (affected by flow control). Excludes FLAT instructions that write to video memory.
 ValuIops:
@@ -4002,27 +3935,27 @@ ValuIops:
 ValuPipeIssueUtil:
   architectures:
     gfx90a:
-      expression: 100*SQ_ACTIVE_INST_VALU/(GRBM_GUI_ACTIVE*CU_NUM)
+      expression: 100*reduce(SQ_ACTIVE_INST_VALU,sum)/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   description: 'Unit: percent'
 VmemLatency:
   architectures:
     gfx942/gfx941/gfx940/gfx90a:
-      expression: accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES)/SQ_INSTS_VMEM
+      expression: reduce(accumulate(SQ_INST_LEVEL_VMEM, HIGH_RES),sum)/reduce(SQ_INSTS_VMEM,sum)
   description: 'Unit: cycles'
 VmemPipeIssueUtil:
   architectures:
     gfx90a:
-      expression: 400*(SQ_ACTIVE_INST_VMEM+SQ_ACTIVE_INST_FLAT)/(GRBM_GUI_ACTIVE*CU_NUM)
+      expression: 400*(reduce(SQ_ACTIVE_INST_VMEM,sum)+reduce(SQ_ACTIVE_INST_FLAT,sum))/(reduce(GRBM_GUI_ACTIVE,max)*CU_NUM)
   description: 'Unit: percent'
 WAVE_DEP_WAIT:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
-      expression: 100*SQ_WAIT_ANY/SQ_WAVE_CYCLES
+      expression: 100*reduce(SQ_WAIT_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
   description: Percentage of the SQ_WAVE_CYCLE time spent waiting for anything.
 WAVE_ISSUE_WAIT:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
-      expression: 100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES
+      expression: 100*reduce(SQ_WAIT_INST_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
   description: Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue.
 WDATA1_SIZE:
   architectures:
@@ -4031,8 +3964,6 @@ WDATA1_SIZE:
   description: The total kilobytes written to the video memory. This is measured on EA1s.
 WRITE_REQ_32B:
   architectures:
-    gfx8:
-      expression: TCC_MC_WRREQ_sum
     gfx906:
       expression: (TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)+(TCC_EA1_WRREQ_sum-TCC_EA1_WRREQ_64B_sum)+(TCC_EA_WRREQ_64B_sum+TCC_EA1_WRREQ_64B_sum)*2
     gfx908/gfx90a/gfx9/gfx900:
@@ -4042,63 +3973,58 @@ WRITE_REQ_32B:
   description: The total number of 32-byte effective memory writes.
 WRITE_SIZE:
   architectures:
-    gfx8:
-      expression: (TCC_MC_WRREQ_sum*32)/1024
     gfx906:
       expression: ((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64+WDATA1_SIZE)/1024
     gfx908/gfx90a/gfx9/gfx900:
       expression: ((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024
     gfx942/gfx941/gfx940:
       expression: ((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+      expression: ((GL2C_MC_WRREQ_sum-GL2C_EA_WRREQ_64B_sum)*32+GL2C_EA_WRREQ_64B_sum*64)/1024
   description: The total kilobytes written to the video memory. This is measured with all extra fetches
     and any cache or memory effects taken into account.
 WaveDepWait:
   architectures:
     gfx90a:
-      expression: 100*SQ_WAIT_ANY/SQ_WAVE_CYCLES
+      expression: 100*reduce(SQ_WAIT_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
   description: 'Unit: percent'
 WaveDuration:
   architectures:
     gfx90a:
-      expression: 4*SQ_WAVE_CYCLES/SQ_WAVES
+      expression: 4*reduce(SQ_WAVE_CYCLES,sum)/reduce(SQ_WAVES,sum)
   description: 'Unit: cycles'
 WaveExec:
   architectures:
     gfx90a:
-      expression: 100*SQ_ACTIVE_INST_ANY/SQ_WAVE_CYCLES
+      expression: 100*reduce(SQ_ACTIVE_INST_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
   description: 'Unit: percent'
 WaveIssueWait:
   architectures:
     gfx90a:
-      expression: 100*SQ_WAIT_INST_ANY/SQ_WAVE_CYCLES
+      expression: 100*reduce(SQ_WAIT_INST_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
   description: 'Unit: percent'
-WaveOccupancy:
-  architectures:
-    gfx90a:
-      expression: SQ_ACCUM_PREV_HIRES/GRBM_GUI_ACTIVE
-  description: 'Unit: wavefronts'
 Wavefronts:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx8/gfx90a/gfx9:
-      expression: SQ_WAVES
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(SQ_WAVES,sum)
   description: Total wavefronts.
 WriteSize:
   architectures:
-    gfx942/gfx941/gfx906/gfx940/gfx908/gfx8/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx906/gfx940/gfx908/gfx90a/gfx9/gfx900:
       expression: WRITE_SIZE
   description: The total kilobytes written to the video memory. This is measured with all extra fetches
     and any cache or memory effects taken into account.
 WriteUnitStalled:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
-      expression: 100*GL2C_WRREQ_STALL_max/GRBM_GUI_ACTIVE
-    gfx906/gfx908/gfx8/gfx90a/gfx9/gfx900:
-      expression: 100*TCC_WRREQ_STALL_max/GRBM_GUI_ACTIVE
+      expression: 100*GL2C_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
+    gfx906/gfx908/gfx90a/gfx9/gfx900:
+      expression: 100*TCC_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
   description: 'The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).'
 sL1dCacheHitRate:
   architectures:
     gfx90a:
-      expression: 100*SQC_DCACHE_HITS/SQC_DCACHE_REQ
+      expression: 100*reduce(SQC_DCACHE_HITS,sum)/reduce(SQC_DCACHE_REQ,sum)
   description: 'Unit: percent'
 vL1dAtomicTagConfStallRate:
   architectures:

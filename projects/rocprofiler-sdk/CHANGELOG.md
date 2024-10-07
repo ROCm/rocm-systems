@@ -111,4 +111,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - Fix crash when only scratch reporting is enabled
 - Fixed MeanOccupancy* metrics
 - Fix aborted-app validation test to properly check for hipExtHostAlloc command now that it is supported
+- Fix for SQ and GRBM metrics implicitly reduced.
 
+### Removed
+- Removed gfx8 metric definitions.
