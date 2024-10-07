@@ -263,6 +263,8 @@
     <metric name="FETCH_SIZE" expr="(TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024" descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
     <metric name="WRITE_SIZE" expr="((TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)*32+TCC_EA_WRREQ_64B_sum*64)/1024" descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
     <metric name="WRITE_REQ_32B" expr="TCC_EA_WRREQ_64B_sum*2+(TCC_EA_WRREQ_sum-TCC_EA_WRREQ_64B_sum)" descr="The total number of 32-byte effective memory writes."></metric>
+    <metric name="BANDWIDTH_EA"  expr="1024*(FETCH_SIZE+WRITE_SIZE)/GRBM_GUI_ACTIVE" descr="Memory Bandwidth measured at the TCC_EA interface. In units of bytes/cycle."></metric>
+    <metric name="OccupancyPercent" expr="400*SQ_WAVE_CYCLES/GRBM_GUI_ACTIVE/CU_NUM/32" descr="GPU occupancy as % of maximum."></metric>
   </gfx90a>
 
   <gfx940>
@@ -388,9 +390,11 @@
     <metric name="TCC_EA0_WRREQ_DRAM_sum" expr="sum(TCC_EA0_WRREQ_DRAM,16)" descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC). Sum over TCC instances."></metric>
     <metric name="TCC_EA_READBW" expr="(128*TCC_BUBBLE_sum)+64*(TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum-TCC_EA0_RDREQ_32B_sum)+32*TCC_EA0_RDREQ_32B_sum" descr="EA read bandwidth."></metric>
     <metric name="TCC_EA_READ_LATENCY" expr="TCC_EA0_RDREQ_LEVEL_sum/(TCC_BUBBLE_sum+TCC_EA0_RDREQ_sum)" descr="Lantency of an EA read."></metric>
-    <metric name="FETCH_SIZE" expr="(TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*64)/1024" descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
+    <metric name="FETCH_SIZE" expr="(TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*128)/1024" descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
     <metric name="WRITE_SIZE" expr="((TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)*32+TCC_EA0_WRREQ_64B_sum*64)/1024" descr="The total kilobytes written to the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
     <metric name="WRITE_REQ_32B" expr="TCC_EA0_WRREQ_64B_sum*2+(TCC_EA0_WRREQ_sum-TCC_EA0_WRREQ_64B_sum)" descr="The total number of 32-byte effective memory writes."></metric>
+    <metric name="BANDWIDTH_EA"  expr="1024*(FETCH_SIZE+WRITE_SIZE)*XCC_NUM/GRBM_GUI_ACTIVE" descr="Memory Bandwidth measured at the TCC_EA interface. In units of bytes/cycle."></metric>
+    <metric name="OccupancyPercent" expr="400*SQ_WAVE_CYCLES*XCC_NUM/GRBM_GUI_ACTIVE/CU_NUM/32" descr="GPU occupancy as % of maximum."></metric>
   </gfx940>
 
   <gfx941 base="gfx940"></gfx941>
@@ -460,6 +464,7 @@
     <metric name="FETCH_SIZE" expr="(GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024" descr="The total kilobytes fetched from the video memory. This is measured with all extra fetches and any cache or memory effects taken into account."></metric>
     <metric name="WriteUnitStalled" expr="100*GL2C_WRREQ_STALL_max/GRBM_GUI_ACTIVE" descr="The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad)."></metric>
     <metric name="LDSBankConflict" expr="100*SQC_LDS_BANK_CONFLICT/SQC_LDS_IDX_ACTIVE" descr="The percentage of GPUTime LDS is stalled by bank conflicts. Value range: 0% (optimal) to 100% (bad)."></metric>
+    <metric name="OccupancyPercent" expr="100*SQ_WAVE_CYCLES/GRBM_GUI_ACTIVE/CU_NUM/32" descr="GPU occupancy as % of maximum."></metric>
   </gfx11>
 
   <gfx12>
