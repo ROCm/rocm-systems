@@ -35,7 +35,7 @@ extern "C" {
 /*! @brief      Opaque handle to communicator
     @details    A communicator contains information required to facilitate collective communications
    calls */
-typedef struct ncclComm* ncclComm_t;
+typedef const struct ncclComm* ncclComm_t;
 #define NCCL_COMM_NULL NULL
 
 #define NCCL_UNIQUE_ID_BYTES 128
