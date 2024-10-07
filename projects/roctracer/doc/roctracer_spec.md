@@ -218,14 +218,16 @@ roctracer_status_t roctracer_disable_domain_callback(
 
 roctracer_status_t roctracer_disable_callback();
 ```
+
 ### 3.4 Activity API
-```
+
 The activity records are asynchronously logged to the pool and can be
 associated with the respective API callbacks using the correlation ID.
 Activity API can be used to enable collecting  the records with
 timestamp data for API calls and GPU activity like kernel submits,
 memory copies, and barriers.
 
+```
 // Correlation id
 typedef uint64_t activity_correlation_id_t;
 
@@ -254,7 +256,13 @@ struct activity_record_t {
    };
    size_t bytes;                              // data size bytes
 };
+```
 
+> [!NOTE]
+> rocprofiler reported device ids are in sync with node-ids reported by KFD(kernel). This can easily be verified by `rocm-smi` under `Node`.
+> Please also note that this device id might not be in sync with the ones provided by `hipGetDeviceProperties` which includes CPU agents and starts from 0.
+
+```
 Return next record:
 static inline int roctracer_next_record(
    const activity_record_t* record,         // [in] record ptr
