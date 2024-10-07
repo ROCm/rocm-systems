@@ -181,7 +181,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         basic_tracing_options,
         "--hsa-trace",
-        help="For collecting --hsa-core-trace, --hsa-amd-trace,--hsa-image-trace and --hsa-finalizer-trace. This option only enables the tracing of the HSA API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc"
+        help="For collecting --hsa-core-trace, --hsa-amd-trace,--hsa-image-trace and --hsa-finalizer-trace. This option only enables the tracing of the HSA API. Unlike previous iterations of rocprof, this does not enable kernel tracing, memory copy tracing, etc",
     )
     add_parser_bool_argument(
         basic_tracing_options,
