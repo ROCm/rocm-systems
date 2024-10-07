@@ -49,7 +49,11 @@
 class MockRuntimeBuffer
 {
 public:
-    MockRuntimeBuffer() { packets = {}; };
+    MockRuntimeBuffer(uint32_t device_ = 0)
+    : device(device_)
+    {
+        packets = {};
+    };
 
     //! Adds a packet to the buffer
     void submit(const packet_union_t& packet) { packets.push_back(packet); };
@@ -62,6 +66,7 @@ public:
         uni.upcoming.type              = AMD_UPCOMING_SAMPLES;
         uni.upcoming.which_sample_type = AMD_SNAPSHOT_V1;
         uni.upcoming.num_samples       = num_samples;
+        uni.upcoming.device.handle     = device;
         submit(uni);
     }
 
@@ -90,6 +95,8 @@ public:
 
     std::vector<packet_union_t>                                packets;
     std::vector<std::vector<rocprofiler_pc_sampling_record_t>> parsed_data;
+
+    const uint32_t device;
 };
 
 /**
@@ -100,21 +107,22 @@ class MockDoorBell
 {
 public:
     MockDoorBell()
-    : handler(getUniqueId())
     {
-        available_ids.erase(handler);
+        auto lock = getLock();
+        assert(getAvailableIds().size() > 0);
+        handler = *getAvailableIds().begin();
+        getAvailableIds().erase(handler);
     };
-    ~MockDoorBell() { available_ids.insert(handler); }
+    ~MockDoorBell()
+    {
+        auto lock = getLock();
+        getAvailableIds().insert(handler);
+    }
 
-    const size_t            handler;
-    static constexpr size_t num_unique_bells = 4;
+    size_t                  handler;
+    static constexpr size_t num_unique_bells = 32;
 
 private:
-    static size_t getUniqueId()
-    {
-        assert(available_ids.size() > 0);
-        return *available_ids.begin();
-    }
     static std::unordered_set<size_t> reset_available_ids()
     {
         std::unordered_set<size_t> set;
@@ -122,9 +130,18 @@ private:
             set.insert(i << 3);
         return set;
     };
-    static std::unordered_set<size_t> available_ids;
+
+    static std::unique_lock<std::mutex> getLock()
+    {
+        static std::mutex mut;
+        return std::unique_lock<std::mutex>(mut);
+    }
+    static std::unordered_set<size_t>& getAvailableIds()
+    {
+        static std::unordered_set<size_t> available_ids = reset_available_ids();
+        return available_ids;
+    }
 };
-std::unordered_set<size_t> MockDoorBell::available_ids = MockDoorBell::reset_available_ids();
 
 /**
  * Mimics a HSA queue. Every live instance of this class has an unique ID and a doorbell.
@@ -136,9 +153,10 @@ class MockQueue
 {
 public:
     MockQueue(int size_, std::shared_ptr<MockRuntimeBuffer>& buffer_)
-    : id(cur_unique_id)
+    : id(getUniqueId())
     , size(size_)
     , doorbell()
+    , device(buffer_->device)
     , buffer(buffer_){};
 
     //! Submits a packet to the runtime buffer
@@ -153,22 +171,28 @@ public:
             read_index++;
     }
 
-    int    read_index  = 0;
-    int    write_index = 0;
-    size_t active_dispatches =
-        0;  //! Number of dispatches that are still able to generate PC samples
-    int                     last_known_read_pkt = 0;
+    int read_index  = 0;
+    int write_index = 0;
+
+    size_t active_dispatches   = 0;  //! Number of dispatches that are still generating PC samples
+    int    last_known_read_pkt = 0;
+
     std::unordered_set<int> async_read_index{};
 
-    const size_t                             id;
-    const size_t                             size;
-    const MockDoorBell                       doorbell;
+    const size_t       id;
+    const size_t       size;
+    const MockDoorBell doorbell;
+    const uint32_t     device;
+
     std::shared_ptr<MockRuntimeBuffer> const buffer;
 
 private:
-    static size_t cur_unique_id;
+    static size_t getUniqueId()
+    {
+        static std::atomic<size_t> _id{1};
+        return _id.fetch_add(1);
+    }
 };
-size_t MockQueue::cur_unique_id = 1;
 
 /**
  * Mimics a kernel dispatch.
@@ -181,12 +205,11 @@ public:
     : queue(queue_)
     , dispatch_id(queue->write_index)
     , doorbell_id(queue->doorbell.handler)
-    , unique_id(cur_unique_id)
+    , unique_id(getUniqueId())
     {
         // Ensure queues are not holding more dispatches than queue_size.
         assert(queue->active_dispatches < queue->size);
         queue->active_dispatches++;
-        cur_unique_id++;
 
         packet_union_t uni;
         ::memset(&uni, 0, sizeof(uni));
@@ -195,6 +218,7 @@ public:
         uni.dispatch_id.queue_size              = queue->size;
         uni.dispatch_id.write_index             = dispatch_id;
         uni.dispatch_id.read_index              = queue->read_index;
+        uni.dispatch_id.device.handle           = queue->device;
         uni.dispatch_id.correlation_id.internal = unique_id;
         queue->submit(uni);
         queue->write_index++;
@@ -228,15 +252,20 @@ public:
     }
 
     std::shared_ptr<MockQueue> const queue;
-    const size_t                     dispatch_id;
-    const size_t                     doorbell_id;
-    const size_t                     unique_id;
-    static size_t                    cur_unique_id;
+
+    const size_t dispatch_id;
+    const size_t doorbell_id;
+    const size_t unique_id;
 
 private:
     bool queue_read_inc = false;
+
+    static size_t getUniqueId()
+    {
+        static std::atomic<size_t> _id{1};
+        return _id.fetch_add(1);
+    }
 };
-size_t MockDispatch::cur_unique_id = 0;
 
 /**
  * Lightweight class to represent a wave in the particular dispatch.

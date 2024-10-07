@@ -45,13 +45,6 @@ namespace pc_sampling
 {
 namespace code_object
 {
-CodeobjTableTranslatorSynchronized*
-get_code_object_translator()
-{
-    static auto*& _v = common::static_object<CodeobjTableTranslatorSynchronized>::construct();
-    return _v;
-}
-
 namespace
 {
 auto&
@@ -110,7 +103,7 @@ executable_freeze(hsa_executable_t executable, const char* options)
             if(code_object.hsa_executable == executable)
             {
                 const auto& code_object_rocp = code_object.rocp_data;
-                get_code_object_translator()->insert(
+                CodeobjTableTranslatorSynchronized::Get()->insert(
                     address_range_t{code_object_rocp.load_base,
                                     code_object_rocp.load_size,
                                     code_object_rocp.code_object_id});
@@ -130,7 +123,7 @@ executable_destroy(hsa_executable_t executable)
             {
                 flush_pc_sampling_buffers(code_object);
                 const auto& code_object_rocp = code_object.rocp_data;
-                get_code_object_translator()->remove(
+                CodeobjTableTranslatorSynchronized::Get()->remove(
                     address_range_t{code_object_rocp.load_base,
                                     code_object_rocp.load_size,
                                     code_object_rocp.code_object_id});

@@ -25,15 +25,11 @@
 #include "lib/common/static_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/defines.hpp"
 
-#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
-
-#    include <rocprofiler-sdk/callback_tracing.h>
-#    include <rocprofiler-sdk/cxx/codeobj/segment.hpp>
-
-#    include <hsa/hsa_api_trace.h>
-
-#    include <mutex>
-#    include <shared_mutex>
+#include <hsa/hsa_api_trace.h>
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <mutex>
+#include <rocprofiler-sdk/cxx/codeobj/segment.hpp>
+#include <shared_mutex>
 
 namespace rocprofiler
 {
@@ -41,12 +37,6 @@ namespace pc_sampling
 {
 namespace code_object
 {
-void
-initialize(HsaApiTable* table);
-
-void
-finalize();
-
 using address_range_t        = rocprofiler::sdk::codeobj::segment::address_range_t;
 using CodeobjTableTranslator = rocprofiler::sdk::codeobj::segment::CodeobjTableTranslator;
 
@@ -59,38 +49,82 @@ public:
     // Must acquire write lock
     void insert(address_range_t addr_range)
     {
-        auto lock = std::unique_lock{mut};
-        this->Super::insert(addr_range);
+        auto lock = std::unique_lock{backlog_mut};
+        insert_backlog.emplace_back(addr_range);
+
+        if(auto try_lock = std::unique_lock{query_mut, std::try_to_lock}) clear_insert_log();
     }
 
     // Must acquire write lock
-    bool remove(address_range_t addr_range)
+    void remove(address_range_t addr_range)
     {
-        auto lock = std::unique_lock{mut};
-        return this->Super::remove(addr_range);
+        auto lock = std::unique_lock{backlog_mut};
+        remove_backlog.emplace_back(addr_range);
+
+        if(auto try_lock = std::unique_lock{query_mut, std::try_to_lock}) clear_remove_log();
     }
+
+    void clear_backlog()
+    {
+        auto backlog_lock = std::unique_lock{backlog_mut};
+
+        if(!remove_backlog.empty() || !insert_backlog.empty())
+        {
+            auto query_lock = std::unique_lock{query_mut};
+
+            clear_remove_log();
+            clear_insert_log();
+        }
+    }
+
+    std::shared_lock<std::shared_mutex> acquire_query_lock() { return std::shared_lock{query_mut}; }
 
     // Must acquire read lock
     address_range_t find_codeobj_in_range(uint64_t addr) const
     {
-        // TODO: It would be good to have a way to cache search results
-        // (caching could be done easily in the parser)
-        auto lock = std::shared_lock{mut};
-        auto it   = this->find(address_range_t{addr, 0, 0});
+        auto it = this->find(address_range_t{addr, 0, 0});
         // `addr` might originate from an unknown code object.
         if(it == this->end()) return address_range_t{0, 0, ROCPROFILER_CODE_OBJECT_ID_NONE};
         return *it;
     }
 
+    static CodeobjTableTranslatorSynchronized* Get()
+    {
+        static auto*& _v = common::static_object<CodeobjTableTranslatorSynchronized>::construct();
+        return _v;
+    }
+
 private:
-    mutable std::shared_mutex mut = {};
+    void clear_insert_log()
+    {
+        for(const auto& addr_range : insert_backlog)
+            this->Super::insert(addr_range);
+        insert_backlog.clear();
+    }
+
+    void clear_remove_log()
+    {
+        for(const auto& addr_range : remove_backlog)
+            this->Super::remove(addr_range);
+        remove_backlog.clear();
+    }
+
+    std::mutex                   backlog_mut{};
+    std::shared_mutex            query_mut{};
+    std::vector<address_range_t> insert_backlog{};
+    std::vector<address_range_t> remove_backlog{};
 };
 
-CodeobjTableTranslatorSynchronized*
-get_code_object_translator();
+#if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
+
+void
+initialize(HsaApiTable* table);
+
+void
+finalize();
+
+#endif
 
 }  // namespace code_object
 }  // namespace pc_sampling
 }  // namespace rocprofiler
-
-#endif

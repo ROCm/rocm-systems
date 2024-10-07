@@ -58,3 +58,22 @@ target_link_libraries(
     pcs_bench_test
     PRIVATE rocprofiler-sdk::rocprofiler-common-library
             rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+
+add_executable(pcs_thread_test)
+target_compile_options(pcs_thread_test PRIVATE "-Ofast")
+
+target_sources(pcs_thread_test PRIVATE multigpu.cpp)
+target_include_directories(pcs_thread_test PRIVATE ${PCTEST_INCLUDE_DIR})
+
+target_link_libraries(
+    pcs_thread_test
+    PRIVATE rocprofiler-sdk::rocprofiler-common-library
+            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+
+gtest_add_tests(
+    TARGET pcs_thread_test
+    SOURCES multigpu.cpp
+    TEST_LIST pcs_thread_test_TESTS
+    WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+
+set_tests_properties(${pcs_thread_test_TESTS} PROPERTIES TIMEOUT 75 LABELS "unittests")

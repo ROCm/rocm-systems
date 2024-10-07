@@ -22,15 +22,15 @@
 
 #pragma once
 
-#include "lib/common/logging.hpp"
+#include "include/rocprofiler-sdk/cxx/codeobj/code_printing.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/translation.hpp"
 
-#include <rocprofiler-sdk/fwd.h>
-
+#include <atomic>
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <unordered_map>
 #include <vector>
 
@@ -68,6 +68,15 @@ struct DispatchPkt
     device_handle         dev;                //! Which device this is run
 };
 
+struct cache_type_t
+{
+    trap_correlation_id_t        id_in{.raw = ~0ul};
+    rocprofiler_correlation_id_t id_out{};
+    uint64_t                     dev_id    = ~0ul;
+    size_t                       increment = 0;
+    size_t                       object_id = 0;
+};
+
 inline bool
 operator==(const trap_correlation_id_t& a, const trap_correlation_id_t& b)
 {
@@ -99,7 +108,11 @@ namespace Parser
 class CorrelationMap
 {
 public:
-    CorrelationMap() = default;
+    CorrelationMap()
+    {
+        static std::atomic<size_t> _ids{1};
+        object_id = _ids.fetch_add(1);
+    };
 
     /**
      * Checks wether a dispatch pkt will generate a collision.
@@ -116,9 +129,10 @@ public:
      */
     void newDispatch(const dispatch_pkt_id_t& pkt)
     {
-        cache_dev_id = ~0ul;
+        std::unique_lock<std::mutex> lk(mut);
         auto trap_id = trap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
         dispatch_to_correlation[{trap_id, pkt.device}] = pkt.correlation_id;
+        cache_reset_count.fetch_add(1);
     }
 
     /**
@@ -126,9 +140,10 @@ public:
      */
     void forget(const dispatch_pkt_id_t& pkt)
     {
-        cache_dev_id = ~0ul;
+        std::unique_lock<std::mutex> lk(mut);
         auto trap_id = trap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
         dispatch_to_correlation.erase({trap_id, pkt.device});
+        cache_reset_count.fetch_add(1);
     }
 
     /**
@@ -138,13 +153,25 @@ public:
     rocprofiler_correlation_id_t get(device_handle dev, trap_correlation_id_t correlation_in)
     {
 #ifndef _PARSER_CORRELATION_DISABLE_CACHE
-        if(dev.handle == cache_dev_id && correlation_in == cache_correlation_id_in)
-            return cache_correlation_id_out;
+        static thread_local cache_type_t cache{};
+        size_t                           new_increment = cache_reset_count.load();
+
+        if(cache.increment == new_increment && cache.object_id == this->object_id &&
+           cache.dev_id == dev.handle && cache.id_in == correlation_in)
+            return cache.id_out;
+
+        // Using unique_lock showed better performance over the shared_lock
+        std::unique_lock<std::mutex> lk(mut);
+        cache.increment = cache_reset_count.load();
+        cache.object_id = object_id;
+        cache.id_out    = dispatch_to_correlation.at({correlation_in, dev});
+        cache.dev_id    = dev.handle;
+        cache.id_in     = correlation_in;
+        return cache.id_out;
+#else
+        std::unique_lock<std::mutex> lk(mut);
+        return dispatch_to_correlation.at({correlation_in, dev});
 #endif
-        cache_correlation_id_out = dispatch_to_correlation.at({correlation_in, dev});
-        cache_dev_id             = dev.handle;
-        cache_correlation_id_in  = correlation_in;
-        return cache_correlation_id_out;
     }
 
     /**
@@ -169,15 +196,14 @@ public:
 
 private:
     std::unordered_map<DispatchPkt, rocprofiler_correlation_id_t> dispatch_to_correlation{};
+    std::atomic<size_t>                                           cache_reset_count{1};
+    size_t                                                        object_id = 0;
 
-    // Making get() const and these cache variables mutable causes performance to be unstable
-    trap_correlation_id_t        cache_correlation_id_in{.raw = ~0ul};  // Invalid value in cache
-    rocprofiler_correlation_id_t cache_correlation_id_out{
-        .internal = ~0ul,
-        .external = rocprofiler_user_data_t{.value = ~0ul}};
-    uint64_t cache_dev_id = ~0ul;  // Invalid device Id in cache
+    std::mutex mut;
 };
 }  // namespace Parser
+
+using address_range_t = rocprofiler::sdk::codeobj::segment::address_range_t;
 
 template <bool bHostTrap, typename GFXIP>
 inline pcsample_status_t
@@ -187,23 +213,25 @@ add_upcoming_samples(const device_handle               device,
                      Parser::CorrelationMap*           corr_map,
                      rocprofiler_pc_sampling_record_t* samples)
 {
-    pcsample_status_t status     = PCSAMPLE_STATUS_SUCCESS;
-    auto        cache_addr_range = rocprofiler::pc_sampling::code_object::address_range_t{0, 0, 0};
-    const auto* code_object_translator =
-        rocprofiler::pc_sampling::code_object::get_code_object_translator();
+    pcsample_status_t status           = PCSAMPLE_STATUS_SUCCESS;
+    auto              cache_addr_range = address_range_t{0, 0, ROCPROFILER_CODE_OBJECT_ID_NONE};
+
+    auto* table = rocprofiler::pc_sampling::code_object::CodeobjTableTranslatorSynchronized::Get();
+    // To achieve better performance, we exported mutex outside of the translator class.
+    table->clear_backlog();
+    auto table_read_lock = table->acquire_query_lock();
+
     for(uint64_t p = 0; p < available_samples; p++)
     {
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
-        samples[p]       = copySample<bHostTrap, GFXIP>((const void*) (buffer + p));
 
         auto& pc_sample = samples[p];
+        pc_sample       = copySample<bHostTrap, GFXIP>((const void*) (buffer + p));
         pc_sample.size  = sizeof(rocprofiler_pc_sampling_record_t);
 
         // Convert PC -> (loaded code object id containing PC, offset within code object)
         if(!cache_addr_range.inrange(snap->pc))
-        {
-            cache_addr_range = code_object_translator->find_codeobj_in_range(snap->pc);
-        }
+            cache_addr_range = table->find_codeobj_in_range(snap->pc);
 
         pc_sample.pc.loaded_code_object_id     = cache_addr_range.id;
         pc_sample.pc.loaded_code_object_offset = snap->pc - cache_addr_range.addr;
@@ -232,8 +260,7 @@ _parse_buffer(generic_sample_t*       buffer,
               Parser::CorrelationMap* corr_map)
 {
     // Maximum size
-    uint64_t index = 0;
-
+    uint64_t          index  = 0;
     pcsample_status_t status = PCSAMPLE_STATUS_SUCCESS;
 
     while(index < buffer_size)
@@ -282,10 +309,7 @@ _parse_buffer(generic_sample_t*       buffer,
                 }
                 break;
             }
-            default:
-                ROCP_WARNING << "Index " << index
-                             << " - Invalid sample type: " << buffer[index].type << "\n";
-                return PCSAMPLE_STATUS_INVALID_SAMPLE;
+            default: return PCSAMPLE_STATUS_INVALID_SAMPLE;
         }
     }
     return status;
