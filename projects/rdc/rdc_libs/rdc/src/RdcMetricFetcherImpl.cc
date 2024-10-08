@@ -669,6 +669,25 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     }
+    case RDC_FI_GPU_MM_ENC_UTIL: {
+      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      RDC_LOG(RDC_ERROR, "AMDSMI No Supported: cannot get MM_ENC_ACTIVITY");
+      return RDC_ST_NO_DATA;
+    }
+    case RDC_FI_GPU_MM_DEC_UTIL: {
+      constexpr uint32_t kUTILIZATION_COUNTERS(1);
+      amdsmi_utilization_counter_t utilization_counters[kUTILIZATION_COUNTERS];
+      utilization_counters[0].type = AMDSMI_COARSE_DECODER_ACTIVITY;
+      uint64_t timestamp;
+
+      value->status = amdsmi_get_utilization_count(processor_handle, utilization_counters,
+                                                  kUTILIZATION_COUNTERS, &timestamp);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(utilization_counters[0].value);
+      }
+      break;
+    }
     case RDC_FI_ECC_CORRECT_TOTAL:
     case RDC_FI_ECC_UNCORRECT_TOTAL:
       get_ecc_total(gpu_index, field_id, value);

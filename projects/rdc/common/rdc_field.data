@@ -49,6 +49,8 @@ FLD_DESC_ENT(RDC_FI_PCIE_BANDWIDTH,      "PCIe bandwidth in GB/sec",            
 FLD_DESC_ENT(RDC_FI_GPU_UTIL,            "GPU busy percentage",                         "GPU_UTIL",         true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_USAGE,    "Memory usage of the GPU instance in bytes",   "GPU_MEMORY_USAGE", true)
 FLD_DESC_ENT(RDC_FI_GPU_MEMORY_TOTAL,    "Total memory of the GPU instance",            "GPU_MEMORY_TOTAL", true)
+FLD_DESC_ENT(RDC_FI_GPU_MM_ENC_UTIL,     "Mutilmedia encoder busy percentage",          "GPU_MM_ENC_UTIL",  true)
+FLD_DESC_ENT(RDC_FI_GPU_MM_DEC_UTIL,     "Mutilmedia decoder busy percentage",          "GPU_MM_DEC_UTIL",  true)
 
 // ECC totals
 FLD_DESC_ENT(RDC_FI_ECC_CORRECT_TOTAL,   "Accumulated Single Error Correction",         "ECC_CORRECT",      true)
