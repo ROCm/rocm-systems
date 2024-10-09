@@ -115,42 +115,6 @@ static __forceinline unsigned long long int strtoull(const char* str,
 #define PASTE2(x, y) x##y
 #define PASTE(x, y) PASTE2(x, y)
 
-#ifdef NDEBUG
-#define debug_warning_n(exp, limit)                                                                \
-  do {                                                                                             \
-  } while (false)
-#else
-#define debug_warning_n(exp, limit)                                                                \
-  do {                                                                                             \
-    static std::atomic<int> count(0);                                                              \
-    if (!(exp) && (limit == 0 || count < limit)) {                                                 \
-      fprintf(stderr, "Warning: " STRING(exp) " in %s, " __FILE__ ":" STRING(__LINE__) "\n",       \
-              __PRETTY_FUNCTION__);                                                                \
-      fflush(stderr);                                                                              \
-      count++;                                                                                     \
-    }                                                                                              \
-  } while (false)
-#endif
-#define debug_warning(exp) debug_warning_n((exp), 0)
-
-#ifdef NDEBUG
-#define debug_print(fmt, ...)                                                                      \
-  do {                                                                                             \
-  } while (false)
-#else
-#define debug_print(fmt, ...)                                                                      \
-  do {                                                                                             \
-    fprintf(stderr, fmt, ##__VA_ARGS__);                                                           \
-    fflush(stderr);                                                                                \
-  } while (false)
-#endif
-
-#ifdef NDEBUG
-#define ifdebug if (false)
-#else
-#define ifdebug if (true)
-#endif
-
 #define __FILENAME__ (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 
 #define LogPrint(flag, format, ...)                                                                \
@@ -158,7 +122,6 @@ static __forceinline unsigned long long int strtoull(const char* str,
     if (hsa_flag_isset64(log_flags, flag))                                                         \
       wsl::log_printf(__FILENAME__, __LINE__, format, ##__VA_ARGS__);                             \
   } while (false);
-
 
 // A macro to disallow the copy and move constructor and operator= functions
 #define DISALLOW_COPY_AND_ASSIGN(TypeName)                                                         \
