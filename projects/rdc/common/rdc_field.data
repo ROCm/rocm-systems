@@ -103,6 +103,7 @@ FLD_DESC_ENT(RDC_FI_XGMI_4_READ_KB,      "XGMI4 accumulated data read size (KB)"
 FLD_DESC_ENT(RDC_FI_XGMI_5_READ_KB,      "XGMI5 accumulated data read size (KB)",       "XGMI_5_READ",      true)
 FLD_DESC_ENT(RDC_FI_XGMI_6_READ_KB,      "XGMI6 accumulated data read size (KB)",       "XGMI_6_READ",      true)
 FLD_DESC_ENT(RDC_FI_XGMI_7_READ_KB,      "XGMI7 accumulated data read size (KB)",       "XGMI_7_READ",      true)
+FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_READ_KB,    "XGMI accumlated data read size across all lanes (KB)", "XGMI_TOTAL_READ", true)
 
 FLD_DESC_ENT(RDC_FI_XGMI_0_WRITE_KB,     "XGMI0 accumulated data write size (KB)",      "XGMI_0_WRITE",     true)
 FLD_DESC_ENT(RDC_FI_XGMI_1_WRITE_KB,     "XGMI1 accumulated data write size (KB)",      "XGMI_1_WRITE",     true)
@@ -112,7 +113,7 @@ FLD_DESC_ENT(RDC_FI_XGMI_4_WRITE_KB,     "XGMI4 accumulated data write size (KB)
 FLD_DESC_ENT(RDC_FI_XGMI_5_WRITE_KB,     "XGMI5 accumulated data write size (KB)",      "XGMI_5_WRITE",     true)
 FLD_DESC_ENT(RDC_FI_XGMI_6_WRITE_KB,     "XGMI6 accumulated data write size (KB)",      "XGMI_6_WRITE",     true)
 FLD_DESC_ENT(RDC_FI_XGMI_7_WRITE_KB,     "XGMI7 accumulated data write size (KB)",      "XGMI_7_WRITE",     true)
-
+FLD_DESC_ENT(RDC_FI_XGMI_TOTAL_WRITE_KB,    "XGMI accumlated data write size across all lanes (KB)", "XGMI_TOTAL_WRITE", true)
 
 
 // ROCProfiler fields

@@ -431,6 +431,36 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
 
 constexpr double kGig = 1000000000.0;
 
+static uint64_t sum_xgmi_read(const amdsmi_gpu_metrics_t& gpu_metrics) {
+    uint64_t total = 0;
+    const auto not_supported_metrics_data = std::numeric_limits<uint64_t>::max();
+    for (int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
+        if (gpu_metrics.xgmi_read_data_acc[i] == not_supported_metrics_data){
+          continue;
+        }
+        total += gpu_metrics.xgmi_read_data_acc[i];
+    }
+    if (total == 0){
+      return not_supported_metrics_data;
+    }
+    return total;
+}
+
+static uint64_t sum_xgmi_write(const amdsmi_gpu_metrics_t& gpu_metrics) {
+    uint64_t total = 0;
+    const auto not_supported_metrics_data = std::numeric_limits<uint64_t>::max();
+    for (int i = 0; i < AMDSMI_MAX_NUM_XGMI_LINKS; ++i) {
+        if (gpu_metrics.xgmi_write_data_acc[i] == not_supported_metrics_data){
+          continue;
+        }
+        total += gpu_metrics.xgmi_write_data_acc[i];
+    }
+    if (total == 0){
+      return not_supported_metrics_data;
+    }
+    return total;
+}
+
 rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field_t field_id,
                                                    rdc_field_value* value) {
   if (!value) {
@@ -486,6 +516,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         {RDC_FI_XGMI_5_READ_KB, gpu_metrics.xgmi_read_data_acc[5]},
         {RDC_FI_XGMI_6_READ_KB, gpu_metrics.xgmi_read_data_acc[6]},
         {RDC_FI_XGMI_7_READ_KB, gpu_metrics.xgmi_read_data_acc[7]},
+        {RDC_FI_XGMI_TOTAL_READ_KB, sum_xgmi_read(gpu_metrics)},
         {RDC_FI_XGMI_0_WRITE_KB, gpu_metrics.xgmi_write_data_acc[0]},
         {RDC_FI_XGMI_1_WRITE_KB, gpu_metrics.xgmi_write_data_acc[1]},
         {RDC_FI_XGMI_2_WRITE_KB, gpu_metrics.xgmi_write_data_acc[2]},
@@ -494,6 +525,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         {RDC_FI_XGMI_5_WRITE_KB, gpu_metrics.xgmi_write_data_acc[5]},
         {RDC_FI_XGMI_6_WRITE_KB, gpu_metrics.xgmi_write_data_acc[6]},
         {RDC_FI_XGMI_7_WRITE_KB, gpu_metrics.xgmi_write_data_acc[7]},
+        {RDC_FI_XGMI_TOTAL_WRITE_KB, sum_xgmi_write(gpu_metrics)},
         {RDC_FI_PCIE_BANDWIDTH, gpu_metrics.pcie_bandwidth_inst},
     };
 
@@ -721,6 +753,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     case RDC_FI_XGMI_5_READ_KB:
     case RDC_FI_XGMI_6_READ_KB:
     case RDC_FI_XGMI_7_READ_KB:
+    case RDC_FI_XGMI_TOTAL_READ_KB:
     case RDC_FI_XGMI_0_WRITE_KB:
     case RDC_FI_XGMI_1_WRITE_KB:
     case RDC_FI_XGMI_2_WRITE_KB:
@@ -729,6 +762,7 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     case RDC_FI_XGMI_5_WRITE_KB:
     case RDC_FI_XGMI_6_WRITE_KB:
     case RDC_FI_XGMI_7_WRITE_KB:
+    case RDC_FI_XGMI_TOTAL_WRITE_KB:
     case RDC_FI_PCIE_BANDWIDTH:
       read_gpu_metrics_uint64_t();
       break;
