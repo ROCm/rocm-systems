@@ -141,16 +141,18 @@ service RdcAPI {
   //  rdc_diag_level_t level,
   //  const char* config,
   //  size_t config_size,
-  //  rdc_diag_response_t* response);
-  rpc DiagnosticRun(DiagnosticRunRequest) returns (DiagnosticRunResponse) {}
+  //  rdc_diag_response_t* response,
+  //  rdc_diag_callback_t* callback);
+  rpc DiagnosticRun(DiagnosticRunRequest) returns (stream DiagnosticRunResponse) {}
 
   // rdc_status_t rdc_test_case_run(
   //   rdc_gpu_group_t group_id,
   //    rdc_diag_test_cases_t test_case,
   //    const char* config,
   //    size_t config_size,
-  //    rdc_diag_test_result_t* result);
-  rpc DiagnosticTestCaseRun(DiagnosticTestCaseRunRequest) returns (DiagnosticTestCaseRunResponse) {}
+  //    rdc_diag_test_result_t* result,
+  //    rdc_diag_callback_t* callback);
+  rpc DiagnosticTestCaseRun(DiagnosticTestCaseRunRequest) returns (stream DiagnosticTestCaseRunResponse) {}
 
   //Just an RPC method not used as an API
   rpc GetMixedComponentVersion(GetMixedComponentVersionRequest) returns (GetMixedComponentVersionResponse) {}
@@ -488,6 +490,7 @@ message DiagnosticResponse {
 message DiagnosticRunResponse {
   uint32 status = 1;
   DiagnosticResponse response = 2;
+  optional string log = 3;
 }
 
 message DiagnosticTestCaseRunRequest {
@@ -510,6 +513,7 @@ message DiagnosticTestCaseRunRequest {
 message DiagnosticTestCaseRunResponse {
   uint32 status = 1;
   DiagnosticTestResult result = 2;
+  optional string log = 3;
 }
 
 message GetMixedComponentVersionRequest {

@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <stdlib.h>
 #include <strings.h>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 
 namespace amd {
@@ -203,7 +204,8 @@ rdc_status_t RdcSmiLib::rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cas
 rdc_status_t RdcSmiLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                           uint32_t gpu_index[RDC_MAX_NUM_DEVICES],
                                           uint32_t gpu_count, const char* /*config*/,
-                                          size_t /*config_size*/, rdc_diag_test_result_t* result) {
+                                          size_t /*config_size*/, rdc_diag_test_result_t* result,
+                                          rdc_diag_callback_t* callback) {
   if (result == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -220,7 +222,7 @@ rdc_status_t RdcSmiLib::rdc_test_case_run(rdc_diag_test_cases_t test_case,
 }
 
 rdc_status_t RdcSmiLib::rdc_diagnostic_run(const rdc_group_info_t&, rdc_diag_level_t, const char*,
-                                           size_t, rdc_diag_response_t*) {
+                                           size_t, rdc_diag_response_t*, rdc_diag_callback_t*) {
   return RDC_ST_NOT_SUPPORTED;
 }
 

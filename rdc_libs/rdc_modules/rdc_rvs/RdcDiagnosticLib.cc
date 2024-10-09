@@ -57,7 +57,7 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
                                     // TODO: use gpu_index
                                     uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
                                     const char* config, size_t config_size,
-                                    rdc_diag_test_result_t* result) {
+                                    rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   rvs_status_t rvs_status = RVS_STATUS_SUCCESS;
   RVS_LOG();
   if (result == nullptr || gpu_count == 0) {

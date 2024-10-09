@@ -27,6 +27,7 @@ THE SOFTWARE.
 #include <memory>
 #include <vector>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcDiagnostic.h"
 #include "rdc_lib/RdcTelemetryLibInterface.h"
 
@@ -42,11 +43,11 @@ class RdcDiagnosticModule : public RdcDiagnostic {
   rdc_status_t rdc_test_case_run(rdc_diag_test_cases_t test_case,
                                  uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
                                  const char* config, size_t config_size,
-                                 rdc_diag_test_result_t* result) override;
+                                 rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) override;
 
   rdc_status_t rdc_diagnostic_run(const rdc_group_info_t& gpus, rdc_diag_level_t level,
                                   const char* config, size_t config_size,
-                                  rdc_diag_response_t* response) override;
+                                  rdc_diag_response_t* response, rdc_diag_callback_t* callback) override;
 
   rdc_status_t rdc_diag_init(uint64_t flags) override;
   rdc_status_t rdc_diag_destroy() override;

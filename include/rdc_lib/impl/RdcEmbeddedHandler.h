@@ -84,10 +84,10 @@ class RdcEmbeddedHandler final : public RdcHandler {
   // Diagnostic API
   rdc_status_t rdc_diagnostic_run(rdc_gpu_group_t group_id, rdc_diag_level_t level,
                                   const char* config, size_t config_size,
-                                  rdc_diag_response_t* response) override;
+                                  rdc_diag_response_t* response, rdc_diag_callback_t* callback) override;
   rdc_status_t rdc_test_case_run(rdc_gpu_group_t group_id, rdc_diag_test_cases_t test_case,
                                  const char* config, size_t config_size,
-                                 rdc_diag_test_result_t* result) override;
+                                 rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) override;
 
   // Control API
   rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;

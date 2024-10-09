@@ -305,24 +305,24 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle,
 
 rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                 rdc_diag_level_t level, const char* config, size_t config_size,
-                                rdc_diag_response_t* response) {
+                                rdc_diag_response_t* response, rdc_diag_callback_t* callback) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
-      ->rdc_diagnostic_run(group_id, level, config, config_size, response);
+      ->rdc_diagnostic_run(group_id, level, config, config_size, response, callback);
 }
 
 rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                rdc_diag_test_cases_t test_case, const char* config,
-                               size_t config_size, rdc_diag_test_result_t* result) {
+                               size_t config_size, rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
-      ->rdc_test_case_run(group_id, test_case, config, config_size, result);
+      ->rdc_test_case_run(group_id, test_case, config, config_size, result, callback);
 }
 
 rdc_status_t get_mixed_component_version(rdc_handle_t p_rdc_handle, mixed_component_t component, mixed_component_version_t* p_mixed_compv) {

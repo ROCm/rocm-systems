@@ -556,6 +556,12 @@ typedef struct {
   rdc_diag_test_result_t diag_info[MAX_TEST_CASES];
 } rdc_diag_response_t;
 
+typedef void (*rdc_callback_t)(void*, void*);
+typedef struct {
+  rdc_callback_t callback; //!< Callback sends logs for running diagnostics
+  void* cookie;            //!< Cookie is used to identify different callbacks and supply them with data
+} rdc_diag_callback_t;
+
 /**
  * @brief The policy type to support
  */
@@ -1087,11 +1093,13 @@ rdc_status_t rdc_field_unwatch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *
  *  @param[inout] response  The detail results of the tests run.
  *
+ *  @param[inout] callback  Callback for realtime communication
+ *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                 rdc_diag_level_t level, const char* config, size_t config_size,
-                                rdc_diag_response_t* response);
+                                rdc_diag_response_t* response, rdc_diag_callback_t* callback);
 
 /**
  *  @brief Run one diagnostic test case
@@ -1110,11 +1118,14 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
  *
  *  @param[inout] result  The results of the test.
  *
+ *  @param[inout] callback  Callback for realtime communication
+ *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                rdc_diag_test_cases_t test_case, const char* config,
-                               size_t config_size, rdc_diag_test_result_t* result);
+                               size_t config_size, rdc_diag_test_result_t* result,
+                               rdc_diag_callback_t* callback);
 
 /**
  *  @brief Get a description of a provided RDC error status

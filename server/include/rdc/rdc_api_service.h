@@ -24,6 +24,8 @@ THE SOFTWARE.
 
 #include <thread>
 
+#include <grpcpp/server_context.h>
+
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
 
@@ -121,13 +123,13 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status RemoveAllJob(::grpc::ServerContext* context, const ::rdc::Empty* request,
                               ::rdc::RemoveAllJobResponse* reply) override;
 
-  ::grpc::Status DiagnosticRun(::grpc::ServerContext* context,
-                               const ::rdc::DiagnosticRunRequest* request,
-                               ::rdc::DiagnosticRunResponse* reply) override;
+  ::grpc::Status DiagnosticRun(
+      ::grpc::ServerContext* context, const ::rdc::DiagnosticRunRequest* request,
+      ::grpc::ServerWriter< ::rdc::DiagnosticRunResponse>* writer) override;
 
-  ::grpc::Status DiagnosticTestCaseRun(::grpc::ServerContext* context,
-                                       const ::rdc::DiagnosticTestCaseRunRequest* request,
-                                       ::rdc::DiagnosticTestCaseRunResponse* reply) override;
+  ::grpc::Status DiagnosticTestCaseRun(
+      ::grpc::ServerContext* context, const ::rdc::DiagnosticTestCaseRunRequest* request,
+      ::grpc::ServerWriter< ::rdc::DiagnosticTestCaseRunResponse>* writer) override;
 
   ::grpc::Status GetMixedComponentVersion(::grpc::ServerContext* context,
                                           const ::rdc::GetMixedComponentVersionRequest* request,

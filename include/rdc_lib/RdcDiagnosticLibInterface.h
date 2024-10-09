@@ -38,7 +38,7 @@ rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST
 rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
                                     uint32_t gpu_index[RDC_MAX_NUM_DEVICES], uint32_t gpu_count,
                                     const char* config, size_t config_size,
-                                    rdc_diag_test_result_t* result);
+                                    rdc_diag_test_result_t* result, rdc_diag_callback_t* callback);
 
 rdc_status_t rdc_diag_init(uint64_t flags);
 
