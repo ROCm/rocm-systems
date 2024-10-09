@@ -758,7 +758,7 @@ rsmi_dev_pci_id_get(uint32_t dv_ind, uint64_t *bdfid) {
    * Add domain to full pci_id:
    * BDFID = ((DOMAIN & 0xFFFFFFFF) << 32) | ((PARTITION_ID & 0xF) << 28) |
    * ((BUS & 0xFF) << 8) | ((DEVICE & 0x1F) <<3 ) | (FUNCTION & 0x7)
-   * 
+   *
    * bits [63:32] = domain
    * bits [31:28] or bits [2:0] = partition id
    * bits [27:16] = reserved
@@ -5092,84 +5092,6 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
      << " | Type: "
      << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
      << " | Data: " << memory_partition
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
-  LOG_TRACE(ss);
-  return ret;
-  CATCH
-}
-
-rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
-  TRY
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
-  LOG_TRACE(ss);
-  REQUIRE_ROOT_ACCESS
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
-
-  // Only use 1st index, rest are there in-case of future issues
-  // NOTE: Partitions sets cause rocm-smi indexes to fluctuate
-  // since the nodes are grouped in respect to primary node - why we only use
-  // 1st node/device id to reset
-  std::string bootState =
-          dev->readBootPartitionState<rsmi_compute_partition_type_t>(0);
-
-  // Initiate reset
-  // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
-  // Likely due to device not supporting it
-  if (bootState != "UNKNOWN") {
-    rsmi_compute_partition_type_t compute_partition =
-      mapStringToRSMIComputePartitionTypes.at(bootState);
-    ret = rsmi_dev_compute_partition_set(dv_ind, compute_partition);
-  }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success - if original boot state was not unknown or valid setting"
-     << " | Device #: " << dv_ind
-     << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevComputePartition)
-     << " | Data: " << bootState
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
-  LOG_TRACE(ss);
-  return ret;
-  CATCH
-}
-
-rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
-  TRY
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======, " << dv_ind;
-  LOG_TRACE(ss);
-  REQUIRE_ROOT_ACCESS
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
-
-  // Only use 1st index, rest are there in-case of future issues
-  // NOTE: Partitions sets cause rocm-smi indexes to fluctuate.
-  // Since the nodes are grouped in respect to primary node - why we only use
-  // 1st node/device id to reset
-  std::string bootState =
-          dev->readBootPartitionState<rsmi_memory_partition_type_t>(0);
-
-  // Initiate reset
-  // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
-  // Likely due to device not supporting it
-  if (bootState != "UNKNOWN") {
-    rsmi_memory_partition_type_t memory_partition =
-      mapStringToMemoryPartitionTypes.at(bootState);
-    ret = rsmi_dev_memory_partition_set(dv_ind, memory_partition);
-  }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success - if original boot state was not unknown or valid setting"
-     << " | Device #: " << dv_ind
-     << " | Type: "
-     << devInfoTypesStrings.at(amd::smi::kDevMemoryPartition)
-     << " | Data: " << bootState
      << " | Returning = "
      << getRSMIStatusString(ret) << " |";
   LOG_TRACE(ss);

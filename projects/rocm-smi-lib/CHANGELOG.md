@@ -30,7 +30,15 @@ Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD
 
 ### Removals
 
-- N/A
+- **Removed `--resetcomputepartition`, and  `--resetmemorypartition` options and associated APIs**.
+  - This change is part of the partition feature redesign.
+  - The related APIs `rsmi_dev_compute_partition_reset()` and `rsmi_dev_memory_partition_reset()`.
+
+- **Temporary Disabled C++ tests for `memorypartition_read_write`**.  
+  - This change is part of the partition feature redesign.
+  - SMI's workflow needs to be adjusted in order to accomidate incoming driver changes to enable
+  Dynamic memory partition feature. We plan on re-enabling testing for this feature during ROCm
+  6.4.
 
 ### Optimizations
 
@@ -47,7 +55,11 @@ Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD
 
 ### Upcoming changes
 
-- N/A
+- **Re-enable C++ tests for `memorypartition_read_write`**.  
+  - This change is part of the partition feature redesign.
+  - SMI's workflow needs to be adjusted in order to accomidate incoming driver changes to enable
+  Dynamic memory partition feature. We plan on re-enabling testing for this feature during ROCm
+  6.4.
 
 
 ## rocm_smi_lib for ROCm 6.2.1

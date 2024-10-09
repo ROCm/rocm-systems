@@ -15,8 +15,8 @@ LD_LIBRARY_PATH  should be set to the folder containing librocm_smi64.
 
 ## Version
 
-The SMI will report two "versions", ROCM-SMI version and other is ROCM-SMI-LIB version.  
-- ROCM-SMI version is the CLI/tool version number with commit ID appended after + sign.  
+The SMI will report two "versions", ROCM-SMI version and other is ROCM-SMI-LIB version.
+- ROCM-SMI version is the CLI/tool version number with commit ID appended after + sign.
 - ROCM-SMI-LIB version is the library package version number.
 ```
 ROCM-SMI version: 2.0.0+8e78352
@@ -44,7 +44,7 @@ usage: rocm-smi [-h] [-V] [-d DEVICE [DEVICE ...]] [--alldevices] [--showhw] [-a
                 [--showtopoaccess] [--showtopoweight] [--showtopohops] [--showtopotype] [--showtoponuma]
                 [--showenergycounter] [--shownodesbw] [--showcomputepartition] [--showmemorypartition] [-r]
                 [--resetfans] [--resetprofile] [--resetpoweroverdrive] [--resetxgmierr] [--resetperfdeterminism]
-                [--resetcomputepartition] [--resetmemorypartition] [--setclock TYPE LEVEL] [--setsclk LEVEL [LEVEL ...]]
+                [--setclock TYPE LEVEL] [--setsclk LEVEL [LEVEL ...]]
                 [--setmclk LEVEL [LEVEL ...]] [--setpcie LEVEL [LEVEL ...]] [--setslevel SCLKLEVEL SCLK SVOLT]
                 [--setmlevel MCLKLEVEL MCLK MVOLT] [--setvc POINT SCLK SVOLT] [--setsrange SCLKMIN SCLKMAX]
                 [--setextremum min|max sclk|mclk CLK] [--setmrange MCLKMIN MCLKMAX] [--setfan LEVEL]
@@ -185,8 +185,7 @@ Reset options:
                                                                    state
   --resetxgmierr                                                   Reset XGMI error count
   --resetperfdeterminism                                           Disable performance determinism
-  --resetcomputepartition                                          Resets to boot compute partition state
-  --resetmemorypartition                                           Resets to boot memory partition state
+
 
 Auto-response options:
   --autorespond RESPONSE                                           Response to automatically provide for all prompts
@@ -200,8 +199,8 @@ Output options:
 ```
 
 ## Detailed Option Descriptions
-`--setextremum <min/max> <sclk or mclk> <value in MHz to set to>`  
-Provided ASIC support, users can now set a maximum or minimum sclk or mclk value through our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.  
+`--setextremum <min/max> <sclk or mclk> <value in MHz to set to>`
+Provided ASIC support, users can now set a maximum or minimum sclk or mclk value through our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.
 
 ```shell
 $ sudo /opt/rocm/bin/rocm-smi --setextremum max sclk 2100

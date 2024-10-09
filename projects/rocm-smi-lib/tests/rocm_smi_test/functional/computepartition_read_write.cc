@@ -428,7 +428,7 @@ void TestComputePartitionReadWrite::Run(void) {
      * [0:SPX, 1:CPX, 2:CPX, 3:CPX, 4:CPX, 5:CPX, 6:SPX, 7:SPX] <- set 1 to CPX
      * [0:SPX, 1:SPX, 2:SPX, 3:SPX] <- reset(1)
      * ...
-     * 
+     *
      */
     std::string final_partition_state = "UNKNOWN";
 
@@ -564,29 +564,29 @@ void TestComputePartitionReadWrite::Run(void) {
                 << "========" << std::endl;
     }
     std::string oldPartition = current_char_computePartition;
-    bool wasResetSuccess = false;
-    ret = rsmi_dev_compute_partition_reset(dv_ind);
-    IF_VERB(STANDARD) {
-      std::cout << "\t**"
-                << "rsmi_dev_compute_partition_reset(" << dv_ind << "): "
-                << amd::smi::getRSMIStatusString(ret, false) << "\n";
+    rsmi_compute_partition_type_t updatePartition =
+         static_cast<rsmi_compute_partition_type_t>(
+          mapStringToRSMIComputePartitionTypes.at(
+            std::string(orig_char_computePartition)));
+    ret = rsmi_dev_compute_partition_set(dv_ind, updatePartition);
+
+
+    ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition, 255);
+    if (strcmp(oldPartition.c_str(), current_char_computePartition) !=
+       0) {
+        devicePartitionUpdated = true;
+        final_partition_state = current_char_computePartition;
+    } else {
+        devicePartitionUpdated = false;
     }
-    ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
-                (ret == RSMI_STATUS_NOT_SUPPORTED) ||
-                (ret == RSMI_STATUS_BUSY));
-    if (ret == RSMI_STATUS_SUCCESS) {
-      wasResetSuccess = true;
-    }
-    ret = rsmi_dev_compute_partition_get(dv_ind, current_char_computePartition,
-                                        255);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
       std::cout << "\t**" << "Current compute partition: "
                 << current_char_computePartition << "\n"
+                << "\t**" << "Old Partition partition (before setting to original): "
+                << oldPartition << "\n"
                 << "\t**" << "Original compute partition: "
                 << orig_char_computePartition << "\n"
-                << "\t**" << "Reset Successful: "
-                << (wasResetSuccess ? "TRUE" : "FALSE") << "\n"
                 << "\t**" << "Partitions Updated: "
                 << (devicePartitionUpdated ? "TRUE" : "FALSE") << "\n";
     }
@@ -598,7 +598,7 @@ void TestComputePartitionReadWrite::Run(void) {
       checkPartitionIdChanges(dv_ind, std::string(current_char_computePartition),
                             isVerbose, false);
     }
-    if (wasResetSuccess && devicePartitionUpdated) {
+    if (devicePartitionUpdated) {
       ASSERT_STRNE(oldPartition.c_str(), current_char_computePartition);
       IF_VERB(STANDARD) {
       std::cout << "\t**"

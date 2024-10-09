@@ -1158,72 +1158,6 @@ def resetPerfDeterminism(deviceList):
     printLogSpacer()
 
 
-def resetComputePartition(deviceList):
-    """ Reset Compute Partition to its boot state
-
-    :param deviceList: List of DRM devices (can be a single-item list)
-    """
-    printLogSpacer(" Reset compute partition to its boot state ")
-    for device in deviceList:
-        originalPartition = getComputePartition(device)
-        ret = rocmsmi.rsmi_dev_compute_partition_reset(device)
-        if rsmi_ret_ok(ret, device, 'reset_compute_partition', silent=True):
-            resetBootState = getComputePartition(device)
-            printLog(device, "Successfully reset compute partition (" +
-                originalPartition + ") to boot state (" + resetBootState +
-                ")", None)
-        elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
-            printLog(device, 'Permission denied', None)
-        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
-            printLog(device, 'Not supported on the given system', None)
-        elif ret == rsmi_status_t.RSMI_STATUS_BUSY:
-            printLog(device, 'Device is currently busy, try again later',
-                     None)
-        else:
-            rsmi_ret_ok(ret, device, 'reset_compute_partition')
-            printErrLog(device, 'Failed to reset the compute partition to boot state')
-    printLogSpacer()
-
-
-def resetMemoryPartition(deviceList):
-    """ Reset current memory partition to its boot state
-
-    :param deviceList: List of DRM devices (can be a single-item list)
-    """
-    printLogSpacer(" Reset memory partition to its boot state ")
-    for device in deviceList:
-        originalPartition = getMemoryPartition(device)
-        t1 = multiprocessing.Process(target=showProgressbar,
-                            args=("Resetting memory partition",13,))
-        t1.start()
-        addExtraLine=True
-        start=time.time()
-        ret = rocmsmi.rsmi_dev_memory_partition_reset(device)
-        stop=time.time()
-        duration=stop-start
-        if t1.is_alive():
-            t1.terminate()
-            t1.join()
-        if duration < float(0.1):   # For longer runs, add extra line before output
-            addExtraLine=False      # This is to prevent overriding progress bar
-        if rsmi_ret_ok(ret, device, 'reset_memory_partition', silent=True):
-            resetBootState = getMemoryPartition(device)
-            printLog(device, "Successfully reset memory partition (" +
-                originalPartition + ") to boot state (" +
-                resetBootState + ")", None, addExtraLine)
-        elif ret == rsmi_status_t.RSMI_STATUS_PERMISSION:
-            printLog(device, 'Permission denied', None, addExtraLine)
-        elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
-            printLog(device, 'Not supported on the given system', None, addExtraLine)
-        elif ret == rsmi_status_t.RSMI_STATUS_BUSY:
-            printLog(device, 'Device is currently busy, try again later',
-                     None)
-        else:
-            rsmi_ret_ok(ret, device, 'reset_memory_partition')
-            printErrLog(device, 'Failed to reset memory partition to boot state')
-    printLogSpacer()
-
-
 def setClockRange(deviceList, clkType, minvalue, maxvalue, autoRespond):
     """ Set the range for the specified clktype in the PowerPlay table for a list of devices.
 
@@ -4240,8 +4174,6 @@ if __name__ == '__main__':
                                   action='store_true')
     groupActionReset.add_argument('--resetxgmierr', help='Reset XGMI error count', action='store_true')
     groupActionReset.add_argument('--resetperfdeterminism', help='Disable performance determinism', action='store_true')
-    groupActionReset.add_argument('--resetcomputepartition', help='Resets to boot compute partition state', action='store_true')
-    groupActionReset.add_argument('--resetmemorypartition', help='Resets to boot memory partition state', action='store_true')
     groupAction.add_argument('--setclock',
                              help='Set Clock Frequency Level(s) for specified clock (requires manual Perf level)',
                              metavar=('TYPE','LEVEL'), nargs=2)
@@ -4329,7 +4261,7 @@ if __name__ == '__main__':
             or args.setpoweroverdrive or args.resetpoweroverdrive or args.rasenable or args.rasdisable or \
             args.rasinject or args.gpureset or args.setperfdeterminism or args.setslevel or args.setmlevel or \
             args.setvc or args.setsrange or args.setextremum or args.setmrange or args.setclock or \
-            args.setcomputepartition or args.setmemorypartition or args.resetcomputepartition or args.resetmemorypartition:
+            args.setcomputepartition or args.setmemorypartition:
         relaunchAsSudo()
 
     # If there is one or more device specified, use that for all commands, otherwise use a
@@ -4579,10 +4511,6 @@ if __name__ == '__main__':
         resetXgmiErr(deviceList)
     if args.resetperfdeterminism:
         resetPerfDeterminism(deviceList)
-    if args.resetcomputepartition:
-        resetComputePartition(deviceList)
-    if args.resetmemorypartition:
-        resetMemoryPartition(deviceList)
     if args.rasenable:
         setRas(deviceList, 'enable', args.rasenable[0], args.rasenable[1])
     if args.rasdisable:

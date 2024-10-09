@@ -111,6 +111,8 @@ mapStringToRSMIMemoryPartitionTypes {
 };
 
 void TestMemoryPartitionReadWrite::Run(void) {
+  GTEST_SKIP_("Temporarily disabled");  // Skipped due to SWDEV-491215 -
+                                        // will be re-enabled in rocm 6.4
   rsmi_status_t ret, err;
   char orig_memory_partition[255];
   char current_memory_partition[255];
@@ -302,13 +304,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << "SETTING ========" << std::endl;
     }
     std::string oldMode = current_memory_partition;
-    bool wasResetSuccess = false;
-    ret = rsmi_dev_memory_partition_reset(dv_ind);
-    ASSERT_TRUE((ret == RSMI_STATUS_SUCCESS) ||
-                (ret == RSMI_STATUS_NOT_SUPPORTED));
-    if (ret == RSMI_STATUS_SUCCESS) {
-      wasResetSuccess = true;
-    }
+
     ret = rsmi_dev_memory_partition_get(dv_ind, current_memory_partition, 255);
     CHK_ERR_ASRT(ret)
     IF_VERB(STANDARD) {
@@ -316,7 +312,7 @@ void TestMemoryPartitionReadWrite::Run(void) {
                 << "Current memory partition: " << current_memory_partition
                 << std::endl;
     }
-    if (wasResetSuccess && wasSetSuccess) {
+    if (wasSetSuccess) {
       ASSERT_STRNE(oldMode.c_str(), current_memory_partition);
       IF_VERB(STANDARD) {
       std::cout << "\t**"
