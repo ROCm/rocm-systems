@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <assert.h>
 #include <grpcpp/grpcpp.h>
+#include <grpcpp/impl/call_op_set.h>
 
 #include <csignal>
 #include <future>
@@ -31,6 +32,7 @@ THE SOFTWARE.
 #include <string>
 
 #include "rdc.grpc.pb.h"  // NOLINT
+#include "rdc.pb.h"
 #include "rdc/rdc.h"
 #include "rdc/rdc_private.h"
 #include "rdc/rdc_server_main.h"
@@ -577,26 +579,55 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   return ::grpc::Status::OK;
 }
 
-::grpc::Status RdcAPIServiceImpl::DiagnosticRun(::grpc::ServerContext* context,
-                                                const ::rdc::DiagnosticRunRequest* request,
-                                                ::rdc::DiagnosticRunResponse* reply) {
+::grpc::Status RdcAPIServiceImpl::DiagnosticRun(
+    ::grpc::ServerContext* context, const ::rdc::DiagnosticRunRequest* request,
+    ::grpc::ServerWriter<::rdc::DiagnosticRunResponse>* writer) {
   (void)(context);
-  if (!reply || !request) {
+  if (!writer || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
+
+  auto cb_lambda = [](void* w, void* m) -> void {
+    if (w == nullptr) {
+      RDC_LOG(RDC_ERROR, "BAD WRITER");
+      return;
+    }
+
+    if (m == nullptr) {
+      RDC_LOG(RDC_ERROR, "BAD MESSAGE");
+      return;
+    }
+
+    auto writer = static_cast<::grpc::ServerWriter<::rdc::DiagnosticRunResponse>*>(w);
+    char* message = static_cast<char*>(m);
+
+    ::rdc::DiagnosticRunResponse reply;
+
+    reply.set_log(std::string(message));
+    if (!writer->Write(reply)) {
+      RDC_LOG(RDC_ERROR, "Failed to write log message");
+    }
+  };
+
+  rdc_callback_t cb = cb_lambda;
+  rdc_diag_callback_t callback = {
+      cb,
+      writer,
+  };
 
   rdc_diag_response_t diag_response;
   rdc_status_t result = rdc_diagnostic_run(
       rdc_handle_, request->group_id(), static_cast<rdc_diag_level_t>(request->level()),
       const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
-      &diag_response);
+      &diag_response, &callback);
 
-  reply->set_status(result);
+  ::rdc::DiagnosticRunResponse reply;
+  reply.set_status(result);
   if (result != RDC_ST_OK) {
     return ::grpc::Status::OK;
   }
 
-  ::rdc::DiagnosticResponse* to_response = reply->mutable_response();
+  ::rdc::DiagnosticResponse* to_response = reply.mutable_response();
   to_response->set_results_count(diag_response.results_count);
 
   for (uint32_t i = 0; i < diag_response.results_count; i++) {
@@ -626,28 +657,61 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     to_diag_info->set_info(test_result.info);
   }
 
+  if (!writer->Write(reply)) {
+    return ::grpc::Status::CANCELLED;
+  }
+
   return ::grpc::Status::OK;
 }
 
 ::grpc::Status RdcAPIServiceImpl::DiagnosticTestCaseRun(
     ::grpc::ServerContext* context, const ::rdc::DiagnosticTestCaseRunRequest* request,
-    ::rdc::DiagnosticTestCaseRunResponse* reply) {
+    ::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>* writer) {
   (void)(context);
-  if (!reply || !request) {
+  if (!writer || !request) {
     return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
   }
+
+  auto cb_lambda = [](void* w, void* m) -> void {
+    if (w == nullptr) {
+      RDC_LOG(RDC_ERROR, "BAD WRITER");
+      return;
+    }
+
+    if (m == nullptr) {
+      RDC_LOG(RDC_ERROR, "BAD MESSAGE");
+      return;
+    }
+
+    auto writer = static_cast<::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>*>(w);
+    char* message = static_cast<char*>(m);
+
+    ::rdc::DiagnosticTestCaseRunResponse reply;
+
+    reply.set_log(std::string(message));
+    if (!writer->Write(reply)) {
+      RDC_LOG(RDC_ERROR, "Failed to write log message");
+    }
+  };
+
+  rdc_callback_t cb = cb_lambda;
+  rdc_diag_callback_t callback = {
+      cb,
+      writer,
+  };
 
   rdc_diag_test_result_t test_result;
   rdc_status_t result = rdc_test_case_run(
       rdc_handle_, request->group_id(), static_cast<rdc_diag_test_cases_t>(request->test_case()),
       const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
-      &test_result);
+      &test_result, &callback);
 
-  reply->set_status(result);
+  ::rdc::DiagnosticTestCaseRunResponse reply;
+  reply.set_status(result);
   if (result != RDC_ST_OK) {
     return ::grpc::Status::OK;
   }
-  ::rdc::DiagnosticTestResult* to_diag_info = reply->mutable_result();
+  ::rdc::DiagnosticTestResult* to_diag_info = reply.mutable_result();
   to_diag_info->set_status(test_result.status);
 
   // details
@@ -669,6 +733,10 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     to_per_detail->set_msg(cur_result.gpu_result.msg);
   }
   to_diag_info->set_info(test_result.info);
+
+  if (!writer->Write(reply)) {
+    return ::grpc::Status::CANCELLED;
+  }
 
   return ::grpc::Status::OK;
 }

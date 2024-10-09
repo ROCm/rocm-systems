@@ -155,8 +155,9 @@ void RdciDiagSubSystem::process() {
 
   rdc_status_t result;
   rdc_diag_response_t response;
+  //rdc_diag_callback_t callback;
   result = rdc_diagnostic_run(rdc_handle_, group_id_, run_level_, config_test_.c_str(),
-                              config_test_.length(), &response);
+                              config_test_.length(), &response, nullptr);
 
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);

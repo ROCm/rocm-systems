@@ -25,6 +25,7 @@ THE SOFTWARE.
 
 #include "amd_smi/amdsmi.h"
 #include "common/rdc_fields_supported.h"
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcException.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcNotification.h"
@@ -380,7 +381,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
 rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
                                                     rdc_diag_level_t level, const char* config,
                                                     size_t config_size,
-                                                    rdc_diag_response_t* response) {
+                                                    rdc_diag_response_t* response, rdc_diag_callback_t* callback) {
   if (!response) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -391,13 +392,13 @@ rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   if (status != RDC_ST_OK) return status;
 
   auto diag = rdc_module_mgr_->get_diagnostic_module();
-  return diag->rdc_diagnostic_run(rdc_group_info, level, config, config_size, response);
+  return diag->rdc_diagnostic_run(rdc_group_info, level, config, config_size, response, callback);
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
                                                    rdc_diag_test_cases_t test_case,
                                                    const char* config, size_t config_size,
-                                                   rdc_diag_test_result_t* result) {
+                                                   rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   if (!result) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -408,7 +409,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
 
   auto diag = rdc_module_mgr_->get_diagnostic_module();
   return diag->rdc_test_case_run(test_case, rdc_group_info.entity_ids, rdc_group_info.count, config,
-                                 config_size, result);
+                                 config_size, result, callback);
 }
 
 // Control API

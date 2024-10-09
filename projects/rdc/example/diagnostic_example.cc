@@ -137,7 +137,7 @@ int main(int, char**) {
   std::cout << " ============== Run individual diagnostic test ===========\n";
   rdc_diag_test_result_t test_result;
   result =
-      rdc_test_case_run(rdc_handle, group_id, RDC_DIAG_COMPUTE_PROCESS, nullptr, 0, &test_result);
+      rdc_test_case_run(rdc_handle, group_id, RDC_DIAG_COMPUTE_PROCESS, nullptr, 0, &test_result, nullptr);
 
   if (result != RDC_ST_OK) {
     std::cout << "Error run RDC_DIAG_COMPUTE_PROCESS diagnostic. Return: "
