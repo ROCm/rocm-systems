@@ -258,7 +258,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(
   if (!MemoryAddress)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pr_debug("[%s] address %p\n", __func__, MemoryAddress);
+  pr_debug("address %p\n", MemoryAddress);
 
   if (MemFlags.ui32.ExtendedCoherent && MemFlags.ui32.CoarseGrain)
     return HSAKMT_STATUS_INVALID_PARAMETER;
@@ -297,7 +297,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   uint32_t *gpu_id_array = NULL;
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
-  pr_debug("[%s] number of nodes %lu\n", __func__, NumberOfNodes);
+  pr_debug("number of nodes %lu\n", NumberOfNodes);
 
   GraphicsResourceInfo->NodeId = 1;
   return hsaKmtImportDMABufHandle(GraphicsResourceHandle, &GraphicsResourceInfo->MemoryAddress);
@@ -412,7 +412,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDeregisterMemory(void *MemoryAddress) {
   if (!MemoryAddress)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pr_debug("[%s] address %p\n", __func__, MemoryAddress);
+  pr_debug("address %p\n", MemoryAddress);
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -511,7 +511,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
     return HSAKMT_STATUS_SUCCESS;
   }
 
-  pr_debug("[%s] address %p\n", __func__, MemoryAddress);
+  pr_debug("address %p\n", MemoryAddress);
 
   wsl::thunk::GpuMemoryHandle handle = nullptr;
   {
@@ -574,7 +574,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
   if (!Pointer || !PointerInfo)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pr_debug("[%s] pointer %p\n", __func__, Pointer);
+  pr_debug("pointer %p\n", Pointer);
 
   memset(PointerInfo, 0, sizeof(HsaPointerInfo));
 
@@ -617,7 +617,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryUserData(const void *Pointer,
 HSAKMT_STATUS HSAKMTAPI hsaKmtReplaceAsanHeaderPage(void *addr) {
   assert(false);
 #ifdef SANITIZER_AMDGPU
-  pr_debug("[%s] address %p\n", __func__, addr);
+  pr_debug("address %p\n", addr);
   CHECK_DXG_OPEN();
 
   return HSAKMT_STATUS_SUCCESS;
@@ -629,7 +629,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReplaceAsanHeaderPage(void *addr) {
 HSAKMT_STATUS HSAKMTAPI hsaKmtReturnAsanHeaderPage(void *addr) {
   assert(false);
 #ifdef SANITIZER_AMDGPU
-  pr_debug("[%s] address %p\n", __func__, addr);
+  pr_debug("address %p\n", addr);
   CHECK_DXG_OPEN();
 
   return HSAKMT_STATUS_SUCCESS;

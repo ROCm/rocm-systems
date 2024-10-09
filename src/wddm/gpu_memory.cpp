@@ -391,13 +391,13 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
     debug_print("%s query resource info from nt handle failed %d\n", __FUNCTION__, static_cast<int>(ret));
     return ErrorCode::InvalidateParams;
   }
-  debug_print("wsl-thunk: import from nt handle %d, get allocation number %d,"
-      " runtime data size %#x total driver data size %#x resource data size=%#x\n",
-      dmabuf_fd,
-      query_args.NumAllocations,
-      query_args.PrivateRuntimeDataSize,
-      query_args.TotalPrivateDriverDataSize,
-      query_args.ResourcePrivateDriverDataSize);
+  pr_debug("wsl-thunk: import from nt handle %d, get allocation number %d,"
+           " runtime data size %#x total driver data size %#x resource data size=%#x\n",
+           dmabuf_fd,
+           query_args.NumAllocations,
+           query_args.PrivateRuntimeDataSize,
+           query_args.TotalPrivateDriverDataSize,
+           query_args.ResourcePrivateDriverDataSize);
 
   SharedHandleInfo shared_info;
   if(sizeof(shared_info) != query_args.PrivateRuntimeDataSize) {

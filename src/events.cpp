@@ -123,7 +123,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *Events[],
 HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSMI(HSAuint32 NodeId, int *fd) {
   CHECK_DXG_OPEN();
 
-  pr_debug("[%s] node %d\n", __func__, NodeId);
+  pr_debug("node id %d\n", NodeId);
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }

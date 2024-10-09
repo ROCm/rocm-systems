@@ -152,7 +152,7 @@ class os_thread {
         }
         err = pthread_create(&thread, &attrib, ThreadTrampoline, args.get());
         if (err != EINVAL) break;
-        debug_print("pthread_create returned EINVAL, doubling stack size\n");
+        pr_debug("pthread_create returned EINVAL, doubling stack size\n");
       }
     }
 
@@ -308,7 +308,7 @@ static int callback(struct dl_phdr_info* info, size_t size, void* data) {
           if (dyn_section[j].d_tag == DT_STRSZ) limit = dyn_section[j].d_un.d_val;
         }
 
-        if (strings == nullptr) debug_print("String table not found");
+        if (strings == nullptr) pr_debug("String table not found\n");
 
         /*
          * Hacky lookup, if string and symbol tables are found,

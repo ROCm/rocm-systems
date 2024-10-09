@@ -135,7 +135,7 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   if (prio == new_prio)
     return HSA_STATUS_SUCCESS;
 
-  debug_print("set prio %d -> %d\n", prio, new_prio);
+  pr_debug("set prio %d -> %d\n", prio, new_prio);
   device->DestroyHwQueue(this);
 
   prio = new_prio;
@@ -219,13 +219,13 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue *queue) {
         (sleep && queue->IsInvalidPacket())) {
       if (queue->thread_stop_)
         break;
-      debug_print("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
-		  queue->ring, queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
+      pr_debug("wait %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
+               queue->ring, queue->GetRingWptr()->load(), queue->GetRingRptr()->load());
       queue->thread_cond_.wait(lock);
     }
   }
 
-  debug_print("aql to pm4 thread %p exit\n", queue->ring);
+  pr_debug("aql to pm4 thread %p exit\n", queue->ring);
 }
 
 ComputeQueue::ComputeQueue(WDDMDevice *device,
@@ -447,8 +447,8 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
   if (scratch_size_ >= scratch_size)
     return true;
 
-  debug_print("need realloc scratch buffer, size %x -> %x\n",
-	      scratch_size_, scratch_size);
+  pr_debug("need realloc scratch buffer, size %x -> %x\n",
+           scratch_size_, scratch_size);
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = scratch_size;
@@ -537,8 +537,8 @@ uint64_t ComputeQueue::GetKernelObjAddr(uint64_t addr) const {
 void ComputeQueue::RingDoorbell() {
   thread_cond_lock_.lock();
   thread_cond_lock_.unlock();
-  debug_print("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
-	      ring, GetRingWptr()->load(), GetRingRptr()->load());
+  pr_debug("notify %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
+           ring, GetRingWptr()->load(), GetRingRptr()->load());
   thread_cond_.notify_one();
 }
 
@@ -599,7 +599,7 @@ hsa_status_t ComputeQueue::Submit(void) {
 
 hsa_status_t
 ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *packet) {
-  debug_print("queue %p kernel dispatch head=%x setup=%x wx=%x wy=%x wz=%x "
+  pr_debug("queue %p kernel dispatch head=%x setup=%x wx=%x wy=%x wz=%x "
            "gx=%x gy=%x gz=%x ps=%x gs=%x ko=%" PRIx64 " ka=%p cs=%" PRIx64 "\n",
            ring, packet->header,
            packet->setup, packet->workgroup_size_x, packet->workgroup_size_y,
@@ -625,10 +625,10 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
   void* entry = (void*)(packet->kernel_object + kernel_object->kernel_code_entry_byte_offset);
   assert((size_t)entry % AMD_ISA_ALIGN_BYTES == 0);
 
-  debug_print("kernel object property=%x entry=%p lds=%x+%x\n",
-	      kernel_object->kernel_code_properties, entry,
-	      kernel_object->workgroup_group_segment_byte_size,
-	      packet->group_segment_size);
+  pr_debug("kernel object property=%x entry=%p lds=%x+%x\n",
+           kernel_object->kernel_code_properties, entry,
+           kernel_object->workgroup_group_segment_byte_size,
+           packet->group_segment_size);
 
   if (packet->setup == 0 || packet->setup > 3)
     return HSA_STATUS_ERROR_INCOMPATIBLE_ARGUMENTS;
@@ -704,7 +704,7 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
 
     assert(signal->kind == AMD_SIGNAL_KIND_USER);
     uint64_t *signal_addr = (uint64_t *)&signal->value;
-    debug_print("signal value=%" PRIx64 "\n", signal->value);
+    pr_debug("signal value=%" PRIx64 "\n", signal->value);
 
     if (platform_atomic_support_)
       i += cmd_util.BuildAtomicMem(signal_addr, TC_OP_ATOMIC_ADD_RTN_64, cpu + i, cache_policy__mec_atomic_mem__bypass, -1);
@@ -729,7 +729,7 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
 
 hsa_status_t
 ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet, bool is_or) {
-  debug_print("queue %p %s head=%x dep %" PRIx64 " %" PRIx64 " %" PRIx64
+  pr_debug("queue %p %s head=%x dep %" PRIx64 " %" PRIx64 " %" PRIx64
            " %" PRIx64 " %" PRIx64 " cs=%" PRIx64"\n",
            ring, is_or ? "or" : "and",
            packet->header, packet->dep_signal[0].handle,
@@ -776,7 +776,7 @@ ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet
     amd_signal_t *signal = (amd_signal_t *)packet->completion_signal.handle;
     assert(signal->kind == AMD_SIGNAL_KIND_USER);
     uint64_t *signal_addr = (uint64_t *)&signal->value;
-    debug_print("signal value=%" PRIx64 "\n", signal->value);
+    pr_debug("signal value=%" PRIx64 "\n", signal->value);
 
     // Record start timestamp when enabling profiling
     if (EnableProfiling())
@@ -823,11 +823,11 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
   assert(op == IT_INDIRECT_BUFFER);
   uint32_t* pm4_addr = reinterpret_cast<uint32_t*>((static_cast<uint64_t>(packet->ib_jump_cmd[2]) << 32) | (static_cast<uint64_t>(packet->ib_jump_cmd[1]) & ~3ull));
   uint32_t pm4_size = packet->ib_jump_cmd[3]&0xfffff;
-  debug_print("queue %p %s VENDOR_SPECIFIC pkt pm4_addr %p pm4_size %#x cs=%" PRIx64"\n",
+  pr_debug("queue %p %s VENDOR_SPECIFIC pkt pm4_addr %p pm4_size %#x cs=%" PRIx64"\n",
            ring, vendor_packet_process ? "process" : "skip", pm4_addr, pm4_size,
            packet->completion_signal.handle);
   for (int i = 0; i < pm4_size; i++) {
-    debug_print("pm4_addr[%d]=%#x\n", i, pm4_addr[i]);
+    pr_debug("pm4_addr[%d]=%#x\n", i, pm4_addr[i]);
   }
 
   int i = ib_size;
@@ -841,7 +841,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
       amd_signal_t *signal = (amd_signal_t *)packet->completion_signal.handle;
       assert(signal->kind == AMD_SIGNAL_KIND_USER);
       uint64_t *signal_addr = (uint64_t *)&signal->value;
-      debug_print("signal value=%" PRIx64 "\n", signal->value);
+      pr_debug("signal value=%" PRIx64 "\n", signal->value);
 
       // Record start timestamp when enabling profiling
       if (EnableProfiling())
@@ -933,8 +933,8 @@ hsa_status_t ComputeQueue::Process(void) {
 
   while (cmdbuf_aql_frame_write_index < ring_wptr->load() &&
          !IsInvalidPacket()) {
-    debug_print("process %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
-	      ring, ring_wptr->load(), ring_rptr->load());
+    pr_debug("process %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
+             ring, ring_wptr->load(), ring_rptr->load());
 
     hsa_status_t ret;
 
@@ -970,9 +970,8 @@ hsa_status_t ComputeQueue::Process(void) {
 
     ready_to_submit = false;
 
-    debug_print("done %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
-	      ring, ring_wptr->load(), ring_rptr->load());
-
+    pr_debug("done %p wptr=%" PRIx64 " rptr=%" PRIx64 "\n",
+             ring, ring_wptr->load(), ring_rptr->load());
   }
 
   return HSA_STATUS_SUCCESS;
@@ -994,7 +993,7 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
       uint64_t end = queue->wptr_queue_.front().second;
       queue->wptr_queue_.pop();
       lock.unlock();
-      debug_print("SDMA: wptr %lx %lx\n", start, end);
+      pr_debug("wptr %lx %lx\n", start, end);
 
       SDMA_PKT_POLL_REGMEM* poll_pkt = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(queue->cmdbuf_addr + queue->WrapIntoRocrRing(start));
       SDMA_PKT_POLL_REGMEM* poll_next_pkt = poll_pkt + 1;
@@ -1019,7 +1018,7 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
 
         amd_signal_t* signal = (amd_signal_t*)((char*)poll_addr - offsetof(amd_signal_t, value));
         uint64_t signal_handle = reinterpret_cast<uint64_t>(signal);
-        debug_print("SDMA: poll signal %#lx addr %#lx val %ld\n", signal_handle, poll_addr, poll_val);
+        pr_debug("poll signal %#lx addr %#lx val %ld\n", signal_handle, poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
         hsa_signal_value_t value =
           hsakmt_hsa_signal_wait_relaxed(hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
@@ -1049,7 +1048,7 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
       start_time = std::chrono::steady_clock::now();
     }
   }
-  debug_print("sdma thread exit\n");
+  pr_debug("thread exit\n");
 }
 
 SDMAQueue::SDMAQueue(WDDMDevice *device,
@@ -1081,7 +1080,7 @@ SDMAQueue::~SDMAQueue() {
 }
 
 void SDMAQueue::RingDoorbell() {
-  debug_print("SDMA: ringdoorbell %#lx %#lx\n", wptr_pre_, wptr_next_);
+  pr_debug("ringdoorbell %#lx %#lx\n", wptr_pre_, wptr_next_);
 
   {
     std::lock_guard<std::mutex> lock(wptr_queue_lock_);

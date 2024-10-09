@@ -301,8 +301,8 @@ bool WDDMDevice::ReserveLocalHeapSpace(void) {
 
       match_index = i;
       local_heap_space_start_ = local_va;
-      debug_print("%s success to reserve gpu va %lx and va cpu %p in %d time\n",
-                  __FUNCTION__, local_va, ptr, i);
+      pr_debug("success to reserve gpu va %lx and va cpu %p in %d time\n",
+               local_va, ptr, i);
       break;
     } else {
       debug_print("%s fail to reserve gpu va for cpu va %p in %d time!\n",
@@ -365,7 +365,7 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   d3dkmt_escape.Flags.HardwareAccess  = true;
 
   NTSTATUS status = D3DKMTEscape(&d3dkmt_escape);
-  debug_print("%s status %d restore %d\n", __FUNCTION__, status, restore);
+  pr_debug("status %d, restore %d\n", status, restore);
   thunk_proxy::DestroyPrivData(priv_data);
 }
 
@@ -596,9 +596,10 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
   if (ret == STATUS_SUCCESS) {
     *handle = args.hSyncObject;
     *addr = (uint64_t *)args.Info.MonitoredFence.FenceValueCPUVirtualAddress;
-    debug_print("create syncobj cpu addr=%p gpu addr=%" PRIx64 "\n",
-		args.Info.MonitoredFence.FenceValueCPUVirtualAddress,
-		args.Info.MonitoredFence.FenceValueGPUVirtualAddress);
+    pr_debug("create syncobj cpu addr=%p gpu addr=%" PRIx64 "\n",
+             args.Info.MonitoredFence.FenceValueCPUVirtualAddress,
+             args.Info.MonitoredFence.FenceValueGPUVirtualAddress);
+
     return true;
   }
 
@@ -730,7 +731,7 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
 
   NTSTATUS status = D3DKMTEscape(&d3dkmt_escape);
   if (status) {
-    debug_print("%s status %d \n", __FUNCTION__, status);
+    pr_debug("status %d \n", status);
   } else {
     thunk_proxy::QueryCalibratedTimestamps(priv_data, gpu, cpu);
   }
