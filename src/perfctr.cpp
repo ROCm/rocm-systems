@@ -26,6 +26,8 @@
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtPmcGetCounterProperties(
     HSAuint32 NodeId, HsaCounterProperties **CounterProperties) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -35,6 +37,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTrace(HSAuint32 NodeId,
                                                HsaCounter *Counters,
                                                HsaPmcTraceRoot *TraceRoot) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -43,18 +46,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcRegisterTrace(HSAuint32 NodeId,
 HSAKMT_STATUS HSAKMTAPI hsaKmtPmcUnregisterTrace(HSAuint32 NodeId,
                                                  HSATraceId TraceId) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtPmcAcquireTraceAccess(HSAuint32 NodeId,
                                                     HSATraceId TraceId) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtPmcReleaseTraceAccess(HSAuint32 NodeId,
                                                     HSATraceId TraceId) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -64,6 +70,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcStartTrace(HSATraceId TraceId,
                                             void *TraceBuffer,
                                             HSAuint64 TraceBufferSizeBytes) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -71,6 +78,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcStartTrace(HSATraceId TraceId,
  * has registered */
 HSAKMT_STATUS HSAKMTAPI hsaKmtPmcQueryTrace(HSATraceId TraceId) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -78,5 +86,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPmcQueryTrace(HSATraceId TraceId) {
  * counters */
 HSAKMT_STATUS HSAKMTAPI hsaKmtPmcStopTrace(HSATraceId TraceId) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }

@@ -32,6 +32,7 @@
 HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingSupport(void) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -40,6 +41,7 @@ hsaKmtPcSamplingQueryCapabilities(HSAuint32 NodeId, void *sample_info,
                                   HSAuint32 sample_info_sz, HSAuint32 *size) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -48,6 +50,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingCreate(HSAuint32 NodeId,
                                                HsaPcSamplingTraceId *traceId) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -55,6 +58,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingDestroy(HSAuint32 NodeId,
                                                 HsaPcSamplingTraceId traceId) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -62,6 +66,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingStart(HSAuint32 NodeId,
                                               HsaPcSamplingTraceId traceId) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -69,5 +74,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtPcSamplingStop(HSAuint32 NodeId,
                                              HsaPcSamplingTraceId traceId) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }

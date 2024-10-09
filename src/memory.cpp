@@ -74,7 +74,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryPolicy(HSAuint32 Node,
                                               void *MemoryAddressAlternate,
                                               HSAuint64 MemorySizeInBytes) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -236,7 +236,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAvailableMemory(HSAuint32 Node,
 HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemory(void *MemoryAddress,
                                              HSAuint64 MemorySizeInBytes) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -359,7 +359,7 @@ HSAKMT_STATUS HSAKMTAPI
 hsaKmtShareMemory(void *MemoryAddress, HSAuint64 SizeInBytes,
                   HsaSharedMemoryHandle *SharedMemoryHandle) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -368,7 +368,7 @@ HSAKMT_STATUS HSAKMTAPI
 hsaKmtRegisterSharedHandle(const HsaSharedMemoryHandle *SharedMemoryHandle,
                            void **MemoryAddress, HSAuint64 *SizeInBytes) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -377,7 +377,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterSharedHandleToNodes(
     const HsaSharedMemoryHandle *SharedMemoryHandle, void **MemoryAddress,
     HSAuint64 *SizeInBytes, HSAuint64 NumberOfNodes, HSAuint32 *NodeArray) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -388,8 +388,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtProcessVMRead(HSAuint32 Pid,
                                             HsaMemoryRange *RemoteMemoryArray,
                                             HSAuint64 RemoteMemoryArrayCount,
                                             HSAuint64 *SizeCopied) {
-  pr_err("[%s] Deprecated\n", __func__);
-
+  CHECK_DXG_OPEN();
+  pr_warn_once("has been deprecated\n");
   assert(false);
   return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
@@ -400,8 +400,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtProcessVMWrite(HSAuint32 Pid,
                                              HsaMemoryRange *RemoteMemoryArray,
                                              HSAuint64 RemoteMemoryArrayCount,
                                              HSAuint64 *SizeCopied) {
-  pr_err("[%s] Deprecated\n", __func__);
-
+  CHECK_DXG_OPEN();
+  pr_warn_once("has been deprecated\n");
   assert(false);
   return HSAKMT_STATUS_NOT_IMPLEMENTED;
 }
@@ -542,6 +542,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapGraphicHandle(HSAuint32 NodeId,
                                                HSAuint64 GraphicResourceOffset,
                                                HSAuint64 GraphicResourceSize,
                                                HSAuint64 *FlatMemoryAddress) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not implemented\n");
   /* This API was only ever implemented in KFD for Kaveri and
    * was never upstreamed. There are no open-source users of
    * this interface. It has been superseded by
@@ -554,7 +556,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapGraphicHandle(HSAuint32 NodeId,
                                                  HSAuint64 FlatMemoryAddress,
                                                  HSAuint64 SizeInBytes) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -562,7 +564,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapGraphicHandle(HSAuint32 NodeId,
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetTileConfig(HSAuint32 NodeId,
                                             HsaGpuTileConfig *config) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -609,12 +611,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetMemoryUserData(const void *Pointer,
                                                 void *UserData) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not implemented\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtReplaceAsanHeaderPage(void *addr) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   assert(false);
 #ifdef SANITIZER_AMDGPU
   pr_debug("address %p\n", addr);
@@ -627,6 +631,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReplaceAsanHeaderPage(void *addr) {
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtReturnAsanHeaderPage(void *addr) {
+  CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   assert(false);
 #ifdef SANITIZER_AMDGPU
   pr_debug("address %p\n", addr);

@@ -158,7 +158,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetQueueCUMask(HSA_QUEUEID QueueId,
   if (CUMaskCount == 0 || !QueueCUMask || ((CUMaskCount % 32) != 0))
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  pr_debug("%s not implemented\n", __func__);
+  pr_warn_once("not implemented\n");
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -181,8 +181,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetTrapHandler(HSAuint32 Node,
                                              void *TrapBufferBaseAddress,
                                              HSAuint64 TrapBufferSizeInBytes) {
   CHECK_DXG_OPEN();
-
-  pr_debug("%s not implemented\n", __func__);
+  pr_warn_once("not implemented\n");
   return HSAKMT_STATUS_SUCCESS;
 }
 

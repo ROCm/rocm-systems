@@ -30,6 +30,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSVMSetAttr(void *start_addr, HSAuint64 size,
                                          unsigned int nattr,
                                          HSA_SVM_ATTRIBUTE *attrs) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -37,16 +38,19 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSVMGetAttr(void *start_addr, HSAuint64 size,
                                          unsigned int nattr,
                                          HSA_SVM_ATTRIBUTE *attrs) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetXNACKMode(HSAint32 enable) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetXNACKMode(HSAint32 *enable) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   *enable = false;
   return HSAKMT_STATUS_SUCCESS;
 }

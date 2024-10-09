@@ -32,11 +32,13 @@ static uint32_t runtime_capabilities_mask = 0;
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtDbgRegister(HSAuint32 NodeId) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtDbgUnregister(HSAuint32 NodeId) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -44,6 +46,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgWavefrontControl(
     HSAuint32 NodeId, HSA_DBG_WAVEOP Operand, HSA_DBG_WAVEMODE Mode,
     HSAuint32 TrapId, HsaDbgWaveMessage *DbgWaveMsgRing) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -51,11 +54,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgAddressWatch(
     HSAuint32 NodeId, HSAuint32 NumWatchPoints, HSA_DBG_WATCH_MODE WatchMode[],
     void *WatchAddress[], HSAuint64 WatchMask[], HsaEvent *WatchEvent[]) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtCheckRuntimeDebugSupport(void) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -88,11 +93,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetRuntimeCapabilities(HSAuint32 *caps_mask) {
 HSAKMT_STATUS HSAKMTAPI hsaKmtDbgEnable(void **runtime_info,
                                         HSAuint32 *data_size) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 HSAKMT_STATUS HSAKMTAPI hsaKmtDbgDisable(void) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -100,6 +106,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgGetDeviceData(void **data,
                                                HSAuint32 *n_entries,
                                                HSAuint32 *entry_size) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -107,6 +114,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDbgGetQueueData(void **data, HSAuint32 *n_entries,
                                               HSAuint32 *entry_size,
                                               bool suspend_queues) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -114,5 +122,6 @@ HSAKMT_STATUS HSAKMTAPI
 hsaKmtDebugTrapIoctl(struct kfd_ioctl_dbg_trap_args *args, HSA_QUEUEID *Queues,
                      HSAuint64 *DebugReturn) {
   CHECK_DXG_OPEN();
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }

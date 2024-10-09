@@ -30,6 +30,7 @@
 HSAKMT_STATUS HSAKMTAPI hsaKmtSPMAcquire(HSAuint32 PreferredNode) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
@@ -38,11 +39,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSPMSetDestBuffer(
     HSAuint32 *SizeCopied, void *DestMemoryAddress, bool *isSPMDataLoss) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSPMRelease(HSAuint32 PreferredNode) {
   CHECK_DXG_OPEN();
   // Used for profiling tools
+  pr_warn_once("not supported\n");
   return HSAKMT_STATUS_NOT_SUPPORTED;
 }

@@ -33,14 +33,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEvent(HsaEventDescriptor *EventDesc,
                                           bool ManualReset, bool IsSignaled,
                                           HsaEvent **Event) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not supported\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEvent(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not supported\n");
   if (!Event)
     return HSAKMT_STATUS_INVALID_HANDLE;
 
@@ -50,7 +50,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEvent(HsaEvent *Event) {
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtSetEvent(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not supported\n");
   if (!Event)
     return HSAKMT_STATUS_INVALID_HANDLE;
 
@@ -60,7 +60,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtSetEvent(HsaEvent *Event) {
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtResetEvent(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not supported\n");
   if (!Event)
     return HSAKMT_STATUS_INVALID_HANDLE;
 
@@ -70,7 +70,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtResetEvent(HsaEvent *Event) {
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtQueryEventState(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-
+  pr_warn_once("not supported\n");
   if (!Event)
     return HSAKMT_STATUS_INVALID_HANDLE;
 
@@ -122,7 +122,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtWaitOnMultipleEvents_Ext(HsaEvent *Events[],
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtOpenSMI(HSAuint32 NodeId, int *fd) {
   CHECK_DXG_OPEN();
-
   pr_debug("node id %d\n", NodeId);
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
