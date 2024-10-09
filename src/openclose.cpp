@@ -108,10 +108,7 @@ static HSAKMT_STATUS init_vars_from_env(void) {
 
   envvar = getenv("HSAKMT_DEBUG_LEVEL");
   if (envvar) {
-    debug_level = atoi(envvar);
-    if (debug_level >= HSAKMT_DEBUG_LEVEL_ERR &&
-        debug_level <= HSAKMT_DEBUG_LEVEL_DEBUG)
-      hsakmt_debug_level = debug_level;
+    hsakmt_debug_level = atoi(envvar);
   }
 
   /* Check whether to support Zero frame buffer */

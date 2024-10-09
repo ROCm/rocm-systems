@@ -90,15 +90,35 @@ extern int PAGE_SHIFT;
 
 /* HSA Thunk logging usage */
 extern int hsakmt_debug_level;
-#define hsakmt_print(level, fmt, ...) \
-	do { if (level <= hsakmt_debug_level) fprintf(stderr, fmt, ##__VA_ARGS__); } while (0)
-#define HSAKMT_DEBUG_LEVEL_DEFAULT	-1
-#define HSAKMT_DEBUG_LEVEL_ERR		3
-#define HSAKMT_DEBUG_LEVEL_WARNING	4
-#define HSAKMT_DEBUG_LEVEL_INFO		6
-#define HSAKMT_DEBUG_LEVEL_DEBUG	7
+#define get_thread_id()                                                                                                          \
+    ([]() -> std::string {                                                                                                       \
+        std::stringstream str_thrd_id;                                                                                           \
+        str_thrd_id << std::hex << std::this_thread::get_id();                                                                   \
+        return str_thrd_id.str();                                                                                                \
+    })()
+#define hsakmt_print_common(stream, fmt, ...)                                                                                    \
+    do {                                                                                                                         \
+        fprintf(stream, "pid:%d tid:0x%s [%s] " fmt, getpid(), get_thread_id().c_str(), __FUNCTION__, ##__VA_ARGS__);            \
+        fflush(stream);                                                                                                          \
+    } while (false)
+#ifdef NDEBUG
+#define hsakmt_print(level, fmt, ...)                                                                                            \
+    do { } while (false)
+#else
+#define hsakmt_print(level, fmt, ...)                                                                                            \
+    do {                                                                                                                         \
+        if (level <= hsakmt_debug_level) {                                                                                       \
+            hsakmt_print_common(stdout, fmt, ##__VA_ARGS__);                                                                     \
+        }                                                                                                                        \
+    } while (false)
+#endif
+#define HSAKMT_DEBUG_LEVEL_ERR      -1
+#define HSAKMT_DEBUG_LEVEL_DEFAULT  3
+#define HSAKMT_DEBUG_LEVEL_WARNING  4
+#define HSAKMT_DEBUG_LEVEL_INFO     6
+#define HSAKMT_DEBUG_LEVEL_DEBUG    7
 #define pr_err(fmt, ...) \
-	hsakmt_print(HSAKMT_DEBUG_LEVEL_ERR, fmt, ##__VA_ARGS__)
+	hsakmt_print_common(stderr, fmt, ##__VA_ARGS__)
 #define pr_warn(fmt, ...) \
 	hsakmt_print(HSAKMT_DEBUG_LEVEL_WARNING, fmt, ##__VA_ARGS__)
 #define pr_info(fmt, ...) \
