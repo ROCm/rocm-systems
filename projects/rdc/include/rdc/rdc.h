@@ -252,6 +252,8 @@ typedef enum {
   RDC_FI_XGMI_5_WRITE_KB,  //!< XGMI_5 accumulated data write size (KB)
   RDC_FI_XGMI_6_WRITE_KB,  //!< XGMI_6 accumulated data write size (KB)
   RDC_FI_XGMI_7_WRITE_KB,  //!< XGMI_7 accumulated data write size (KB)
+  RDC_FI_XGMI_TOTAL_READ_KB,      //!< XGMI_SUM accumulated data read size (KB)
+  RDC_FI_XGMI_TOTAL_WRITE_KB,      //!< XGMI_SUM accumulated data write size (KB)
 
   /**
    * @brief ROC-profiler related fields
