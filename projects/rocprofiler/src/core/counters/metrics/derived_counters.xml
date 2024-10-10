@@ -492,6 +492,11 @@
   <metric name="ACTIVE_WAVES"                                           expr=SQ_WAVES descr="Active Waves"></metric>
   <metric name="BANDWIDTH_EA"                                           expr=1024*(FETCH_SIZE+WRITE_SIZE)*XCC_NUM/GRBM_GUI_ACTIVE descr="Memory Bandwidth measured at the TCC_EA interface. In units of bytes/cycle."></metric>
   <metric name="OccupancyPercent"                                       expr=400*SQ_WAVE_CYCLES*XCC_NUM/GRBM_GUI_ACTIVE/CU_NUM/32 descr="GPU occupancy as % of maximum."></metric>
+  <metric name="GPU_UTIL"                                               expr=100*GRBM_GUI_ACTIVE/GRBM_COUNT descr="Percentage of the time that GUI is active"></metric>  
+  <metric name="MfmaUtil"                                               expr=100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4) descr="Unit: percent"></metric>
+  <metric name="FP64_ACTIVE"                                            expr=TOTAL_64_OPS/GRBM_GUI_ACTIVE descr="The ratio of total floating point 64 bit ops / total number of cycles across all XCCs."></metric>
+  <metric name="ENGINE_ACTIVE"                                          expr=GPU_UTIL/100 descr="Ratio between 0-1 of the time the GPU is active"></metric>
+  <metric name="TENSOR_ACTIVE"                                          expr=MfmaUtil descr="Tensor core active in percent, identical to MfmaUtil"></metric>  
 </gfx940_expr>
 
 <gfx10_expr>
