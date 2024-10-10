@@ -55,13 +55,14 @@ CounterPacketConstruct::CounterPacketConstruct(rocprofiler_agent_id_t           
         _metrics.emplace_back().metric = x;
         uint32_t event_id              = std::atoi(x.event().c_str());
 
-        ROCP_TRACE << fmt::format(
-            "Fetching events for counter {} (id={}, instance_count={}) on agent {} (name:{})",
-            x.name(),
-            event_id,
-            query_info.instance_count,
-            agent.handle,
-            rocprofiler::agent::get_agent(agent)->name);
+        ROCP_TRACE << fmt::format("Fetching events for counter {} (id={}, instance_count={}) on "
+                                  "agent {} (node-id:{})(name:{})",
+                                  x.name(),
+                                  event_id,
+                                  query_info.instance_count,
+                                  agent.handle,
+                                  rocprofiler::agent::get_agent(agent)->node_id,
+                                  rocprofiler::agent::get_agent(agent)->name);
 
         for(unsigned block_index = 0; block_index < query_info.instance_count; ++block_index)
         {
