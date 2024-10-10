@@ -734,6 +734,12 @@ struct_amdsmi_violation_status_t._pack_ = 1 # source:False
 struct_amdsmi_violation_status_t._fields_ = [
     ('reference_timestamp', ctypes.c_uint64),
     ('violation_timestamp', ctypes.c_uint64),
+    ('acc_counter', ctypes.c_uint64),
+    ('acc_prochot_thrm', ctypes.c_uint64),
+    ('acc_ppt_pwr', ctypes.c_uint64),
+    ('acc_socket_thrm', ctypes.c_uint64),
+    ('acc_vr_thrm', ctypes.c_uint64),
+    ('acc_hbm_thrm', ctypes.c_uint64),
     ('per_prochot_thrm', ctypes.c_uint64),
     ('per_ppt_pwr', ctypes.c_uint64),
     ('per_socket_thrm', ctypes.c_uint64),
@@ -745,7 +751,7 @@ struct_amdsmi_violation_status_t._fields_ = [
     ('active_vr_thrm', ctypes.c_ubyte),
     ('active_hbm_thrm', ctypes.c_ubyte),
     ('PADDING_0', ctypes.c_ubyte * 3),
-    ('reserved', ctypes.c_uint64 * 24),
+    ('reserved', ctypes.c_uint64 * 30),
 ]
 
 amdsmi_violation_status_t = struct_amdsmi_violation_status_t
@@ -798,19 +804,6 @@ amdsmi_card_form_factor_t = ctypes.c_uint32 # enum
 class struct_amdsmi_pcie_info_t(Structure):
     pass
 
-class struct_pcie_static_(Structure):
-    pass
-
-struct_pcie_static_._pack_ = 1 # source:False
-struct_pcie_static_._fields_ = [
-    ('max_pcie_width', ctypes.c_uint16),
-    ('PADDING_0', ctypes.c_ubyte * 2),
-    ('max_pcie_speed', ctypes.c_uint32),
-    ('pcie_interface_version', ctypes.c_uint32),
-    ('slot_type', amdsmi_card_form_factor_t),
-    ('reserved', ctypes.c_uint64 * 10),
-]
-
 class struct_pcie_metric_(Structure):
     pass
 
@@ -829,6 +822,19 @@ struct_pcie_metric_._fields_ = [
     ('pcie_lc_perf_other_end_recovery_count', ctypes.c_uint32),
     ('PADDING_2', ctypes.c_ubyte * 4),
     ('reserved', ctypes.c_uint64 * 12),
+]
+
+class struct_pcie_static_(Structure):
+    pass
+
+struct_pcie_static_._pack_ = 1 # source:False
+struct_pcie_static_._fields_ = [
+    ('max_pcie_width', ctypes.c_uint16),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('max_pcie_speed', ctypes.c_uint32),
+    ('pcie_interface_version', ctypes.c_uint32),
+    ('slot_type', amdsmi_card_form_factor_t),
+    ('reserved', ctypes.c_uint64 * 10),
 ]
 
 struct_amdsmi_pcie_info_t._pack_ = 1 # source:False

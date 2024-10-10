@@ -528,11 +528,16 @@ typedef struct {
 } amdsmi_vram_usage_t;
 /**
  * @brief This structure hold violation status information.
- *        Note: for MI3x asics and higher, older ASICs will show unsupported.
  */
 typedef struct {
   uint64_t reference_timestamp;  //!< Represents CPU timestamp in microseconds (uS)
   uint64_t violation_timestamp;  //!< Violation time in milliseconds (ms)
+  uint64_t acc_counter;          //!< Current accumulated counter; Max uint64 means unsupported
+  uint64_t acc_prochot_thrm;     //!< Current accumulated processor hot violation count; Max uint64 means unsupported
+  uint64_t acc_ppt_pwr;          //!< PVIOL; Current accumulated Package Power Tracking (PPT) count; Max uint64 means unsupported
+  uint64_t acc_socket_thrm;      //!< TVIOL; Current accumulated Socket thermal count; Max uint64 means unsupported
+  uint64_t acc_vr_thrm;          //!< Current accumulated voltage regulator count; Max uint64 means unsupported
+  uint64_t acc_hbm_thrm;         //!< Current accumulated High Bandwidth Memory (HBM) thermal count; Max uint64 means unsupported
   uint64_t per_prochot_thrm;     //!< Processor hot violation % (greater than 0% is a violation); Max uint64 means unsupported
   uint64_t per_ppt_pwr;          //!< PVIOL; Package Power Tracking (PPT) violation % (greater than 0% is a violation); Max uint64 means unsupported
   uint64_t per_socket_thrm;      //!< TVIOL; Socket thermal violation % (greater than 0% is a violation); Max uint64 means unsupported
@@ -543,7 +548,7 @@ typedef struct {
   uint8_t active_socket_thrm;    //!< Socket thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
   uint8_t active_vr_thrm;        //!< Voltage regulator violation; 1 = active 0 = not active; Max uint8 means unsupported
   uint8_t active_hbm_thrm;       //!< High Bandwidth Memory (HBM) thermal violation; 1 = active 0 = not active; Max uint8 means unsupported
-  uint64_t reserved[24];         // Reserved for new violation info
+  uint64_t reserved[30];         // Reserved for new violation info
 } amdsmi_violation_status_t;
 typedef struct {
   amdsmi_range_t supported_freq_range;

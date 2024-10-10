@@ -2020,6 +2020,12 @@ def amdsmi_get_violation_status(
     return {
         "reference_timestamp": _validate_if_max_uint(violation_status.reference_timestamp, MaxUIntegerTypes.UINT64_T),
         "violation_timestamp": _validate_if_max_uint(violation_status.violation_timestamp, MaxUIntegerTypes.UINT64_T),
+        "acc_counter": _validate_if_max_uint(violation_status.acc_counter, MaxUIntegerTypes.UINT64_T),
+        "acc_prochot_thrm": _validate_if_max_uint(violation_status.acc_prochot_thrm, MaxUIntegerTypes.UINT64_T),
+        "acc_ppt_pwr": _validate_if_max_uint(violation_status.acc_ppt_pwr, MaxUIntegerTypes.UINT64_T),                           #PVIOL
+        "acc_socket_thrm": _validate_if_max_uint(violation_status.acc_socket_thrm, MaxUIntegerTypes.UINT64_T),                   #TVIOL
+        "acc_vr_thrm": _validate_if_max_uint(violation_status.acc_vr_thrm, MaxUIntegerTypes.UINT64_T),
+        "acc_hbm_thrm": _validate_if_max_uint(violation_status.acc_hbm_thrm, MaxUIntegerTypes.UINT64_T),
         "per_prochot_thrm": _validate_if_max_uint(violation_status.per_prochot_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),
         "per_ppt_pwr": _validate_if_max_uint(violation_status.per_ppt_pwr, MaxUIntegerTypes.UINT64_T, isActivity=True),          #PVIOL
         "per_socket_thrm": _validate_if_max_uint(violation_status.per_socket_thrm, MaxUIntegerTypes.UINT64_T, isActivity=True),  #TVIOL

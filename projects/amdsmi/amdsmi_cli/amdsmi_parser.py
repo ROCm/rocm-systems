@@ -1077,8 +1077,8 @@ class AMDSMIParser(argparse.ArgumentParser):
                 set_value_parser.add_argument('-C', '--compute-partition', action='store', choices=self.helpers.get_compute_partition_types(), type=str.upper, required=False, help=set_compute_partition_help, metavar='PARTITION')
                 set_value_parser.add_argument('-M', '--memory-partition', action='store', choices=self.helpers.get_memory_partition_types(), type=str.upper, required=False, help=set_memory_partition_help, metavar='PARTITION')
                 set_value_parser.add_argument('-o', '--power-cap', action='store', type=self._positive_int, required=False, help=set_power_cap_help, metavar='WATTS')
-                set_value_parser.add_argument('-p', '--soc-pstate', action='store', required=False,  type=self._not_negative_int, help=set_soc_pstate_help, metavar='POLICY_ID')
-                set_value_parser.add_argument('-x', '--xgmi-plpd', action='store', required=False,  type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
+                set_value_parser.add_argument('-p', '--soc-pstate', action='store', required=False, type=self._not_negative_int, help=set_soc_pstate_help, metavar='POLICY_ID')
+                set_value_parser.add_argument('-x', '--xgmi-plpd', action='store', required=False, type=self._not_negative_int, help=set_xgmi_plpd_help, metavar='POLICY_ID')
                 set_value_parser.add_argument('-L', '--clk-limit', action=self._limit_select(), nargs=3, required=False, help=set_clk_limit_help, metavar=('CLK_TYPE', 'LIM_TYPE', 'VALUE'))
 
             set_value_parser.add_argument('-R', '--process-isolation', action='store', choices=[0,1], type=self._not_negative_int, required=False, help=set_process_isolation_help, metavar='STATUS')

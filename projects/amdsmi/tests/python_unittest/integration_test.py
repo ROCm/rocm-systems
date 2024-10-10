@@ -864,7 +864,8 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
         print()
         self.tearDown()
 
-    # Only supported on MI300+ ASICs
+    # amdsmi_get_violation_status is only supported on MI300+ ASICs
+    # We should expect a not supported status for Navi / MI100 / MI2x ASICs
     @handle_exceptions
     def test_get_violation_status(self):
         self.setUp()
@@ -881,6 +882,17 @@ class TestAmdSmiPythonInterface(unittest.TestCase):
                 violation_status['reference_timestamp']))
             print("  Violation Timestamp: {}".format(
                 violation_status['violation_timestamp']))
+
+            print(" Current Prochot Thrm Accumulated (Count): {}".format(
+                violation_status['acc_prochot_thrm']))
+            print(" Current PVIOL (acc_ppt_pwr) Accumulated (Count): {}".format(
+                violation_status['acc_ppt_pwr']))
+            print(" Current TVIOL (acc_socket_thrm) Accumulated (Count): {}".format(
+                violation_status['acc_socket_thrm']))
+            print(" Current VR_THRM Accumulated (Count): {}".format(
+                violation_status['acc_vr_thrm']))
+            print(" Current HBM Thrm Accumulated (Count): {}".format(
+                violation_status['acc_hbm_thrm']))
 
             print(" Prochot Thrm Violation (%): {}".format(
                 violation_status['per_prochot_thrm']))

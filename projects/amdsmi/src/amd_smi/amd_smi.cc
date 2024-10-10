@@ -637,6 +637,14 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
 
     violation_status->reference_timestamp = std::numeric_limits<uint64_t>::max();
     violation_status->violation_timestamp = std::numeric_limits<uint64_t>::max();
+
+    violation_status->acc_counter = std::numeric_limits<uint64_t>::max();
+    violation_status->acc_prochot_thrm = std::numeric_limits<uint64_t>::max();
+    violation_status->acc_ppt_pwr = std::numeric_limits<uint64_t>::max();
+    violation_status->acc_socket_thrm = std::numeric_limits<uint64_t>::max();
+    violation_status->acc_vr_thrm = std::numeric_limits<uint64_t>::max();
+    violation_status->acc_hbm_thrm = std::numeric_limits<uint64_t>::max();
+
     violation_status->per_prochot_thrm = std::numeric_limits<uint64_t>::max();
     violation_status->per_ppt_pwr = std::numeric_limits<uint64_t>::max();
     violation_status->per_socket_thrm = std::numeric_limits<uint64_t>::max();
@@ -701,6 +709,14 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     if (status != AMDSMI_STATUS_SUCCESS) {
         return status;
     }
+
+    // Insert current accumulator counters into struct
+    violation_status->acc_counter = metric_info_b.accumulation_counter;
+    violation_status->acc_prochot_thrm = metric_info_b.prochot_residency_acc;
+    violation_status->acc_ppt_pwr = metric_info_b.ppt_residency_acc;
+    violation_status->acc_socket_thrm = metric_info_b.socket_thm_residency_acc;
+    violation_status->acc_vr_thrm = metric_info_b.vr_thm_residency_acc;
+    violation_status->acc_hbm_thrm = metric_info_b.hbm_thm_residency_acc;
 
     ss << __PRETTY_FUNCTION__ << " | "
        << "[gpu_metrics A] metric_info_a.accumulation_counter: " << std::dec
@@ -818,7 +834,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     }
     if ( (metric_info_b.hbm_thm_residency_acc != std::numeric_limits<uint64_t>::max()
         || metric_info_a.hbm_thm_residency_acc != std::numeric_limits<uint64_t>::max())
-        && (metric_info_b.hbm_thm_residency_acc >= metric_info_a.vr_thm_residency_acc)
+        && (metric_info_b.hbm_thm_residency_acc >= metric_info_a.hbm_thm_residency_acc)
         && ((metric_info_b.accumulation_counter - metric_info_a.accumulation_counter) > 0) ) {
         violation_status->per_hbm_thrm =
             (((metric_info_b.hbm_thm_residency_acc -
