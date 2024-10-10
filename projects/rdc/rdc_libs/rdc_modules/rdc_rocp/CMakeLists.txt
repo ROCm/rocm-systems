@@ -41,6 +41,11 @@ if(BUILD_PROFILER)
         "${ROCM_DIR}/include"
         "${ROCM_DIR}/include/hsa")
 
+    # let bootstrap find this module at build time
+    # at install-time the directory structure is a lot simpler
+    set_property(TARGET ${BOOTSTRAP_LIB} APPEND PROPERTY
+        BUILD_RPATH "\$ORIGIN/../rdc_modules/${RDC_ROCP_LIB}")
+
     # Set the VERSION and SOVERSION values
     set_property(TARGET ${RDC_ROCP_LIB} PROPERTY
         SOVERSION "${VERSION_MAJOR}")
