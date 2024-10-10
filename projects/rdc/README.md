@@ -204,10 +204,10 @@ E.g. Correct output on MI300 using [gpu-burn](https://github.com/ROCm/HIP-Exampl
     export HSA_TOOLS_LIB=/opt/rocm/lib/librocprofiler64.so.1
     gpu-burn
     # terminal 3
-    rdci dmon -u -e 800,801,803 -i 0 -c 1
+    rdci dmon -u -e 800,801 -i 0 -c 1
     # output:
-    # GPU   MN_OCC_PER_CU       MN_OCC_PER_ACT_CU   ACTIVE_WAVES
-    # 0     1683.422            6479.242            32640.000
+    # GPU   OCCUPANCY_PERCENT   ACTIVE_WAVES
+    # 0     001.000             32640.000
 
 ### `HSA_STATUS_ERROR_OUT_OF_RESOURCES`
 
