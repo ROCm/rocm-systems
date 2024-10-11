@@ -364,6 +364,11 @@
   <metric name="TCC_ALL_TC_OP_INV_EVICT" block=TCC event=80 descr="Number of evictions due to all TC_OP invalidate requests."></metric>
   <metric name="TCC_EA_RDREQ_DRAM" block=TCC event=102 descr="Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC)."></metric>
   <metric name="TCC_EA_WRREQ_DRAM" block=TCC event=103 descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC)."></metric>
+
+  <metric name="SPI_PIPE_0" block=SPI event=16777216 descr="Dummy Counter. Used to select SPI Pipe 0"></metric>
+  <metric name="SPI_PIPE_1" block=SPI event=16777217 descr="Dummy Counter. Used to select SPI Pipe 1"></metric>
+  <metric name="SPI_PIPE_2" block=SPI event=16777218 descr="Dummy Counter. Used to select SPI Pipe 2"></metric>
+  <metric name="SPI_PIPE_3" block=SPI event=16777219 descr="Dummy Counter. Used to select SPI Pipe 3"></metric>
 </gfx90a>
 
 <gfx940>
@@ -624,6 +629,11 @@
   <metric name="TCC_PROBE_EVICT" block=TCC event=81 descr="Number of evictions/invalidations due to probes. Not windowable."></metric>
   <metric name="TCC_EA0_RDREQ_DRAM" block=TCC event=102 descr="Number of TCC/EA read requests (either 32-byte or 64-byte) destined for DRAM (MC)."></metric>
   <metric name="TCC_EA0_WRREQ_DRAM" block=TCC event=103 descr="Number of TCC/EA write requests (either 32-byte of 64-byte) destined for DRAM (MC)."></metric>
+
+  <metric name="SPI_PIPE_0" block=SPI event=16777216 descr="Dummy Counter. Used to select SPI Pipe 0"></metric>
+  <metric name="SPI_PIPE_1" block=SPI event=16777217 descr="Dummy Counter. Used to select SPI Pipe 1"></metric>
+  <metric name="SPI_PIPE_2" block=SPI event=16777218 descr="Dummy Counter. Used to select SPI Pipe 2"></metric>
+  <metric name="SPI_PIPE_3" block=SPI event=16777219 descr="Dummy Counter. Used to select SPI Pipe 3"></metric>
 </gfx940>
 
 <gfx941 base="gfx940"></gfx941>

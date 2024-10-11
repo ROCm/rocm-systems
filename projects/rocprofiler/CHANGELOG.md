@@ -341,3 +341,9 @@ Example for file plugin output:
 
 - JSON output plugin for rocprofv2, the JSON file matches Google Trace Format, so it should be easily loaded to perfetto, chrome tracing or speedscope. For Speedscope, `--disable-json-data-flows` option will be needed as speedscope doesn't work with data flows.
 - Added `--no-serialization` flag to disable kernel serialization when rocprofv2 is in counter-collection mode. This change was added to allow rocprofv2 to avoid deadlock when profiling certain programs in counter-collection mode.
+
+## ROCprofiler for rocm 6.3
+
+### Added
+
+- SPI Pipe Selection
