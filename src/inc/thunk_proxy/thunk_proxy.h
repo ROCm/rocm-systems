@@ -1,9 +1,9 @@
-#ifndef _ROCR_PROXY_H_
-#define _ROCR_PROXY_H_
+#ifndef _WSL_INC_THUNK_PROXY_H_
+#define _WSL_INC_THUNK_PROXY_H_
 
 #include <vector>
 
-namespace rocr_proxy {
+namespace thunk_proxy {
 enum AllocDomain {
   kSystem,
   kLocal,

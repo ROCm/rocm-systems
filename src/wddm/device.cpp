@@ -351,7 +351,7 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
   void *priv_data;
   int priv_size;
 
-  priv_size = rocr_proxy::CreatePowerOptPrivData(&priv_data, restore);
+  priv_size = thunk_proxy::CreatePowerOptPrivData(&priv_data, restore);
 
   D3DKMT_ESCAPE d3dkmt_escape;
   memset(&d3dkmt_escape, 0, sizeof(d3dkmt_escape));
@@ -366,16 +366,16 @@ void WDDMDevice::SetPowerOptimization(bool restore) {
 
   NTSTATUS status = D3DKMTEscape(&d3dkmt_escape);
   debug_print("%s status %d restore %d\n", __FUNCTION__, status, restore);
-  rocr_proxy::DestroyPrivData(priv_data);
+  thunk_proxy::DestroyPrivData(priv_data);
 }
 
-ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const rocr_proxy::AllocDomain domain,
+ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
                                                gpusize hit_base_addr, gpusize size,
                                                gpusize *out_gpu_virt_addr, gpusize alignment, bool lock) {
   gpusize gpu_addr = 0;
   ErrorCode code = ErrorCode::Success;
 
-  if (domain == rocr_proxy::kSystem) {
+  if (domain == thunk_proxy::kSystem) {
 
     code = d3dthunk::ReserveGpuVirtualAddress(adapter_, size,
                                           system_heap_space_start_,
@@ -390,7 +390,7 @@ ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const rocr_proxy::AllocDomain dom
     }
   } else {
     uint64_t align = alignment == 0 ? (64 * 1024) : alignment; // default 64K alignment
-    if (domain == rocr_proxy::kLocal && size >= GPU_HUGE_PAGE_SIZE)
+    if (domain == thunk_proxy::kLocal && size >= GPU_HUGE_PAGE_SIZE)
       align = GPU_HUGE_PAGE_SIZE;
 
     gpu_addr = local_va_mgr_->Alloc(size, align, hit_base_addr);
@@ -403,11 +403,11 @@ ErrorCode WDDMDevice::ReserveGpuVirtualAddress(const rocr_proxy::AllocDomain dom
   return code;
 }
 
-ErrorCode WDDMDevice::FreeGpuVirtualAddress(const rocr_proxy::AllocDomain domain,
+ErrorCode WDDMDevice::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domain,
                                             gpusize gpu_addr, gpusize size) {
   auto code = ErrorCode::Success;
 
-  if (domain == rocr_proxy::kSystem) {
+  if (domain == thunk_proxy::kSystem) {
 
       DecommitSystemHeapSpace((void *)gpu_addr, size);
 
@@ -484,7 +484,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
     return false;
 
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
-  priv_size = rocr_proxy::CreateContextPrivData(&priv_data, FwManagedGfxState);
+  priv_size = thunk_proxy::CreateContextPrivData(&priv_data, FwManagedGfxState);
 
   D3DKMT_CREATECONTEXTVIRTUAL args = {0};
   args.hDevice = device_;
@@ -497,16 +497,16 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
   if (IsHwsEnabled(engine))
     args.Flags.HwQueueSupported = 1;
   else
-    args.Flags.DisableGpuTimeout = rocr_proxy::ShouldDisableGpuTimeout(engine, &device_info_);
+    args.Flags.DisableGpuTimeout = thunk_proxy::ShouldDisableGpuTimeout(engine, &device_info_);
 
   NTSTATUS ret = D3DKMTCreateContextVirtual(&args);
   if (ret == STATUS_SUCCESS) {
     *handle = args.hContext;
-    rocr_proxy::DestroyPrivData(priv_data);
+    thunk_proxy::DestroyPrivData(priv_data);
     return true;
   }
 
-  rocr_proxy::DestroyPrivData(priv_data);
+  thunk_proxy::DestroyPrivData(priv_data);
 
   fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
   return false;
@@ -676,7 +676,7 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
     if (ret != STATUS_SUCCESS)
       goto err_out1;
 
-    supported = rocr_proxy::QueryAdapterSupported(info[i].hAdapter);
+    supported = thunk_proxy::QueryAdapterSupported(info[i].hAdapter);
 
     if (std::wcsstr(query.ChipType, L"AMD") && supported) {
       adapters[num_adapters++] = info[i];
@@ -698,7 +698,7 @@ bool WDDMDevice::ParseDeviceInfo() {
   bool ret;
 
   memset(&device_info_, 0, sizeof(device_info_));
-  ret = rocr_proxy::ParseAdapterInfo(adapter_, &device_info_);
+  ret = thunk_proxy::ParseAdapterInfo(adapter_, &device_info_);
   if (!ret)
     return false;
 
@@ -713,7 +713,7 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
   void *priv_data;
   int priv_size;
 
-  priv_size = rocr_proxy::CreateCalibratedTimestampsPrivData(&priv_data);
+  priv_size = thunk_proxy::CreateCalibratedTimestampsPrivData(&priv_data);
 
   D3DKMT_ESCAPE d3dkmt_escape;
   memset(&d3dkmt_escape, 0, sizeof(d3dkmt_escape));
@@ -730,9 +730,9 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
   if (status) {
     debug_print("%s status %d \n", __FUNCTION__, status);
   } else {
-    rocr_proxy::QueryCalibratedTimestamps(priv_data, gpu, cpu);
+    thunk_proxy::QueryCalibratedTimestamps(priv_data, gpu, cpu);
   }
-  rocr_proxy::DestroyPrivData(priv_data);
+  thunk_proxy::DestroyPrivData(priv_data);
 }
 
 bool WDDMDevice::CreateQueue(WDDMQueue *queue) {
@@ -741,7 +741,7 @@ bool WDDMDevice::CreateQueue(WDDMQueue *queue) {
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = queue->cmdbuf_size;
-  create_info.domain = rocr_proxy::kSystem;
+  create_info.domain = thunk_proxy::kSystem;
 
   GpuMemory *gpu_mem = nullptr;
   auto code = CreateGpuMemory(create_info, &gpu_mem);
@@ -779,7 +779,7 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   void *priv_data;
   int priv_size;
 
-  priv_size = rocr_proxy::CreateSubmitPrivData(&priv_data, queue->queue, command_addr, command_size, false);
+  priv_size = thunk_proxy::CreateSubmitPrivData(&priv_data, queue->queue, command_addr, command_size, false);
 
   D3DKMT_SUBMITCOMMAND args = {0};
   args.Commands = command_addr;
@@ -792,11 +792,11 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
   NTSTATUS ret = D3DKMTSubmitCommand(&args);
   if (ret != STATUS_SUCCESS) {
     fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
-    rocr_proxy::DestroyPrivData(priv_data);
+    thunk_proxy::DestroyPrivData(priv_data);
     return false;
   }
 
-  rocr_proxy::DestroyPrivData(priv_data);
+  thunk_proxy::DestroyPrivData(priv_data);
 
   if (!GpuSignal(queue->context, &queue->syncobj, &fence_value, 1))
     return false;
@@ -809,23 +809,23 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   int priv_size;
 
   bool FwManagedGfxState = SupportStateShadowingByCpFw();
-  priv_size = rocr_proxy::CreateHwQueuePrivData(&priv_data, queue->context,
+  priv_size = thunk_proxy::CreateHwQueuePrivData(&priv_data, queue->context,
                                                   FwManagedGfxState, queue->prio);
 
   D3DKMT_CREATEHWQUEUE createHwQueue = {0};
   createHwQueue.hHwContext = queue->context;
-  createHwQueue.Flags.DisableGpuTimeout = rocr_proxy::ShouldDisableGpuTimeout(queue->queue_engine, &device_info_);
+  createHwQueue.Flags.DisableGpuTimeout = thunk_proxy::ShouldDisableGpuTimeout(queue->queue_engine, &device_info_);
   createHwQueue.pPrivateDriverData = priv_data;
   createHwQueue.PrivateDriverDataSize = priv_size;
 
   NTSTATUS ret = D3DKMTCreateHwQueue(&createHwQueue);
   if (ret != STATUS_SUCCESS) {
     fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
-    rocr_proxy::DestroyPrivData(priv_data);
+    thunk_proxy::DestroyPrivData(priv_data);
     return false;
   }
 
-  rocr_proxy::DestroyPrivData(priv_data);
+  thunk_proxy::DestroyPrivData(priv_data);
 
   queue->queue = createHwQueue.hHwQueue;
   queue->syncobj = createHwQueue.hHwQueueProgressFence;
@@ -853,7 +853,7 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   void *priv_data;
   int priv_size;
 
-  priv_size = rocr_proxy::CreateSubmitPrivData(&priv_data, queue->queue, command_addr, command_size, true);
+  priv_size = thunk_proxy::CreateSubmitPrivData(&priv_data, queue->queue, command_addr, command_size, true);
 
   D3DKMT_SUBMITCOMMANDTOHWQUEUE args = {0};
   args.hHwQueue = queue->queue;
@@ -866,11 +866,11 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
   NTSTATUS ret = D3DKMTSubmitCommandToHwQueue(&args);
   if (ret != STATUS_SUCCESS) {
     fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
-    rocr_proxy::DestroyPrivData(priv_data);
+    thunk_proxy::DestroyPrivData(priv_data);
     return false;
   }
 
-  rocr_proxy::DestroyPrivData(priv_data);
+  thunk_proxy::DestroyPrivData(priv_data);
 
   return true;
 }

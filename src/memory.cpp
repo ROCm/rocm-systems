@@ -144,17 +144,17 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
     if (zfb_support && MemFlags.ui32.NonPaged == 1)
       MemFlags.ui32.CoarseGrain = 1;
 
-    create_info.domain = rocr_proxy::AllocDomain::kSystem;
+    create_info.domain = thunk_proxy::AllocDomain::kSystem;
   } else {
-    create_info.domain = rocr_proxy::AllocDomain::kLocal;
+    create_info.domain = thunk_proxy::AllocDomain::kLocal;
   }
 
   if (!MemFlags.ui32.CoarseGrain)
-    create_info.mem_flags = rocr_proxy::kFineGrain;
+    create_info.mem_flags = thunk_proxy::kFineGrain;
 
   //In hsa-runtime, only kernarg region set Uncached.
   if (MemFlags.ui32.Uncached)
-    create_info.mem_flags |= rocr_proxy::kKernarg;
+    create_info.mem_flags |= thunk_proxy::kKernarg;
 
   create_info.flags.physical_only = MemFlags.ui32.NoAddress;
   create_info.flags.interprocess = MemFlags.ui32.NoAddress;
@@ -162,7 +162,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   create_info.flags.virtual_alloc = MemFlags.ui32.OnlyAddress;
   /*when only alloc virtual or only physical, it's vmm allocation, force to local*/
   if (create_info.flags.virtual_alloc || create_info.flags.physical_only)
-    create_info.domain = rocr_proxy::AllocDomain::kLocal;
+    create_info.domain = thunk_proxy::AllocDomain::kLocal;
 
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
@@ -444,7 +444,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
   wsl::thunk::GpuMemoryHandle handle = 0;
   uint64_t addr;
   wsl::thunk::GpuMemoryCreateInfo create_info{};
-  create_info.domain = rocr_proxy::kUserMemory;
+  create_info.domain = thunk_proxy::kUserMemory;
   create_info.size = aligned_size;
   create_info.user_ptr = aligned_ptr;
 

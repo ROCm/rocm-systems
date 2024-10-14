@@ -21,7 +21,7 @@ licensed as MIT:
     FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
     DEALINGS IN THE SOFTWARE.
 
-However, the binary src/rocr_proxy/librocr_proxy.a is licensed under an AMD proprietary license:
+However, the binary src/thunk_proxy/libthunk_proxy.a is licensed under an AMD proprietary license:
 
     Copyright (C) 2025 Advanced Micro Devices, Inc. All rights reserved.
 

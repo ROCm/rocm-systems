@@ -51,7 +51,7 @@
 #include <vector>
 
 #include "inc/wddm/types.h"
-#include "inc/rocr_proxy/rocr_proxy.h"
+#include "inc/thunk_proxy/thunk_proxy.h"
 #include "inc/wddm/va_mgr.h"
 #include "inc/wddm/status.h"
 #include "inc/wddm/types.h"
@@ -80,7 +80,7 @@ public:
   bool IsDgpu() { return device_info_.is_dgpu; }
   const char *ProductName() { return device_info_.product_name; }
   const char *Uuid() { return device_info_.uuid; }
-  rocr_proxy::AsicFamilyType GfxFamily() { return device_info_.family; }
+  thunk_proxy::AsicFamilyType GfxFamily() { return device_info_.family; }
   uint32_t DeviceId() { return device_info_.device_id; }
   uint32_t WavefrontSize() { return device_info_.wavefront_size; }
   uint32_t ComputeUnitCount() { return device_info_.compute_unit_count; }
@@ -168,7 +168,7 @@ public:
   bool AllocUserQueueMemFromUMD(void) const { return false; }
 
   bool IsHwsEnabled(int engine) {
-    return rocr_proxy::GetHwsEnabled(engine, &device_info_);
+    return thunk_proxy::GetHwsEnabled(engine, &device_info_);
   }
 
   void UpdatePageFence(uint64_t fence_value);
@@ -178,16 +178,16 @@ public:
   D3DKMT_HANDLE DeviceHandle() const { return device_; }
   LUID GetLuid() const { return adapter_luid_; }
 
-  const rocr_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
+  const thunk_proxy::DeviceInfo& DeviceInfo() const { return device_info_; }
 
-  ErrorCode ReserveGpuVirtualAddress(rocr_proxy::AllocDomain domain,
+  ErrorCode ReserveGpuVirtualAddress(thunk_proxy::AllocDomain domain,
                                      gpusize hit_base_addr,
                                      gpusize size,
                                      gpusize *out_gpu_virtual_addr, 
                                      gpusize alignment,
                                      bool lock=false);
 
-  ErrorCode FreeGpuVirtualAddress(rocr_proxy::AllocDomain domain,
+  ErrorCode FreeGpuVirtualAddress(thunk_proxy::AllocDomain domain,
                                   gpusize base_addr,
                                   gpusize size);
 
@@ -231,7 +231,7 @@ private:
   uint32_t cmdbuf_aql_frame_size_;
   static const uint32_t cmdbuf_aql_frame_num_;
   // device info
-  rocr_proxy::DeviceInfo device_info_;
+  thunk_proxy::DeviceInfo device_info_;
 
   std::unique_ptr<VaMgr> local_va_mgr_;
   //CmdUtil cmd_util;

@@ -60,9 +60,9 @@ hsa_status_t WDDMQueue::SwsInit(void) {
     GpuMemory *gpu_mem = nullptr;
     GpuMemoryCreateInfo create_info{};
 
-    create_info.domain = rocr_proxy::kUserQueue;
+    create_info.domain = thunk_proxy::kUserQueue;
     create_info.size = device->GetSwsQueueSize();
-    create_info.engine_flag = rocr_proxy::QueueEngine2EngineFlag(queue_engine);
+    create_info.engine_flag = thunk_proxy::QueueEngine2EngineFlag(queue_engine);
 
     auto code = device->CreateGpuMemory(create_info, &gpu_mem);
     if (code != ErrorCode::Success) {
@@ -119,7 +119,7 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   if (!use_hws)
     return HSA_STATUS_SUCCESS;
 
-  rocr_proxy::SchedLevel new_prio = ConvertSchedLevel(priority);
+  thunk_proxy::SchedLevel new_prio = ConvertSchedLevel(priority);
   if (prio == new_prio)
     return HSA_STATUS_SUCCESS;
 
@@ -246,7 +246,7 @@ ComputeQueue::ComputeQueue(WDDMDevice *device,
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = PAGE_SIZE;
-  create_info.domain = rocr_proxy::kSystem;
+  create_info.domain = thunk_proxy::kSystem;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
   assert(code == ErrorCode::Success);
@@ -436,7 +436,7 @@ bool ComputeQueue::UpdateScratch(uint32_t private_segment_size, bool wave32) {
 
   GpuMemoryCreateInfo create_info{};
   create_info.size = scratch_size;
-  create_info.domain = rocr_proxy::kLocal;
+  create_info.domain = thunk_proxy::kLocal;
   GpuMemory *gpu_mem = nullptr;
   auto code = device->CreateGpuMemory(create_info, &gpu_mem);
   if (code != ErrorCode::Success)

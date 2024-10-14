@@ -17,7 +17,7 @@ size_t GpuMemory::CalcChunkNumbers(gpusize size) {
 gpusize GpuMemory::AdjustSize(gpusize size) const {
   const auto &device_info = device_->DeviceInfo();
 
-  if (device_info.enable_big_page_alignment && desc_.domain == rocr_proxy::kLocal) {
+  if (device_info.enable_big_page_alignment && desc_.domain == thunk_proxy::kLocal) {
     uint32_t alignment = device_info.big_page_alignment_size;
     // BigPage is only supported for allocations > bigPageMinAlignment.
     // Also, if bigPageMinAlignment == 0, BigPage optimization is not supported per KMD.
@@ -259,7 +259,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
   int priv_drv_data_size;
   int alloc_priv_data_size;
 
-  if (!rocr_proxy::CreatePrivateAllocInfo(NumChunks(), &priv_drv_data, &alloc_priv,
+  if (!thunk_proxy::CreatePrivateAllocInfo(NumChunks(), &priv_drv_data, &alloc_priv,
                                           &priv_drv_data_size, &alloc_priv_data_size))
     return ErrorCode::OutOfMemory;
 
@@ -277,11 +277,11 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
     size_t block_size = std::min(size, WDDMDevice::GpuMemoryChunkSize);
 
     if (IsUserMemory() || IsSystem()) {
-      rocr_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
+      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, 0, desc_.mem_flags, desc_.engine_flag, device_info);
       alloc_info[i].pSystemMem = static_cast<void *>(cpu_addr);
       cpu_addr += block_size;
     } else {
-      rocr_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, addr, desc_.mem_flags, desc_.engine_flag, device_info);
+      thunk_proxy::SetAllocationInfo(priv_data, block_size, desc_.domain, addr, desc_.mem_flags, desc_.engine_flag, device_info);
     }
 
     size -= block_size;
@@ -321,7 +321,7 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
 
     resource_ = args.hResource;
   }
-  rocr_proxy::DestroyPrivateAllocInfo(priv_drv_data, alloc_priv);
+  thunk_proxy::DestroyPrivateAllocInfo(priv_drv_data, alloc_priv);
   return status;
 }
 

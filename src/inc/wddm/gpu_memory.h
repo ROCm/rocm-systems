@@ -48,7 +48,7 @@
 #include "util/utils.h"
 #include "inc/wddm/types.h"
 #include "inc/wddm/thunks.h"
-#include "inc/rocr_proxy/rocr_proxy.h"
+#include "inc/thunk_proxy/thunk_proxy.h"
 
 namespace wsl {
 namespace thunk {
@@ -69,7 +69,7 @@ union GpuMemoryCreateFlags {
 struct GpuMemoryCreateInfo {
   GpuMemoryCreateInfo() {
     flags.reserved = 0;
-    domain = rocr_proxy::kLocal;
+    domain = thunk_proxy::kLocal;
     size = 0;
     alignment = 0;
     mem_flags = 0;
@@ -80,7 +80,7 @@ struct GpuMemoryCreateInfo {
   }
 
   GpuMemoryCreateFlags flags;
-  rocr_proxy::AllocDomain domain;
+  thunk_proxy::AllocDomain domain;
   gpusize size;
   gpusize alignment;
   int mem_flags;
@@ -102,7 +102,7 @@ struct GpuMemoryDesc {
     engine_flag = 0;
   }
 
-  rocr_proxy::AllocDomain domain;
+  thunk_proxy::AllocDomain domain;
   LUID adapter_luid;      // Where is the backing store location
   gpusize gpu_addr;
   void *cpu_addr;
@@ -129,7 +129,7 @@ struct GpuMemoryDesc {
 };
 
 struct SharedHandleInfo {
-  rocr_proxy::AllocDomain domain;
+  thunk_proxy::AllocDomain domain;
   LUID adapter_luid;
   gpusize client_size;    // user request size
   uint64_t size;
@@ -151,10 +151,10 @@ public:
   uint64_t GpuAddress() const { return desc_.gpu_addr; }
   void *CpuAddress() const { return desc_.cpu_addr; }
 
-  inline bool IsLocal() const { return desc_.domain == rocr_proxy::kLocal; }
-  inline bool IsUserMemory() const { return desc_.domain == rocr_proxy::kUserMemory; }
-  inline bool IsSystem() const { return desc_.domain == rocr_proxy::kSystem; }
-  inline bool IsUserQueue() const { return desc_.domain == rocr_proxy::kUserQueue; }
+  inline bool IsLocal() const { return desc_.domain == thunk_proxy::kLocal; }
+  inline bool IsUserMemory() const { return desc_.domain == thunk_proxy::kUserMemory; }
+  inline bool IsSystem() const { return desc_.domain == thunk_proxy::kSystem; }
+  inline bool IsUserQueue() const { return desc_.domain == thunk_proxy::kUserQueue; }
   inline bool IsPhysicalOnly() const { return desc_.flags.is_physical_only; }
   inline bool IsVirtual() const { return desc_.flags.is_virtual; }
   inline bool IsShared() const { return desc_.flags.is_shared; }
@@ -162,7 +162,7 @@ public:
 
   inline uint32_t Flags() const { return desc_.flags.reserved; }
   inline int GetAllocInfo() const { return desc_.mem_flags; }
-  inline bool IsFineGrain() const { return (desc_.mem_flags & rocr_proxy::kFineGrain); }
+  inline bool IsFineGrain() const { return (desc_.mem_flags & thunk_proxy::kFineGrain); }
   inline bool IsSameAdapter(const LUID &luid) const {
     return (desc_.adapter_luid.HighPart == luid.HighPart &&
       desc_.adapter_luid.LowPart == luid.LowPart);

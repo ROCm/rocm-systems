@@ -74,7 +74,7 @@ public:
             cmdbuf_size(cmdbuf_size),
             queue_engine(engine),
             use_hws(use_hws),
-            prio(rocr_proxy::kNormal) {
+            prio(thunk_proxy::kNormal) {
 
   }
 
@@ -99,15 +99,15 @@ public:
   uint64_t *GetSyncAddr(void) const { return sync_addr; }
   uint64_t GetCmdbufAddr(void) const { return cmdbuf_addr; }
 
-  rocr_proxy::SchedLevel ConvertSchedLevel(hsa_amd_queue_priority_t prio) const {
+  thunk_proxy::SchedLevel ConvertSchedLevel(hsa_amd_queue_priority_t prio) const {
     switch (prio) {
     case HSA_AMD_QUEUE_PRIORITY_LOW:
-      return rocr_proxy::kLow;
+      return thunk_proxy::kLow;
     case HSA_AMD_QUEUE_PRIORITY_HIGH:
-      return rocr_proxy::kHigh;
+      return thunk_proxy::kHigh;
     case HSA_AMD_QUEUE_PRIORITY_NORMAL:
     default:
-      return rocr_proxy::kNormal;
+      return thunk_proxy::kNormal;
     }
   }
 
@@ -129,7 +129,7 @@ public:
   uint32_t queue_engine;
 
   bool use_hws;
-  rocr_proxy::SchedLevel prio;
+  thunk_proxy::SchedLevel prio;
 };
 
 class ComputeQueue : public WDDMQueue {

@@ -45,7 +45,7 @@
 
 #include <cstdint>
 #include <ntstatus.h>
-#include "inc/rocr_proxy/wddm_types.h"
+#include "inc/thunk_proxy/wddm_types.h"
 // windows wchar is 16bit, but linux is 32bit
 // seems libdxcore (not dxgkrnl.ko) convert thunk windows wchar to linux one
 // so only accept 32bit wchar args. note driver private data structure still
