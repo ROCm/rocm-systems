@@ -361,11 +361,17 @@ class Flag {
 
   bool enable_scratch_alt() const { return enable_scratch_alt_; }
 
+  bool enable_scratch() const { return enable_scratch_; }
+
   size_t scratch_single_limit_async() const { return scratch_single_limit_async_; }
 
   std::string tools_lib_names() const { return tools_lib_names_; }
 
   bool disable_image() const { return disable_image_; }
+
+  void disable_image(bool disable) { disable_image_ = disable; }
+
+  void set_ipc_mode_legacy(bool enable) { enable_ipc_mode_legacy_ = enable; }
 
   bool disable_pc_sampling() const { return disable_pc_sampling_; }
 
@@ -423,7 +429,32 @@ class Flag {
   bool enable_dtif() const { return enable_dtif_; }
 
   bool enable_dxg_detection() const { return enable_dxg_detection_; }
- private:
+
+  void set_sdma(bool peer_sdma, bool sdma_gang) {
+    enable_peer_sdma_ = peer_sdma ? SDMA_ENABLE : SDMA_DISABLE;
+    enable_sdma_gang_ = sdma_gang ? SDMA_ENABLE : SDMA_DISABLE;
+  }
+
+  void disable_scratch() {
+    scratch_single_limit_ = 0;
+    //scratch_single_limit_async_ = 0;
+    enable_scratch_async_reclaim_ = false;
+    enable_scratch_alt_ = false;
+    enable_scratch_ = false;
+    scratch_mem_size_ = 0;
+    no_scratch_reclaim_ = true;
+    no_scratch_thread_limit_ = true;
+  }
+
+  void disable_xnack() { xnack_ = XNACK_DISABLE; }
+
+  void disable_fine_grain_pcie() { fine_grain_pcie_ = false; }
+
+  void disable_dev_mem_queue_buf() { dev_mem_queue_buf_ = false; }
+
+  void disable_sdma_hdp_flush() { enable_sdma_hdp_flush_ = false; }
+
+  private:
   bool check_flat_scratch_;
   bool enable_vm_fault_message_;
   bool enable_interrupt_;
@@ -475,6 +506,7 @@ class Flag {
   size_t scratch_single_limit_async_;
   bool enable_scratch_async_reclaim_;
   bool enable_scratch_alt_;
+  bool enable_scratch_ = true;
 
   std::string tools_lib_names_;
   std::string svm_profile_;
