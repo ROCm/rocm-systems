@@ -121,6 +121,7 @@ set ( HSAKMT_SRC "src/debug.cpp"
                  "src/globals.cpp"
                  "src/memory.cpp"
                  "src/libdrm.cpp"
+                 "src/hsa.cpp"
                  "src/openclose.cpp"
                  "src/perfctr.cpp"
                  "src/queues.cpp"
@@ -159,6 +160,11 @@ target_link_libraries(${HSAKMT_TARGET} PRIVATE dxcore)
 
 target_link_directories(${HSAKMT_TARGET} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src/thunk_proxy)
 target_link_libraries(${HSAKMT_TARGET} PRIVATE thunk_proxy)
+
+if (FALSE)
+target_link_directories(${HSAKMT_TARGET} PRIVATE /opt/rocm/lib)
+target_link_libraries(${HSAKMT_TARGET} PRIVATE hsa-runtime64)
+endif ()
 
 set_property(TARGET ${HSAKMT_TARGET} PROPERTY LINK_FLAGS ${HSAKMT_LINK_FLAGS})
 

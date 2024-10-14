@@ -30,22 +30,9 @@
 #include <unistd.h>
 #include <cstdio>
 #include <strings.h>
-#include <dlfcn.h>
 #include <cassert>
 #include <amdgpu.h>
 #include "libhsakmt.h"
-#include "inc/hsa/hsa.h"
-#include "inc/hsa/hsa_ven_amd_loader.h"
-
-hsa_signal_value_t (*fn_hsa_signal_load_relaxed)(hsa_signal_t signal);
-hsa_signal_value_t (*fn_hsa_signal_wait_relaxed)(
-    hsa_signal_t signal, hsa_signal_condition_t condition,
-    hsa_signal_value_t compare_value, uint64_t timeout_hint,
-    hsa_wait_state_t wait_state_hint);
-void (*fn_hsa_signal_store_screlease)(hsa_signal_t hsa_signal,
-                                      hsa_signal_value_t value);
-hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
-    const void *device_address, const void **host_address);
 
 static const char dxg_device_name[] = "/dev/dxg";
 static pid_t parent_pid = -1;
@@ -146,33 +133,6 @@ static HSAKMT_STATUS init_vars_from_env(void) {
   return HSAKMT_STATUS_SUCCESS;
 }
 
-#define _HSAKMT_LOOKUP_SYMS(_sym)                                              \
-  do {                                                                         \
-    fn_##_sym =                                                                \
-        reinterpret_cast<decltype(fn_##_sym)>(dlsym(RTLD_DEFAULT, #_sym));     \
-    if (!fn_##_sym) {                                                          \
-      pr_err("%s not found - %s\n", #_sym, dlerror());                         \
-      return HSAKMT_STATUS_ERROR;                                              \
-    }                                                                          \
-  } while (0)
-
-static HSAKMT_STATUS init_symbols(void) {
-  _HSAKMT_LOOKUP_SYMS(hsa_signal_load_relaxed);
-  _HSAKMT_LOOKUP_SYMS(hsa_signal_wait_relaxed);
-  _HSAKMT_LOOKUP_SYMS(hsa_signal_store_screlease);
-
-  hsa_status_t (*fn_hsa_system_get_extension_table)(
-      uint16_t extension, uint16_t version_major, uint16_t version_minor,
-      void *table);
-  _HSAKMT_LOOKUP_SYMS(hsa_system_get_extension_table);
-  hsa_ven_amd_loader_1_03_pfn_t table;
-  fn_hsa_system_get_extension_table(HSA_EXTENSION_AMD_LOADER, 1, 3, &table);
-  fn_hsa_ven_amd_loader_query_host_address =
-      table.hsa_ven_amd_loader_query_host_address;
-
-  return HSAKMT_STATUS_SUCCESS;
-}
-
 HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
   HSAKMT_STATUS result;
   int fd = -1;
@@ -191,10 +151,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
 
   if (dxg_open_count == 0) {
     static bool atfork_installed = false;
-
-    result = init_symbols();
-    if (result != HSAKMT_STATUS_SUCCESS)
-      goto open_failed;
 
     result = init_vars_from_env();
     if (result != HSAKMT_STATUS_SUCCESS)

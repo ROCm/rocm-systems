@@ -48,6 +48,18 @@
 #include "inc/registers.h"
 #include "libhsakmt.h"
 
+#include "hsa-runtime/inc/hsa.h"
+#include "hsa-runtime/inc/hsa_ven_amd_loader.h"
+extern hsa_signal_value_t hsakmt_hsa_signal_load_relaxed(hsa_signal_t signal);
+extern hsa_signal_value_t hsakmt_hsa_signal_wait_relaxed(
+    hsa_signal_t signal, hsa_signal_condition_t condition,
+    hsa_signal_value_t compare_value, uint64_t timeout_hint,
+    hsa_wait_state_t wait_state_hint);
+extern void hsakmt_hsa_signal_store_screlease(hsa_signal_t hsa_signal,
+                                      hsa_signal_value_t value);
+extern hsa_status_t hsakmt_hsa_ven_amd_loader_query_host_address(
+    const void *device_address, const void **host_address);
+
 namespace wsl {
 namespace thunk {
 
@@ -130,7 +142,6 @@ hsa_status_t WDDMQueue::SetPriority(hsa_amd_queue_priority_t priority) {
   return HwsInit();
 }
 
-extern "C" void (*fn_hsa_signal_store_screlease)(hsa_signal_t hsa_signal, hsa_signal_value_t value);
 void ComputeQueue::HandleError(hsa_status_t status) {
   hsa_signal_t sig = amd_queue_rocr_->queue_inactive_signal;
   hsa_signal_value_t val = -1;
@@ -160,7 +171,7 @@ void ComputeQueue::HandleError(hsa_status_t status) {
   }
 
   if (sig.handle) {
-    fn_hsa_signal_store_screlease(sig, val);
+    hsakmt_hsa_signal_store_screlease(sig, val);
   }
   if (error_code_) {
     error_code_->store(val, std::memory_order_release);
@@ -505,13 +516,10 @@ uint32_t ComputeQueue::UpdateIndexStride(uint32_t srd, bool wave32) {
   return srd;
 }
 
-extern "C" hsa_status_t (*fn_hsa_ven_amd_loader_query_host_address)(
-  const void *device_address,
-  const void **host_address);
 uint64_t ComputeQueue::GetKernelObjAddr(uint64_t addr) const {
 //TODO: convert dev_addr to host_addr
   uint64_t host_addr = 0;
-  auto ret = fn_hsa_ven_amd_loader_query_host_address(reinterpret_cast<const void *>(addr),
+  auto ret = hsakmt_hsa_ven_amd_loader_query_host_address(reinterpret_cast<const void *>(addr),
                                            reinterpret_cast<const void **>(&host_addr));
   if (ret == HSA_STATUS_ERROR_INVALID_ARGUMENT) {
     return NULL;
@@ -706,14 +714,6 @@ ComputeQueue::KernelDispatchAqlToPm4(char *cpu, hsa_kernel_dispatch_packet_t *pa
   return HSA_STATUS_SUCCESS;
 }
 
-extern "C" hsa_signal_value_t (*fn_hsa_signal_load_relaxed)(
-    hsa_signal_t signal);
-extern "C" hsa_signal_value_t (*fn_hsa_signal_wait_relaxed)(
-    hsa_signal_t signal,
-    hsa_signal_condition_t condition,
-    hsa_signal_value_t compare_value,
-    uint64_t timeout_hint,
-    hsa_wait_state_t wait_state_hint);
 hsa_status_t
 ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet, bool is_or) {
   debug_print("queue %p %s head=%x dep %" PRIx64 " %" PRIx64 " %" PRIx64
@@ -735,7 +735,7 @@ ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet
 
     while (n) {
       for (int i = 0; i < n; i++) {
-        if (!fn_hsa_signal_load_relaxed(sig[i])) {
+        if (!hsakmt_hsa_signal_load_relaxed(sig[i])) {
           unsignaled = false;
           break;
         }
@@ -751,7 +751,7 @@ ComputeQueue::BarrierGenericAqlToPm4(char *cpu, hsa_barrier_and_packet_t *packet
         continue;
 
     hsa_signal_value_t value =
-      fn_hsa_signal_wait_relaxed(packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+      hsakmt_hsa_signal_wait_relaxed(packet->dep_signal[i], HSA_SIGNAL_CONDITION_EQ, 0, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
     assert(value == 0);
     }
   }
@@ -851,7 +851,7 @@ hsa_status_t ComputeQueue::VendorSpecificAqlToPm4(char *cpu, amd_aql_pm4_ib *pac
     ib_size = i;
   } else {
     if (packet->completion_signal.handle != 0) {
-      fn_hsa_signal_store_screlease(packet->completion_signal, 0);
+      hsakmt_hsa_signal_store_screlease(packet->completion_signal, 0);
     }
   }
 
@@ -986,7 +986,7 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
         debug_print("SDMA: poll signal %#lx addr %#lx val %d\n", signal_handle, poll_addr, poll_val);
         hsa_signal_t hsa_signal = {signal_handle};
         hsa_signal_value_t value =
-          fn_hsa_signal_wait_relaxed(hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
+          hsakmt_hsa_signal_wait_relaxed(hsa_signal, HSA_SIGNAL_CONDITION_EQ, poll_val, UINT64_MAX, HSA_WAIT_STATE_BLOCKED);
         assert(value == poll_val);
 
         poll_pkt += 2;
