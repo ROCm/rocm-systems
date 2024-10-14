@@ -259,7 +259,7 @@
   <metric name="ScaPipeIssueUtil"                                       expr=100*SQ_ACTIVE_INST_SCA/(GRBM_GUI_ACTIVE*CU_NUM)          descr="Unit: percent"></metric>
   <metric name="ValuPipeIssueUtil"                                      expr=100*SQ_ACTIVE_INST_VALU/(GRBM_GUI_ACTIVE*CU_NUM)         descr="Unit: percent"></metric>
   <metric name="VmemPipeIssueUtil"                                      expr=100*4*(SQ_ACTIVE_INST_VMEM+SQ_ACTIVE_INST_FLAT)/(GRBM_GUI_ACTIVE*CU_NUM)      descr="Unit: percent"></metric>
-  <metric name="MfmaUtil"                                               expr=100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)                       descr="Unit: percent"></metric>
+  <metric name="MfmaUtil"                                               expr=100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)               descr="The percentage of kernel's duration, the MFMA unit was busy executing instructions"></metric>
   <metric name="AvgNumActiveThreads"                                    expr=SQ_THREAD_CYCLES_VALU/SQ_ACTIVE_INST_VALU                descr="Unit: percent"></metric>
   <metric name="VmemLatency"                                            expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_VMEM                        descr="Unit: cycles"></metric>
   <metric name="SmemLatency"                                            expr=SQ_ACCUM_PREV_HIRES/SQ_INSTS_SMEM_NORM                   descr="Unit: cycles"></metric>
@@ -326,7 +326,7 @@
   <metric name="ScaPipeIssueUtil"                                       expr=100*SQ_ACTIVE_INST_SCA/(GRBM_GUI_ACTIVE*CU_NUM)          descr="Unit: percent"></metric>
   <metric name="ValuPipeIssueUtil"                                      expr=100*SQ_ACTIVE_INST_VALU/(GRBM_GUI_ACTIVE*CU_NUM)         descr="Unit: percent"></metric>
   <metric name="VmemPipeIssueUtil"                                      expr=100*4*(SQ_ACTIVE_INST_VMEM+SQ_ACTIVE_INST_FLAT)/(GRBM_GUI_ACTIVE*CU_NUM)      descr="Unit: percent"></metric>
-  <metric name="MfmaUtil"                                               expr=100*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)                       descr="Unit: percent"></metric>
+  <metric name="MfmaUtil"                                               expr=100*XCC_NUM*SQ_VALU_MFMA_BUSY_CYCLES/(GRBM_GUI_ACTIVE*CU_NUM*4)               descr="The percentage of kernel's duration, the MFMA unit was busy executing instructions"></metric>
   <metric name="AvgNumActiveThreads"                                    expr=SQ_THREAD_CYCLES_VALU/SQ_ACTIVE_INST_VALU                descr="Unit: percent"></metric>
 
   ## Local Data Share (LDS) Metrics
