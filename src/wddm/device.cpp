@@ -138,7 +138,7 @@ bool WDDMDevice::CreateDevice(void) {
     return true;
   }
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -150,7 +150,7 @@ bool WDDMDevice::DestroyDevice(void) {
   if (ret == STATUS_SUCCESS)
     return true;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -168,7 +168,7 @@ bool WDDMDevice::CreatePagingQueue(void) {
     return true;
   }
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -180,7 +180,7 @@ bool WDDMDevice::DestroyPagingQueue(void) {
   if (ret == STATUS_SUCCESS)
     return true;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -192,8 +192,7 @@ bool WDDMDevice::CommitSystemHeapSpace(void* addr, int64_t size, bool lock) {
     mapFlags |= MAP_LOCKED;
   void* paddr = mmap(addr, size, protFlags, mapFlags, -1, 0);
   if (paddr == MAP_FAILED) {
-    fprintf(stderr, "%s fail to commit %s addr = %p, paddr = %p\n",
-                     __FUNCTION__, (lock ? "locked" : ""), addr, paddr);
+    pr_err("fail to commit %s addr = %p, paddr = %p\n", (lock ? "locked" : ""), addr, paddr);
     return false;
   }
   assert(addr == paddr);
@@ -212,8 +211,7 @@ bool WDDMDevice::CommitSystemHeapSpace(void* addr, int64_t size, bool lock) {
    * https://man7.org/linux/man-pages/man2/madvise.2.html
    */
   if (madvise(addr, size, MADV_DONTFORK))
-    fprintf(stderr, "%s fail to set MADV_DONTFORK for addr = %p\n",
-                    __FUNCTION__, addr);
+    pr_err("fail to set MADV_DONTFORK for addr = %p\n", addr);
 
   return true;
 }
@@ -224,8 +222,7 @@ bool WDDMDevice::DecommitSystemHeapSpace(void* addr, int64_t size) {
                      MAP_NORESERVE|MAP_UNINITIALIZED;
   void* paddr = mmap(addr, size, protFlags, mapFlags, -1, 0);
   if (paddr == MAP_FAILED) {
-    fprintf(stderr, "%s fail to decommit addr = %p, paddr = %p\n",
-                     __FUNCTION__, addr, paddr);
+    pr_err("fail to decommit addr = %p, paddr = %p\n", addr, paddr);
     return false;
   }
   assert(addr == paddr);
@@ -245,8 +242,7 @@ bool WDDMDevice::ReserveSystemHeapSpace() {
   void* cpu = mmap(NULL, system_heap_space_size_, protFlags,
               MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
   if (cpu == MAP_FAILED) {
-    fprintf(stderr, "%s fail to reserve system_heap_space_size_ = %lx \n",
-                     __FUNCTION__, system_heap_space_size_);
+    pr_err("fail to reserve system_heap_space_size_ = %lx \n", system_heap_space_size_);
     return false;
   }
 
@@ -257,7 +253,7 @@ bool WDDMDevice::ReserveSystemHeapSpace() {
 bool WDDMDevice::FreeSystemHeapSpace(void) {
   void *cpu = (void *)system_heap_space_start_;
   if (munmap(cpu, system_heap_space_size_ != 0)) {
-    fprintf(stderr, "%s fail to unmap = %p \n", __FUNCTION__, cpu);
+    pr_err("fail to unmap = %p \n", cpu);
     return false;
   }
   return true;
@@ -287,8 +283,7 @@ bool WDDMDevice::ReserveLocalHeapSpace(void) {
     local_va = 0;
     ptr = mmap(NULL, sys_va_size , PROT_NONE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0);
     if (ptr == MAP_FAILED) {
-      fprintf(stderr, "%s fail to reserve cpu va in %d time!\n",
-              __FUNCTION__, i);
+      pr_err("fail to reserve cpu va in %d time!\n", i);
       break;
     }
 
@@ -305,7 +300,7 @@ bool WDDMDevice::ReserveLocalHeapSpace(void) {
                local_va, ptr, i);
       break;
     } else {
-      debug_print("%s fail to reserve gpu va for cpu va %p in %d time!\n",
+      pr_err("%s fail to reserve gpu va for cpu va %p in %d time!\n",
               __FUNCTION__, ptr, i);
     }
   }
@@ -315,21 +310,18 @@ bool WDDMDevice::ReserveLocalHeapSpace(void) {
     uint64_t left_size = local_va - sys_va[match_index];
     uint64_t right_size = align - left_size;
     if ((left_size > 0) && munmap((void*)sys_va[match_index], left_size))
-      fprintf(stderr, "%s fail to unmap left %lx with size %lx\n",
-              __FUNCTION__, sys_va[match_index], left_size);
+      pr_err("fail to unmap left %lx with size %lx\n", sys_va[match_index], left_size);
     if ((right_size > 0) && munmap((void*)(local_va + local_heap_space_size_), right_size))
-      fprintf(stderr, "%s fail to unmap right %lx with size %lx\n",
-              __FUNCTION__, (local_va + local_heap_space_size_), right_size);
+      pr_err("fail to unmap right %lx with size %lx\n", (local_va + local_heap_space_size_), right_size);
   } else {
-      fprintf(stderr, "%s fail to reserve Local Heap Space !\n",
-              __FUNCTION__);
+      pr_err("fail to reserve Local Heap Space!\n");
   }
 
   /* free match fail address for cpu va */
   int free = match_index >= 0 ? match_index : 16;
   for (int j = 0; j < free; j++) {
     if (sys_va[j] != 0 && munmap((void*)sys_va[j], sys_va_size)) {
-      fprintf(stderr, "%s fail to unmap %d %lx\n", __FUNCTION__, j, sys_va[j]);
+      pr_err("fail to unmap %d %lx\n", j, sys_va[j]);
     }
   }
 
@@ -460,7 +452,7 @@ void *WDDMDevice::Lock(D3DKMT_HANDLE handle) {
   if (ret == STATUS_SUCCESS)
     return args.pData;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return NULL;
 }
 
@@ -473,7 +465,7 @@ bool WDDMDevice::Unlock(D3DKMT_HANDLE handle) {
   if (ret == STATUS_SUCCESS)
     return true;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -510,7 +502,7 @@ bool WDDMDevice::CreateContext(int engine, D3DKMT_HANDLE *handle) {
 
   thunk_proxy::DestroyPrivData(priv_data);
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -522,7 +514,7 @@ bool WDDMDevice::DestroyContext(D3DKMT_HANDLE handle) {
   if (ret == STATUS_SUCCESS)
     return true;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -539,7 +531,7 @@ bool WDDMDevice::GpuWait(WDDMQueue *queue, const D3DKMT_HANDLE *syncobjs,
   if (ret == STATUS_SUCCESS)
       return true;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -555,7 +547,7 @@ bool WDDMDevice::GpuSignal(D3DKMT_HANDLE context, const D3DKMT_HANDLE *syncobjs,
   if (ret == STATUS_SUCCESS)
     return true;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -572,7 +564,7 @@ bool WDDMDevice::CpuWait(const D3DKMT_HANDLE *syncobjs, uint64_t *value,
   if (ret == STATUS_SUCCESS)
     return true;
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -603,7 +595,7 @@ bool WDDMDevice::CreateSyncobj(D3DKMT_HANDLE *handle, uint64_t **addr) {
     return true;
   }
 
-  fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+  pr_err("fail %x\n", ret);
   return false;
 }
 
@@ -613,7 +605,7 @@ void WDDMDevice::DestroySyncobj(D3DKMT_HANDLE handle) {
 
   NTSTATUS ret = D3DKMTDestroySynchronizationObject(&args);
   if (ret != STATUS_SUCCESS)
-    fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+    pr_err("fail %x\n", ret);
 }
 
 void WDDMDevice::InitCmdbufInfo(void) {
@@ -796,7 +788,7 @@ bool WDDMDevice::SubmitToSwQueue(WDDMQueue *queue, uint64_t command_addr,
 
   NTSTATUS ret = D3DKMTSubmitCommand(&args);
   if (ret != STATUS_SUCCESS) {
-    fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+    pr_err("fail %x\n", ret);
     thunk_proxy::DestroyPrivData(priv_data);
     return false;
   }
@@ -825,7 +817,7 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
 
   NTSTATUS ret = D3DKMTCreateHwQueue(&createHwQueue);
   if (ret != STATUS_SUCCESS) {
-    fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+    pr_err("fail %x\n", ret);
     thunk_proxy::DestroyPrivData(priv_data);
     return false;
   }
@@ -846,7 +838,7 @@ bool WDDMDevice::DestroyHwQueue(WDDMQueue *queue) {
 
   NTSTATUS ret = D3DKMTDestroyHwQueue(&DestroyHwQueue);
   if (ret != STATUS_SUCCESS) {
-    fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+    pr_err("fail %x\n", ret);
     return false;
   }
 
@@ -870,7 +862,7 @@ bool WDDMDevice::SubmitToHwQueue(WDDMQueue *queue, uint64_t command_addr,
 
   NTSTATUS ret = D3DKMTSubmitCommandToHwQueue(&args);
   if (ret != STATUS_SUCCESS) {
-    fprintf(stderr, "%s fail %x\n", __FUNCTION__, ret);
+    pr_err("fail %x\n", ret);
     thunk_proxy::DestroyPrivData(priv_data);
     return false;
   }

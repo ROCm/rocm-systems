@@ -2,6 +2,7 @@
 #include <map>
 #include <algorithm>
 #include "inc/wddm/va_mgr.h"
+#include "libhsakmt.h"
 
 using namespace std;
 
@@ -17,9 +18,9 @@ VaMgr::VaMgr(uint64_t start, uint64_t size, uint64_t min_align) {
 VaMgr::~VaMgr() {
 
   if (free_list_.size() != 1)
-    std::cerr << "Warning: free_list_ size is not 1." << std::endl;
+    pr_err("free_list_ size is not 1.\n");
   if (frag_map_.size() != 1)
-    std::cerr << "Warning: frag_map_ size is not 1." << std::endl;
+    pr_err("frag_map_ size is not 1.\n");
 
   free_list_.clear();
   frag_map_.clear();

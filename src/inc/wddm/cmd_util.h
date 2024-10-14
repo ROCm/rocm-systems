@@ -9,6 +9,7 @@
 #include "hsa-runtime/inc/amd_hsa_kernel_code.h"
 #include "inc/pm4_cmds.h"
 #include "util/utils.h"
+#include "libhsakmt.h"
 
 namespace wsl {
 namespace thunk {

@@ -388,7 +388,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
   query_args.hNtHandle = reinterpret_cast<HANDLE>(dmabuf_fd);
   auto ret = d3dthunk::QueryResourceInfoFromNtHandle(&query_args);
   if (ret != ErrorCode::Success) {
-    debug_print("%s query resource info from nt handle failed %d\n", __FUNCTION__, static_cast<int>(ret));
+    pr_err("query resource info from nt handle failed %d\n", static_cast<int>(ret));
     return ErrorCode::InvalidateParams;
   }
   pr_debug("wsl-thunk: import from nt handle %d, get allocation number %d,"
@@ -401,8 +401,8 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
 
   SharedHandleInfo shared_info;
   if(sizeof(shared_info) != query_args.PrivateRuntimeDataSize) {
-    debug_print("%s shared hanle info size mismatch:%d vs %ld\n",
-        __FUNCTION__, query_args.PrivateRuntimeDataSize, sizeof(shared_info));
+    pr_err("shared hanle info size mismatch:%d vs %ld\n",
+           query_args.PrivateRuntimeDataSize, sizeof(shared_info));
     return ErrorCode::UnSupported;
   }
 
@@ -412,8 +412,8 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
   D3DDDI_OPENALLOCATIONINFO2 *open_info =
     reinterpret_cast<D3DDDI_OPENALLOCATIONINFO2*> (calloc(1, total_size));
   if (!open_info) {
-    debug_print("%s alloc open_info failed, NumAllocations:%d\n",
-        __FUNCTION__, query_args.NumAllocations);
+    pr_err("alloc open_info failed, NumAllocations:%d\n",
+           query_args.NumAllocations);
     return ErrorCode::OutOfMemory;
   }
 
@@ -438,7 +438,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
   ret = d3dthunk::OpenResourceFromNtHandle(&open_args);
   if (ret != ErrorCode::Success) {
     ret = ErrorCode::InvalidateParams;
-    debug_print("%s open resource failed %d\n", __FUNCTION__, static_cast<int>(ret));
+    pr_err("open resource failed %d\n", static_cast<int>(ret));
     goto err_out;
   }
 

@@ -165,7 +165,7 @@ void ComputeQueue::HandleError(hsa_status_t status) {
   for (std::size_t i = 0; i < sizeof(QueueErrors) / sizeof(QueueErrors[0]); ++i) {
     if (QueueErrors[i].status == status) {
       val = QueueErrors[i].code;
-      debug_print("error %d, sig_val %ld\n", status, val);
+      pr_err("error %d, sig_val %ld\n", status, val);
       break;
     }
   }
@@ -193,7 +193,7 @@ void ComputeQueue::AqlToPm4Thread(ComputeQueue *queue) {
     if (!queue->IsInvalidPacket()) {
       hsa_status_t status = queue->Process();
       if (status != HSA_STATUS_SUCCESS) {
-        fprintf(stderr, "process compute queue fail status = %08x\n", status);
+        pr_err("process compute queue fail status = %08x\n", status);
         queue->HandleError(status);
         break;
       }

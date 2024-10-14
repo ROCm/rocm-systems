@@ -98,7 +98,7 @@ class os_thread {
     pthread_attr_t attrib;
     err = pthread_attr_init(&attrib);
     if (err != 0) {
-      fprintf(stderr, "pthread_attr_init failed: %s\n", strerror(err));
+      pr_err("pthread_attr_init failed: %s\n", strerror(err));
       return;
     }
 
@@ -107,10 +107,10 @@ class os_thread {
       stackSize = AlignUp(stackSize, 4096);
       err = pthread_attr_setstacksize(&attrib, stackSize);
       if (err != 0) {
-        fprintf(stderr, "pthread_attr_setstacksize failed: %s\n", strerror(err));
+        pr_err("pthread_attr_setstacksize failed: %s\n", strerror(err));
         err = pthread_attr_destroy(&attrib);
         if (err != 0) {
-          fprintf(stderr, "pthread_attr_destroy failed: %s\n", strerror(err));
+          pr_err("pthread_attr_destroy failed: %s\n", strerror(err));
           return;
         }
       }
@@ -123,7 +123,7 @@ class os_thread {
       cores = get_nprocs_conf();
       cpuset = CPU_ALLOC(cores);
       if (cpuset == nullptr) {
-        fprintf(stderr, "CPU_ALLOC failed: %s\n", strerror(errno));
+        pr_err("CPU_ALLOC failed: %s\n", strerror(errno));
         return;
       }
       CPU_ZERO_S(CPU_ALLOC_SIZE(cores), cpuset);
@@ -133,7 +133,7 @@ class os_thread {
       err = pthread_attr_setaffinity_np(&attrib, CPU_ALLOC_SIZE(cores), cpuset);
       CPU_FREE(cpuset);
       if (err != 0) {
-        fprintf(stderr, "pthread_setaffinity_np failed: %s\n", strerror(err));
+        pr_err("pthread_setaffinity_np failed: %s\n", strerror(err));
         return;
       }
     }
@@ -147,7 +147,7 @@ class os_thread {
         stackSize *= 2;
         err = pthread_attr_setstacksize(&attrib, stackSize);
         if (err != 0) {
-          fprintf(stderr, "pthread_attr_setstacksize failed: %s\n", strerror(err));
+          pr_err("pthread_attr_setstacksize failed: %s\n", strerror(err));
           return;
         }
         err = pthread_create(&thread, &attrib, ThreadTrampoline, args.get());
@@ -163,7 +163,7 @@ class os_thread {
 
     err = pthread_attr_destroy(&attrib);
     if (err != 0) {
-      fprintf(stderr, "pthread_attr_destroy failed: %s\n", strerror(err));
+      pr_err("pthread_attr_destroy failed: %s\n", strerror(err));
     }
   }
 
@@ -181,7 +181,7 @@ class os_thread {
     if (lock != nullptr) DestroyMutex(lock);
     if ((state == RUNNING) && (thread != 0)) {
       int err = pthread_detach(thread);
-      if (err != 0) fprintf(stderr, "pthread_detach failed: %s\n", strerror(err));
+      if (err != 0) pr_err("pthread_detach failed: %s\n", strerror(err));
     }
   }
 
@@ -216,7 +216,7 @@ static_assert(sizeof(Thread) == sizeof(os_thread*), "OS abstraction size mismatc
 
 LibHandle LoadLib(std::string filename) {
   void* ret = dlopen(filename.c_str(), RTLD_LAZY);
-  if (ret == nullptr) debug_print("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
+  if (ret == nullptr) pr_err("LoadLib(%s) failed: %s\n", filename.c_str(), dlerror());
   return *(LibHandle*)&ret;
 }
 
@@ -231,14 +231,14 @@ void* GetExportAddress(LibHandle lib, std::string export_name) {
   link_map* map;
   int err = dlinfo(*(void**)&lib, RTLD_DI_LINKMAP, &map);
   if (err == -1) {
-    fprintf(stderr, "dlinfo failed: %s\n", dlerror());
+    pr_err("dlinfo failed: %s\n", dlerror());
     return nullptr;
   }
 
   Dl_info info;
   err = dladdr(ret, &info);
   if (err == 0) {
-    fprintf(stderr, "dladdr failed.\n");
+    pr_err("dladdr failed.\n");
     return nullptr;
   }
 
@@ -601,7 +601,7 @@ uint64_t ReadAccurateClock() {
   timespec time;
   int err = clock_gettime(CLOCK_MONOTONIC_RAW, &time);
   if (err != 0) {
-    perror("clock_gettime(CLOCK_MONOTONIC_RAW,...) failed");
+    pr_err("clock_gettime(CLOCK_MONOTONIC_RAW,...) failed %s\n", strerror(errno));
     abort();
   }
   return (uint64_t(time.tv_sec) * 1000000000ull + uint64_t(time.tv_nsec)) * invPeriod;
@@ -633,13 +633,11 @@ uint64_t AccurateClockFrequency() {
   timespec time;
   int err = clock_getres(clock, &time);
   if (err != 0) {
-    perror("clock_getres failed");
+    pr_err("clock_getres failed %s\n", strerror(errno));
     abort();
   }
   if (time.tv_sec != 0 || time.tv_nsec >= 0xFFFFFFFF) {
-    fprintf(stderr,
-            "clock_getres(CLOCK_MONOTONIC(_RAW),...) returned very low "
-            "frequency (<1Hz).\n");
+    pr_err("clock_getres(CLOCK_MONOTONIC(_RAW),...) returned very low frequency (<1Hz).\n");
     abort();
   }
   if (invPeriod == 0.0) invPeriod = 1.0 / double(time.tv_nsec);
@@ -650,20 +648,20 @@ SharedMutex CreateSharedMutex() {
   pthread_rwlockattr_t attrib;
   int err = pthread_rwlockattr_init(&attrib);
   if (err != 0) {
-    fprintf(stderr, "rw lock attribute init failed: %s\n", strerror(err));
+    pr_err("rw lock attribute init failed: %s\n", strerror(err));
     return nullptr;
   }
 
 #ifdef __GLIBC__
   err = pthread_rwlockattr_setkind_np(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
   if (err != 0) {
-    fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
+    pr_err("Set rw lock attribute failure: %s\n", strerror(err));
     return nullptr;
   }
 #else
   err = pthread_rwlockattr_setkind(&attrib, PTHREAD_RWLOCK_PREFER_WRITER_NONRECURSIVE_NP);
   if (err != 0) {
-    fprintf(stderr, "Set rw lock attribute failure: %s\n", strerror(err));
+    pr_err("Set rw lock attribute failure: %s\n", strerror(err));
     return nullptr;
   }
 #endif
@@ -671,7 +669,7 @@ SharedMutex CreateSharedMutex() {
   pthread_rwlock_t* lock = new pthread_rwlock_t;
   err = pthread_rwlock_init(lock, &attrib);
   if (err != 0) {
-    fprintf(stderr, "rw lock init failed: %s\n", strerror(err));
+    pr_err("rw lock init failed: %s\n", strerror(err));
     return nullptr;
   }
 
@@ -692,7 +690,7 @@ bool AcquireSharedMutex(SharedMutex lock) {
 void ReleaseSharedMutex(SharedMutex lock) {
   int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
   if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
+    pr_err("SharedMutex unlock failed: %s\n", strerror(err));
     abort();
   }
 }
@@ -710,7 +708,7 @@ bool SharedAcquireSharedMutex(SharedMutex lock) {
 void SharedReleaseSharedMutex(SharedMutex lock) {
   int err = pthread_rwlock_unlock(*(pthread_rwlock_t**)&lock);
   if (err != 0) {
-    fprintf(stderr, "SharedMutex unlock failed: %s\n", strerror(err));
+    pr_err("SharedMutex unlock failed: %s\n", strerror(err));
     abort();
   }
 }

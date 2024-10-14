@@ -484,7 +484,7 @@ static HSAKMT_STATUS topology_parse_cpuinfo(struct proc_cpuinfo *cpuinfo,
       p += 2; /* remove ": " */
       proc = atoi(p);
       if (proc >= num_procs) {
-        pr_warn("cpuinfo contains processor %d larger than %u\n", proc,
+        pr_err("cpuinfo contains processor %d larger than %u\n", proc,
                 num_procs);
         ret = HSAKMT_STATUS_NO_MEMORY;
         goto exit;
@@ -527,7 +527,7 @@ static HSAKMT_STATUS topology_parse_cpuinfo(struct proc_cpuinfo *cpuinfo,
       p += 2; /* remove ": " */
       proc = atoi(p);
       if (proc >= num_procs) {
-        pr_warn("cpuinfo contains processor %d larger than %u\n", proc,
+        pr_err("cpuinfo contains processor %d larger than %u\n", proc,
                 num_procs);
         ret = HSAKMT_STATUS_NO_MEMORY;
         goto exit;
@@ -584,7 +584,7 @@ static HSAKMT_STATUS topology_get_cpu_maxfreq(uint32_t *max_freq) {
   if (!cpuinfo_max_freq) {
     std::ifstream cpuinfo("/proc/cpuinfo");
     if (!cpuinfo) {
-      std::cerr << "Failed to open /proc/cpuinfo\n";
+      pr_err("Failed to open /proc/cpuinfo\n");
       return HSAKMT_STATUS_ERROR;
     }
 
