@@ -140,6 +140,8 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
   childpid = fork();
   if (childpid > 0) {  // Parent
     close(fd[1]);
+    int *result_d{nullptr};
+    HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
     // Allocate in parent
     if (testmalloc) {
       kerTestDeviceMalloc<<<1, 1>>>(SIZE);
@@ -150,6 +152,16 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     // Check allocated memory size
     HIP_CHECK(hipMemGetInfo(&avail, &tot));
     if ((tot - avail) < SIZE) {
+      // Clean up memory before return
+      if (testmalloc) {
+        kerTestDeviceFree<<<1, 1>>>(result_d);
+      } else {
+        kerTestDeviceDelete<<<1, 1>>>(result_d);
+      }
+      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK(hipFree(result_d));
+      close(fd[0]);
+      wait(NULL);
       return false;
     }
     // parent will wait to read the device cnt
@@ -164,8 +176,17 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     if ((tot - avail) < SIZE) {
       testResult = false;
     }
+    if (testmalloc) {
+      kerTestDeviceFree<<<1, 1>>>(result_d);
+    } else {
+      kerTestDeviceDelete<<<1, 1>>>(result_d);
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipFree(result_d));
   } else if (!childpid) {  // Child
     // Wait for hipDeviceSetLimit() completion in parent.
+    int *result_d{nullptr};
+    HIP_CHECK(hipMalloc(&result_d, sizeof(int)));
     close(fd[0]);
     // Allocate in child
     if (testmalloc) {
@@ -185,6 +206,13 @@ static bool testDeviceAllocMulProc(bool testmalloc) {
     write(fd[1], &testResult, sizeof(testResult));
     // close the write descriptor:
     close(fd[1]);
+    if (testmalloc) {
+      kerTestDeviceFree<<<1, 1>>>(result_d);
+    } else {
+      kerTestDeviceDelete<<<1, 1>>>(result_d);
+    }
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipFree(result_d));
     exit(0);
   }
   return testResult;
