@@ -36,22 +36,20 @@ THE SOFTWARE.
 // HSA extension. The library implementation requires HSA API intercepting and
 // a profiling queue supporting a submit callback interface.
 //
-//
-/** \mainpage ROCProfiler API Specification
+// For more information about the AMD ROCm ecosystem, refer to: https://rocm.docs.amd.com/
+/**
+ * \mainpage rocprofiler_api ROCProfiler API specification
  *
- * \section introduction Introduction
- *
- * The ROCProfiler library provides GPU Applications Profiling/Tracing APIs.
- * The API offers functionality for profiling GPU applications in kernel,
- * application and user mode. It also supports no replay mode and provides
+ * The ROCProfiler library provides profiling and tracing APIs for GPU compute applications.
+ * The APIs offer functionalities for profiling GPU applications in kernel,
+ * application, and user mode. The APIs also support no replay mode and provides
  * the records pool support through a simple sequence of calls. This enables
- * users to profile and trace in easy small steps. Our samples code provides
- * good examples on how to use the API calls for both profiling and
- * tracing.
+ * users to profile and trace in small steps. The sample codes demonstrate
+ * how to use the API calls for both profiling and tracing.
  *
- * \section supported_amd_gpu_architectures Supported AMD GPU Architectures
+ * \section supported_amd_gpu_architectures Supported AMD GPU architectures
  *
- * The following AMD GPU architectures are supported:
+ * Here is the list of supported AMD GPU architectures:
  *
  * - gfx900 (AMD Vega 10)
  * - gfx906 (AMD Vega 7nm also referred to as AMD Vega 20)
@@ -65,97 +63,42 @@ THE SOFTWARE.
  * - gfx1031 (Navy Flounder)
  * - gfx1032 (Dimgrey Cavefish)
  * - gfx1100 (Navi31)
- * For more information about the AMD ROCm ecosystem, please refer to:
- *
- * - https://docs.amd.com/
- *
 *
- * \section known_limitations Known Limitations and Restrictions
+ * \section known_limitations Known limitations and restrictions
  *
- * The AMD Profiler API library implementation currently has the following
- * restrictions.  Future releases aim to address these restrictions.
+ * The AMD Profiler API library implementation has the following
+ * restrictions. Future releases aim to address these restrictions.
  *
- * 1. The following profiling modes are not yet implemented:
+ * The following profiling modes are not yet implemented:
  *
- *    - ::ROCPROFILER_APPLICATION_REPLAY_MODE
- *    - ::ROCPROFILER_USER_REPLAY_MODE
+ * - ::ROCPROFILER_APPLICATION_REPLAY_MODE
+ * - ::ROCPROFILER_USER_REPLAY_MODE
  *
- * 2. While setting filters, properties can mix up and may produce
- *    undesirable results.
+ * While setting filters, properties can mix up and might produce undesirable results.
  *
- * \section references References
- *
- * 1. Advanced Micro Devices: [www.amd.com] (https://www.amd.com/)
- * 2. AMD ROCm Ecosystem: [docs.amd.com] (https://docs.amd.com/)
- *
- * \section disclaimer Legal Disclaimer and Copyright Information
- *
- * AMD ROCm software is made available by Advanced Micro Devices, Inc. under
- * the open source license identified in the top-level directory for the
- * library in the repository on [Github.com](https://github.com/) (Portions of
- * AMD ROCm software are licensed under MITx11 and UIL/NCSA.  For more
- * information on the license, review the \p license.txt in the top-level
- * directory for the library on [Github.com](https://github.com/)).  The
- * additional terms and conditions below apply to your use of AMD ROCm
- * technical documentation.
- *
- * ©2019-2023 Advanced Micro Devices, Inc.  All rights reserved.
- *
- * The information presented in this document is for informational purposes
- * only and may contain technical inaccuracies, omissions, and typographical
- * errors.  The information contained herein is subject to change and may be
- * rendered inaccurate for many reasons, including but not limited to product
- * and roadmap changes, component and motherboard version changes, new model
- * and/or product releases, product differences between differing
- * manufacturers, software changes, BIOS flashes, firmware upgrades, or the
- * like.  Any computer system has risks of security vulnerabilities that cannot
- * be completely prevented or mitigated.  AMD assumes no obligation to update
- * or otherwise correct or revise this information.  However, AMD reserves the
- * right to revise this information and to make changes from time to time to
- * the content hereof without obligation of AMD to notify any person of such
- * revisions or changes.
- *
- * THIS INFORMATION IS PROVIDED "AS IS."  AMD MAKES NO REPRESENTATIONS OR
- * WARRANTIES WITH RESPECT TO THE CONTENTS HEREOF AND ASSUMES NO RESPONSIBILITY
- * FOR ANY INACCURACIES, ERRORS, OR OMISSIONS THAT MAY APPEAR IN THIS
- * INFORMATION.  AMD SPECIFICALLY DISCLAIMS ANY IMPLIED WARRANTIES OF
- * NON-INFRINGEMENT, MERCHANTABILITY, OR FITNESS FOR ANY PARTICULAR PURPOSE.
- * IN NO EVENT WILL AMD BE LIABLE TO ANY PERSON FOR ANY RELIANCE, DIRECT,
- * INDIRECT, SPECIAL, OR OTHER CONSEQUENTIAL DAMAGES ARISING FROM THE USE OF
- * ANY INFORMATION CONTAINED HEREIN, EVEN IF AMD IS EXPRESSLY ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGES.
- *
- * AMD, the AMD Arrow logo, AMD Instinct™, Radeon™, AMD ROCm™, and combinations
- * thereof are trademarks of Advanced Micro Devices, Inc.  Linux® is the
- * registered trademark of Linus Torvalds in the U.S. and other countries.
- * PCIe® is a registered trademark of PCI-SIG Corporation.  Other product names
- * used in this publication are for identification purposes only and may be
- * trademarks of their respective companies.
- *
-
- * This document is going to discuss the following:
- * 1. @ref symbol_versions_group
- * 2. @ref versioning_group
- * 3. @ref status_codes_group
- * 4. @ref rocprofiler_general_group
- * 5. @ref timestamp_group
- * 6. @ref generic_record_group
+ * This document discusses the following:
+ * - @ref symbol_versions_group
+ * - @ref versioning_group
+ * - @ref status_codes_group
+ * - @ref rocprofiler_general_group
+ * - @ref timestamp_group
+ * - @ref generic_record_group
  *      - @ref record_agents_group
  *      - @ref record_queues_group
  *      - @ref record_kernels_group
- * 7. @ref profiling_api_group
+ * - @ref profiling_api_group
  *      - @ref profiling_api_counters_group
- * 8. @ref tracing_api_group
+ * - @ref tracing_api_group
  *      - @ref roctx_tracer_api_data_group
  *      - @ref hsa_tracer_api_data_group
  *      - @ref hip_tracer_api_data_group
- * 9. @ref memory_storage_buffer_group
- * 10. @ref sessions_handling_group
+ * - @ref memory_storage_buffer_group
+ * - @ref sessions_handling_group
  *      - @ref session_filter_group
  *      - @ref session_range_group
  *      - @ref session_user_replay_pass_group
- * 11. @ref device_profiling
- * 12. @ref rocprofiler_plugins
+ * - @ref device_profiling
+ * - @ref rocprofiler_plugins
  */
 //
 /**
