@@ -68,7 +68,9 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid)
   CreatePagingQueue();
   ReserveLocalHeapSpace();
   ReserveSystemHeapSpace();
+  InitHandleApertureSpace();
   InitVaMgr();
+  InitHandleApertureMgr();
   InitCmdbufInfo();
 }
 
@@ -335,8 +337,48 @@ bool WDDMDevice::FreeLocalHeapSpace(void) {
 }
 
 void WDDMDevice::InitVaMgr() {
-  uint32_t min_align = 4096;
-  local_va_mgr_ = std::make_unique<VaMgr>(local_heap_space_start_, local_heap_space_size_, min_align);
+  local_va_mgr_ = std::make_unique<VaMgr>(local_heap_space_start_,
+                                          local_heap_space_size_,
+                                          DEFAULT_GPU_PAGE_SIZE);
+}
+
+void WDDMDevice::InitHandleApertureMgr() {
+  handle_aperture_mgr_ = std::make_unique<VaMgr>(handle_aperture_start_,
+                                                 handle_aperture_size_,
+                                                 DEFAULT_GPU_PAGE_SIZE);
+}
+
+bool WDDMDevice::InitHandleApertureSpace(void) {
+  handle_aperture_start_ = START_NON_CANONICAL_ADDR;
+  handle_aperture_size_ = 1ULL << 47;
+
+  while (handle_aperture_start_ < END_NON_CANONICAL_ADDR - 1) {
+    if (device_info_.private_aperture_base &&
+      IS_OVERLAPPING(device_info_.private_aperture_base,
+                     device_info_.private_aperture_size,
+                     handle_aperture_start_,
+                     handle_aperture_size_)) {
+      handle_aperture_start_ += (1ULL << 47);
+      continue;
+    }
+
+    if (device_info_.shared_aperture_base &&
+      IS_OVERLAPPING(device_info_.shared_aperture_base,
+                     device_info_.shared_aperture_size,
+                     handle_aperture_start_,
+                     handle_aperture_size_)) {
+      handle_aperture_start_ += (1ULL << 47);
+      continue;
+    }
+
+    pr_debug("handle aperture start %lx, size %lx\n", handle_aperture_start_, handle_aperture_size_);
+    return true;
+  }
+
+  handle_aperture_start_ = 0;
+  pr_err("fail\n");
+
+  return false;
 }
 
 void WDDMDevice::SetPowerOptimization(bool restore) {
@@ -414,6 +456,23 @@ ErrorCode WDDMDevice::FreeGpuVirtualAddress(const thunk_proxy::AllocDomain domai
   }
 
   return code;
+}
+
+ErrorCode WDDMDevice::HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr) {
+  uint64_t align = DEFAULT_GPU_PAGE_SIZE;
+
+  if (size >= GPU_HUGE_PAGE_SIZE)
+    align = GPU_HUGE_PAGE_SIZE;
+
+  *out_gpu_virt_addr = handle_aperture_mgr_->Alloc(size, align);
+  if (*out_gpu_virt_addr == 0)
+    return ErrorCode::OutOfHandleApeMemory;
+
+  return ErrorCode::Success;
+}
+
+void WDDMDevice::HandleApertureFree(gpusize gpu_addr) {
+  handle_aperture_mgr_->Free(gpu_addr);
 }
 
 void WDDMDevice::UpdatePageFence(uint64_t fence_value) {

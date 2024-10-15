@@ -46,6 +46,8 @@ GpuMemory::GpuMemory(WDDMDevice *device) : device_(device) {
 GpuMemory::~GpuMemory() {
   FreeGpuVirtualAddress(GpuAddress(), Size());
   FreePhysicalMemory();
+  if (desc_.handle_ape_addr > 0)
+    device_->HandleApertureFree(desc_.handle_ape_addr);
 }
 
 ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
@@ -77,6 +79,8 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
 
   if (IsPhysicalOnly()) {
     code = CreatePhysicalMemory();
+    if (code == ErrorCode::Success)
+      code = device_->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
     return code;
   }
 
@@ -454,7 +458,7 @@ ErrorCode GpuMemory::ImportPhysicalHandle(int dmabuf_fd) {
     alloc_handles_ptr_[i] = open_info[i].hAllocation;
 
   free(open_info);
-  return ErrorCode::Success;
+  return device_->HandleApertureAlloc(desc_.size, &desc_.handle_ape_addr);
 
 err_out:
   delete[] alloc_handles_ptr_;

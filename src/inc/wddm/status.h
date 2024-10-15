@@ -50,6 +50,7 @@ enum class ErrorCode {
   NotReady,
   OutOfMemory,
   OutOfGpuMemory,
+  OutOfHandleApeMemory,
   Timeout,
   SyscallFail,
   InvalidateParams,

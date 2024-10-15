@@ -242,7 +242,7 @@ after_trim:
 
     /* For these physical allcations, use GpuMemory object's address as thunk handle*/
     if (create_info.flags.physical_only || create_info.dmabuf_fd > 0)
-      *MemoryAddress = reinterpret_cast<void *>(gpu_mem);
+      *MemoryAddress = reinterpret_cast<void*>(gpu_mem->HandleApeAddress());
     else
       *MemoryAddress = reinterpret_cast<void *>(gpu_mem->GpuAddress());
 

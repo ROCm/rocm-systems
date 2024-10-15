@@ -100,6 +100,7 @@ struct GpuMemoryDesc {
     flags.reserved = 0;
     mem_flags = 0;
     engine_flag = 0;
+    handle_ape_addr = 0;
   }
 
   thunk_proxy::AllocDomain domain;
@@ -109,6 +110,7 @@ struct GpuMemoryDesc {
   gpusize client_size;    // user request size
   gpusize size;
   gpusize alignment;
+  gpusize handle_ape_addr;
 
   union {
     struct {
@@ -151,6 +153,7 @@ public:
   gpusize ClientSize() const { return desc_.client_size; }
   uint64_t GpuAddress() const { return desc_.gpu_addr; }
   void *CpuAddress() const { return desc_.cpu_addr; }
+  uint64_t HandleApeAddress() const { return desc_.handle_ape_addr; }
 
   inline bool IsLocal() const { return desc_.domain == thunk_proxy::kLocal; }
   inline bool IsUserMemory() const { return desc_.domain == thunk_proxy::kUserMemory; }

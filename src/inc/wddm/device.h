@@ -66,6 +66,10 @@ class WDDMQueue;
 
 // WSL2 hyperv GPADL protocol limitation
 #define MAX_USERPTR_BLOCK_SIZE 0xf0000000
+#define START_NON_CANONICAL_ADDR (1ULL << 47)
+#define END_NON_CANONICAL_ADDR (~0UL - (1UL << 47))
+#define IS_OVERLAPPING(start1, size1, start2, size2) \
+  ((start1 < (start2 + size2)) && (start2 < (start1 + size1)))
 
 class WDDMDevice {
 public:
@@ -192,6 +196,9 @@ public:
                                   gpusize size);
 
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem);
+  ErrorCode HandleApertureAlloc(gpusize size, gpusize *out_gpu_virt_addr);
+  void HandleApertureFree(gpusize gpu_addr);
+
 private:
   bool ParseDeviceInfo(void);
   void DestroyDeviceInfo(void);
@@ -209,10 +216,12 @@ private:
   bool ReserveSystemHeapSpace(void);
   bool FreeSystemHeapSpace(void);
   bool ReserveLocalHeapSpace(void);
+  bool InitHandleApertureSpace(void);
   bool CommitSystemHeapSpace(void* addr, int64_t size, bool lock=false);
   bool DecommitSystemHeapSpace(void* addr, int64_t size);
   bool FreeLocalHeapSpace(void);
   void InitVaMgr();
+  void InitHandleApertureMgr();
 
   D3DKMT_HANDLE adapter_;
   LUID adapter_luid_;
@@ -223,6 +232,8 @@ private:
   uint64_t *page_fence_addr_;
   std::atomic<uint64_t> page_fence_value_;
 
+  uint64_t handle_aperture_start_;
+  uint64_t handle_aperture_size_;
   uint64_t local_heap_space_start_;
   uint64_t local_heap_space_size_;
   uint64_t system_heap_space_start_;
@@ -234,6 +245,7 @@ private:
   thunk_proxy::DeviceInfo device_info_;
 
   std::unique_ptr<VaMgr> local_va_mgr_;
+  std::unique_ptr<VaMgr> handle_aperture_mgr_;
   //CmdUtil cmd_util;
 };
 
