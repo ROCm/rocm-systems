@@ -197,9 +197,18 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 # Prepare final version for the CPACK use
 #
 # -------------------------------------------------------------------------------------- #
-
+# Make proper version for appending Default Value is 99999
+set(ROCM_VERSION_FOR_PACKAGE
+    "99999"
+    CACHE STRING "")
+if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+    set(ROCM_VERSION_FOR_PACKAGE
+        "$ENV{ROCM_LIBPATCH_VERSION}"
+        CACHE STRING "" FORCE)
+endif()
+# Prepare final version for the CPACK use
 set(CPACK_PACKAGE_VERSION
-    "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}"
+    "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}"
     )
 
 include(CPack)
