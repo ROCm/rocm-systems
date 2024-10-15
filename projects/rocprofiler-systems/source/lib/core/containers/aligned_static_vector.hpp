@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,21 +32,21 @@
 #include <cstdlib>
 #include <new>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace container
 {
-#if !defined(OMNITRACE_CACHELINE_SIZE)
+#if !defined(ROCPROFSYS_CACHELINE_SIZE)
 #    ifdef __cpp_lib_hardware_interference_size
-#        define OMNITRACE_CACHELINE_SIZE std::hardware_destructive_interference_size
+#        define ROCPROFSYS_CACHELINE_SIZE std::hardware_destructive_interference_size
 #    else
 // 64 bytes on x86-64 │ L1_CACHE_BYTES │ L1_CACHE_SHIFT │ __cacheline_aligned │ ...
-#        define OMNITRACE_CACHELINE_SIZE 64
+#        define ROCPROFSYS_CACHELINE_SIZE 64
 #    endif
 #endif
 
 constexpr std::size_t cacheline_align_v =
-    std::max<size_t>(OMNITRACE_CACHELINE_SIZE, OMNITRACE_CACHELINE_SIZE_MIN);
+    std::max<size_t>(ROCPROFSYS_CACHELINE_SIZE, ROCPROFSYS_CACHELINE_SIZE_MIN);
 
 template <typename Tp, size_t N, size_t AlignN = cacheline_align_v,
           bool AtomicSizeV = false>
@@ -228,7 +228,7 @@ aligned_static_vector<Tp, N, AlignN, AtomicSizeV>&
 aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::operator=(
     std::initializer_list<Tp>&& _v)
 {
-    if(OMNITRACE_UNLIKELY(_v.size() > N))
+    if(ROCPROFSYS_UNLIKELY(_v.size() > N))
     {
         throw exception<std::out_of_range>(
             std::string{ "aligned_static_vector::operator=(initializer_list) size > " } +
@@ -323,4 +323,4 @@ aligned_static_vector<Tp, N, AlignN, AtomicSizeV>::emplace_back(Args&&... _v)
 }
 
 }  // namespace container
-}  // namespace omnitrace
+}  // namespace rocprofsys

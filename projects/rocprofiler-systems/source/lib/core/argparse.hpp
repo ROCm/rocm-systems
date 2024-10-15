@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@
 #include <set>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace argparse
 {
@@ -93,4 +93,4 @@ add_group_arguments(parser_t&, const std::string&, parser_data&, bool _add_group
 parser_data&
 add_extended_arguments(parser_t&, parser_data&);
 }  // namespace argparse
-}  // namespace omnitrace
+}  // namespace rocprofsys

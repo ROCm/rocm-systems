@@ -3,8 +3,8 @@
 import os
 import sys
 import time
-import omnitrace
-from omnitrace.user import region as omni_user_region
+import rocprofsys
+from rocprofsys.user import region as omni_user_region
 import random
 
 _prefix = ""
@@ -33,7 +33,7 @@ def inefficient(n):
     return _ret
 
 
-@omnitrace.profile()
+@rocprofsys.profile()
 def run(n):
     _ret = 0
     _ret += fib(n)
@@ -61,6 +61,6 @@ if __name__ == "__main__":
     for i in range(args.num_iterations):
         with omni_user_region(f"main_loop"):
             if args.stop_profile > 0 and i == args.stop_profile:
-                omnitrace.user.stop_trace()
+                rocprofsys.user.stop_trace()
             ans = run(args.value)
             print(f"[{_prefix}] [{i}] result of run({args.value}) = {ans}\n")

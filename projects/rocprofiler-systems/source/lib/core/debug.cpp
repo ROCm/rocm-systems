@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@
 #include <sstream>
 #include <string>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace debug
 {
@@ -48,7 +48,7 @@ struct source_location_history
 const std::string&
 get_file_name()
 {
-    static auto _fname = tim::get_env<std::string>("OMNITRACE_LOG_FILE", "");
+    static auto _fname = tim::get_env<std::string>("ROCPROFSYS_LOG_FILE", "");
     return _fname;
 }
 
@@ -127,7 +127,7 @@ close_file()
         fclose(_file);
         // Write the trace into a file.
         if(get_verbose() >= 0)
-            operation::file_output_message<tim::project::omnitrace>{}(
+            operation::file_output_message<tim::project::rocprofsys>{}(
                 get_file_name(), std::string{ "debug" });
     }
 }
@@ -164,4 +164,4 @@ template std::string as_hex<int64_t>(int64_t, size_t);
 template std::string as_hex<uint64_t>(uint64_t, size_t);
 template std::string
 as_hex<void*>(void*, size_t);
-}  // namespace omnitrace
+}  // namespace rocprofsys

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(omnitrace-examples LANGUAGES C CXX)
+project(rocprofiler-systems-examples LANGUAGES C CXX)
 
 if("${CMAKE_BUILD_TYPE}" STREQUAL "")
     set(CMAKE_BUILD_TYPE
@@ -17,26 +17,27 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_CLANG_TIDY)
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME examples)
 
-if(OMNITRACE_BUILD_DEBUG)
+if(ROCPROFSYS_BUILD_DEBUG)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g3 -fno-omit-frame-pointer")
 endif()
 
 option(BUILD_SHARED_LIBS "Build dynamic libraries" ON)
 
-if(CMAKE_PROJECT_NAME STREQUAL "omnitrace")
+if(CMAKE_PROJECT_NAME STREQUAL "rocprofiler-systems")
     set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
     set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
     set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR})
-    omnitrace_add_option(OMNITRACE_INSTALL_EXAMPLES "Install omnitrace examples" OFF)
+    rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_EXAMPLES
+                                   "Install rocprofiler-systems examples" OFF)
 else()
-    option(OMNITRACE_INSTALL_EXAMPLES "Install omnitrace examples" ON)
+    option(ROCPROFSYS_INSTALL_EXAMPLES "Install rocprofiler-systems examples" ON)
 endif()
 
-if(OMNITRACE_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES)
     include(GNUInstallDirs)
 endif()
 
-set(OMNITRACE_EXAMPLE_ROOT_DIR
+set(ROCPROFSYS_EXAMPLE_ROOT_DIR
     ${CMAKE_CURRENT_LIST_DIR}
     CACHE INTERNAL "")
 # defines function for creating causal profiling exes

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include <string_view>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -95,4 +95,4 @@ struct symbol : private tim::unwind::bfd_file::symbol
     std::vector<dwarf_entry>    dwarf_info   = {};
 };
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

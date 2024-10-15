@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -61,7 +61,7 @@ get_clock_cpu_now() noexcept;
 }  // namespace
 
 //
-//  This implementation works well for Omnitrace
+//  This implementation works well for rocprof-sys
 //  while COZ makes poor predictions
 //
 template <bool V>
@@ -82,7 +82,7 @@ template bool rng_impl_func<false>(int64_t, uint64_t);
 
 //
 //  This implementation works well for COZ
-//  while Omnitrace makes poor predictions
+//  while rocprof-sys makes poor predictions
 //
 template <bool V>
 bool

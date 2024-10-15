@@ -1,4 +1,4 @@
-# Omnitrace Causal Viewer
+# ROCm Systems Profiler Causal Viewer
 
 ## Installation
 
@@ -13,13 +13,13 @@ python -m pip install .
 #### Console Script
 
 ```console
-omnitrace-causal-plot <args...>
+rocprof-sys-causal-plot <args...>
 ```
 
 #### Module
 
 ```console
-python -m omnitrace_causal_viewer <args...>
+python -m rocprof-sys_causal_viewer <args...>
 ```
 
 ### From source tree

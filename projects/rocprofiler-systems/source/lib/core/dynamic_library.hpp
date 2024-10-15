@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 #include <unistd.h>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 std::string
 find_library_path(const std::string& _name, const std::vector<std::string>& _env_vars,
@@ -77,10 +77,10 @@ dynamic_library::invoke(std::string_view _name, RetT (*&_func)(Args...), Args...
         }
         else
         {
-            fprintf(stderr, "[omnitrace][pid=%i]> %s :: %s\n", getpid(), _name.data(),
+            fprintf(stderr, "[rocprof-sys][pid=%i]> %s :: %s\n", getpid(), _name.data(),
                     dlerror());
         }
     }
     return RetT{};
 }
-}  // namespace omnitrace
+}  // namespace rocprofsys

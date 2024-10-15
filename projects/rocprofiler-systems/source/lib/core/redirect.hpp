@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,15 +31,15 @@
 #include <streambuf>
 #include <string>
 
-namespace omnitrace
+namespace rocprofsys
 {
 inline namespace config
 {
 bool
-get_debug() OMNITRACE_HOT;
+get_debug() ROCPROFSYS_HOT;
 
 int
-get_verbose() OMNITRACE_HOT;
+get_verbose() ROCPROFSYS_HOT;
 }  // namespace config
 
 struct redirect
@@ -68,10 +68,11 @@ struct redirect
         if(_v != _expect)
         {
             if(get_verbose() > 0)
-                std::cerr << "[omnitrace::redirect] Expected:\n[omnitrace::redirect]    "
-                          << _expect
-                          << "\n[omnitrace::redirect] Found:\n[omnitrace::redirect]    "
-                          << _v << "\n";
+                std::cerr
+                    << "[rocprofsys::redirect] Expected:\n[rocprofsys::redirect]    "
+                    << _expect
+                    << "\n[rocprofsys::redirect] Found:\n[rocprofsys::redirect]    " << _v
+                    << "\n";
             if(get_verbose() <= 0 || (&m_os != &std::cerr && &m_os != &std::cout))
                 m_os << m_buffer.str() << std::flush;
         }
@@ -99,4 +100,4 @@ private:
     std::stringstream m_buffer{};
     std::streambuf*   m_strm_buffer = nullptr;
 };
-}  // namespace omnitrace
+}  // namespace rocprofsys

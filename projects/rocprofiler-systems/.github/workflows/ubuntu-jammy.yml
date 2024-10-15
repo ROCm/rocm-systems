@@ -32,8 +32,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OMNITRACE_CI: ON
-  OMNITRACE_TMPDIR: "%env{PWD}%/testing-tmp"
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
   ubuntu-jammy-external:
@@ -93,7 +93,7 @@ jobs:
     env:
       OMPI_ALLOW_RUN_AS_ROOT: 1
       OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
-      OMNITRACE_CI: 'ON'
+      ROCPROFSYS_CI: 'ON'
 
     steps:
     - uses: actions/checkout@v4
@@ -178,25 +178,25 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace-dev
-          -DOMNITRACE_BUILD_TESTING=ON
-          -DOMNITRACE_USE_MPI=${{ matrix.mpi }}
-          -DOMNITRACE_USE_HIP=${{ matrix.hip }}
-          -DOMNITRACE_USE_OMPT=${{ matrix.ompt }}
-          -DOMNITRACE_USE_PAPI=${{ matrix.papi }}
-          -DOMNITRACE_USE_PYTHON=${{ matrix.python }}
-          -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
-          -DOMNITRACE_BUILD_LTO=${{ matrix.lto }}
-          -DOMNITRACE_BUILD_DYNINST=${{ matrix.build-dyninst }}
-          -DOMNITRACE_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
-          -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
-          -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
-          -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
-          -DOMNITRACE_MAX_THREADS=64
-          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
-          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems-dev
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=${{ matrix.mpi }}
+          -DROCPROFSYS_USE_HIP=${{ matrix.hip }}
+          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
+          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_BUILD_LTO=${{ matrix.lto }}
+          -DROCPROFSYS_BUILD_DYNINST=${{ matrix.build-dyninst }}
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=${{ matrix.hidden }}
+          -DROCPROFSYS_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
+          -DROCPROFSYS_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DUSE_CLANG_OMP=OFF
 
     - name: Install
@@ -208,8 +208,8 @@ jobs:
       run: |
         cd build
         cpack -G STGZ
-        mkdir -p /opt/omnitrace
-        ./omnitrace-*.sh --prefix=/opt/omnitrace --exclude-subdir --skip-license
+        mkdir -p /opt/rocprofiler-systems
+        ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
 
     - name: Test Install with Modulefile
       timeout-minutes: 15
@@ -217,16 +217,16 @@ jobs:
       run: |
         set -v
         source /usr/share/modules/init/$(basename ${SHELL})
-        module use /opt/omnitrace/share/modulefiles
+        module use /opt/rocprofiler-systems/share/modulefiles
         module avail
-        module load omnitrace
-        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,python,rewrite,runtime}=1
+        module load rocprofiler-systems
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
 
     - name: Test User API
       timeout-minutes: 10
       run: |
         set -v
-        ./scripts/test-find-package.sh --install-dir /opt/omnitrace
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
       if: failure()
@@ -244,6 +244,6 @@ jobs:
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
-          build/omnitrace-tests-config/*.cfg
-          build/omnitrace-tests-output/**/*.txt
-          build/omnitrace-tests-output/**/*-instr*.json
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json

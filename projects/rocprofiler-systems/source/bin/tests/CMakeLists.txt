@@ -1,10 +1,10 @@
-set(OMNITRACE_ABORT_FAIL_REGEX
+set(ROCPROFSYS_ABORT_FAIL_REGEX
     "### ERROR ###|unknown-hash=|address of faulting memory reference|exiting with non-zero exit code|terminate called after throwing an instance|calling abort.. in |Exit code: [1-9]"
     CACHE INTERNAL "Regex to catch abnormal exits when a PASS_REGULAR_EXPRESSION is set"
           FORCE)
 
 # adds a ctest for executable
-function(OMNITRACE_ADD_BIN_TEST)
+function(ROCPROFILER_SYSTEMS_ADD_BIN_TEST)
     cmake_parse_arguments(
         TEST
         "" # options
@@ -19,10 +19,10 @@ function(OMNITRACE_ADD_BIN_TEST)
 
     if(NOT TEST_ENVIRONMENT)
         set(TEST_ENVIRONMENT
-            "OMNITRACE_TRACE=ON"
-            "OMNITRACE_PROFILE=ON"
-            "OMNITRACE_USE_SAMPLING=ON"
-            "OMNITRACE_TIME_OUTPUT=OFF"
+            "ROCPROFSYS_TRACE=ON"
+            "ROCPROFSYS_PROFILE=ON"
+            "ROCPROFSYS_USE_SAMPLING=ON"
+            "ROCPROFSYS_TIME_OUTPUT=OFF"
             "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}"
             )
     endif()
@@ -31,31 +31,31 @@ function(OMNITRACE_ADD_BIN_TEST)
     list(
         APPEND
         TEST_ENVIRONMENT
-        "OMNITRACE_CI=ON"
-        "OMNITRACE_CI_TIMEOUT=${TEST_TIMEOUT}"
-        "OMNITRACE_CONFIG_FILE="
-        "OMNITRACE_OUTPUT_PATH=${PROJECT_BINARY_DIR}/omnitrace-tests-output"
+        "ROCPROFSYS_CI=ON"
+        "ROCPROFSYS_CI_TIMEOUT=${TEST_TIMEOUT}"
+        "ROCPROFSYS_CONFIG_FILE="
+        "ROCPROFSYS_OUTPUT_PATH=${PROJECT_BINARY_DIR}/rocprof-sys-tests-output"
         "TWD=${TEST_WORKING_DIRECTORY}")
     # copy for inverse
     set(TEST_ENVIRONMENT_INV "${TEST_ENVIRONMENT}")
 
     # different for regular test and inverse test
-    list(APPEND TEST_ENVIRONMENT "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}/")
-    list(APPEND TEST_ENVIRONMENT_INV "OMNITRACE_OUTPUT_PREFIX=${TEST_NAME}-inverse/")
+    list(APPEND TEST_ENVIRONMENT "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}/")
+    list(APPEND TEST_ENVIRONMENT_INV "ROCPROFSYS_OUTPUT_PREFIX=${TEST_NAME}-inverse/")
 
     if(NOT "${TEST_PASS_REGEX}" STREQUAL ""
        AND NOT "${TEST_FAIL_REGEX}" STREQUAL ""
-       AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|OMNITRACE_ABORT_FAIL_REGEX")
-        omnitrace_message(
+       AND NOT "${TEST_FAIL_REGEX}" MATCHES "\\|ROCPROFSYS_ABORT_FAIL_REGEX")
+        rocprofiler_systems_message(
             FATAL_ERROR
-            "${TEST_NAME} has set pass and fail regexes but fail regex does not include '|OMNITRACE_ABORT_FAIL_REGEX'"
+            "${TEST_NAME} has set pass and fail regexes but fail regex does not include '|ROCPROFSYS_ABORT_FAIL_REGEX'"
             )
     endif()
 
     if("${TEST_FAIL_REGEX}" STREQUAL "")
-        set(TEST_FAIL_REGEX "(${OMNITRACE_ABORT_FAIL_REGEX})")
+        set(TEST_FAIL_REGEX "(${ROCPROFSYS_ABORT_FAIL_REGEX})")
     else()
-        string(REPLACE "|OMNITRACE_ABORT_FAIL_REGEX" "|${OMNITRACE_ABORT_FAIL_REGEX}"
+        string(REPLACE "|ROCPROFSYS_ABORT_FAIL_REGEX" "|${ROCPROFSYS_ABORT_FAIL_REGEX}"
                        TEST_FAIL_REGEX "${TEST_FAIL_REGEX}")
     endif()
 
@@ -74,7 +74,7 @@ function(OMNITRACE_ADD_BIN_TEST)
                        DEPENDS
                        "${TEST_DEPENDS}"
                        LABELS
-                       "omnitrace-bin;${TEST_LABELS}"
+                       "rocprofiler-systems-bin;${TEST_LABELS}"
                        PASS_REGULAR_EXPRESSION
                        "${TEST_PASS_REGEX}"
                        FAIL_REGULAR_EXPRESSION
@@ -97,7 +97,7 @@ function(OMNITRACE_ADD_BIN_TEST)
                        DEPENDS
                        "${TEST_DEPENDS}"
                        LABELS
-                       "omnitrace-bin;${TEST_LABELS}"
+                       "rocprofiler-systems-bin;${TEST_LABELS}"
                        PASS_REGULAR_EXPRESSION
                        "${TEST_PASS_REGEX}"
                        FAIL_REGULAR_EXPRESSION
@@ -105,19 +105,19 @@ function(OMNITRACE_ADD_BIN_TEST)
                        SKIP_REGULAR_EXPRESSION
                        "${TEST_SKIP_REGEX}"
                        ${TEST_PROPERTIES})
-    elseif(OMNITRACE_BUILD_TESTING)
+    elseif(ROCPROFSYS_BUILD_TESTING)
         message(FATAL_ERROR "Error! ${TEST_TARGET} does not exist")
     endif()
 endfunction()
 
-omnitrace_add_bin_test(
-    NAME omnitrace-instrument-help
-    TARGET omnitrace-instrument
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-instrument-help
+    TARGET rocprofiler-systems-instrument
     ARGS --help
-    LABELS omnitrace-instrument
+    LABELS rocprofiler-systems-instrument
     TIMEOUT 45
     PASS_REGEX
-        ".*\\\[omnitrace-instrument\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
+        ".*\\\[rocprof-sys-instrument\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[MODE OPTIONS\\\].*\\\[LIBRARY OPTIONS\\\].*\\\[SYMBOL SELECTION OPTIONS\\\].*\\\[RUNTIME OPTIONS\\\].*\\\[GRANULARITY OPTIONS\\\].*\\\[DYNINST OPTIONS\\\].*"
     )
 
 # on RedHat, /usr/bin/ls is a script for `coreutils --coreutils-prog=ls`
@@ -129,9 +129,9 @@ else()
     set(LS_ARGS)
 endif()
 
-omnitrace_add_bin_test(
-    NAME omnitrace-instrument-simulate-ls
-    TARGET omnitrace-instrument
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-instrument-simulate-ls
+    TARGET rocprofiler-systems-instrument
     ARGS --simulate
          --print-format
          json
@@ -146,45 +146,48 @@ omnitrace_add_bin_test(
     LABELS "simulate"
     TIMEOUT 240)
 
-omnitrace_add_bin_test(
-    NAME omnitrace-instrument-simulate-ls-check
-    DEPENDS omnitrace-instrument-simulate-ls
-    COMMAND ls omnitrace-tests-output/omnitrace-instrument-simulate-ls/instrumentation
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-instrument-simulate-ls-check
+    DEPENDS rocprofiler-systems-instrument-simulate-ls
+    COMMAND
+        ls
+        rocprof-sys-tests-output/rocprofiler-systems-instrument-simulate-ls/instrumentation
     TIMEOUT 60
     PASS_REGEX
         ".*available.json.*available.txt.*available.xml.*excluded.json.*excluded.txt.*excluded.xml.*instrumented.json.*instrumented.txt.*instrumented.xml.*overlapping.json.*overlapping.txt.*overlapping.xml.*"
-    FAIL_REGEX "No such file or directory|not found|OMNITRACE_ABORT_FAIL_REGEX")
+    FAIL_REGEX "No such file or directory|not found|ROCPROFSYS_ABORT_FAIL_REGEX")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-instrument-simulate-lib
-    TARGET omnitrace-instrument
-    ARGS --print-available functions -v 2 -- $<TARGET_FILE:omnitrace-user-library>
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-instrument-simulate-lib
+    TARGET rocprofiler-systems-instrument
+    ARGS --print-available functions -v 2 --
+         $<TARGET_FILE:rocprofiler-systems-user-library>
     LABELS "simulate"
     TIMEOUT 120
     PASS_REGEX
-        "\\\[omnitrace\\\]\\\[exe\\\] Runtime instrumentation is not possible!(.*)\n(.*)\\\[omnitrace\\\]\\\[exe\\\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
+        "\\\[rocprof-sys\\\]\\\[exe\\\] Runtime instrumentation is not possible!(.*)\n(.*)\\\[rocprof-sys\\\]\\\[exe\\\] Switching to binary rewrite mode and assuming '--simulate --all-functions'"
     )
 
-file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/omnitrace-tests-output/tmp)
+file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp)
 
-omnitrace_add_bin_test(
-    NAME omnitrace-instrument-simulate-lib-basename
-    TARGET omnitrace-instrument
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-instrument-simulate-lib-basename
+    TARGET rocprofiler-systems-instrument
     ARGS --print-available
          functions
          -v
          2
          -o
-         ${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-instrument-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:omnitrace-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
+         ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-instrument-simulate-lib-basename/${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
          --
-         ${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:omnitrace-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
+         ${CMAKE_SHARED_LIBRARY_PREFIX}$<TARGET_FILE_BASE_NAME:rocprofiler-systems-user-library>${CMAKE_SHARED_LIBRARY_SUFFIX}
     LABELS "simulate"
     TIMEOUT 120
-    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/omnitrace-tests-output/tmp)
+    WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/tmp)
 
-omnitrace_add_bin_test(
-    NAME omnitrace-instrument-write-log
-    TARGET omnitrace-instrument
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-instrument-write-log
+    TARGET rocprofiler-systems-instrument
     ARGS --print-instrumented
          functions
          -v
@@ -198,98 +201,99 @@ omnitrace_add_bin_test(
     TIMEOUT 120
     PASS_REGEX "Opening .*/instrumentation/user.log")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-instrument-write-log-check
-    DEPENDS omnitrace-instrument-write-log
-    COMMAND ls
-            omnitrace-tests-output/omnitrace-instrument-write-log/instrumentation/user.log
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-instrument-write-log-check
+    DEPENDS rocprofiler-systems-instrument-write-log
+    COMMAND
+        ls
+        rocprof-sys-tests-output/rocprofiler-systems-instrument-write-log/instrumentation/user.log
     LABELS "log"
     TIMEOUT 60
     PASS_REGEX "user.log"
-    FAIL_REGEX "No such file or directory|not found|OMNITRACE_ABORT_FAIL_REGEX")
+    FAIL_REGEX "No such file or directory|not found|ROCPROFSYS_ABORT_FAIL_REGEX")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-help
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-help
+    TARGET rocprofiler-systems-avail
     ARGS --help
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
     PASS_REGEX
-        ".*\\\[omnitrace-avail\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[INFO OPTIONS\\\].*\\\[FILTER OPTIONS\\\].*\\\[COLUMN OPTIONS\\\].*\\\[DISPLAY OPTIONS\\\].*\\\[OUTPUT OPTIONS\\\].*"
+        ".*\\\[rocprof-sys-avail\\\] Usage:.*\\\[DEBUG OPTIONS\\\].*\\\[INFO OPTIONS\\\].*\\\[FILTER OPTIONS\\\].*\\\[COLUMN OPTIONS\\\].*\\\[DISPLAY OPTIONS\\\].*\\\[OUTPUT OPTIONS\\\].*"
     )
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-all
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-all
+    TARGET rocprofiler-systems-avail
     ARGS --all
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45)
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-all-expand-keys
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-all-expand-keys
+    TARGET rocprofiler-systems-avail
     ARGS --all --expand-keys
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
-    FAIL_REGEX "%[a-zA-Z_]%|OMNITRACE_ABORT_FAIL_REGEX")
+    FAIL_REGEX "%[a-zA-Z_]%|ROCPROFSYS_ABORT_FAIL_REGEX")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-all-only-available-alphabetical
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-all-only-available-alphabetical
+    TARGET rocprofiler-systems-avail
     ARGS --all --available --alphabetical --debug --output
-         ${CMAKE_CURRENT_BINARY_DIR}/omnitrace-avail-all-only-available-alphabetical.log
-    LABELS "omnitrace-avail"
+         ${CMAKE_CURRENT_BINARY_DIR}/rocprof-sys-avail-all-only-available-alphabetical.log
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
     PROPERTIES
         ATTACHED_FILES
-        ${CMAKE_CURRENT_BINARY_DIR}/omnitrace-avail-all-only-available-alphabetical.log)
+        ${CMAKE_CURRENT_BINARY_DIR}/rocprof-sys-avail-all-only-available-alphabetical.log)
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-all-csv
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-all-csv
+    TARGET rocprofiler-systems-avail
     ARGS --all --csv --csv-separator "#"
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
     PASS_REGEX
         "COMPONENT#AVAILABLE#VALUE_TYPE#STRING_IDS#FILENAME#DESCRIPTION#CATEGORY#.*ENVIRONMENT VARIABLE#VALUE#DATA TYPE#DESCRIPTION#CATEGORIES#.*HARDWARE COUNTER#DEVICE#AVAILABLE#DESCRIPTION#"
     )
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-filter-wall-clock-available
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-filter-wall-clock-available
+    TARGET rocprofiler-systems-avail
     ARGS -r wall_clock -C --available
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
     PASS_REGEX
         "\\\|[-]+\\\|\n\\\|[ ]+COMPONENT[ ]+\\\|\n\\\|[-]+\\\|\n\\\| (wall_clock)[ ]+\\\|\n\\\|[-]+\\\|"
     )
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-category-filter-omnitrace
-    TARGET omnitrace-avail
-    ARGS --categories settings::omnitrace --brief
-    LABELS "omnitrace-avail"
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-category-filter-rocprofiler-systems
+    TARGET rocprofiler-systems-avail
+    ARGS --categories settings::rocprofsys --brief
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
-    PASS_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
+    PASS_REGEX "ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE|OUTPUT_PREFIX)"
     FAIL_REGEX
-        "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)|OMNITRACE_ABORT_FAIL_REGEX"
+        "ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)|ROCPROFSYS_ABORT_FAIL_REGEX"
     )
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-category-filter-timemory
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-category-filter-timemory
+    TARGET rocprofiler-systems-avail
     ARGS --categories settings::timemory --brief --advanced
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
     PASS_REGEX
-        "OMNITRACE_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
-    FAIL_REGEX "OMNITRACE_(SETTINGS_DESC|OUTPUT_FILE)|OMNITRACE_ABORT_FAIL_REGEX")
+        "ROCPROFSYS_(ADD_SECONDARY|SCIENTIFIC|PRECISION|MEMORY_PRECISION|TIMING_PRECISION)"
+    FAIL_REGEX "ROCPROFSYS_(SETTINGS_DESC|OUTPUT_FILE)|ROCPROFSYS_ABORT_FAIL_REGEX")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-regex-negation
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-regex-negation
+    TARGET rocprofiler-systems-avail
     ARGS -R
-         omnitrace
+         rocprofsys
          ~timemory
          -r
          _P
@@ -299,20 +303,22 @@ omnitrace_add_bin_test(
          --csv
          --brief
          --advanced
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     TIMEOUT 45
     PASS_REGEX
-        "ENVIRONMENT VARIABLE,[ \n]+OMNITRACE_THREAD_POOL_SIZE,[ \n]+OMNITRACE_USE_PID,[ \n]+"
-    FAIL_REGEX "OMNITRACE_TRACE|OMNITRACE_ABORT_FAIL_REGEX")
+        "ENVIRONMENT VARIABLE,[ \n]+ROCPROFSYS_THREAD_POOL_SIZE,[ \n]+ROCPROFSYS_USE_PID,[ \n]+"
+    FAIL_REGEX "ROCPROFSYS_TRACE|ROCPROFSYS_ABORT_FAIL_REGEX")
 
-string(REPLACE "+" "\\\+" _AVAIL_CFG_PATH
-               "${PROJECT_BINARY_DIR}/omnitrace-tests-output/omnitrace-avail/omnitrace-")
+string(
+    REPLACE
+        "+" "\\\+" _AVAIL_CFG_PATH
+        "${PROJECT_BINARY_DIR}/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-")
 # use of TWD == Test Working Directory (added by function)
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-write-config
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-write-config
+    TARGET rocprofiler-systems-avail
     ARGS -G
-         %env{TWD}%/omnitrace-tests-output/omnitrace-avail/omnitrace-test.cfg
+         %env{TWD}%/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-test.cfg
          -F
          txt
          json
@@ -320,69 +326,69 @@ omnitrace_add_bin_test(
          --force
          --all
          -c
-         omnitrace
+         rocprofsys
     TIMEOUT 45
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     PASS_REGEX
         "Outputting JSON configuration file '${_AVAIL_CFG_PATH}test\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}test\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}test\\\.cfg'(.*)"
     )
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-write-config-tweak
-    TARGET omnitrace-avail
-    ARGS -G %env{TWD}%/omnitrace-tests-output/omnitrace-avail/omnitrace-tweak.cfg -F txt
-         json xml --force
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-write-config-tweak
+    TARGET rocprofiler-systems-avail
+    ARGS -G %env{TWD}%/rocprof-sys-tests-output/rocprof-sys-avail/rocprof-sys-tweak.cfg -F
+         txt json xml --force
     TIMEOUT 45
-    LABELS "omnitrace-avail"
-    ENVIRONMENT "OMNITRACE_TRACE=OFF;OMNITRACE_PROFILE=ON"
+    LABELS "rocprofiler-systems-avail"
+    ENVIRONMENT "ROCPROFSYS_TRACE=OFF;ROCPROFSYS_PROFILE=ON"
     PASS_REGEX
         "Outputting JSON configuration file '${_AVAIL_CFG_PATH}tweak\\\.json'(.*)Outputting XML configuration file '${_AVAIL_CFG_PATH}tweak\\\.xml'(.*)Outputting text configuration file '${_AVAIL_CFG_PATH}tweak\\\.cfg'(.*)"
     )
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-list-keys
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-list-keys
+    TARGET rocprofiler-systems-avail
     ARGS --list-keys --expand-keys
     TIMEOUT 45
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     PASS_REGEX "Output Keys:\n(.*)%argv%(.*)%argv_hash%")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-list-keys-markdown
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-list-keys-markdown
+    TARGET rocprofiler-systems-avail
     ARGS --list-keys --expand-keys --markdown
     TIMEOUT 45
-    LABELS "omnitrace-avail;markdown"
+    LABELS "rocprofiler-systems-avail;markdown"
     PASS_REGEX "(.*)`%argv%`(.*)`%argv_hash%`")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-list-categories
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-list-categories
+    TARGET rocprofiler-systems-avail
     ARGS --list-categories
     TIMEOUT 45
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     PASS_REGEX " component::(.*) hw_counters::(.*) settings::")
 
-omnitrace_add_bin_test(
-    NAME omnitrace-avail-core-categories
-    TARGET omnitrace-avail
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-avail-core-categories
+    TARGET rocprofiler-systems-avail
     ARGS -c core
     TIMEOUT 45
-    LABELS "omnitrace-avail"
+    LABELS "rocprofiler-systems-avail"
     PASS_REGEX
-        "OMNITRACE_CONFIG_FILE(.*)OMNITRACE_ENABLED(.*)OMNITRACE_SUPPRESS_CONFIG(.*)OMNITRACE_SUPPRESS_PARSING(.*)OMNITRACE_VERBOSE"
+        "ROCPROFSYS_CONFIG_FILE(.*)ROCPROFSYS_ENABLED(.*)ROCPROFSYS_SUPPRESS_CONFIG(.*)ROCPROFSYS_SUPPRESS_PARSING(.*)ROCPROFSYS_VERBOSE"
     )
 
-omnitrace_add_bin_test(
-    NAME omnitrace-run-help
-    TARGET omnitrace-run
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-run-help
+    TARGET rocprofiler-systems-run
     ARGS --help
     TIMEOUT 45
-    LABELS "omnitrace-run")
+    LABELS "rocprofiler-systems-run")
 
-file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/omnitrace-tests-config")
+file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config")
 file(
-    WRITE "${PROJECT_BINARY_DIR}/omnitrace-tests-config/empty.cfg"
+    WRITE "${PROJECT_BINARY_DIR}/rocprof-sys-tests-config/empty.cfg"
     "
 #
 # empty config file
@@ -394,18 +400,18 @@ set_target_properties(
     sleeper PROPERTIES BUILD_TYPE RelWithDebInfo RUNTIME_OUTPUT_DIRECTORY
                                                  ${PROJECT_BINARY_DIR}/bin/testing)
 
-omnitrace_add_bin_test(
-    NAME omnitrace-run-args
-    TARGET omnitrace-run
+rocprofiler_systems_add_bin_test(
+    NAME rocprofiler-systems-run-args
+    TARGET rocprofiler-systems-run
     ARGS --monochrome
          --debug=false
          -v
          1
          -c
-         %env{TWD}%/omnitrace-tests-config/empty.cfg
+         %env{TWD}%/rocprof-sys-tests-config/empty.cfg
          -o
-         omnitrace-tests-output
-         omnitrace-run-args-output/
+         rocprof-sys-tests-output
+         rocprofiler-systems-run-args-output/
          -TPHD
          -S
          cputime
@@ -469,7 +475,7 @@ omnitrace_add_bin_test(
          --kokkosp-name-length-max=1024
          --kokkosp-prefix="[kokkos]"
          --tmpdir
-         ${CMAKE_BINARY_DIR}/omnitrace-tests-config/tmpdir
+         ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/tmpdir
          --perfetto-backend
          inprocess
          --use-pid
@@ -488,4 +494,4 @@ omnitrace_add_bin_test(
          $<TARGET_FILE:sleeper>
          5
     TIMEOUT 45
-    LABELS "omnitrace-run")
+    LABELS "rocprofiler-systems-run")

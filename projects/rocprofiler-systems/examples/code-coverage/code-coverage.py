@@ -1,6 +1,6 @@
 #!@PYTHON_EXECUTABLE@
 
-import omnitrace
+import rocprofsys
 import argparse
 
 if __name__ == "__main__":
@@ -28,15 +28,15 @@ if __name__ == "__main__":
 
     data = None
     for itr in args.input:
-        _summary, _details = omnitrace.coverage.load(itr)
+        _summary, _details = rocprofsys.coverage.load(itr)
         if data is None:
             data = _details
         else:
-            data = omnitrace.coverage.concat(data, _details)
+            data = rocprofsys.coverage.concat(data, _details)
 
-    summary = omnitrace.coverage.get_summary(data)
-    top = omnitrace.coverage.get_top(data)
-    bottom = omnitrace.coverage.get_bottom(data)
+    summary = rocprofsys.coverage.get_summary(data)
+    top = rocprofsys.coverage.get_top(data)
+    bottom = rocprofsys.coverage.get_bottom(data)
 
     print("Top code coverage:")
     for itr in top:
@@ -51,4 +51,4 @@ if __name__ == "__main__":
         )
 
     print("\nSaving code coverage")
-    omnitrace.coverage.save(summary, data, args.output)
+    rocprofsys.coverage.save(summary, data, args.output)

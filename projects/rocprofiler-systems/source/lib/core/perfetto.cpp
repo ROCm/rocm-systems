@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace perfetto
 {
@@ -86,8 +86,8 @@ setup()
 
     for(const auto& itr : config::get_disabled_categories())
     {
-        OMNITRACE_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
-                            itr.c_str());
+        ROCPROFSYS_VERBOSE_F(1, "Disabling perfetto track event category: %s\n",
+                             itr.c_str());
         track_event_cfg.add_disabled_categories(itr);
     }
 
@@ -124,12 +124,12 @@ start()
         }
         else
         {
-            OMNITRACE_VERBOSE(2, "Resuming perfetto...\n");
+            ROCPROFSYS_VERBOSE(2, "Resuming perfetto...\n");
             _tmp_file->fopen("a+");
         }
     }
 
-    OMNITRACE_VERBOSE(2, "Setup perfetto...\n");
+    ROCPROFSYS_VERBOSE(2, "Setup perfetto...\n");
     int   _fd = (_tmp_file) ? _tmp_file->fd : -1;
     auto& cfg = get_config();
     tracing_session->Setup(cfg, _fd);
@@ -143,16 +143,17 @@ stop()
 
     auto& tracing_session = get_perfetto_session();
 
-    OMNITRACE_CI_THROW(tracing_session == nullptr, "Null pointer to the tracing session");
+    ROCPROFSYS_CI_THROW(tracing_session == nullptr,
+                        "Null pointer to the tracing session");
 
     if(tracing_session)
     {
         // Make sure the last event is closed
-        OMNITRACE_VERBOSE(2, "Flushing the perfetto trace data...\n");
+        ROCPROFSYS_VERBOSE(2, "Flushing the perfetto trace data...\n");
         ::perfetto::TrackEvent::Flush();
         tracing_session->FlushBlocking();
 
-        OMNITRACE_VERBOSE(2, "Stopping the perfetto trace session (blocking)...\n");
+        ROCPROFSYS_VERBOSE(2, "Stopping the perfetto trace session (blocking)...\n");
         tracing_session->StopBlocking();
     }
 }
@@ -177,7 +178,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 
             if(!_fdata)
             {
-                OMNITRACE_VERBOSE(
+                ROCPROFSYS_VERBOSE(
                     -1, "Error! perfetto temp trace file '%s' could not be read",
                     _tmp_file->filename.c_str());
                 return char_vec_t{ tracing_session->ReadTraceBlocking() };
@@ -191,7 +192,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
             auto _fnum_read = fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
             fclose(_fdata);
 
-            OMNITRACE_CI_THROW(
+            ROCPROFSYS_CI_THROW(
                 _fnum_read != _fnum_elem,
                 "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
                 _fnum_read, _tmp_file->filename.c_str(), _fnum_elem);
@@ -233,7 +234,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
     auto _filename = config::get_perfetto_output_filename();
     if(!trace_data.empty())
     {
-        operation::file_output_message<tim::project::omnitrace> _fom{};
+        operation::file_output_message<tim::project::rocprofsys> _fom{};
         // Write the trace into a file.
         if(config::get_verbose() >= 0)
             _fom(_filename, std::string{ "perfetto" },
@@ -259,7 +260,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
     }
     else if(dmp::rank() == 0)
     {
-        OMNITRACE_VERBOSE(
+        ROCPROFSYS_VERBOSE(
             0, "perfetto trace data is empty. File '%s' will not be written...\n",
             _filename.c_str());
     }
@@ -278,8 +279,8 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
 std::unique_ptr<::perfetto::TracingSession>&
 get_perfetto_session(pid_t _pid)
 {
-    return ::omnitrace::perfetto::get_session(_pid);
+    return ::rocprofsys::perfetto::get_session(_pid);
 }
-}  // namespace omnitrace
+}  // namespace rocprofsys
 
 PERFETTO_TRACK_EVENT_STATIC_STORAGE();

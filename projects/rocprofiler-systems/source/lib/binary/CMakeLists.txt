@@ -16,13 +16,17 @@ set(binary_headers
     ${CMAKE_CURRENT_LIST_DIR}/scope_filter.hpp
     ${CMAKE_CURRENT_LIST_DIR}/symbol.hpp)
 
-add_library(omnitrace-binary-library STATIC)
-add_library(omnitrace::omnitrace-binary ALIAS omnitrace-binary-library)
+add_library(rocprofiler-systems-binary-library STATIC)
+add_library(rocprofiler-systems::rocprofiler-systems-binary ALIAS
+            rocprofiler-systems-binary-library)
 
-target_sources(omnitrace-binary-library PRIVATE ${binary_sources} ${binary_headers})
+target_sources(rocprofiler-systems-binary-library PRIVATE ${binary_sources}
+                                                          ${binary_headers})
 
 target_link_libraries(
-    omnitrace-binary-library PRIVATE omnitrace::omnitrace-interface-library
-                                     omnitrace::omnitrace-core)
+    rocprofiler-systems-binary-library
+    PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library
+            rocprofiler-systems::rocprofiler-systems-core)
 
-set_target_properties(omnitrace-binary-library PROPERTIES OUTPUT_NAME omnitrace-binary)
+set_target_properties(rocprofiler-systems-binary-library
+                      PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-binary)

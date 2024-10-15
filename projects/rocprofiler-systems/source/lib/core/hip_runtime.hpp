@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 
 #include "core/defines.hpp"
 
-#if defined(OMNITRACE_USE_HIP) && OMNITRACE_USE_HIP > 0
+#if defined(ROCPROFSYS_USE_HIP) && ROCPROFSYS_USE_HIP > 0
 
 #    if defined(HIP_INCLUDE_HIP_HIP_RUNTIME_H) ||                                        \
         defined(HIP_INCLUDE_HIP_HIP_RUNTIME_API_H)
@@ -35,7 +35,7 @@
 #    define HIP_PROF_HIP_API_STRING 1
 
 // following must be included before <roctracer_hip.h> for ROCm 6.0+
-#    if OMNITRACE_HIP_VERSION >= 60000
+#    if ROCPROFSYS_HIP_VERSION >= 60000
 #        if defined(USE_PROF_API)
 #            undef USE_PROF_API
 #        endif

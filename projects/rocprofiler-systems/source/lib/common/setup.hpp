@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,54 +41,54 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#if !defined(OMNITRACE_SETUP_LOG_NAME)
-#    if defined(OMNITRACE_COMMON_LIBRARY_NAME)
-#        define OMNITRACE_SETUP_LOG_NAME "[" OMNITRACE_COMMON_LIBRARY_NAME "]"
+#if !defined(ROCPROFSYS_SETUP_LOG_NAME)
+#    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
+#        define ROCPROFSYS_SETUP_LOG_NAME "[" ROCPROFSYS_COMMON_LIBRARY_NAME "]"
 #    else
-#        define OMNITRACE_SETUP_LOG_NAME
+#        define ROCPROFSYS_SETUP_LOG_NAME
 #    endif
 #endif
 
-#if !defined(OMNITRACE_SETUP_LOG_START)
-#    if defined(OMNITRACE_COMMON_LIBRARY_LOG_START)
-#        define OMNITRACE_SETUP_LOG_START OMNITRACE_COMMON_LIBRARY_LOG_START
+#if !defined(ROCPROFSYS_SETUP_LOG_START)
+#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
+#        define ROCPROFSYS_SETUP_LOG_START ROCPROFSYS_COMMON_LIBRARY_LOG_START
 #    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define OMNITRACE_SETUP_LOG_START                                                \
+#        define ROCPROFSYS_SETUP_LOG_START                                               \
             fprintf(stderr, "%s", ::tim::log::color::info());
 #    else
-#        define OMNITRACE_SETUP_LOG_START
+#        define ROCPROFSYS_SETUP_LOG_START
 #    endif
 #endif
 
-#if !defined(OMNITRACE_SETUP_LOG_END)
-#    if defined(OMNITRACE_COMMON_LIBRARY_LOG_END)
-#        define OMNITRACE_SETUP_LOG_END OMNITRACE_COMMON_LIBRARY_LOG_END
+#if !defined(ROCPROFSYS_SETUP_LOG_END)
+#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
+#        define ROCPROFSYS_SETUP_LOG_END ROCPROFSYS_COMMON_LIBRARY_LOG_END
 #    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define OMNITRACE_SETUP_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
+#        define ROCPROFSYS_SETUP_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
 #    else
-#        define OMNITRACE_SETUP_LOG_END
+#        define ROCPROFSYS_SETUP_LOG_END
 #    endif
 #endif
 
-#define OMNITRACE_SETUP_LOG(CONDITION, ...)                                              \
+#define ROCPROFSYS_SETUP_LOG(CONDITION, ...)                                             \
     if(CONDITION)                                                                        \
     {                                                                                    \
         fflush(stderr);                                                                  \
-        OMNITRACE_SETUP_LOG_START                                                        \
-        fprintf(stderr, "[omnitrace]" OMNITRACE_SETUP_LOG_NAME "[%i] ", getpid());       \
+        ROCPROFSYS_SETUP_LOG_START                                                       \
+        fprintf(stderr, "[rocprof-sys]" ROCPROFSYS_SETUP_LOG_NAME "[%i] ", getpid());    \
         fprintf(stderr, __VA_ARGS__);                                                    \
-        OMNITRACE_SETUP_LOG_END                                                          \
+        ROCPROFSYS_SETUP_LOG_END                                                         \
         fflush(stderr);                                                                  \
     }
 
-namespace omnitrace
+namespace rocprofsys
 {
 inline namespace common
 {
 inline std::vector<env_config>
 get_environ(int _verbose, std::string _search_paths = {},
-            std::string _omnilib    = "libomnitrace.so",
-            std::string _omnilib_dl = "libomnitrace-dl.so")
+            std::string _omnilib    = "librocprof-sys.so",
+            std::string _omnilib_dl = "librocprof-sys-dl.so")
 {
     auto _data            = std::vector<env_config>{};
     auto _omnilib_path    = path::get_origin(_omnilib);
@@ -109,17 +109,17 @@ get_environ(int _verbose, std::string _search_paths = {},
     _omnilib    = common::path::find_path(_omnilib, _verbose, _search_paths);
     _omnilib_dl = common::path::find_path(_omnilib_dl, _verbose, _search_paths);
 
-#if defined(OMNITRACE_USE_ROCTRACER) && OMNITRACE_USE_ROCTRACER > 0
+#if defined(ROCPROFSYS_USE_ROCTRACER) && ROCPROFSYS_USE_ROCTRACER > 0
     _data.emplace_back(env_config{ "HSA_TOOLS_LIB", _omnilib.c_str(), 0 });
 #endif
 
-#if defined(OMNITRACE_USE_ROCPROFILER) && OMNITRACE_USE_ROCPROFILER > 0
-#    if OMNITRACE_HIP_VERSION >= 50200
+#if defined(ROCPROFSYS_USE_ROCPROFILER) && ROCPROFSYS_USE_ROCPROFILER > 0
+#    if ROCPROFSYS_HIP_VERSION >= 50200
 #        define ROCPROFILER_METRICS_DIR "lib/rocprofiler"
 #    else
 #        define ROCPROFILER_METRICS_DIR "rocprofiler/lib"
 #    endif
-#    if OMNITRACE_HIP_VERSION <= 50500
+#    if ROCPROFSYS_HIP_VERSION <= 50500
 #        define ROCPROFILER_LIBNAME "librocprofiler64.so"
 #    else
 #        define ROCPROFILER_LIBNAME "librocprofiler64.so.1"
@@ -133,7 +133,7 @@ get_environ(int _verbose, std::string _search_paths = {},
 
     auto _possible_rocp_metrics = std::vector<std::string>{};
     auto _possible_rocprof_libs = std::vector<std::string>{};
-    for(const auto* itr : { "OMNITRACE_ROCM_PATH", "ROCM_PATH" })
+    for(const auto* itr : { "ROCPROFSYS_ROCM_PATH", "ROCM_PATH" })
     {
         if(getenv(itr))
         {
@@ -150,9 +150,9 @@ get_environ(int _verbose, std::string _search_paths = {},
 
     // default path
     _possible_rocp_metrics.emplace_back(
-        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "lib/rocprofiler"));
+        common::join('/', ROCPROFSYS_DEFAULT_ROCM_PATH, "lib/rocprofiler"));
     _possible_rocp_metrics.emplace_back(
-        common::join('/', OMNITRACE_DEFAULT_ROCM_PATH, "rocprofiler/lib"));
+        common::join('/', ROCPROFSYS_DEFAULT_ROCM_PATH, "rocprofiler/lib"));
 
     auto _realpath_and_unique = [](const auto& _inp_v) {
         auto _out_v = decltype(_inp_v){};
@@ -172,7 +172,7 @@ get_environ(int _verbose, std::string _search_paths = {},
         if(path::exists(itr))
         {
             _data.emplace_back(
-                env_config{ "OMNITRACE_ROCPROFILER_LIBRARY", itr.c_str(), 0 });
+                env_config{ "ROCPROFSYS_ROCPROFILER_LIBRARY", itr.c_str(), 0 });
             _possible_rocp_metrics.emplace(
                 _possible_rocp_metrics.begin(),
                 common::join('/', path::dirname(itr), "../../lib/rocprofiler"));
@@ -195,7 +195,7 @@ get_environ(int _verbose, std::string _search_paths = {},
     }
 
     auto _found_rocp_metrics = (!_env_rocp_metrics.empty())
-                                   ? get_env("OMNITRACE_ROCP_METRICS_FORCE_VALID", false)
+                                   ? get_env("ROCPROFSYS_ROCP_METRICS_FORCE_VALID", false)
                                    : false;
 
     if(!_found_rocp_metrics)
@@ -232,26 +232,27 @@ get_environ(int _verbose, std::string _search_paths = {},
                  << path::exists(_rocp_metrics_xml) << ") and/or gfx_metrics.xml (found: "
                  << path::exists(_rocp_gfx_metrics_xml)
                  << "). To ignore this error, set "
-                    "OMNITRACE_ROCP_METRICS_FORCE_VALID=true in the environment";
+                    "ROCPROFSYS_ROCP_METRICS_FORCE_VALID=true in the environment";
         }
         else
         {
-            _msg << "Error! ROCP_METRICS not set in environment and OmniTrace could not "
-                    "find a suitable path. Please set ROCP_METRICS=/path/to/metrics.xml "
-                    "in the environment. This file is typically located in the same "
-                    "folder as the librocprofiler64.so library.\nAdditional note: "
-                    "metrics.xml typically contains:\n\t#include "
-                    "\"gfx_metrics.xml\"\nMake sure the provided path also contains this "
-                    "file.\nExample:\n\texport ROCP_METRICS="
-                 << OMNITRACE_DEFAULT_ROCM_PATH << "/" << ROCPROFILER_METRICS_DIR
-                 << "/metrics.xml\n";
+            _msg
+                << "Error! ROCP_METRICS not set in environment and rocprof-sys could not "
+                   "find a suitable path. Please set ROCP_METRICS=/path/to/metrics.xml "
+                   "in the environment. This file is typically located in the same "
+                   "folder as the librocprofiler64.so library.\nAdditional note: "
+                   "metrics.xml typically contains:\n\t#include "
+                   "\"gfx_metrics.xml\"\nMake sure the provided path also contains this "
+                   "file.\nExample:\n\texport ROCP_METRICS="
+                << ROCPROFSYS_DEFAULT_ROCM_PATH << "/" << ROCPROFILER_METRICS_DIR
+                << "/metrics.xml\n";
         }
         throw std::runtime_error(_msg.str());
     }
 #endif
 
-#if defined(OMNITRACE_USE_OMPT) && OMNITRACE_USE_OMPT > 0
-    if(get_env("OMNITRACE_USE_OMPT", true))
+#if defined(ROCPROFSYS_USE_OMPT) && ROCPROFSYS_USE_OMPT > 0
+    if(get_env("ROCPROFSYS_USE_OMPT", true))
     {
         std::string _omni_omp_libs = _omnilib_dl;
         const char* _omp_libs      = getenv("OMP_TOOL_LIBRARIES");
@@ -262,8 +263,8 @@ get_environ(int _verbose, std::string _search_paths = {},
             _override      = 1;
             _omni_omp_libs = common::join(':', _omp_libs, _omnilib_dl);
         }
-        OMNITRACE_SETUP_LOG(_verbose >= 2, "setting OMP_TOOL_LIBRARIES to '%s'\n",
-                            _omni_omp_libs.c_str());
+        ROCPROFSYS_SETUP_LOG(_verbose >= 2, "setting OMP_TOOL_LIBRARIES to '%s'\n",
+                             _omni_omp_libs.c_str());
         _data.emplace_back(
             env_config{ "OMP_TOOL_LIBRARIES", _omni_omp_libs.c_str(), _override });
     }
@@ -274,8 +275,8 @@ get_environ(int _verbose, std::string _search_paths = {},
 
 inline void
 setup_environ(int _verbose, const std::string& _search_paths = {},
-              std::string _omnilib    = "libomnitrace.so",
-              std::string _omnilib_dl = "libomnitrace-dl.so")
+              std::string _omnilib    = "librocprof-sys.so",
+              std::string _omnilib_dl = "librocprof-sys-dl.so")
 {
     auto _data =
         get_environ(_verbose, _search_paths, std::move(_omnilib), std::move(_omnilib_dl));
@@ -283,4 +284,4 @@ setup_environ(int _verbose, const std::string& _search_paths = {},
         itr(_verbose >= 3);
 }
 }  // namespace common
-}  // namespace omnitrace
+}  // namespace rocprofsys

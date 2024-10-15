@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,8 +50,8 @@
 #include <utility>
 #include <vector>
 
-#define OMNITRACE_DECLARE_COMPONENT(NAME)                                                \
-    namespace omnitrace                                                                  \
+#define ROCPROFSYS_DECLARE_COMPONENT(NAME)                                               \
+    namespace rocprofsys                                                                 \
     {                                                                                    \
     namespace component                                                                  \
     {                                                                                    \
@@ -63,7 +63,7 @@
     namespace trait                                                                      \
     {                                                                                    \
     template <>                                                                          \
-    struct is_component<omnitrace::component::NAME> : true_type                          \
+    struct is_component<rocprofsys::component::NAME> : true_type                         \
     {};                                                                                  \
     }                                                                                    \
     }                                                                                    \
@@ -71,12 +71,12 @@
     {                                                                                    \
     namespace component                                                                  \
     {                                                                                    \
-    using ::omnitrace::component::NAME;                                                  \
+    using ::rocprofsys::component::NAME;                                                 \
     }                                                                                    \
     }
 
-#define OMNITRACE_COMPONENT_ALIAS(NAME, ...)                                             \
-    namespace omnitrace                                                                  \
+#define ROCPROFSYS_COMPONENT_ALIAS(NAME, ...)                                            \
+    namespace rocprofsys                                                                 \
     {                                                                                    \
     namespace component                                                                  \
     {                                                                                    \
@@ -87,22 +87,22 @@
     {                                                                                    \
     namespace component                                                                  \
     {                                                                                    \
-    using ::omnitrace::component::NAME;                                                  \
+    using ::rocprofsys::component::NAME;                                                 \
     }                                                                                    \
     }
 
-#define OMNITRACE_DEFINE_CONCRETE_TRAIT(TRAIT, TYPE, VALUE)                              \
+#define ROCPROFSYS_DEFINE_CONCRETE_TRAIT(TRAIT, TYPE, VALUE)                             \
     namespace tim                                                                        \
     {                                                                                    \
     namespace trait                                                                      \
     {                                                                                    \
     template <>                                                                          \
-    struct TRAIT<::omnitrace::TYPE> : VALUE                                              \
+    struct TRAIT<::rocprofsys::TYPE> : VALUE                                             \
     {};                                                                                  \
     }                                                                                    \
     }
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace api       = ::tim::api;        // NOLINT
 namespace category  = ::tim::category;   // NOLINT
@@ -126,9 +126,9 @@ struct construct_on_thread
 {
     int64_t index = threading::get_id();
 };
-}  // namespace omnitrace
+}  // namespace rocprofsys
 
 // same sort of functionality as python's " ".join([...])
 #if !defined(JOIN)
-#    define JOIN(...) ::omnitrace::common::join(__VA_ARGS__)
+#    define JOIN(...) ::rocprofsys::common::join(__VA_ARGS__)
 #endif

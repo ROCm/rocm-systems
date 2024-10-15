@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@
 #include <cstdint>
 #include <string>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -55,7 +55,7 @@ struct scope_filter
 
     template <typename ContainerT>
     static bool satisfies_filter(const ContainerT&, filter_scope,
-                                 std::string_view) OMNITRACE_PURE;
+                                 std::string_view) ROCPROFSYS_PURE;
 };
 
 template <typename ContainerT>
@@ -72,4 +72,4 @@ scope_filter::satisfies_filter(const ContainerT& _filters, filter_scope _scope,
     return true;
 }
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

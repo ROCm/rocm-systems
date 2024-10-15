@@ -1,7 +1,7 @@
 # ======================================================================================
 # elfutils.cmake
 #
-# Configure elfutils for omnitrace
+# Configure elfutils for rocprofiler-systems
 #
 # ----------------------------------------
 #
@@ -38,7 +38,7 @@ set(ElfUtils_MIN_VERSION
     CACHE STRING "Minimum acceptable elfutils version")
 
 if(${ElfUtils_MIN_VERSION} VERSION_LESS ${_min_version})
-    omnitrace_message(
+    rocprofiler_systems_message(
         FATAL_ERROR
         "Requested version ${ElfUtils_MIN_VERSION} is less than minimum supported version (${_min_version})"
         )
@@ -51,7 +51,7 @@ set(ElfUtils_DOWNLOAD_VERSION
 
 # make sure we are not downloading a version less than minimum
 if(${ElfUtils_DOWNLOAD_VERSION} VERSION_LESS ${ElfUtils_MIN_VERSION})
-    omnitrace_message(
+    rocprofiler_systems_message(
         FATAL_ERROR
         "elfutils download version is set to ${ElfUtils_DOWNLOAD_VERSION} but elfutils minimum version is set to ${ElfUtils_MIN_VERSION}"
         )
@@ -85,7 +85,7 @@ find_program(
     PATH_SUFFIXES bin)
 
 if(NOT ElfUtils_C_COMPILER OR NOT ElfUtils_CXX_COMPILER)
-    omnitrace_message(
+    rocprofiler_systems_message(
         FATAL_ERROR
         "ElfUtils requires the GNU C and C++ compilers. ElfUtils_C_COMPILER: ${ElfUtils_C_COMPILER}, ElfUtils_CXX_COMPILER: ${ElfUtils_CXX_COMPILER}"
         )
@@ -100,7 +100,7 @@ set(_eu_build_byproducts "${_eu_root}/lib/libdw${CMAKE_STATIC_LIBRARY_SUFFIX}"
                          "${_eu_root}/lib/libelf${CMAKE_STATIC_LIBRARY_SUFFIX}")
 
 externalproject_add(
-    omnitrace-elfutils-build
+    rocprofiler-systems-elfutils-build
     PREFIX ${PROJECT_BINARY_DIR}/external/elfutils
     URL ${ElfUtils_DOWNLOAD_URL}
         "https://sourceware.org/elfutils/ftp/${ElfUtils_DOWNLOAD_VERSION}/elfutils-${ElfUtils_DOWNLOAD_VERSION}.tar.bz2"
@@ -119,7 +119,7 @@ externalproject_add(
 
 # target for re-executing the installation
 add_custom_target(
-    omnitrace-elfutils-install
+    rocprofiler-systems-elfutils-install
     COMMAND ${MAKE_COMMAND} install -s
     WORKING_DIRECTORY ${PROJECT_BINARY_DIR}/external/elfutils/src/ElfUtils-External
     COMMENT "Installing ElfUtils...")

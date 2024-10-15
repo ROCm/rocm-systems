@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -44,7 +44,7 @@
 #include <tuple>
 #include <variant>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -62,4 +62,4 @@ template <bool ExcludeInternal>
 std::optional<tim::unwind::processed_entry>
 lookup_ipaddr_entry(uintptr_t, unw_context_t* = nullptr, tim::unwind::cache* = nullptr);
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

@@ -16,6 +16,6 @@ global-exclude *__pycache__*
 
 # recursive excludes
 
-recursive-exclude omnitrace_causal_viewer.egg-info *
+recursive-exclude rocprofsys_causal_viewer.egg-info *
 recursive-exclude build *
 recursive-exclude dist *

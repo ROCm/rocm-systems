@@ -20,7 +20,7 @@ toupper()
 : ${BINARY_DIR:=${PWD}/build}
 : ${SITE:=$(hostname)}
 : ${NAME:=""}
-: ${SUBMIT_URL:="my.cdash.org/submit.php?project=Omnitrace"}
+: ${SUBMIT_URL:="my.cdash.org/submit.php?project=rocprofiler-systems"}
 : ${CODECOV:=0}
 
 usage()
@@ -159,7 +159,7 @@ export CMAKE_BUILD_PARALLEL_LEVEL
 
 if [ "${CODECOV}" -gt 0 ]; then
     GCOV_CMD=$(which gcov)
-    CMAKE_ARGS="${CMAKE_ARGS} -DOMNITRACE_BUILD_CODECOV=ON -DOMNITRACE_STRIP_LIBRARIES=OFF"
+    CMAKE_ARGS="${CMAKE_ARGS} -DROCPROFSYS_BUILD_CODECOV=ON -DROCPROFSYS_STRIP_LIBRARIES=OFF"
 fi
 
 GIT_CMD=$(which git)
@@ -172,7 +172,7 @@ verbose-run mkdir -p ${BINARY_DIR}
 
 cat << EOF > ${BINARY_DIR}/CTestCustom.cmake
 
-set(CTEST_PROJECT_NAME "Omnitrace")
+set(CTEST_PROJECT_NAME "rocprofiler-systems")
 set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 
 set(CTEST_DROP_METHOD "http")
@@ -199,7 +199,7 @@ set(CTEST_SOURCE_DIRECTORY ${SOURCE_DIR})
 set(CTEST_BINARY_DIRECTORY ${BINARY_DIR})
 
 set(CTEST_UPDATE_COMMAND ${GIT_CMD})
-set(CTEST_CONFIGURE_COMMAND "${CMAKE_CMD} -B ${BINARY_DIR} ${SOURCE_DIR} -DOMNITRACE_BUILD_CI=ON ${CMAKE_ARGS}")
+set(CTEST_CONFIGURE_COMMAND "${CMAKE_CMD} -B ${BINARY_DIR} ${SOURCE_DIR} -DROCPROFSYS_BUILD_CI=ON ${CMAKE_ARGS}")
 set(CTEST_BUILD_COMMAND "${CMAKE_CMD} --build ${BINARY_DIR} --target all --parallel ${CMAKE_BUILD_PARALLEL_LEVEL}")
 set(CTEST_COVERAGE_COMMAND ${GCOV_CMD})
 EOF

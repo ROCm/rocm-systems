@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include <thread>
 #include <unistd.h>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace mproc
 {
@@ -46,7 +46,7 @@ get_concurrent_processes(int _ppid)
         std::ifstream _ifs{ _inp };
         if(!_ifs)
         {
-            OMNITRACE_VERBOSE_F(2, "Warning! File '%s' cannot be read\n", _inp.c_str());
+            ROCPROFSYS_VERBOSE_F(2, "Warning! File '%s' cannot be read\n", _inp.c_str());
             return _children;
         }
 
@@ -191,4 +191,4 @@ diagnose_status(pid_t _pid, int _status, int _verbose)
     return _ec;
 }
 }  // namespace mproc
-}  // namespace omnitrace
+}  // namespace rocprofsys

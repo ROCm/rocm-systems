@@ -138,10 +138,10 @@ EXCLUDE_PATTERNS       = */.git/* \
                          ../../examples/* \
                          ../../tests/*
 EXCLUDE_SYMBOLS        = "std::*" \
-                         "OMNITRACE_ATTRIBUTE" \
-                         "OMNITRACE_VISIBILITY" \
-                         "OMNITRACE_PUBLIC_API" \
-                         "OMNITRACE_HIDDEN_API" \
+                         "ROCPROFSYS_ATTRIBUTE" \
+                         "ROCPROFSYS_VISIBILITY" \
+                         "ROCPROFSYS_PUBLIC_API" \
+                         "ROCPROFSYS_HIDDEN_API" \
                          "SpaceHandle" \
                          "KokkosPDevice*"
 EXAMPLE_PATH           = ../../examples
@@ -314,10 +314,10 @@ SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../source/lib/omnitrace-user
 INCLUDE_FILE_PATTERNS  = *.h \
                          *.hpp
-PREDEFINED             = OMNITRACE_PUBLIC_API= \
-                         OMNITRACE_HIDDEN_API= \
-                         "OMNITRACE_ATTRIBUTE(...)=" \
-                         "OMNITRACE_VISIBILITY(...)=" \
+PREDEFINED             = ROCPROFSYS_PUBLIC_API= \
+                         ROCPROFSYS_HIDDEN_API= \
+                         "ROCPROFSYS_ATTRIBUTE(...)=" \
+                         "ROCPROFSYS_VISIBILITY(...)=" \
                          "__attribute__(x)=" \
                          "__declspec(x)=" \
                          "size_t=unsigned long" \

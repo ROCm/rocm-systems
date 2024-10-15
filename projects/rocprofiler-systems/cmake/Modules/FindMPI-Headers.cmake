@@ -10,7 +10,7 @@ set(MPI_HEADERS_VENDOR_INTERNAL
     "OpenMPI"
     CACHE STRING "Distribution type of internal mpi.h")
 set(MPI_HEADERS_INCLUDE_DIR_INTERNAL
-    "${PROJECT_SOURCE_DIR}/source/lib/omnitrace/library/tpls/mpi"
+    "${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/tpls/mpi"
     CACHE PATH "Path to internal ${MPI_HEADERS_VENDOR_INTERNAL} mpi.h")
 mark_as_advanced(MPI_HEADERS_VENDOR_INTERNAL)
 mark_as_advanced(MPI_HEADERS_INCLUDE_DIR_INTERNAL)

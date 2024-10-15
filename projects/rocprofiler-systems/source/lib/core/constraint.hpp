@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,7 @@
 #include <string>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace constraint
 {
@@ -51,7 +51,7 @@ struct stages
 
     stages();
 
-    OMNITRACE_DEFAULT_COPY_MOVE(stages)
+    ROCPROFSYS_DEFAULT_COPY_MOVE(stages)
 
     functor_t init    = [](const spec&) { return true; };
     functor_t wait    = [](const spec&) { return true; };
@@ -69,7 +69,7 @@ struct clock_identifier
     clock_identifier();
     clock_identifier(std::string_view, int);
 
-    OMNITRACE_DEFAULT_COPY_MOVE(clock_identifier)
+    ROCPROFSYS_DEFAULT_COPY_MOVE(clock_identifier)
 
     std::string as_string() const;
 
@@ -91,7 +91,7 @@ struct spec
     spec(const std::string&, double, double, uint64_t = 0, uint64_t = 1);
     spec(const std::string&);
 
-    OMNITRACE_DEFAULT_COPY_MOVE(spec)
+    ROCPROFSYS_DEFAULT_COPY_MOVE(spec)
 
     void operator()(const stages&) const;
 
@@ -111,4 +111,4 @@ get_trace_specs();
 stages
 get_trace_stages();
 }  // namespace constraint
-}  // namespace omnitrace
+}  // namespace rocprofsys

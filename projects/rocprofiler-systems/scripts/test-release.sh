@@ -84,7 +84,7 @@ done
 
 remove-pycache()
 {
-    rm -rf ${1}/lib/python/site-packages/omnitrace/__pycache__
+    rm -rf ${1}/lib/python/site-packages/rocprofsys/__pycache__
 }
 
 setup-env()
@@ -96,11 +96,11 @@ setup-env()
 
 test-install()
 {
-    verbose-run omnitrace-instrument --help
-    verbose-run omnitrace-avail --help
-    verbose-run omnitrace-avail --all
-    if [ -d "${1}/lib/python/site-packages/omnitrace" ]; then
-        verbose-run omnitrace-python --help
+    verbose-run rocprof-sys-instrument --help
+    verbose-run rocprof-sys-avail --help
+    verbose-run rocprof-sys-avail --all
+    if [ -d "${1}/lib/python/site-packages/rocprofsys" ]; then
+        verbose-run rocprof-sys-python --help
     fi
 }
 
@@ -121,12 +121,12 @@ test-stgz()
     if [ -z "${1}" ]; then return; fi
 
     local INSTALLER=$(change-directory ${1})
-    mkdir /opt/omnitrace-stgz
-    setup-env /opt/omnitrace-stgz
+    mkdir /opt/rocprof-sys-stgz
+    setup-env /opt/rocprof-sys-stgz
 
-    verbose-run ${INSTALLER} --prefix=/opt/omnitrace-stgz --skip-license --exclude-dir
+    verbose-run ${INSTALLER} --prefix=/opt/rocprof-sys-stgz --skip-license --exclude-dir
 
-    test-install /opt/omnitrace-stgz
+    test-install /opt/rocprof-sys-stgz
 }
 
 test-deb()
@@ -134,16 +134,16 @@ test-deb()
     if [ -z "${1}" ]; then return; fi
 
     local INSTALLER=$(change-directory ${1})
-    setup-env /opt/omnitrace
+    setup-env /opt/rocprof-sys
 
     verbose-run ${SUDO_CMD} dpkg --contents ${INSTALLER}
     verbose-run ${SUDO_CMD} dpkg -i ${INSTALLER}
 
-    test-install /opt/omnitrace
-    remove-pycache /opt/omnitrace
-    verbose-run apt-get remove -y omnitrace
-    if [ -d /opt/omnitrace ]; then
-        find /opt/omnitrace -type f
+    test-install /opt/rocprof-sys
+    remove-pycache /opt/rocprof-sys
+    verbose-run apt-get remove -y rocprof-sys
+    if [ -d /opt/rocprof-sys ]; then
+        find /opt/rocprof-sys -type f
     fi
 }
 
@@ -152,16 +152,16 @@ test-rpm()
     if [ -z "${1}" ]; then return; fi
 
     local INSTALLER=$(change-directory ${1})
-    setup-env /opt/omnitrace
+    setup-env /opt/rocprof-sys
 
     verbose-run ${SUDO_CMD} rpm -ql -p ${INSTALLER}
     verbose-run ${SUDO_CMD} rpm -v -i -p ${INSTALLER} --nodeps
 
-    test-install /opt/omnitrace
-    remove-pycache /opt/omnitrace
-    verbose-run rpm -e omnitrace
-    if [ -d /opt/omnitrace ]; then
-        find /opt/omnitrace -type f
+    test-install /opt/rocprof-sys
+    remove-pycache /opt/rocprof-sys
+    verbose-run rpm -e rocprof-sys
+    if [ -d /opt/rocprof-sys ]; then
+        find /opt/rocprof-sys -type f
     fi
 }
 

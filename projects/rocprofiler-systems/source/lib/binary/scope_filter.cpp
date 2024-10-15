@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 
 #include <regex>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -43,4 +43,4 @@ scope_filter::operator()(std::string_view _value) const
     throw exception<std::runtime_error>{ "invalid scope filter mode" };
 }
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

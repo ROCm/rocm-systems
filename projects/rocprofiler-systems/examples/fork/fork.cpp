@@ -1,5 +1,5 @@
 
-#include <omnitrace/user.h>
+#include <rocprofiler-systems/user.h>
 
 #include <chrono>
 #include <cstdio>
@@ -33,7 +33,7 @@ run(const char* _name, int nchildren)
     pthread_barrier_init(&_barrier, nullptr, nchildren + 1);
     for(int i = 0; i < nchildren; ++i)
     {
-        omnitrace_user_push_region("launch_child");
+        rocprofsys_user_push_region("launch_child");
         auto _run = [&_barrier, &_children, i, _name](uint64_t _nsec) {
             pthread_barrier_wait(&_barrier);
             _children.at(i) = fork();
@@ -43,13 +43,13 @@ run(const char* _name, int nchildren)
                 print_info(_name);
                 printf("[%s][%i] child job starting...\n", _name, getpid());
                 auto _sleep = [=]() {
-                    omnitrace_user_push_region("child_process_child_thread");
+                    rocprofsys_user_push_region("child_process_child_thread");
                     std::this_thread::sleep_for(std::chrono::seconds{ _nsec });
-                    omnitrace_user_pop_region("child_process_child_thread");
+                    rocprofsys_user_pop_region("child_process_child_thread");
                 };
-                omnitrace_user_push_region("child_process");
+                rocprofsys_user_push_region("child_process");
                 std::thread{ _sleep }.join();
-                omnitrace_user_push_region("child_process");
+                rocprofsys_user_push_region("child_process");
                 printf("[%s][%i] child job complete\n", _name, getpid());
                 exit(EXIT_SUCCESS);
             }
@@ -59,7 +59,7 @@ run(const char* _name, int nchildren)
             }
         };
         _threads.emplace_back(_run, i + 1);
-        omnitrace_user_pop_region("launch_child");
+        rocprofsys_user_pop_region("launch_child");
     }
 
     // all child threads should start executing their fork once this returns
@@ -67,7 +67,7 @@ run(const char* _name, int nchildren)
     // wait for the threads to successfully fork
     pthread_barrier_wait(&_barrier);
 
-    omnitrace_user_push_region("wait_for_children");
+    rocprofsys_user_push_region("wait_for_children");
 
     int   _status   = 0;
     pid_t _wait_pid = 0;
@@ -110,7 +110,7 @@ run(const char* _name, int nchildren)
     for(auto& itr : _threads)
         itr.join();
 
-    omnitrace_user_pop_region("wait_for_children");
+    rocprofsys_user_pop_region("wait_for_children");
 
     printf("[%s][%i] returning (error code: %i) ...\n", _name, getpid(), _status);
     return _status;

@@ -10,7 +10,7 @@ set -e
 
 run-script()
 {
-    echo -e "\n##### omnitrace :: executing '${@}'... #####\n"
+    echo -e "\n##### ${PROJECT_NAME} :: executing '${@}'... #####\n"
     eval $@
 }
 

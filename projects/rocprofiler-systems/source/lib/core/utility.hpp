@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,7 +38,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace utility
 {
@@ -253,4 +253,4 @@ extern template std::unordered_set<int64_t>
 parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
                                                           long);
 }  // namespace utility
-}  // namespace omnitrace
+}  // namespace rocprofsys

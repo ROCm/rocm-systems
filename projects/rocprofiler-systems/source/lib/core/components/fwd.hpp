@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -39,15 +39,15 @@
 
 #include <type_traits>
 
-OMNITRACE_DECLARE_COMPONENT(roctracer)
-OMNITRACE_DECLARE_COMPONENT(rocprofiler)
-OMNITRACE_DECLARE_COMPONENT(rcclp_handle)
-OMNITRACE_DECLARE_COMPONENT(comm_data)
+ROCPROFSYS_DECLARE_COMPONENT(roctracer)
+ROCPROFSYS_DECLARE_COMPONENT(rocprofiler)
+ROCPROFSYS_DECLARE_COMPONENT(rcclp_handle)
+ROCPROFSYS_DECLARE_COMPONENT(comm_data)
 
-OMNITRACE_COMPONENT_ALIAS(comm_data_tracker_t,
-                          ::tim::component::data_tracker<float, project::omnitrace>)
+ROCPROFSYS_COMPONENT_ALIAS(comm_data_tracker_t,
+                           ::tim::component::data_tracker<float, project::rocprofsys>)
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace policy = ::tim::policy;     // NOLINT
 namespace comp   = ::tim::component;  // NOLINT
@@ -94,161 +94,162 @@ template <typename ApiT, typename StartFuncT = default_functor_t,
           typename StopFuncT = default_functor_t>
 struct functors;
 }  // namespace component
-}  // namespace omnitrace
+}  // namespace rocprofsys
 
-#if !defined(OMNITRACE_USE_ROCTRACER)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer, false_type)
+#if !defined(ROCPROFSYS_USE_ROCTRACER)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::roctracer, false_type)
 #endif
 
-#if !defined(OMNITRACE_USE_ROCPROFILER)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler, false_type)
+#if !defined(ROCPROFSYS_USE_ROCPROFILER)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::rocprofiler, false_type)
 #endif
 
-#if !defined(OMNITRACE_USE_RCCL)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, category::rocm_rccl, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::rcclp_handle, false_type)
+#if !defined(ROCPROFSYS_USE_RCCL)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, category::rocm_rccl, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::rcclp_handle, false_type)
 #endif
 
-#if !defined(OMNITRACE_USE_RCCL) && !defined(OMNITRACE_USE_MPI)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data_tracker_t, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data, false_type)
+#if !defined(ROCPROFSYS_USE_RCCL) && !defined(ROCPROFSYS_USE_MPI)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data_tracker_t, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::comm_data, false_type)
 #endif
 
 #if !defined(TIMEMORY_USE_LIBUNWIND)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, category::sampling, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_metrics, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_timestamp, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_wall_clock, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_cpu_clock, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_percent, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, category::sampling, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_metrics, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::backtrace_timestamp, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_wall_clock, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_cpu_clock, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_percent, false_type)
 #endif
 
-#if !defined(TIMEMORY_USE_LIBUNWIND) || !defined(OMNITRACE_USE_ROCM_SMI)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_busy, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_temp, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_power, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_memory, false_type)
+#if !defined(TIMEMORY_USE_LIBUNWIND) || !defined(ROCPROFSYS_USE_ROCM_SMI)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_busy, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_temp, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_power, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_available, component::sampling_gpu_memory, false_type)
 #endif
 
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::roctracer, project::omnitrace,
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::roctracer, project::rocprofsys,
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::external)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::rocprofiler, project::omnitrace,
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::rocprofiler, project::rocprofsys,
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::external, category::hardware_counter)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_wall_clock, project::omnitrace,
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_wall_clock,
+                           project::rocprofsys, category::timing, os::supports_unix,
+                           category::sampling, category::interrupt_sampling)
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_cpu_clock, project::rocprofsys,
                            category::timing, os::supports_unix, category::sampling,
                            category::interrupt_sampling)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_cpu_clock, project::omnitrace,
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_percent, project::rocprofsys,
                            category::timing, os::supports_unix, category::sampling,
                            category::interrupt_sampling)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_percent, project::omnitrace,
-                           category::timing, os::supports_unix, category::sampling,
-                           category::interrupt_sampling)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_busy, project::omnitrace,
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_busy, project::rocprofsys,
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::sampling, category::process_sampling)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_memory, project::omnitrace,
-                           tpls::rocm, device::gpu, os::supports_linux, category::memory,
-                           category::sampling, category::process_sampling)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_power, project::omnitrace,
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_memory,
+                           project::rocprofsys, tpls::rocm, device::gpu,
+                           os::supports_linux, category::memory, category::sampling,
+                           category::process_sampling)
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_power, project::rocprofsys,
                            tpls::rocm, device::gpu, os::supports_linux, category::power,
                            category::sampling, category::process_sampling)
-TIMEMORY_SET_COMPONENT_API(omnitrace::component::sampling_gpu_temp, project::omnitrace,
+TIMEMORY_SET_COMPONENT_API(rocprofsys::component::sampling_gpu_temp, project::rocprofsys,
                            tpls::rocm, device::gpu, os::supports_linux,
                            category::temperature, category::sampling,
                            category::process_sampling)
 
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::roctracer, "roctracer",
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::roctracer, "roctracer",
                                  "High-precision ROCm API and kernel tracing", "")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::rocprofiler, "rocprofiler",
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::rocprofiler, "rocprofiler",
                                  "ROCm kernel hardware counters", "")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_wall_clock,
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_wall_clock,
                                  "sampling_wall_clock", "Wall-clock timing",
                                  "Derived from statistical sampling")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_cpu_clock,
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_cpu_clock,
                                  "sampling_cpu_clock", "CPU-clock timing",
                                  "Derived from statistical sampling")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_percent,
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_percent,
                                  "sampling_percent",
                                  "Fraction of wall-clock time spent in functions",
                                  "Derived from statistical sampling")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_gpu_busy,
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_busy,
                                  "sampling_gpu_busy",
                                  "GPU Utilization (% busy) via ROCm-SMI",
                                  "Derived from sampling")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_gpu_memory,
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_memory,
                                  "sampling_gpu_memory_usage",
                                  "GPU Memory Usage via ROCm-SMI", "Derived from sampling")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_gpu_power,
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_power,
                                  "sampling_gpu_power", "GPU Power Usage via ROCm-SMI",
                                  "Derived from sampling")
-TIMEMORY_METADATA_SPECIALIZATION(omnitrace::component::sampling_gpu_temp,
+TIMEMORY_METADATA_SPECIALIZATION(rocprofsys::component::sampling_gpu_temp,
                                  "sampling_gpu_temp", "GPU Temperature via ROCm-SMI",
                                  "Derived from sampling")
 
 // statistics type
-TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_wall_clock, double)
-TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_cpu_clock, double)
-TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_busy, double)
-TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_temp, double)
-TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_power, double)
-TIMEMORY_STATISTICS_TYPE(omnitrace::component::sampling_gpu_memory, double)
-TIMEMORY_STATISTICS_TYPE(omnitrace::component::comm_data_tracker_t, float)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_wall_clock, double)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_cpu_clock, double)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_busy, double)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_temp, double)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_power, double)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::sampling_gpu_memory, double)
+TIMEMORY_STATISTICS_TYPE(rocprofsys::component::comm_data_tracker_t, float)
 
 // enable timing units
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_wall_clock,
-                                true_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_cpu_clock,
-                                true_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_percent,
-                                true_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::sampling_wall_clock,
-                                true_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::sampling_cpu_clock,
-                                true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_wall_clock,
+                                 true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_cpu_clock,
+                                 true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_timing_category, component::sampling_percent,
+                                 true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::sampling_wall_clock,
+                                 true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(uses_timing_units, component::sampling_cpu_clock,
+                                 true_type)
 
 // enable percent units
-OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_percent_units, component::sampling_gpu_busy,
-                                true_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_percent_units, component::sampling_percent,
-                                true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(uses_percent_units, component::sampling_gpu_busy,
+                                 true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(uses_percent_units, component::sampling_percent,
+                                 true_type)
 
 // enable memory units
-OMNITRACE_DEFINE_CONCRETE_TRAIT(is_memory_category, component::sampling_gpu_memory,
-                                true_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(uses_memory_units, component::sampling_gpu_memory,
-                                true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(is_memory_category, component::sampling_gpu_memory,
+                                 true_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(uses_memory_units, component::sampling_gpu_memory,
+                                 true_type)
 
 // reporting categories (sum)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_busy, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_temp, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_power, false_type)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_memory, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_busy, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_temp, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_power, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_sum, component::sampling_gpu_memory, false_type)
 
 // reporting categories (mean)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(report_mean, component::sampling_percent, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_mean, component::sampling_percent, false_type)
 
 // reporting categories (stats)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(report_statistics, component::sampling_percent,
-                                false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_statistics, component::sampling_percent,
+                                 false_type)
 
 // reporting categories (self)
-OMNITRACE_DEFINE_CONCRETE_TRAIT(report_self, component::sampling_percent, false_type)
+ROCPROFSYS_DEFINE_CONCRETE_TRAIT(report_self, component::sampling_percent, false_type)
 
-#define OMNITRACE_DECLARE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                          \
+#define ROCPROFSYS_DECLARE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                         \
     TIMEMORY_DECLARE_EXTERN_TEMPLATE(                                                    \
-        struct tim::component::base<TIMEMORY_ESC(omnitrace::component::NAME),            \
+        struct tim::component::base<TIMEMORY_ESC(rocprofsys::component::NAME),           \
                                     __VA_ARGS__>)                                        \
-    TIMEMORY_DECLARE_EXTERN_OPERATIONS(TIMEMORY_ESC(omnitrace::component::NAME),         \
+    TIMEMORY_DECLARE_EXTERN_OPERATIONS(TIMEMORY_ESC(rocprofsys::component::NAME),        \
                                        HAS_DATA)                                         \
-    TIMEMORY_DECLARE_EXTERN_STORAGE(TIMEMORY_ESC(omnitrace::component::NAME))
+    TIMEMORY_DECLARE_EXTERN_STORAGE(TIMEMORY_ESC(rocprofsys::component::NAME))
 
-#define OMNITRACE_INSTANTIATE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                      \
+#define ROCPROFSYS_INSTANTIATE_EXTERN_COMPONENT(NAME, HAS_DATA, ...)                     \
     TIMEMORY_INSTANTIATE_EXTERN_TEMPLATE(                                                \
-        struct tim::component::base<TIMEMORY_ESC(omnitrace::component::NAME),            \
+        struct tim::component::base<TIMEMORY_ESC(rocprofsys::component::NAME),           \
                                     __VA_ARGS__>)                                        \
-    TIMEMORY_INSTANTIATE_EXTERN_OPERATIONS(TIMEMORY_ESC(omnitrace::component::NAME),     \
+    TIMEMORY_INSTANTIATE_EXTERN_OPERATIONS(TIMEMORY_ESC(rocprofsys::component::NAME),    \
                                            HAS_DATA)                                     \
-    TIMEMORY_INSTANTIATE_EXTERN_STORAGE(TIMEMORY_ESC(omnitrace::component::NAME))
+    TIMEMORY_INSTANTIATE_EXTERN_STORAGE(TIMEMORY_ESC(rocprofsys::component::NAME))

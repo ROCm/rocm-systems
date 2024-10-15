@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include <cstdint>
 #include <limits>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -43,7 +43,7 @@ struct address_range
     uintptr_t low  = std::numeric_limits<uintptr_t>::max();
     uintptr_t high = std::numeric_limits<uintptr_t>::min();
 
-    OMNITRACE_DEFAULT_OBJECT(address_range)
+    ROCPROFSYS_DEFAULT_OBJECT(address_range)
 
     explicit address_range(uintptr_t _v);
     address_range(uintptr_t _low, uintptr_t _high);
@@ -89,14 +89,14 @@ operator+(uintptr_t _v, binary::address_range _lhs)
 {
     return (_lhs += _v);
 }
-}  // namespace omnitrace
+}  // namespace rocprofsys
 
 namespace std
 {
 template <>
-struct hash<::omnitrace::binary::address_range>
+struct hash<::rocprofsys::binary::address_range>
 {
-    using address_range_t = ::omnitrace::binary::address_range;
+    using address_range_t = ::rocprofsys::binary::address_range;
 
     auto operator()(const address_range_t& _v) const { return _v.hash(); }
     auto operator()(address_range_t&& _v) const { return _v.hash(); }

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 from __future__ import absolute_import
 
 __author__ = "AMD Research"
-__copyright__ = "Copyright 2023, Advanced Micro Devices, Inc."
+__copyright__ = "Copyright 2023-2024, Advanced Micro Devices, Inc."
 __license__ = "MIT"
 __maintainer__ = "AMD Research"
 __status__ = "Development"
@@ -270,7 +270,7 @@ class experiment_progress(object):
 def process_samples(data, _data):
     if not _data:
         return data
-    for record in _data["omnitrace"]["causal"]["records"]:
+    for record in _data["rocprofsys"]["causal"]["records"]:
         for samp in record["samples"]:
             _info = samp["info"]
             _count = samp["count"]
@@ -303,7 +303,7 @@ def process_data(data, _data, experiments, progress_points):
     _selection_filter = re.compile(experiments)
     _progresspt_filter = re.compile(progress_points)
 
-    for record in _data["omnitrace"]["causal"]["records"]:
+    for record in _data["rocprofsys"]["causal"]["records"]:
         for exp in record["experiments"]:
             _speedup = exp["virtual_speedup"]
             _duration = exp["duration"]
@@ -612,8 +612,8 @@ def parse_files(
             with open(file, "r") as j:
                 _data = json.load(j)
                 dict_data = {}
-                # make sure the JSON is an omnitrace causal JSON
-                if "omnitrace" not in _data or "causal" not in _data["omnitrace"]:
+                # make sure the JSON is an rocprof-sys causal JSON
+                if "rocprofsys" not in _data or "causal" not in _data["rocprofsys"]:
                     continue
                 dict_data[file] = process_data({}, _data, experiments, progress_points)
                 samps = process_samples({}, _data)
@@ -831,8 +831,8 @@ def find_causal_files(workload_path, verbose, recursive):
                 with open(itr, "r") as f:
                     inp_data = json.load(f)
                     if (
-                        "omnitrace" not in inp_data.keys()
-                        or "causal" not in inp_data["omnitrace"].keys()
+                        "rocprofsys" not in inp_data.keys()
+                        or "causal" not in inp_data["rocprofsys"].keys()
                     ):
                         if verbose >= 2:
                             print(f"{itr} is not a causal profile")

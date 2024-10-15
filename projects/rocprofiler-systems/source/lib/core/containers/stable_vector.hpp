@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,11 +34,11 @@
 #include <type_traits>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace container
 {
-template <typename Tp, size_t ChunkSizeV = OMNITRACE_MAX_THREADS,
+template <typename Tp, size_t ChunkSizeV = ROCPROFSYS_MAX_THREADS,
           size_t AlignN = alignof(Tp)>
 class stable_vector
 {
@@ -299,7 +299,7 @@ template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 typename stable_vector<Tp, ChunkSizeV, AlignN>::chunk_type&
 stable_vector<Tp, ChunkSizeV, AlignN>::last_chunk()
 {
-    if(OMNITRACE_UNLIKELY(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV))
+    if(ROCPROFSYS_UNLIKELY(m_chunks.empty() || m_chunks.back()->size() == ChunkSizeV))
     {
         add_chunk();
     }
@@ -358,9 +358,9 @@ template <typename Tp, size_t ChunkSizeV, size_t AlignN>
 typename stable_vector<Tp, ChunkSizeV, AlignN>::reference
 stable_vector<Tp, ChunkSizeV, AlignN>::at(size_type i)
 {
-    if(OMNITRACE_UNLIKELY(i >= size()))
+    if(ROCPROFSYS_UNLIKELY(i >= size()))
     {
-        throw ::omnitrace::exception<std::out_of_range>(
+        throw ::rocprofsys::exception<std::out_of_range>(
             "stable_vector::at(" + std::to_string(i) + "). size is " +
             std::to_string(size()));
     }
@@ -387,4 +387,4 @@ resize(stable_vector<Tp, ChunkSizeV, AlignN>& _v, size_t _n, Args&&... args)
     return _v.size();
 }
 }  // namespace container
-}  // namespace omnitrace
+}  // namespace rocprofsys

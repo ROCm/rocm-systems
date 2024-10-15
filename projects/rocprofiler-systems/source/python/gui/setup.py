@@ -47,16 +47,16 @@ def parse_requirements(fname="requirements.txt"):
 
 
 setup(
-    name="omnitrace-causal-viewer",
+    name="rocprof-sys-causal-viewer",
     version=get_project_version(),
     description="GUI for viewing causal profilers",
     long_description=get_long_description(),
     long_description_content_type="text/markdown",
     author="AMD Research",
-    packages=["omnitrace_causal_viewer"],
-    package_dir={"omnitrace_causal_viewer": "source"},
+    packages=["rocprof_sys_causal_viewer"],
+    package_dir={"rocprof_sys_causal_viewer": "source"},
     package_data={
-        "omnitrace_causal_viewer": [
+        "rocprof_sys_causal_viewer": [
             "source/assets/*",
             "source/workloads/*",
             "source/VERSION",
@@ -65,6 +65,8 @@ setup(
     install_requires=parse_requirements(),
     python_requires=">=3.6",
     entry_points={
-        "console_scripts": ["omnitrace-causal-plot=omnitrace_causal_viewer.__main__:main"]
+        "console_scripts": [
+            "rocprof-sys-causal-plot=rocprof_sys_causal_viewer.__main__:main"
+        ]
     },
 )

@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(omnitrace-python)
+project(rocprofiler-systems-python)
 
-if(OMNITRACE_DISABLE_EXAMPLES)
+if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                             OMNITRACE_DISABLE_EXAMPLES)
+    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                              ROCPROFSYS_DISABLE_EXAMPLES)
         return()
     endif()
 endif()
@@ -22,11 +22,11 @@ if(Python3_FOUND)
         configure_file(${PROJECT_SOURCE_DIR}/${_FILE} ${PROJECT_BINARY_DIR}/${_FILE}
                        @ONLY)
 
-        if(OMNITRACE_INSTALL_EXAMPLES)
+        if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
                 PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
                 DESTINATION bin
-                COMPONENT omnitrace-examples)
+                COMPONENT rocprofiler-systems-examples)
         endif()
     endforeach()
 endif()

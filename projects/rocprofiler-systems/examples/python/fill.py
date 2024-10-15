@@ -3,9 +3,9 @@
 import os
 import sys
 import time
-import omnitrace
-from omnitrace.user import region as omni_user_region
-from omnitrace.profiler import config as omni_config
+import rocprofsys
+from rocprofsys.user import region as omni_user_region
+from rocprofsys.profiler import config as omni_config
 
 _prefix = ""
 
@@ -14,7 +14,7 @@ def loop(n):
     pass
 
 
-@omnitrace.profile()
+@rocprofsys.profile()
 def run(i, n, v):
     for l in range(n * n):
         loop(v + l)

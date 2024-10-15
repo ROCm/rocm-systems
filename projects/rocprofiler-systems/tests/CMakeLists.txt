@@ -1,27 +1,27 @@
 #
-#   omnitrace tests
+#   rocprofiler-systems tests
 #
 include_guard(GLOBAL)
 
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-testing.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-testing.cmake)
 
 # test groups
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-config-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-instrument-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-pthread-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-rocm-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-user-api-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-mpi-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-kokkos-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-openmp-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-code-coverage-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-fork-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-time-window-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-attach-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-rccl-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-overflow-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-annotate-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-causal-tests.cmake)
-include(${CMAKE_CURRENT_LIST_DIR}/omnitrace-python-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-config-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-instrument-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-pthread-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rocm-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-user-api-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-mpi-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-kokkos-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-openmp-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-code-coverage-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-fork-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-time-window-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-attach-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-rccl-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-overflow-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-annotate-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-causal-tests.cmake)
+include(${CMAKE_CURRENT_LIST_DIR}/rocprof-sys-python-tests.cmake)
 
 add_subdirectory(source)

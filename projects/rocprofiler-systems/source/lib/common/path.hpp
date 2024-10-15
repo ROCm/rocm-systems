@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -38,46 +38,47 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#if !defined(OMNITRACE_PATH_LOG_NAME)
-#    if defined(OMNITRACE_COMMON_LIBRARY_NAME)
-#        define OMNITRACE_PATH_LOG_NAME "[" OMNITRACE_COMMON_LIBRARY_NAME "]"
+#if !defined(ROCPROFSYS_PATH_LOG_NAME)
+#    if defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
+#        define ROCPROFSYS_PATH_LOG_NAME "[" ROCPROFSYS_COMMON_LIBRARY_NAME "]"
 #    else
-#        define OMNITRACE_PATH_LOG_NAME
+#        define ROCPROFSYS_PATH_LOG_NAME
 #    endif
 #endif
 
-#if !defined(OMNITRACE_PATH_LOG_START)
-#    if defined(OMNITRACE_COMMON_LIBRARY_LOG_START)
-#        define OMNITRACE_PATH_LOG_START OMNITRACE_COMMON_LIBRARY_LOG_START
+#if !defined(ROCPROFSYS_PATH_LOG_START)
+#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
+#        define ROCPROFSYS_PATH_LOG_START ROCPROFSYS_COMMON_LIBRARY_LOG_START
 #    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define OMNITRACE_PATH_LOG_START fprintf(stderr, "%s", ::tim::log::color::info());
+#        define ROCPROFSYS_PATH_LOG_START                                                \
+            fprintf(stderr, "%s", ::tim::log::color::info());
 #    else
-#        define OMNITRACE_PATH_LOG_START
+#        define ROCPROFSYS_PATH_LOG_START
 #    endif
 #endif
 
-#if !defined(OMNITRACE_PATH_LOG_END)
-#    if defined(OMNITRACE_COMMON_LIBRARY_LOG_END)
-#        define OMNITRACE_PATH_LOG_END OMNITRACE_COMMON_LIBRARY_LOG_END
+#if !defined(ROCPROFSYS_PATH_LOG_END)
+#    if defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
+#        define ROCPROFSYS_PATH_LOG_END ROCPROFSYS_COMMON_LIBRARY_LOG_END
 #    elif defined(TIMEMORY_LOG_COLORS_AVAILABLE)
-#        define OMNITRACE_PATH_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
+#        define ROCPROFSYS_PATH_LOG_END fprintf(stderr, "%s", ::tim::log::color::end());
 #    else
-#        define OMNITRACE_PATH_LOG_END
+#        define ROCPROFSYS_PATH_LOG_END
 #    endif
 #endif
 
-#define OMNITRACE_PATH_LOG(CONDITION, ...)                                               \
+#define ROCPROFSYS_PATH_LOG(CONDITION, ...)                                              \
     if(CONDITION)                                                                        \
     {                                                                                    \
         fflush(stderr);                                                                  \
-        OMNITRACE_PATH_LOG_START                                                         \
-        fprintf(stderr, "[omnitrace]" OMNITRACE_PATH_LOG_NAME "[%i] ", getpid());        \
+        ROCPROFSYS_PATH_LOG_START                                                        \
+        fprintf(stderr, "[rocprof-sys]" ROCPROFSYS_PATH_LOG_NAME "[%i] ", getpid());     \
         fprintf(stderr, __VA_ARGS__);                                                    \
-        OMNITRACE_PATH_LOG_END                                                           \
+        ROCPROFSYS_PATH_LOG_END                                                          \
         fflush(stderr);                                                                  \
     }
 
-namespace omnitrace
+namespace rocprofsys
 {
 inline namespace common
 {
@@ -85,45 +86,45 @@ namespace path
 {
 inline std::vector<std::string>
 get_link_map(const char*, std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) },
-             bool _include_self = false) OMNITRACE_INTERNAL_API;
+             bool _include_self = false) ROCPROFSYS_INTERNAL_API;
 
 inline auto
 get_link_map(const char* _name, bool&& _include_self,
              std::vector<int>&& _open_modes = {
-                 (RTLD_LAZY | RTLD_NOLOAD) }) OMNITRACE_INTERNAL_API;
+                 (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 get_origin(const std::string&,
-           std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) }) OMNITRACE_INTERNAL_API;
+           std::vector<int>&& = { (RTLD_LAZY | RTLD_NOLOAD) }) ROCPROFSYS_INTERNAL_API;
 
 inline bool
-exists(const std::string& _fname) OMNITRACE_INTERNAL_API;
+exists(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
 template <typename RetT = std::string>
 inline RetT
-get_default_lib_search_paths() OMNITRACE_INTERNAL_API;
+get_default_lib_search_paths() ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 find_path(const std::string& _path, int _verbose,
-          const std::string& _search_paths = {}) OMNITRACE_INTERNAL_API;
+          const std::string& _search_paths = {}) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
-dirname(const std::string& _fname) OMNITRACE_INTERNAL_API;
+dirname(const std::string& _fname) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
 realpath(const std::string& _relpath,
-         std::string*       _resolved = nullptr) OMNITRACE_INTERNAL_API;
+         std::string*       _resolved = nullptr) ROCPROFSYS_INTERNAL_API;
 
 inline bool
-is_text_file(const std::string& filename) OMNITRACE_INTERNAL_API;
+is_text_file(const std::string& filename) ROCPROFSYS_INTERNAL_API;
 
 inline bool
-is_link(const std::string& _path) OMNITRACE_INTERNAL_API;
+is_link(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
 inline std::string
-readlink(const std::string& _path) OMNITRACE_INTERNAL_API;
+readlink(const std::string& _path) ROCPROFSYS_INTERNAL_API;
 
-struct OMNITRACE_INTERNAL_API path_type
+struct ROCPROFSYS_INTERNAL_API path_type
 {
     enum path_type_e
     {
@@ -181,8 +182,9 @@ template <typename RetT>
 RetT
 get_default_lib_search_paths()
 {
-    auto _paths = join(":", get_env("OMNITRACE_PATH", ""), get_env("LD_LIBRARY_PATH", ""),
-                       get_env("LIBRARY_PATH", ""), get_env("PWD", ""), ".");
+    auto _paths =
+        join(":", get_env("ROCPROFSYS_PATH", ""), get_env("LD_LIBRARY_PATH", ""),
+             get_env("LIBRARY_PATH", ""), get_env("PWD", ""), ".");
     if constexpr(std::is_same<RetT, std::string>::value)
         return _paths;
     else
@@ -204,13 +206,13 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
     for(const auto& itr : _paths)
     {
         auto _f = join('/', itr, _path);
-        OMNITRACE_PATH_LOG(_verbose >= _verbose_lvl + 1,
-                           "searching for '%s' in '%s' ...\n", _path.c_str(),
-                           itr.c_str());
+        ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
+                            "searching for '%s' in '%s' ...\n", _path.c_str(),
+                            itr.c_str());
         if(exists(_f))
         {
-            OMNITRACE_PATH_LOG(_verbose >= _verbose_lvl, "found '%s' in '%s' ...\n",
-                               _path.c_str(), itr.c_str());
+            ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl, "found '%s' in '%s' ...\n",
+                                _path.c_str(), itr.c_str());
             return _f;
         }
     }
@@ -224,14 +226,14 @@ find_path(const std::string& _path, int _verbose, const std::string& _search_pat
             for(const auto* sitr : { "lib", "lib64", "../lib", "../lib64" })
             {
                 auto _f = join('/', dirname(itr), sitr, _path);
-                OMNITRACE_PATH_LOG(_verbose >= _verbose_lvl + 1,
-                                   "searching for '%s' in '%s' ...\n", _path.c_str(),
-                                   common::join('/', itr, sitr).c_str());
+                ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl + 1,
+                                    "searching for '%s' in '%s' ...\n", _path.c_str(),
+                                    common::join('/', itr, sitr).c_str());
                 if(exists(_f))
                 {
-                    OMNITRACE_PATH_LOG(_verbose >= _verbose_lvl,
-                                       "found '%s' in '%s' ...\n", _path.c_str(),
-                                       itr.c_str());
+                    ROCPROFSYS_PATH_LOG(_verbose >= _verbose_lvl,
+                                        "found '%s' in '%s' ...\n", _path.c_str(),
+                                        itr.c_str());
                     return _f;
                 }
             }
@@ -317,7 +319,7 @@ is_text_file(const std::string& filename)
     std::ifstream _file{ filename, std::ios::in | std::ios::binary };
     if(!_file.is_open())
     {
-        OMNITRACE_PATH_LOG(0, "Error! '%s' could not be opened...\n", filename.c_str());
+        ROCPROFSYS_PATH_LOG(0, "Error! '%s' could not be opened...\n", filename.c_str());
         return false;
     }
 
@@ -411,4 +413,4 @@ get_origin(const std::string& _filename, std::vector<int>&& _open_modes)
 }
 }  // namespace path
 }  // namespace common
-}  // namespace omnitrace
+}  // namespace rocprofsys

@@ -1,6 +1,6 @@
 # configure packaging
 
-function(omnitrace_parse_release)
+function(rocprofiler_systems_parse_release)
     if(EXISTS /etc/lsb-release AND NOT IS_DIRECTORY /etc/lsb-release)
         file(READ /etc/lsb-release _LSB_RELEASE)
         if(_LSB_RELEASE)
@@ -27,7 +27,7 @@ function(omnitrace_parse_release)
 endfunction()
 
 # parse either /etc/lsb-release or /etc/os-release
-omnitrace_parse_release()
+rocprofiler_systems_parse_release()
 
 if(NOT _SYSTEM_NAME)
     set(_SYSTEM_NAME "${CMAKE_SYSTEM_NAME}")
@@ -42,83 +42,83 @@ set(CPACK_PACKAGE_VERSION_MAJOR "${PROJECT_VERSION_MAJOR}")
 set(CPACK_PACKAGE_VERSION_MINOR "${PROJECT_VERSION_MINOR}")
 set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 
-set(CPACK_PACKAGE_CONTACT "jonathan.madsen@amd.com")
+set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-systems")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
-set(OMNITRACE_CPACK_SYSTEM_NAME
+set(ROCPROFSYS_CPACK_SYSTEM_NAME
     "${_SYSTEM_NAME}"
     CACHE STRING "System name, e.g. Linux or Ubuntu-20.04")
-set(OMNITRACE_CPACK_PACKAGE_SUFFIX "")
+set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX "")
 
-if(OMNITRACE_USE_HIP
-   OR OMNITRACE_USE_ROCTRACER
-   OR OMNITRACE_USE_ROCM_SMI)
-    set(OMNITRACE_CPACK_PACKAGE_SUFFIX
-        "${OMNITRACE_CPACK_PACKAGE_SUFFIX}-ROCm-${ROCmVersion_NUMERIC_VERSION}")
+if(ROCPROFSYS_USE_HIP
+   OR ROCPROFSYS_USE_ROCTRACER
+   OR ROCPROFSYS_USE_ROCM_SMI)
+    set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX
+        "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-ROCm-${ROCmVersion_NUMERIC_VERSION}")
 endif()
 
-if(OMNITRACE_USE_PAPI)
-    set(OMNITRACE_CPACK_PACKAGE_SUFFIX "${OMNITRACE_CPACK_PACKAGE_SUFFIX}-PAPI")
+if(ROCPROFSYS_USE_PAPI)
+    set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-PAPI")
 endif()
 
-if(OMNITRACE_USE_OMPT)
-    set(OMNITRACE_CPACK_PACKAGE_SUFFIX "${OMNITRACE_CPACK_PACKAGE_SUFFIX}-OMPT")
+if(ROCPROFSYS_USE_OMPT)
+    set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-OMPT")
 endif()
 
-if(OMNITRACE_USE_MPI)
+if(ROCPROFSYS_USE_MPI)
     set(VALID_MPI_IMPLS "mpich" "openmpi")
     if("${MPI_C_COMPILER_INCLUDE_DIRS};${MPI_C_HEADER_DIR}" MATCHES "openmpi")
-        set(OMNITRACE_MPI_IMPL "openmpi")
+        set(ROCPROFSYS_MPI_IMPL "openmpi")
     elseif("${MPI_C_COMPILER_INCLUDE_DIRS};${MPI_C_HEADER_DIR}" MATCHES "mpich")
-        set(OMNITRACE_MPI_IMPL "mpich")
+        set(ROCPROFSYS_MPI_IMPL "mpich")
     else()
         message(
             WARNING
-                "MPI implementation could not be determined. Please set OMNITRACE_MPI_IMPL to one of the following for CPack: ${VALID_MPI_IMPLS}"
+                "MPI implementation could not be determined. Please set ROCPROFSYS_MPI_IMPL to one of the following for CPack: ${VALID_MPI_IMPLS}"
             )
     endif()
-    if(OMNITRACE_MPI_IMPL AND NOT "${OMNITRACE_MPI_IMPL}" IN_LIST VALID_MPI_IMPLS)
+    if(ROCPROFSYS_MPI_IMPL AND NOT "${ROCPROFSYS_MPI_IMPL}" IN_LIST VALID_MPI_IMPLS)
         message(
             SEND_ERROR
-                "Invalid OMNITRACE_MPI_IMPL (${OMNITRACE_MPI_IMPL}). Should be one of: ${VALID_MPI_IMPLS}"
+                "Invalid ROCPROFSYS_MPI_IMPL (${ROCPROFSYS_MPI_IMPL}). Should be one of: ${VALID_MPI_IMPLS}"
             )
     else()
-        omnitrace_add_feature(OMNITRACE_MPI_IMPL
-                              "MPI implementation for CPack DEBIAN depends")
+        rocprofiler_systems_add_feature(ROCPROFSYS_MPI_IMPL
+                                        "MPI implementation for CPack DEBIAN depends")
     endif()
 
-    if("${OMNITRACE_MPI_IMPL}" STREQUAL "openmpi")
-        set(OMNITRACE_MPI_IMPL_UPPER "OpenMPI")
-    elseif("${OMNITRACE_MPI_IMPL}" STREQUAL "mpich")
-        set(OMNITRACE_MPI_IMPL_UPPER "MPICH")
+    if("${ROCPROFSYS_MPI_IMPL}" STREQUAL "openmpi")
+        set(ROCPROFSYS_MPI_IMPL_UPPER "OpenMPI")
+    elseif("${ROCPROFSYS_MPI_IMPL}" STREQUAL "mpich")
+        set(ROCPROFSYS_MPI_IMPL_UPPER "MPICH")
     else()
-        set(OMNITRACE_MPI_IMPL_UPPER "MPI")
+        set(ROCPROFSYS_MPI_IMPL_UPPER "MPI")
     endif()
-    set(OMNITRACE_CPACK_PACKAGE_SUFFIX
-        "${OMNITRACE_CPACK_PACKAGE_SUFFIX}-${OMNITRACE_MPI_IMPL_UPPER}")
+    set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX
+        "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-${ROCPROFSYS_MPI_IMPL_UPPER}")
 endif()
 
-if(OMNITRACE_USE_PYTHON)
-    set(_OMNITRACE_PYTHON_NAME "Python3")
-    foreach(_VER ${OMNITRACE_PYTHON_VERSIONS})
+if(ROCPROFSYS_USE_PYTHON)
+    set(_ROCPROFSYS_PYTHON_NAME "Python3")
+    foreach(_VER ${ROCPROFSYS_PYTHON_VERSIONS})
         if("${_VER}" VERSION_LESS 3.0.0)
-            set(_OMNITRACE_PYTHON_NAME "Python")
+            set(_ROCPROFSYS_PYTHON_NAME "Python")
         endif()
     endforeach()
-    set(OMNITRACE_CPACK_PACKAGE_SUFFIX "${OMNITRACE_CPACK_PACKAGE_SUFFIX}-Python3")
+    set(ROCPROFSYS_CPACK_PACKAGE_SUFFIX "${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}-Python3")
 endif()
 
 set(CPACK_PACKAGE_FILE_NAME
-    "${CPACK_PACKAGE_NAME}-${OMNITRACE_VERSION}-${OMNITRACE_CPACK_SYSTEM_NAME}${OMNITRACE_CPACK_PACKAGE_SUFFIX}"
+    "${CPACK_PACKAGE_NAME}-${ROCPROFSYS_VERSION}-${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}"
     )
 if(DEFINED ENV{CPACK_PACKAGE_FILE_NAME})
     set(CPACK_PACKAGE_FILE_NAME $ENV{CPACK_PACKAGE_FILE_NAME})
 endif()
 
-set(OMNITRACE_PACKAGE_FILE_NAME
-    ${CPACK_PACKAGE_NAME}-${OMNITRACE_VERSION}-${OMNITRACE_CPACK_SYSTEM_NAME}${OMNITRACE_CPACK_PACKAGE_SUFFIX}
+set(ROCPROFSYS_PACKAGE_FILE_NAME
+    ${CPACK_PACKAGE_NAME}-${ROCPROFSYS_VERSION}-${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}
     )
-omnitrace_add_feature(OMNITRACE_PACKAGE_FILE_NAME "CPack filename")
+rocprofiler_systems_add_feature(ROCPROFSYS_PACKAGE_FILE_NAME "CPack filename")
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -126,9 +126,9 @@ omnitrace_add_feature(OMNITRACE_PACKAGE_FILE_NAME "CPack filename")
 #
 # -------------------------------------------------------------------------------------- #
 
-set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/omnitrace")
+set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "https://github.com/ROCm/rocprofiler-systems")
 set(CPACK_DEBIAN_PACKAGE_RELEASE
-    "${OMNITRACE_CPACK_SYSTEM_NAME}${OMNITRACE_CPACK_PACKAGE_SUFFIX}")
+    "${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}")
 string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_DEBIAN_PACKAGE_RELEASE
                      "${CPACK_DEBIAN_PACKAGE_RELEASE}")
 string(REPLACE "-" "~" CPACK_DEBIAN_PACKAGE_RELEASE "${CPACK_DEBIAN_PACKAGE_RELEASE}")
@@ -137,10 +137,10 @@ set(_DEBIAN_PACKAGE_DEPENDS "")
 if(DYNINST_USE_OpenMP)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS libgomp1)
 endif()
-if(OMNITRACE_USE_PAPI AND NOT OMNITRACE_BUILD_PAPI)
+if(ROCPROFSYS_USE_PAPI AND NOT ROCPROFSYS_BUILD_PAPI)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS libpapi-dev libpfm4)
 endif()
-if(NOT OMNITRACE_BUILD_DYNINST)
+if(NOT ROCPROFSYS_BUILD_DYNINST)
     if(NOT DYNINST_BUILD_BOOST)
         foreach(_BOOST_COMPONENT atomic system thread date-time filesystem timer)
             list(APPEND _DEBIAN_PACKAGE_DEPENDS
@@ -160,19 +160,19 @@ if(ROCmVersion_FOUND)
     set(_ROCM_SMI_SUFFIX
         " (>= ${ROCmVersion_MAJOR_VERSION}.0.0.${ROCmVersion_NUMERIC_VERSION})")
 endif()
-if(OMNITRACE_USE_ROCM_SMI)
+if(ROCPROFSYS_USE_ROCM_SMI)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS "rocm-smi-lib${_ROCM_SMI_SUFFIX}")
 endif()
-if(OMNITRACE_USE_ROCTRACER)
+if(ROCPROFSYS_USE_ROCTRACER)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS "roctracer-dev${_ROCTRACER_SUFFIX}")
 endif()
-if(OMNITRACE_USE_ROCPROFILER)
+if(ROCPROFSYS_USE_ROCPROFILER)
     list(APPEND _DEBIAN_PACKAGE_DEPENDS "rocprofiler-dev${_ROCPROFILER_SUFFIX}")
 endif()
-if(OMNITRACE_USE_MPI)
-    if("${OMNITRACE_MPI_IMPL}" STREQUAL "openmpi")
+if(ROCPROFSYS_USE_MPI)
+    if("${ROCPROFSYS_MPI_IMPL}" STREQUAL "openmpi")
         list(APPEND _DEBIAN_PACKAGE_DEPENDS "libopenmpi-dev")
-    elseif("${OMNITRACE_MPI_IMPL}" STREQUAL "mpich")
+    elseif("${ROCPROFSYS_MPI_IMPL}" STREQUAL "mpich")
         list(APPEND _DEBIAN_PACKAGE_DEPENDS "libmpich-dev")
     endif()
 endif()
@@ -195,14 +195,14 @@ if(DEFINED CPACK_PACKAGING_INSTALL_PREFIX)
 endif()
 
 set(CPACK_RPM_PACKAGE_RELEASE
-    "${OMNITRACE_CPACK_SYSTEM_NAME}${OMNITRACE_CPACK_PACKAGE_SUFFIX}")
+    "${ROCPROFSYS_CPACK_SYSTEM_NAME}${ROCPROFSYS_CPACK_PACKAGE_SUFFIX}")
 string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_RPM_PACKAGE_RELEASE
                      "${CPACK_RPM_PACKAGE_RELEASE}")
 string(REPLACE "-" "~" CPACK_RPM_PACKAGE_RELEASE "${CPACK_RPM_PACKAGE_RELEASE}")
 
 set(_RPM_PACKAGE_PROVIDES "")
 
-if(OMNITRACE_BUILD_LIBUNWIND)
+if(ROCPROFSYS_BUILD_LIBUNWIND)
     list(APPEND _RPM_PACKAGE_PROVIDES "libunwind.so.99()(64bit)")
     list(APPEND _RPM_PACKAGE_PROVIDES "libunwind-x86_64.so.99()(64bit)")
     list(APPEND _RPM_PACKAGE_PROVIDES "libunwind-setjmp.so.0()(64bit)")
@@ -241,22 +241,25 @@ if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
     set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
 endif()
 
-omnitrace_add_feature(CPACK_PACKAGE_NAME "Package name")
-omnitrace_add_feature(CPACK_PACKAGE_VERSION "Package version")
-omnitrace_add_feature(CPACK_PACKAGING_INSTALL_PREFIX "Package installation prefix")
+rocprofiler_systems_add_feature(CPACK_PACKAGE_NAME "Package name")
+rocprofiler_systems_add_feature(CPACK_PACKAGE_VERSION "Package version")
+rocprofiler_systems_add_feature(CPACK_PACKAGING_INSTALL_PREFIX
+                                "Package installation prefix")
 
-omnitrace_add_feature(CPACK_DEBIAN_FILE_NAME "Debian file name")
-omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_RELEASE "Debian package release version")
-omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS "Debian package dependencies")
-omnitrace_add_feature(CPACK_DEBIAN_PACKAGE_SHLIBDEPS
-                      "Debian package shared library dependencies")
+rocprofiler_systems_add_feature(CPACK_DEBIAN_FILE_NAME "Debian file name")
+rocprofiler_systems_add_feature(CPACK_DEBIAN_PACKAGE_RELEASE
+                                "Debian package release version")
+rocprofiler_systems_add_feature(CPACK_DEBIAN_PACKAGE_DEPENDS
+                                "Debian package dependencies")
+rocprofiler_systems_add_feature(CPACK_DEBIAN_PACKAGE_SHLIBDEPS
+                                "Debian package shared library dependencies")
 
-omnitrace_add_feature(CPACK_RPM_FILE_NAME "RPM file name")
-omnitrace_add_feature(CPACK_RPM_PACKAGE_RELEASE "RPM package release version")
-omnitrace_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package dependencies")
-omnitrace_add_feature(CPACK_RPM_PACKAGE_AUTOREQPROV
-                      "RPM package auto generate requires and provides")
-omnitrace_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package requires")
-omnitrace_add_feature(CPACK_RPM_PACKAGE_PROVIDES "RPM package provides")
+rocprofiler_systems_add_feature(CPACK_RPM_FILE_NAME "RPM file name")
+rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_RELEASE "RPM package release version")
+rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package dependencies")
+rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_AUTOREQPROV
+                                "RPM package auto generate requires and provides")
+rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_REQUIRES "RPM package requires")
+rocprofiler_systems_add_feature(CPACK_RPM_PACKAGE_PROVIDES "RPM package provides")
 
 include(CPack)

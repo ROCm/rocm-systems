@@ -1,5 +1,5 @@
 #
-function(OMNITRACE_FIND_PYTHON _VAR)
+function(ROCPROFILER_SYSTEMS_FIND_PYTHON _VAR)
     set(options REQUIRED QUIET)
     set(args VERSION ROOT_DIR)
     set(kwargs COMPONENTS)
@@ -68,13 +68,13 @@ function(OMNITRACE_FIND_PYTHON _VAR)
                 "${_PYTHON_VERSION_LIST}"
                 PARENT_SCOPE)
         else()
-            omnitrace_message(WARNING "${_PYTHON_ERROR_VALUE}")
+            rocprofiler_systems_message(WARNING "${_PYTHON_ERROR_VALUE}")
         endif()
     endif()
 endfunction()
 #
 # Internal: find the appropriate link time optimization flags for this compiler
-function(_OMNITRACE_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
+function(_ROCPROFSYS_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
     # Checks whether the given CXX/linker flags can compile and link a cxx file.  cxxflags
     # and linkerflags are lists of flags to use.  The result variable is a unique variable
     # name for each set of flags: the compilation result will be cached base on the result
@@ -141,9 +141,9 @@ function(_OMNITRACE_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
         endif()
 
         if(PYBIND11_LTO_CXX_FLAGS)
-            omnitrace_message(STATUS "${target_name} :: LTO enabled")
+            rocprofiler_systems_message(STATUS "${target_name} :: LTO enabled")
         else()
-            omnitrace_message(
+            rocprofiler_systems_message(
                 STATUS
                 "${target_name} :: LTO disabled (not supported by the compiler and/or linker)"
                 )
@@ -162,14 +162,14 @@ function(_OMNITRACE_PYBIND11_ADD_LTO_FLAGS target_name prefer_thin_lto)
     endif()
 endfunction()
 #
-function(OMNITRACE_PYBIND11_ADD_MODULE target_name)
+function(ROCPROFILER_SYSTEMS_PYBIND11_ADD_MODULE target_name)
     set(options MODULE SHARED EXCLUDE_FROM_ALL NO_EXTRAS SYSTEM THIN_LTO LTO)
     set(args PYTHON_VERSION VISIBILITY CXX_STANDARD)
     set(kwargs)
     cmake_parse_arguments(ARG "${options}" "${args}" "${kwargs}" ${ARGN})
 
     if(ARG_MODULE AND ARG_SHARED)
-        omnitrace_message(FATAL_ERROR "Can't be both MODULE and SHARED")
+        rocprofiler_systems_message(FATAL_ERROR "Can't be both MODULE and SHARED")
     elseif(ARG_SHARED)
         set(lib_type SHARED)
     else()
@@ -261,7 +261,7 @@ function(OMNITRACE_PYBIND11_ADD_MODULE target_name)
     endif()
 
     if(ARG_LTO OR ARG_THIN_LTO)
-        _omnitrace_pybind11_add_lto_flags(${target_name} ${ARG_THIN_LTO})
+        _rocprofiler_systems_pybind11_add_lto_flags(${target_name} ${ARG_THIN_LTO})
     endif()
 
     if(NOT MSVC AND NOT ${CMAKE_BUILD_TYPE} MATCHES Debug|RelWithDebInfo)

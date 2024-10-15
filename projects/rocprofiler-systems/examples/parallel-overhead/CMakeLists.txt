@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(omnitrace-parallel-overhead-example LANGUAGES CXX)
+project(rocprofiler-systems-parallel-overhead-example LANGUAGES CXX)
 
-if(OMNITRACE_DISABLE_EXAMPLES)
+if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                             OMNITRACE_DISABLE_EXAMPLES)
+    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                              ROCPROFSYS_DISABLE_EXAMPLES)
         return()
     endif()
 endif()
@@ -26,9 +26,9 @@ target_link_libraries(parallel-overhead-locks PRIVATE Threads::Threads
                                                       parallel-overhead-compile-options)
 target_compile_definitions(parallel-overhead-locks PRIVATE USE_LOCKS=1)
 
-if(OMNITRACE_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS parallel-overhead parallel-overhead-locks
         DESTINATION bin
-        COMPONENT omnitrace-examples)
+        COMPONENT rocprofiler-systems-examples)
 endif()

@@ -6,7 +6,7 @@ import glob
 
 """
 This script reads in function prototypes can generates the implementation pieces
-needed to dlsym the function in libomnitrace
+needed to dlsym the function in librocprof-sys.
 
 Example input file:
 
@@ -18,13 +18,13 @@ generates:
 
     ##### declaration:
 
-        bool OnLoad(HsaApiTable*, uint64_t, uint64_t, const char* const*) OMNITRACE_PUBLIC_API;
-        void OnUnload() OMNITRACE_PUBLIC_API;
+        bool OnLoad(HsaApiTable*, uint64_t, uint64_t, const char* const*) ROCPROFSYS_PUBLIC_API;
+        void OnUnload() ROCPROFSYS_PUBLIC_API;
 
     ##### dlsym:
 
-        OMNITRACE_DLSYM(OnLoad_f, m_omnihandle, "OnLoad");
-        OMNITRACE_DLSYM(OnUnload_f, m_omnihandle, "OnUnload");
+        ROCPROFSYS_DLSYM(OnLoad_f, m_omnihandle, "OnLoad");
+        ROCPROFSYS_DLSYM(OnUnload_f, m_omnihandle, "OnUnload");
 
     ##### member variables:
 
@@ -35,12 +35,12 @@ generates:
 
         bool OnLoad(HsaApiTable* table, uint64_t runtime_version, uint64_t failed_tool_count, const char* const* failed_tool_names)
         {
-            return OMNITRACE_DL_INVOKE(get_indirect().OnLoad_f, table, runtime_version, failed_tool_count, failed_tool_names);
+            return ROCPROFSYS_DL_INVOKE(get_indirect().OnLoad_f, table, runtime_version, failed_tool_count, failed_tool_names);
         }
 
         void OnUnload()
         {
-            return OMNITRACE_DL_INVOKE(get_indirect().OnUnload_f);
+            return ROCPROFSYS_DL_INVOKE(get_indirect().OnUnload_f);
         }
 """
 
@@ -69,18 +69,18 @@ class function:
         )
 
     def function_decl(self):
-        return "    {} {}({}) OMNITRACE_PUBLIC_API;".format(
+        return "    {} {}({}) ROCPROFSYS_PUBLIC_API;".format(
             self.return_type, self.func_name, ", ".join(self.param_types)
         )
 
     def dlsym_function(self):
-        return '    OMNITRACE_DLSYM({0}_f, m_omnihandle, "{0}");'.format(self.func_name)
+        return '    ROCPROFSYS_DLSYM({0}_f, m_omnihandle, "{0}");'.format(self.func_name)
 
     def call_dlsym_function(self):
         _param_names = ", ".join(self.param_names)
         if _param_names and _param_names != ", ":
             _param_names = f", {_param_names}"
-        return "    {} {}({})\n    {}\n        return OMNITRACE_DL_INVOKE(get_indirect().{}_f{});\n    {}".format(
+        return "    {} {}({})\n    {}\n        return ROCPROFSYS_DL_INVOKE(get_indirect().{}_f{});\n    {}".format(
             self.return_type,
             self.func_name,
             ", ".join(self.params),

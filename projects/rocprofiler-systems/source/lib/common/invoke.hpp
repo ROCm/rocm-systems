@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,20 +31,20 @@
 #include <string>
 #include <unistd.h>
 
-#if !defined(OMNITRACE_COMMON_LIBRARY_NAME)
-#    define OMNITRACE_COMMON_LIBRARY_NAME "common"
-#    error OMNITRACE_COMMON_LIBRARY_NAME must be defined
+#if !defined(ROCPROFSYS_COMMON_LIBRARY_NAME)
+#    define ROCPROFSYS_COMMON_LIBRARY_NAME "common"
+#    error ROCPROFSYS_COMMON_LIBRARY_NAME must be defined
 #endif
 
-#if !defined(OMNITRACE_COMMON_LIBRARY_LOG_START)
-#    define OMNITRACE_COMMON_LIBRARY_LOG_START
+#if !defined(ROCPROFSYS_COMMON_LIBRARY_LOG_START)
+#    define ROCPROFSYS_COMMON_LIBRARY_LOG_START
 #endif
 
-#if !defined(OMNITRACE_COMMON_LIBRARY_LOG_END)
-#    define OMNITRACE_COMMON_LIBRARY_LOG_END
+#if !defined(ROCPROFSYS_COMMON_LIBRARY_LOG_END)
+#    define ROCPROFSYS_COMMON_LIBRARY_LOG_END
 #endif
 
-namespace omnitrace
+namespace rocprofsys
 {
 inline namespace common
 {
@@ -52,7 +52,7 @@ namespace
 {
 template <typename FuncT, typename... Args>
 inline auto
-invoke(const char* _name, FuncT&& _func, Args... _args) OMNITRACE_HIDDEN_API;
+invoke(const char* _name, FuncT&& _func, Args... _args) ROCPROFSYS_HIDDEN_API;
 
 inline int32_t&
 get_guard()
@@ -77,7 +77,7 @@ ignore(const char* _name, int _verbose, int _value, const char* _reason, Args...
     {
         fflush(stderr);
         fprintf(stderr,
-                "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
+                "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                 "][%i][%li] %s(%s) was ignored :: %s\n",
                 getpid(), get_thread_index(), _name,
                 join(QuoteStrings{}, ", ", _args...).c_str(), _reason);
@@ -107,13 +107,13 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
             if(_verbose >= 3)
             {
                 fflush(stderr);
-                OMNITRACE_COMMON_LIBRARY_LOG_START
+                ROCPROFSYS_COMMON_LIBRARY_LOG_START
                 fprintf(stderr,
-                        "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
+                        "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                         "][%i][%li][%i] %s(%s)\n",
                         getpid(), get_thread_index(), _lk, _name,
                         join(QuoteStrings{}, ", ", _args...).c_str());
-                OMNITRACE_COMMON_LIBRARY_LOG_END
+                ROCPROFSYS_COMMON_LIBRARY_LOG_END
                 fflush(stderr);
             }
             return std::invoke(std::forward<FuncT>(_func), _args...);
@@ -121,25 +121,25 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
         else if(_verbose >= 2)
         {
             fflush(stderr);
-            OMNITRACE_COMMON_LIBRARY_LOG_START
+            ROCPROFSYS_COMMON_LIBRARY_LOG_START
             fprintf(stderr,
-                    "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
+                    "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                     "][%i][%li] %s(%s) was guarded :: value = %i\n",
                     getpid(), get_thread_index(), _name,
                     join(QuoteStrings{}, ", ", _args...).c_str(), _lk);
-            OMNITRACE_COMMON_LIBRARY_LOG_END
+            ROCPROFSYS_COMMON_LIBRARY_LOG_END
             fflush(stderr);
         }
     }
     else if(_verbose >= 0)
     {
-        OMNITRACE_COMMON_LIBRARY_LOG_START
+        ROCPROFSYS_COMMON_LIBRARY_LOG_START
         fprintf(stderr,
-                "[omnitrace][" OMNITRACE_COMMON_LIBRARY_NAME
+                "[rocprof-sys][" ROCPROFSYS_COMMON_LIBRARY_NAME
                 "][%i][%li] %s(%s) ignored :: null function pointer\n",
                 getpid(), get_thread_index(), _name,
                 join(QuoteStrings{}, ", ", _args...).c_str());
-        OMNITRACE_COMMON_LIBRARY_LOG_END
+        ROCPROFSYS_COMMON_LIBRARY_LOG_END
     }
 
     using return_type = decltype(std::invoke(std::forward<FuncT>(_func), _args...));
@@ -147,4 +147,4 @@ invoke(const char* _name, int _verbose, bool& _toggle, FuncT&& _func, Args... _a
 }
 }  // namespace
 }  // namespace common
-}  // namespace omnitrace
+}  // namespace rocprofsys

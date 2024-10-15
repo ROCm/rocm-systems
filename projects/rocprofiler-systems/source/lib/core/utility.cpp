@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -23,7 +23,7 @@
 #include "utility.hpp"
 #include "debug.hpp"
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace utility
 {
@@ -71,7 +71,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
     {
         if(_v.find_first_not_of("0123456789-:") != std::string::npos)
         {
-            OMNITRACE_BASIC_VERBOSE_F(
+            ROCPROFSYS_BASIC_VERBOSE_F(
                 0,
                 "Invalid %s specification. Only numerical values (e.g., 0), ranges "
                 "(e.g., 0-7), and ranges with increments (e.g. 20-40:10) are permitted. "
@@ -92,7 +92,7 @@ parse_numeric_range(std::string _input_string, const std::string& _label, Up _in
         if(_v.find('-') != std::string::npos)
         {
             auto _vv = tim::delimit(_v, "-");
-            OMNITRACE_CONDITIONAL_THROW(
+            ROCPROFSYS_CONDITIONAL_THROW(
                 _vv.size() != 2,
                 "Invalid %s range specification: %s. Required format N-M, e.g. 0-4",
                 _label.c_str(), _v.c_str());
@@ -120,4 +120,4 @@ template std::unordered_set<int64_t>
 parse_numeric_range<int64_t, std::unordered_set<int64_t>>(std::string, const std::string&,
                                                           long);
 }  // namespace utility
-}  // namespace omnitrace
+}  // namespace rocprofsys

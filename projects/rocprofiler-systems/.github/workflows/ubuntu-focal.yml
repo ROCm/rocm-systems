@@ -32,8 +32,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OMNITRACE_CI: ON
-  OMNITRACE_TMPDIR: "%env{PWD}%/testing-tmp"
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
   ubuntu-focal-external:
@@ -140,23 +140,23 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
-          -DOMNITRACE_BUILD_TESTING=ON
-          -DOMNITRACE_USE_MPI=OFF
-          -DOMNITRACE_USE_HIP=OFF
-          -DOMNITRACE_USE_OMPT=OFF
-          -DOMNITRACE_USE_PAPI=OFF
-          -DOMNITRACE_USE_PYTHON=${{ matrix.python }}
-          -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
-          -DOMNITRACE_STRIP_LIBRARIES=${{ matrix.strip }}
-          -DOMNITRACE_BUILD_LTO=${{ matrix.lto }}
-          -DOMNITRACE_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
-          -DOMNITRACE_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
-          -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DOMNITRACE_MAX_THREADS=64
-          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
-          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=OFF
+          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_OMPT=OFF
+          -DROCPROFSYS_USE_PAPI=OFF
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_STRIP_LIBRARIES=${{ matrix.strip }}
+          -DROCPROFSYS_BUILD_LTO=${{ matrix.lto }}
+          -DROCPROFSYS_BUILD_STATIC_LIBGCC=${{ matrix.static-libgcc }}
+          -DROCPROFSYS_BUILD_STATIC_LIBSTDCXX=${{ matrix.static-libstdcxx }}
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=OFF
 
     - name: Test Build-Tree Module
@@ -167,24 +167,24 @@ jobs:
         source /usr/share/modules/init/$(basename ${SHELL})
         module use ./share/modulefiles
         module avail
-        module load omnitrace
-        echo $(which omnitrace)
-        ldd $(which omnitrace)
-        omnitrace-instrument --help
-        omnitrace-avail --help
-        omnitrace-sample --help
+        module load rocprofiler-systems
+        echo $(which rocprof-sys-instrument)
+        ldd $(which rocprof-sys-instrument)
+        rocprof-sys-instrument --help
+        rocprof-sys-avail --help
+        rocprof-sys-sample --help
 
     - name: Test Build-Tree Source Script
       timeout-minutes: 45
       shell: bash
       run: |
         cd build
-        source ./share/omnitrace/setup-env.sh
-        echo $(which omnitrace)
-        ldd $(which omnitrace)
-        omnitrace-instrument --help
-        omnitrace-avail --help
-        omnitrace-sample --help
+        source ./share/rocprofiler-systems/setup-env.sh
+        echo $(which rocprof-sys-instrument)
+        ldd $(which rocprof-sys-instrument)
+        rocprof-sys-instrument --help
+        rocprof-sys-avail --help
+        rocprof-sys-sample --help
 
     - name: Install
       timeout-minutes: 10
@@ -196,16 +196,16 @@ jobs:
       shell: bash
       run: |
         source /usr/share/modules/init/$(basename ${SHELL})
-        module use /opt/omnitrace/share/modulefiles
+        module use /opt/rocprofiler-systems/share/modulefiles
         module avail
-        module load omnitrace
-        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,rewrite,runtime}=1 --test-omnitrace-python=${{ matrix.python }}
+        module load rocprofiler-systems
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,rewrite,runtime}=1 --test-rocprof-sys-python=${{ matrix.python }}
 
     - name: Test User API
       timeout-minutes: 10
       run: |
         set -v
-        ./scripts/test-find-package.sh --install-dir /opt/omnitrace
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
       if: failure()
@@ -223,9 +223,9 @@ jobs:
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
-          build/omnitrace-tests-config/*.cfg
-          build/omnitrace-tests-output/**/*.txt
-          build/omnitrace-tests-output/**/*-instr*.json
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json
 
     - name: Kill Perfetto
       if: success() || failure()
@@ -294,20 +294,20 @@ jobs:
         echo "CMAKE_PREFIX_PATH=/opt/dyninst:${CMAKE_PREFIX_PATH}" >> $GITHUB_ENV
         echo "LD_LIBRARY_PATH=/opt/rocm/lib:/usr/local/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
         cat << EOF > test-install.cfg
-        OMNITRACE_PROFILE               = ON
-        OMNITRACE_TRACE                 = ON
-        OMNITRACE_USE_PID               = OFF
-        OMNITRACE_USE_SAMPLING          = OFF
-        OMNITRACE_USE_PROCESS_SAMPLING  = OFF
-        OMNITRACE_COUT_OUTPUT           = ON
-        OMNITRACE_TIME_OUTPUT           = OFF
-        OMNITRACE_TIMEMORY_COMPONENTS   = cpu_clock cpu_util current_peak_rss kernel_mode_time monotonic_clock monotonic_raw_clock network_stats num_io_in num_io_out num_major_page_faults num_minor_page_faults page_rss peak_rss priority_context_switch process_cpu_clock process_cpu_util read_bytes read_char system_clock thread_cpu_clock thread_cpu_util timestamp trip_count user_clock user_mode_time virtual_memory voluntary_context_switch wall_clock written_bytes written_char
-        OMNITRACE_OUTPUT_PATH           = omnitrace-tests-output
-        OMNITRACE_OUTPUT_PREFIX         = %tag%/
-        OMNITRACE_DEBUG                 = OFF
-        OMNITRACE_VERBOSE               = 3
-        OMNITRACE_DL_VERBOSE            = 3
-        OMNITRACE_PERFETTO_BACKEND      = system
+        ROCPROFSYS_PROFILE               = ON
+        ROCPROFSYS_TRACE                 = ON
+        ROCPROFSYS_USE_PID               = OFF
+        ROCPROFSYS_USE_SAMPLING          = OFF
+        ROCPROFSYS_USE_PROCESS_SAMPLING  = OFF
+        ROCPROFSYS_COUT_OUTPUT           = ON
+        ROCPROFSYS_TIME_OUTPUT           = OFF
+        ROCPROFSYS_TIMEMORY_COMPONENTS   = cpu_clock cpu_util current_peak_rss kernel_mode_time monotonic_clock monotonic_raw_clock network_stats num_io_in num_io_out num_major_page_faults num_minor_page_faults page_rss peak_rss priority_context_switch process_cpu_clock process_cpu_util read_bytes read_char system_clock thread_cpu_clock thread_cpu_util timestamp trip_count user_clock user_mode_time virtual_memory voluntary_context_switch wall_clock written_bytes written_char
+        ROCPROFSYS_OUTPUT_PATH           = rocprofsys-tests-output
+        ROCPROFSYS_OUTPUT_PREFIX         = %tag%/
+        ROCPROFSYS_DEBUG                 = OFF
+        ROCPROFSYS_VERBOSE               = 3
+        ROCPROFSYS_DL_VERBOSE            = 3
+        ROCPROFSYS_PERFETTO_BACKEND      = system
         EOF
         realpath test-install.cfg
         cat test-install.cfg
@@ -328,25 +328,25 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }}
-          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
-          -DOMNITRACE_BUILD_TESTING=ON
-          -DOMNITRACE_BUILD_DEVELOPER=ON
-          -DOMNITRACE_BUILD_EXTRA_OPTIMIZATIONS=OFF
-          -DOMNITRACE_BUILD_LTO=OFF
-          -DOMNITRACE_USE_MPI=OFF
-          -DOMNITRACE_USE_HIP=ON
-          -DOMNITRACE_MAX_THREADS=64
-          -DOMNITRACE_USE_PAPI=OFF
-          -DOMNITRACE_USE_OMPT=OFF
-          -DOMNITRACE_USE_PYTHON=ON
-          -DOMNITRACE_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
-          -DOMNITRACE_USE_SANITIZER=OFF
-          -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DOMNITRACE_CI_MPI_RUN_AS_ROOT=${{ matrix.mpi-headers }}
-          -DOMNITRACE_CI_GPU=OFF
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_BUILD_DEVELOPER=ON
+          -DROCPROFSYS_BUILD_EXTRA_OPTIMIZATIONS=OFF
+          -DROCPROFSYS_BUILD_LTO=OFF
+          -DROCPROFSYS_USE_MPI=OFF
+          -DROCPROFSYS_USE_HIP=ON
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_USE_PAPI=OFF
+          -DROCPROFSYS_USE_OMPT=OFF
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_USE_MPI_HEADERS=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_USE_SANITIZER=OFF
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=${{ matrix.mpi-headers }}
+          -DROCPROFSYS_CI_GPU=OFF
           -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF
-          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           --
           ${{ matrix.ctest-exclude }}
 
@@ -358,14 +358,14 @@ jobs:
       timeout-minutes: 15
       shell: bash
       run: |
-        source /opt/omnitrace/share/omnitrace/setup-env.sh
-        ./scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,python,rewrite,runtime}=1
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ./scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
 
     - name: Test User API
       timeout-minutes: 10
       run: |
         set -v
-        ./scripts/test-find-package.sh --install-dir /opt/omnitrace
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
       if: failure()
@@ -383,10 +383,10 @@ jobs:
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
-          omnitrace-tests-output/**/*.txt
-          build/omnitrace-tests-config/*.cfg
-          build/omnitrace-tests-output/**/*.txt
-          build/omnitrace-tests-output/**/*-instr*.json
+          rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json
 
     - name: Kill Perfetto
       if: success() || failure()
@@ -476,14 +476,14 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
-          -DOMNITRACE_BUILD_TESTING=ON
-          -DOMNITRACE_BUILD_DYNINST=ON
-          -DOMNITRACE_USE_MPI=${USE_MPI}
-          -DOMNITRACE_USE_HIP=OFF
-          -DOMNITRACE_USE_PYTHON=${{ matrix.python }}
-          -DOMNITRACE_USE_OMPT=${{ matrix.ompt }}
-          -DOMNITRACE_USE_PAPI=${{ matrix.papi }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_BUILD_DYNINST=ON
+          -DROCPROFSYS_USE_MPI=${USE_MPI}
+          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_PYTHON=${{ matrix.python }}
+          -DROCPROFSYS_USE_OMPT=${{ matrix.ompt }}
+          -DROCPROFSYS_USE_PAPI=${{ matrix.papi }}
           -DDYNINST_BUILD_ELFUTILS=ON
           -DDYNINST_BUILD_LIBIBERTY=ON
           -DDYNINST_BUILD_TBB=${{ matrix.tbb }}
@@ -491,9 +491,9 @@ jobs:
           -DDYNINST_BUILD_SHARED_LIBS=ON
           -DDYNINST_BUILD_STATIC_LIBS=OFF
           -DDYNINST_ELFUTILS_DOWNLOAD_VERSION=${{ env.ELFUTILS_DOWNLOAD_VERSION }}
-          -DOMNITRACE_MAX_THREADS=64
-          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
-          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
           -DMPI_HEADERS_ALLOW_MPICH=ON
 
     - name: Test Build-Tree Env
@@ -502,43 +502,43 @@ jobs:
         source /usr/share/modules/init/$(basename ${SHELL})
         module use ${{ github.workspace }}/build/share/modulefiles
         module avail
-        module load omnitrace
+        module load rocprofiler-systems
         module list
         env
-        module unload omnitrace
+        module unload rocprofiler-systems
         module list
         env
-        source ${{ github.workspace }}/build/share/omnitrace/setup-env.sh
+        source ${{ github.workspace }}/build/share/rocprofiler-systems/setup-env.sh
         env
 
     - name: Install
       working-directory: ${{ github.workspace }}/build
       run: |
         cpack -G STGZ
-        mkdir -p /opt/omnitrace
-        ./omnitrace-*.sh --prefix=/opt/omnitrace --exclude-subdir --skip-license
+        mkdir -p /opt/rocprofiler-systems
+        ./rocprofiler-systems-*.sh --prefix=/opt/rocprofiler-systems --exclude-subdir --skip-license
 
     - name: Test Install with setup-env.sh
       timeout-minutes: 15
       run: |
         set -v
-        source /opt/omnitrace/share/omnitrace/setup-env.sh
-        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,python,rewrite,runtime}=1
+        source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
+        ${{ github.workspace }}/scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
 
     - name: Test Install with Modulefile
       timeout-minutes: 15
       run: |
         set -v
         source /usr/share/modules/init/$(basename ${SHELL})
-        module use /opt/omnitrace/share/modulefiles
-        module load omnitrace
-        ${{ github.workspace }}/scripts/test-install.sh --test-omnitrace-{instrument,avail,sample,python,rewrite,runtime}=1
+        module use /opt/rocprofiler-systems/share/modulefiles
+        module load rocprofiler-systems
+        ${{ github.workspace }}/scripts/test-install.sh --test-rocprof-sys-{instrument,avail,sample,python,rewrite,runtime}=1
 
     - name: Test User API
       timeout-minutes: 10
       run: |
         set -v
-        ${{ github.workspace }}/scripts/test-find-package.sh --install-dir /opt/omnitrace
+        ${{ github.workspace }}/scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
       if: failure()
@@ -556,9 +556,9 @@ jobs:
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
-          ${{ github.workspace }}/build/omnitrace-tests-config/*.cfg
-          ${{ github.workspace }}/build/omnitrace-tests-output/**/*.txt
-          ${{ github.workspace }}/build/omnitrace-tests-output/**/*-instr*.json
+          ${{ github.workspace }}/build/rocprof-sys-tests-config/*.cfg
+          ${{ github.workspace }}/build/rocprof-sys-tests-output/**/*.txt
+          ${{ github.workspace }}/build/rocprof-sys-tests-output/**/*-instr*.json
 
     - name: Kill Perfetto
       if: success() || failure()
@@ -576,8 +576,8 @@ jobs:
       options: --cap-add CAP_SYS_ADMIN
 
     env:
-      OMNITRACE_VERBOSE: 2
-      OMNITRACE_CAUSAL_BACKEND: perf
+      ROCPROFSYS_VERBOSE: 2
+      ROCPROFSYS_CAUSAL_BACKEND: perf
 
     steps:
     - uses: actions/checkout@v4
@@ -618,18 +618,18 @@ jobs:
           --site GitHub
           --coverage
           --
-          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
-          -DOMNITRACE_BUILD_CI=OFF
-          -DOMNITRACE_BUILD_TESTING=ON
-          -DOMNITRACE_BUILD_DYNINST=OFF
-          -DOMNITRACE_BUILD_DEBUG=OFF
-          -DOMNITRACE_BUILD_HIDDEN_VISIBILITY=OFF
-          -DOMNITRACE_USE_MPI=ON
-          -DOMNITRACE_USE_PYTHON=ON
-          -DOMNITRACE_USE_OMPT=ON
-          -DOMNITRACE_USE_PAPI=ON
-          -DOMNITRACE_USE_HIP=OFF
-          -DOMNITRACE_USE_RCCL=OFF
-          -DOMNITRACE_MAX_THREADS=64
-          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
-          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_CI=OFF
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_BUILD_DYNINST=OFF
+          -DROCPROFSYS_BUILD_DEBUG=OFF
+          -DROCPROFSYS_BUILD_HIDDEN_VISIBILITY=OFF
+          -DROCPROFSYS_USE_MPI=ON
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_USE_OMPT=ON
+          -DROCPROFSYS_USE_PAPI=ON
+          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_RCCL=OFF
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}

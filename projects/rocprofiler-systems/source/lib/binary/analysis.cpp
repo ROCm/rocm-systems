@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 #    error "BFD support not enabled"
 #endif
 
-#define PACKAGE "omnitrace"
+#define PACKAGE "rocprofiler-systems"
 
 #include <bfd.h>
 
@@ -60,7 +60,7 @@
 #include <set>
 #include <stdexcept>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -75,7 +75,8 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
     auto& _bfd = _info.bfd;
     _bfd       = std::make_shared<bfd_file>(_name);
 
-    OMNITRACE_BASIC_VERBOSE(0, "[binary] Reading line info for '%s'...\n", _name.c_str());
+    ROCPROFSYS_BASIC_VERBOSE(0, "[binary] Reading line info for '%s'...\n",
+                             _name.c_str());
 
     if(_bfd && _bfd->is_good())
     {
@@ -124,8 +125,8 @@ parse_line_info(const std::string& _name, bool _process_dwarf, bool _process_bfd
         _info.sort();
     }
 
-    OMNITRACE_BASIC_VERBOSE(1, "[binary] Reading line info for '%s'... %zu entries\n",
-                            _bfd->name.c_str(), _info.symbols.size());
+    ROCPROFSYS_BASIC_VERBOSE(1, "[binary] Reading line info for '%s'... %zu entries\n",
+                             _bfd->name.c_str(), _info.symbols.size());
 
     return _info;
 }
@@ -151,7 +152,7 @@ get_binary_info(const std::vector<std::string>&  _files,
     };
 
     // filter function used by procfs::get_contiguous_maps
-    // ensures that we do not process omnitrace/gotcha/libunwind libraries
+    // ensures that we do not process rocprof-sys/gotcha/libunwind libraries
     // and do not process the libraries outside of the binary scope
     auto _filter = [&_satisfies_binary_filter](const procfs::maps& _v) {
         if(_v.pathname.empty()) return false;
@@ -237,10 +238,10 @@ lookup_ipaddr_entry(uintptr_t _addr, unw_context_t* _context_p,
                 }
             };
 
-            for(const auto& itr : binary::get_link_map("libomnitrace.so", "", ""))
+            for(const auto& itr : binary::get_link_map("librocprof-sys.so", "", ""))
                 _insert_exclude_range(itr.real());
 
-            for(const auto& itr : binary::get_link_map("libomnitrace-dl.so", "", ""))
+            for(const auto& itr : binary::get_link_map("librocprof-sys-dl.so", "", ""))
                 _insert_exclude_range(itr.real());
 
             return _exclude_range_v;
@@ -305,4 +306,4 @@ lookup_ipaddr_entry<true>(uintptr_t, unw_context_t*, tim::unwind::cache*);
 template std::optional<tim::unwind::processed_entry>
 lookup_ipaddr_entry<false>(uintptr_t, unw_context_t*, tim::unwind::cache*);
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

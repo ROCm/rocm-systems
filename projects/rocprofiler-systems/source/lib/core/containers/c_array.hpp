@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace container
 {
@@ -62,7 +62,7 @@ struct c_array
     Tp& at(size_t i)
     {
         if(i < m_size) return m_base[i];
-        throw ::omnitrace::exception<std::out_of_range>(
+        throw ::rocprofsys::exception<std::out_of_range>(
             std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
             std::to_string(m_size));
     }
@@ -71,7 +71,7 @@ struct c_array
     const Tp& at(size_t i) const
     {
         if(i < m_size) return m_base[i];
-        throw ::omnitrace::exception<std::out_of_range>(
+        throw ::rocprofsys::exception<std::out_of_range>(
             std::string{ typeid(*this).name() } + std::to_string(i) + " exceeds size " +
             std::to_string(m_size));
     }
@@ -137,4 +137,4 @@ wrap_c_array(Tp* base, size_t size)
     return c_array<Tp>(base, size);
 }
 }  // namespace container
-}  // namespace omnitrace
+}  // namespace rocprofsys

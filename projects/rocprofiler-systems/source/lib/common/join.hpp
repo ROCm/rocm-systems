@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,11 +31,11 @@
 #include <tuple>
 #include <type_traits>
 
-#if !defined(OMNITRACE_FOLD_EXPRESSION)
-#    define OMNITRACE_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
+#if !defined(ROCPROFSYS_FOLD_EXPRESSION)
+#    define ROCPROFSYS_FOLD_EXPRESSION(...) ((__VA_ARGS__), ...)
 #endif
 
-namespace omnitrace
+namespace rocprofsys
 {
 inline namespace common
 {
@@ -99,13 +99,13 @@ join(DelimT&& _delim, Args&&... _args)
     if constexpr(std::is_same<delim_type, char>::value)
     {
         const char _delim_c[2] = { _delim, '\0' };
-        OMNITRACE_FOLD_EXPRESSION(_ss << _delim_c << _args);
+        ROCPROFSYS_FOLD_EXPRESSION(_ss << _delim_c << _args);
         auto _ret = _ss.str();
         return (_ret.length() > 1) ? _ret.substr(1) : std::string{};
     }
     else
     {
-        OMNITRACE_FOLD_EXPRESSION(_ss << _delim << _args);
+        ROCPROFSYS_FOLD_EXPRESSION(_ss << _delim << _args);
         auto   _ret = _ss.str();
         auto&& _len = std::string{ _delim }.length();
         return (_ret.length() > _len) ? _ret.substr(_len) : std::string{};
@@ -127,13 +127,13 @@ join(QuoteStrings&&, DelimT&& _delim, Args&&... _args)
     if constexpr(std::is_same<delim_type, char>::value)
     {
         const char _delim_c[2] = { _delim, '\0' };
-        OMNITRACE_FOLD_EXPRESSION(_ss << _delim_c << as_string(_args));
+        ROCPROFSYS_FOLD_EXPRESSION(_ss << _delim_c << as_string(_args));
         auto _ret = _ss.str();
         return (_ret.length() > 1) ? _ret.substr(1) : std::string{};
     }
     else
     {
-        OMNITRACE_FOLD_EXPRESSION(_ss << _delim << as_string(_args));
+        ROCPROFSYS_FOLD_EXPRESSION(_ss << _delim << as_string(_args));
         auto   _ret = _ss.str();
         auto&& _len = std::string{ _delim }.length();
         return (_ret.length() > _len) ? _ret.substr(_len) : std::string{};
@@ -177,4 +177,4 @@ join(QuoteStrings&&, std::tuple<DelimB, DelimT, DelimE>&& _delim, Args&&... _arg
 }
 }  // namespace
 }  // namespace common
-}  // namespace omnitrace
+}  // namespace rocprofsys

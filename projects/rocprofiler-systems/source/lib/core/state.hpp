@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,9 +28,9 @@
 #include <cstdint>
 #include <string>
 
-namespace omnitrace
+namespace rocprofsys
 {
-// used for specifying the state of omnitrace
+// used for specifying the state of rocprof-sys
 enum class State : unsigned short
 {
     PreInit = 0,
@@ -40,7 +40,7 @@ enum class State : unsigned short
     Disabled,
 };
 
-// used for specifying the state of omnitrace
+// used for specifying the state of rocprof-sys
 enum class ThreadState : unsigned short
 {
     Enabled = 0,
@@ -74,48 +74,49 @@ enum class CausalMode : unsigned short
 //      Runtime configuration data
 //
 State
-get_state() OMNITRACE_HOT;
+get_state() ROCPROFSYS_HOT;
 
 ThreadState
-get_thread_state() OMNITRACE_HOT;
+get_thread_state() ROCPROFSYS_HOT;
 
 /// returns old state
-State set_state(State) OMNITRACE_COLD;  // does not change often
+State set_state(State) ROCPROFSYS_COLD;  // does not change often
 
 /// returns old state
-ThreadState set_thread_state(ThreadState) OMNITRACE_HOT;  // changes often
+ThreadState set_thread_state(ThreadState) ROCPROFSYS_HOT;  // changes often
 
 /// return current state (state change may be ignored)
-ThreadState push_thread_state(ThreadState) OMNITRACE_HOT;
+ThreadState push_thread_state(ThreadState) ROCPROFSYS_HOT;
 
 /// return current state (state change may be ignored)
 ThreadState
-pop_thread_state() OMNITRACE_HOT;
+pop_thread_state() ROCPROFSYS_HOT;
 
 struct scoped_thread_state
 {
-    OMNITRACE_INLINE scoped_thread_state(ThreadState _v) { push_thread_state(_v); }
-    OMNITRACE_INLINE ~scoped_thread_state() { pop_thread_state(); }
+    ROCPROFSYS_INLINE scoped_thread_state(ThreadState _v) { push_thread_state(_v); }
+    ROCPROFSYS_INLINE ~scoped_thread_state() { pop_thread_state(); }
 };
-}  // namespace omnitrace
+}  // namespace rocprofsys
 
-#define OMNITRACE_SCOPED_THREAD_STATE(STATE)                                             \
-    ::omnitrace::scoped_thread_state OMNITRACE_VARIABLE(_scoped_thread_state_, __LINE__) \
+#define ROCPROFSYS_SCOPED_THREAD_STATE(STATE)                                            \
+    ::rocprofsys::scoped_thread_state ROCPROFSYS_VARIABLE(_scoped_thread_state_,         \
+                                                          __LINE__)                      \
     {                                                                                    \
-        ::omnitrace::STATE                                                               \
+        ::rocprofsys::STATE                                                              \
     }
 
 namespace std
 {
 std::string
-to_string(omnitrace::State _v);
+to_string(rocprofsys::State _v);
 
 std::string
-to_string(omnitrace::ThreadState _v);
+to_string(rocprofsys::ThreadState _v);
 
 std::string
-to_string(omnitrace::Mode _v);
+to_string(rocprofsys::Mode _v);
 
 std::string
-to_string(omnitrace::CausalMode _v);
+to_string(rocprofsys::CausalMode _v);
 }  // namespace std

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,16 +31,16 @@
 #include <optional>
 #include <type_traits>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace concepts = ::tim::concepts;  // NOLINT
 
-static constexpr size_t max_supported_threads = OMNITRACE_MAX_THREADS;
+static constexpr size_t max_supported_threads = ROCPROFSYS_MAX_THREADS;
 
 template <typename Tp>
 struct thread_deleter;
 
-// unique ptr type for omnitrace
+// unique ptr type for rocprof-sys
 template <typename Tp>
 using unique_ptr_t = std::unique_ptr<Tp, thread_deleter<Tp>>;
 
@@ -59,7 +59,7 @@ make_unique(Args&&... args)
 {
     return unique_ptr_t<Tp>{ new Tp{ std::forward<Args>(args)... } };
 }
-}  // namespace omnitrace
+}  // namespace rocprofsys
 
 namespace tim
 {
@@ -70,7 +70,7 @@ struct is_unique_pointer : std::false_type
 {};
 
 template <typename Tp>
-struct is_unique_pointer<::omnitrace::unique_ptr_t<Tp>> : std::true_type
+struct is_unique_pointer<::rocprofsys::unique_ptr_t<Tp>> : std::true_type
 {};
 
 template <typename Tp>

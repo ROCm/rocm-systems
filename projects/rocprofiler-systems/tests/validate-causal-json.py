@@ -266,7 +266,7 @@ class experiment_progress(object):
 def process_samples(data, _data):
     if not _data:
         return data
-    for record in _data["omnitrace"]["causal"]["records"]:
+    for record in _data["rocprofsys"]["causal"]["records"]:
         for samp in record["samples"]:
             _info = samp["info"]
             _count = samp["count"]
@@ -297,7 +297,7 @@ def process_data(data, _data, args):
     _selection_filter = re.compile(args.experiments)
     _progresspt_filter = re.compile(args.progress_points)
 
-    for record in _data["omnitrace"]["causal"]["records"]:
+    for record in _data["rocprofsys"]["causal"]["records"]:
         for exp in record["experiments"]:
             _speedup = exp["virtual_speedup"]
             _duration = exp["duration"]

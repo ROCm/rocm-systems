@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -29,7 +29,7 @@
 #    include <timemory/components/perfetto/backends.hpp>
 #else
 #    include <perfetto.h>
-PERFETTO_DEFINE_CATEGORIES(OMNITRACE_PERFETTO_CATEGORIES);
+PERFETTO_DEFINE_CATEGORIES(ROCPROFSYS_PERFETTO_CATEGORIES);
 #endif
 
 #include "debug.hpp"
@@ -43,7 +43,7 @@ PERFETTO_DEFINE_CATEGORIES(OMNITRACE_PERFETTO_CATEGORIES);
 #include <utility>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 std::unique_ptr<::perfetto::TracingSession>& get_perfetto_session(
     pid_t = process::get_id());
@@ -143,15 +143,15 @@ perfetto_counter_track<Tp>::emplace(size_t _idx, const std::string& _v,
                 std::stringstream _css{};
                 for(auto&& eitr : _curr)
                     _css << " " << std::hex << std::setw(12) << std::left << eitr;
-                OMNITRACE_THROW("perfetto_counter_track emplace method for '%s' (%p) "
-                                "invalidated C-string '%s' (%p).\n%8s: %s\n%8s: %s\n",
-                                _v.c_str(), (void*) _name->c_str(),
-                                std::get<0>(itr).c_str(),
-                                (void*) std::get<0>(itr).c_str(), "previous",
-                                _pss.str().c_str(), "current", _css.str().c_str());
+                ROCPROFSYS_THROW("perfetto_counter_track emplace method for '%s' (%p) "
+                                 "invalidated C-string '%s' (%p).\n%8s: %s\n%8s: %s\n",
+                                 _v.c_str(), (void*) _name->c_str(),
+                                 std::get<0>(itr).c_str(),
+                                 (void*) std::get<0>(itr).c_str(), "previous",
+                                 _pss.str().c_str(), "current", _css.str().c_str());
             }
         }
     }
     return _index;
 }
-}  // namespace omnitrace
+}  // namespace rocprofsys

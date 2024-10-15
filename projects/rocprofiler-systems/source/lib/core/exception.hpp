@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@
 #include <timemory/utility/backtrace.hpp>
 #include <type_traits>
 
-namespace omnitrace
+namespace rocprofsys
 {
 template <typename Tp>
 class exception : public Tp
@@ -50,4 +50,4 @@ public:
 private:
     char* m_what = nullptr;
 };
-}  // namespace omnitrace
+}  // namespace rocprofsys

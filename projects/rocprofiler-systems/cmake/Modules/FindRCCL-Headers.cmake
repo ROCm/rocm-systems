@@ -6,7 +6,7 @@ include(FindPackageHandleStandardArgs)
 # ----------------------------------------------------------------------------------------#
 
 set(RCCL-Headers_INCLUDE_DIR_INTERNAL
-    "${PROJECT_SOURCE_DIR}/source/lib/omnitrace/library/tpls/rccl"
+    "${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys/library/tpls/rccl"
     CACHE PATH "Path to internal rccl.h")
 
 # ----------------------------------------------------------------------------------------#
@@ -60,7 +60,7 @@ else()
 endif()
 
 if(NOT EXISTS "${RCCL-Headers_INCLUDE_DIR}/${_RCCL-Headers_FILE}")
-    omnitrace_message(
+    rocprofiler_systems_message(
         AUTHOR_WARNING
         "RCCL header (${RCCL-Headers_INCLUDE_DIR}/${_RCCL-Headers_FILE}) does not exist! Setting RCCL-Headers_INCLUDE_DIR to internal RCCL include directory: ${RCCL-Headers_INCLUDE_DIR_INTERNAL}"
         )

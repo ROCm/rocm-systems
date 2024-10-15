@@ -2,7 +2,7 @@
 name = @PROJECT_NAME@
 url = @PROJECT_HOMEPAGE_URL@
 download_url = @PROJECT_HOMEPAGE_URL@.git
-maintainer = AMD Research
+maintainer = AMD ROCm
 license = MIT
 description = @PROJECT_DESCRIPTION@
 keywords =

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@
 #include <atomic>
 #include <cstdlib>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace container
 {
@@ -147,7 +147,7 @@ template <typename Tp, size_t N, bool AtomicSizeV>
 static_vector<Tp, N, AtomicSizeV>&
 static_vector<Tp, N, AtomicSizeV>::operator=(std::initializer_list<Tp>&& _v)
 {
-    if(OMNITRACE_UNLIKELY(_v.size() > N))
+    if(ROCPROFSYS_UNLIKELY(_v.size() > N))
     {
         throw exception<std::out_of_range>(
             std::string{ "static_vector::operator=(initializer_list) size > " } +
@@ -227,4 +227,4 @@ static_vector<Tp, N, AtomicSizeV>::update_size(size_t _n)
         m_size = _n;
 }
 }  // namespace container
-}  // namespace omnitrace
+}  // namespace rocprofsys

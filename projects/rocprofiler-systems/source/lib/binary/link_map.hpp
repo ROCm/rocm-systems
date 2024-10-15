@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,7 @@
 #include <string_view>
 #include <vector>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -54,11 +54,11 @@ std::optional<std::string>
 get_linked_path(const char*, open_modes_vec_t&& = {});
 
 // default parameters: get the linked binaries for the exe but exclude the linked binaries
-// from libomnitrace
+// from librocprof-sys
 std::set<link_file>
 get_link_map(const char*        _lib               = nullptr,
-             const std::string& _exclude_linked_by = "libomnitrace.so",
-             const std::string& _exclude_re        = "libomnitrace-([a-zA-Z]+)\\.so",
+             const std::string& _exclude_linked_by = "librocprof-sys.so",
+             const std::string& _exclude_re        = "librocprof-sys-([a-zA-Z]+)\\.so",
              open_modes_vec_t&& _open_modes        = {});
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

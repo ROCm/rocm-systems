@@ -23,9 +23,9 @@ fi
 
 : ${EXAMPLE_DIR:=examples}
 : ${EXAMPLE_NAME:=user-api}
-: ${SOURCE_DIR:=$(mktemp -t -d omnitrace-test-source-XXXX)}
-: ${BINARY_DIR:=$(mktemp -t -d omnitrace-test-build-XXXX)}
-: ${INSTALL_DIR:=$(mktemp -t -d omnitrace-install-XXXX)}
+: ${SOURCE_DIR:=$(mktemp -t -d rocprof-sys-test-source-XXXX)}
+: ${BINARY_DIR:=$(mktemp -t -d rocprof-sys-test-build-XXXX)}
+: ${INSTALL_DIR:=$(mktemp -t -d rocprof-sys-install-XXXX)}
 : ${INSTALL_SCRIPT:=""}
 
 usage()
@@ -36,7 +36,7 @@ usage()
     print_option example-dir "<PATH>" "Directory containing example" "${EXAMPLE_DIR}"
     print_option source-dir "<PATH>" "Location to copy example to" "${SOURCE_DIR}"
     print_option binary-dir "<PATH>" "Location to build" "${BINARY_DIR}"
-    print_option install-dir "<PATH>" "Location of omnitrace installation" "${INSTALL_DIR}"
+    print_option install-dir "<PATH>" "Location of rocprofiler-systems installation" "${INSTALL_DIR}"
     print_option install-script "<FILEPATH>" "Absolute path to the installer script" ""
 }
 
@@ -92,9 +92,9 @@ do
     esac
 done
 
-if [ ! -f "${INSTALL_DIR}/include/omnitrace/user.h" ]; then
+if [ ! -f "${INSTALL_DIR}/include/rocprofiler-systems/user.h" ]; then
     if [ -z "${INSTALL_SCRIPT}" ]; then
-        error-message "Unable to find \"omnitrace/user.h\" in \"${INSTALL_DIR}/include\" and installation script not provided"
+        error-message "Unable to find \"rocprofiler-systems/user.h\" in \"${INSTALL_DIR}/include\" and installation script not provided"
     elif [ ! -f "${INSTALL_SCRIPT}" ]; then
         error-message "Unable to locate \"${INSTALL_SCRIPT}\" in directory \"${PWD}\""
     else
@@ -122,10 +122,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(omnitrace REQUIRED COMPONENTS user)
+find_package(rocprofiler-systems REQUIRED COMPONENTS user)
 find_package(Threads REQUIRED)
 
-get_target_property(LIBS omnitrace::omnitrace INTERFACE_LINK_LIBRARIES)
+get_target_property(LIBS rocprofiler-systems::rocprofiler-systems INTERFACE_LINK_LIBRARIES)
 foreach(_LIB \${LIBS})
     foreach(_VAR LINK_LIBRARIES INCLUDE_DIRECTORIES)
         get_target_property(_VAL \${_LIB} INTERFACE_\${_VAR})
@@ -137,7 +137,7 @@ endforeach()
 
 file(GLOB sources \${CMAKE_CURRENT_LIST_DIR}/*.cpp \${CMAKE_CURRENT_LIST_DIR}/*.c)
 add_executable(app \${sources})
-target_link_libraries(app PRIVATE Threads::Threads omnitrace::omnitrace)
+target_link_libraries(app PRIVATE Threads::Threads rocprofiler-systems::rocprofiler-systems)
 EOF
 
 export CMAKE_PREFIX_PATH=${INSTALL_DIR}:${CMAKE_PREFIX_PATH}

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 
 #include <timemory/units.hpp>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace perf
 {
@@ -101,7 +101,7 @@ get_hw_config(std::string_view _v)
         return hw_config::reference_cpu_cycles;
     else
     {
-        OMNITRACE_THROW("Unknown perf hardware config: %s", _v.data());
+        ROCPROFSYS_THROW("Unknown perf hardware config: %s", _v.data());
     }
 
 #undef HW_CONFIG_REGEX
@@ -134,7 +134,7 @@ get_sw_config(std::string_view _v)
         return sw_config::emulation_faults;
     else
     {
-        OMNITRACE_THROW("Unknown perf hw cache config: %s", _v.data());
+        ROCPROFSYS_THROW("Unknown perf hw cache config: %s", _v.data());
     }
 
 #undef SW_CONFIG_REGEX
@@ -165,7 +165,7 @@ get_hw_cache_config(std::string_view _v)
     else if(HW_CACHE_CONFIG_REGEX("NODE"))
         _value |= static_cast<int>(hw_cache_config::node);
     else
-        OMNITRACE_THROW("Unknown perf software config: %s", _v.data());
+        ROCPROFSYS_THROW("Unknown perf software config: %s", _v.data());
 
 #undef HW_CACHE_CONFIG_REGEX
 #define HW_CACHE_OP_REGEX(KEY)                                                           \
@@ -226,7 +226,7 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
         case PERF_TYPE_MAX:
         default:
         {
-            OMNITRACE_THROW("unsupported perf type");
+            ROCPROFSYS_THROW("unsupported perf type");
         }
     };
 
@@ -241,4 +241,4 @@ config_overflow_sampling(struct perf_event_attr& _pe, std::string_view _event,
     }
 }
 }  // namespace perf
-}  // namespace omnitrace
+}  // namespace rocprofsys

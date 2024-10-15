@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,7 @@
 #    error "BFD support not enabled"
 #endif
 
-#define PACKAGE     "omnitrace"
+#define PACKAGE     "rocprofiler-systems"
 #define L_LNNO_SIZE 4
 
 #include <bfd.h>
@@ -49,7 +49,7 @@
 
 #include <timemory/mpl/concepts.hpp>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -404,4 +404,4 @@ template std::vector<dwarf_entry>
 symbol::get_debug_line_info<std::vector<dwarf_entry>>(
     const std::vector<scope_filter>& _filters) const;
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

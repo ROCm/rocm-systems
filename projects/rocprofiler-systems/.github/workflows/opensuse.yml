@@ -32,8 +32,8 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  OMNITRACE_CI: ON
-  OMNITRACE_TMPDIR: "%env{PWD}%/testing-tmp"
+  ROCPROFSYS_CI: ON
+  ROCPROFSYS_TMPDIR: "%env{PWD}%/testing-tmp"
 
 jobs:
   opensuse:
@@ -69,8 +69,8 @@ jobs:
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
-        echo "/opt/omnitrace/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
-        echo "LD_LIBRARY_PATH=/opt/omnitrace/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
+        echo "/opt/rocprofiler-systems/bin:${HOME}/.local/bin" >> $GITHUB_PATH &&
+        echo "LD_LIBRARY_PATH=/opt/rocprofiler-systems/lib:${LD_LIBRARY_PATH}" >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
       timeout-minutes: 115
@@ -86,20 +86,20 @@ jobs:
           -DCMAKE_C_COMPILER=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')
           -DCMAKE_CXX_COMPILER=${{ matrix.compiler }}
           -DCMAKE_BUILD_TYPE=${{ matrix.build-type }}
-          -DCMAKE_INSTALL_PREFIX=/opt/omnitrace
-          -DOMNITRACE_BUILD_TESTING=ON
-          -DOMNITRACE_USE_MPI=OFF
-          -DOMNITRACE_USE_HIP=OFF
-          -DOMNITRACE_USE_OMPT=OFF
-          -DOMNITRACE_USE_PYTHON=ON
-          -DOMNITRACE_INSTALL_PERFETTO_TOOLS=OFF
-          -DOMNITRACE_USE_MPI_HEADERS=ON
-          -DOMNITRACE_PYTHON_PREFIX=/opt/conda/envs
-          -DOMNITRACE_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
-          -DOMNITRACE_CI_MPI_RUN_AS_ROOT=ON
-          -DOMNITRACE_MAX_THREADS=64
-          -DOMNITRACE_DISABLE_EXAMPLES="transpose;rccl"
-          -DOMNITRACE_BUILD_NUMBER=${{ github.run_attempt }}
+          -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems
+          -DROCPROFSYS_BUILD_TESTING=ON
+          -DROCPROFSYS_USE_MPI=OFF
+          -DROCPROFSYS_USE_HIP=OFF
+          -DROCPROFSYS_USE_OMPT=OFF
+          -DROCPROFSYS_USE_PYTHON=ON
+          -DROCPROFSYS_INSTALL_PERFETTO_TOOLS=OFF
+          -DROCPROFSYS_USE_MPI_HEADERS=ON
+          -DROCPROFSYS_PYTHON_PREFIX=/opt/conda/envs
+          -DROCPROFSYS_PYTHON_ENVS="py3.6;py3.7;py3.8;py3.9;py3.10;py3.11"
+          -DROCPROFSYS_CI_MPI_RUN_AS_ROOT=ON
+          -DROCPROFSYS_MAX_THREADS=64
+          -DROCPROFSYS_DISABLE_EXAMPLES="transpose;rccl"
+          -DROCPROFSYS_BUILD_NUMBER=${{ github.run_attempt }}
 
     - name: Install
       timeout-minutes: 10
@@ -110,27 +110,27 @@ jobs:
       timeout-minutes: 10
       run: |
         set -v
-        export OMNITRACE_DEBUG=ON
-        which omnitrace-avail
-        ldd $(which omnitrace-avail)
-        omnitrace-avail --help
-        omnitrace-avail -a
-        which omnitrace
-        ldd $(which omnitrace)
-        omnitrace-instrument --help
-        omnitrace-instrument -e -v 1 -o ls.inst --simulate -- ls
-        for i in $(find omnitrace-ls.inst-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace-instrument -e -v 1 -o ls.inst -- ls
-        omnitrace-run -- ./ls.inst
-        omnitrace-instrument -e -v 1 --simulate -- ls
-        for i in $(find omnitrace-ls-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
-        omnitrace-instrument -e -v 1 -- ls
+        export ROCPROFSYS_DEBUG=ON
+        which rocprof-sys-avail
+        ldd $(which rocprof-sys-avail)
+        rocprof-sys-avail --help
+        rocprof-sys-avail -a
+        which rocprof-sys-instrument
+        ldd $(which rocprof-sys-instrument)
+        rocprof-sys-instrument --help
+        rocprof-sys-instrument -e -v 1 -o ls.inst --simulate -- ls
+        for i in $(find rocprofsys-ls.inst-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        rocprof-sys-instrument -e -v 1 -o ls.inst -- ls
+        rocprof-sys-run -- ./ls.inst
+        rocprof-sys-instrument -e -v 1 --simulate -- ls
+        for i in $(find rocprofsys-ls-output -type f); do echo -e "\n\n --> ${i} \n\n"; cat ${i}; done
+        rocprof-sys-instrument -e -v 1 -- ls
 
     - name: Test User API
       timeout-minutes: 10
       run: |
         set -v
-        ./scripts/test-find-package.sh --install-dir /opt/omnitrace
+        ./scripts/test-find-package.sh --install-dir /opt/rocprofiler-systems
 
     - name: CTest Artifacts
       if: failure()
@@ -148,9 +148,9 @@ jobs:
       with:
         name: data-${{ github.job }}-${{ strategy.job-index }}-files
         path: |
-          build/omnitrace-tests-config/*.cfg
-          build/omnitrace-tests-output/**/*.txt
-          build/omnitrace-tests-output/**/*-instr*.json
+          build/rocprofsys-tests-config/*.cfg
+          build/rocprofsys-tests-output/**/*.txt
+          build/rocprofsys-tests-output/**/*-instr*.json
 
     - name: Kill Perfetto
       if: success() || failure()

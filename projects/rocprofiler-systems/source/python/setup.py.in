@@ -6,7 +6,7 @@ setup(
     name="@PROJECT_NAME@",
     version="@PROJECT_VERSION@",
     description="@PROJECT_DESCRIPTION@",
-    author="AMD Research",
+    author="AMD ROCm",
     url="@PROJECT_HOMEPAGE_URL@",
     packages=["@PROJECT_NAME@"],
 )

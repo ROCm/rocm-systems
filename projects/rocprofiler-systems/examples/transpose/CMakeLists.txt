@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(omnitrace-transpose-example LANGUAGES CXX)
+project(rocprofiler-systems-transpose-example LANGUAGES CXX)
 
-if(OMNITRACE_DISABLE_EXAMPLES)
+if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                             OMNITRACE_DISABLE_EXAMPLES)
+    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                              ROCPROFSYS_DISABLE_EXAMPLES)
         return()
     endif()
 endif()
@@ -36,7 +36,7 @@ endif()
 
 if((NOT CMAKE_CXX_COMPILER_IS_HIPCC OR (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang"
                                         AND NOT hip_FOUND))
-   AND (NOT COMMAND omnitrace_custom_compilation AND NOT HIPCC_EXECUTABLE))
+   AND (NOT COMMAND rocprofiler_systems_custom_compilation AND NOT HIPCC_EXECUTABLE))
     message(AUTHOR_WARNING "transpose target could not be built")
     return()
 endif()
@@ -56,8 +56,10 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "Clang"
    AND NOT HIPCC_EXECUTABLE)
     target_link_libraries(
         transpose
-        PRIVATE $<TARGET_NAME_IF_EXISTS:omnitrace::omnitrace-compile-options>
-                $<TARGET_NAME_IF_EXISTS:hip::host> $<TARGET_NAME_IF_EXISTS:hip::device>)
+        PRIVATE
+            $<TARGET_NAME_IF_EXISTS:rocprofiler-systems::rocprofiler-systems-compile-options>
+            $<TARGET_NAME_IF_EXISTS:hip::host>
+            $<TARGET_NAME_IF_EXISTS:hip::device>)
 else()
     target_compile_options(transpose PRIVATE -W -Wall)
 endif()
@@ -73,12 +75,12 @@ endif()
 
 if(NOT CMAKE_CXX_COMPILER_IS_HIPCC AND HIPCC_EXECUTABLE)
     # defined in MacroUtilities.cmake
-    omnitrace_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
+    rocprofiler_systems_custom_compilation(COMPILER ${HIPCC_EXECUTABLE} TARGET transpose)
 endif()
 
-if(OMNITRACE_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS transpose
         DESTINATION bin
-        COMPONENT omnitrace-examples)
+        COMPONENT rocprofiler-systems-examples)
 endif()

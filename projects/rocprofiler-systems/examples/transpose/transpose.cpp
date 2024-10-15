@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015-2020 Advanced Micro Devices, Inc. All rights reserved.
+Copyright (c) 2015-2024 Advanced Micro Devices, Inc. All rights reserved.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -221,7 +221,7 @@ main(int argc, char** argv)
 #else
     (void) size;
 #endif
-    // this is a temporary workaround in omnitrace when HIP + MPI is enabled
+    // this is a temporary workaround in rocprof-sys when HIP + MPI is enabled
     int ndevice = 0;
     int devid   = rank;
     HIP_API_CALL(hipGetDeviceCount(&ndevice));

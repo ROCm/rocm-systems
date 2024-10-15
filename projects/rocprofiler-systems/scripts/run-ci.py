@@ -39,7 +39,7 @@ def generate_custom(args, cmake_args, ctest_args):
     NAME = re.sub(r"(.*)-([0-9]+)/merge", "PR_\\2_\\1", NAME)
 
     return f"""
-        set(CTEST_PROJECT_NAME "Omnitrace")
+        set(CTEST_PROJECT_NAME "rocprofiler-systems")
         set(CTEST_NIGHTLY_START_TIME "05:00:00 UTC")
 
         set(CTEST_DROP_METHOD "http")
@@ -66,7 +66,7 @@ def generate_custom(args, cmake_args, ctest_args):
         set(CTEST_BINARY_DIRECTORY {BINARY_DIR})
 
         set(CTEST_UPDATE_COMMAND {GIT_CMD})
-        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} -DOMNITRACE_BUILD_CI=ON {CMAKE_ARGS}")
+        set(CTEST_CONFIGURE_COMMAND "{CMAKE_CMD} -B {BINARY_DIR} {SOURCE_DIR} -DROCPROFSYS_BUILD_CI=ON {CMAKE_ARGS}")
         set(CTEST_BUILD_COMMAND "{CMAKE_CMD} --build {BINARY_DIR} --target all --parallel {BUILD_JOBS}")
         set(CTEST_COVERAGE_COMMAND {GCOV_CMD})
         """
@@ -138,7 +138,7 @@ def parse_cdash_args(args):
     BINARY_DIR = os.path.join(SOURCE_DIR, "build")
     SITE = socket.gethostname()
     NAME = None
-    SUBMIT_URL = "my.cdash.org/submit.php?project=Omnitrace"
+    SUBMIT_URL = "my.cdash.org/submit.php?project=rocprofiler-systems"
     CODECOV = False
 
     parser = argparse.ArgumentParser()
@@ -219,7 +219,10 @@ def parse_args(args=None):
     cdash_args = parse_cdash_args(input_args)
 
     if cdash_args.coverage:
-        cmake_args += ["-DOMNITRACE_BUILD_CODECOV=ON", "-DOMNITRACE_STRIP_LIBRARIES=OFF"]
+        cmake_args += [
+            "-DROCPROFSYS_BUILD_CODECOV=ON",
+            "-DROCPROFSYS_STRIP_LIBRARIES=OFF",
+        ]
 
     def get_repeat_val(_param):
         _value = getattr(cdash_args, f"repeat_{_param}".replace("-", "_"))

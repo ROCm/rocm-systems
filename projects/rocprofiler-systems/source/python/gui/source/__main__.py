@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # MIT License
 #
-# Copyright (c) 2023 Advanced Micro Devices, Inc. All Rights Reserved.
+# Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,7 @@
 from __future__ import absolute_import
 
 __author__ = "AMD Research"
-__copyright__ = "Copyright 2023, Advanced Micro Devices, Inc."
+__copyright__ = "Copyright 2023-2024, Advanced Micro Devices, Inc."
 __license__ = "MIT"
 __maintainer__ = "AMD Research"
 __status__ = "Development"
@@ -118,7 +118,7 @@ def main():
 
     for itr in [
         settings_path,
-        os.path.join(os.environ.get("HOME"), ".omnitrace-causal-plot.json"),
+        os.path.join(os.environ.get("HOME"), ".rocprof-sys-causal-plot.json"),
     ]:
         if os.path.exists(itr):
             with open(itr, "r") as f:
@@ -143,18 +143,18 @@ def main():
             settings[key] = value
 
     my_parser = argparse.ArgumentParser(
-        description="AMD's OmniTrace Causal Profiling GUI",
+        description="AMD's ROCm Systems Profiler Causal Profiling GUI",
         prog="tool",
         allow_abbrev=False,
         formatter_class=lambda prog: argparse.RawTextHelpFormatter(
             prog, max_help_position=40
         ),
         usage="""
-        omnitrace-causal-plot [ARGS...]
+        rocprof-sys-causal-plot [ARGS...]
 
         -------------------------------------------------------------------------------
         Examples:
-        \tomnitrace-causal-plot --path workloads/toy -n 0
+        \trocprof-sys-causal-plot --path workloads/toy -n 0
         -------------------------------------------------------------------------------
         """,
     )
@@ -162,7 +162,9 @@ def main():
     my_parser.add_argument(
         "--version",
         action="version",
-        version="OmniTrace Causal Viewer v{}\n".format(f"{__version__}".strip("\n")),
+        version="ROCm Systems Profiler Causal Viewer v{}\n".format(
+            f"{__version__}".strip("\n")
+        ),
     )
 
     my_parser.add_argument(

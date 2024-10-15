@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 
-project(omnitrace-lulesh-example LANGUAGES C CXX)
+project(rocprofiler-systems-lulesh-example LANGUAGES C CXX)
 
-if(OMNITRACE_DISABLE_EXAMPLES)
+if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                             OMNITRACE_DISABLE_EXAMPLES)
+    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                              ROCPROFSYS_DISABLE_EXAMPLES)
         return()
     endif()
 endif()
@@ -65,18 +65,18 @@ endif()
 file(GLOB headers ${PROJECT_SOURCE_DIR}/*.h ${PROJECT_SOURCE_DIR}/*.hxx)
 file(GLOB sources ${PROJECT_SOURCE_DIR}/*.cc)
 
-omnitrace_causal_example_executable(
+rocprofiler_systems_causal_example_executable(
     "lulesh"
     SOURCES ${sources} ${headers}
     LINK_LIBRARIES Kokkos::kokkos lulesh-mpi
     INCLUDE_DIRECTORIES ${PROJECT_SOURCE_DIR}/includes)
 
-if(OMNITRACE_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES)
     if(LULESH_BUILD_KOKKOS)
         install(
             TARGETS kokkoscore kokkoscontainers
             DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            COMPONENT omnitrace-examples)
+            COMPONENT rocprofiler-systems-examples)
         set_target_properties(lulesh PROPERTIES INSTALL_RPATH
                                                 "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}")
     endif()

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -33,7 +33,7 @@
 #include <string>
 #include <utility>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace procfs = ::tim::procfs;
 
@@ -100,14 +100,15 @@ dynamic_library::dynamic_library(std::string _env, std::string _fname, int _flag
             }
             else if(_env_val.find('/') == 0)
             {
-                OMNITRACE_VERBOSE_F(1,
-                                    "Ignoring environment variable %s=\"%s\" because the "
-                                    "filepath does not exist. Using \"%s\" instead...\n",
-                                    envname.c_str(), _env_val.c_str(), filename.c_str())
+                ROCPROFSYS_VERBOSE_F(
+                    1,
+                    "Ignoring environment variable %s=\"%s\" because the "
+                    "filepath does not exist. Using \"%s\" instead...\n",
+                    envname.c_str(), _env_val.c_str(), filename.c_str())
             }
             else if(_env_val.find('/') != 0 && filename.find('/') == 0)
             {
-                OMNITRACE_VERBOSE_F(
+                ROCPROFSYS_VERBOSE_F(
                     1,
                     "Ignoring environment variable %s=\"%s\" because the "
                     "filepath is relative. Using absolute path \"%s\" instead...\n",
@@ -129,8 +130,8 @@ dynamic_library::open()
         handle = dlopen(filename.c_str(), flags);
         if(!handle)
         {
-            OMNITRACE_VERBOSE(2, "[dynamic_library] Error opening %s=\"%s\" :: %s.\n",
-                              envname.c_str(), filename.c_str(), dlerror());
+            ROCPROFSYS_VERBOSE(2, "[dynamic_library] Error opening %s=\"%s\" :: %s.\n",
+                               envname.c_str(), filename.c_str(), dlerror());
         }
         dlerror();  // Clear any existing error
     }
@@ -149,4 +150,4 @@ dynamic_library::is_open() const
 {
     return (handle != nullptr);
 }
-}  // namespace omnitrace
+}  // namespace rocprofsys

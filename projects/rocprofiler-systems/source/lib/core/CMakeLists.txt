@@ -40,36 +40,40 @@ set(core_headers
     ${CMAKE_CURRENT_LIST_DIR}/timemory.hpp
     ${CMAKE_CURRENT_LIST_DIR}/utility.hpp)
 
-add_library(omnitrace-core-library STATIC)
-add_library(omnitrace::omnitrace-core ALIAS omnitrace-core-library)
+add_library(rocprofiler-systems-core-library STATIC)
+add_library(rocprofiler-systems::rocprofiler-systems-core ALIAS
+            rocprofiler-systems-core-library)
 
-target_sources(omnitrace-core-library PRIVATE ${core_sources} ${core_headers}
-                                              ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp)
+target_sources(
+    rocprofiler-systems-core-library PRIVATE ${core_sources} ${core_headers}
+                                             ${CMAKE_CURRENT_BINARY_DIR}/defines.hpp)
 add_subdirectory(binary)
 add_subdirectory(components)
 add_subdirectory(containers)
 
-target_include_directories(omnitrace-core-library BEFORE
+target_include_directories(rocprofiler-systems-core-library BEFORE
                            PRIVATE ${CMAKE_CURRENT_LIST_DIR})
 
-target_link_libraries(omnitrace-core-library
-                      PRIVATE omnitrace::omnitrace-interface-library)
+target_link_libraries(rocprofiler-systems-core-library
+                      PRIVATE rocprofiler-systems::rocprofiler-systems-interface-library)
 target_link_libraries(
-    omnitrace-core-library
+    rocprofiler-systems-core-library
     PRIVATE
-        $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-common-library>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc-optional>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx-optional>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-sanitizer>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>)
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-headers>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-threading>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-hip>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm-smi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
+    )
 
-set_target_properties(omnitrace-core-library PROPERTIES OUTPUT_NAME omnitrace-core)
+set_target_properties(rocprofiler-systems-core-library
+                      PROPERTIES OUTPUT_NAME ${BINARY_NAME_PREFIX}-core)

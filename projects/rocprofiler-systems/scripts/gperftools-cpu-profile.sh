@@ -87,7 +87,7 @@ run-pprof()
 }
 
 # configure pre-loading of profiler library
-for i in $(find ${PWD} -type f | egrep 'libomnitrace' | egrep -v '\.a$' | egrep '\.so$') $(ldd ${1} | awk '{print $(NF-1)}')
+for i in $(find ${PWD} -type f | egrep 'librocprof-sys' | egrep -v '\.a$' | egrep '\.so$') $(ldd ${1} | awk '{print $(NF-1)}')
 do
     if [ -f "${i}" ]; then run-verbose ADD_LIBS "${i}"; fi
 done

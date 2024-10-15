@@ -46,5 +46,5 @@ _toc.yml
 /.cache
 /.clangd
 /compile_commands.json
-/omnitrace-install.py
-/scripts/omnitrace-install.py
+/rocprof-sys-install.py
+/scripts/rocprof-sys-install.py

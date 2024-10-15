@@ -54,20 +54,21 @@ foreach(_VAR FIND_STRATEGY FIND_VIRTUALENV FIND_FRAMEWORK FIND_IMPLEMENTATIONS
     if(DEFINED Python3_${_VAR})
         set(Python_${_VAR}
             "${Python3_${_VAR}}"
-            CACHE STRING "Set via Python3_${_VAR} setting (omnitrace)")
+            CACHE STRING "Set via Python3_${_VAR} setting (rocprofsys)")
         mark_as_advanced(Python_${_VAR})
         mark_as_advanced(Python3_${_VAR})
     endif()
 endforeach()
 
 # display version
-omnitrace_add_feature(OMNITRACE_PYTHON_VERSIONS "Python version for omnitrace" DOC)
+rocprofiler_systems_add_feature(ROCPROFSYS_PYTHON_VERSIONS
+                                "Python version for rocprofsys" DOC)
 
 option(PYBIND11_INSTALL "Enable Pybind11 installation" OFF)
 
-if(OMNITRACE_BUILD_PYTHON AND NOT TARGET pybind11)
+if(ROCPROFSYS_BUILD_PYTHON AND NOT TARGET pybind11)
     # checkout PyBind11 if not checked out
-    omnitrace_checkout_git_submodule(
+    rocprofiler_systems_checkout_git_submodule(
         RECURSIVE
         RELATIVE_PATH external/pybind11
         WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
@@ -78,15 +79,16 @@ if(OMNITRACE_BUILD_PYTHON AND NOT TARGET pybind11)
         set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
     endif()
     set(PYBIND11_NOPYTHON ON)
-    omnitrace_save_variables(IPO VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    rocprofiler_systems_save_variables(IPO VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
     add_subdirectory(${PROJECT_SOURCE_DIR}/external/pybind11)
-    omnitrace_restore_variables(IPO VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
+    rocprofiler_systems_restore_variables(IPO
+                                          VARIABLES CMAKE_INTERPROCEDURAL_OPTIMIZATION)
 endif()
 
 execute_process(
     COMMAND ${PYTHON_EXECUTABLE} -c
             "import time ; print('{} {}'.format(time.ctime(), time.tzname[0]))"
-    OUTPUT_VARIABLE OMNITRACE_INSTALL_DATE
+    OUTPUT_VARIABLE ROCPROFSYS_INSTALL_DATE
     OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
 
-string(REPLACE "  " " " OMNITRACE_INSTALL_DATE "${OMNITRACE_INSTALL_DATE}")
+string(REPLACE "  " " " ROCPROFSYS_INSTALL_DATE "${ROCPROFSYS_INSTALL_DATE}")

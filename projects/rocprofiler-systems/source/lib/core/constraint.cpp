@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,7 @@
 #include <thread>
 #include <type_traits>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace constraint
 {
@@ -47,7 +47,7 @@ namespace units = ::tim::units;
 using clock_type    = std::chrono::high_resolution_clock;
 using duration_type = std::chrono::duration<double, std::nano>;
 
-#define OMNITRACE_CLOCK_IDENTIFIER(VAL)                                                  \
+#define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
     clock_identifier { #VAL, VAL }
 
 auto
@@ -63,13 +63,13 @@ clock_name(std::string _v)
 }
 
 auto accepted_clock_ids =
-    std::set<clock_identifier>{ OMNITRACE_CLOCK_IDENTIFIER(CLOCK_REALTIME),
-                                OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
-                                OMNITRACE_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
-                                OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
-                                OMNITRACE_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
-                                OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
-                                OMNITRACE_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) };
+    std::set<clock_identifier>{ ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
+                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
+                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
+                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
+                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
+                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
+                                ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) };
 
 template <typename Tp>
 clock_identifier
@@ -101,9 +101,9 @@ find_clock_identifier(const Tp& _v)
         }
     }
 
-    OMNITRACE_THROW("Unknown clock id %s: %s. Valid choices: %s\n", _descript,
-                    timemory::join::join("", _v).c_str(),
-                    timemory::join::join("", accepted_clock_ids).c_str());
+    ROCPROFSYS_THROW("Unknown clock id %s: %s. Valid choices: %s\n", _descript,
+                     timemory::join::join("", _v).c_str(),
+                     timemory::join::join("", accepted_clock_ids).c_str());
 }
 
 void
@@ -232,10 +232,10 @@ spec::spec(const std::string& _clock_id, double _delay, double _dur, uint64_t _n
 {}
 
 spec::spec(const std::string& _line)
-: spec{ config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIOD_CLOCK_ID")
+: spec{ config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
             .value_or("CLOCK_REALTIME"),
-        config::get_setting_value<double>("OMNITRACE_TRACE_DELAY").value_or(0.0),
-        config::get_setting_value<double>("OMNITRACE_TRACE_DURATION").value_or(0.0) }
+        config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0),
+        config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0) }
 {
     auto _delim = tim::delimit(_line, ":");
     if(!_delim.empty()) delay = utility::convert<double>(_delim.at(0));
@@ -266,11 +266,11 @@ spec::operator()(const stages& _stages) const
             return _ret;
         };
 
-        OMNITRACE_VERBOSE(2,
-                          "Executing constraint spec %lu of %lu :: delay: %6.3f, "
-                          "duration: %6.3f, clock: %s\n",
-                          i, _spec.repeat, _spec.delay, _spec.duration,
-                          _spec.clock_id.as_string().c_str());
+        ROCPROFSYS_VERBOSE(2,
+                           "Executing constraint spec %lu of %lu :: delay: %6.3f, "
+                           "duration: %6.3f, clock: %s\n",
+                           i, _spec.repeat, _spec.delay, _spec.duration,
+                           _spec.clock_id.as_string().c_str());
 
         if(_stages.init(_spec) && _wait(_stages.wait, _spec.delay) &&
            _stages.start(_spec) && _wait(_stages.collect, _spec.duration) &&
@@ -302,11 +302,11 @@ get_trace_specs()
 
     {
         auto _delay_v =
-            config::get_setting_value<double>("OMNITRACE_TRACE_DELAY").value_or(0.0);
+            config::get_setting_value<double>("ROCPROFSYS_TRACE_DELAY").value_or(0.0);
         auto _duration_v =
-            config::get_setting_value<double>("OMNITRACE_TRACE_DURATION").value_or(0.0);
+            config::get_setting_value<double>("ROCPROFSYS_TRACE_DURATION").value_or(0.0);
         auto _clock_v = find_clock_identifier(
-            config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIOD_CLOCK_ID")
+            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIOD_CLOCK_ID")
                 .value_or("CLOCK_REALTIME"));
 
         if(_delay_v > 0.0 || _duration_v > 0.0)
@@ -317,7 +317,7 @@ get_trace_specs()
 
     {
         auto _periods_v =
-            config::get_setting_value<std::string>("OMNITRACE_TRACE_PERIODS")
+            config::get_setting_value<std::string>("ROCPROFSYS_TRACE_PERIODS")
                 .value_or("");
         if(!_periods_v.empty())
         {
@@ -349,4 +349,4 @@ get_trace_stages()
     return _v;
 }
 }  // namespace constraint
-}  // namespace omnitrace
+}  // namespace rocprofsys

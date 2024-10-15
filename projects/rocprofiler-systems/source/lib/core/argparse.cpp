@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,7 @@
 #include <timemory/utility/filepath.hpp>
 #include <timemory/utility/join.hpp>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace argparse
 {
@@ -56,25 +56,25 @@ get_clock_id_choices()
         return _v;
     };
 
-#define OMNITRACE_CLOCK_IDENTIFIER(VAL)                                                  \
+#define ROCPROFSYS_CLOCK_IDENTIFIER(VAL)                                                 \
     std::make_tuple(clock_name(#VAL), VAL, std::string_view{ #VAL })
 
     auto _choices = strvec_t{};
     auto _aliases = std::map<std::string, strvec_t>{};
-    for(auto itr : { OMNITRACE_CLOCK_IDENTIFIER(CLOCK_REALTIME),
-                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
-                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
-                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
-                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
-                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
-                     OMNITRACE_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) })
+    for(auto itr : { ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME),
+                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC),
+                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_PROCESS_CPUTIME_ID),
+                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_RAW),
+                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_REALTIME_COARSE),
+                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_MONOTONIC_COARSE),
+                     ROCPROFSYS_CLOCK_IDENTIFIER(CLOCK_BOOTTIME) })
     {
         auto _choice = std::to_string(std::get<1>(itr));
         _choices.emplace_back(_choice);
         _aliases[_choice] = { std::get<0>(itr), std::string{ std::get<2>(itr) } };
     }
 
-#undef OMNITRACE_CLOCK_IDENTIFIER
+#undef ROCPROFSYS_CLOCK_IDENTIFIER
 
     return std::make_pair(_choices, _aliases);
 }
@@ -137,13 +137,13 @@ update_env(parser_data& _data, std::string_view _env_var, Tp&& _env_val,
             else
             {
                 free(itr);
-                itr = strdup(omnitrace::common::join('=', _env_var, _env_val).c_str());
+                itr = strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str());
             }
             return;
         }
     }
     _data.current.emplace_back(
-        strdup(omnitrace::common::join('=', _env_var, _env_val).c_str()));
+        strdup(rocprofsys::common::join('=', _env_var, _env_val).c_str()));
 }
 
 void
@@ -171,7 +171,7 @@ get_internal_libpath(const std::string& _lib)
     auto _pos = _exe.find_last_of('/');
     auto _dir = filepath::get_cwd();
     if(_pos != std::string_view::npos) _dir = _exe.substr(0, _pos);
-    return filepath::realpath(omnitrace::common::join("/", _dir, "..", "lib", _lib),
+    return filepath::realpath(rocprofsys::common::join("/", _dir, "..", "lib", _lib),
                               nullptr, false);
 }
 }  // namespace
@@ -219,21 +219,21 @@ init_parser(parser_data& _data)
         }
     }
 
-    _data.dl_libpath   = get_realpath(get_internal_libpath("libomnitrace-dl.so").c_str());
-    _data.omni_libpath = get_realpath(get_internal_libpath("libomnitrace.so").c_str());
+    _data.dl_libpath = get_realpath(get_internal_libpath("librocprof-sys-dl.so").c_str());
+    _data.omni_libpath = get_realpath(get_internal_libpath("librocprof-sys.so").c_str());
 
-#if defined(OMNITRACE_USE_ROCTRACER) || defined(OMNITRACE_USE_ROCPROFILER)
+#if defined(ROCPROFSYS_USE_ROCTRACER) || defined(ROCPROFSYS_USE_ROCPROFILER)
     update_env(_data, "HSA_TOOLS_LIB", _data.dl_libpath);
     if(!getenv("HSA_TOOLS_REPORT_LOAD_FAILURE"))
         update_env(_data, "HSA_TOOLS_REPORT_LOAD_FAILURE", "1");
 #endif
 
-#if defined(OMNITRACE_USE_ROCPROFILER)
+#if defined(ROCPROFSYS_USE_ROCPROFILER)
     update_env(_data, "ROCP_TOOL_LIB", _data.omni_libpath);
     if(!getenv("ROCP_HSA_INTERCEPT")) update_env(_data, "ROCP_HSA_INTERCEPT", "1");
 #endif
 
-#if defined(OMNITRACE_USE_OMPT)
+#if defined(ROCPROFSYS_USE_OMPT)
     if(!getenv("OMP_TOOL_LIBRARIES"))
         update_env(_data, "OMP_TOOL_LIBRARIES", _data.dl_libpath, UPD_PREPEND);
 #endif
@@ -305,7 +305,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             ? strvec_t{ "hsa-interrupt" }
             : strvec_t{};
 
-#if OMNITRACE_USE_ROCTRACER == 0 && OMNITRACE_USE_ROCPROFILER == 0
+#if ROCPROFSYS_USE_ROCTRACER == 0 && ROCPROFSYS_USE_ROCPROFILER == 0
     _realtime_reqs.clear();
 #endif
 
@@ -325,7 +325,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _monochrome = p.get<bool>("monochrome");
                 _data.monochrome = _monochrome;
                 p.set_use_color(!_monochrome);
-                update_env(_data, "OMNITRACE_MONOCHROME", (_monochrome) ? "1" : "0");
+                update_env(_data, "ROCPROFSYS_MONOCHROME", (_monochrome) ? "1" : "0");
                 update_env(_data, "MONOCHROME", (_monochrome) ? "1" : "0");
             });
 
@@ -337,7 +337,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _parser.add_argument({ "--debug" }, "Debug output")
             .max_count(1)
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_DEBUG", p.get<bool>("debug"));
+                update_env(_data, "ROCPROFSYS_DEBUG", p.get<bool>("debug"));
             });
 
         _data.processed_environs.emplace("debug");
@@ -351,7 +351,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _v       = p.get<int>("verbose");
                 _data.verbose = _v;
-                update_env(_data, "OMNITRACE_VERBOSE", _v);
+                update_env(_data, "ROCPROFSYS_VERBOSE", _v);
             });
 
         _data.processed_environs.emplace("verbose");
@@ -369,7 +369,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("filepath")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_CONFIG_FILE",
+                update_env(_data, "ROCPROFSYS_CONFIG_FILE",
                            join(array_config_t{ ":" }, p.get<strvec_t>("config")));
             });
 
@@ -389,8 +389,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("path [prefix]")
             .action([&](parser_t& p) {
                 auto _v = p.get<strvec_t>("output");
-                update_env(_data, "OMNITRACE_OUTPUT_PATH", _v.at(0));
-                if(_v.size() > 1) update_env(_data, "OMNITRACE_OUTPUT_PREFIX", _v.at(1));
+                update_env(_data, "ROCPROFSYS_OUTPUT_PATH", _v.at(0));
+                if(_v.size() > 1) update_env(_data, "ROCPROFSYS_OUTPUT_PREFIX", _v.at(1));
             });
 
         _data.processed_environs.emplace("output");
@@ -405,7 +405,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Generate a detailed trace (perfetto output)")
             .max_count(1)
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_TRACE", p.get<bool>("trace"));
+                update_env(_data, "ROCPROFSYS_TRACE", p.get<bool>("trace"));
             });
 
         _data.processed_environs.emplace("trace");
@@ -420,7 +420,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .max_count(1)
             .conflicts({ "flat-profile" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_PROFILE", p.get<bool>("profile"));
+                update_env(_data, "ROCPROFSYS_PROFILE", p.get<bool>("profile"));
             });
 
         _data.processed_environs.emplace("profile");
@@ -434,8 +434,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .max_count(1)
             .conflicts({ "profile" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_PROFILE", p.get<bool>("flat-profile"));
-                update_env(_data, "OMNITRACE_FLAT_PROFILE", p.get<bool>("flat-profile"));
+                update_env(_data, "ROCPROFSYS_PROFILE", p.get<bool>("flat-profile"));
+                update_env(_data, "ROCPROFSYS_FLAT_PROFILE", p.get<bool>("flat-profile"));
             });
 
         _data.processed_environs.emplace("flat_profile");
@@ -451,13 +451,13 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("timer-type")
             .choices({ "cputime", "realtime" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_USE_SAMPLING", true);
+                update_env(_data, "ROCPROFSYS_USE_SAMPLING", true);
                 auto _modes = p.get<strset_t>("sample");
                 if(!_modes.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_CPUTIME",
+                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME",
                                _modes.count("cputime") > 0, UPD_WEAK);
-                    update_env(_data, "OMNITRACE_SAMPLING_REALTIME",
+                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME",
                                _modes.count("realtime") > 0, UPD_WEAK);
                 }
             });
@@ -475,8 +475,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _h = p.get<bool>("host");
                 auto _d = p.get<bool>("device");
-                update_env(_data, "OMNITRACE_USE_PROCESS_SAMPLING", _h || _d);
-                update_env(_data, "OMNITRACE_CPU_FREQ_ENABLED", _h);
+                update_env(_data, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
+                update_env(_data, "ROCPROFSYS_CPU_FREQ_ENABLED", _h);
             });
 
         _data.processed_environs.emplace("host");
@@ -494,8 +494,8 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .action([&](parser_t& p) {
                 auto _h = p.get<bool>("host");
                 auto _d = p.get<bool>("device");
-                update_env(_data, "OMNITRACE_USE_PROCESS_SAMPLING", _h || _d);
-                update_env(_data, "OMNITRACE_USE_ROCM_SMI", _d);
+                update_env(_data, "ROCPROFSYS_USE_PROCESS_SAMPLING", _h || _d);
+                update_env(_data, "ROCPROFSYS_USE_ROCM_SMI", _d);
             });
 
         _data.processed_environs.emplace("device");
@@ -512,11 +512,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_TRACE_DELAY", p.get<double>("wait"),
+                update_env(_data, "ROCPROFSYS_TRACE_DELAY", p.get<double>("wait"),
                            UPD_WEAK);
-                update_env(_data, "OMNITRACE_SAMPLING_DELAY", p.get<double>("wait"),
+                update_env(_data, "ROCPROFSYS_SAMPLING_DELAY", p.get<double>("wait"),
                            UPD_WEAK);
-                update_env(_data, "OMNITRACE_CAUSAL_DELAY", p.get<double>("wait"),
+                update_env(_data, "ROCPROFSYS_CAUSAL_DELAY", p.get<double>("wait"),
                            UPD_WEAK);
             });
 
@@ -533,11 +533,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_TRACE_DURATION", p.get<double>("duration"),
+                update_env(_data, "ROCPROFSYS_TRACE_DURATION", p.get<double>("duration"),
                            UPD_WEAK);
-                update_env(_data, "OMNITRACE_SAMPLING_DURATION",
+                update_env(_data, "ROCPROFSYS_SAMPLING_DURATION",
                            p.get<double>("duration"), UPD_WEAK);
-                update_env(_data, "OMNITRACE_CAUSAL_DURATION", p.get<double>("duration"),
+                update_env(_data, "ROCPROFSYS_CAUSAL_DURATION", p.get<double>("duration"),
                            UPD_WEAK);
             });
 
@@ -555,7 +555,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
                 update_env(
-                    _data, "OMNITRACE_TRACE_PERIODS",
+                    _data, "ROCPROFSYS_TRACE_PERIODS",
                     join(array_config_t{ " ", "", "" }, p.get<strvec_t>("periods")),
                     UPD_WEAK);
             });
@@ -567,28 +567,28 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                                   "rcclp", "rocm-smi",    "roctracer",  "rocprofiler",
                                   "roctx", "mutex-locks", "spin-locks", "rw-locks" };
 
-#if !defined(OMNITRACE_USE_MPI) && !defined(OMNITRACE_USE_MPI_HEADERS)
+#if !defined(ROCPROFSYS_USE_MPI) && !defined(ROCPROFSYS_USE_MPI_HEADERS)
     _backend_choices.erase("mpip");
 #endif
 
-#if !defined(OMNITRACE_USE_OMPT)
+#if !defined(ROCPROFSYS_USE_OMPT)
     _backend_choices.erase("ompt");
 #endif
 
-#if !defined(OMNITRACE_USE_RCCL)
+#if !defined(ROCPROFSYS_USE_RCCL)
     _backend_choices.erase("rcclp");
 #endif
 
-#if !defined(OMNITRACE_USE_ROCM_SMI)
+#if !defined(ROCPROFSYS_USE_ROCM_SMI)
     _backend_choices.erase("rocm-smi");
 #endif
 
-#if !defined(OMNITRACE_USE_ROCTRACER)
+#if !defined(ROCPROFSYS_USE_ROCTRACER)
     _backend_choices.erase("roctracer");
     _backend_choices.erase("roctx");
 #endif
 
-#if !defined(OMNITRACE_USE_ROCPROFILER)
+#if !defined(ROCPROFSYS_USE_ROCPROFILER)
     _backend_choices.erase("rocprofiler");
 #endif
 
@@ -599,25 +599,25 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
         _backend_choices.erase("roctracer");
         _backend_choices.erase("rocprofiler");
 
-#if defined(OMNITRACE_USE_RCCL)
-        update_env(_data, "OMNITRACE_USE_RCCLP", false);
+#if defined(ROCPROFSYS_USE_RCCL)
+        update_env(_data, "ROCPROFSYS_USE_RCCLP", false);
 #endif
 
-#if defined(OMNITRACE_USE_ROCM_SMI)
-        update_env(_data, "OMNITRACE_USE_ROCM_SMI", false);
+#if defined(ROCPROFSYS_USE_ROCM_SMI)
+        update_env(_data, "ROCPROFSYS_USE_ROCM_SMI", false);
 #endif
 
-#if defined(OMNITRACE_USE_ROCTRACER)
-        update_env(_data, "OMNITRACE_USE_ROCTRACER", false);
-        update_env(_data, "OMNITRACE_USE_ROCTX", false);
-        update_env(_data, "OMNITRACE_ROCTRACER_HSA_ACTIVITY", false);
-        update_env(_data, "OMNITRACE_ROCTRACER_HIP_ACTIVITY", false);
+#if defined(ROCPROFSYS_USE_ROCTRACER)
+        update_env(_data, "ROCPROFSYS_USE_ROCTRACER", false);
+        update_env(_data, "ROCPROFSYS_USE_ROCTX", false);
+        update_env(_data, "ROCPROFSYS_ROCTRACER_HSA_ACTIVITY", false);
+        update_env(_data, "ROCPROFSYS_ROCTRACER_HIP_ACTIVITY", false);
         _backend_choices.erase("roctracer");
         _backend_choices.erase("roctx");
 #endif
 
-#if defined(OMNITRACE_USE_ROCPROFILER)
-        update_env(_data, "OMNITRACE_USE_ROCPROFILER", false);
+#if defined(ROCPROFSYS_USE_ROCPROFILER)
+        update_env(_data, "ROCPROFSYS_USE_ROCPROFILER", false);
 #endif
     }
 
@@ -637,17 +637,17 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _update = [&](const auto& _opt, bool _cond) {
                     if(_cond || _v.count("all") > 0) update_env(_data, _opt, true);
                 };
-                _update("OMNITRACE_USE_KOKKOSP", _v.count("kokkosp") > 0);
-                _update("OMNITRACE_USE_MPIP", _v.count("mpip") > 0);
-                _update("OMNITRACE_USE_OMPT", _v.count("ompt") > 0);
-                _update("OMNITRACE_USE_RCCLP", _v.count("rcclp") > 0);
-                _update("OMNITRACE_USE_ROCTX", _v.count("roctx") > 0);
-                _update("OMNITRACE_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
-                _update("OMNITRACE_USE_ROCTRACER", _v.count("roctracer") > 0);
-                _update("OMNITRACE_USE_ROCPROFILER", _v.count("rocprofiler") > 0);
-                _update("OMNITRACE_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
-                _update("OMNITRACE_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
-                _update("OMNITRACE_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+                _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
+                _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
+                _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
+                _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
+                _update("ROCPROFSYS_USE_ROCTX", _v.count("roctx") > 0);
+                _update("ROCPROFSYS_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
+                _update("ROCPROFSYS_USE_ROCTRACER", _v.count("roctracer") > 0);
+                _update("ROCPROFSYS_USE_ROCPROFILER", _v.count("rocprofiler") > 0);
+                _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
+                _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
+                _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 || _v.count("ompt") > 0)
                     update_env(_data, "OMP_TOOL_LIBRARIES", _data.dl_libpath,
@@ -673,17 +673,17 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 auto _update = [&](const auto& _opt, bool _cond) {
                     if(_cond || _v.count("all") > 0) update_env(_data, _opt, false);
                 };
-                _update("OMNITRACE_USE_KOKKOSP", _v.count("kokkosp") > 0);
-                _update("OMNITRACE_USE_MPIP", _v.count("mpip") > 0);
-                _update("OMNITRACE_USE_OMPT", _v.count("ompt") > 0);
-                _update("OMNITRACE_USE_RCCLP", _v.count("rcclp") > 0);
-                _update("OMNITRACE_USE_ROCTX", _v.count("roctx") > 0);
-                _update("OMNITRACE_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
-                _update("OMNITRACE_USE_ROCTRACER", _v.count("roctracer") > 0);
-                _update("OMNITRACE_USE_ROCPROFILER", _v.count("rocprofiler") > 0);
-                _update("OMNITRACE_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
-                _update("OMNITRACE_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
-                _update("OMNITRACE_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
+                _update("ROCPROFSYS_USE_KOKKOSP", _v.count("kokkosp") > 0);
+                _update("ROCPROFSYS_USE_MPIP", _v.count("mpip") > 0);
+                _update("ROCPROFSYS_USE_OMPT", _v.count("ompt") > 0);
+                _update("ROCPROFSYS_USE_RCCLP", _v.count("rcclp") > 0);
+                _update("ROCPROFSYS_USE_ROCTX", _v.count("roctx") > 0);
+                _update("ROCPROFSYS_USE_ROCM_SMI", _v.count("rocm-smi") > 0);
+                _update("ROCPROFSYS_USE_ROCTRACER", _v.count("roctracer") > 0);
+                _update("ROCPROFSYS_USE_ROCPROFILER", _v.count("rocprofiler") > 0);
+                _update("ROCPROFSYS_TRACE_THREAD_LOCKS", _v.count("mutex-locks") > 0);
+                _update("ROCPROFSYS_TRACE_THREAD_RW_LOCKS", _v.count("rw-locks") > 0);
+                _update("ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS", _v.count("spin-locks") > 0);
 
                 if(_v.count("all") > 0 ||
                    (_v.count("roctracer") > 0 && _v.count("rocprofiler") > 0))
@@ -746,7 +746,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("filepath")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_PERFETTO_FILE",
+                update_env(_data, "ROCPROFSYS_PERFETTO_FILE",
                            p.get<std::string>("trace-file"));
             });
 
@@ -762,7 +762,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("KB")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_PERFETTO_BUFFER_SIZE_KB",
+                update_env(_data, "ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB",
                            p.get<int64_t>("trace-buffer-size"));
             });
 
@@ -777,7 +777,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("policy")
             .choices({ "discard", "ring_buffer" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_PERFETTO_FILL_POLICY",
+                update_env(_data, "ROCPROFSYS_PERFETTO_FILL_POLICY",
                            p.get<std::string>("trace-fill-policy"));
             });
 
@@ -797,7 +797,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_TRACE_DELAY", p.get<double>("trace-wait"));
+                update_env(_data, "ROCPROFSYS_TRACE_DELAY", p.get<double>("trace-wait"));
             });
 
         _data.processed_environs.emplace("trace_delay");
@@ -814,7 +814,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_TRACE_DURATION",
+                update_env(_data, "ROCPROFSYS_TRACE_DURATION",
                            p.get<double>("trace-duration"));
             });
 
@@ -833,7 +833,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .min_count(1)
             .dtype("period-spec(s)")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_TRACE_PERIODS",
+                update_env(_data, "ROCPROFSYS_TRACE_PERIODS",
                            join(array_config_t{ ",", "", "" },
                                 p.get<strvec_t>("trace-periods")));
             });
@@ -855,11 +855,11 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                 "active "
                 "threads would equate to ~1 second of realtime. If this proves to be "
                 "difficult to handle in practice, please file a feature request for "
-                "omnitrace to auto-scale based on the number of threads.")
+                "rocprof-sys to auto-scale based on the number of threads.")
             .count(1)
             .dtype("clock-id")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_TRACE_PERIOD_CLOCK_ID",
+                update_env(_data, "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID",
                            p.get<double>("trace-clock-id"));
             })
             .choices(_clock_id_choices.first)
@@ -883,12 +883,12 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .choices({ "text", "json", "console" })
             .action([&](parser_t& p) {
                 auto _v = p.get<strset_t>("profile-format");
-                update_env(_data, "OMNITRACE_PROFILE", true);
+                update_env(_data, "ROCPROFSYS_PROFILE", true);
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_TEXT_OUTPUT", _v.count("text") != 0);
-                    update_env(_data, "OMNITRACE_JSON_OUTPUT", _v.count("json") != 0);
-                    update_env(_data, "OMNITRACE_COUT_OUTPUT", _v.count("console") != 0);
+                    update_env(_data, "ROCPROFSYS_TEXT_OUTPUT", _v.count("text") != 0);
+                    update_env(_data, "ROCPROFSYS_JSON_OUTPUT", _v.count("json") != 0);
+                    update_env(_data, "ROCPROFSYS_COUT_OUTPUT", _v.count("console") != 0);
                 }
             });
 
@@ -911,9 +911,9 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("path [prefix]")
             .action([&](parser_t& p) {
                 auto _v = p.get<strvec_t>("profile-diff");
-                update_env(_data, "OMNITRACE_DIFF_OUTPUT", true);
-                update_env(_data, "OMNITRACE_INPUT_PATH", _v.at(0));
-                if(_v.size() > 1) update_env(_data, "OMNITRACE_INPUT_PREFIX", _v.at(1));
+                update_env(_data, "ROCPROFSYS_DIFF_OUTPUT", true);
+                update_env(_data, "ROCPROFSYS_INPUT_PATH", _v.at(0));
+                if(_v.size() > 1) update_env(_data, "ROCPROFSYS_INPUT_PREFIX", _v.at(1));
             });
 
         _data.processed_environs.emplace("profile_diff");
@@ -936,7 +936,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("floating-point")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_PROCESS_SAMPLING_FREQ",
+                update_env(_data, "ROCPROFSYS_PROCESS_SAMPLING_FREQ",
                            p.get<double>("process-freq"));
             });
 
@@ -953,7 +953,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_PROCESS_SAMPLING_DELAY",
+                update_env(_data, "ROCPROFSYS_PROCESS_SAMPLING_DELAY",
                            p.get<double>("process-wait"));
             });
 
@@ -970,7 +970,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_SAMPLING_PROCESS_DURATION",
+                update_env(_data, "ROCPROFSYS_SAMPLING_PROCESS_DURATION",
                            p.get<double>("process-duration"));
             });
 
@@ -987,7 +987,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("int and/or range")
             .required({ "host" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_SAMPLING_CPUS",
+                update_env(_data, "ROCPROFSYS_SAMPLING_CPUS",
                            join(array_config_t{ "," }, p.get<strvec_t>("cpus")));
             });
 
@@ -1003,7 +1003,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("int and/or range")
             .required({ "device" })
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_SAMPLING_GPUS",
+                update_env(_data, "ROCPROFSYS_SAMPLING_GPUS",
                            join(array_config_t{ "," }, p.get<strvec_t>("gpus")));
             });
 
@@ -1023,7 +1023,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("floating-point")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_SAMPLING_FREQ",
+                update_env(_data, "ROCPROFSYS_SAMPLING_FREQ",
                            p.get<double>("sampling-freq"));
             });
 
@@ -1042,7 +1042,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("int and/or range")
             .action([&](parser_t& p) {
                 update_env(
-                    _data, "OMNITRACE_SAMPLING_TIDS",
+                    _data, "ROCPROFSYS_SAMPLING_TIDS",
                     join(array_config_t{ ", " }, p.get<std::vector<int64_t>>("tids")));
             });
 
@@ -1063,7 +1063,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_SAMPLING_DELAY",
+                update_env(_data, "ROCPROFSYS_SAMPLING_DELAY",
                            p.get<double>("sampling-wait"));
             });
 
@@ -1082,7 +1082,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .count(1)
             .dtype("seconds")
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_SAMPLING_DURATION",
+                update_env(_data, "ROCPROFSYS_SAMPLING_DURATION",
                            p.get<double>("sampling-duration"));
             });
 
@@ -1100,20 +1100,20 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("[freq] [delay] [tids...]")
             .action([&](parser_t& p) {
                 auto _v = p.get<std::deque<std::string>>("sample-cputime");
-                update_env(_data, "OMNITRACE_SAMPLING_CPUTIME", true);
+                update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME", true);
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_CPUTIME_FREQ", _v.front());
+                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME_FREQ", _v.front());
                     _v.pop_front();
                 }
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_CPUTIME_DELAY", _v.front());
+                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME_DELAY", _v.front());
                     _v.pop_front();
                 }
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_CPUTIME_TIDS",
+                    update_env(_data, "ROCPROFSYS_SAMPLING_CPUTIME_TIDS",
                                join(array_config_t{ "," }, _v));
                 }
             });
@@ -1129,20 +1129,20 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .required(std::move(_realtime_reqs))
             .action([&](parser_t& p) {
                 auto _v = p.get<std::deque<std::string>>("sample-realtime");
-                update_env(_data, "OMNITRACE_SAMPLING_REALTIME", true);
+                update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME", true);
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_REALTIME_FREQ", _v.front());
+                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME_FREQ", _v.front());
                     _v.pop_front();
                 }
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_REALTIME_DELAY", _v.front());
+                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME_DELAY", _v.front());
                     _v.pop_front();
                 }
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_REALTIME_TIDS",
+                    update_env(_data, "ROCPROFSYS_SAMPLING_REALTIME_TIDS",
                                join(array_config_t{ "," }, _v));
                 }
             });
@@ -1157,7 +1157,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
             .dtype("[event] [freq] [tids...]")
             .action([&](parser_t& p) {
                 auto _v = p.get<std::deque<std::string>>("sample-overflow");
-                update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW", true);
+                update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW", true);
 
                 if(!_v.empty())
                 {
@@ -1167,17 +1167,17 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                             "", "'--sample-overflow ", _v.front(),
                             " ...' conflicts with '--sampling-overflow-event ",
                             p.get<std::string>("sampling-overflow-event"), "' option"));
-                    update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW_EVENT", _v.front());
+                    update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_EVENT", _v.front());
                     _v.pop_front();
                 }
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW_FREQ", _v.front());
+                    update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_FREQ", _v.front());
                     _v.pop_front();
                 }
                 if(!_v.empty())
                 {
-                    update_env(_data, "OMNITRACE_SAMPLING_OVERFLOW_TIDS",
+                    update_env(_data, "ROCPROFSYS_SAMPLING_OVERFLOW_TIDS",
                                join(array_config_t{ "," }, _v));
                 }
             });
@@ -1191,37 +1191,37 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
 
     add_group_arguments(_parser, "sampling", _data);
 
-    _parser.start_group("HARDWARE COUNTER OPTIONS", "See also: omnitrace-avail -H");
+    _parser.start_group("HARDWARE COUNTER OPTIONS", "See also: rocprof-sys-avail -H");
 
     if(_data.environ_filter("cpu_events", _data))
     {
         _parser
             .add_argument({ "-C", "--cpu-events" },
                           "Set the CPU hardware counter events to record (ref: "
-                          "`omnitrace-avail -H -c CPU`)")
+                          "`rocprof-sys-avail -H -c CPU`)")
             .min_count(1)
             .dtype("[EVENT ...]")
             .action([&](parser_t& p) {
                 auto _events = join(array_config_t{ "," }, p.get<strvec_t>("cpu-events"));
-                update_env(_data, "OMNITRACE_PAPI_EVENTS", _events);
+                update_env(_data, "ROCPROFSYS_PAPI_EVENTS", _events);
             });
 
         _data.processed_environs.emplace("cpu_events");
         _data.processed_environs.emplace("papi_events");
     }
 
-#if defined(OMNITRACE_USE_ROCPROFILER)
+#if defined(ROCPROFSYS_USE_ROCPROFILER)
     if(_data.environ_filter("gpu_events", _data))
     {
         _parser
             .add_argument({ "-G", "--gpu-events" },
                           "Set the GPU hardware counter events to record (ref: "
-                          "`omnitrace-avail -H -c GPU`)")
+                          "`rocprof-sys-avail -H -c GPU`)")
             .min_count(1)
             .dtype("[EVENT ...]")
             .action([&](parser_t& p) {
                 auto _events = join(array_config_t{ "," }, p.get<strvec_t>("gpu-events"));
-                update_env(_data, "OMNITRACE_ROCM_EVENTS", _events);
+                update_env(_data, "ROCPROFSYS_ROCM_EVENTS", _events);
             });
 
         _data.processed_environs.emplace("gpu_events");
@@ -1244,7 +1244,7 @@ add_core_arguments(parser_t& _parser, parser_data& _data)
                           "Include inline info in output when available")
             .max_count(1)
             .action([&](parser_t& p) {
-                update_env(_data, "OMNITRACE_SAMPLING_INCLUDE_INLINES",
+                update_env(_data, "ROCPROFSYS_SAMPLING_INCLUDE_INLINES",
                            p.get<bool>("inlines"));
             });
 
@@ -1328,9 +1328,9 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
     };
 
     auto _settings = std::vector<std::shared_ptr<tim::vsettings>>{};
-    for(auto& itr : *omnitrace::settings::instance())
+    for(auto& itr : *rocprofsys::settings::instance())
     {
-        if(itr.second->get_categories().count("omnitrace") == 0) continue;
+        if(itr.second->get_categories().count("rocprofsys") == 0) continue;
         if(itr.second->get_categories().count("deprecated") > 0) continue;
         if(itr.second->get_hidden()) continue;
         if(!_data.setting_filter(itr.second.get(), _data)) continue;
@@ -1353,7 +1353,7 @@ add_group_arguments(parser_t& _parser, const std::string& _group_name, parser_da
                                }),
                 _choices.end());
             _choices.emplace_back(
-                "... run `omnitrace-avail -H -c CPU` for full list ...");
+                "... run `rocprof-sys-avail -H -c CPU` for full list ...");
             itr.second->set_choices(_choices);
         }
     }
@@ -1390,9 +1390,9 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
 {
     auto _category_count_map = std::unordered_map<std::string, uint32_t>{};
     auto _settings           = std::vector<std::shared_ptr<tim::vsettings>>{};
-    for(auto& itr : *omnitrace::settings::instance())
+    for(auto& itr : *rocprofsys::settings::instance())
     {
-        if(itr.second->get_categories().count("omnitrace") == 0) continue;
+        if(itr.second->get_categories().count("rocprofsys") == 0) continue;
         if(itr.second->get_categories().count("deprecated") > 0) continue;
         if(itr.second->get_hidden()) continue;
         if(!_data.setting_filter(itr.second.get(), _data)) continue;
@@ -1414,15 +1414,14 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
                                }),
                 _choices.end());
             _choices.emplace_back(
-                "... run `omnitrace-avail -H -c CPU` for full list ...");
+                "... run `rocprof-sys-avail -H -c CPU` for full list ...");
             itr.second->set_choices(_choices);
         }
 
         for(const auto& citr : itr.second->get_categories())
         {
-            if(std::regex_search(
-                   citr, std::regex{
-                             "omnitrace|timemory|^(native|custom|advanced|analysis)$" }))
+            if(std::regex_search(citr, std::regex{ "rocprofsys|timemory|^("
+                                                   "native|custom|advanced|analysis)$" }))
                 continue;
             _category_count_map[citr] += 1;
         }
@@ -1467,4 +1466,4 @@ add_extended_arguments(parser_t& _parser, parser_data& _data)
     return _data;
 }
 }  // namespace argparse
-}  // namespace omnitrace
+}  // namespace rocprofsys

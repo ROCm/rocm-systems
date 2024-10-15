@@ -23,6 +23,6 @@ enable_perfetto_trace_processor_percentile = false
 enable_perfetto_trace_processor_sqlite = true
 enable_perfetto_ui = false
 
-extra_cflags = "@OMNITRACE_PERFETTO_C_FLAGS@"
-extra_cxxflags = "@OMNITRACE_PERFETTO_CXX_FLAGS@"
-extra_ldflags = "@OMNITRACE_PERFETTO_LINK_FLAGS@ -Wl,-rpath=\\\$ORIGIN:\\\$ORIGIN/../lib:\\\$ORIGIN/../lib/omnitrace"
+extra_cflags = "@ROCPROFSYS_PERFETTO_C_FLAGS@"
+extra_cxxflags = "@ROCPROFSYS_PERFETTO_CXX_FLAGS@"
+extra_ldflags = "@ROCPROFSYS_PERFETTO_LINK_FLAGS@ -Wl,-rpath=\\\$ORIGIN:\\\$ORIGIN/../lib:\\\$ORIGIN/../lib/rocprof-sys"

@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,11 +27,11 @@
 #define CAUSAL_LABEL   __FILE__ ":" CAUSAL_STR(__LINE__)
 
 #if defined(USE_OMNI) && USE_OMNI > 0
-#    include <omnitrace/causal.h>
-#    define CAUSAL_PROGRESS              OMNITRACE_CAUSAL_PROGRESS
-#    define CAUSAL_PROGRESS_NAMED(LABEL) OMNITRACE_CAUSAL_PROGRESS_NAMED(LABEL)
-#    define CAUSAL_BEGIN(LABEL)          OMNITRACE_CAUSAL_BEGIN(LABEL)
-#    define CAUSAL_END(LABEL)            OMNITRACE_CAUSAL_END(LABEL)
+#    include <rocprofiler-systems/causal.h>
+#    define CAUSAL_PROGRESS              ROCPROFSYS_CAUSAL_PROGRESS
+#    define CAUSAL_PROGRESS_NAMED(LABEL) ROCPROFSYS_CAUSAL_PROGRESS_NAMED(LABEL)
+#    define CAUSAL_BEGIN(LABEL)          ROCPROFSYS_CAUSAL_BEGIN(LABEL)
+#    define CAUSAL_END(LABEL)            ROCPROFSYS_CAUSAL_END(LABEL)
 #elif defined(USE_COZ) && USE_COZ > 0
 #    include <coz.h>
 #    define CAUSAL_PROGRESS              COZ_PROGRESS_NAMED(CAUSAL_LABEL)

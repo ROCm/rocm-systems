@@ -1,12 +1,12 @@
 cmake_minimum_required(VERSION 3.15 FATAL_ERROR)
 
-project(omnitrace-code-coverage-example LANGUAGES CXX)
+project(rocprofiler-systems-code-coverage-example LANGUAGES CXX)
 
-if(OMNITRACE_DISABLE_EXAMPLES)
+if(ROCPROFSYS_DISABLE_EXAMPLES)
     get_filename_component(_DIR ${CMAKE_CURRENT_LIST_DIR} NAME)
 
-    if(${PROJECT_NAME} IN_LIST OMNITRACE_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
-                                                             OMNITRACE_DISABLE_EXAMPLES)
+    if(${PROJECT_NAME} IN_LIST ROCPROFSYS_DISABLE_EXAMPLES OR ${_DIR} IN_LIST
+                                                              ROCPROFSYS_DISABLE_EXAMPLES)
         return()
     endif()
 endif()
@@ -19,11 +19,11 @@ add_executable(code-coverage code-coverage.cpp)
 target_link_libraries(code-coverage PRIVATE Threads::Threads)
 target_compile_options(code-coverage PRIVATE ${_FLAGS})
 
-if(OMNITRACE_INSTALL_EXAMPLES)
+if(ROCPROFSYS_INSTALL_EXAMPLES)
     install(
         TARGETS code-coverage
         DESTINATION bin
-        COMPONENT omnitrace-examples)
+        COMPONENT rocprofiler-systems-examples)
 endif()
 
 set(PYTHON_FILES code-coverage.py)
@@ -37,11 +37,11 @@ if(Python3_FOUND)
         configure_file(${PROJECT_SOURCE_DIR}/${_FILE} ${PROJECT_BINARY_DIR}/${_FILE}
                        @ONLY)
 
-        if(OMNITRACE_INSTALL_EXAMPLES)
+        if(ROCPROFSYS_INSTALL_EXAMPLES)
             install(
                 PROGRAMS ${PROJECT_BINARY_DIR}/${_FILE}
                 DESTINATION bin
-                COMPONENT omnitrace-examples)
+                COMPONENT rocprofiler-systems-examples)
         endif()
     endforeach()
 endif()

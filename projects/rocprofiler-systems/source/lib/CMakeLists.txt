@@ -1,10 +1,10 @@
 # ----------------------------------------------------------------------------- #
 #
-# omnitrace: contains all instrumentation functionality
+# rocprofiler-systems: contains all instrumentation functionality
 #
-# omnitrace-dl: contains minimal symbols and dlopen's omnitrace
+# rocprofiler-systems-dl: contains minimal symbols and dlopen's rocprofiler-systems
 #
-# omnitrace-user: contains symbols for user API
+# rocprofiler-systems-user: contains symbols for user API
 #
 # ----------------------------------------------------------------------------- #
 
@@ -12,56 +12,58 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.20)
     cmake_policy(SET CMP0115 NEW)
 endif()
 
-if(OMNITRACE_USE_ROCPROFILER
+if(ROCPROFSYS_USE_ROCPROFILER
    AND rocprofiler_LIBRARY_DIR
    AND ROCmVersion_TRIPLE_VERSION VERSION_LESS 5.2.0
    AND NOT CMAKE_INSTALL_RPATH_USE_LINK_PATH)
-    set(OMNITRACE_LIB_INSTALL_RPATH
-        "\$ORIGIN:\$ORIGIN/omnitrace:${rocprofiler_LIBRARY_DIR}")
+    set(ROCPROFSYS_LIB_INSTALL_RPATH
+        "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}:${rocprofiler_LIBRARY_DIR}")
 else()
-    set(OMNITRACE_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/omnitrace")
+    set(ROCPROFSYS_LIB_INSTALL_RPATH "\$ORIGIN:\$ORIGIN/${PROJECT_NAME}")
 endif()
 
 # ------------------------------------------------------------------------------#
 #
-# omnitrace interface library
+# rocprofiler-systems interface library
 #
 # ------------------------------------------------------------------------------#
 
-add_library(omnitrace-interface-library INTERFACE)
-add_library(omnitrace::omnitrace-interface-library ALIAS omnitrace-interface-library)
+add_library(rocprofiler-systems-interface-library INTERFACE)
+add_library(rocprofiler-systems::rocprofiler-systems-interface-library ALIAS
+            rocprofiler-systems-interface-library)
 
 target_include_directories(
-    omnitrace-interface-library INTERFACE ${CMAKE_CURRENT_SOURCE_DIR}
-                                          ${CMAKE_CURRENT_SOURCE_DIR}/omnitrace)
+    rocprofiler-systems-interface-library
+    INTERFACE ${CMAKE_CURRENT_SOURCE_DIR} ${CMAKE_CURRENT_SOURCE_DIR}/rocprof-sys)
 
 target_link_libraries(
-    omnitrace-interface-library
+    rocprofiler-systems-interface-library
     INTERFACE
-        $<BUILD_INTERFACE:omnitrace::omnitrace-headers>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-threading>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-common-library>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-options>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-compile-definitions>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-perfetto>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-timemory>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-elfutils>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-bfd>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-mpi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-ptl>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-hip>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-roctracer>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-rocprofiler>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-rocm-smi>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-rccl>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libgcc-optional>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-static-libstdcxx-optional>
-        $<BUILD_INTERFACE:omnitrace::omnitrace-sanitizer>
-        $<BUILD_INTERFACE:$<IF:$<BOOL:${OMNITRACE_BUILD_LTO}>,omnitrace::omnitrace-lto,>>)
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-headers>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-threading>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-common-library>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-options>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-compile-definitions>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-perfetto>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-timemory>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-elfutils>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-bfd>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-mpi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-ptl>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-hip>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-roctracer>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocprofiler>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rocm-smi>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-rccl>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libgcc-optional>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-static-libstdcxx-optional>
+        $<BUILD_INTERFACE:rocprofiler-systems::rocprofiler-systems-sanitizer>
+        $<BUILD_INTERFACE:$<IF:$<BOOL:${ROCPROFSYS_BUILD_LTO}>,rocprofiler-systems::rocprofiler-systems-lto,>>
+    )
 
 # ------------------------------------------------------------------------------#
 #
-# omnitrace internal libraries
+# rocprofiler-systems internal libraries
 #
 # ------------------------------------------------------------------------------#
 
@@ -71,11 +73,11 @@ add_subdirectory(binary)
 
 # ------------------------------------------------------------------------------#
 #
-# omnitrace exported libraries
+# rocprofiler-systems exported libraries
 #
 # ------------------------------------------------------------------------------#
 
-add_subdirectory(omnitrace)
-add_subdirectory(omnitrace-dl)
-add_subdirectory(omnitrace-rt)
-add_subdirectory(omnitrace-user)
+add_subdirectory(rocprof-sys)
+add_subdirectory(rocprof-sys-dl)
+add_subdirectory(rocprof-sys-rt)
+add_subdirectory(rocprof-sys-user)

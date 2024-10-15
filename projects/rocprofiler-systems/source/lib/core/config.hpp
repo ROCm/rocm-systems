@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@
 #include <string_view>
 #include <unordered_set>
 
-namespace omnitrace
+namespace rocprofsys
 {
 //
 //      Initialization routines
@@ -49,7 +49,7 @@ using signal_handler_t = void (*)(void);
 signal_handler_t set_signal_handler(signal_handler_t);
 
 bool
-settings_are_configured() OMNITRACE_HOT;
+settings_are_configured() ROCPROFSYS_HOT;
 
 void
 configure_settings(bool _init = true);
@@ -156,10 +156,10 @@ bool&
 is_binary_rewrite();
 
 bool
-get_is_continuous_integration() OMNITRACE_HOT;
+get_is_continuous_integration() ROCPROFSYS_HOT;
 
 bool
-get_debug_env() OMNITRACE_HOT;
+get_debug_env() ROCPROFSYS_HOT;
 
 bool
 get_debug_init();
@@ -168,49 +168,49 @@ bool
 get_debug_finalize();
 
 bool
-get_debug() OMNITRACE_HOT;
+get_debug() ROCPROFSYS_HOT;
 
 bool
-get_debug_sampling() OMNITRACE_HOT;
+get_debug_sampling() ROCPROFSYS_HOT;
 
 bool
-get_debug_tid() OMNITRACE_HOT;
+get_debug_tid() ROCPROFSYS_HOT;
 
 bool
-get_debug_pid() OMNITRACE_HOT;
+get_debug_pid() ROCPROFSYS_HOT;
 
 int
-get_verbose_env() OMNITRACE_HOT;
+get_verbose_env() ROCPROFSYS_HOT;
 
 int
-get_verbose() OMNITRACE_HOT;
+get_verbose() ROCPROFSYS_HOT;
 
 bool&
-get_use_perfetto() OMNITRACE_HOT;
+get_use_perfetto() ROCPROFSYS_HOT;
 
 bool&
-get_use_timemory() OMNITRACE_HOT;
+get_use_timemory() ROCPROFSYS_HOT;
 
 bool&
-get_use_causal() OMNITRACE_HOT;
+get_use_causal() ROCPROFSYS_HOT;
 
 bool
-get_use_roctracer() OMNITRACE_HOT;
+get_use_roctracer() ROCPROFSYS_HOT;
 
 bool
-get_use_rocprofiler() OMNITRACE_HOT;
+get_use_rocprofiler() ROCPROFSYS_HOT;
 
 bool
-get_use_rocm_smi() OMNITRACE_HOT;
+get_use_rocm_smi() ROCPROFSYS_HOT;
 
 bool
 get_use_roctx();
 
 bool&
-get_use_sampling() OMNITRACE_HOT;
+get_use_sampling() ROCPROFSYS_HOT;
 
 bool&
-get_use_process_sampling() OMNITRACE_HOT;
+get_use_process_sampling() ROCPROFSYS_HOT;
 
 bool&
 get_use_pid();
@@ -267,7 +267,7 @@ std::set<std::string>
 get_disabled_categories();
 
 bool
-get_perfetto_annotations() OMNITRACE_HOT;
+get_perfetto_annotations() ROCPROFSYS_HOT;
 
 uint64_t
 get_thread_pool_size();
@@ -278,12 +278,12 @@ get_trace_hsa_api_types();
 std::string&
 get_perfetto_backend();
 
-// make this visible so omnitrace-avail can call it
+// make this visible so rocprof-sys-avail can call it
 std::string
 get_perfetto_output_filename();
 
 bool
-get_perfetto_roctracer_per_stream() OMNITRACE_HOT;
+get_perfetto_roctracer_per_stream() ROCPROFSYS_HOT;
 
 double
 get_trace_delay();
@@ -424,4 +424,4 @@ get_causal_source_exclude();
 std::vector<std::string>
 get_causal_function_exclude();
 }  // namespace config
-}  // namespace omnitrace
+}  // namespace rocprofsys

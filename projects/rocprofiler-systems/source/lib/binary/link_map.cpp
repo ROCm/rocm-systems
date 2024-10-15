@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -35,7 +35,7 @@
 #include <string>
 #include <string_view>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -138,14 +138,14 @@ get_link_map(const char* _lib, const std::string& _exclude_linked_by,
     auto _name = (!_lib) ? config::get_exe_realpath() : std::string{ _lib };
     for(const auto& itr : _fini_chain)
     {
-        OMNITRACE_BASIC_VERBOSE(2, "[linkmap][%s]: %s\n", filepath::basename(_name),
-                                itr.real().c_str());
+        ROCPROFSYS_BASIC_VERBOSE(2, "[linkmap][%s]: %s\n", filepath::basename(_name),
+                                 itr.real().c_str());
     }
 
     for(const auto& itr : _excl_chain)
     {
-        OMNITRACE_BASIC_VERBOSE(3, "[linkmap][%s]: %s\n", _exclude_linked_by.c_str(),
-                                link_file{ itr }.real().c_str());
+        ROCPROFSYS_BASIC_VERBOSE(3, "[linkmap][%s]: %s\n", _exclude_linked_by.c_str(),
+                                 link_file{ itr }.real().c_str());
     }
 
     return _fini_chain;
@@ -178,4 +178,4 @@ link_file::real() const
     return filepath::realpath(name, nullptr, false);
 }
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys

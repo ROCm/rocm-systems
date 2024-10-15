@@ -5,22 +5,27 @@ add_library(tests-compile-options INTERFACE)
 target_compile_options(tests-compile-options INTERFACE -g)
 
 add_executable(thread-limit thread-limit.cpp)
-target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${OMNITRACE_MAX_THREADS})
+target_compile_definitions(thread-limit PRIVATE MAX_THREADS=${ROCPROFSYS_MAX_THREADS})
 target_link_libraries(thread-limit PRIVATE Threads::Threads tests-compile-options)
 
 set(_thread_limit_environment
-    "${_base_environment}" "OMNITRACE_TRACE=ON" "OMNITRACE_PROFILE=ON"
-    "OMNITRACE_COUT_OUTPUT=ON" "OMNITRACE_USE_SAMPLING=ON" "OMNITRACE_SAMPLING_FREQ=250"
-    "OMNITRACE_VERBOSE=2" "OMNITRACE_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss")
+    "${_base_environment}"
+    "ROCPROFSYS_TRACE=ON"
+    "ROCPROFSYS_PROFILE=ON"
+    "ROCPROFSYS_COUT_OUTPUT=ON"
+    "ROCPROFSYS_USE_SAMPLING=ON"
+    "ROCPROFSYS_SAMPLING_FREQ=250"
+    "ROCPROFSYS_VERBOSE=2"
+    "ROCPROFSYS_TIMEMORY_COMPONENTS=wall_clock,peak_rss,page_rss")
 
-math(EXPR THREAD_LIMIT_TEST_VALUE "${OMNITRACE_MAX_THREADS} + 24")
+math(EXPR THREAD_LIMIT_TEST_VALUE "${ROCPROFSYS_MAX_THREADS} + 24")
 math(EXPR THREAD_LIMIT_TEST_VALUE_PLUS_ONE "${THREAD_LIMIT_TEST_VALUE} + 1")
 
 set(_thread_limit_pass_regex "\\|${THREAD_LIMIT_TEST_VALUE}>>>")
 set(_thread_limit_fail_regex
-    "\\|${THREAD_LIMIT_TEST_VALUE_PLUS_ONE}>>>|OMNITRACE_ABORT_FAIL_REGEX")
+    "\\|${THREAD_LIMIT_TEST_VALUE_PLUS_ONE}>>>|ROCPROFSYS_ABORT_FAIL_REGEX")
 
-omnitrace_add_test(
+rocprofiler_systems_add_test(
     SKIP_BASELINE
     NAME thread-limit
     TARGET thread-limit

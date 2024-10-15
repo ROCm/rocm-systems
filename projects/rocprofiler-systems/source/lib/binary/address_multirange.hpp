@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2022 Advanced Micro Devices, Inc. All Rights Reserved.
+// Copyright (c) 2022-2024 Advanced Micro Devices, Inc. All Rights Reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,7 +30,7 @@
 #include <cstdint>
 #include <utility>
 
-namespace omnitrace
+namespace rocprofsys
 {
 namespace binary
 {
@@ -39,7 +39,7 @@ struct address_multirange
     struct coarse
     {};
 
-    OMNITRACE_DEFAULT_OBJECT(address_multirange)
+    ROCPROFSYS_DEFAULT_OBJECT(address_multirange)
 
     address_multirange& operator+=(std::pair<coarse, uintptr_t>&&);
     address_multirange& operator+=(std::pair<coarse, address_range>&& _v);
@@ -61,7 +61,7 @@ private:
 };
 
 template <typename Tp>
-OMNITRACE_INLINE bool
+ROCPROFSYS_INLINE bool
 address_multirange::contains(Tp&& _v) const
 {
     using type = concepts::unqualified_type_t<Tp>;
@@ -74,4 +74,4 @@ address_multirange::contains(Tp&& _v) const
                        [_v](auto&& itr) { return itr.contains(_v); });
 }
 }  // namespace binary
-}  // namespace omnitrace
+}  // namespace rocprofsys
