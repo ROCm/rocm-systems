@@ -323,6 +323,9 @@ hsa_status_t CpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS:
       *((uint32_t*)value) = 0;
       break;
+    case HSA_EXT_AGENT_INFO_IMAGE_SUPPORT:
+      *((bool*)value) = false;
+      break;
     case HSA_AMD_AGENT_INFO_CHIP_ID:
       *((uint32_t*)value) = properties_.DeviceId;
       break;

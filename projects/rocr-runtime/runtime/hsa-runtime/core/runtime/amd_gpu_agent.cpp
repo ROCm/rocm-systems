@@ -278,6 +278,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
     ASICShader compute_10;
     ASICShader compute_11;
     ASICShader compute_12;
+    ASICShader compute_1250;
   };
 
   std::map<std::string, CompiledShader> compiled_shaders = {
@@ -306,6 +307,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeTrapHandlerV2_10, sizeof(kCodeTrapHandlerV2_10), 2, 4},    // gfx10
            {kCodeTrapHandlerV2_11, sizeof(kCodeTrapHandlerV2_11), 2, 4},    // gfx11
            {kCodeTrapHandlerV2_12, sizeof(kCodeTrapHandlerV2_12), 2, 4},    // gfx12
+           {kCodeTrapHandlerV2_1250, sizeof(kCodeTrapHandlerV2_1250), 2, 4},  // gfx1250
        }},
       {"CopyAligned",
        {
@@ -318,6 +320,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeCopyAligned10, sizeof(kCodeCopyAligned10), 32, 12},        // gfx10
            {kCodeCopyAligned11, sizeof(kCodeCopyAligned11), 32, 12},        // gfx11
            {kCodeCopyAligned12, sizeof(kCodeCopyAligned12), 32, 12},        // gfx12
+           {kCodeCopyAligned1250, sizeof(kCodeCopyAligned1250), 32, 12},    // gfx1250
        }},
       {"CopyMisaligned",
        {
@@ -330,6 +333,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeCopyMisaligned10, sizeof(kCodeCopyMisaligned10), 23, 10},  // gfx10
            {kCodeCopyMisaligned11, sizeof(kCodeCopyMisaligned11), 23, 10},  // gfx11
            {kCodeCopyMisaligned12, sizeof(kCodeCopyMisaligned12), 23, 10},  // gfx12
+           {kCodeCopyMisaligned1250, sizeof(kCodeCopyMisaligned1250), 23, 10},  // gfx1250
        }},
       {"Fill",
        {
@@ -342,6 +346,7 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
            {kCodeFill10, sizeof(kCodeFill10), 19, 8},                       // gfx10
            {kCodeFill11, sizeof(kCodeFill11), 19, 8},                       // gfx11
            {kCodeFill12, sizeof(kCodeFill12), 19, 8},                       // gfx12
+           {kCodeFill1250, sizeof(kCodeFill1250), 19, 8},                   // gfx1250
        }}};
 
   auto compiled_shader_it = compiled_shaders.find(func_name);
@@ -376,11 +381,17 @@ void GpuAgent::AssembleShader(const char* func_name, AssembleTarget assemble_tar
         asic_shader = &compiled_shader_it->second.compute_11;
       break;
     case 12:
-        asic_shader = &compiled_shader_it->second.compute_12;
+        if(isa_->GetMinorVersion() >= 5)
+          asic_shader = &compiled_shader_it->second.compute_1250;
+        else
+          asic_shader = &compiled_shader_it->second.compute_12;
       break;
     default:
       assert(false && "Precompiled shader unavailable for target");
   }
+
+  assert((asic_shader->code && asic_shader->size && asic_shader->num_sgprs && asic_shader->num_vgprs)
+          && "Invalid shader");
 
   // Allocate a GPU-visible buffer for the shader.
   size_t header_size =
@@ -1708,10 +1719,6 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
   // agent, and vendor name length limit excluding terminating nul character.
   constexpr size_t hsa_name_size = 63;
 
-  const bool isa_has_image_support =
-      (isa_->GetMajorVersion() == 9 &&
-      (isa_->GetMinorVersion() == 4 || isa_->GetMinorVersion() == 5)) ? false : true;
-
   switch (attribute_u) {
     case HSA_AGENT_INFO_NAME: {
       std::string name = isa_->GetProcessorName();
@@ -1858,20 +1865,23 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
     case HSA_EXT_AGENT_INFO_IMAGE_2DADEPTH_MAX_ELEMENTS:
     case HSA_EXT_AGENT_INFO_IMAGE_3D_MAX_ELEMENTS:
     case HSA_EXT_AGENT_INFO_IMAGE_ARRAY_MAX_LAYERS:
-      if (!isa_has_image_support)
+      if (!isa_->HasImageSupport())
         *((uint32_t*)value) = 0;
       else
         return hsa_amd_image_get_info_max_dim(public_handle(), attribute, value);
       break;
     case HSA_EXT_AGENT_INFO_MAX_IMAGE_RD_HANDLES:
       // TODO: hardcode based on OCL constants.
-      *((uint32_t*)value) = isa_has_image_support ? 128 : 0;
+      *((uint32_t*)value) = isa_->HasImageSupport() ? 128 : 0;
       break;
     case HSA_EXT_AGENT_INFO_MAX_IMAGE_RORW_HANDLES:
-      *((uint32_t*)value) = isa_has_image_support ? 64 : 0;
+      *((uint32_t*)value) = isa_->HasImageSupport() ? 64 : 0;
       break;
     case HSA_EXT_AGENT_INFO_MAX_SAMPLER_HANDLERS:
-      *((uint32_t*)value) = isa_has_image_support ? 16 : 0;
+      *((uint32_t*)value) = isa_->HasImageSupport() ? 16 : 0;
+      break;
+    case HSA_EXT_AGENT_INFO_IMAGE_SUPPORT:
+      *((uint32_t*)value) = isa_->HasImageSupport();
       break;
     case HSA_AMD_AGENT_INFO_CHIP_ID:
       *((uint32_t*)value) = properties_.DeviceId;
