@@ -47,7 +47,7 @@
         const char* reason = "";                                                                   \
         amd_comgr_status_string(status, &reason);                                                  \
         std::cerr << __FILE__ << ':' << __LINE__ << " code: " << status << " failed: " << reason   \
-                  << std::endl;                                                                    \
+                  << "\n";                                                                         \
         throw std::exception();                                                                    \
     }
 
@@ -57,14 +57,14 @@
         const char* reason = "";                                                                   \
         amd_comgr_status_string(status, &reason);                                                  \
         std::cerr << __FILE__ << ':' << __LINE__ << " code: " << status << " failed: " << reason   \
-                  << std::endl;                                                                    \
+                  << "\n";                                                                         \
         return AMD_COMGR_STATUS_ERROR;                                                             \
     }
 
 #define CHECK_VA2FO(x, msg)                                                                        \
     if(!(x))                                                                                       \
     {                                                                                              \
-        std::cerr << __FILE__ << ' ' << __LINE__ << ' ' << msg << std::endl;                       \
+        std::cerr << __FILE__ << ' ' << __LINE__ << ' ' << msg << "\n";                            \
         return std::nullopt;                                                                       \
     }
 
@@ -79,8 +79,8 @@ namespace disassembly
 class CodeObjectBinary
 {
 public:
-    CodeObjectBinary(const std::string& _uri)
-    : m_uri(_uri)
+    CodeObjectBinary(std::string _uri)
+    : m_uri(std::move(_uri))
     {
         const std::string protocol_delim{"://"};
 
@@ -108,9 +108,9 @@ public:
         decoded_path.reserve(path.length());
         for(size_t i = 0; i < path.length(); ++i)
         {
-            if(path[i] == '%' && std::isxdigit(path[i + 1]) && std::isxdigit(path[i + 2]))
+            if(path[i] == '%' && std::isxdigit(path[i + 1]) != 0 && std::isxdigit(path[i + 2]) != 0)
             {
-                decoded_path += std::stoi(path.substr(i + 1, 2), 0, 16);
+                decoded_path += std::stoi(path.substr(i + 1, 2), nullptr, 16);
                 i += 2;
             }
             else
@@ -153,7 +153,7 @@ public:
 
         if(auto size_it = params.find("size"); size_it != params.end())
         {
-            if(!(size = std::stoul(size_it->second, nullptr, 0))) return;
+            if((size = std::stoul(size_it->second, nullptr, 0)) == 0) return;
         }
 
         if(protocol == "memory") throw std::runtime_error(protocol + " protocol not supported!");
@@ -161,7 +161,7 @@ public:
         std::ifstream file(decoded_path, std::ios::in | std::ios::binary);
         if(!file || !file.is_open()) throw std::runtime_error("could not open " + decoded_path);
 
-        if(!size)
+        if(size == 0)
         {
             file.ignore(std::numeric_limits<std::streamsize>::max());
             size_t bytes = file.gcount();
@@ -174,7 +174,7 @@ public:
 
         file.seekg(offset, std::ios_base::beg);
         buffer.resize(size);
-        file.read(&buffer[0], size);
+        file.read(buffer.data(), size);
     }
 
     std::string       m_uri;
@@ -269,6 +269,7 @@ public:
         int64_t              copysize = reinterpret_cast<int64_t>(instance.buffer.data()) +
                            instance.buffer.size() - static_cast<int64_t>(from);
         copysize = std::min<int64_t>(size, copysize);
+        // NOLINTNEXTLINE(performance-no-int-to-ptr)
         std::memcpy(to, (char*) from, copysize);
         return copysize;
     }

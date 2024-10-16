@@ -105,15 +105,17 @@ public:
 
             std::map<uint64_t, std::string> line_addrs;
 
-            while(!dwarf_nextcu(
-                dbg.get(), cu_offset, &next_offset, &header_size, nullptr, nullptr, nullptr))
+            while(
+                dwarf_nextcu(
+                    dbg.get(), cu_offset, &next_offset, &header_size, nullptr, nullptr, nullptr) ==
+                0)
             {
                 Dwarf_Die die;
                 if(!dwarf_offdie(dbg.get(), cu_offset + header_size, &die)) continue;
 
                 Dwarf_Lines* lines;
                 size_t       line_count;
-                if(dwarf_getsrclines(&die, &lines, &line_count)) continue;
+                if(dwarf_getsrclines(&die, &lines, &line_count) != 0) continue;
 
                 for(size_t i = 0; i < line_count; ++i)
                 {
@@ -121,8 +123,8 @@ public:
                     int         line_number;
                     Dwarf_Line* line = dwarf_onesrcline(lines, i);
 
-                    if(line && !dwarf_lineaddr(line, &addr) && !dwarf_lineno(line, &line_number) &&
-                       line_number)
+                    if(line && dwarf_lineaddr(line, &addr) == 0 &&
+                       dwarf_lineno(line, &line_number) == 0 && line_number != 0)
                     {
                         std::string src        = dwarf_linesrc(line, nullptr, nullptr);
                         auto        dwarf_line = src + ':' + std::to_string(line_number);
@@ -162,9 +164,9 @@ public:
         } catch(...)
         {}
     }
-    ~CodeobjDecoderComponent() {}
+    ~CodeobjDecoderComponent() = default;
 
-    std::optional<uint64_t> va2fo(uint64_t vaddr)
+    std::optional<uint64_t> va2fo(uint64_t vaddr) const
     {
         if(disassembly) return disassembly->va2fo(vaddr);
         return {};
@@ -342,21 +344,21 @@ public:
     CodeobjAddressTranslate()           = default;
     ~CodeobjAddressTranslate() override = default;
 
-    virtual void addDecoder(const char* filepath,
-                            marker_id_t id,
-                            uint64_t    load_addr,
-                            uint64_t    memsize) override
+    void addDecoder(const char* filepath,
+                    marker_id_t id,
+                    uint64_t    load_addr,
+                    uint64_t    memsize) override
     {
         this->Super::addDecoder(filepath, id, load_addr, memsize);
         auto ptr = decoders.at(id);
         table.insert({ptr->begin(), ptr->size(), id});
     }
 
-    virtual void addDecoder(const void* data,
-                            size_t      memory_size,
-                            marker_id_t id,
-                            uint64_t    load_addr,
-                            uint64_t    memsize) override
+    void addDecoder(const void* data,
+                    size_t      memory_size,
+                    marker_id_t id,
+                    uint64_t    load_addr,
+                    uint64_t    memsize) override
     {
         this->Super::addDecoder(data, memory_size, id, load_addr, memsize);
         auto ptr = decoders.at(id);
@@ -396,7 +398,7 @@ public:
     {
         std::map<uint64_t, SymbolInfo> symbols;
 
-        for(auto& [_, dec] : decoders)
+        for(const auto& [_, dec] : decoders)
         {
             auto& smap = dec->getSymbolMap();
             for(auto& [vaddr, sym] : smap)
