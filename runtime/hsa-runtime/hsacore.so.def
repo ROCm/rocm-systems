@@ -257,6 +257,7 @@ global:
 	hsa_ven_amd_pcs_flush;
 	hsa_amd_queue_get_info;
 	hsa_amd_enable_logging;
+	hsa_amd_signal_wait_all;
 local:
     *;
 };

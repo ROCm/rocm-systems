@@ -40,13 +40,14 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 
-#include <new>
-#include <typeinfo>
+#include <algorithm>
 #include <exception>
-#include <set>
-#include <utility>
-#include <memory>
 #include <map>
+#include <memory>
+#include <new>
+#include <set>
+#include <typeinfo>
+#include <utility>
 #include <vector>
 
 #include "core/inc/agent.h"
@@ -570,6 +571,35 @@ hsa_status_t hsa_amd_signal_value_pointer(hsa_signal_t hsa_signal,
   CATCH;
 }
 
+uint32_t hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* hsa_signals,
+                                 hsa_signal_condition_t* conds, hsa_signal_value_t* values,
+                                 uint64_t timeout_hint, hsa_wait_state_t wait_hint,
+                                 hsa_signal_value_t* satisfying_values) {
+  TRY;
+  if (!core::Runtime::runtime_singleton_->IsOpen()) {
+    assert(false && "hsa_amd_signal_wait_all called while not initialized.");
+    return 0;
+  }
+  // Do not check for signal invalidation. Invalidation may occur during async
+  // signal handler loop and is not an error.
+  for (int i = 0; i < signal_count; ++i)
+    assert(hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid() &&
+           "Invalid signal.");
+
+  std::vector<hsa_signal_value_t> satisfying_values_vec;
+  satisfying_values_vec.resize(signal_count);
+  uint32_t first_satysifying_signal_idx =
+      core::Signal::WaitMultiple(signal_count, hsa_signals, conds, values, timeout_hint, wait_hint,
+                                 satisfying_values_vec, true);
+
+  if (satisfying_values) {
+    std::copy(satisfying_values_vec.begin(), satisfying_values_vec.end(), satisfying_values);
+  }
+
+  return first_satysifying_signal_idx;
+  CATCHRET(uint32_t);
+}
+
 uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signals,
                                  hsa_signal_condition_t* conds, hsa_signal_value_t* values,
                                  uint64_t timeout_hint, hsa_wait_state_t wait_hint,
@@ -585,8 +615,14 @@ uint32_t hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* hsa_signal
     assert(hsa_signals[i].handle != 0 && core::SharedSignal::Convert(hsa_signals[i])->IsValid() &&
            "Invalid signal.");
 
-  return core::Signal::WaitAny(signal_count, hsa_signals, conds, values,
-                               timeout_hint, wait_hint, satisfying_value);
+  std::vector<hsa_signal_value_t> satisfying_value_vec(1);
+  uint32_t satisfying_signal_idx =
+      core::Signal::WaitMultiple(signal_count, hsa_signals, conds, values, timeout_hint, wait_hint,
+                                 satisfying_value_vec, false);
+
+  if (satisfying_value) *satisfying_value = satisfying_value_vec.at(0);
+
+  return satisfying_signal_idx;
   CATCHRET(uint32_t);
 }
 

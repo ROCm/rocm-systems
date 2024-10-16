@@ -57,9 +57,10 @@
  * - 1.4 - Virtual Memory API
  * - 1.5 - hsa_amd_agent_info: HSA_AMD_AGENT_INFO_MEMORY_PROPERTIES
  * - 1.6 - Virtual Memory API: hsa_amd_vmem_address_reserve_align
+ * - 1.7 - hsa_amd_signal_wait_all
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 6
+#define HSA_AMD_INTERFACE_VERSION_MINOR 7
 
 #ifdef __cplusplus
 extern "C" {
@@ -1180,6 +1181,20 @@ hsa_status_t HSA_API
                                  hsa_amd_signal_handler handler, void* arg);
 
 /**
+ * @brief Wait for all signal-condition pairs to be satisfied.
+ *
+ * @details Allows waiting for all of several signal and condition pairs to be
+ * satisfied. The function returns 0 if all signals met their conditions and -1
+ * on a timeout. The value of each signal's satisfying value is returned in
+ * satisfying_value unless satisfying_value is nullptr. This function provides
+ * only relaxed memory semantics.
+ */
+uint32_t HSA_API hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* signals,
+                                         hsa_signal_condition_t* conds, hsa_signal_value_t* values,
+                                         uint64_t timeout_hint, hsa_wait_state_t wait_hint,
+                                         hsa_signal_value_t* satisfying_values);
+
+/**
  * @brief Wait for any signal-condition pair to be satisfied.
  *
  * @details Allows waiting for any of several signal and conditions pairs to be
@@ -1429,7 +1444,7 @@ typedef enum {
  * following its memory access model. The actual placement may vary or migrate
  * due to the system's NUMA policy and state, which is beyond the scope of
  * HSA APIs.
- */ 
+ */
 typedef struct hsa_amd_memory_pool_s {
   /**
    * Opaque handle.
@@ -2972,7 +2987,7 @@ typedef enum hsa_amd_svm_attribute_s {
   HSA_AMD_SVM_ATTRIB_ACCESS_QUERY = 0x203,
 } hsa_amd_svm_attribute_t;
 
-// List type for hsa_amd_svm_attributes_set/get. 
+// List type for hsa_amd_svm_attributes_set/get.
 typedef struct hsa_amd_svm_attribute_pair_s {
   // hsa_amd_svm_attribute_t value.
   uint64_t attribute;

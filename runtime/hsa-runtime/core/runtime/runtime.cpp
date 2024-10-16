@@ -1533,7 +1533,7 @@ hsa_status_t Runtime::IPCDetach(void* ptr) {
 }
 
 void Runtime::AsyncEventsLoop(void* _eventsInfo) {
-  struct AsyncEventsInfo* eventsInfo = reinterpret_cast<struct AsyncEventsInfo*>(_eventsInfo);
+  AsyncEventsInfo* eventsInfo = reinterpret_cast<AsyncEventsInfo*>(_eventsInfo);
 
   auto& async_events_control_ = eventsInfo->control;
   auto& async_events_ = eventsInfo->events;
@@ -1602,26 +1602,19 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
 
   while (!async_events_control_.exit) {
     // Wait for a signal
-    hsa_signal_value_t value = 0;
+    std::vector<hsa_signal_value_t> value(1);
+    value[0] = 0;
     uint32_t index = 0;
     uint32_t wait_any = true;
     if (eventsInfo->monitor_exceptions) {
-      index = Signal::WaitAnyExceptions(
-                          uint32_t(async_events_.Size()),
-                          &async_events_.signal_[0],
-                          &async_events_.cond_[0],
-                          &async_events_.value_[0],
-                          &value);
+      index =
+          Signal::WaitAnyExceptions(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+                                    &async_events_.cond_[0], &async_events_.value_[0], &value[0]);
     } else {
      if (core::Runtime::runtime_singleton_->flag().wait_any()) {
-      index = Signal::WaitAny(
-                          uint32_t(async_events_.Size()),
-                          &async_events_.signal_[0],
-                          &async_events_.cond_[0],
-                          &async_events_.value_[0],
-                          uint64_t(-1),
-                          HSA_WAIT_STATE_BLOCKED,
-                          &value);
+       index = Signal::WaitMultiple(uint32_t(async_events_.Size()), &async_events_.signal_[0],
+                                    &async_events_.cond_[0], &async_events_.value_[0], uint64_t(-1),
+                                    HSA_WAIT_STATE_BLOCKED, value, false);
      } else {
       // Skip wake-up signal logic
       index = 1;
@@ -1636,7 +1629,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       hsa_signal_handle(async_events_control_.wake)->StoreRelaxed(0);
     } else if (index != -1) {
       if (wait_any) {
-        processEvent(index, value, wait_any);
+        processEvent(index, value[0], wait_any);
       } else {
         index = 0;
       }
@@ -1664,12 +1657,12 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
         // Check remaining signals before sleeping.
         for (size_t i = index; i < async_events_.Size(); i++) {
           hsa_signal_handle sig(async_events_.signal_[i]);
-          value = atomic::Load(&sig->signal_.value, std::memory_order_relaxed);
-          if (checkCondition(async_events_.cond_[i], value, async_events_.value_[i])) {
+          value[0] = atomic::Load(&sig->signal_.value, std::memory_order_relaxed);
+          if (checkCondition(async_events_.cond_[i], value[0], async_events_.value_[i])) {
             if (i == 0) {
               hsa_signal_handle(async_events_control_.wake)->StoreRelaxed(0);
             } else {
-              if (!processEvent(i, value, wait_any)) {
+              if (!processEvent(i, value[0], wait_any)) {
                 i--;
               }
             }

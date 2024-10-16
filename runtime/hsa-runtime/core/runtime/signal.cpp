@@ -2,24 +2,24 @@
 //
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
-// 
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
-// 
+//
+// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
+//
 // Developed by:
-// 
+//
 //                 AMD Research and AMD HSA Software Development
-// 
+//
 //                 Advanced Micro Devices, Inc.
-// 
+//
 //                 www.amd.com
-// 
+//
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to
 // deal with the Software without restriction, including without limitation
 // the rights to use, copy, modify, merge, publish, distribute, sublicense,
 // and/or sell copies of the Software, and to permit persons to whom the
 // Software is furnished to do so, subject to the following conditions:
-// 
+//
 //  - Redistributions of source code must retain the above copyright notice,
 //    this list of conditions and the following disclaimers.
 //  - Redistributions in binary form must reproduce the above copyright
@@ -29,7 +29,7 @@
 //    nor the names of its contributors may be used to endorse or promote
 //    products derived from this Software without specific prior written
 //    permission.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
 // FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
@@ -46,6 +46,9 @@
 #include "core/inc/signal.h"
 
 #include <algorithm>
+#include <numeric>
+#include <vector>
+
 #include "core/util/timer.h"
 #include "core/inc/runtime.h"
 
@@ -177,10 +180,11 @@ Signal::~Signal() {
   }
 }
 
-uint32_t Signal::WaitAny(uint32_t signal_count, const hsa_signal_t* hsa_signals,
-                         const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
-                         uint64_t timeout, hsa_wait_state_t wait_hint,
-                         hsa_signal_value_t* satisfying_value) {
+uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_signals,
+                              const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
+                              uint64_t timeout, hsa_wait_state_t wait_hint,
+                              std::vector<hsa_signal_value_t>& satisfying_values,
+                              bool wait_on_all) {
   hsa_signal_handle* signals =
       reinterpret_cast<hsa_signal_handle*>(const_cast<hsa_signal_t*>(hsa_signals));
 
@@ -251,10 +255,14 @@ uint32_t Signal::WaitAny(uint32_t signal_count, const hsa_signal_t* hsa_signals,
       timer::duration_from_seconds<timer::fast_clock::duration>(
           double(timeout) / double(hsa_freq));
 
-  bool condition_met = false;
+  std::vector<uint32_t> unmet_condition_ids(signal_count);
+  std::iota(unmet_condition_ids.begin(), unmet_condition_ids.end(), 0);
+
   while (true) {
     // Cannot mwaitx - polling multiple signals
-    for (uint32_t i = 0; i < signal_count; i++) {
+    for (auto it = unmet_condition_ids.begin(); it != unmet_condition_ids.end();) {
+      auto i = *it;
+      bool condition_met = false;
       if (!signals[i]->IsValid())
         return uint32_t(-1);
 
@@ -282,8 +290,14 @@ uint32_t Signal::WaitAny(uint32_t signal_count, const hsa_signal_t* hsa_signals,
           return uint32_t(-1);
       }
       if (condition_met) {
-        if (satisfying_value != NULL) *satisfying_value = value;
-        return i;
+        it = unmet_condition_ids.erase(it);
+        satisfying_values[i] = value;
+        if (!wait_on_all)
+          return i;
+        else if (unmet_condition_ids.empty())
+          return 0;
+      } else {
+        ++it;
       }
     }
 
@@ -306,7 +320,7 @@ uint32_t Signal::WaitAny(uint32_t signal_count, const hsa_signal_t* hsa_signals,
     uint64_t ct=timer::duration_cast<std::chrono::milliseconds>(
       time_remaining).count();
     wait_ms = (ct>0xFFFFFFFEu) ? 0xFFFFFFFEu : ct;
-    hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, false, wait_ms, event_age);
+    hsaKmtWaitOnMultipleEvents_Ext(evts, unique_evts, wait_on_all, wait_ms, event_age);
   }
 }
 

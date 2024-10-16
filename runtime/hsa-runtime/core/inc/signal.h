@@ -3,7 +3,7 @@
 // The University of Illinois/NCSA
 // Open Source License (NCSA)
 //
-// Copyright (c) 2014-2020, Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2014-2024, Advanced Micro Devices, Inc. All rights reserved.
 //
 // Developed by:
 //
@@ -351,14 +351,30 @@ class Signal {
   /// Returns NULL for DefaultEvent Type.
   virtual HsaEvent* EopEvent() = 0;
 
-  /// @brief Waits until any signal in the list satisfies its condition or
-  /// timeout is reached.
-  /// Returns the index of a satisfied signal.  Returns -1 on timeout and
-  /// errors.
-  static uint32_t WaitAny(uint32_t signal_count, const hsa_signal_t* hsa_signals,
-                          const hsa_signal_condition_t* conds, const hsa_signal_value_t* values,
-                          uint64_t timeout_hint, hsa_wait_state_t wait_hint,
-                          hsa_signal_value_t* satisfying_value);
+  /// @brief Waits until multiple signals in the list satisfy their conditions
+  /// or a timeout is reached.
+  /// @param signal_count Number of hsa_signals in the list.
+  /// @param hsa_signals Pointer to array of HSA signals.
+  /// @param conds Pointer to array of signal conditions.
+  /// @param values Pointer to array of signal values.
+  /// @param timeout Timeout hint value.
+  /// @param wait_hint Hint about wait state.
+  /// @param satisfying_values Vector of satisfying values. If \p wait_on_all
+  /// is false (then we are waiting on any signal in the list) this will contain
+  /// only the first satisfying value.
+  /// @param wait_on_all Wait on all signals in the list to satisfy their
+  /// conditions if true, else wait on any signal in the list to satisfy its
+  /// condition.
+  /// @return Return the index of the first signal in the list that satisfies
+  /// its condition or -1 on a timeout. Note that if \p wait_on_all is true,
+  /// then all signals in the list satisfy their conditions, thus the index will
+  /// always be 0.
+  static uint32_t WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_signals,
+                               const hsa_signal_condition_t* conds,
+                               const hsa_signal_value_t* values, uint64_t timeout,
+                               hsa_wait_state_t wait_hint,
+                               std::vector<hsa_signal_value_t>& satisfying_values,
+                               bool wait_on_all);
 
   /// @brief Dedicated funtion to wait on signals that are not of type HSA_EVENTTYPE_SIGNAL
   /// these events can only be received by calling the underlying driver (i.e via the hsaKmtWaitOnMultipleEvents_Ext

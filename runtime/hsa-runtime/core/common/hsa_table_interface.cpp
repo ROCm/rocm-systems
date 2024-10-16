@@ -910,6 +910,15 @@ hsa_status_t HSA_API
 }
 
 // Mirrors Amd Extension Apis
+uint32_t HSA_API hsa_amd_signal_wait_all(uint32_t signal_count, hsa_signal_t* signals,
+                                         hsa_signal_condition_t* conds, hsa_signal_value_t* values,
+                                         uint64_t timeout_hint, hsa_wait_state_t wait_hint,
+                                         hsa_signal_value_t* satisfying_values) {
+  return amdExtTable->hsa_amd_signal_wait_all_fn(signal_count, signals, conds, values, timeout_hint,
+                                                 wait_hint, satisfying_values);
+}
+
+// Mirrors Amd Extension Apis
 uint32_t HSA_API
     hsa_amd_signal_wait_any(uint32_t signal_count, hsa_signal_t* signals,
                             hsa_signal_condition_t* conds,
