@@ -87,6 +87,7 @@ public:
   virtual hsa_status_t Init(void) { return HSA_STATUS_SUCCESS; }
   virtual hsa_status_t Fini(void) { return HSA_STATUS_SUCCESS; }
   virtual void RingDoorbell() { }
+  virtual void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
   hsa_status_t SwsInit(void);
   hsa_status_t SwsFini(void);
@@ -162,6 +163,7 @@ public:
 
   uint64_t GetAqlWriteIndex(void) const { return cmdbuf_aql_frame_write_index; }
   uint32_t GetAqlFrameSize(void) const { return cmdbuf_aql_frame_size; }
+  void* GetHsaQueueAddr(void) const { return ring; }
 
   bool IsInvalidPacket(void) const {
     uint16_t *packet = (uint16_t *)((char *)ring +
@@ -278,6 +280,7 @@ public:
   uint64_t * GetRingRptr(void) { return WDDMQueue::GetSyncAddr(); }
   uint64_t * GetDoorbellPtr() { return &doorbell_; }
   void RingDoorbell();
+  void* GetHsaQueueAddr(void) const { return reinterpret_cast<void*>(GetCmdbufAddr()); }
 
 private:
   uint64_t wptr_next_;

@@ -117,6 +117,7 @@ struct GpuMemoryDesc {
       uint32_t is_external : 1;
       uint32_t is_physical_only : 1;
       uint32_t is_locked : 1;
+      uint32_t is_queue_referenced : 1;
 
       uint32_t unused : 27;
     };
@@ -167,6 +168,9 @@ public:
     return (desc_.adapter_luid.HighPart == luid.HighPart &&
       desc_.adapter_luid.LowPart == luid.LowPart);
   }
+  inline void GetQueueReference() { desc_.flags.is_queue_referenced = 1; }
+  inline void PutQueueReference() { desc_.flags.is_queue_referenced = 0; }
+  inline bool IsQueueReferenced() const { return desc_.flags.is_queue_referenced; }
 
   WinAllocationHandle GetAllocationHandle(size_t index) const { return alloc_handles_ptr_[index]; }
   size_t NumChunks() const { return num_allocations_; }

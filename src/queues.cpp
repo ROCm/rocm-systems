@@ -76,6 +76,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
   wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   assert(device_);
 
+  if (queue_acquire_buffer(QueueAddress) == false)
+    return HSAKMT_STATUS_INVALID_PARAMETER;
+
   switch (Type) {
   case HSA_QUEUE_COMPUTE_AQL: {
     assert(QueueResource->ErrorReason == nullptr);
@@ -138,11 +141,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyQueue(HSA_QUEUEID QueueId) {
   CHECK_DXG_OPEN();
 
   auto queue_ = reinterpret_cast<wsl::thunk::WDDMQueue *>(QueueId);
+  void *QueueAddress = queue_->GetHsaQueueAddr();
 
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   delete queue_;
+  queue_release_buffer(QueueAddress);
   return HSAKMT_STATUS_SUCCESS;
 }
 

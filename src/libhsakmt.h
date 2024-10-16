@@ -177,6 +177,8 @@ bool is_forked_child(void);
 
 void clear_allocation_map(void);
 
+bool queue_acquire_buffer(void *MemoryAddress);
+bool queue_release_buffer(void *MemoryAddress);
 /* Calculate VGPR and SGPR register file size per CU */
 uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 #define SGPR_SIZE_PER_CU 0x4000
