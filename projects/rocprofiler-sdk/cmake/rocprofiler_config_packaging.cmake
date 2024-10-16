@@ -2,13 +2,26 @@
 # configure packaging settings
 #
 
-function(rocprofiler_set_package_depends _VARIABLE _VALUE _INFO)
+function(rocprofiler_set_package_depends _VARIABLE _VALUE _INFO _REPLACE_PARENTHESIS)
     string(REPLACE ";" ", " _DEPENDS "${_VALUE}")
+    if(_REPLACE_PARENTHESIS)
+        string(REGEX REPLACE "\\\(|\\\)" "" _DEPENDS "${_DEPENDS}")
+    endif()
     set(${_VARIABLE}
         "${_DEPENDS}"
         CACHE STRING "${_INFO} package dependencies" FORCE)
     rocprofiler_add_feature(${_VARIABLE} "${_INFO} package dependencies")
 endfunction()
+
+# Make proper version for appending Default Value is 99999
+set(ROCM_VERSION_FOR_PACKAGE
+    "99999"
+    CACHE STRING "")
+if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
+    set(ROCM_VERSION_FOR_PACKAGE
+        "$ENV{ROCM_LIBPATCH_VERSION}"
+        CACHE STRING "" FORCE)
+endif()
 
 # Add packaging directives
 set(CPACK_PACKAGE_NAME ${PROJECT_NAME}-sdk)
@@ -30,15 +43,13 @@ set(ROCPROFILER_CPACK_PACKAGE_SUFFIX "")
 
 set(CPACK_PACKAGE_FILE_NAME
     "${CPACK_PACKAGE_NAME}-${ROCPROFILER_VERSION}-${ROCPROFILER_CPACK_SYSTEM_NAME}${ROCPROFILER_CPACK_PACKAGE_SUFFIX}"
-    )
+    CACHE STRING "")
 if(DEFINED ENV{CPACK_PACKAGE_FILE_NAME})
-    set(CPACK_PACKAGE_FILE_NAME $ENV{CPACK_PACKAGE_FILE_NAME})
+    set(CPACK_PACKAGE_FILE_NAME
+        "$ENV{CPACK_PACKAGE_FILE_NAME}"
+        CACHE STRING "" FORCE)
 endif()
-
-set(ROCPROFILER_PACKAGE_FILE_NAME
-    ${CPACK_PACKAGE_NAME}-${ROCPROFILER_VERSION}-${ROCPROFILER_CPACK_SYSTEM_NAME}${ROCPROFILER_CPACK_PACKAGE_SUFFIX}
-    )
-rocprofiler_add_feature(ROCPROFILER_PACKAGE_FILE_NAME "CPack filename")
+rocprofiler_add_feature(CPACK_PACKAGE_FILE_NAME "CPack filename")
 
 get_cmake_property(ROCPROFILER_PACKAGING_COMPONENTS COMPONENTS)
 
@@ -64,9 +75,9 @@ set(COMPONENT_NAME_docs "rocprofiler-sdk-docs")
 set(COMPONENT_NAME_tests "rocprofiler-sdk-tests")
 set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 
-set(COMPONENT_DEP_core "")
+set(COMPONENT_DEP_core "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_docs "")
-set(COMPONENT_DEP_tests "rocprofiler-sdk")
+set(COMPONENT_DEP_tests "rocprofiler-sdk (= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_roctx "")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")
@@ -113,9 +124,9 @@ foreach(COMPONENT_GROUP ${ROCPROFILER_COMPONENT_GROUPS})
     set(CPACK_RPM_${UCOMPONENT}_PACKAGE_NAME "${_NAME}")
 
     rocprofiler_set_package_depends(CPACK_DEBIAN_${UCOMPONENT}_PACKAGE_DEPENDS "${_DEP}"
-                                    "Debian")
+                                    "Debian" OFF)
     rocprofiler_set_package_depends(CPACK_RPM_${UCOMPONENT}_PACKAGE_REQUIRES "${_DEP}"
-                                    "RedHat")
+                                    "RedHat" ON)
 
     foreach(COMPONENT ${COMPONENT_GROUP_${COMPONENT_GROUP}_COMPONENTS})
         cpack_add_component(${COMPONENT} REQUIRED GROUP "${COMPONENT_GROUP}")
@@ -138,25 +149,20 @@ set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS ON) # generate list of shared libs prov
 set(CPACK_DEBIAN_TESTS_PACKAGE_SHLIBDEPS OFF) # disable for tests package
 set(CPACK_DEBIAN_TESTS_PACKAGE_GENERATE_SHLIBS OFF) # disable for tests package
 set(CPACK_DEBIAN_PACKAGE_HOMEPAGE "${PROJECT_HOMEPAGE_URL}")
-set(CPACK_DEBIAN_PACKAGE_RELEASE
-    "${ROCPROFILER_CPACK_SYSTEM_NAME}${ROCPROFILER_CPACK_PACKAGE_SUFFIX}")
-string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_DEBIAN_PACKAGE_RELEASE
-                     "${CPACK_DEBIAN_PACKAGE_RELEASE}")
-string(REPLACE "-" "~" CPACK_DEBIAN_PACKAGE_RELEASE "${CPACK_DEBIAN_PACKAGE_RELEASE}")
+set(CPACK_DEBIAN_PACKAGE_GENERATE_SHLIBS_POLICY ">=")
+set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS_PRIVATE_DIRS
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/${CPACK_PACKAGE_NAME})
 if(DEFINED ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
-    set(CPACK_DEBIAN_PACKAGE_RELEASE $ENV{CPACK_DEBIAN_PACKAGE_RELEASE})
+    set(CPACK_DEBIAN_PACKAGE_RELEASE
+        "$ENV{CPACK_DEBIAN_PACKAGE_RELEASE}"
+        CACHE STRING "" FORCE)
 endif()
 
-set(_DEBIAN_PACKAGE_DEPENDS "")
-if(rocm_version_FOUND)
-    set(_ROCPROFILER_SUFFIX " (>= 1.0.0.${rocm_version_NUMERIC_VERSION})")
-    set(_ROCTRACER_SUFFIX " (>= 1.0.0.${rocm_version_NUMERIC_VERSION})")
-    set(_ROCM_SMI_SUFFIX
-        " (>= ${rocm_version_MAJOR_VERSION}.0.0.${rocm_version_NUMERIC_VERSION})")
-endif()
-rocprofiler_set_package_depends(CPACK_DEBIAN_PACKAGE_DEPENDS "${_DEBIAN_PACKAGE_DEPENDS}"
-                                "Debian")
+rocprofiler_set_package_depends(CPACK_DEBIAN_PACKAGE_DEPENDS
+                                "${CPACK_DEBIAN_PACKAGE_DEPENDS}" "Debian" OFF)
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
+set(CPACK_DEBIAN_PACKAGE_VERSION "${PROJECT_VERSION}")
 
 # -------------------------------------------------------------------------------------- #
 #
@@ -176,13 +182,10 @@ set(CPACK_RPM_PACKAGE_AUTOREQ
 set(CPACK_RPM_PACKAGE_AUTOPROV ON) # generate list of shared libs provided by package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOREQ OFF) # disable for tests package
 set(CPACK_RPM_TESTS_PACKAGE_AUTOPROV OFF) # disable for tests package
-set(CPACK_RPM_PACKAGE_RELEASE
-    "${ROCPROFILER_CPACK_SYSTEM_NAME}${ROCPROFILER_CPACK_PACKAGE_SUFFIX}")
-string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_RPM_PACKAGE_RELEASE
-                     "${CPACK_RPM_PACKAGE_RELEASE}")
-string(REPLACE "-" "~" CPACK_RPM_PACKAGE_RELEASE "${CPACK_RPM_PACKAGE_RELEASE}")
 if(DEFINED ENV{CPACK_RPM_PACKAGE_RELEASE})
-    set(CPACK_RPM_PACKAGE_RELEASE $ENV{CPACK_RPM_PACKAGE_RELEASE})
+    set(CPACK_RPM_PACKAGE_RELEASE
+        "$ENV{CPACK_RPM_PACKAGE_RELEASE}"
+        CACHE STRING "" FORCE)
 endif()
 
 # Get rpm distro
@@ -197,15 +200,7 @@ set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 # Prepare final version for the CPACK use
 #
 # -------------------------------------------------------------------------------------- #
-# Make proper version for appending Default Value is 99999
-set(ROCM_VERSION_FOR_PACKAGE
-    "99999"
-    CACHE STRING "")
-if(DEFINED ENV{ROCM_LIBPATCH_VERSION})
-    set(ROCM_VERSION_FOR_PACKAGE
-        "$ENV{ROCM_LIBPATCH_VERSION}"
-        CACHE STRING "" FORCE)
-endif()
+
 # Prepare final version for the CPACK use
 set(CPACK_PACKAGE_VERSION
     "${CPACK_PACKAGE_VERSION_MAJOR}.${CPACK_PACKAGE_VERSION_MINOR}.${CPACK_PACKAGE_VERSION_PATCH}.${ROCM_VERSION_FOR_PACKAGE}"

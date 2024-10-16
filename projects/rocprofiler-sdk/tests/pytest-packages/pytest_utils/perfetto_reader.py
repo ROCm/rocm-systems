@@ -28,7 +28,7 @@ import time
 import pandas as pd
 
 from collections import OrderedDict
-from perfetto.trace_processor import TraceProcessor
+from perfetto.trace_processor import TraceProcessor, TraceProcessorConfig
 
 
 class PerfettoReader:
@@ -162,14 +162,18 @@ class PerfettoReader:
         def construct_trace_processor(trace_v):
             for i in range(4):
                 try:
-                    return TraceProcessor(trace=(trace_v))
+                    verbosity = True if i > 0 else False
+                    cfg = TraceProcessorConfig(verbose=verbosity)
+                    return TraceProcessor(trace=(trace_v), config=cfg)
                 except Exception as e:
                     nwait = i + 1
                     sys.stderr.write(
-                        f"{e}\n\nRetrying trace processor construction after {nwait} seconds...\n"
+                        f"{e}\nRetrying trace processor construction after {nwait} seconds...\n"
                     )
                     sys.stderr.flush()
                     time.sleep(nwait)
+
+            raise RuntimeError(f"Failed to construct trace processor for '{trace_v}'")
 
         if len(self.filename) + len(_new_filenames) != len(self.trace_processor):
             self.trace_processor = [construct_trace_processor(f) for f in self.filename]

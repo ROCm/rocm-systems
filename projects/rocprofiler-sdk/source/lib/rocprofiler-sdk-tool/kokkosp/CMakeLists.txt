@@ -20,6 +20,9 @@ set_target_properties(
     rocprofiler-sdk-tool-kokkosp
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY
                ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
+               SOVERSION ${PROJECT_VERSION_MAJOR}
+               VERSION ${PROJECT_VERSION}
+               SKIP_BUILD_RPATH OFF
                BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 

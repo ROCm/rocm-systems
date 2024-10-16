@@ -15,9 +15,6 @@
 # compute paths
 get_filename_component(@PACKAGE_NAME@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 
-# version
-set(@PACKAGE_NAME@_VERSION @PROJECT_VERSION@)
-
 @PACKAGE_INIT@
 
 set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")
@@ -58,8 +55,7 @@ else()
 
     find_package(
         amd_comgr
-        @amd_comgr_VERSION@
-        EXACT
+        @PACKAGE_amd_comgr_VERSION@
         REQUIRED
         CONFIG
         HINTS
@@ -71,8 +67,7 @@ else()
 
     find_package(
         hsa-runtime64
-        @hsa-runtime64_VERSION@
-        EXACT
+        @PACKAGE_hsa-runtime64_VERSION@
         REQUIRED
         CONFIG
         HINTS
@@ -84,8 +79,7 @@ else()
 
     find_package(
         hip
-        @hip_VERSION@
-        EXACT
+        @PACKAGE_hip_VERSION@
         REQUIRED
         CONFIG
         HINTS

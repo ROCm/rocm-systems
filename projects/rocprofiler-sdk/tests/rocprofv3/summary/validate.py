@@ -237,13 +237,13 @@ def test_summary_display_data(json_data, summary_data):
 
     expected_hip_and_marker_dims = [20, 9] if hip_and_marker is not None else [0, 0]
 
-    assert get_dims(hip) == [13, 9]
-    assert get_dims(marker) == [7, 9]
-    assert get_dims(dispatch) == [3, 9]
-    assert get_dims(memcpy) == [2, 9]
-    assert get_dims(dispatch_and_copy) == [5, 9]
-    assert get_dims(hip_and_marker) == expected_hip_and_marker_dims
-    assert get_dims(total) == [22, 9]
+    assert get_dims(marker) == [7, 9], f"{marker}"
+    assert get_dims(memcpy) == [2, 9], f"{memcpy}"
+    assert get_dims(dispatch) == [3, 9], f"{dispatch}"
+    assert get_dims(dispatch_and_copy) == [5, 9], f"{dispatch_and_copy}"
+    assert get_dims(hip) == [13, 9], f"{hip}"
+    assert get_dims(hip_and_marker) == expected_hip_and_marker_dims, f"{hip_and_marker}"
+    assert get_dims(total) == [22, 9], f"{total}"
 
 
 def test_perfetto_data(pftrace_data, json_data):

@@ -14,9 +14,6 @@
 # compute paths
 get_filename_component(@PACKAGE_NAME@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 
-# version
-set(@PACKAGE_NAME@_VERSION @PROJECT_VERSION@)
-
 @PACKAGE_INIT@
 
 set_and_check(@PACKAGE_NAME@_INCLUDE_DIR "@PACKAGE_INCLUDE_INSTALL_DIR@")

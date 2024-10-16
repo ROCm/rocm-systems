@@ -38,6 +38,17 @@ rocprofiler_install_env_setup_files(
     INSTALL_DIR ${CMAKE_INSTALL_DATAROOTDIR}
     COMPONENT development)
 
+function(compute_rocprofiler_sdk_version _VAR)
+    string(REGEX REPLACE "([0-9]+)\\\.([0-9]+)\\\.(.*)" "\\1.\\2" _TMP "${${_VAR}}")
+    set(PACKAGE_${_VAR}
+        "${_TMP}.0...${_TMP}.999999999999"
+        PARENT_SCOPE)
+endfunction()
+
+compute_rocprofiler_sdk_version(amd_comgr_VERSION)
+compute_rocprofiler_sdk_version(hsa-runtime64_VERSION)
+compute_rocprofiler_sdk_version(hip_VERSION)
+
 # ------------------------------------------------------------------------------#
 # install tree
 #

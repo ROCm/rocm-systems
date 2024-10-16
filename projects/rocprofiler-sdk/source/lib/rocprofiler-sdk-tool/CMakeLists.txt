@@ -72,7 +72,9 @@ target_link_libraries(rocprofv3-trigger-list-metrics
 set_target_properties(
     rocprofv3-trigger-list-metrics
     PROPERTIES RUNTIME_OUTPUT_DIRECTORY
-               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk)
+               ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/rocprofiler-sdk
+               BUILD_RPATH "\$ORIGIN:\$ORIGIN/.."
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 
 install(
     TARGETS rocprofv3-trigger-list-metrics
