@@ -187,7 +187,7 @@ class OmniSoC_Base:
                 self._mspec.chip_id = MI300_CHIP_IDS[self._mspec.chip_id]
 
         self._mspec.num_xcd = str(
-            total_xcds(self._mspec.gpu_model, self._mspec.compute_partition)
+            total_xcds(self._mspec.chip_id, self._mspec.compute_partition)
         )
 
     @demarcate
