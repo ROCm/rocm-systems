@@ -81,7 +81,7 @@ set(ALL_OPTION ALL )
 endif()
 
 list(JOIN GPU_ARCH "," OFFLOAD_ARCH)
-add_custom_target(src_to_ir ${ALL_OPTION} COMMAND ${HIPCC} -c -emit-llvm -I${INCLUDES} --cuda-host-only -target x86_64-linux-gnu -o ${SQ_HOST_BC} ${SRCS}
+add_custom_target(src_to_ir ${ALL_OPTION} COMMAND ${HIPCC} -c -emit-llvm -I${INCLUDES} --cuda-host-only -fuse-cuid=none -target x86_64-linux-gnu -o ${SQ_HOST_BC} ${SRCS}
                                 COMMAND ${HIPCC} -c -emit-llvm -I${INCLUDES} --cuda-device-only --offload-arch=${OFFLOAD_ARCH} ${SRCS})
 
 # Target for BC to LL

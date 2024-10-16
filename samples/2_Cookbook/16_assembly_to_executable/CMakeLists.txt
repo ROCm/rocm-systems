@@ -77,7 +77,7 @@ set(ALL_OPTION ALL )
 endif()
 
 list(JOIN GPU_ARCH "," OFFLOAD_ARCH)
-add_custom_target(src_to_asm ${ALL_OPTION}  COMMAND ${HIPCC} -c -S -I${INCLUDES} --cuda-host-only -target x86_64-linux-gnu -o ${SQ_HOST_ASM} ${SRCS}
+add_custom_target(src_to_asm ${ALL_OPTION}  COMMAND ${HIPCC} -c -S -I${INCLUDES} --cuda-host-only -fuse-cuid=none -target x86_64-linux-gnu -o ${SQ_HOST_ASM} ${SRCS}
                                COMMAND ${HIPCC} -c -S -I${INCLUDES} --cuda-device-only --offload-arch=${OFFLOAD_ARCH} ${SRCS})
 
 
