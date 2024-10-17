@@ -20,7 +20,7 @@ In addition to runtimes, ROCm Systems Profiler supports the collection of system
 such as the memory usage, page-faults, and context-switches, and thread-level metrics such as memory usage, CPU time, and numerous hardware counters.
 
 > [!NOTE]
-> Full documentation is available at [ROCm Systems Profiler documentation](https://rocm.docs.amd.com/projects/omnitrace/en/latest/index.html) in an organized, easy-to-read, searchable format.
+> Full documentation is available at [ROCm Systems Profiler documentation](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/index.html) in an organized, easy-to-read, searchable format.
 The documentation source files reside in the [`/docs`](/docs) folder of this repository. For information on contributing to the documentation, see
 [Contribute to ROCm documentation](https://rocm.docs.amd.com/en/latest/contribute/contributing.html)
 
@@ -99,14 +99,14 @@ The documentation source files reside in the [`/docs`](/docs) folder of this rep
 If the above recommendation is not desired, download the `rocprofiler-systems-install.py` and specify `--prefix <install-directory>` when
 executing it. This script will attempt to auto-detect a compatible OS distribution and version.
 If ROCm support is desired, specify `--rocm X.Y` where `X` is the ROCm major version and `Y`
-is the ROCm minor version, e.g. `--rocm 5.4`.
+is the ROCm minor version, e.g. `--rocm 6.2`.
 
 ```console
 wget https://github.com/ROCm/rocprofiler-systems/releases/latest/download/rocprofiler-systems-install.py
-python3 ./rocprofiler-systems-install.py --prefix /opt/rocprofiler-systems/rocm-5.4 --rocm 5.4
+python3 ./rocprofiler-systems-install.py --prefix /opt/rocprofiler-systems --rocm 6.2
 ```
 
-See the [ROCm Systems Profiler installation guide](https://rocm.docs.amd.com/projects/omnitrace/en/latest/install/install.html) for detailed information.
+See the [ROCm Systems Profiler installation guide](https://rocm.docs.amd.com/projects/rocprofiler-systems/en/latest/install/install.html) for detailed information.
 
 ### Setup
 
@@ -295,13 +295,13 @@ for `foo` via the direct call within `spam`. There will be no entries for `bar` 
 - Select "Open trace file" from panel on the left
 - Locate the rocprofiler-systems perfetto output (extension: `.proto`)
 
-![rocprof-sys-perfetto](docs/data/omnitrace-perfetto.png)
+![rocprof-sys-perfetto](docs/data/rocprof-sys-perfetto.png)
 
-![rocprof-sys-rocm](docs/data/omnitrace-rocm.png)
+![rocprof-sys-rocm](docs/data/rocprof-sys-rocm.png)
 
-![rocprof-sys-rocm-flow](docs/data/omnitrace-rocm-flow.png)
+![rocprof-sys-rocm-flow](docs/data/rocprof-sys-rocm-flow.png)
 
-![rocprof-sys-user-api](docs/data/omnitrace-user-api.png)
+![rocprof-sys-user-api](docs/data/rocprof-sys-user-api.png)
 
 ## Using Perfetto tracing with System Backend
 
@@ -331,6 +331,7 @@ Configure rocprofiler-systems to use the perfetto system backend via the `--perf
 ```shell
 # enable sampling on the uninstrumented binary
 rocprof-sys-run --sample --trace --perfetto-backend=system -- ./myapp
+
 # trace the instrument the binary
 rocprof-sys-instrument -o ./myapp.inst -- ./myapp
 rocprof-sys-run --trace --perfetto-backend=system -- ./myapp.inst

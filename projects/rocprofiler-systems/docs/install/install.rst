@@ -1,38 +1,41 @@
 .. meta::
-   :description: Omnitrace documentation and reference
-   :keywords: Omnitrace, ROCm, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
+   :description: ROCm Systems Profiler installation documentation and reference
+   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, installation, installer, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
 
 *************************************
-Omnitrace installation
+ROCm Systems Profiler installation
 *************************************
 
 The following information builds on the guidelines in the :doc:`Quick start <./quick-start>` guide.
-It covers how to install `Omnitrace <https://github.com/ROCm/omnitrace>`_ from source or a binary distribution,
-as well as the :ref:`post-installation-steps`.
+It covers how to install `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ from
+source or a binary distribution, as well as the :ref:`post-installation-steps`.
 
-If you have problems using Omnitrace after installation,
+If you have problems using ROCm Systems Profiler after installation,
 consult the :ref:`post-installation-troubleshooting` section.
 
 Release links
 ========================================
 
-To review and install either the current Omnitrace release or earlier releases, use these links:
+To review and install either the current ROCm Systems Profiler release or earlier releases, use these links:
 
-* Latest Omnitrace Release: `<https://github.com/ROCm/omnitrace/releases/latest>`_
-* All Omnitrace Releases: `<https://github.com/ROCm/omnitrace/releases>`_
+* Latest ROCm Systems Profiler Release: `<https://github.com/ROCm/rocprofiler-systems/releases/latest>`_
+* All ROCm Systems Profiler Releases: `<https://github.com/ROCm/rocprofiler-systems/releases>`_
 
 Operating system support
 ========================================
 
-Omnitrace is only supported on Linux. The following distributions are tested in the Omnitrace GitHub workflows:
+ROCm Systems Profiler is only supported on Linux. The following distributions are tested in the ROCm Systems Profiler GitHub workflows:
 
 * Ubuntu 20.04
 * Ubuntu 22.04
-* OpenSUSE 15.3
-* OpenSUSE 15.4
-* Red Hat 8.7
-* Red Hat 9.0
-* Red Hat 9.1
+* OpenSUSE 15.5
+* OpenSUSE 15.6
+* Red Hat 8.8
+* Red Hat 8.9
+* Red Hat 8.10
+* Red Hat 9.2
+* Red Hat 9.3
+* Red Hat 9.4
 
 Other OS distributions might function but are not supported or tested.
 
@@ -61,58 +64,58 @@ Architecture
 ========================================
 
 With regards to instrumentation, at present only AMD64 (x86_64) architectures are tested. However,
-Dyninst supports several more architectures and Omnitrace instrumentation may support other
+Dyninst supports several more architectures and ROCm Systems Profiler instrumentation may support other
 CPU architectures such as aarch64 and ppc64.
 Other modes of use, such as sampling and causal profiling, are not dependent on Dyninst and therefore
 might be more portable.
 
-Installing Omnitrace from binary distributions
+Installing ROCm Systems Profiler from binary distributions
 ================================================
 
-Every Omnitrace release provides binary installer scripts of the form:
+Every ROCm Systems Profiler release provides binary installer scripts of the form:
 
 .. code-block:: shell
 
-   omnitrace-{VERSION}-{OS_DISTRIB}-{OS_VERSION}[-ROCm-{ROCM_VERSION}[-{EXTRA}]].sh
+   rocprof-sys-{VERSION}-{OS_DISTRIB}-{OS_VERSION}[-ROCm-{ROCM_VERSION}[-{EXTRA}]].sh
 
 For example,
 
 .. code-block:: shell
 
-   omnitrace-1.0.0-ubuntu-18.04-OMPT-PAPI-Python3.sh
-   omnitrace-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI-Python3.sh
+   rocprof-sys-1.0.0-ubuntu-18.04-OMPT-PAPI-Python3.sh
+   rocprof-sys-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI-Python3.sh
    ...
-   omnitrace-1.0.0-ubuntu-20.04-ROCm-50000-OMPT-PAPI-Python3.sh
+   rocprof-sys-1.0.0-ubuntu-20.04-ROCm-50000-OMPT-PAPI-Python3.sh
 
 Any of the ``EXTRA`` fields with a CMake build option
 (for example, PAPI, as referenced in a following section) or
 with no link requirements (such as OMPT) have
 self-contained support for these packages.
 
-To install Omnitrace using a binary installer script, follow these steps:
+To install ROCm Systems Profiler using a binary installer script, follow these steps:
 
 #. Download the appropriate binary distribution
 
    .. code-block:: shell
 
-      wget https://github.com/ROCm/omnitrace/releases/download/v<VERSION>/<SCRIPT>
+      wget https://github.com/ROCm/rocprofiler-systems/releases/download/v<VERSION>/<SCRIPT>
 
 #. Create the target installation directory
 
    .. code-block:: shell
 
-      mkdir /opt/omnitrace
+      mkdir /opt/rocprofiler-systems
 
 #. Run the installer script
 
    .. code-block:: shell
 
-      ./omnitrace-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI.sh --prefix=/opt/omnitrace --exclude-subdir
+      ./rocprofiler-systems-1.0.0-ubuntu-18.04-ROCm-405000-OMPT-PAPI.sh --prefix=/opt/rocprofiler-systems --exclude-subdir
 
-Installing Omnitrace from source
+Installing ROCm Systems Profiler from source
 ========================================
 
-Omnitrace needs a GCC compiler with full support for C++17 and CMake v3.16 or higher.
+ROCm Systems Profiler needs a GCC compiler with full support for C++17 and CMake v3.16 or higher.
 The Clang compiler may be used in lieu of the GCC compiler if `Dyninst <https://github.com/dyninst/dyninst>`_
 is already installed.
 
@@ -122,7 +125,7 @@ Build requirements
 * GCC compiler v7+
 
   * Older GCC compilers may be supported but are not tested
-  * Clang compilers are generally supported for Omnitrace but not Dyninst
+  * Clang compilers are generally supported for ROCm Systems Profiler but not Dyninst
 
 * `CMake <https://cmake.org/>`_ v3.16+
 
@@ -151,16 +154,16 @@ Required third-party packages
 * `libunwind <https://www.nongnu.org/libunwind/>`_ for call-stack sampling
 
 Any of the third-party packages required by Dyninst, along with Dyninst itself, can be built and installed
-during the Omnitrace build. The following list indicates the package, the version,
-the application that requires the package (for example, Omnitrace requires Dyninst
-while Dyninst requires TBB), and the CMake option to build the package alongside Omnitrace:
+during the ROCm Systems Profiler build. The following list indicates the package, the version,
+the application that requires the package (for example, ROCm Systems Profiler requires Dyninst
+while Dyninst requires TBB), and the CMake option to build the package alongside ROCm Systems Profiler:
 
 .. csv-table::
    :header: "Third-Party Library", "Minimum Version", "Required By", "CMake Option"
    :widths: 15, 10, 12, 40
 
-   "Dyninst", "12.0", "Omnitrace", "``OMNITRACE_BUILD_DYNINST`` (default: OFF)"
-   "Libunwind", "", "Omnitrace", "``OMNITRACE_BUILD_LIBUNWIND`` (default: ON)"
+   "Dyninst", "12.0", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_DYNINST`` (default: OFF)"
+   "Libunwind", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_LIBUNWIND`` (default: ON)"
    "TBB", "2018.6", "Dyninst", "``DYNINST_BUILD_TBB`` (default: OFF)"
    "ElfUtils", "0.178", "Dyninst", "``DYNINST_BUILD_ELFUTILS`` (default: OFF)"
    "LibIberty",  "", "Dyninst", "``DYNINST_BUILD_LIBIBERTY`` (default: OFF)"
@@ -180,9 +183,9 @@ Optional third-party packages
 * `PAPI <https://icl.utk.edu/papi/>`_
 * MPI
 
-  * ``OMNITRACE_USE_MPI`` enables full MPI support
-  * ``OMNITRACE_USE_MPI_HEADERS`` enables wrapping of the dynamically-linked MPI C function calls.
-    (By default, if Omnitrace cannot find an OpenMPI MPI distribution, it uses a local copy
+  * ``ROCPROFSYS_USE_MPI`` enables full MPI support
+  * ``ROCPROFSYS_USE_MPI_HEADERS`` enables wrapping of the dynamically-linked MPI C function calls.
+    (By default, if ROCm Systems Profiler cannot find an OpenMPI MPI distribution, it uses a local copy
     of the OpenMPI ``mpi.h``.)
 
 * Several optional third-party profiling tools supported by Timemory
@@ -192,19 +195,19 @@ Optional third-party packages
    :header: "Third-Party Library", "CMake Enable Option", "CMake Build Option"
    :widths: 15, 45, 40
 
-   "PAPI", "``OMNITRACE_USE_PAPI`` (default: ON)", "``OMNITRACE_BUILD_PAPI`` (default: ON)"
-   "MPI", "``OMNITRACE_USE_MPI`` (default: OFF)", ""
-   "MPI (header-only)", "``OMNITRACE_USE_MPI_HEADERS`` (default: ON)", ""
+   "PAPI", "``ROCPROFSYS_USE_PAPI`` (default: ON)", "``ROCPROFSYS_BUILD_PAPI`` (default: ON)"
+   "MPI", "``ROCPROFSYS_USE_MPI`` (default: OFF)", ""
+   "MPI (header-only)", "``ROCPROFSYS_USE_MPI_HEADERS`` (default: ON)", ""
 
 Installing Dyninst
 -----------------------------------
 
-The easiest way to install Dyninst is alongside Omnitrace, but it can also be installed using Spack.
+The easiest way to install Dyninst is alongside ROCm Systems Profiler, but it can also be installed using Spack.
 
-Building Dyninst alongside Omnitrace
+Building Dyninst alongside ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To install Dyninst alongside Omnitrace, configure Omnitrace with ``OMNITRACE_BUILD_DYNINST=ON``.
+To install Dyninst alongside ROCm Systems Profiler, configure ROCm Systems Profiler with ``ROCPROFSYS_BUILD_DYNINST=ON``.
 Depending on the version of Ubuntu, the ``apt`` package manager might have current enough
 versions of the Dyninst Boost, TBB, and LibIberty dependencies
 (use ``apt-get install libtbb-dev libiberty-dev libboost-dev``).
@@ -213,8 +216,8 @@ its dependencies via ``DYNINST_BUILD_<DEP>=ON``, as follows:
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/omnitrace.git omnitrace-source
-   cmake -B omnitrace-build -DOMNITRACE_BUILD_DYNINST=ON -DDYNINST_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON omnitrace-source
+   git clone https://github.com/ROCm/rocprofiler-systems.git rocprof-sys-source
+   cmake -B rocprof-sys-build -DROCPROFSYS_BUILD_DYNINST=ON -DDYNINST_BUILD_{TBB,ELFUTILS,BOOST,LIBIBERTY}=ON rocprof-sys-source
 
 where ``-DDYNINST_BUILD_{TBB,BOOST,ELFUTILS,LIBIBERTY}=ON`` is expanded by
 the shell to ``-DDYNINST_BUILD_TBB=ON -DDYNINST_BUILD_BOOST=ON ...``
@@ -234,18 +237,18 @@ Installing Dyninst via Spack
    spack install --reuse dyninst
    spack load -r dyninst
 
-Installing Omnitrace
+Installing ROCm Systems Profiler
 -----------------------------------
 
-Omnitrace has CMake configuration options for MPI support (``OMNITRACE_USE_MPI`` or
-``OMNITRACE_USE_MPI_HEADERS``), HIP kernel tracing (``OMNITRACE_USE_ROCTRACER``),
-ROCm device sampling (``OMNITRACE_USE_ROCM_SMI``), OpenMP-Tools (``OMNITRACE_USE_OMPT``),
-hardware counters via PAPI (``OMNITRACE_USE_PAPI``), among other features.
+ROCm Systems Profiler has CMake configuration options for MPI support (``ROCPROFSYS_USE_MPI`` or
+``ROCPROFSYS_USE_MPI_HEADERS``), HIP kernel tracing (``ROCPROFSYS_USE_ROCTRACER``),
+ROCm device sampling (``ROCPROFSYS_USE_ROCM_SMI``), OpenMP-Tools (``ROCPROFSYS_USE_OMPT``),
+hardware counters via PAPI (``ROCPROFSYS_USE_PAPI``), among other features.
 Various additional features can be enabled via the
 ``TIMEMORY_USE_*`` `CMake options <https://timemory.readthedocs.io/en/develop/installation.html#cmake-options>`_.
-Any ``OMNITRACE_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>``
+Any ``ROCPROFSYS_USE_<VAL>`` option which has a corresponding ``TIMEMORY_USE_<VAL>``
 option means that the Timemory support for this feature has been integrated
-into Perfetto support for Omnitrace, for example, ``OMNITRACE_USE_PAPI=<VAL>`` also configures
+into Perfetto support for ROCm Systems Profiler, for example, ``ROCPROFSYS_USE_PAPI=<VAL>`` also configures
 ``TIMEMORY_USE_PAPI=<VAL>``. This means the data that Timemory is able to collect via this package
 is passed along to Perfetto and is displayed when the ``.proto`` file is visualized
 in `the Perfetto UI <https://ui.perfetto.dev>`_.
@@ -257,39 +260,39 @@ in `the Perfetto UI <https://ui.perfetto.dev>`_.
 
 .. code-block:: shell
 
-   git clone https://github.com/ROCm/omnitrace.git omnitrace-source
+   git clone https://github.com/ROCm/rocprofiler-systems.git rocprof-sys-source
    cmake                                       \
-       -B omnitrace-build                      \
-       -D CMAKE_INSTALL_PREFIX=/opt/omnitrace  \
-       -D OMNITRACE_USE_HIP=ON                 \
-       -D OMNITRACE_USE_ROCM_SMI=ON            \
-       -D OMNITRACE_USE_ROCTRACER=ON           \
-       -D OMNITRACE_USE_PYTHON=ON              \
-       -D OMNITRACE_USE_OMPT=ON                \
-       -D OMNITRACE_USE_MPI_HEADERS=ON         \
-       -D OMNITRACE_BUILD_PAPI=ON              \
-       -D OMNITRACE_BUILD_LIBUNWIND=ON         \
-       -D OMNITRACE_BUILD_DYNINST=ON           \
+       -B rocprof-sys-build                      \
+       -D CMAKE_INSTALL_PREFIX=/opt/rocprofiler-systems  \
+       -D ROCPROFSYS_USE_HIP=ON                 \
+       -D ROCPROFSYS_USE_ROCM_SMI=ON            \
+       -D ROCPROFSYS_USE_ROCTRACER=ON           \
+       -D ROCPROFSYS_USE_PYTHON=ON              \
+       -D ROCPROFSYS_USE_OMPT=ON                \
+       -D ROCPROFSYS_USE_MPI_HEADERS=ON         \
+       -D ROCPROFSYS_BUILD_PAPI=ON              \
+       -D ROCPROFSYS_BUILD_LIBUNWIND=ON         \
+       -D ROCPROFSYS_BUILD_DYNINST=ON           \
        -D DYNINST_BUILD_TBB=ON                 \
        -D DYNINST_BUILD_BOOST=ON               \
        -D DYNINST_BUILD_ELFUTILS=ON            \
        -D DYNINST_BUILD_LIBIBERTY=ON           \
-       omnitrace-source
-   cmake --build omnitrace-build --target all --parallel 8
-   cmake --build omnitrace-build --target install
-   source /opt/omnitrace/share/omnitrace/setup-env.sh
+       rocprof-sys-source
+   cmake --build rocprof-sys-build --target all --parallel 8
+   cmake --build rocprof-sys-build --target install
+   source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 
-.. _mpi-support-omnitrace:
+.. _mpi-support-rocprof-sys:
 
-MPI support within Omnitrace
+MPI support within ROCm Systems Profiler
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Omnitrace can have full (``OMNITRACE_USE_MPI=ON``) or partial (``OMNITRACE_USE_MPI_HEADERS=ON``) MPI support.
+ROCm Systems Profiler can have full (``ROCPROFSYS_USE_MPI=ON``) or partial (``ROCPROFSYS_USE_MPI_HEADERS=ON``) MPI support.
 The only difference between these two modes is whether or not the results collected
 via Timemory and/or Perfetto can be aggregated into a single
 output file during finalization. When full MPI support is enabled, combining the
 Timemory results always occurs, whereas combining the Perfetto
-results is configurable via the ``OMNITRACE_PERFETTO_COMBINE_TRACES`` setting.
+results is configurable via the ``ROCPROFSYS_PERFETTO_COMBINE_TRACES`` setting.
 
 The primary benefits of partial or full MPI support are the automatic wrapping
 of MPI functions and the ability
@@ -298,13 +301,13 @@ instead of having to use the system process identifier (i.e. ``PID``).
 In general, it's recommended to use partial MPI support with the OpenMPI
 headers as this is the most portable configuration.
 If full MPI support is selected, make sure your target application is built
-against the same MPI distribution as Omnitrace.
-For example, do not build Omnitrace with MPICH and use it on a target application built against OpenMPI.
+against the same MPI distribution as ROCm Systems Profiler.
+For example, do not build ROCm Systems Profiler with MPICH and use it on a target application built against OpenMPI.
 If partial support is selected, the reason the OpenMPI headers are recommended instead of the MPICH headers is
 because the ``MPI_COMM_WORLD`` in OpenMPI is a pointer to ``ompi_communicator_t`` (8 bytes),
-whereas ``MPI_COMM_WORLD`` in MPICH is an ``int`` (4 bytes). Building Omnitrace with partial MPI support
+whereas ``MPI_COMM_WORLD`` in MPICH is an ``int`` (4 bytes). Building ROCm Systems Profiler with partial MPI support
 and the MPICH headers and then using
-Omnitrace on an application built against OpenMPI causes a segmentation fault.
+ROCm Systems Profiler on an application built against OpenMPI causes a segmentation fault.
 This happens because the value of the ``MPI_COMM_WORLD`` is truncated
 during the function wrapping before being passed along to the underlying MPI function.
 
@@ -313,8 +316,8 @@ during the function wrapping before being passed along to the underlying MPI fun
 Post-installation steps
 ========================================
 
-After installation, you can optionally configure the Omnitrace environment.
-You should also test the executables to confirm Omnitrace is correctly installed.
+After installation, you can optionally configure the ROCm Systems Profiler environment.
+You should also test the executables to confirm ROCm Systems Profiler is correctly installed.
 
 Configure the environment
 -----------------------------------
@@ -323,14 +326,14 @@ If environment modules are available and preferred, add them using these command
 
 .. code-block:: shell
 
-   module use /opt/omnitrace/share/modulefiles
-   module load omnitrace/1.0.0
+   module use /opt/rocprofiler-systems/share/modulefiles
+   module load rocprofiler-systems/1.0.0
 
 Alternatively, you can directly source the ``setup-env.sh`` script:
 
 .. code-block:: shell
 
-   source /opt/omnitrace/share/omnitrace/setup-env.sh
+   source /opt/rocprofiler-systems/share/rocprofiler-systems/setup-env.sh
 
 Test the executables
 -----------------------------------
@@ -340,8 +343,8 @@ issues locating the installed libraries:
 
 .. code-block:: shell
 
-   omnitrace-instrument --help
-   omnitrace-avail --help
+   rocprof-sys-instrument --help
+   rocprof-sys-avail --help
 
 .. note::
 
@@ -353,27 +356,27 @@ issues locating the installed libraries:
 Post-installation troubleshooting
 ========================================
 
-This section explains how to resolve certain issues that might happen when you first use Omnitrace.
+This section explains how to resolve certain issues that might happen when you first use ROCm Systems Profiler.
 
 Issues with RHEL and SELinux
 ----------------------------------------------------
 
 RHEL (Red Hat Enterprise Linux) and related distributions of Linux automatically enable a security feature
-named SELinux (Security-Enhanced Linux) that prevents Omnitrace from running.
+named SELinux (Security-Enhanced Linux) that prevents ROCm Systems Profiler from running.
 This issue applies to any Linux distribution with SELinux installed, including RHEL,
 CentOS, Fedora, and Rocky Linux. The problem can happen with any GPU, or even without a GPU.
 
 The problem occurs after you instrument a program and try to
-run ``omnitrace-run`` with the instrumented program.
+run ``rocprof-sys-run`` with the instrumented program.
 
 .. code-block:: shell
 
    g++ hello.cpp -o hello
-   omniperf-instrument -M sampling -o hello.instr -- ./hello
-   omnitrace-run -- ./hello.instr
+   rocprof-sys-instrument -M sampling -o hello.instr -- ./hello
+   rocprof-sys-run -- ./hello.instr
 
 Instead of successfully running the binary with call-stack sampling,
-Omnitrace crashes with a segmentation fault.
+ROCm Systems Profiler crashes with a segmentation fault.
 
 .. note::
 
@@ -412,4 +415,4 @@ Configuring PAPI to collect hardware counters
 
 To use PAPI to collect the majority of hardware counters, ensure
 the ``/proc/sys/kernel/perf_event_paranoid`` setting has a value less than or equal to ``2``.
-For more information, see the :ref:`omnitrace_papi_events` section.
+For more information, see the :ref:`rocprof-sys_papi_events` section.

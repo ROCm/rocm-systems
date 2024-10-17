@@ -1,12 +1,12 @@
 .. meta::
-   :description: Omnitrace documentation and reference
-   :keywords: Omnitrace, ROCm, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
+   :description: ROCm Systems Profiler binary instrumentation and rewrite documentation and reference
+   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, binary instrumentation, binary rewrite, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
 
 ****************************************************
 Instrumenting and rewriting a binary application
 ****************************************************
 
-There are three ways to perform instrumentation with the ``omnitrace-instrument`` executable:
+There are three ways to perform instrumentation with the ``rocprof-sys-instrument`` executable:
 
 * Runtime instrumentation
 * Attaching to an already running process
@@ -14,11 +14,11 @@ There are three ways to perform instrumentation with the ``omnitrace-instrument`
 
 Here is a comparison of the three modes:
 
-* Runtime instrumentation of the application using the ``omnitrace-instrument`` executable 
+* Runtime instrumentation of the application using the ``rocprof-sys-instrument`` executable
   (analogous to ``gdb --args <program> <args>``)
 
   * This mode is the default if neither the ``-p`` nor ``-o`` command-line options are used
-  * Runtime instrumentation supports instrumenting not only the target executable but also 
+  * Runtime instrumentation supports instrumenting not only the target executable but also
     the shared libraries loaded by the target executable. Consequently, this mode consumes more memory,
     takes longer to perform the instrumentation, and tends to add more significant overhead to the
     runtime of the application.
@@ -26,7 +26,7 @@ Here is a comparison of the three modes:
     libraries but also the performance of the library dependencies
 
 * Attaching to a process that is currently running (analogous to ``gdb -p <PID>``)
- 
+
   * This mode is activated using ``-p <PID>``
   * The same caveats from the first example apply with respect to memory and overhead
 
@@ -39,25 +39,25 @@ Here is a comparison of the three modes:
 
   * This mode is activated through the ``-o <output-file>`` option
   * Binary rewriting is limited to the text section of the target executable or library. It does not instrument
-    the dynamically-linked libraries. Consequently, this mode performs the 
+    the dynamically-linked libraries. Consequently, this mode performs the
     instrumentation significantly faster
     and has a much lower overhead when running the instrumented executable and libraries.
-  * Binary rewriting is the recommended mode when the target executable uses 
+  * Binary rewriting is the recommended mode when the target executable uses
     process-level parallelism (for example, MPI)
-  * If the target executable has a minimal ``main`` routine and the bulk of your 
+  * If the target executable has a minimal ``main`` routine and the bulk of your
     application is in one specific dynamic library,
     see :ref:`binary-rewriting-library-label` for help
 
-The omnitrace-instrument executable
+The rocprof-sys-instrument executable
 ========================================
 
-Instrumentation is performed with the ``omnitrace-instrument`` executable. For more details, use the ``-h`` or ``--help`` option to
+Instrumentation is performed with the ``rocprof-sys-instrument`` executable. For more details, use the ``-h`` or ``--help`` option to
 view the help menu.
 
 .. code-block:: shell
 
-   $ omnitrace-instrument --help
-   [omnitrace-instrument] Usage: omnitrace-instrument [ --help (count: 0, dtype: bool)
+   $ rocprof-sys-instrument --help
+   [rocprof-sys-instrument] Usage: rocprof-sys-instrument [ --help (count: 0, dtype: bool)
                                                       --version (count: 0, dtype: bool)
                                                       --verbose (max: 1, dtype: bool)
                                                       --error (max: 1, dtype: boolean)
@@ -161,8 +161,8 @@ view the help menu.
       [MODE OPTIONS]
 
       -o, --output                   Enable generation of a new executable (binary-rewrite). If a filename is not provided,
-                                    omnitrace will use the basename and output to the cwd, unless the target binary is in the
-                                    cwd. In the latter case, omnitrace will either use ${PWD}/<basename>.inst (non-libraries)
+                                    rocprof-sys will use the basename and output to the cwd, unless the target binary is in the
+                                    cwd. In the latter case, rocprof-sys will either use ${PWD}/<basename>.inst (non-libraries)
                                     or ${PWD}/instrumented/<basename> (libraries)
       -p, --pid                      Connect to running process
       -M, --mode [ coverage | sampling | trace ]
@@ -177,7 +177,7 @@ view the help menu.
       [LIBRARY OPTIONS]
 
       --prefer [ shared | static ]   Prefer this library types when available
-      -L, --library                  Libraries with instrumentation routines (default: "libomnitrace-dl")
+      -L, --library                  Libraries with instrumentation routines (default: "librocprof-sys-dl")
       -m, --main-function            The primary function to instrument around, e.g. \'main\'
       --load                         Supplemental instrumentation library names w/o extension (e.g. \'libinstr\' for
                                     \'libinstr.so\' or \'libinstr.a\')
@@ -200,17 +200,17 @@ view the help menu.
       -ME, --module-exclude          Regex(es) for excluding modules/files/libraries (always applied)
       -MR, --module-restrict         Regex(es) for restricting modules/files/libraries only to those that match the provided
                                     regular-expressions
-      --internal-function-include    Regex(es) for including functions which are (likely) utilized by omnitrace itself. Use
+      --internal-function-include    Regex(es) for including functions which are (likely) utilized by rocprof-sys itself. Use
                                     this option with care.
-      --internal-module-include      Regex(es) for including modules/libraries which are (likely) utilized by omnitrace
+      --internal-module-include      Regex(es) for including modules/libraries which are (likely) utilized by rocprof-sys
                                     itself. Use this option with care.
       --instruction-exclude          Regex(es) for excluding functions containing certain instructions
       --internal-library-deps        Treat the libraries linked to the internal libraries as internal libraries. This increase
                                     the internal library processing time and consume more memory (so use with care) but may
                                     be useful when the application uses Boost libraries and Dyninst is dynamically linked
                                     against the same boost libraries
-      --internal-library-append      Append to the list of libraries which omnitrace treats as being used internally, e.g.
-                                    OmniTrace will find all the symbols in this library and prevent them from being
+      --internal-library-append      Append to the list of libraries which rocprof-sys treats as being used internally, e.g.
+                                    ROCm Systems Profiler will find all the symbols in this library and prevent them from being
                                     instrumented.
       --internal-library-remove [ ld-linux-x86-64.so.2
                                  libBrokenLocale.so.1
@@ -272,7 +272,7 @@ view the help menu.
                                  libz.so
                                  libzstd.so ]
                                     Remove the specified libraries from being treated as being used internally, e.g.
-                                    OmniTrace will permit all the symbols in these libraries to be eligible for
+                                    ROCm System Profiler will permit all the symbols in these libraries to be eligible for
                                     instrumentation.
       --linkage [ global | local | unique | unknown | weak ]
                                     Only instrument functions with specified linkage (default: global, local, unique)
@@ -287,11 +287,11 @@ view the help menu.
                                     options to gain more information about the function signature or location of the
                                     functions
       -C, --config                   Read in a configuration file and encode these values as the defaults in the executable
-      -d, --default-components       Default components to instrument (only useful when timemory is enabled in omnitrace
+      -d, --default-components       Default components to instrument (only useful when timemory is enabled in rocprof-sys
                                     library)
       --env                          Environment variables to add to the runtime in form VARIABLE=VALUE. E.g. use \'--env
-                                    OMNITRACE_PROFILE=ON\' to default to using timemory instead of perfetto
-      --mpi                          Enable MPI support (requires omnitrace built w/ full or partial MPI support). NOTE: this
+                                    ROCPROFSYS_PROFILE=ON\' to default to using timemory instead of perfetto
+      --mpi                          Enable MPI support (requires rocprof-sys built w/ full or partial MPI support). NOTE: this
                                     will automatically be activated if MPI_Init, MPI_Init_thread, MPI_Finalize,
                                     MPI_Comm_rank, or MPI_Comm_size are found in the symbol table of target
 
@@ -322,8 +322,8 @@ view the help menu.
       --allow-overlapping            Allow dyninst to instrument either multiple functions which overlap (share part of same
                                     function body) or single functions with multiple entry points. For more info, see Section
                                     2 of the DyninstAPI documentation.
-      --parse-all-modules            By default, omnitrace simply requests Dyninst to provide all the procedures in the
-                                    application image. If this option is enabled, omnitrace will iterate over all the modules
+      --parse-all-modules            By default, rocprof-sys simply requests Dyninst to provide all the procedures in the
+                                    application image. If this option is enabled, rocprof-sys will iterate over all the modules
                                     and extract the functions. Theoretically, it should be the same but the data is slightly
                                     different, possibly due to weak binding scopes. In general, enabling option will probably
                                     have no visible effect
@@ -344,17 +344,17 @@ view the help menu.
                            TypeChecking ]
       Advanced dyninst options: BPatch::set<OPTION>(bool), e.g. bpatch->setTrampRecursive(true)
 
-``omnitrace-instrument`` uses a similar syntax as LLVM to separate command-line arguments from the 
-application's arguments. It uses a standalone 
-double-hyphen (``--``) as a separator. 
+``rocprof-sys-instrument`` uses a similar syntax as LLVM to separate command-line arguments from the
+application's arguments. It uses a standalone
+double-hyphen (``--``) as a separator.
 All arguments preceding the double-hyphen
-are interpreted as belonging to Omnitrace and all arguments following the 
+are interpreted as belonging to ROCm Systems Profiler and all arguments following the
 double-hyphen are interpreted as being part of the
 application and its arguments. In binary rewrite mode, all application arguments after the first argument
-are ignored. As an example, ``./omnitrace-instrument -o ls.inst -- ls -l`` interprets ``ls`` as 
+are ignored. As an example, ``./rocprof-sys-instrument -o ls.inst -- ls -l`` interprets ``ls`` as
 the target to instrument, ignoring the ``-l`` argument,
-and generates a ``ls.inst`` executable that you can subsequently run using the 
-``omnitrace-run -- ls.inst -l`` command.
+and generates a ``ls.inst`` executable that you can subsequently run using the
+``rocprof-sys-run -- ls.inst -l`` command.
 
 Runtime instrumentation example
 ========================================
@@ -363,7 +363,7 @@ The following example shows how to enable runtime instrumentation.
 
 .. code-block:: shell
 
-   omnitrace-instrument <omnitrace-options> -- <exe> [<exe-options>...]
+   rocprof-sys-instrument <rocprof-sys-options> -- <exe> [<exe-options>...]
 
 Attaching to a running process
 ========================================
@@ -372,7 +372,7 @@ Use the following command to attach to an active process.
 
 .. code-block:: shell
 
-   omnitrace-instrument <omnitrace-options> -p <PID> -- <exe-name>
+   rocprof-sys-instrument <rocprof-sys-options> -p <PID> -- <exe-name>
 
 Binary rewrite
 ========================================
@@ -381,24 +381,24 @@ This example demonstrates how to rewrite a binary.
 
 .. code-block:: shell
 
-   omnitrace-instrument <omnitrace-options> -o <name-of-new-exe-or-library> -- <exe-or-library>
+   rocprof-sys-instrument <rocprof-sys-options> -o <name-of-new-exe-or-library> -- <exe-or-library>
 
 .. _binary-rewriting-library-label:
 
 Binary rewrite of a library
 -----------------------------------
 
-Many applications bundle the bulk of their functionality into one or more 
+Many applications bundle the bulk of their functionality into one or more
 dynamic libraries and have a relatively simple ``main``
-which links to these libraries and serves as the "driver" for 
+which links to these libraries and serves as the "driver" for
 setting up the workflow. If you perform a binary rewrite of an
-executable like this and find there is insufficient information, you 
+executable like this and find there is insufficient information, you
 can either switch to runtime instrumentation or perform a
 binary rewrite on the relevant libraries.
 
-Support for stand-alone binary rewriting of a dynamic library without a binary rewrite of 
+Support for stand-alone binary rewriting of a dynamic library without a binary rewrite of
 the executable is a beta feature.
-In general, it is supported as long as the library contains the ``_init`` and 
+In general, it is supported as long as the library contains the ``_init`` and
 ``_fini`` symbols but these symbols are not
 standardized to the extent of ``main`` in an executable.
 
@@ -406,8 +406,8 @@ Here is the recommended workflow for the binary rewrite of a library:
 
 #. Determine the names of the dynamically linked libraries of interest using ``ldd``
 #. Generate a binary rewrite of the executable
-#. Generate a binary rewrite of the desired libraries with the same base name as the 
-   original library, for example, ``libfoo.so.2`` instead of ``libfoo.so``,  and output the instrumented 
+#. Generate a binary rewrite of the desired libraries with the same base name as the
+   original library, for example, ``libfoo.so.2`` instead of ``libfoo.so``,  and output the instrumented
    library into a different folder than the original library.
 
 #. Prefix the ``LD_LIBRARY_PATH`` executable with the output folder from the previous step
@@ -433,10 +433,10 @@ Generate binary rewrites of ``foo`` and ``libfoo.so.2``:
 
 .. code-block:: shell
 
-   omnitrace-instrument -o ./foo.inst -- foo
-   omnitrace-instrument -o ./libfoo.so.2 -- /usr/local/lib/libfoo.so.2
+   rocprof-sys-instrument -o ./foo.inst -- foo
+   rocprof-sys-instrument -o ./libfoo.so.2 -- /usr/local/lib/libfoo.so.2
 
-At this point, the instrumented ``foo.inst`` executable still dynamically loads the 
+At this point, the instrumented ``foo.inst`` executable still dynamically loads the
 original ``libfoo.so.2`` in ``/usr/local/lib``:
 
 .. code-block:: shell
@@ -446,7 +446,7 @@ original ``libfoo.so.2`` in ``/usr/local/lib``:
          libfoo.so.2 => /usr/local/lib/libfoo.so.2 (...)
          ...
 
-Prefix the ``LD_LIBRARY_PATH`` environment variable with the folder containing 
+Prefix the ``LD_LIBRARY_PATH`` environment variable with the folder containing
 the instrumented ``libfoo.so.2``:
 
 .. code-block:: shell
@@ -465,90 +465,90 @@ the instrumented ``libfoo.so.2``:
 Selective instrumentation
 ========================================
 
-The default behavior of ``omnitrace-instrument`` does not instrument every symbol in the binary. 
+The default behavior of ``rocprof-sys-instrument`` does not instrument every symbol in the binary.
 The default rules are:
 
 * Skip instrumenting dynamic call-sites (such as function pointers)
 
   * The ``--dynamic-callsites`` option forces instrumentation for all dynamic call-sites
 
-* The cost of a function can be loosely approximated by the number of 
-  instructions. By default, ``omnitrace-instrument`` only instruments functions 
+* The cost of a function can be loosely approximated by the number of
+  instructions. By default, ``rocprof-sys-instrument`` only instruments functions
   with at least 1024 instructions
 
   * The  ``--min-instructions`` option modifies this heuristic for all functions which do not contain loops
   * The ``--min-instructions-loop`` option modifies this heuristic for functions which contain loops.
 
-* The cost of a function can be also be loosely approximated by the size of the function 
-  in the binary so this heuristic can be used in lieu of or in addition to the 
+* The cost of a function can be also be loosely approximated by the size of the function
+  in the binary so this heuristic can be used in lieu of or in addition to the
   minimum number of instructions
 
   * The ``--min-address-range`` option modifies this heuristic for all functions which do not contain loops
-  * The ``--min-address-range-loop`` option modifies this heuristic for functions which contain loops 
+  * The ``--min-address-range-loop`` option modifies this heuristic for functions which contain loops
 
 * Skip instrumentation points which require using a trap
- 
+
   * See the description for the ``--traps`` and ``--loop-traps`` options for more information
 
 * Skip instrumenting loops within the body of a function
 
   * The ``--instrument-loops`` option enables this behavior
 
-* Skip instrumenting functions with overlapping function bodies and single 
+* Skip instrumenting functions with overlapping function bodies and single
   functions with multiple entry point
 
-  * These behaviors arise from various optimizations. Enable instrumenting for these functions 
+  * These behaviors arise from various optimizations. Enable instrumenting for these functions
     by using the ``--allow-overlapping`` option
 
 .. note::
 
-   The separate loop options ``--min-instructions-loop`` and ``--min-address-range-loop`` 
+   The separate loop options ``--min-instructions-loop`` and ``--min-address-range-loop``
    are provided because functions with loops can be compact in the binary while also being costly
 
 Viewing the available, instrumented, excluded, and overlapping functions
 -------------------------------------------------------------------------
 
-Whenever ``omnitrace-instrument`` runs with a verbosity of zero or higher, 
-it generates files that detail which functions 
-were available for instrumentation (along with the module they were defined in), actually instrumented, 
+Whenever ``rocprof-sys-instrument`` runs with a verbosity of zero or higher,
+it generates files that detail which functions
+were available for instrumentation (along with the module they were defined in), actually instrumented,
 excluded, and which contained overlapping function bodies.
-By default, these files are saved to the ``omnitrace-<NAME>-output`` folder 
+By default, these files are saved to the ``rocprof-sys-<NAME>-output`` folder
 where ``<NAME>`` is the base name of the targeted binary (or
 the base name of the resulting executable in the case of binary rewrite). For example,
-``omnitrace-instrument -- ls`` outputs these files to ``omnitrace-ls-output`` 
-whereas ``omnitrace-instrument -o ls.inst -- ls`` places them in ``omnitrace-ls.inst-output``.
+``rocprof-sys-instrument -- ls`` outputs these files to ``rocprof-sys-ls-output``
+whereas ``rocprof-sys-instrument -o ls.inst -- ls`` places them in ``rocprof-sys-ls.inst-output``.
 
-To generate these files without running or generating an 
+To generate these files without running or generating an
 executable, use the ``--simulate`` option:
 
 .. code-block:: shell
 
-   omnitrace-instrument --simulate -- foo
-   omnitrace-instrument --simulate -o foo.inst -- foo
+   rocprof-sys-instrument --simulate -- foo
+   rocprof-sys-instrument --simulate -o foo.inst -- foo
 
 Excluding and including modules and functions
 ----------------------------------------------
 
-Omnitrace has a set of six command-line options which each accept one or more 
+ROCm Systems Profiler has a set of six command-line options which each accept one or more
 regular expressions for customizing the scope of which module and/or functions are
-instrumented. Multiple regex patterns per option are treated as an OR operation, 
+instrumented. Multiple regex patterns per option are treated as an OR operation,
 for example, ``--module-include libfoo libbar`` is effectively the same as ``--module-include 'libfoo|libbar'``.
 
-To force the inclusion of certain modules and/or function 
+To force the inclusion of certain modules and/or function
 without changing any of the heuristics, use the ``--module-include`` and/or ``--function-include`` options.
-These options do not exclude modules or functions which do 
+These options do not exclude modules or functions which do
 not satisfy their regular expression.
 
-To narrow the scope of the instrumentation to a specific set 
+To narrow the scope of the instrumentation to a specific set
 of libraries and/or functions, use the ``--module-restrict`` and ``--function-restrict`` options.
-These options let you exclusively select the union of one or more 
+These options let you exclusively select the union of one or more
 regular expressions, regardless of whether or not the functions satisfy the
-previously-mentioned default heuristics. Any function or module that is not within 
+previously-mentioned default heuristics. Any function or module that is not within
 the union of these regular expressions is excluded from instrumentation.
 
-To avoid instrumenting a set of modules and/or functions, 
+To avoid instrumenting a set of modules and/or functions,
 use the ``--module-exclude`` and ``--function-exclude`` options.
-These options are always applied, even if the module or function 
+These options are always applied, even if the module or function
 satisfies the "restrict" or "include" regular expression.
 
 .. _available-module-function-output:
@@ -558,7 +558,7 @@ An example of the available module and function info output
 
 .. code-block:: shell
 
-   omnitrace-instrument -o lulesh.inst --label file line args --simulate -- lulesh
+   rocprof-sys-instrument -o lulesh.inst --label file line args --simulate -- lulesh
 
 .. code-block:: shell
 
@@ -779,7 +779,7 @@ An example of instrumented module and function info output
 
 .. code-block:: shell
 
-   omnitrace-instrument -o lulesh.inst --label file line args --simulate -- lulesh
+   rocprof-sys-instrument -o lulesh.inst --label file line args --simulate -- lulesh
 
 After the heuristics are applied based on the pattern in :ref:`available-module-function-output`,
 the selected module and functions are:
@@ -850,15 +850,15 @@ Sampling
 
    This capability has been deprecated in favor of :doc:`Call stack sampling <./sampling-call-stack>`.
 
-By default, ``omnitrace-instrument`` uses ``--mode trace`` for instrumentation. The ``--mode sampling`` option
+By default, ``rocprof-sys-instrument`` uses ``--mode trace`` for instrumentation. The ``--mode sampling`` option
 only instruments ``main`` in an executable. It activates both CPU call-stack sampling and
 background system-level thread sampling by default.
 Tracing capabilities which do not rely on instrumentation, such as the HIP API and kernel tracing
 (which is collected by roctracer), are still available.
 
-The Omnitrace sampling capabilities are always available, even in trace mode, but are deactivated by default.
-To activate sampling in trace mode, set ``OMNITRACE_USE_SAMPLING=ON`` in the environment
-or in an Omnitrace configuration file.
+The ROCm Systems Profiler sampling capabilities are always available, even in trace mode, but are deactivated by default.
+To activate sampling in trace mode, set ``ROCPROFSYS_USE_SAMPLING=ON`` in the environment
+or in an ROCm Systems Profiler configuration file.
 
 Embedding a default configuration
 ========================================
@@ -872,31 +872,31 @@ the configuration settings are not be preserved for subsequent sessions:
 
 .. code-block:: shell
 
-   omnitrace-instrument -o ./foo.inst -- ./foo
-   export OMNITRACE_USE_SAMPLING=ON
-   export OMNITRACE_SAMPLING_FREQ=5
-   omnitrace-run -- ./foo.inst
+   rocprof-sys-instrument -o ./foo.inst -- ./foo
+   export ROCPROFSYS_USE_SAMPLING=ON
+   export ROCPROFSYS_SAMPLING_FREQ=5
+   rocprof-sys-run -- ./foo.inst
 
 Whereas the following command preserves those environment variables:
 
 .. code-block:: shell
 
-   omnitrace-instrument -o ./foo.samp --env OMNITRACE_USE_SAMPLING=ON OMNITRACE_SAMPLING_FREQ=5 -- ./foo
+   rocprof-sys-instrument -o ./foo.samp --env ROCPROFSYS_USE_SAMPLING=ON ROCPROFSYS_SAMPLING_FREQ=5 -- ./foo
 
 They can now be used in future sessions.
 
 .. code-block:: shell
 
    # will sample 5x per second
-   omnitrace-run -- ./foo.samp
+   rocprof-sys-run -- ./foo.samp
 
 Even though the environment variables are preserved, subsequent sessions can still override those defaults:
 
 .. code-block:: shell
 
    # will sample 100x per second
-   export OMNITRACE_SAMPLING_FREQ=100
-   omnitrace-run -- ./foo.samp
+   export ROCPROFSYS_SAMPLING_FREQ=100
+   rocprof-sys-run -- ./foo.samp
 
 .. _rpath-troubleshooting:
 
@@ -906,10 +906,10 @@ Troubleshooting
 Checking for RPATH
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If ``ldd ./foo.inst`` from the :ref:`binary-rewriting-library-label` 
-section still returns ``/usr/local/lib/libfoo.so.2``, the executable could have 
+If ``ldd ./foo.inst`` from the :ref:`binary-rewriting-library-label`
+section still returns ``/usr/local/lib/libfoo.so.2``, the executable could have
 an rpath encoded in the binary.
-This ELF entry results in the dynamic linker ignoring ``LD_LIBRARY_PATH`` if 
+This ELF entry results in the dynamic linker ignoring ``LD_LIBRARY_PATH`` if
 it finds ``libfoo.so.2`` in the rpath.
 Using the ``objdump`` tool, perform the following query:
 
@@ -923,13 +923,13 @@ If this produces output that appears similar to this output.:
 
    RUNPATH              $ORIGIN:$ORIGIN/../lib
 
-Remove or modify the rpath to get ``foo.inst`` to resolve 
+Remove or modify the rpath to get ``foo.inst`` to resolve
 to the instrumented ``libfoo.so.2`` as explained in the next section.
 
 Modifying an RPATH
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-This code snippet uses the ``patchelf`` tool to modify the rpath of the given executable 
+This code snippet uses the ``patchelf`` tool to modify the rpath of the given executable
 or library to ``/home/user``, which is where the instrumented libraries are located.
 
 .. note::

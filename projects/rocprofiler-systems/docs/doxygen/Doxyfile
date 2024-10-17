@@ -4,7 +4,7 @@
 # Project related configuration options
 #---------------------------------------------------------------------------
 DOXYFILE_ENCODING      = UTF-8
-PROJECT_NAME           = omnitrace
+PROJECT_NAME           = rocprofiler-systems
 PROJECT_NUMBER         = 1.11.3
 PROJECT_BRIEF          = "High-level and comprehensive application tracing and profiling on both the CPU and GPU"
 PROJECT_LOGO           =
@@ -19,8 +19,8 @@ ABBREVIATE_BRIEF       =
 ALWAYS_DETAILED_SEC    = YES
 INLINE_INHERITED_MEMB  = YES
 FULL_PATH_NAMES        = YES
-STRIP_FROM_PATH        = /home/docs/checkouts/readthedocs.org/user_builds/advanced-micro-devices-omnitrace/checkouts/
-STRIP_FROM_INC_PATH    = /home/docs/checkouts/readthedocs.org/user_builds/advanced-micro-devices-omnitrace/checkouts/
+STRIP_FROM_PATH        = /home/docs/checkouts/readthedocs.org/user_builds/advanced-micro-devices-rocprofiler-systems/checkouts/
+STRIP_FROM_INC_PATH    = /home/docs/checkouts/readthedocs.org/user_builds/advanced-micro-devices-rocprofiler-systems/checkouts/
 SHORT_NAMES            = NO
 JAVADOC_AUTOBRIEF      = NO
 JAVADOC_BANNER         = NO
@@ -114,10 +114,10 @@ WARN_LOGFILE           = doc/warnings.log
 # Configuration options related to the input files
 #---------------------------------------------------------------------------
 INPUT                  = ../../README.md \
-                         ../../source/lib/omnitrace-user/omnitrace/types.h \
-                         ../../source/lib/omnitrace-user/omnitrace/categories.h \
-                         ../../source/lib/omnitrace-user/omnitrace/user.h \
-                         ../../source/lib/omnitrace-user/omnitrace/causal.h
+                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/types.h \
+                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/categories.h \
+                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/user.h \
+                         ../../source/lib/rocprof-sys-user/rocprofiler-systems/causal.h
 INPUT_ENCODING         = UTF-8
 FILE_PATTERNS          = *.h \
                          *.hh \
@@ -198,9 +198,9 @@ HTML_DYNAMIC_SECTIONS  = YES
 HTML_INDEX_NUM_ENTRIES = 1000
 GENERATE_DOCSET        = NO
 DOCSET_FEEDNAME        = "Doxygen generated docs"
-DOCSET_BUNDLE_ID       = org.doxygen.omnitrace
-DOCSET_PUBLISHER_ID    = org.doxygen.amdresearch
-DOCSET_PUBLISHER_NAME  = "Audacious Software Group"
+DOCSET_BUNDLE_ID       = org.doxygen.rocprofiler-systems
+DOCSET_PUBLISHER_ID    = org.doxygen.amd
+DOCSET_PUBLISHER_NAME  = "Advanced Micro Devices, Inc."
 GENERATE_HTMLHELP      = NO
 CHM_FILE               =
 HHC_LOCATION           =
@@ -217,7 +217,7 @@ QHP_CUST_FILTER_ATTRS  =
 QHP_SECT_FILTER_ATTRS  =
 QHG_LOCATION           =
 GENERATE_ECLIPSEHELP   = NO
-ECLIPSE_DOC_ID         = org.doxygen.omnitrace
+ECLIPSE_DOC_ID         = org.doxygen.rocprofiler-systems
 DISABLE_INDEX          = NO
 GENERATE_TREEVIEW      = NO
 ENUM_VALUES_PER_LINE   = 1
@@ -311,7 +311,7 @@ ENABLE_PREPROCESSING   = YES
 MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = NO
 SEARCH_INCLUDES        = YES
-INCLUDE_PATH           = ../../source/lib/omnitrace-user
+INCLUDE_PATH           = ../../source/lib/rocprof-sys-user
 INCLUDE_FILE_PATTERNS  = *.h \
                          *.hpp
 PREDEFINED             = ROCPROFSYS_PUBLIC_API= \

@@ -1,14 +1,14 @@
 .. meta::
-   :description: Omnitrace documentation and reference
-   :keywords: Omnitrace, ROCm, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
+   :description: ROCm Systems Profiler feature set documentation and reference
+   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, feature set, use cases, tracking, visualization, tool, Instinct, accelerator, AMD
 
 ***************************************
-The Omnitrace feature set and use cases
+The ROCm Systems Profiler feature set and use cases
 ***************************************
 
-`Omnitrace <https://github.com/ROCm/omnitrace>`_ is designed to be highly extensible. 
-Internally, it leverages the `Timemory performance analysis toolkit <https://github.com/NERSC/timemory>`_ 
-to manage extensions, resources, data, and other items. It supports the following features, 
+`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is designed to be highly extensible.
+Internally, it leverages the `Timemory performance analysis toolkit <https://github.com/NERSC/timemory>`_
+to manage extensions, resources, data, and other items. It supports the following features,
 modes, metrics, and APIs.
 
 Data collection modes
@@ -22,11 +22,6 @@ Data collection modes
 * Statistical sampling: Periodic software interrupts per-thread
 * Process-level sampling: A background thread records process-, system- and device-level metrics while the application runs
 * Causal profiling: Quantifies the potential impact of optimizations in parallel code
-  
-.. note::
-
-   Critical trace support was removed in Omnitrace v1.11.0. 
-   It was replaced by the causal profiling feature.
 
 Data analysis
 ========================================
@@ -98,40 +93,40 @@ Third-party API support
 * NVTX
 * ROCTX
 
-Omnitrace use cases
+ROCm Systems Profiler use cases
 ========================================
 
-When analyzing the performance of an application, do NOT 
+When analyzing the performance of an application, do NOT
 assume you know where the performance bottlenecks are
-and why they are happening. Omnitrace is a tool for analyzing the entire 
+and why they are happening. ROCm Systems Profiler is a tool for analyzing the entire
 application and its performance. It is
-ideal for characterizing where optimization would have the greatest impact 
+ideal for characterizing where optimization would have the greatest impact
 on an end-to-end run of the application and for
 viewing what else is happening on the system during a performance bottleneck.
 
-When GPUs are involved, there is a tendency to assume that 
+When GPUs are involved, there is a tendency to assume that
 the quickest path to performance improvement is minimizing
-the runtime of the GPU kernels. This is a highly flawed assumption. 
+the runtime of the GPU kernels. This is a highly flawed assumption.
 If you optimize the runtime of a kernel from one millisecond
-to 1 microsecond (1000x speed-up) but the original application never 
+to 1 microsecond (1000x speed-up) but the original application never
 spent time waiting for kernels to complete,
-there would be no statistically significant reduction in the end-to-end 
+there would be no statistically significant reduction in the end-to-end
 runtime of your application. In other words, it does not matter
-how fast or slow the code on GPU is if the application has a  
+how fast or slow the code on GPU is if the application has a
 bottleneck on waiting on the GPU.
 
-Use Omnitrace to obtain a high-level view of the entire application. Use it 
+Use ROCm Systems Profiler to obtain a high-level view of the entire application. Use it
 to determine where the performance bottlenecks are and
 obtain clues to why these bottlenecks are happening. Rather than worrying about kernel
-performance, start your investigation with Omnitrace, which characterizes the
+performance, start your investigation with ROCm Systems Profiler, which characterizes the
 broad picture.
 
 .. note::
 
-   For insight into the execution of individual kernels on the GPU, 
-   use `Omniperf <https://github.com/rocm/omniperf>`_.
+   For insight into the execution of individual kernels on the GPU,
+   use `ROCm Compute Profiler <https://github.com/rocm/rocprofiler-compute>`_.
 
-In terms of CPU analysis, Omnitrace does not target any specific vendor. 
+In terms of CPU analysis, ROCm Systems Profiler does not target any specific vendor.
 It works just as well on AMD and non-AMD CPUs.
-With regard to the GPU, Omnitrace is currently restricted to HIP and HSA APIs 
+With regard to the GPU, ROCm Systems Profiler is currently restricted to HIP and HSA APIs
 and kernels running on AMD GPUs.

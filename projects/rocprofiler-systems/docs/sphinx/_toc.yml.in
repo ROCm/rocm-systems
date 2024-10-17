@@ -6,18 +6,18 @@ defaults:
 root: index
 subtrees:
   - entries:
-    - file: what-is-omnitrace.rst
+    - file: what-is-rocprof-sys.rst
 
   - caption: Install
     entries:
     - file: install/quick-start.rst
-      title: Omnitrace quick start
+      title: ROCm Systems Profiler quick start
     - file: install/install.rst
-      title: Omnitrace installation guide
+      title: ROCm Systems Profiler installation guide
 
   - caption: Tutorials
     entries:
-    - url: https://github.com/ROCm/omnitrace/tree/amd-mainline/examples
+    - url: https://github.com/ROCm/rocprofiler-systems/tree/amd-mainline/examples
       title: GitHub examples
     - file: tutorials/video-tutorials.rst
       title: Video tutorials
@@ -25,37 +25,37 @@ subtrees:
   - caption: How to
     entries:
     - file: how-to/configuring-validating-environment.rst
-      title: Configuring and validating the environment 
+      title: Configuring and validating the environment
     - file: how-to/configuring-runtime-options.rst
-      title: Configuring runtime options 
+      title: Configuring runtime options
     - file: how-to/sampling-call-stack.rst
-      title: Sampling the call stack 
+      title: Sampling the call stack
     - file: how-to/instrumenting-rewriting-binary-application.rst
       title: Instrumenting and rewriting a binary application
     - file: how-to/performing-causal-profiling.rst
-      title: Performing causal profiling 
-    - file: how-to/understanding-omnitrace-output.rst
-      title: Understanding the Omnitrace output 
+      title: Performing causal profiling
+    - file: how-to/understanding-rocprof-sys-output.rst
+      title: Understanding the ROCm Systems Profiler output
     - file: how-to/profiling-python-scripts.rst
-      title: Profiling Python scripts  
-    - file: how-to/using-omnitrace-api.rst
-      title: Using the Omnitrace API
-    - file: how-to/general-tips-using-omnitrace.rst 
-      title: General tips for using Omnitrace 
+      title: Profiling Python scripts
+    - file: how-to/using-rocprof-sys-api.rst
+      title: Using the ROCm Systems Profiler API
+    - file: how-to/general-tips-using-rocprof-sys.rst
+      title: General tips for using ROCm Systems Profiler
 
   - caption: Conceptual
     entries:
     - file: conceptual/data-collection-modes.rst
       title: Data collection modes
-    - file: conceptual/omnitrace-feature-set.rst
-      title: The Omnitrace feature set and use cases
+    - file: conceptual/rocprof-sys-feature-set.rst
+      title: The ROCm Systems Profiler feature set and use cases
 
   - caption: Reference
     entries:
     - file: reference/development-guide.rst
       title: Development guide
-    - file: reference/omnitrace-glossary.rst
-      title: Omnitrace glossary
+    - file: reference/rocprof-sys-glossary.rst
+      title: ROCm Systems Profiler glossary
     - file: doxygen/html/files
       title: API library
     - file: doxygen/html/functions

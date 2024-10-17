@@ -1,131 +1,133 @@
 .. meta::
-   :description: Omnitrace documentation and reference
-   :keywords: Omnitrace, ROCm, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
+   :description: ROCm Systems Profiler runtime options documentation and reference
+   :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, runtime options, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
 
 ****************************************************
 Configuring runtime options
 ****************************************************
 
-The ``omnitrace.cfg`` file maintains a list of the `Omnitrace <https://github.com/ROCm/omnitrace>`_ runtime options. To create this configuration 
-file and view the current runtime options, use the ``omnitrace-avail`` executable.
+The ``rocprof-sys.cfg`` file maintains a list of the
+`ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ runtime
+options. To create this configuration
+file and view the current runtime options, use the ``rocprof-sys-avail`` executable.
 
-The omnitrace-avail executable
+The rocprof-sys-avail executable
 ========================================
 
-The ``omnitrace-avail`` executable provides information about the runtime settings, 
+The ``rocprof-sys-avail`` executable provides information about the runtime settings,
 data collection capabilities, and, when built with PAPI support, the
 available hardware counters. The executable is effectively
-self-updating. As new capabilities and settings are added to the Omnitrace source code, they are
-propagated to ``omnitrace-avail``. ``omnitrace-avail`` should be viewed as the ultimate authority 
+self-updating. As new capabilities and settings are added to the ROCm Systems Profiler source code, they are
+propagated to ``rocprof-sys-avail``. ``rocprof-sys-avail`` should be viewed as the ultimate authority
 in the event of any conflicts with this documentation.
 
-It is recommended that you create a default configuration file in 
-``${HOME}/.omnitrace.cfg``. This can be done by
-running the command ``omnitrace-avail -G ~/.omnitrace.cfg``. Alternatively,  
-use the ``omnitrace-avail -G ~/.omnitrace.cfg --all`` option
+It is recommended that you create a default configuration file in
+``${HOME}/.rocprof-sys.cfg``. This can be done by
+running the command ``rocprof-sys-avail -G ~/.rocprof-sys.cfg``. Alternatively,
+use the ``rocprof-sys-avail -G ~/.rocprof-sys.cfg --all`` option
 for a verbose configuration file with descriptions, categories, and additional information.
 
-Modify ``${HOME}/.omnitrace.cfg`` as required. For example, enable `Perfetto <https://perfetto.dev/>`_,
+Modify ``${HOME}/.rocprof-sys.cfg`` as required. For example, enable `Perfetto <https://perfetto.dev/>`_,
 `Timemory <https://github.com/NERSC/timemory>`_, sampling, and process-level sampling by default
 and tweak the default sampling values.
 
 .. code-block:: shell
 
    # ...
-   OMNITRACE_TRACE                = true
-   OMNITRACE_PROFILE              = true
-   OMNITRACE_USE_SAMPLING         = true
-   OMNITRACE_USE_PROCESS_SAMPLING = true
+   ROCPROFSYS_TRACE                = true
+   ROCPROFSYS_PROFILE              = true
+   ROCPROFSYS_USE_SAMPLING         = true
+   ROCPROFSYS_USE_PROCESS_SAMPLING = true
    # ...
-   OMNITRACE_SAMPLING_FREQ        = 50
-   OMNITRACE_SAMPLING_CPUS        = all
-   OMNITRACE_SAMPLING_GPUS        = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_FREQ        = 50
+   ROCPROFSYS_SAMPLING_CPUS        = all
+   ROCPROFSYS_SAMPLING_GPUS        = $env:HIP_VISIBLE_DEVICES
 
 Exploring runtime settings
 -----------------------------------
 
-Use the following command to view the list of the available runtime settings, their current values, and descriptions 
+Use the following command to view the list of the available runtime settings, their current values, and descriptions
 for each setting:
 
 .. code-block:: shell
 
-   omnitrace-avail --description
+   rocprof-sys-avail --description
 
 .. note::
 
    Use ``--brief`` to suppress printing the current value and/or ``-c 0`` to suppress truncation of the descriptions.
 
-Any Boolean setting (``omnitrace-avail --settings --value --brief --filter bool``) 
-accepts a case insensitive match for nearly all common Boolean logic expressions: 
+Any Boolean setting (``rocprof-sys-avail --settings --value --brief --filter bool``)
+accepts a case insensitive match for nearly all common Boolean logic expressions:
 ``ON``, ``OFF``, ``YES``, ``NO``, ``TRUE``, ``FALSE``, ``0``, ``1``, etc.
 
 Exploring components
 -----------------------------------
 
-Omnitrace uses `Timemory <https://github.com/NERSC/timemory>`_ extensively to provide 
+ROCm Systems Profiler uses `Timemory <https://github.com/NERSC/timemory>`_ extensively to provide
 various capabilities and manage
-data and resources. By default, with ``OMNITRACE_PROFILE=ON``, Omnitrace only collects wall-clock
-timing values. However, by modifying the ``OMNITRACE_TIMEMORY_COMPONENTS`` setting, 
-Omnitrace can be configured to
+data and resources. By default, with ``ROCPROFSYS_PROFILE=ON``, ROCm Systems Profiler only collects wall-clock
+timing values. However, by modifying the ``ROCPROFSYS_TIMEMORY_COMPONENTS`` setting,
+ROCm Systems Profiler can be configured to
 collect hardware counters, CPU-clock timers, memory usage, context switches, page faults, network statistics,
-and much more. Omnitrace can even be used as a dynamic instrumentation vehicle 
+and much more. ROCm Systems Profiler can even be used as a dynamic instrumentation vehicle
 for other third-party profiling
 APIs such as `Caliper <https://github.com/LLNL/Caliper>`_ and `LIKWID <https://github.com/RRZE-HPC/likwid>`_.
-To leverage this capability, build Omnitrace from source with the CMake 
+To leverage this capability, build ROCm Systems Profiler from source with the CMake
 options ``TIMEMORY_USE_CALIPER=ON`` or ``TIMEMORY_USE_LIKWID=ON`` and then add
-``caliper_marker``, ``likwid_marker``, or both to ``OMNITRACE_TIMEMORY_COMPONENTS``.
+``caliper_marker``, ``likwid_marker``, or both to ``ROCPROFSYS_TIMEMORY_COMPONENTS``.
 
 To view all possible components and their descriptions:
 
 .. code-block:: shell
 
-   omnitrace-avail --components --description
+   rocprof-sys-avail --components --description
 
-To restrict the output to available components and view the string identifiers for ``OMNITRACE_TIMEMORY_COMPONENTS``:
+To restrict the output to available components and view the string identifiers for ``ROCPROFSYS_TIMEMORY_COMPONENTS``:
 
 .. code-block:: shell
 
-   omnitrace-avail --components --available --string --brief
+   rocprof-sys-avail --components --available --string --brief
 
 Exploring hardware counters
 -----------------------------------
 
-Omnitrace supports hardware counter collection via PAPI and ROCm.
+ROCm Systems Profiler supports hardware counter collection via PAPI and ROCm.
 Generally, PAPI is used to collect CPU-based hardware counters and ROCm is used to collect GPU-based hardware
-counters. Although it is possible to install PAPI with ROCm support and use it to 
-collect GPU-based hardware counters, this is not recommended because PAPI 
+counters. Although it is possible to install PAPI with ROCm support and use it to
+collect GPU-based hardware counters, this is not recommended because PAPI
 cannot simultaneously collect CPU and GPU hardware counters.
 
 To view all possible hardware counters and their descriptions, use the following command:
 
 .. code-block:: shell
 
-   omnitrace-avail --hw-counters --description
+   rocprof-sys-avail --hw-counters --description
 
-Appending the ``-c CPU`` option restricts the list of hardware counters to 
+Appending the ``-c CPU`` option restricts the list of hardware counters to
 those available through PAPI, while ``-c GPU`` limits the list to those available from ROCm.
 
 Enabling hardware counters
 -----------------------------------
 
-PAPI Hardware counters are configured with the ``OMNITRACE_PAPI_EVENTS`` configuration variable.
-ROCm Hardware counters are configured with the ``OMNITRACE_ROCM_EVENTS`` configuration variable.
-ROCm hardware counters also require the ``OMNITRACE_USE_ROCPROFILER`` configuration
-variable to be enabled using ``OMNITRACE_USE_ROCPROFILER=ON``.
+PAPI Hardware counters are configured with the ``ROCPROFSYS_PAPI_EVENTS`` configuration variable.
+ROCm Hardware counters are configured with the ``ROCPROFSYS_ROCM_EVENTS`` configuration variable.
+ROCm hardware counters also require the ``ROCPROFSYS_USE_ROCPROFILER`` configuration
+variable to be enabled using ``ROCPROFSYS_USE_ROCPROFILER=ON``.
 
 Here is a sample configuration for hardware counters:
 
 .. code-block:: shell
 
    # using papi identifiers
-   OMNITRACE_PAPI_EVENTS   = PAPI_TOT_CYC PAPI_TOT_INS
+   ROCPROFSYS_PAPI_EVENTS   = PAPI_TOT_CYC PAPI_TOT_INS
 
    # using perf identifiers
-   OMNITRACE_PAPI_EVENTS   = perf::INSTRUCTIONS perf::CACHE-REFERENCES perf::CACHE-MISSES
+   ROCPROFSYS_PAPI_EVENTS   = perf::INSTRUCTIONS perf::CACHE-REFERENCES perf::CACHE-MISSES
 
-.. _omnitrace_papi_events:
+.. _rocprof-sys_papi_events:
 
-OMNITRACE_PAPI_EVENTS
+ROCPROFSYS_PAPI_EVENTS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In order to collect the majority of hardware counters via PAPI, ensure the ``/proc/sys/kernel/perf_event_paranoid``
@@ -135,18 +137,18 @@ has a value <= 2. If you have ``sudo`` access, use the following command to modi
 
    echo 0 | sudo tee /proc/sys/kernel/perf_event_paranoid
 
-However this value is not retained upon reboot. 
+However this value is not retained upon reboot.
 Use the following command to preserve this setting after a reboot:
 
 .. code-block:: shell
 
    echo 'kernel.perf_event_paranoid=0' | sudo tee -a /etc/sysctl.conf
 
-PAPI events use a concept similar to a namespace. All specified hardware 
+PAPI events use a concept similar to a namespace. All specified hardware
 counters must be from the same namespace.
-For hardware counters starting with the ``PAPI_`` prefix, these are high-level 
+For hardware counters starting with the ``PAPI_`` prefix, these are high-level
 aggregates of multiple hardware counters.
-Otherwise, most events use two or three colons (``::`` or ``:::``) between the 
+Otherwise, most events use two or three colons (``::`` or ``:::``) between the
 component name and the counter name, for example,
 ``amd64_rapl::RAPL_ENERGY_PKG`` and ``perf::PERF_COUNT_HW_CPU_CYCLES``.
 
@@ -154,33 +156,33 @@ For example, the following is a valid configuration:
 
 .. code-block:: shell
 
-   OMNITRACE_PAPI_EVENTS = perf::INSTRUCTIONS  perf::CACHE-REFERENCES  perf::CACHE-MISSES
+   ROCPROFSYS_PAPI_EVENTS = perf::INSTRUCTIONS  perf::CACHE-REFERENCES  perf::CACHE-MISSES
 
 However, the following specification of a roughly equivalent set of hardware counters is an incorrect configuration because it mixes
 PAPI components from different namespaces:
 
 .. code-block:: shell
 
-   OMNITRACE_PAPI_EVENTS = PAPI_TOT_INS        perf::CACHE-REFERENCES  perf::CACHE-MISSES
+   ROCPROFSYS_PAPI_EVENTS = PAPI_TOT_INS        perf::CACHE-REFERENCES  perf::CACHE-MISSES
 
 .. note::
 
-   If Omnitrace was configured with the default ``OMNITRACE_BUILD_PAPI=ON`` setting, 
+   If ROCm Systems Profiler was configured with the default ``ROCPROFSYS_BUILD_PAPI=ON`` setting,
    standard PAPI command-line tools such as
-   ``papi_avail`` and ``papi_event_chooser`` are not able to provide information 
-   about the PAPI library used by Omnitrace
-   (because Omnitrace statically links to ``libpapi``). However, all of these tools are 
-   installed with the prefix ``omnitrace-`` with
-   underscores replaced with hypens, for example ``papi_avail`` becomes ``omnitrace-papi-avail``.
+   ``papi_avail`` and ``papi_event_chooser`` are not able to provide information
+   about the PAPI library used by ROCm Systems Profiler
+   (because ROCm Systems Profiler statically links to ``libpapi``). However, all of these tools are
+   installed with the prefix ``rocprof-sys-`` with
+   underscores replaced with hypens, for example ``papi_avail`` becomes ``rocprof-sys-papi-avail``.
 
-OMNITRACE_ROCM_EVENTS
+ROCPROFSYS_ROCM_EVENTS
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Omnitrace reads the ROCm events from the ``${ROCM_PATH}/lib/rocprofiler/metrics.xml`` 
+ROCm Systems Profiler reads the ROCm events from the ``${ROCM_PATH}/lib/rocprofiler/metrics.xml``
 file. Use the ``ROCP_METRICS`` environment
-variable to point Omnitrace to a different XML metrics file, for example, 
+variable to point ROCm Systems Profiler to a different XML metrics file, for example,
 ``export ROCP_METRICS=${PWD}/custom_metrics.xml``.
-``omnitrace-avail -H -c GPU`` shows event names with a suffix of ``:device=N`` 
+``rocprof-sys-avail -H -c GPU`` shows event names with a suffix of ``:device=N``
 where ``N`` is the device number.
 For example, if you have two devices, the output is:
 
@@ -190,7 +192,7 @@ For example, if you have two devices, the output is:
    ...
    | Wavefronts:device=1                   | Derived counter: SQ_WAVES             |
 
-To collect the event on all devices, specify the event, 
+To collect the event on all devices, specify the event,
 such as ``Wavefronts``, without the ``:device=`` suffix.
 To collect the event only on specific devices, use the ``:device=`` suffix.
 
@@ -202,12 +204,12 @@ The following example:
 
 .. code-block:: shell
 
-   OMNITRACE_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
+   ROCPROFSYS_ROCM_EVENTS = GPUBusy     SQ_WAVES:device=0    SQ_INSTS_VALU:device=1
 
-omnitrace-avail examples
+rocprof-sys-avail examples
 -----------------------------------
 
-The following examples demonstrate how to use ``omnitrace-avail`` to perform several common 
+The following examples demonstrate how to use ``rocprof-sys-avail`` to perform several common
 configuration tasks.
 
 Generating a default configuration file
@@ -215,96 +217,96 @@ Generating a default configuration file
 
 .. code-block:: shell
 
-   $ omnitrace-avail -G ~/.omnitrace.cfg
-   [omnitrace-avail] Outputting text configuration file '/home/user/.omnitrace.cfg'...
-   $ cat ~/.omnitrace.cfg
-   # auto-generated by omnitrace-avail (version 1.2.0) on 2022-06-27 @ 19:15
+   $ rocprof-sys-avail -G ~/.rocprof-sys.cfg
+   [rocprof-sys-avail] Outputting text configuration file '/home/user/.rocprof-sys.cfg'...
+   $ cat ~/.rocprof-sys.cfg
+   # auto-generated by rocprof-sys-avail (version 1.2.0) on 2022-06-27 @ 19:15
 
-   OMNITRACE_CONFIG_FILE                              =
-   OMNITRACE_MODE                                     = trace
-   OMNITRACE_TRACE                                    = true
-   OMNITRACE_PROFILE                                  = false
-   OMNITRACE_USE_SAMPLING                             = false
-   OMNITRACE_USE_PROCESS_SAMPLING                     = true
-   OMNITRACE_USE_ROCTRACER                            = true
-   OMNITRACE_USE_ROCM_SMI                             = true
-   OMNITRACE_USE_KOKKOSP                              = false
-   OMNITRACE_USE_CODE_COVERAGE                        = false
-   OMNITRACE_USE_PID                                  = true
-   OMNITRACE_OUTPUT_PATH                              = omnitrace-%tag%-output
-   OMNITRACE_OUTPUT_PREFIX                            =
-   OMNITRACE_CI                                       = false
-   OMNITRACE_THREAD_POOL_SIZE                         = 8
-   OMNITRACE_DEBUG                                    = false
-   OMNITRACE_DL_VERBOSE                               = 0
-   OMNITRACE_INSTRUMENTATION_INTERVAL                 = 1
-   OMNITRACE_KOKKOSP_KERNEL_LOGGER                    = false
-   OMNITRACE_PAPI_EVENTS                              = PAPI_TOT_CYC
-   OMNITRACE_PERFETTO_BACKEND                         = inprocess
-   OMNITRACE_PERFETTO_BUFFER_SIZE_KB                  = 1024000
-   OMNITRACE_PERFETTO_COMBINE_TRACES                  = false
-   OMNITRACE_PERFETTO_FILE                            = perfetto-trace.proto
-   OMNITRACE_PERFETTO_FILL_POLICY                     = discard
-   OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB              = 4096
-   OMNITRACE_ROCTRACER_HSA_ACTIVITY                   = false
-   OMNITRACE_ROCTRACER_HSA_API                        = false
-   OMNITRACE_ROCTRACER_HSA_API_TYPES                  =
-   OMNITRACE_SAMPLING_CPUS                            =
-   OMNITRACE_SAMPLING_DELAY                           = 0.5
-   OMNITRACE_SAMPLING_FREQ                            = 10
-   OMNITRACE_SAMPLING_GPUS                            = all
-   OMNITRACE_TIME_OUTPUT                              = true
-   OMNITRACE_TIMEMORY_COMPONENTS                      = wall_clock
-   OMNITRACE_TRACE_THREAD_LOCKS                       = false
-   OMNITRACE_VERBOSE                                  = 0
-   OMNITRACE_COLLAPSE_PROCESSES                       = false
-   OMNITRACE_COLLAPSE_THREADS                         = false
-   OMNITRACE_COUT_OUTPUT                              = false
-   OMNITRACE_CPU_AFFINITY                             = false
-   OMNITRACE_DIFF_OUTPUT                              = false
-   OMNITRACE_ENABLE_SIGNAL_HANDLER                    = true
-   OMNITRACE_ENABLED                                  = true
-   OMNITRACE_FILE_OUTPUT                              = true
-   OMNITRACE_FLAT_PROFILE                             = false
-   OMNITRACE_INPUT_EXTENSIONS                         = json,xml
-   OMNITRACE_INPUT_PATH                               =
-   OMNITRACE_INPUT_PREFIX                             =
-   OMNITRACE_JSON_OUTPUT                              = true
-   OMNITRACE_MAX_DEPTH                                = 65535
-   OMNITRACE_MAX_WIDTH                                = 120
-   OMNITRACE_MEMORY_PRECISION                         = -1
-   OMNITRACE_MEMORY_SCIENTIFIC                        = false
-   OMNITRACE_MEMORY_UNITS                             = MB
-   OMNITRACE_MEMORY_WIDTH                             = -1
-   OMNITRACE_NETWORK_INTERFACE                        =
-   OMNITRACE_NODE_COUNT                               = 0
-   OMNITRACE_PAPI_FAIL_ON_ERROR                       = false
-   OMNITRACE_PAPI_MULTIPLEXING                        = false
-   OMNITRACE_PAPI_OVERFLOW                            = 0
-   OMNITRACE_PAPI_QUIET                               = false
-   OMNITRACE_PAPI_THREADING                           = true
-   OMNITRACE_PRECISION                                = -1
-   OMNITRACE_SCIENTIFIC                               = false
-   OMNITRACE_STRICT_CONFIG                            = true
-   OMNITRACE_SUPPRESS_CONFIG                          = true
-   OMNITRACE_SUPPRESS_PARSING                         = true
-   OMNITRACE_TEXT_OUTPUT                              = true
-   OMNITRACE_TIME_FORMAT                              = %F_%H.%M
-   OMNITRACE_TIMELINE_PROFILE                         = false
-   OMNITRACE_TIMING_PRECISION                         = 6
-   OMNITRACE_TIMING_SCIENTIFIC                        = false
-   OMNITRACE_TIMING_UNITS                             = sec
-   OMNITRACE_TIMING_WIDTH                             = -1
-   OMNITRACE_TREE_OUTPUT                              = true
-   OMNITRACE_WIDTH                                    = -1
+   ROCPROFSYS_CONFIG_FILE                              =
+   ROCPROFSYS_MODE                                     = trace
+   ROCPROFSYS_TRACE                                    = true
+   ROCPROFSYS_PROFILE                                  = false
+   ROCPROFSYS_USE_SAMPLING                             = false
+   ROCPROFSYS_USE_PROCESS_SAMPLING                     = true
+   ROCPROFSYS_USE_ROCTRACER                            = true
+   ROCPROFSYS_USE_ROCM_SMI                             = true
+   ROCPROFSYS_USE_KOKKOSP                              = false
+   ROCPROFSYS_USE_CODE_COVERAGE                        = false
+   ROCPROFSYS_USE_PID                                  = true
+   ROCPROFSYS_OUTPUT_PATH                              = rocprof-sys-%tag%-output
+   ROCPROFSYS_OUTPUT_PREFIX                            =
+   ROCPROFSYS_CI                                       = false
+   ROCPROFSYS_THREAD_POOL_SIZE                         = 8
+   ROCPROFSYS_DEBUG                                    = false
+   ROCPROFSYS_DL_VERBOSE                               = 0
+   ROCPROFSYS_INSTRUMENTATION_INTERVAL                 = 1
+   ROCPROFSYS_KOKKOSP_KERNEL_LOGGER                    = false
+   ROCPROFSYS_PAPI_EVENTS                              = PAPI_TOT_CYC
+   ROCPROFSYS_PERFETTO_BACKEND                         = inprocess
+   ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB                  = 1024000
+   ROCPROFSYS_PERFETTO_COMBINE_TRACES                  = false
+   ROCPROFSYS_PERFETTO_FILE                            = perfetto-trace.proto
+   ROCPROFSYS_PERFETTO_FILL_POLICY                     = discard
+   ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB              = 4096
+   ROCPROFSYS_ROCTRACER_HSA_ACTIVITY                   = false
+   ROCPROFSYS_ROCTRACER_HSA_API                        = false
+   ROCPROFSYS_ROCTRACER_HSA_API_TYPES                  =
+   ROCPROFSYS_SAMPLING_CPUS                            =
+   ROCPROFSYS_SAMPLING_DELAY                           = 0.5
+   ROCPROFSYS_SAMPLING_FREQ                            = 10
+   ROCPROFSYS_SAMPLING_GPUS                            = all
+   ROCPROFSYS_TIME_OUTPUT                              = true
+   ROCPROFSYS_TIMEMORY_COMPONENTS                      = wall_clock
+   ROCPROFSYS_TRACE_THREAD_LOCKS                       = false
+   ROCPROFSYS_VERBOSE                                  = 0
+   ROCPROFSYS_COLLAPSE_PROCESSES                       = false
+   ROCPROFSYS_COLLAPSE_THREADS                         = false
+   ROCPROFSYS_COUT_OUTPUT                              = false
+   ROCPROFSYS_CPU_AFFINITY                             = false
+   ROCPROFSYS_DIFF_OUTPUT                              = false
+   ROCPROFSYS_ENABLE_SIGNAL_HANDLER                    = true
+   ROCPROFSYS_ENABLED                                  = true
+   ROCPROFSYS_FILE_OUTPUT                              = true
+   ROCPROFSYS_FLAT_PROFILE                             = false
+   ROCPROFSYS_INPUT_EXTENSIONS                         = json,xml
+   ROCPROFSYS_INPUT_PATH                               =
+   ROCPROFSYS_INPUT_PREFIX                             =
+   ROCPROFSYS_JSON_OUTPUT                              = true
+   ROCPROFSYS_MAX_DEPTH                                = 65535
+   ROCPROFSYS_MAX_WIDTH                                = 120
+   ROCPROFSYS_MEMORY_PRECISION                         = -1
+   ROCPROFSYS_MEMORY_SCIENTIFIC                        = false
+   ROCPROFSYS_MEMORY_UNITS                             = MB
+   ROCPROFSYS_MEMORY_WIDTH                             = -1
+   ROCPROFSYS_NETWORK_INTERFACE                        =
+   ROCPROFSYS_NODE_COUNT                               = 0
+   ROCPROFSYS_PAPI_FAIL_ON_ERROR                       = false
+   ROCPROFSYS_PAPI_MULTIPLEXING                        = false
+   ROCPROFSYS_PAPI_OVERFLOW                            = 0
+   ROCPROFSYS_PAPI_QUIET                               = false
+   ROCPROFSYS_PAPI_THREADING                           = true
+   ROCPROFSYS_PRECISION                                = -1
+   ROCPROFSYS_SCIENTIFIC                               = false
+   ROCPROFSYS_STRICT_CONFIG                            = true
+   ROCPROFSYS_SUPPRESS_CONFIG                          = true
+   ROCPROFSYS_SUPPRESS_PARSING                         = true
+   ROCPROFSYS_TEXT_OUTPUT                              = true
+   ROCPROFSYS_TIME_FORMAT                              = %F_%H.%M
+   ROCPROFSYS_TIMELINE_PROFILE                         = false
+   ROCPROFSYS_TIMING_PRECISION                         = 6
+   ROCPROFSYS_TIMING_SCIENTIFIC                        = false
+   ROCPROFSYS_TIMING_UNITS                             = sec
+   ROCPROFSYS_TIMING_WIDTH                             = -1
+   ROCPROFSYS_TREE_OUTPUT                              = true
+   ROCPROFSYS_WIDTH                                    = -1
 
 When creating a new configuration file, the following recommendations apply:
 
 * Use the ``--all`` option to view all descriptions, choices, and other information in the configuration file.
-* To create a new configuration without inheriting from an existing ``${HOME}/.omnitrace.cfg`` file,
-  set ``OMNITRACE_SUPPRESS_CONFIG=ON`` in the environment beforehand.
+* To create a new configuration without inheriting from an existing ``${HOME}/.rocprof-sys.cfg`` file,
+  set ``ROCPROFSYS_SUPPRESS_CONFIG=ON`` in the environment beforehand.
 * To create a new configuration that makes minor changes to an existing configuration,
-  set ``OMNITRACE_CONFIG_FILE=/path/to/existing/file`` and define the changes as environment 
+  set ``ROCPROFSYS_CONFIG_FILE=/path/to/existing/file`` and define the changes as environment
   variables before generating it.
 
 Viewing the setting descriptions
@@ -312,89 +314,89 @@ Viewing the setting descriptions
 
 .. code-block:: shell
 
-   $ omnitrace-avail -S -bd
+   $ rocprof-sys-avail -S -bd
    |-----------------------------------------|-----------------------------------------|
    |          ENVIRONMENT VARIABLE           |               DESCRIPTION               |
    |-----------------------------------------|-----------------------------------------|
-   | OMNITRACE_CI                            | Enable some runtime validation check... |
-   | OMNITRACE_ADD_SECONDARY                 | Enable/disable components adding sec... |
-   | OMNITRACE_COLLAPSE_PROCESSES            | Enable/disable combining process-spe... |
-   | OMNITRACE_COLLAPSE_THREADS              | Enable/disable combining thread-spec... |
-   | OMNITRACE_CONFIG_FILE                   | Configuration file for omnitrace        |
-   | OMNITRACE_COUT_OUTPUT                   | Write output to stdout                  |
-   | OMNITRACE_CPU_AFFINITY                  | Enable pinning threads to CPUs (Linu... |
-   | OMNITRACE_THREAD_POOL_SIZE              | Number of threads to use when genera... |
-   | OMNITRACE_DEBUG                         | Enable debug output                     |
-   | OMNITRACE_DIFF_OUTPUT                   | Generate a difference output vs. a p... |
-   | OMNITRACE_DL_VERBOSE                    | Verbosity within the omnitrace-dl li... |
-   | OMNITRACE_ENABLED                       | Activation state of timemory            |
-   | OMNITRACE_ENABLE_SIGNAL_HANDLER         | Enable signals in timemory_init         |
-   | OMNITRACE_FILE_OUTPUT                   | Write output to files                   |
-   | OMNITRACE_FLAT_PROFILE                  | Set the label hierarchy mode to defa... |
-   | OMNITRACE_INPUT_EXTENSIONS              | File extensions used when searching ... |
-   | OMNITRACE_INPUT_PATH                    | Explicitly specify the input folder ... |
-   | OMNITRACE_INPUT_PREFIX                  | Explicitly specify the prefix for in... |
-   | OMNITRACE_INSTRUMENTATION_INTERVAL      | Instrumentation only takes measureme... |
-   | OMNITRACE_JSON_OUTPUT                   | Write json output files                 |
-   | OMNITRACE_KOKKOSP_KERNEL_LOGGER         | Enables kernel logging                  |
-   | OMNITRACE_MAX_DEPTH                     | Set the maximum depth of label hiera... |
-   | OMNITRACE_MAX_THREAD_BOOKMARKS          | Maximum number of times a worker thr... |
-   | OMNITRACE_MAX_WIDTH                     | Set the maximum width for component ... |
-   | OMNITRACE_MEMORY_PRECISION              | Set the precision for components wit... |
-   | OMNITRACE_MEMORY_SCIENTIFIC             | Set the numerical reporting format f... |
-   | OMNITRACE_MEMORY_UNITS                  | Set the units for components with u...  |
-   | OMNITRACE_MEMORY_WIDTH                  | Set the output width for components ... |
-   | OMNITRACE_NETWORK_INTERFACE             | Default network interface               |
-   | OMNITRACE_NODE_COUNT                    | Total number of nodes used in applic... |
-   | OMNITRACE_OUTPUT_FILE                   | Perfetto filename                       |
-   | OMNITRACE_OUTPUT_PATH                   | Explicitly specify the output folder... |
-   | OMNITRACE_OUTPUT_PREFIX                 | Explicitly specify a prefix for all ... |
-   | OMNITRACE_PAPI_EVENTS                   | PAPI presets and events to collect (... |
-   | OMNITRACE_PAPI_FAIL_ON_ERROR            | Configure PAPI errors to trigger a r... |
-   | OMNITRACE_PAPI_MULTIPLEXING             | Enable multiplexing when using PAPI     |
-   | OMNITRACE_PAPI_OVERFLOW                 | Value at which PAPI hw counters trig... |
-   | OMNITRACE_PAPI_QUIET                    | Configure suppression of reporting P... |
-   | OMNITRACE_PAPI_THREADING                | Enable multithreading support when u... |
-   | OMNITRACE_PERFETTO_BACKEND              | Specify the perfetto backend to acti... |
-   | OMNITRACE_PERFETTO_BUFFER_SIZE_KB       | Size of perfetto buffer (in KB)         |
-   | OMNITRACE_PERFETTO_COMBINE_TRACES       | Combine Perfetto traces. If not expl... |
-   | OMNITRACE_PERFETTO_FILL_POLICY          | Behavior when perfetto buffer is ful... |
-   | OMNITRACE_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
-   | OMNITRACE_PRECISION                     | Set the global output precision for ... |
-   | OMNITRACE_ROCTRACER_HSA_ACTIVITY        | Enable HSA activity tracing support     |
-   | OMNITRACE_ROCTRACER_HSA_API             | Enable HSA API tracing support          |
-   | OMNITRACE_ROCTRACER_HSA_API_TYPES       | HSA API type to collect                 |
-   | OMNITRACE_SAMPLING_CPUS                 | CPUs to collect frequency informatio... |
-   | OMNITRACE_SAMPLING_DELAY                | Number of seconds to wait before the... |
-   | OMNITRACE_SAMPLING_FREQ                 | Number of software interrupts per se... |
-   | OMNITRACE_SAMPLING_GPUS                 | Devices to query when OMNITRACE_USE_... |
-   | OMNITRACE_SCIENTIFIC                    | Set the global numerical reporting t... |
-   | OMNITRACE_STRICT_CONFIG                 | Throw errors for unknown setting nam... |
-   | OMNITRACE_SUPPRESS_CONFIG               | Disable processing of setting config... |
-   | OMNITRACE_SUPPRESS_PARSING              | Disable parsing environment             |
-   | OMNITRACE_TEXT_OUTPUT                   | Write text output files                 |
-   | OMNITRACE_TIMELINE_PROFILE              | Set the label hierarchy mode to defa... |
-   | OMNITRACE_TIMEMORY_COMPONENTS           | List of components to collect via ti... |
-   | OMNITRACE_TIME_FORMAT                   | Customize the folder generation when... |
-   | OMNITRACE_TIME_OUTPUT                   | Output data to subfolder w/ a timest... |
-   | OMNITRACE_TIMING_PRECISION              | Set the precision for components wit... |
-   | OMNITRACE_TIMING_SCIENTIFIC             | Set the numerical reporting format f... |
-   | OMNITRACE_TIMING_UNITS                  | Set the units for components with u...  |
-   | OMNITRACE_TIMING_WIDTH                  | Set the output width for components ... |
-   | OMNITRACE_TRACE_THREAD_LOCKS            | Enable tracking calls to pthread_mut... |
-   | OMNITRACE_TREE_OUTPUT                   | Write hierarchical json output files    |
-   | OMNITRACE_USE_CODE_COVERAGE             | Enable support for code coverage        |
-   | OMNITRACE_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
-   | OMNITRACE_USE_OMPT                      | Enable support for OpenMP-Tools         |
-   | OMNITRACE_TRACE                         | Enable perfetto backend                 |
-   | OMNITRACE_USE_PID                       | Enable tagging filenames with proces... |
-   | OMNITRACE_USE_ROCM_SMI                  | Enable sampling GPU power, temp, uti... |
-   | OMNITRACE_USE_ROCTRACER                 | Enable ROCM tracing                     |
-   | OMNITRACE_USE_SAMPLING                  | Enable statistical sampling of call-... |
-   | OMNITRACE_USE_PROCESS_SAMPLING          | Enable a background thread which sam... |
-   | OMNITRACE_PROFILE                       | Enable timemory backend                 |
-   | OMNITRACE_VERBOSE                       | Verbosity level                         |
-   | OMNITRACE_WIDTH                         | Set the global output width for comp... |
+   | ROCPROFSYS_CI                            | Enable some runtime validation check... |
+   | ROCPROFSYS_ADD_SECONDARY                 | Enable/disable components adding sec... |
+   | ROCPROFSYS_COLLAPSE_PROCESSES            | Enable/disable combining process-spe... |
+   | ROCPROFSYS_COLLAPSE_THREADS              | Enable/disable combining thread-spec... |
+   | ROCPROFSYS_CONFIG_FILE                   | Configuration file for rocprof-sys      |
+   | ROCPROFSYS_COUT_OUTPUT                   | Write output to stdout                  |
+   | ROCPROFSYS_CPU_AFFINITY                  | Enable pinning threads to CPUs (Linu... |
+   | ROCPROFSYS_THREAD_POOL_SIZE              | Number of threads to use when genera... |
+   | ROCPROFSYS_DEBUG                         | Enable debug output                     |
+   | ROCPROFSYS_DIFF_OUTPUT                   | Generate a difference output vs. a p... |
+   | ROCPROFSYS_DL_VERBOSE                    | Verbosity within the rocprof-sys-dl ... |
+   | ROCPROFSYS_ENABLED                       | Activation state of timemory            |
+   | ROCPROFSYS_ENABLE_SIGNAL_HANDLER         | Enable signals in timemory_init         |
+   | ROCPROFSYS_FILE_OUTPUT                   | Write output to files                   |
+   | ROCPROFSYS_FLAT_PROFILE                  | Set the label hierarchy mode to defa... |
+   | ROCPROFSYS_INPUT_EXTENSIONS              | File extensions used when searching ... |
+   | ROCPROFSYS_INPUT_PATH                    | Explicitly specify the input folder ... |
+   | ROCPROFSYS_INPUT_PREFIX                  | Explicitly specify the prefix for in... |
+   | ROCPROFSYS_INSTRUMENTATION_INTERVAL      | Instrumentation only takes measureme... |
+   | ROCPROFSYS_JSON_OUTPUT                   | Write json output files                 |
+   | ROCPROFSYS_KOKKOSP_KERNEL_LOGGER         | Enables kernel logging                  |
+   | ROCPROFSYS_MAX_DEPTH                     | Set the maximum depth of label hiera... |
+   | ROCPROFSYS_MAX_THREAD_BOOKMARKS          | Maximum number of times a worker thr... |
+   | ROCPROFSYS_MAX_WIDTH                     | Set the maximum width for component ... |
+   | ROCPROFSYS_MEMORY_PRECISION              | Set the precision for components wit... |
+   | ROCPROFSYS_MEMORY_SCIENTIFIC             | Set the numerical reporting format f... |
+   | ROCPROFSYS_MEMORY_UNITS                  | Set the units for components with u...  |
+   | ROCPROFSYS_MEMORY_WIDTH                  | Set the output width for components ... |
+   | ROCPROFSYS_NETWORK_INTERFACE             | Default network interface               |
+   | ROCPROFSYS_NODE_COUNT                    | Total number of nodes used in applic... |
+   | ROCPROFSYS_OUTPUT_FILE                   | Perfetto filename                       |
+   | ROCPROFSYS_OUTPUT_PATH                   | Explicitly specify the output folder... |
+   | ROCPROFSYS_OUTPUT_PREFIX                 | Explicitly specify a prefix for all ... |
+   | ROCPROFSYS_PAPI_EVENTS                   | PAPI presets and events to collect (... |
+   | ROCPROFSYS_PAPI_FAIL_ON_ERROR            | Configure PAPI errors to trigger a r... |
+   | ROCPROFSYS_PAPI_MULTIPLEXING             | Enable multiplexing when using PAPI     |
+   | ROCPROFSYS_PAPI_OVERFLOW                 | Value at which PAPI hw counters trig... |
+   | ROCPROFSYS_PAPI_QUIET                    | Configure suppression of reporting P... |
+   | ROCPROFSYS_PAPI_THREADING                | Enable multithreading support when u... |
+   | ROCPROFSYS_PERFETTO_BACKEND              | Specify the perfetto backend to acti... |
+   | ROCPROFSYS_PERFETTO_BUFFER_SIZE_KB       | Size of perfetto buffer (in KB)         |
+   | ROCPROFSYS_PERFETTO_COMBINE_TRACES       | Combine Perfetto traces. If not expl... |
+   | ROCPROFSYS_PERFETTO_FILL_POLICY          | Behavior when perfetto buffer is ful... |
+   | ROCPROFSYS_PERFETTO_SHMEM_SIZE_HINT_KB   | Hint for shared-memory buffer size i... |
+   | ROCPROFSYS_PRECISION                     | Set the global output precision for ... |
+   | ROCPROFSYS_ROCTRACER_HSA_ACTIVITY        | Enable HSA activity tracing support     |
+   | ROCPROFSYS_ROCTRACER_HSA_API             | Enable HSA API tracing support          |
+   | ROCPROFSYS_ROCTRACER_HSA_API_TYPES       | HSA API type to collect                 |
+   | ROCPROFSYS_SAMPLING_CPUS                 | CPUs to collect frequency informatio... |
+   | ROCPROFSYS_SAMPLING_DELAY                | Number of seconds to wait before the... |
+   | ROCPROFSYS_SAMPLING_FREQ                 | Number of software interrupts per se... |
+   | ROCPROFSYS_SAMPLING_GPUS                 | Devices to query when ROCPROFSYS_USE_... |
+   | ROCPROFSYS_SCIENTIFIC                    | Set the global numerical reporting t... |
+   | ROCPROFSYS_STRICT_CONFIG                 | Throw errors for unknown setting nam... |
+   | ROCPROFSYS_SUPPRESS_CONFIG               | Disable processing of setting config... |
+   | ROCPROFSYS_SUPPRESS_PARSING              | Disable parsing environment             |
+   | ROCPROFSYS_TEXT_OUTPUT                   | Write text output files                 |
+   | ROCPROFSYS_TIMELINE_PROFILE              | Set the label hierarchy mode to defa... |
+   | ROCPROFSYS_TIMEMORY_COMPONENTS           | List of components to collect via ti... |
+   | ROCPROFSYS_TIME_FORMAT                   | Customize the folder generation when... |
+   | ROCPROFSYS_TIME_OUTPUT                   | Output data to subfolder w/ a timest... |
+   | ROCPROFSYS_TIMING_PRECISION              | Set the precision for components wit... |
+   | ROCPROFSYS_TIMING_SCIENTIFIC             | Set the numerical reporting format f... |
+   | ROCPROFSYS_TIMING_UNITS                  | Set the units for components with u...  |
+   | ROCPROFSYS_TIMING_WIDTH                  | Set the output width for components ... |
+   | ROCPROFSYS_TRACE_THREAD_LOCKS            | Enable tracking calls to pthread_mut... |
+   | ROCPROFSYS_TREE_OUTPUT                   | Write hierarchical json output files    |
+   | ROCPROFSYS_USE_CODE_COVERAGE             | Enable support for code coverage        |
+   | ROCPROFSYS_USE_KOKKOSP                   | Enable support for Kokkos Tools         |
+   | ROCPROFSYS_USE_OMPT                      | Enable support for OpenMP-Tools         |
+   | ROCPROFSYS_TRACE                         | Enable perfetto backend                 |
+   | ROCPROFSYS_USE_PID                       | Enable tagging filenames with proces... |
+   | ROCPROFSYS_USE_ROCM_SMI                  | Enable sampling GPU power, temp, uti... |
+   | ROCPROFSYS_USE_ROCTRACER                 | Enable ROCM tracing                     |
+   | ROCPROFSYS_USE_SAMPLING                  | Enable statistical sampling of call-... |
+   | ROCPROFSYS_USE_PROCESS_SAMPLING          | Enable a background thread which sam... |
+   | ROCPROFSYS_PROFILE                       | Enable timemory backend                 |
+   | ROCPROFSYS_VERBOSE                       | Verbosity level                         |
+   | ROCPROFSYS_WIDTH                         | Set the global output width for comp... |
    |-----------------------------------------|-----------------------------------------|
 
 Viewing components
@@ -402,7 +404,7 @@ Viewing components
 
 .. code-block:: shell
 
-   $ omnitrace-avail -C -bd
+   $ rocprof-sys-avail -C -bd
    |-----------------------------------|----------------------------------------------|
    |             COMPONENT             |                 DESCRIPTION                  |
    |-----------------------------------|----------------------------------------------|
@@ -460,7 +462,7 @@ Viewing components
    | wall_clock                        | Real-clock timer (i.e. wall-clock timer).    |
    | written_bytes                     | Number of bytes sent to the storage layer.   |
    | written_char                      | Number of bytes which this task has cause... |
-   | omnitrace                         | Invokes instrumentation functions  omnitr... |
+   | rocprof-sys                       | Invokes instrumentation functions rocprof... |
    | roctracer                         | High-precision ROCm API and kernel tracing.  |
    | sampling_wall_clock               | Wall-clock timing. Derived from statistic... |
    | sampling_cpu_clock                | CPU-clock timing. Derived from statistica... |
@@ -476,7 +478,7 @@ Viewing hardware counters
 
 .. code-block:: shell
 
-   $ omnitrace-avail -H -bd
+   $ rocprof-sys-avail -H -bd
    |---------------------------------------|---------------------------------------|
    |           HARDWARE COUNTER            |              DESCRIPTION              |
    |---------------------------------------|---------------------------------------|
@@ -1197,17 +1199,17 @@ Viewing hardware counters
 Creating a configuration file
 ========================================
 
-Omnitrace supports three configuration file formats: JSON, XML, and plain text.
-Use ``omnitrace-avail -G <filename> -F txt json xml`` to generate default 
+ROCm Systems Profiler supports three configuration file formats: JSON, XML, and plain text.
+Use ``rocprof-sys-avail -G <filename> -F txt json xml`` to generate default
 configuration files in each format. Optionally
 include the ``--all`` flag to include full descriptions and other information.
-Configuration files are specified by the ``OMNITRACE_CONFIG_FILE`` environment variable
-which by default looks for ``${HOME}/.omnitrace.cfg`` and ``${HOME}/.omnitrace.json``.
+Configuration files are specified by the ``ROCPROFSYS_CONFIG_FILE`` environment variable
+which by default looks for ``${HOME}/.rocprof-sys.cfg`` and ``${HOME}/.rocprof-sys.json``.
 Multiple configuration files can be concatenated using the ``:`` symbol, for example:
 
 .. code-block:: shell
 
-   export OMNITRACE_CONFIG_FILE=~/.config/omnitrace.cfg:~/.config/omnitrace.json
+   export ROCPROFSYS_CONFIG_FILE=~/.config/rocprof-sys.cfg:~/.config/rocprof-sys.json
 
 If a configuration variable is specified in both a configuration file and in the environment,
 the environment variable takes precedence.
@@ -1220,7 +1222,7 @@ Variables are created when an lvalue starts with a ``$`` and are
 de-referenced when they appear as rvalues.
 
 Entries in the text configuration file which do not match a known setting
-in ``omnitrace-avail`` but are prefixed with ``OMNITRACE_`` are interpreted as
+in ``rocprof-sys-avail`` but are prefixed with ``ROCPROFSYS_`` are interpreted as
 environment variables. They are exported via ``setenv``
 but do not override an existing value for the environment variable.
 
@@ -1231,35 +1233,35 @@ but do not override an existing value for the environment variable.
    $SAMPLE                         = OFF
 
    # use fields
-   OMNITRACE_TRACE                 = $ENABLE
-   OMNITRACE_PROFILE               = $ENABLE
-   OMNITRACE_USE_SAMPLING          = $SAMPLE
-   OMNITRACE_USE_PROCESS_SAMPLING  = $SAMPLE
+   ROCPROFSYS_TRACE                 = $ENABLE
+   ROCPROFSYS_PROFILE               = $ENABLE
+   ROCPROFSYS_USE_SAMPLING          = $SAMPLE
+   ROCPROFSYS_USE_PROCESS_SAMPLING  = $SAMPLE
 
    # debug
-   OMNITRACE_DEBUG                 = OFF
-   OMNITRACE_VERBOSE               = 1
+   ROCPROFSYS_DEBUG                 = OFF
+   ROCPROFSYS_VERBOSE               = 1
 
    # output fields
-   OMNITRACE_OUTPUT_PATH           = omnitrace-output
-   OMNITRACE_OUTPUT_PREFIX         = %tag%/
-   OMNITRACE_TIME_OUTPUT           = OFF
-   OMNITRACE_USE_PID               = OFF
+   ROCPROFSYS_OUTPUT_PATH           = rocprof-sys-output
+   ROCPROFSYS_OUTPUT_PREFIX         = %tag%/
+   ROCPROFSYS_TIME_OUTPUT           = OFF
+   ROCPROFSYS_USE_PID               = OFF
 
    # timemory fields
-   OMNITRACE_PAPI_EVENTS           = PAPI_TOT_INS PAPI_FP_INS
-   OMNITRACE_TIMEMORY_COMPONENTS   = wall_clock peak_rss trip_count
-   OMNITRACE_MEMORY_UNITS          = MB
-   OMNITRACE_TIMING_UNITS          = sec
+   ROCPROFSYS_PAPI_EVENTS           = PAPI_TOT_INS PAPI_FP_INS
+   ROCPROFSYS_TIMEMORY_COMPONENTS   = wall_clock peak_rss trip_count
+   ROCPROFSYS_MEMORY_UNITS          = MB
+   ROCPROFSYS_TIMING_UNITS          = sec
 
    # sampling fields
-   OMNITRACE_SAMPLING_FREQ         = 50
-   OMNITRACE_SAMPLING_DELAY        = 0.1
-   OMNITRACE_SAMPLING_CPUS         = 0-3
-   OMNITRACE_SAMPLING_GPUS         = $env:HIP_VISIBLE_DEVICES
+   ROCPROFSYS_SAMPLING_FREQ         = 50
+   ROCPROFSYS_SAMPLING_DELAY        = 0.1
+   ROCPROFSYS_SAMPLING_CPUS         = 0-3
+   ROCPROFSYS_SAMPLING_GPUS         = $env:HIP_VISIBLE_DEVICES
 
    # misc env variables (see metadata JSON file after run)
-   $env:OMNITRACE_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF
+   $env:ROCPROFSYS_SAMPLING_KEEP_DYNINST_SUFFIX  = OFF
 
 Sample JSON configuration file
 -----------------------------------
@@ -1269,9 +1271,9 @@ The full JSON specification for a configuration value contains a lot of informat
 .. code-block:: json
 
    {
-      "omnitrace": {
+      "rocprof-sys": {
          "settings": {
-               "OMNITRACE_ADD_SECONDARY": {
+               "ROCPROFSYS_ADD_SECONDARY": {
                   "count": -1,
                   "name": "add_secondary",
                   "data_type": "bool",
@@ -1279,9 +1281,9 @@ The full JSON specification for a configuration value contains a lot of informat
                   "value": true,
                   "max_count": 1,
                   "cmdline": [
-                     "--omnitrace-add-secondary"
+                     "--rocprof-sys-add-secondary"
                   ],
-                  "environ": "OMNITRACE_ADD_SECONDARY",
+                  "environ": "ROCPROFSYS_ADD_SECONDARY",
                   "cereal_class_version": 1,
                   "categories": [
                      "component",
@@ -1294,15 +1296,15 @@ The full JSON specification for a configuration value contains a lot of informat
       }
    }
 
-However when writing an JSON configuration file, the following example is minimally acceptable 
-for ``OMNITRACE_ADD_SECONDARY``:
+However when writing an JSON configuration file, the following example is minimally acceptable
+for ``ROCPROFSYS_ADD_SECONDARY``:
 
 .. code-block:: json
 
    {
-      "omnitrace": {
+      "rocprof-sys": {
          "settings": {
-               "OMNITRACE_ADD_SECONDARY": {
+               "ROCPROFSYS_ADD_SECONDARY": {
                   "value": true
                }
          }
@@ -1318,19 +1320,19 @@ The full XML specification for a configuration value contains the same informati
 
    <?xml version="1.0" encoding="utf-8"?>
    <timemory_xml>
-      <omnitrace>
+      <rocprofiler-systems>
          <settings>
                <cereal_class_version>2</cereal_class_version>
                <!-- Full setting specification -->
-               <OMNITRACE_ADD_SECONDARY>
+               <ROCPROFSYS_ADD_SECONDARY>
                   <cereal_class_version>1</cereal_class_version>
                   <name>add_secondary</name>
-                  <environ>OMNITRACE_ADD_SECONDARY</environ>
+                  <environ>ROCPROFSYS_ADD_SECONDARY</environ>
                   <description>...</description>
                   <count>-1</count>
                   <max_count>1</max_count>
                   <cmdline>
-                     <value0>--omnitrace-add-secondary</value0>
+                     <value0>--rocprof-sys-add-secondary</value0>
                   </cmdline>
                   <categories>
                      <value0>component</value0>
@@ -1340,24 +1342,24 @@ The full XML specification for a configuration value contains the same informati
                   <data_type>bool</data_type>
                   <initial>true</initial>
                   <value>true</value>
-               </OMNITRACE_ADD_SECONDARY>
+               </ROCPROFSYS_ADD_SECONDARY>
                <!-- etc. -->
          </settings>
-      </omnitrace>
+      </rocprofiler-systems>
    </timemory_xml>
 
-However, when writing an XML configuration file, it is minimally acceptable 
-to set ``OMNITRACE_ADD_SECONDARY=false``:
+However, when writing an XML configuration file, it is minimally acceptable
+to set ``ROCPROFSYS_ADD_SECONDARY=false``:
 
 .. code-block:: xml
 
    <?xml version="1.0" encoding="utf-8"?>
    <timemory_xml>
-      <omnitrace>
+      <rocprofiler-systems>
          <settings>
-               <OMNITRACE_ADD_SECONDARY>
+               <ROCPROFSYS_ADD_SECONDARY>
                   <value>false</value>
-               </OMNITRACE_ADD_SECONDARY>
+               </ROCPROFSYS_ADD_SECONDARY>
          </settings>
-      </omnitrace>
+      </rocprofiler-systems>
    </timemory_xml>

@@ -36,14 +36,14 @@ with open("../VERSION", encoding="utf-8") as f:
         raise ValueError("VERSION not found!")
     version_number = match[1]
 
-external_projects_current_project = "omnitrace"
+external_projects_current_project = "rocprofiler-systems"
 
-project = "omnitrace"
+project = "rocprofiler-systems"
 author = "Advanced Micro Devices, Inc."
 copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
 version = version_number
 release = version_number
-html_title = f"Omnitrace {version} documentation"
+html_title = f"ROCm Systems Profiler {version} documentation"
 
 external_toc_path = "./sphinx/_toc.yml"
 
