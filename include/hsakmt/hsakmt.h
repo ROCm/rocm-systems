@@ -563,12 +563,6 @@ hsaKmtExportDMABufHandle(
     HSAuint64 *Offset			//OUT
     );
 
-
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtImportDMABufHandle(int DMABufFd,
-                         void **MemoryAddress);
-
 /**
  Export a memory buffer for sharing with other processes
 

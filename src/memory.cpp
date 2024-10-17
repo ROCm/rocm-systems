@@ -458,7 +458,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 }
 
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtImportDMABufHandle(int DMABufFd,
+HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
                                                  void **MemoryAddress) {
 
   CHECK_DXG_OPEN();

@@ -207,4 +207,6 @@ bool queue_release_buffer(void *MemoryAddress);
 uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id);
 #define SGPR_SIZE_PER_CU 0x4000
 
+HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd, void **MemoryAddress);
+
 #endif
