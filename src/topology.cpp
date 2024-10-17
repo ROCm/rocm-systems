@@ -708,9 +708,9 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
       pr_err("HSA_OVERRIDE_GFX_VERSION %s is invalid\n", envvar);
       return HSAKMT_STATUS_ERROR;
     }
-    props->EngineId.ui32.Major = major & 0x3f;
-    props->EngineId.ui32.Minor = minor & 0xff;
-    props->EngineId.ui32.Stepping = step & 0xff;
+    props->OverrideEngineId.ui32.Major = major & 0x3f;
+    props->OverrideEngineId.ui32.Minor = minor & 0xff;
+    props->OverrideEngineId.ui32.Stepping = step & 0xff;
   } else {
     props->EngineId.ui32.Major = device->Major();
     props->EngineId.ui32.Minor = device->Minor();

@@ -322,6 +322,7 @@ typedef struct _HsaNodeProperties
                                        // may be 0 if HW has no restrictions
 
     HSA_ENGINE_ID   EngineId;          // Identifier (rev) of the GPU uEngine or Firmware, may be 0
+    HSA_ENGINE_ID   OverrideEngineId;  // Identifier (rev) of the Overrided GPU uEngine or Firmware, may be 0
 
     HSAuint16       VendorId;          // GPU vendor id; 0 on latency (= CPU)-only nodes
     HSAuint16       DeviceId;          // GPU device id; 0 on latency (= CPU)-only nodes
