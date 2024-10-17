@@ -29,7 +29,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
   CHECK_DXG_OPEN();
 
   VersionInfo->KernelInterfaceMajorVersion = 1;
-  VersionInfo->KernelInterfaceMinorVersion = 16;
+  VersionInfo->KernelInterfaceMinorVersion = 17;
 
   return HSAKMT_STATUS_SUCCESS;
 }

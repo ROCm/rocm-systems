@@ -38,10 +38,32 @@ uint32_t get_vgpr_size_per_cu(HSA_ENGINE_ID id) {
   return vgpr_size;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(
-    HSAuint32 NodeId, HSA_QUEUE_TYPE Type, HSAuint32 QueuePercentage,
-    HSA_QUEUE_PRIORITY Priority, void *QueueAddress, HSAuint64 QueueSizeInBytes,
-    HsaEvent *Event, HsaQueueResource *QueueResource) {
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(HSAuint32 NodeId,
+					  HSA_QUEUE_TYPE Type,
+					  HSAuint32 QueuePercentage,
+					  HSA_QUEUE_PRIORITY Priority,
+					  void *QueueAddress,
+					  HSAuint64 QueueSizeInBytes,
+					  HsaEvent *Event,
+					  HsaQueueResource *QueueResource)
+{
+	if (Type == HSA_QUEUE_SDMA_BY_ENG_ID)
+		return HSAKMT_STATUS_ERROR;
+
+	return hsaKmtCreateQueueExt(NodeId, Type, QueuePercentage, Priority, 0,
+				    QueueAddress, QueueSizeInBytes, Event,
+				    QueueResource);
+}
+
+HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueueExt(HSAuint32 NodeId,
+					     HSA_QUEUE_TYPE Type,
+					     HSAuint32 QueuePercentage,
+					     HSA_QUEUE_PRIORITY Priority,
+					     HSAuint32 SdmaEngineId,
+					     void *QueueAddress,
+					     HSAuint64 QueueSizeInBytes,
+					     HsaEvent *Event,
+					     HsaQueueResource *QueueResource) {
   HSAKMT_STATUS result;
 
   CHECK_DXG_OPEN();
@@ -73,8 +95,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateQueue(
     // for doorbell_signal.hardware_doorbell_ptr
     QueueResource->Queue_DoorBell_aql = queue_->GetDoorbellPtr();
   } break;
-  case HSA_QUEUE_SDMA: {
-    uint32_t queue_engine = device_->GetSdmaEngine(0); // TODO:
+  case HSA_QUEUE_SDMA:
+  case HSA_QUEUE_SDMA_BY_ENG_ID: {
+    pr_debug("create sdma queue in engine %d\n", SdmaEngineId);
+    uint32_t queue_engine = device_->GetSdmaEngine(0); // TODO: SdmaEngineId
     bool use_hws = device_->IsHwsEnabled(queue_engine);
     auto queue_ = new wsl::thunk::SDMAQueue(
 		device_, QueueAddress, QueueSizeInBytes,

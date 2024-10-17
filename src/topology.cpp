@@ -973,6 +973,7 @@ static HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
   props->Flags.ui32.NonCoherent = 1;
   props->Flags.ui32.NoAtomics32bit = !(device->SupportPlatformAtomic());
   props->Flags.ui32.NoAtomics64bit = !(device->SupportPlatformAtomic());
+  props->RecSdmaEngIdMask = 0;
 
   return HSAKMT_STATUS_SUCCESS;
 }
