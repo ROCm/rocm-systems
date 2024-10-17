@@ -1508,6 +1508,15 @@ typedef struct _HsaPcSamplingInfo
 }
 HsaPcSamplingInfo;
 
+typedef union
+{
+    HSAuint32 Value;
+    struct
+    {
+        unsigned int requiresVAddr : 1;  // Requires virtual address
+    } ui32;
+} HSA_REGISTER_MEM_FLAGS;
+
 #pragma pack(pop, hsakmttypes_h)
 
 

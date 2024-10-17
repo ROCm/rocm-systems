@@ -513,6 +513,21 @@ hsaKmtRegisterGraphicsHandleToNodes(
     );
 
 /**
+  Similar to hsaKmtRegisterGraphicsHandleToNodes but provides registration
+  options via RegisterFlags.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtRegisterGraphicsHandleToNodesExt(
+    HSAuint64       GraphicsResourceHandle,        //IN
+    HsaGraphicsResourceInfo *GraphicsResourceInfo, //OUT
+    HSAuint64       NumberOfNodes,                 //IN
+    HSAuint32*      NodeArray,                     //IN
+    HSA_REGISTER_MEM_FLAGS RegisterFlags           //IN
+    );
+
+/**
  * Export a dmabuf handle and offset for a given memory address
  *
  * Validates that @MemoryAddress belongs to a valid allocation and that the
