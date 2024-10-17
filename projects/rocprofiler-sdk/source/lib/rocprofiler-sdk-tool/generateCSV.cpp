@@ -483,7 +483,9 @@ generate_csv(tool_table*                                                     too
                                   "VGPR_Count",
                                   "SGPR_Count",
                                   "Counter_Name",
-                                  "Counter_Value"}};
+                                  "Counter_Value",
+                                  "Start_Timestamp",
+                                  "End_Timestamp"}};
     for(const auto& record : data)
     {
         auto kernel_id          = record.dispatch_data.dispatch_info.kernel_id;
@@ -525,7 +527,9 @@ generate_csv(tool_table*                                                     too
                 record.arch_vgpr_count,
                 record.sgpr_count,
                 itr.first,
-                itr.second);
+                itr.second,
+                record.dispatch_data.start_timestamp,
+                record.dispatch_data.end_timestamp);
         }
         ofs << row_ss.str();
     }

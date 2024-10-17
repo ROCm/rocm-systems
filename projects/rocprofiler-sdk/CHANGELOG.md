@@ -103,6 +103,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - Support `--marker-trace` on application linked against old (roctracer) ROCTx (i.e. `libroctx64.so`)
 - Replaced deprecated hipHostMalloc and hipHostFree functions with hipExtHostAlloc and hipFreeHost in when ROCm version is greater than or equal to 6.3
 - Updated `rocprofv3` `--help` options.
+- Adding start and end timestamp columns to the counter collection csv output.
 
 ### Fixes
 

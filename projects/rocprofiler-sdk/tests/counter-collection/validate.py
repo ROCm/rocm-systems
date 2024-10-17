@@ -60,6 +60,7 @@ def test_counter_values(input_data):
         agent = get_agent(agent_id)
         scaling_factor = get_scaling_factor(agent_id)
         assert agent is not None, f"itr={itr}\nagent={agent}"
+        assert itr["start_timestamp"] < itr["end_timestamp"]
         for ritr in itr["records"]:
             value = ritr["counter_value"]
             if int(round(value, 0)) > 0:
