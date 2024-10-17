@@ -26,7 +26,7 @@
 
 #include <stdint.h>
 
-/** \defgroup DATA_TYPE ROCTX Data types
+/** \defgroup DATA_TYPE ROCTx Data types
  *
  * Data types defined or aliased by ROCTx
  *
@@ -34,20 +34,20 @@
  */
 
 /**
- * ROCTX range ID.
+ * ROCTx range ID.
  *
  * This is the range ID used to identify start/end ranges.
  */
 
 /**
- * @brief ROCTX range ID.
+ * @brief ROCTx range ID.
  *
  * This is the range ID used to identify start/end ranges.
  */
 typedef uint64_t roctx_range_id_t;
 
 /**
- * @brief ROCTX thread ID.
+ * @brief ROCTx thread ID.
  *
  * This is the thread ID used to identify OS threads
  */

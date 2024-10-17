@@ -26,7 +26,7 @@ THE SOFTWARE.
 // hip header file
 #include <hip/hip_runtime.h>
 
-// roctx header file
+// ROCTx header file
 #include <rocprofiler-sdk-roctx/roctx.h>
 
 #define WIDTH 1024

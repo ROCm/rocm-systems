@@ -22,16 +22,16 @@
 
 #pragma once
 
-/** \mainpage ROCTX API Specification
+/** \mainpage ROCTx API Specification
  *
  * \section introduction Introduction
- * ROCTX is a library that implements the AMD code annotation API.  It provides
+ * ROCTx is a library that implements the AMD code annotation API.  It provides
  * the support necessary to annotate events and code ranges in applications.
  */
 
 /**
  * \file
- * ROCTX API interface.
+ * ROCTx API interface.
  */
 
 #include <stddef.h>
@@ -43,7 +43,7 @@
 
 ROCTX_EXTERN_C_INIT
 
-/** \defgroup marker_group ROCTX Markers
+/** \defgroup marker_group ROCTx Markers
  *
  * Marker annotations are used to describe events in a ROCm application.
  *
@@ -60,7 +60,7 @@ roctxMarkA(const char* message) ROCTX_API ROCTX_NONNULL(1);
 
 /** @} */
 
-/** \defgroup range_group ROCTX Ranges
+/** \defgroup range_group ROCTx Ranges
  *
  * Range annotations are used to describe events in a ROCm application.
  *
@@ -114,7 +114,7 @@ roctxRangeStop(roctx_range_id_t id) ROCTX_API;
 
 /** @} */
 
-/** \defgroup PROFILER_COMM ROCTX Application control/customization of profiling tools
+/** \defgroup PROFILER_COMM ROCTx Application control/customization of profiling tools
  *
  * Applications can invoke these functions to control/customize profiling tool behavior.
  *

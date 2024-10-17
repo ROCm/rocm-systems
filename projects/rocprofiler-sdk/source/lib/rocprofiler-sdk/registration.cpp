@@ -708,7 +708,7 @@ rocprofiler_set_api_table(const char* name,
     static auto _once = std::once_flag{};
     std::call_once(_once, rocprofiler::registration::initialize);
 
-    // pass to roctx init
+    // pass to ROCTx init
     ROCP_ERROR_IF(num_tables == 0) << "rocprofiler expected " << name
                                    << " library to pass at least one table, not " << num_tables;
     ROCP_ERROR_IF(tables == nullptr) << "rocprofiler expected pointer to array of tables from "
@@ -813,7 +813,7 @@ rocprofiler_set_api_table(const char* name,
     }
     else if(std::string_view{name} == "roctx")
     {
-        // pass to roctx init
+        // pass to ROCTx init
         ROCP_FATAL_IF(num_tables < 3)
             << "rocprofiler expected ROCTX library to pass 3 API tables, not " << num_tables;
         ROCP_ERROR_IF(num_tables > 3)

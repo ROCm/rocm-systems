@@ -626,7 +626,7 @@ update_table(const context::context_array_t& _contexts,
         // make sure we don't access a field that doesn't exist in input table
         if(_info.offset() >= _orig->version.minor_id) return;
 
-        // check to see if there are any contexts which enable this operation in the ROCTX API
+        // check to see if there are any contexts which enable this operation in the ROCTx API
         // domain
         if(!should_wrap_functor(_contexts,
                                 _info.callback_domain_idx,

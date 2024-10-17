@@ -154,7 +154,7 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Perfetto shared memory size hint in KB. default: 64 KB
     - Extension
 
-You can also see all the ``rocprofv3`` options using:
+To see exhaustive list of ``rocprofv3`` options, run:
 
 .. code-block:: bash
 
@@ -247,7 +247,7 @@ Marker trace
 
 In certain situations, such as debugging performance issues in large-scale GPU programs, API-level tracing might be too fine-grained to provide a big picture of the program execution. In such cases, it is helpful to define specific tasks to be traced.
 
-To specify the tasks for tracing, enclose the respective source code with the API calls provided by the ``ROCTX`` library. This process is also known as instrumentation. As the scope of code for instrumentation is defined using the enclosing API calls, it is called a range. A range is a programmer-defined task that has a well-defined start and end code scope. You can also refine the scope specified within a range using further nested ranges. ``rocprofv3`` also reports the timelines for these nested ranges.
+To specify the tasks for tracing, enclose the respective source code with the API calls provided by the ``ROCTx`` library. This process is also known as instrumentation. As the scope of code for instrumentation is defined using the enclosing API calls, it is called a range. A range is a programmer-defined task that has a well-defined start and end code scope. You can also refine the scope specified within a range using further nested ranges. ``rocprofv3`` also reports the timelines for these nested ranges.
 
 Here is a list of useful APIs for code instrumentation.
 
@@ -257,10 +257,18 @@ Here is a list of useful APIs for code instrumentation.
 - ``roctxRangePop``: Stops the current nested range.
 - ``roctxRangeStop``: Stops the given range.
 
-See how to use ``rocTX`` APIs in the MatrixTranspose application below:
+.. note::
+  To use ``rocprofv3`` for marker tracing, including and linking to old ROCTx works but it is recommended to switch to new ROCTx because
+  it has been extended with new APIs.
+  To use new ROCTx, please include header ``"rocprofiler-sdk-roctx/roctx.h"`` and link your application with ``librocprofiler-sdk-roctx.so``.
+  Above list of APIs is not exhaustive. See public header file ``"rocprofiler-sdk-roctx/roctx.h"`` for full list.
+
+See how to use ``ROCTx`` APIs in the MatrixTranspose application below:
 
 .. code-block:: bash
-
+    
+    #include <rocprofiler-sdk-roctx/roctx.h>
+    
     roctxMark("before hipLaunchKernel");
     int rangeId = roctxRangeStart("hipLaunchKernel range");
     roctxRangePush("hipLaunchKernel");
@@ -366,7 +374,7 @@ memory operations (copies and scratch).
 
     rocprofv3 –-runtime-trace -- < app_relative_path >
 
-Running the above command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``,and ``marker_api_trace.csv`` (if ``rocTX`` APIs are specified in the application) files prefixed with the process ID.
+Running the above command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``,and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 System trace
 ++++++++++++++
@@ -377,7 +385,7 @@ This is an all-inclusive option to collect all the above-mentioned traces.
 
     rocprofv3 –-sys-trace -- < app_relative_path >
 
-Running the above command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, and ``marker_api_trace.csv`` (if ``rocTX`` APIs are specified in the application) files prefixed with the process ID.
+Running the above command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 Scratch memory trace
 ++++++++++++++++++++++

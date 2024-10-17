@@ -17,7 +17,7 @@ ROCProfiler-SDK is AMD’s new and improved tooling infrastructure, providing a 
 - HIP kernel tracing
 - HSA API tracing
 - HSA operation tracing
-- Marker(ROCtx) tracing
+- Marker(ROCTx) tracing
 - PC Sampling (Beta)
 
 ## Tool Support

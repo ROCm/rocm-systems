@@ -78,7 +78,7 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - `--roctx-trace`
      - `--roctx-trace`
      - `--marker-trace`
-     - Improved ROCtx library with more features
+     - Improved ROCTx library with more features
      - 
    * - Basic tracing options
      - Memory Copy Trace

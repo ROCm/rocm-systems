@@ -106,7 +106,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     io_options.add_argument(
         "-o",
         "--output-file",
-        help="For the output file name",
+        help="For the output file name. If nothing specified default path is `%%hostname%%/%%pid%%`",
         default=os.environ.get("ROCPROF_OUTPUT_FILE_NAME", None),
         type=str,
         required=False,
@@ -114,7 +114,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     io_options.add_argument(
         "-d",
         "--output-directory",
-        help="For adding output path where the output files will be saved",
+        help="For adding output path where the output files will be saved. If nothing specified default path is `%%hostname%%/%%pid%%`",
         default=os.environ.get("ROCPROF_OUTPUT_PATH", None),
         type=str,
         required=False,
@@ -161,7 +161,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         basic_tracing_options,
         "--marker-trace",
-        help="For collecting Marker (ROCTx) Traces. Similar to --roctx-trace option in earlier rocprof versions but with improved ROCtx library with more features",
+        help="For collecting Marker (ROCTx) Traces. Similar to --roctx-trace option in earlier rocprof versions but with improved ROCTx library with more features",
     )
     add_parser_bool_argument(
         basic_tracing_options,
