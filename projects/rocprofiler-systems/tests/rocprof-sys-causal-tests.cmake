@@ -5,8 +5,8 @@
 # -------------------------------------------------------------------------------------- #
 
 rocprofiler_systems_add_causal_test(
-    NAME cpu-omni-func
-    TARGET causal-cpu-omni
+    NAME cpu-rocprofsys-func
+    TARGET causal-cpu-rocprofsys
     RUN_ARGS 70 10 432525 1000000000
     CAUSAL_MODE "function"
     CAUSAL_PASS_REGEX
@@ -15,8 +15,8 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-omni-func-ndebug
-    TARGET causal-cpu-omni-ndebug
+    NAME cpu-rocprofsys-func-ndebug
+    TARGET causal-cpu-rocprofsys-ndebug
     RUN_ARGS 70 10 432525 1000000000
     CAUSAL_MODE "function"
     CAUSAL_PASS_REGEX
@@ -25,8 +25,8 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-omni-line
-    TARGET causal-cpu-omni
+    NAME cpu-rocprofsys-line
+    TARGET causal-cpu-rocprofsys
     RUN_ARGS 70 10 432525 1000000000
     CAUSAL_MODE "line"
     CAUSAL_PASS_REGEX
@@ -34,8 +34,8 @@ rocprofiler_systems_add_causal_test(
     )
 
 rocprofiler_systems_add_causal_test(
-    NAME both-omni-func
-    TARGET causal-both-omni
+    NAME both-rocprofsys-func
+    TARGET causal-both-rocprofsys
     RUN_ARGS 70 10 432525 400000000
     CAUSAL_MODE "function"
     CAUSAL_ARGS
@@ -47,9 +47,9 @@ rocprofiler_systems_add_causal_test(
         3
         --monochrome
         -g
-        ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/causal-both-omni-func
+        ${CMAKE_BINARY_DIR}/rocprof-sys-tests-config/causal-both-rocprofsys-func
         -l
-        causal-both-omni
+        causal-both-rocprofsys
         -v
         3
         -b
@@ -61,7 +61,7 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     NAME lulesh-func
-    TARGET lulesh-omni
+    TARGET lulesh-rocprofsys
     RUN_ARGS -i 35 -s 50 -p
     CAUSAL_MODE "function"
     CAUSAL_ARGS -s 0,10,25,50,75
@@ -72,7 +72,7 @@ rocprofiler_systems_add_causal_test(
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
     NAME lulesh-func-ndebug
-    TARGET lulesh-omni-ndebug
+    TARGET lulesh-rocprofsys-ndebug
     RUN_ARGS -i 35 -s 50 -p
     CAUSAL_MODE "function"
     CAUSAL_ARGS -s 0,10,25,50,75
@@ -83,7 +83,7 @@ rocprofiler_systems_add_causal_test(
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
     NAME lulesh-line
-    TARGET lulesh-omni
+    TARGET lulesh-rocprofsys
     RUN_ARGS -i 35 -s 50 -p
     CAUSAL_MODE "line"
     CAUSAL_ARGS -s 0,10,25,50,75 -S lulesh.cc
@@ -95,7 +95,7 @@ rocprofiler_systems_add_causal_test(
 # 500000000)
 set(_causal_e2e_exe_args 80 50 432525 100000000)
 set(_causal_common_args
-    "-n 5 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-omni>")
+    "-n 5 -e -s 0 10 20 30 -B $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys>")
 
 macro(
     causal_e2e_args_and_validation
@@ -113,7 +113,7 @@ macro(
 
     # arguments to validate-causal-json.py
     set(${_NAME}_valid
-        "-n 0 -i rocprof-sys-tests-output/causal-cpu-omni-${_TEST}-e2e/causal/experiments.json -v ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-omni> 10 ${_V10} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-omni> 20 ${_V20} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-omni> 30 ${_V30} ${_TOL}"
+        "-n 0 -i rocprof-sys-tests-output/causal-cpu-rocprofsys-${_TEST}-e2e/causal/experiments.json -v ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 10 ${_V10} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 20 ${_V20} ${_TOL} ${_EXPER} $<TARGET_FILE_BASE_NAME:causal-cpu-rocprofsys> 30 ${_V30} ${_TOL}"
         )
 
     # patch string for command-line
@@ -135,8 +135,8 @@ endif()
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-omni-slow-func-e2e
-    TARGET causal-cpu-omni
+    NAME cpu-rocprofsys-slow-func-e2e
+    TARGET causal-cpu-rocprofsys
     LABELS "causal-e2e"
     RUN_ARGS ${_causal_e2e_exe_args}
     CAUSAL_MODE "func"
@@ -149,8 +149,8 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-omni-fast-func-e2e
-    TARGET causal-cpu-omni
+    NAME cpu-rocprofsys-fast-func-e2e
+    TARGET causal-cpu-rocprofsys
     LABELS "causal-e2e"
     RUN_ARGS ${_causal_e2e_exe_args}
     CAUSAL_MODE "func"
@@ -163,8 +163,8 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-omni-line-100-e2e
-    TARGET causal-cpu-omni
+    NAME cpu-rocprofsys-line-100-e2e
+    TARGET causal-cpu-rocprofsys
     LABELS "causal-e2e"
     RUN_ARGS ${_causal_e2e_exe_args}
     CAUSAL_MODE "line"
@@ -177,8 +177,8 @@ rocprofiler_systems_add_causal_test(
 
 rocprofiler_systems_add_causal_test(
     SKIP_BASELINE
-    NAME cpu-omni-line-110-e2e
-    TARGET causal-cpu-omni
+    NAME cpu-rocprofsys-line-110-e2e
+    TARGET causal-cpu-rocprofsys
     LABELS "causal-e2e"
     RUN_ARGS ${_causal_e2e_exe_args}
     CAUSAL_MODE "line"
