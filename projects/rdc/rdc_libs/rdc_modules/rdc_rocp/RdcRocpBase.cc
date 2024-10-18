@@ -246,17 +246,18 @@ RdcRocpBase::RdcRocpBase() {
 
   // all fields
   static const std::map<rdc_field_t, const char*> temp_field_map_k = {
-      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_CU, "MeanOccupancyPerCU"},
-      {RDC_FI_PROF_MEAN_OCCUPANCY_PER_ACTIVE_CU, "MeanOccupancyPerActiveCU"},
+      {RDC_FI_PROF_OCCUPANCY_PERCENT, "OccupancyPercent"},
       {RDC_FI_PROF_ACTIVE_CYCLES, "GRBM_GUI_ACTIVE"},
       {RDC_FI_PROF_ACTIVE_WAVES, "SQ_WAVES"},
       {RDC_FI_PROF_ELAPSED_CYCLES, "GRBM_COUNT"},
+      {RDC_FI_PROF_TENSOR_ACTIVE_PERCENT, "MfmaUtil"}, // same as TENSOR_ACTIVE but available for more GPUs
+      {RDC_FI_PROF_GPU_UTIL_PERCENT, "GPU_UTIL"},
       // metrics below are divided by time passed
       {RDC_FI_PROF_EVAL_MEM_R_BW, "FETCH_SIZE"},
       {RDC_FI_PROF_EVAL_MEM_W_BW, "WRITE_SIZE"},
       {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
-      {RDC_FI_PROF_EVAL_FLOPS_64, "TOTAL_64_OPS"},
+      {RDC_FI_PROF_EVAL_FLOPS_64, "FP64_ACTIVE"},
   };
 
   std::vector<std::string> all_fields;
@@ -392,6 +393,11 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
     // RDC_LOG(RDC_DEBUG, "INDEX: " << gpu_index << " before[" << *value << "] after["
     //                              << (*value / elapsed) << "]");
     *value = *value / elapsed;
+  }
+  // GPU_UTIL metric is available on more GPUs than ENGINE_ACTIVE.
+  // ENGINE_ACTIVE = GPU_UTIL/100, so do the math ourselves
+  if (field == RDC_FI_PROF_GPU_UTIL_PERCENT) {
+    *value = *value / 100.0F;
   }
   return Rocp2RdcError(status);
 }
