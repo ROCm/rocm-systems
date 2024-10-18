@@ -92,6 +92,11 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t context_i
             std::make_unique<rocprofiler::context::device_counting_service>();
     }
 
+    if(ctx.device_counter_collection->conf_agents.emplace(agent_id.handle).second == false)
+    {
+        return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    }
+
     ctx.device_counter_collection->agent_data.emplace_back();
     ctx.device_counter_collection->agent_data.back().callback_data =
         rocprofiler_user_data_t{.ptr = user_data};

@@ -73,7 +73,13 @@ struct agent_callback_data
     , agent_id(rhs.agent_id)
     , cb(rhs.cb)
     , buffer(rhs.buffer)
-    {}
+    {
+        rhs.completion.handle   = 0;
+        rhs.start_signal.handle = 0;
+    }
+
+    agent_callback_data& operator=(const agent_callback_data&) = delete;
+    agent_callback_data(const agent_callback_data&)            = delete;
 
     ~agent_callback_data();
 };

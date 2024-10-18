@@ -91,6 +91,7 @@ struct dispatch_counter_collection_service
 
 struct device_counting_service
 {
+    std::unordered_set<uint64_t>                            conf_agents;
     std::vector<rocprofiler::counters::agent_callback_data> agent_data;
 
     enum class state

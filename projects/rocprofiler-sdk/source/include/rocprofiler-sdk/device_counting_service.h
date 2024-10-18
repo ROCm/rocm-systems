@@ -84,6 +84,8 @@ typedef void (*rocprofiler_device_counting_service_callback_t)(
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist.
  * @retval ::ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND Returned if the buffer is not found.
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Returned if context already has agent
+ *                                                     profiling configured for agent_id.
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
  */
 rocprofiler_status_t

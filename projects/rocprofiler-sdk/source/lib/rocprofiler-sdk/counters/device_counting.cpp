@@ -280,6 +280,7 @@ read_agent_ctx(const context::context*    ctx,
 
     for(auto& callback_data : agent_ctx.agent_data)
     {
+        if(!callback_data.profile || !callback_data.set_profile) continue;
         const auto* agent = agent::get_agent_cache(callback_data.profile->agent);
 
         // If the agent no longer exists or we don't have a profile queue, reading is an error
@@ -402,6 +403,8 @@ start_agent_ctx(const context::context* ctx)
             break;
         }
 
+        callback_data.set_profile = false;
+
         // Ask the tool what profile we should use for this agent
         callback_data.cb(
             {.handle = ctx->context_idx},
@@ -455,7 +458,6 @@ start_agent_ctx(const context::context* ctx)
             continue;
         }
 
-        callback_data.set_profile = false;
         CHECK(callback_data.profile);
 
         // Generate necessary structures in the context (packet gen, etc) to process
