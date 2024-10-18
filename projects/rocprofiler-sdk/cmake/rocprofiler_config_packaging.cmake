@@ -77,7 +77,7 @@ set(COMPONENT_NAME_roctx "rocprofiler-sdk-roctx")
 
 set(COMPONENT_DEP_core "rocprofiler-sdk-roctx (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_docs "")
-set(COMPONENT_DEP_tests "rocprofiler-sdk (= ${PROJECT_VERSION})")
+set(COMPONENT_DEP_tests "rocprofiler-sdk (>= ${PROJECT_VERSION})")
 set(COMPONENT_DEP_roctx "")
 
 set(COMPONENT_DESC_core "rocprofiler-sdk libraries, headers, samples, and tools")

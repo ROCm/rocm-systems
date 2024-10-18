@@ -109,6 +109,8 @@ CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  ag
     profile.events      = events.data();
     profile.event_count = static_cast<uint32_t>(events.size());
 
+    ROCP_TRACE << "profile events count: " << profile.event_count;
+
     hsa_status_t status = aqlprofile_pmc_create_packets(&this->handle,
                                                         &this->packets,
                                                         profile,
