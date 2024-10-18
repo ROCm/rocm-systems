@@ -442,5 +442,38 @@ int IOLink::UpdateP2pCapability(void) {
     return 0;
 }
 
+IOLinkDirectionType_t DiscoverIOLinkPerNodeDirection(uint32_t src_node_idx, uint32_t dst_node_idx)
+{
+    /*  Note: Lets look at the IOLinks of the source node and see if there is a link to the target node
+     *        Then we do the same inverting the actors (source and target) and see if there is a link
+     */
+    auto direction_type(IOLinkDirectionType_t::kNonDirectional);
+    auto src_links_list = IOLinksPerNodeList_t();
+    auto dst_links_list = IOLinksPerNodeList_t();
+    if (auto src_discover_result = DiscoverLinksPerNode(src_node_idx, &src_links_list, IO_LINK_DIRECTORY);
+        src_discover_result == 0) {
+        for (const auto& [key, value] : src_links_list) {
+            if (key == dst_node_idx) {
+                direction_type = IOLinkDirectionType_t::kUniDirectional;
+                break;
+            }
+        }
+    }
+
+    if (auto dst_discover_result = DiscoverLinksPerNode(dst_node_idx, &dst_links_list, IO_LINK_DIRECTORY);
+        dst_discover_result == 0) {
+        for (const auto& [key, value] : dst_links_list) {
+            if (key == src_node_idx) {
+                direction_type = (direction_type == IOLinkDirectionType_t::kUniDirectional ?
+                                 IOLinkDirectionType_t::kBiDirectional : IOLinkDirectionType_t::kUniDirectional);
+                break;
+            }
+        }
+    }
+
+    return direction_type;
+}
+
+
 }  // namespace smi
 }  // namespace amd

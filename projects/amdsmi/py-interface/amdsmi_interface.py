@@ -668,36 +668,22 @@ def amdsmi_get_cpusocket_handles() -> List[amdsmi_wrapper.amdsmi_socket_handle]:
     Returns:
         `List`: List containing all of the found cpu socket handles.
     """
-    socket_handles = amdsmi_get_socket_handles()
-    cpu_handles = []
-    type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU
-    for socket in socket_handles:
-        cpu_count = ctypes.c_uint32()
-        null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
-        _check_res(
-            amdsmi_wrapper.amdsmi_get_processor_handles_by_type(
-                socket,
-                type,
-                null_ptr,
-                ctypes.byref(cpu_count),
-            )
-        )
-        processor_handles = (
-            amdsmi_wrapper.amdsmi_processor_handle * cpu_count.value)()
-        _check_res(
-            amdsmi_wrapper.amdsmi_get_processor_handles_by_type(
-                socket,
-                type,
-                processor_handles,
-                ctypes.byref(cpu_count)
-            )
-        )
-        cpu_handles.extend(
-            [
-                amdsmi_wrapper.amdsmi_processor_handle(processor_handles[dev_idx])
-                for dev_idx in range(cpu_count.value)
-            ]
-        )
+    cpu_count = ctypes.c_uint32(0)
+    null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_handles(
+            ctypes.byref(cpu_count), null_ptr)
+    )
+    proc_handles = (amdsmi_wrapper.amdsmi_processor_handle *
+                      cpu_count.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpu_handles(
+            ctypes.byref(cpu_count), proc_handles)
+    )
+    cpu_handles = [
+        amdsmi_wrapper.amdsmi_processor_handle(proc_handles[sock_idx])
+        for sock_idx in range(cpu_count.value)
+    ]
     return cpu_handles
 
 
@@ -761,37 +747,23 @@ def amdsmi_get_processor_handles() -> List[amdsmi_wrapper.amdsmi_processor_handl
     return devices
 
 def amdsmi_get_cpucore_handles() -> List[amdsmi_wrapper.amdsmi_processor_handle]:
-    socket_handles = amdsmi_get_socket_handles()
-    core_handles = []
-    type = amdsmi_wrapper.AMDSMI_PROCESSOR_TYPE_AMD_CPU_CORE
+    cores_count = ctypes.c_uint32(0)
+    null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpucore_handles(
+            ctypes.byref(cores_count), null_ptr)
+    )
+    proc_handles = (amdsmi_wrapper.amdsmi_processor_handle *
+                      cores_count.value)()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_cpucore_handles(
+            ctypes.byref(cores_count), proc_handles)
+    )
+    core_handles = [
+        amdsmi_wrapper.amdsmi_processor_handle(proc_handles[sock_idx])
+        for sock_idx in range(cores_count.value)
+    ]
 
-    for socket in socket_handles:
-        core_count = ctypes.c_uint32()
-        null_ptr = ctypes.POINTER(amdsmi_wrapper.amdsmi_processor_handle)()
-        _check_res(
-            amdsmi_wrapper.amdsmi_get_processor_handles_by_type(
-                socket,
-                type,
-                null_ptr,
-                ctypes.byref(core_count),
-            )
-        )
-        c_handles = (
-            amdsmi_wrapper.amdsmi_processor_handle * core_count.value)()
-        _check_res(
-            amdsmi_wrapper.amdsmi_get_processor_handles_by_type(
-                socket,
-                type,
-                c_handles,
-                ctypes.byref(core_count)
-            )
-        )
-        core_handles.extend(
-            [
-                amdsmi_wrapper.amdsmi_processor_handle(c_handles[dev_idx])
-                for dev_idx in range(core_count.value)
-            ]
-        )
     return core_handles
 
 

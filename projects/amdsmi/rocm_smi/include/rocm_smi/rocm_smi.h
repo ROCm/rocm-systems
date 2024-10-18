@@ -3647,12 +3647,9 @@ rsmi_status_t rsmi_dev_process_isolation_set(uint32_t dv_ind,
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] sclean the clean flag. Only 1 will take effect and other number
- *  are reserved for future usage.
- *
  *  @return ::RSMI_STATUS_SUCCESS is returned upon successful call, non-zero on fail
  */
-rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind, uint32_t sclean);
+rsmi_status_t rsmi_dev_gpu_run_cleaner_shader(uint32_t dv_ind);
 
 /** @} */  // end of PerfCont
 

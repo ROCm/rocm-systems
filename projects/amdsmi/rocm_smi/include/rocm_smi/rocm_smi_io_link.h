@@ -82,6 +82,14 @@ typedef enum _LINK_DIRECTORY_TYPE {
   P2P_LINK_DIRECTORY         = 1
 } LINK_DIRECTORY_TYPE;
 
+enum class IOLinkDirectionType_t
+{
+    kNonDirectional = 0,
+    kUniDirectional = 1,
+    kBiDirectional = 2,
+};
+
+
 class IOLink {
  public:
     explicit IOLink(uint32_t node_indx, uint32_t link_indx, LINK_DIRECTORY_TYPE link_dir_type) :
@@ -121,6 +129,9 @@ class IOLink {
     rsmi_p2p_capability_t link_cap_;
 };
 
+using IOLinksPerNodeList_t = std::map<uint32_t, std::shared_ptr<IOLink>>;
+using IOLinksPerNodeListPtr_t = IOLinksPerNodeList_t*;
+
 int
 DiscoverIOLinksPerNode(uint32_t node_indx, std::map<uint32_t,
                        std::shared_ptr<IOLink>> *links);
@@ -136,6 +147,10 @@ DiscoverIOLinks(std::map<std::pair<uint32_t, uint32_t>,
 int
 DiscoverP2PLinks(std::map<std::pair<uint32_t, uint32_t>,
                  std::shared_ptr<IOLink>> *links);
+
+IOLinkDirectionType_t DiscoverIOLinkPerNodeDirection(uint32_t src_node_idx,
+                                                     uint32_t dst_node_idx);
+
 
 }  // namespace smi
 }  // namespace amd

@@ -181,16 +181,6 @@ try:
 except OSError as error:
     print(error)
     print("Unable to find amdsmi library try installing amd-smi-lib from your package manager")
-class FunctionFactoryStub:
-    def __getattr__(self, _):
-      return ctypes.CFUNCTYPE(lambda y:y)
-
-# libraries['FIXME_STUB'] explanation
-# As you did not list (-l libraryname.so) a library that exports this function
-# This is a non-working stub instead. 
-# You can either re-run clan2py with -l /path/to/library.so
-# Or manually fix this by comment the ctypes.CDLL loading
-_libraries['FIXME_STUB'] = FunctionFactoryStub() #  ctypes.CDLL('FIXME_STUB')
 
 
 
@@ -2081,9 +2071,9 @@ amdsmi_shut_down.argtypes = []
 amdsmi_get_socket_handles = _libraries['libamd_smi.so'].amdsmi_get_socket_handles
 amdsmi_get_socket_handles.restype = amdsmi_status_t
 amdsmi_get_socket_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
-amdsmi_get_cpusocket_handles = _libraries['FIXME_STUB'].amdsmi_get_cpusocket_handles
-amdsmi_get_cpusocket_handles.restype = amdsmi_status_t
-amdsmi_get_cpusocket_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
+amdsmi_get_cpu_handles = _libraries['libamd_smi.so'].amdsmi_get_cpu_handles
+amdsmi_get_cpu_handles.restype = amdsmi_status_t
+amdsmi_get_cpu_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
 size_t = ctypes.c_uint64
 amdsmi_get_socket_info = _libraries['libamd_smi.so'].amdsmi_get_socket_info
 amdsmi_get_socket_info.restype = amdsmi_status_t
@@ -2100,9 +2090,9 @@ amdsmi_get_processor_handles_by_type.argtypes = [amdsmi_socket_handle, processor
 amdsmi_get_processor_handles = _libraries['libamd_smi.so'].amdsmi_get_processor_handles
 amdsmi_get_processor_handles.restype = amdsmi_status_t
 amdsmi_get_processor_handles.argtypes = [amdsmi_socket_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
-amdsmi_get_cpucore_handles = _libraries['FIXME_STUB'].amdsmi_get_cpucore_handles
+amdsmi_get_cpucore_handles = _libraries['libamd_smi.so'].amdsmi_get_cpucore_handles
 amdsmi_get_cpucore_handles.restype = amdsmi_status_t
-amdsmi_get_cpucore_handles.argtypes = [amdsmi_cpusocket_handle, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
+amdsmi_get_cpucore_handles.argtypes = [ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(ctypes.POINTER(None))]
 amdsmi_get_processor_type = _libraries['libamd_smi.so'].amdsmi_get_processor_type
 amdsmi_get_processor_type.restype = amdsmi_status_t
 amdsmi_get_processor_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(processor_type_t)]
@@ -2818,8 +2808,9 @@ __all__ = \
     'amdsmi_get_cpu_dimm_power_consumption',
     'amdsmi_get_cpu_dimm_temp_range_and_refresh_rate',
     'amdsmi_get_cpu_dimm_thermal_sensor', 'amdsmi_get_cpu_family',
-    'amdsmi_get_cpu_fclk_mclk', 'amdsmi_get_cpu_hsmp_proto_ver',
-    'amdsmi_get_cpu_model', 'amdsmi_get_cpu_prochot_status',
+    'amdsmi_get_cpu_fclk_mclk', 'amdsmi_get_cpu_handles',
+    'amdsmi_get_cpu_hsmp_proto_ver', 'amdsmi_get_cpu_model',
+    'amdsmi_get_cpu_prochot_status',
     'amdsmi_get_cpu_pwr_svi_telemetry_all_rails',
     'amdsmi_get_cpu_smu_fw_version',
     'amdsmi_get_cpu_socket_c0_residency',
@@ -2830,8 +2821,8 @@ __all__ = \
     'amdsmi_get_cpu_socket_power', 'amdsmi_get_cpu_socket_power_cap',
     'amdsmi_get_cpu_socket_power_cap_max',
     'amdsmi_get_cpu_socket_temperature', 'amdsmi_get_cpucore_handles',
-    'amdsmi_get_cpusocket_handles', 'amdsmi_get_energy_count',
-    'amdsmi_get_esmi_err_msg', 'amdsmi_get_fw_info',
+    'amdsmi_get_energy_count', 'amdsmi_get_esmi_err_msg',
+    'amdsmi_get_fw_info',
     'amdsmi_get_gpu_accelerator_partition_profile',
     'amdsmi_get_gpu_activity', 'amdsmi_get_gpu_asic_info',
     'amdsmi_get_gpu_available_counters',

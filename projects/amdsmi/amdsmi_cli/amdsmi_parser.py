@@ -635,10 +635,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-c', '--cache', action='store_true', required=False, help=cache_help)
             static_parser.add_argument('-B', '--board', action='store_true', required=False, help=board_help)
             static_parser.add_argument('-R', '--process-isolation', action='store_true', required=False, help=process_isolation_help)
-            static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
 
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
+                static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
                 static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--soc-pstate', action='store_true', required=False, help=soc_pstate_help)
@@ -1039,8 +1039,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_power_cap_help = "Set power capacity limit"
         set_soc_pstate_help = "Set the GPU soc pstate policy using policy id\n"
         set_xgmi_plpd_help = "Set the GPU XGMI per-link power down policy using policy id\n"
-        set_process_isolation_help = "Enable or disable the GPU process isolation: 0 for disable and 1 for enable.\n"
         set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \nOf form: amd-smi set -L (sclk | mclk) (min | max) value"
+        set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
@@ -1131,7 +1131,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_compute_help = "Reset compute partitions on the specified GPU"
         reset_memory_help = "Reset memory partitions on the specified GPU"
         reset_power_cap_help = "Reset power capacity limit to max capable"
-        reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs"
+        reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
 
         # Create reset subparser
         reset_parser = subparsers.add_parser('reset', help=reset_help, description=reset_subcommand_help)
@@ -1207,7 +1207,10 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-m', '--mem', action='store_true', required=False, help=mem_util_help)
         monitor_parser.add_argument('-n', '--encoder', action='store_true', required=False, help=encoder_util_help)
         monitor_parser.add_argument('-d', '--decoder', action='store_true', required=False, help=decoder_util_help)
-        monitor_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
+
+        if not self.helpers.is_virtual_os():
+            monitor_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
+
         monitor_parser.add_argument('-v', '--vram-usage', action='store_true', required=False, help=mem_usage_help)
         monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_bandwidth_help)
         monitor_parser.add_argument('-q', '--process', action='store_true', required=False, help=process_help)

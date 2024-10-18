@@ -311,8 +311,6 @@ class AMDSMICommands():
             args.board = board
         if driver:
             args.driver = driver
-        if ras:
-            args.ras = ras
         if vram:
             args.vram = vram
         if cache:
@@ -321,12 +319,14 @@ class AMDSMICommands():
             args.process_isolation = process_isolation
 
         # Store args that are applicable to the current platform
-        current_platform_args = ["asic", "bus", "vbios", "driver", "ras",
+        current_platform_args = ["asic", "bus", "vbios", "driver",
                                  "vram", "cache", "board", "process_isolation"]
-        current_platform_values = [args.asic, args.bus, args.vbios, args.driver, args.ras,
+        current_platform_values = [args.asic, args.bus, args.vbios, args.driver,
                                    args.vram, args.cache, args.board, args.process_isolation]
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
+            if ras:
+                args.ras = ras
             if partition:
                 args.partition = partition
             if limit:
@@ -336,7 +336,8 @@ class AMDSMICommands():
             if xgmi_plpd:
                 args.xgmi_plpd = xgmi_plpd
             current_platform_args += ["ras", "limit", "partition", "soc_pstate", "xgmi_plpd"]
-            current_platform_values += [args.ras, args.limit, args.partition, args.soc_pstate, args.xgmi_plpd]
+            current_platform_values += [args.ras, args.limit, args.partition,
+                                        args.soc_pstate, args.xgmi_plpd]
 
         if self.helpers.is_linux() and not self.helpers.is_virtual_os():
             if numa:
@@ -1249,10 +1250,9 @@ class AMDSMICommands():
                 args.temperature = temperature
             if pcie:
                 args.pcie = pcie
-            if throttle:
-                args.throttle = throttle
-            current_platform_args += ["usage", "power", "clock", "temperature", "pcie", "throttle"]
-            current_platform_values += [args.usage, args.power, args.clock, args.temperature, args.pcie, args.throttle]
+            current_platform_args += ["usage", "power", "clock", "temperature", "pcie"]
+            current_platform_values += [args.usage, args.power, args.clock,
+                                        args.temperature, args.pcie]
 
         # Only args that are applicable to Hypervisors and BM Linux
         if self.helpers.is_hypervisor() or (self.helpers.is_baremetal() and self.helpers.is_linux()):
@@ -1276,8 +1276,12 @@ class AMDSMICommands():
                 args.xgmi_err = xgmi_err
             if energy:
                 args.energy = energy
-            current_platform_args += ["fan", "voltage_curve", "overdrive", "perf_level", "xgmi_err", "energy"]
-            current_platform_values += [args.fan, args.voltage_curve, args.overdrive, args.perf_level, args.xgmi_err, args.energy]
+            if throttle:
+                args.throttle = throttle
+            current_platform_args += ["fan", "voltage_curve", "overdrive", "perf_level",
+                                      "xgmi_err", "energy", "throttle"]
+            current_platform_values += [args.fan, args.voltage_curve, args.overdrive,
+                                        args.perf_level, args.xgmi_err, args.energy, args.throttle]
 
         if self.helpers.is_hypervisor():
             if schedule:
@@ -1291,7 +1295,8 @@ class AMDSMICommands():
             if xgmi:
                 args.xgmi = xgmi
             current_platform_args += ["schedule", "guard", "guest_data", "fb_usage", "xgmi"]
-            current_platform_values += [args.schedule, args.guard, args.guest_data, args.fb_usage, args.xgmi]
+            current_platform_values += [args.schedule, args.guard, args.guest_data,
+                                        args.fb_usage, args.xgmi]
 
         # Handle No GPU passed
         if args.gpu == None:
@@ -4512,6 +4517,22 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
+
+        # handle platform for ecc
+        if self.helpers.is_virtual_os():
+            args.ecc = False
+            if not any([args.power_usage, args.temperature, args.gfx, args.mem,
+                    args.encoder, args.decoder, args.vram_usage, args.pcie, args.violation]):
+                args.power_usage = args.temperature = args.gfx = args.mem = \
+                args.encoder = args.decoder = \
+                args.vram_usage = args.pcie = args.violation = True
+        else:
+            if not any([args.power_usage, args.temperature, args.gfx, args.mem,
+                    args.encoder, args.decoder, args.ecc,
+                    args.vram_usage, args.pcie, args.violation]):
+                args.power_usage = args.temperature = args.gfx = args.mem = \
+                args.encoder = args.decoder = args.ecc = \
+                args.vram_usage = args.pcie = args.violation = True
 
         # If all arguments are False, the print all values
         # Don't include process in this logic as it's an optional edge case

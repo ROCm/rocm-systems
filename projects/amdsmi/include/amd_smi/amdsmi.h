@@ -1973,33 +1973,32 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
 
 #ifdef ENABLE_ESMI_LIB
 /**
- *  @brief Get the list of cpu socket handles in the system.
+ *  @brief Get the list of cpu handles in the system.
  *
  *  @platform{cpu_bm}
  *
  *  @details Depends on AMDSMI_INIT_AMD_CPUS flag passed to ::amdsmi_init.
- *  The socket handles can be used to query the processor handles in that socket, which
- *  will be used in other APIs to get processor detail information.
+ *  The processor handles can be used in other APIs to get processor detail information.
  *
- *  @param[in,out] socket_count As input, the value passed
- *  through this parameter is the number of ::amdsmi_cpusocket_handle that
- *  may be safely written to the memory pointed to by @p socket_handles. This is the
- *  limit on how many socket handles will be written to @p socket_handles. On return, @p
- *  socket_count will contain the number of socket handles written to @p socket_handles,
- *  or the number of socket handles that could have been written if enough memory had been
+ *  @param[in,out] cpu_count As input, the value passed
+ *  through this parameter is the number of ::amdsmi_processor_handle that
+ *  may be safely written to the memory pointed to by @p processor_handles. This is the
+ *  limit on how many processor handles will be written to @p processor_handles. On return, @p
+ *  socket_count will contain the number of processor handles written to @p processor_handles,
+ *  or the number of processor handles that could have been written if enough memory had been
  *  provided.
- *  If @p socket_handles is NULL, as output, @p socket_count will contain
- *  how many sockets are available to read in the system.
+ *  If @p processor_handles is NULL, as output, @p cpu_count will contain
+ *  how many processors are available to read in the system.
  *
  *  @param[in,out] socket_handles A pointer to a block of memory to which the
- *  ::amdsmi_cpusocket_handle values will be written. This value may be NULL.
- *  In this case, this function can be used to query how many sockets are
+ *  ::amdsmi_processor_handle values will be written. This value may be NULL.
+ *  In this case, this function can be used to query how many processors are
  *  available to read in the system.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
-amdsmi_status_t amdsmi_get_cpusocket_handles(uint32_t *socket_count,
-                amdsmi_cpusocket_handle* socket_handles);
+amdsmi_status_t amdsmi_get_cpu_handles(uint32_t *cpu_count,
+                                       amdsmi_processor_handle *processor_handles);
 #endif
 
 /**
@@ -2134,21 +2133,20 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
 
 #ifdef ENABLE_ESMI_LIB
 /**
- *  @brief Get the list of the cpu core handles associated to a cpu socket.
+ *  @brief Get the list of the cpu core handles in a system.
  *
  *  @platform{cpu_bm}
  *
- *  @details This function retrieves the cpu core handles of a cpu socket.
- *  @param[in] socket_handle The cpu socket to query
- *  @param[in,out] processor_count As input, the value passed
+ *  @details This function retrieves the cpu core handles of a system.
+ *  @param[in,out] cores_count As input, the value passed
  *  through this parameter is the number of ::amdsmi_processor_handle's that
  *  may be safely written to the memory pointed to by @p processor_handles. This is the
- *  limit on how many processor handles will be written to @p processor_handles. On return, @p
- *  processor_count will contain the number of processor handles written to @p processor_handles,
- *  or the number of processor handles that could have been written if enough memory had been
+ *  limit on how many core handles will be written to @p processor_handles. On return, @p
+ *  cores_count will contain the number of core processor handles written to @p processor_handles,
+ *  or the number of core processor handles that could have been written if enough memory had been
  *  provided.
  *  If @p processor_handles is NULL, as output, @p processor_count will contain
- *  how many cpu cores are available to read for the cpu socket.
+ *  how many cpu cores are available to read in the system.
  *
  *  @param[in,out] processor_handles A pointer to a block of memory to which the
  *  ::amdsmi_processor_handle values will be written. This value may be NULL.
@@ -2157,9 +2155,8 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
 */
-amdsmi_status_t amdsmi_get_cpucore_handles(amdsmi_cpusocket_handle socket_handle,
-                                    uint32_t *processor_count,
-                                    amdsmi_processor_handle* processor_handles);
+amdsmi_status_t amdsmi_get_cpucore_handles(uint32_t *cores_count,
+                                           amdsmi_processor_handle* processor_handles);
 #endif
 
 /**

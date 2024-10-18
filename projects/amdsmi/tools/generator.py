@@ -106,6 +106,48 @@ def write_header(full_path_file_name):
     shutil.move(abs_path, full_path_file_name)
 
 
+def write_file(full_path_file_name, contents):
+    fh, abs_path = tempfile.mkstemp()
+    with os.fdopen(fh, 'w') as new_file:
+        for line in contents:
+            new_file.write(f'{line}\n')
+
+    shutil.copymode(full_path_file_name, abs_path)
+    os.remove(full_path_file_name)
+    shutil.move(abs_path, full_path_file_name)
+
+
+def find_replacement(search_str1, search_str2, line):
+    pos1 = line.find(search_str1)
+    if pos1 < 0:
+        return ''
+
+    if len(search_str2):
+        pos2 = line.find(search_str2, pos1)
+        if pos2 < 0:
+            return ''
+    else:
+        pos2 = len(line) - 1
+
+    return line[pos1:pos2+1]
+
+
+def find_line_num(search_str, line):
+    pos1 = line.find(search_str)
+    if pos1 < 0:
+        return 0
+    items = line[pos1:].split(':')
+    if len(items) < 2:
+        return 0
+
+    line_num = items[1].strip()
+    if not line_num.isdigit():
+        return 0
+
+    line_num = int(line_num)
+    return (line_num)
+
+
 def main():
     output_file, input_file, library, clang_extra_args =  parseArgument()
 
@@ -157,54 +199,150 @@ except OSError as error:
     arguments.append("--clang-args=-I" + clang_include_dir + clang_extra_args)
     clangToPy(arguments)
 
-    write_header(output_file)
     replace_line(output_file, line_to_replace, new_line)
+    write_header(output_file)
 
-    # Custom handling for anonymous struct within amdsmi_bdf_t in Linux
+    # Custom handling for <anonymous|unnamed> struct in Linux
     if os_platform == "Linux":
-        # Get line number for anonymous error in struct_amdsmi_bdf_t
-        reference_line = "uint64_t function_number :"
-        line_number = -1
-        with open(input_file, 'r') as file:
-            for input_file_line_number, line in enumerate(file, 1):
-                if reference_line in line:
-                    line_number = input_file_line_number - 1 # Anonymous line will error on the line before this
-                    break
+        with open(input_file, 'r') as fin:
+            input_file_contents = fin.read()
+        input_file_array = input_file_contents.split('\n')
 
-        if line_number == -1:
-            print("Could not find reference line in amdsmi.h for amdsmi_bdf_t struct. Skipping anonymous struct replacement.")
-        else:
-            print(f"Found reference line in amdsmi.h for amdsmi_bdf_t struct at line {line_number}")
-            union_anon_line = "union_amdsmi_bdf_t._anonymous_ = ('_0',)"
-            replace_line(output_file, union_anon_line, "")
+        with open(output_file, 'r') as fin:
+            output_file_contents = fin.read()
+        output_file_array = output_file_contents.split('\n')
 
-            internal_union_anon_line = f"('_0', struct_struct (anonymous at amdsmi.h:{line_number}:3))"
-            internal_union_struct_line = "('struct_amdsmi_bdf_t', struct_amdsmi_bdf_t)"
-            replace_line(output_file, internal_union_anon_line, internal_union_struct_line)
+        # Find all unamed occurences in the output_file
+        struct_name_dict = {}
+        for index, line in enumerate(output_file_array):
+            if 'amdsmi.h:' in line:
+                # Handling "struct_struct (<anonymous:unnamed> at amdsmi.h:<num>:<num>)"
+                if 'anonymous' in line or 'unnamed' in line:
+                    search_name = 'unnamed'
+                    if 'anonymous' in line:
+                        search_name = 'anonymous'
 
-            struct_anon_line = f"struct_struct (anonymous at amdsmi.h:{line_number}:3)"
-            struct_amdsmi_bdf_t_line = "struct_amdsmi_bdf_t"
-            replace_line(output_file, struct_anon_line, struct_amdsmi_bdf_t_line)
+                    # Find the amdsmi.h line number for this instance
+                    # Example 1:
+                    #    class struct_struct (anonymous at amdsmi.h:370:9)(Structure):
+                    #    line_num = 370
+                    # Example 2:
+                    #    class struct_struct (unnamed at amdsmi.h:782:9)(Structure):
+                    #    line_num = 782
+                    line_num = find_line_num(search_name, line)
+                    if line_num == 0:
+                        print(f'Error: {index+1}: Could determine amdsmi.h line number in {line}, skipping replacement')
+                        continue
 
-            struct_anon_all_line = "'struct_struct (anonymous at"
-            struct_amdsmi_bdf_t_line = "'struct_amdsmi_bdf_t',"
-            replace_line(output_file, struct_anon_all_line, struct_amdsmi_bdf_t_line)
+                    # Using in amdsmi.h starting at the line_num to find the structure name
+                    # Search the following lines for "open curly bracket" that has a name
+                    # Example 1:
+                    #    369: typedef union {
+                    #    370:     struct {
+                    #    371:         uint64_t function_number : 3;
+                    #    375:     };
+                    #    377: } amdsmi_bdf_t;
+                    #    struct_name = amdsmi_bdf_t
+                    # Example 2:
+                    #    782: struct {
+                    #    783:     uint64_t gfx;
+                    #    786: } engine_usage;
+                    #    struct_name = engine_usage
+                    struct_name = ''
+                    for i in range(1, 50):
+                        input_line = input_file_array[line_num + i]
+                        # { matches close curly brackets on next line
+                        if '}' in input_line:
+                            struct_name = input_line.strip()[1:-1].strip()
+                            if len(struct_name):
+                                struct_name = struct_name.split('[')[0] # ]
+                                break
+                    if not len(struct_name):
+                        print(f'Error: {index+1}: Could not find struct name using line number {line_num}, skipping replacement')
+                        continue
 
-            struct_anon_all_line = ", 'struct_struct"
-            replace_line(output_file, struct_anon_all_line, ",")
+                    # Generate the replacement for this line
+                    # Example:
+                    #     class struct_struct (unnamed at amdsmi.h:782:9)(Structure):
+                    # becomes
+                    #     class struct_engine_usage(Structure):
+                    str_replace = find_replacement('struct_struct', ')', line)
+                    if len(str_replace) > 0:
+                        str_with = f'struct_{struct_name}'
+                    else:
+                        # Example
+                        #     (unnamed at amdsmi.h:787:9)', 'uint32_t', 'uint64_t', 'uint8_t',
+                        # becomes
+                        #     'struct_memory_usage', 'uint32_t', 'uint64_t', 'uint8_t',
+                        str_replace = find_replacement(f'({search_name}', ')', line)
+                        if len(str_replace) == 0:
+                            print(f'Error: {index+1}: Could not find structure name in {line}, skipping replacement')
+                            continue
+                        str_with = f"'struct_{struct_name}"
 
-            struct_anon_all_line = "(anonymous at "
-            struct_amdsmi_bdf_t_line = "'struct_amdsmi_bdf_t',"
-            replace_line(output_file, struct_anon_all_line, struct_amdsmi_bdf_t_line)
+                    # Save the line number and struct_name association for possible additional replacements
+                    if line_num not in struct_name_dict:
+                        struct_name_dict[line_num] = struct_name
 
-            struct_anon_all_line_to_remove = f"amdsmi.h:{line_number}:3)', "
-            replace_line(output_file, struct_anon_all_line_to_remove, "")
+                    # Do the replace
+                    new_line = line.replace(str_replace, str_with)
 
-        # Custom handling to ensure amdsmi_get_utilization_count doesn't multiply the struct by 0
-        print(f"Replacing amdsmi_get_utilization_count line in {output_file}")
-        utilization_count_line_bad = "amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, struct_amdsmi_utilization_counter_t * 0, uint32_t, ctypes.POINTER(ctypes.c_uint64)]"
-        utilization_count_line_good = "amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]"
-        replace_line(output_file, utilization_count_line_bad, utilization_count_line_good)
+                    # Look for special replacements that has the struct_name
+                    # Example
+                    #     ('_0', struct_struct (anonymous at amdsmi.h:370:9)),
+                    # becomes
+                    #     ('struct_amdsmi_bdf_t', struct_amdsmi_bdf_t),
+                    if '_0' in new_line:
+                        new_line = new_line.replace('_0', f'struct_{struct_name}')
+
+                    # Look for special replacements that has an amdsmi.h:
+                    # Example
+                    #     amdsmi.h:370:9)', 'uint8_t',
+                    # becomes
+                    #     'uint8_t,
+                    if 'amdsmi.h:' in new_line:
+                        str_replace = find_replacement('amdsmi.h:', ',', line)
+                        if len(str_replace) > 0:
+                            new_line = new_line.replace(str_replace, '')
+
+                    # Save the replaced line into the array
+                    output_file_array[index] = new_line
+
+            # Look for special replacements
+            new_line = output_file_array[index]
+
+            # Example
+            #     union_amdsmi_bdf_t._anonymous_ = ('_0',)
+            # becomes
+            #
+            if '_anonymous_' in new_line:
+                new_line = ''
+                output_file_array[index] = new_line
+
+            # Example
+            #     'struct_pcie_static_', 'struct_struct (anonymous at
+            # becomes
+            #     'struct_pcie_static_',
+            name = ", 'struct_struct"
+            if name in new_line:
+                str_replace = find_replacement(name, '', new_line)
+                if len(str_replace) > 0:
+                    new_line = new_line.replace(str_replace, ',')
+                    output_file_array[index] = new_line
+
+            # Example
+            #     amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, struct_amdsmi_utilization_counter_t * 0, uint32_t, ctypes.POINTER(ctypes.c_uint64)]
+            # becomes
+            #     amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]
+            name = "amdsmi_get_utilization_count.argtypes"
+            if name in new_line:
+                str_replace = find_replacement(name, '', new_line)
+                if len(str_replace) > 0:
+                    str_with = 'amdsmi_get_utilization_count.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_utilization_counter_t), uint32_t, ctypes.POINTER(ctypes.c_uint64)]'
+                    new_line = new_line.replace(str_replace, str_with)
+                    output_file_array[index] = new_line
+
+        write_file(output_file, output_file_array)
 
 if __name__ == "__main__":
     main()
