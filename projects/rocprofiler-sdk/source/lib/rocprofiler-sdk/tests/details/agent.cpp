@@ -122,7 +122,7 @@ AcquireAgentInfoEntry(hsa_agent_t agent, agent_info_t* agent_i)
     RET_IF_HSA_ERR(err);
 
     // Get profile supported by the agent
-    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_i->agent_profile);
+    err = hsa_agent_get_info(agent, HSA_AGENT_INFO_PROFILE, &agent_i->device_counting_service);
     RET_IF_HSA_ERR(err);
 
     // Get floating-point rounding mode

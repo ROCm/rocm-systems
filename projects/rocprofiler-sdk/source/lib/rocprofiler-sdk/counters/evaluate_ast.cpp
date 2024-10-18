@@ -509,7 +509,11 @@ EvaluateAST::read_pkt(const aql::CounterPacketConstruct* pkt_gen, hsa::AQLPacket
             return HSA_STATUS_SUCCESS;
         },
         &aql_data);
-    CHECK(status == HSA_STATUS_SUCCESS);
+
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        ROCP_ERROR << "AqlProfile could not decode packet";
+    }
     return ret;
 }
 

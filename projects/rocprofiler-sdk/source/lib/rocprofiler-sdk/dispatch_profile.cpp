@@ -39,10 +39,10 @@ extern "C" {
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_configure_buffered_dispatch_profile_counting_service(
+rocprofiler_configure_buffered_dispatch_counting_service(
     rocprofiler_context_id_t                         context_id,
     rocprofiler_buffer_id_t                          buffer_id,
-    rocprofiler_profile_counting_dispatch_callback_t callback,
+    rocprofiler_dispatch_counting_service_callback_t callback,
     void*                                            callback_data_args)
 {
     return rocprofiler::counters::configure_buffered_dispatch(
@@ -62,9 +62,9 @@ rocprofiler_configure_buffered_dispatch_profile_counting_service(
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_configure_callback_dispatch_profile_counting_service(
+rocprofiler_configure_callback_dispatch_counting_service(
     rocprofiler_context_id_t                         context_id,
-    rocprofiler_profile_counting_dispatch_callback_t dispatch_callback,
+    rocprofiler_dispatch_counting_service_callback_t dispatch_callback,
     void*                                            dispatch_callback_args,
     rocprofiler_profile_counting_record_callback_t   record_callback,
     void*                                            record_callback_args)

@@ -43,7 +43,7 @@
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/counters.h>
-#include <rocprofiler-sdk/dispatch_profile.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
@@ -428,11 +428,11 @@ struct scratch_memory_callback_record_t
 
 struct profile_counting_record
 {
-    profile_counting_record(rocprofiler_profile_counting_dispatch_record_t hdr)
+    profile_counting_record(rocprofiler_dispatch_counting_service_record_t hdr)
     : header{hdr}
     {}
 
-    rocprofiler_profile_counting_dispatch_record_t header = {};
+    rocprofiler_dispatch_counting_service_record_t header = {};
     std::vector<rocprofiler_record_counter_t>      data   = {};
 
     profile_counting_record()                                   = default;
@@ -501,7 +501,7 @@ set_external_correlation_id(rocprofiler_thread_id_t                            t
 }
 
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_profile_config_id_t*             config,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
@@ -584,7 +584,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     }
 
     // Create a colleciton profile for the counters
-    rocprofiler_profile_config_id_t profile;
+    rocprofiler_profile_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(rocprofiler_create_profile_config(dispatch_data.dispatch_info.agent_id,
                                                        collect_counters.data(),
                                                        collect_counters.size(),
@@ -839,7 +839,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                 header->kind == ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER)
         {
             auto* profiler_record =
-                static_cast<rocprofiler_profile_counting_dispatch_record_t*>(header->payload);
+                static_cast<rocprofiler_dispatch_counting_service_record_t*>(header->payload);
             counter_collection_bf_records.emplace_back(*profiler_record);
         }
         else if(header->category == ROCPROFILER_BUFFER_CATEGORY_COUNTERS &&
@@ -848,7 +848,7 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
             auto* profiler_record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             if(counter_collection_bf_records.empty())
                 throw std::runtime_error{
-                    "missing rocprofiler_profile_counting_dispatch_record_t (header)"};
+                    "missing rocprofiler_dispatch_counting_service_record_t (header)"};
             counter_collection_bf_records.back().emplace_back(*profiler_record);
         }
         else
@@ -1303,7 +1303,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         "buffer tracing service for rccl api configure");
 
     ROCPROFILER_CALL(
-        rocprofiler_configure_buffered_dispatch_profile_counting_service(
+        rocprofiler_configure_buffered_dispatch_counting_service(
             counter_collection_ctx, counter_collection_buffer, dispatch_callback, nullptr),
         "setup buffered service");
 

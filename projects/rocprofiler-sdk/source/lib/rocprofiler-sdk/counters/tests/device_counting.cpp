@@ -33,7 +33,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/buffer.h>
-#include <rocprofiler-sdk/dispatch_profile.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -241,10 +241,10 @@ submitPacket(hsa_queue_t* queue, const void* packet)
 
 }  // namespace
 
-class agent_profile_test : public ::testing::Test
+class device_counting_service_test : public ::testing::Test
 {
 protected:
-    agent_profile_test() {}
+    device_counting_service_test() {}
 
     static void test_run(rocprofiler_counter_flag_t flags = ROCPROFILER_COUNTER_FLAG_NONE,
                          const std::unordered_set<std::string>& test_metrics = {},
@@ -256,7 +256,7 @@ protected:
         context::push_client(1);
         test_init();
         // rocprofiler_debugger_block();
-        counters::agent_profile_hsa_registration();
+        counters::device_counting_service_hsa_registration();
 
         std::string kernel_name = "null_kernel";
 
@@ -336,14 +336,14 @@ protected:
                 /**
                  * Check profile construction
                  */
-                rocprofiler_profile_config_id_t cfg_id = {};
+                rocprofiler_profile_config_id_t cfg_id = {.handle = 0};
                 rocprofiler_counter_id_t        id     = {.handle = metric.id()};
                 ROCPROFILER_CALL(
                     rocprofiler_create_profile_config(agent.get_rocp_agent()->id, &id, 1, &cfg_id),
                     "Unable to create profile");
 
                 ROCPROFILER_CALL(
-                    rocprofiler_configure_agent_profile_counting_service(
+                    rocprofiler_configure_device_counting_service(
                         ctx,
                         opt_buff_id,
                         agent.get_rocp_agent()->id,
@@ -367,7 +367,7 @@ protected:
                 // construction This is a workaround for the test environment since we create
                 // contexts after AgentCache constructed.
                 agent::get_agent_cache(agent.get_rocp_agent())
-                    ->init_agent_profile_queue(get_api_table(), get_ext_table());
+                    ->init_device_counting_service_queue(get_api_table(), get_ext_table());
 
                 hsa_signal_store_screlease(completion_signal, 1);
                 hsa_signal_store_screlease(found_data, 0);
@@ -402,9 +402,9 @@ protected:
                                         HSA_WAIT_STATE_BLOCKED);
 
                 // Sample the counting service.
-                ROCPROFILER_CALL(rocprofiler_sample_agent_profile_counting_service(
-                                     ctx, {.value = track_metric}, flags),
-                                 "Could not sample");
+                ROCPROFILER_CALL(
+                    rocprofiler_sample_device_counting_service(ctx, {.value = track_metric}, flags),
+                    "Could not sample");
                 ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "Could not stop context");
                 rocprofiler_flush_buffer(opt_buff_id);
 
@@ -427,9 +427,9 @@ protected:
     }
 };
 
-TEST_F(agent_profile_test, sync_counters) { test_run(); }
-TEST_F(agent_profile_test, async_counters) { test_run(ROCPROFILER_COUNTER_FLAG_ASYNC); }
-TEST_F(agent_profile_test, sync_grbm_verify)
+TEST_F(device_counting_service_test, sync_counters) { test_run(); }
+TEST_F(device_counting_service_test, async_counters) { test_run(ROCPROFILER_COUNTER_FLAG_ASYNC); }
+TEST_F(device_counting_service_test, sync_grbm_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);
     ROCP_ERROR << global_recs().size();
@@ -445,7 +445,7 @@ TEST_F(agent_profile_test, sync_grbm_verify)
     }
 }
 
-TEST_F(agent_profile_test, sync_gpu_util_verify)
+TEST_F(device_counting_service_test, sync_gpu_util_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
     ROCP_ERROR << global_recs().size();
@@ -461,7 +461,7 @@ TEST_F(agent_profile_test, sync_gpu_util_verify)
     }
 }
 
-TEST_F(agent_profile_test, sync_sq_waves_verify)
+TEST_F(device_counting_service_test, sync_sq_waves_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000);
     ROCP_ERROR << global_recs().size();

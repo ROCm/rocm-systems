@@ -193,7 +193,7 @@ build_profile_for_agent(rocprofiler_agent_id_t agent)
         }
     }
 
-    rocprofiler_profile_config_id_t profile;
+    rocprofiler_profile_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(rocprofiler_create_profile_config(
                          agent, collect_counters.data(), collect_counters.size(), &profile),
                      "Could not construct profile cfg");
@@ -266,7 +266,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
         return 1;
     }
 
-    ROCPROFILER_CALL(rocprofiler_configure_agent_profile_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
                          get_client_ctx(), get_buffer(), agent_id, set_profile, nullptr),
                      "Could not setup buffered service");
 
@@ -275,7 +275,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
         rocprofiler_start_context(get_client_ctx());
         while(exit_toggle().load() == false)
         {
-            rocprofiler_sample_agent_profile_counting_service(
+            rocprofiler_sample_device_counting_service(
                 get_client_ctx(), {.value = count}, ROCPROFILER_COUNTER_FLAG_NONE);
             count++;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));

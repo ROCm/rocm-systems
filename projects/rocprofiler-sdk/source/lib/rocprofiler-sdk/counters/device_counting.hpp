@@ -57,7 +57,7 @@ struct agent_callback_data
 
     std::shared_ptr<rocprofiler::counters::profile_config> profile     = {};
     rocprofiler_agent_id_t                                 agent_id    = {.handle = 0};
-    rocprofiler_agent_profile_callback_t                   cb          = nullptr;
+    rocprofiler_device_counting_service_callback_t         cb          = nullptr;
     rocprofiler_buffer_id_t                                buffer      = {.handle = 0};
     bool                                                   set_profile = false;
 
@@ -78,11 +78,16 @@ struct agent_callback_data
     ~agent_callback_data();
 };
 
+// Stop all contexts and prevent any further requests to start/stop/read.
+// Waits until any current operation is complete before exiting.
+rocprofiler_status_t
+device_counting_service_finalize();
+
 // If we have contexts that are started before HSA init. This
 // function will start those contexts. Should only be called
 // as part of the HSA init process in rocprofiler.
 rocprofiler_status_t
-agent_profile_hsa_registration();
+device_counting_service_hsa_registration();
 
 // Send the AQL start packet to a queue on the agent to start
 // collecting counter data. This function is synchronous and will

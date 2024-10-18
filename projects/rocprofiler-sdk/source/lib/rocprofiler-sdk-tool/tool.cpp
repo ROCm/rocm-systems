@@ -889,7 +889,7 @@ get_tool_agent(rocprofiler_agent_id_t id, const tool_agent_vec_t& data)
 
 // this function creates a rocprofiler profile config on the first entry
 auto
-get_agent_profile(rocprofiler_agent_id_t agent_id)
+get_device_counting_service(rocprofiler_agent_id_t agent_id)
 {
     static auto       data                    = common::Synchronized<agent_counter_map_t>{};
     static const auto gpu_agents              = get_gpu_agents();
@@ -980,7 +980,7 @@ get_agent_profile(rocprofiler_agent_id_t agent_id)
 }
 
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_profile_config_id_t*             config,
                   rocprofiler_user_data_t*                     user_data,
                   void* /*callback_data_args*/)
@@ -1004,7 +1004,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     {
         return;
     }
-    else if(auto profile = get_agent_profile(agent_id))
+    else if(auto profile = get_device_counting_service(agent_id))
     {
         *config          = *profile;
         user_data->value = common::get_tid();
@@ -1028,7 +1028,7 @@ get_counter_info_name(uint64_t record_id)
 }
 
 void
-counter_record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                         rocprofiler_record_counter_t*                record_data,
                         size_t                                       record_count,
                         rocprofiler_user_data_t                      user_data,
@@ -1459,7 +1459,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool::get_config().counter_collection)
     {
         ROCPROFILER_CALL(
-            rocprofiler_configure_callback_dispatch_profile_counting_service(
+            rocprofiler_configure_callback_dispatch_counting_service(
                 get_client_ctx(), dispatch_callback, nullptr, counter_record_callback, nullptr),
             "Could not setup counting service");
     }

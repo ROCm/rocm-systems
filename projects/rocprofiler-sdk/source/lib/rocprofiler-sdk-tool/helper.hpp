@@ -271,7 +271,7 @@ struct rocprofiler_tool_record_counter_t
 
 struct rocprofiler_tool_counter_collection_record_t
 {
-    rocprofiler_profile_counting_dispatch_data_t       dispatch_data    = {};
+    rocprofiler_dispatch_counting_service_data_t       dispatch_data    = {};
     std::array<rocprofiler_tool_record_counter_t, 512> records          = {};
     uint64_t                                           thread_id        = 0;
     uint64_t                                           arch_vgpr_count  = 0;

@@ -122,7 +122,7 @@ buffered_callback(rocprofiler_context_id_t,
 {}
 
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t,
                   rocprofiler_profile_config_id_t*,
                   rocprofiler_user_data_t*,
                   void*)
@@ -163,7 +163,7 @@ TEST(counters_init_order, metric_map_order)
                                                nullptr,
                                                &get_buffer()),
                      "buffer creation failed");
-    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_profile_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
                          get_client_ctx(), get_buffer(), dispatch_callback, nullptr),
                      "Could not setup buffered service");
     rocprofiler::registration::set_init_status(1);

@@ -104,6 +104,8 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - Replaced deprecated hipHostMalloc and hipHostFree functions with hipExtHostAlloc and hipFreeHost in when ROCm version is greater than or equal to 6.3
 - Updated `rocprofv3` `--help` options.
 - Adding start and end timestamp columns to the counter collection csv output.
+- Changed naming of agent profiling to device counting service (which more closely follows its name). To convert existing tool/user code to the new names, the following sed can be used: `find . -type f -exec sed -i 's/rocprofiler_agent_profile_callback_t/rocprofiler_device_counting_service_callback_t/g; s/rocprofiler_configure_agent_profile_counting_service/rocprofiler_configure_device_counting_service/g; s/agent_profile.h/device_counting_service.h/g; s/rocprofiler_sample_agent_profile_counting_service/rocprofiler_sample_device_counting_service/g' {} +`
+- Changed naming of dispatch profiling service to dispatch counting service (which more closely follows its name). To convert existing tool/user code to the new names, the following sed can be used: `-type f -exec sed -i -e 's/dispatch_profile_counting_service/dispatch_counting_service/g' -e 's/dispatch_profile.h/dispatch_counting_service.h/g' -e 's/rocprofiler_profile_counting_dispatch_callback_t/rocprofiler_dispatch_counting_service_callback_t/g' -e 's/rocprofiler_profile_counting_dispatch_data_t/rocprofiler_dispatch_counting_service_data_t/g'  -e 's/rocprofiler_profile_counting_dispatch_record_t/rocprofiler_dispatch_counting_service_record_t/g' {} +`
 
 ### Fixes
 

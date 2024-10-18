@@ -23,7 +23,7 @@
 #pragma once
 
 #include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/dispatch_profile.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <optional>
 
@@ -45,7 +45,7 @@ namespace counters
 struct counter_callback_info
 {
     // User callback
-    rocprofiler_profile_counting_dispatch_callback_t user_cb{nullptr};
+    rocprofiler_dispatch_counting_service_callback_t user_cb{nullptr};
     // User id
     void* callback_args{nullptr};
     // Link to the context this is associated with
@@ -81,22 +81,22 @@ destroy_counter_profile(uint64_t id);
 rocprofiler_status_t
 configure_buffered_dispatch(rocprofiler_context_id_t                         context_id,
                             rocprofiler_buffer_id_t                          buffer,
-                            rocprofiler_profile_counting_dispatch_callback_t callback,
+                            rocprofiler_dispatch_counting_service_callback_t callback,
                             void*                                            callback_args);
 
 rocprofiler_status_t
 configure_callback_dispatch(rocprofiler_context_id_t                         context_id,
-                            rocprofiler_profile_counting_dispatch_callback_t callback,
+                            rocprofiler_dispatch_counting_service_callback_t callback,
                             void*                                            callback_data_args,
                             rocprofiler_profile_counting_record_callback_t   record_callback,
                             void*                                            record_callback_args);
 
 rocprofiler_status_t
-configure_agent_collection(rocprofiler_context_id_t             context_id,
-                           rocprofiler_buffer_id_t              buffer_id,
-                           rocprofiler_agent_id_t               agent_id,
-                           rocprofiler_agent_profile_callback_t cb,
-                           void*                                user_data);
+configure_agent_collection(rocprofiler_context_id_t                       context_id,
+                           rocprofiler_buffer_id_t                        buffer_id,
+                           rocprofiler_agent_id_t                         agent_id,
+                           rocprofiler_device_counting_service_callback_t cb,
+                           void*                                          user_data);
 
 void
 start_context(const context::context*);

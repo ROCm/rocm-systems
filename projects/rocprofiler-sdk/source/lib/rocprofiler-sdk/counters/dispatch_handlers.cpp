@@ -108,7 +108,7 @@ queue_cb(const context::context*                                         ctx,
 
     auto req_profile = rocprofiler_profile_config_id_t{.handle = 0};
     auto dispatch_data =
-        common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
+        common::init_public_api_struct(rocprofiler_dispatch_counting_service_data_t{});
 
     dispatch_data.correlation_id = _corr_id_v;
     {
@@ -248,7 +248,7 @@ completed_cb(const context::context*                       ctx,
         if(buf)
         {
             auto _header =
-                common::init_public_api_struct(rocprofiler_profile_counting_dispatch_record_t{});
+                common::init_public_api_struct(rocprofiler_dispatch_counting_service_record_t{});
             _header.num_records    = out.size();
             _header.correlation_id = _corr_id_v;
             if(dispatch_time.status == HSA_STATUS_SUCCESS)
@@ -270,7 +270,7 @@ completed_cb(const context::context*                       ctx,
             CHECK(info->record_callback);
 
             auto dispatch_data =
-                common::init_public_api_struct(rocprofiler_profile_counting_dispatch_data_t{});
+                common::init_public_api_struct(rocprofiler_dispatch_counting_service_data_t{});
 
             dispatch_data.dispatch_info  = session.callback_record.dispatch_info;
             dispatch_data.correlation_id = _corr_id_v;

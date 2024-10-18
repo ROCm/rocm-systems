@@ -56,8 +56,8 @@ target_link_libraries(
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp init_order.cpp core.cpp
-    code_object_loader.cpp agent_profiling.cpp)
-set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp agent_profiling.hpp)
+    code_object_loader.cpp device_counting.cpp)
+set(ROCPROFILER_LIB_COUNTER_TEST_HEADERS code_object_loader.hpp device_counting.hpp)
 
 add_executable(counter-test)
 

@@ -73,7 +73,7 @@ public:
     std::string_view           name() const { return m_name; }
     size_t                     index() const { return m_index; }
 
-    void init_agent_profile_queue(const CoreApiTable& api, const AmdExtTable& ext) const;
+    void init_device_counting_service_queue(const CoreApiTable& api, const AmdExtTable& ext) const;
     bool operator==(const rocprofiler_agent_t*) const;
     bool operator==(hsa_agent_t) const;
 

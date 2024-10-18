@@ -23,7 +23,7 @@
 #include "lib/rocprofiler-sdk/counters/controller.hpp"
 
 #include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/dispatch_profile.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -64,11 +64,11 @@ CounterController::destroy_profile(uint64_t id)
 }
 
 rocprofiler_status_t
-CounterController::configure_agent_collection(rocprofiler_context_id_t             context_id,
-                                              rocprofiler_buffer_id_t              buffer_id,
-                                              rocprofiler_agent_id_t               agent_id,
-                                              rocprofiler_agent_profile_callback_t cb,
-                                              void*                                user_data)
+CounterController::configure_agent_collection(rocprofiler_context_id_t context_id,
+                                              rocprofiler_buffer_id_t  buffer_id,
+                                              rocprofiler_agent_id_t   agent_id,
+                                              rocprofiler_device_counting_service_callback_t cb,
+                                              void* user_data)
 {
     auto* ctx_p = rocprofiler::context::get_mutable_registered_context(context_id);
     if(!ctx_p) return ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID;
@@ -86,18 +86,18 @@ CounterController::configure_agent_collection(rocprofiler_context_id_t          
         return ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND;
     }
 
-    if(!ctx.agent_counter_collection)
+    if(!ctx.device_counter_collection)
     {
-        ctx.agent_counter_collection =
-            std::make_unique<rocprofiler::context::agent_counter_collection_service>();
+        ctx.device_counter_collection =
+            std::make_unique<rocprofiler::context::device_counting_service>();
     }
 
-    ctx.agent_counter_collection->agent_data.emplace_back();
-    ctx.agent_counter_collection->agent_data.back().callback_data =
+    ctx.device_counter_collection->agent_data.emplace_back();
+    ctx.device_counter_collection->agent_data.back().callback_data =
         rocprofiler_user_data_t{.ptr = user_data};
-    ctx.agent_counter_collection->agent_data.back().agent_id = agent_id;
-    ctx.agent_counter_collection->agent_data.back().cb       = cb;
-    ctx.agent_counter_collection->agent_data.back().buffer   = buffer_id;
+    ctx.device_counter_collection->agent_data.back().agent_id = agent_id;
+    ctx.device_counter_collection->agent_data.back().cb       = cb;
+    ctx.device_counter_collection->agent_data.back().buffer   = buffer_id;
 
     return ROCPROFILER_STATUS_SUCCESS;
 }
@@ -110,7 +110,7 @@ rocprofiler_status_t
 CounterController::configure_dispatch(
     rocprofiler_context_id_t                         context_id,
     rocprofiler_buffer_id_t                          buffer,
-    rocprofiler_profile_counting_dispatch_callback_t callback,
+    rocprofiler_dispatch_counting_service_callback_t callback,
     void*                                            callback_args,
     rocprofiler_profile_counting_record_callback_t   record_callback,
     void*                                            record_callback_args)
@@ -120,7 +120,7 @@ CounterController::configure_dispatch(
 
     auto& ctx = *ctx_p;
 
-    if(ctx.agent_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
+    if(ctx.device_counter_collection) return ROCPROFILER_STATUS_ERROR_AGENT_DISPATCH_CONFLICT;
 
     // FIXME: Due to the clock gating issue, counter collection and PC sampling service
     // cannot coexist in the same context for now.

@@ -390,13 +390,13 @@ typedef enum
 typedef enum
 {
     ROCPROFILER_COUNTER_RECORD_NONE = 0,
-    ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,  ///< ::rocprofiler_profile_counting_dispatch_record_t
+    ROCPROFILER_COUNTER_RECORD_PROFILE_COUNTING_DISPATCH_HEADER,  ///< ::rocprofiler_dispatch_counting_service_record_t
     ROCPROFILER_COUNTER_RECORD_VALUE,
     ROCPROFILER_COUNTER_RECORD_LAST,
 
     /// @var ROCPROFILER_COUNTER_RECORD_KIND_DISPATCH_PROFILE_HEADER
     /// @brief Indicates the payload type is of type
-    /// ::rocprofiler_profile_counting_dispatch_record_t
+    /// ::rocprofiler_dispatch_counting_service_record_t
 } rocprofiler_counter_record_kind_t;
 
 /**
@@ -694,9 +694,9 @@ typedef struct
     /// specific dispatch.
     ///
     /// This value can be mapped to a dispatch via the `dispatch_info` field (@see
-    /// ::rocprofiler_kernel_dispatch_info_t) of a ::rocprofiler_profile_counting_dispatch_data_t
+    /// ::rocprofiler_kernel_dispatch_info_t) of a ::rocprofiler_dispatch_counting_service_data_t
     /// instance (provided during callback for profile config) or a
-    /// ::rocprofiler_profile_counting_dispatch_record_t records (which will be insert into the
+    /// ::rocprofiler_dispatch_counting_service_record_t records (which will be insert into the
     /// buffer prior to the associated ::rocprofiler_record_counter_t records).
 } rocprofiler_record_counter_t;
 

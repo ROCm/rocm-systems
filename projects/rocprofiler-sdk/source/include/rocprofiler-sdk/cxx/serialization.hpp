@@ -345,7 +345,7 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_rccl_api_data_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_data_t data)
+save(ArchiveT& ar, rocprofiler_dispatch_counting_service_data_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
     ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
@@ -356,7 +356,7 @@ save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_data_t data)
 
 template <typename ArchiveT>
 void
-save(ArchiveT& ar, rocprofiler_profile_counting_dispatch_record_t data)
+save(ArchiveT& ar, rocprofiler_dispatch_counting_service_record_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
     ROCP_SDK_SAVE_DATA_FIELD(num_records);

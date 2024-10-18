@@ -277,7 +277,7 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
                                      itr->is_tracing(ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY);
 
         if(itr->counter_collection || itr->pc_sampler || has_kernel_tracing ||
-           has_scratch_reporting || itr->agent_counter_collection || itr->agent_thread_trace ||
+           has_scratch_reporting || itr->device_counter_collection || itr->agent_thread_trace ||
            itr->dispatch_thread_trace)
         {
             enable_intercepter = true;

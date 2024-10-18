@@ -9,7 +9,7 @@ set(ROCPROFILER_LIB_SOURCES
     agent.cpp
     buffer.cpp
     buffer_tracing.cpp
-    agent_profile.cpp
+    device_counting_service.cpp
     callback_tracing.cpp
     context.cpp
     counters.cpp

@@ -31,7 +31,7 @@
 ROCPROFILER_EXTERN_C_INIT
 
 /**
- * @defgroup DISPATCH_PROFILE_COUNTING_SERVICE Dispatch Profile Counting Service
+ * @defgroup dispatch_counting_service Dispatch Profile Counting Service
  * @brief Per-dispatch hardware counter collection service
  *
  * @{
@@ -41,21 +41,21 @@ ROCPROFILER_EXTERN_C_INIT
  * @brief Kernel dispatch data for profile counting callbacks.
  *
  */
-typedef struct rocprofiler_profile_counting_dispatch_data_t
+typedef struct rocprofiler_dispatch_counting_service_data_t
 {
     uint64_t                           size;             ///< Size of this struct
     rocprofiler_correlation_id_t       correlation_id;   ///< Correlation ID for this dispatch
     rocprofiler_timestamp_t            start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t            end_timestamp;    ///< end time in nanoseconds
     rocprofiler_kernel_dispatch_info_t dispatch_info;    ///< Dispatch info
-} rocprofiler_profile_counting_dispatch_data_t;
+} rocprofiler_dispatch_counting_service_data_t;
 
 /**
  * @brief ROCProfiler Profile Counting Counter Record Header Information
  *
- * This is buffer equivalent of ::rocprofiler_profile_counting_dispatch_data_t
+ * This is buffer equivalent of ::rocprofiler_dispatch_counting_service_data_t
  */
-typedef struct rocprofiler_profile_counting_dispatch_record_t
+typedef struct rocprofiler_dispatch_counting_service_record_t
 {
     uint64_t                     size;         ///< Size of this struct
     uint64_t                     num_records;  ///< number of ::rocprofiler_record_counter_t records
@@ -63,7 +63,7 @@ typedef struct rocprofiler_profile_counting_dispatch_record_t
     rocprofiler_timestamp_t      start_timestamp;      ///< start time in nanoseconds
     rocprofiler_timestamp_t      end_timestamp;        ///< end time in nanoseconds
     rocprofiler_kernel_dispatch_info_t dispatch_info;  ///< Contains the `dispatch_id`
-} rocprofiler_profile_counting_dispatch_record_t;
+} rocprofiler_dispatch_counting_service_record_t;
 
 /**
  * @brief Kernel Dispatch Callback. This is a callback that is invoked before the kernel
@@ -72,13 +72,13 @@ typedef struct rocprofiler_profile_counting_dispatch_record_t
  *        will be collected and emplaced in the buffer with @ref rocprofiler_buffer_id_t used when
  *        setting up this callback.
  *
- * @param [in] dispatch_data      @see ::rocprofiler_profile_counting_dispatch_data_t
+ * @param [in] dispatch_data      @see ::rocprofiler_dispatch_counting_service_data_t
  * @param [out] config            Profile config detailing the counters to collect for this kernel
  * @param [out] user_data         User data unique to this dispatch. Returned in record callback
- * @param [in] callback_data_args Callback supplied via buffered_dispatch_profile_counting_service
+ * @param [in] callback_data_args Callback supplied via buffered_dispatch_counting_service
  */
-typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
-    rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+typedef void (*rocprofiler_dispatch_counting_service_callback_t)(
+    rocprofiler_dispatch_counting_service_data_t dispatch_data,
     rocprofiler_profile_config_id_t*             config,
     rocprofiler_user_data_t*                     user_data,
     void*                                        callback_data_args);
@@ -86,17 +86,17 @@ typedef void (*rocprofiler_profile_counting_dispatch_callback_t)(
 /**
  * @brief Counting record callback. This is a callback is invoked when the kernel
  *        execution is complete and contains the counter profile data requested in
- *        @ref rocprofiler_profile_counting_dispatch_callback_t. Only used with
- *        @ref rocprofiler_configure_callback_dispatch_profile_counting_service.
+ *        @ref rocprofiler_dispatch_counting_service_callback_t. Only used with
+ *        @ref rocprofiler_configure_callback_dispatch_counting_service.
  *
- * @param [in] dispatch_data      @see ::rocprofiler_profile_counting_dispatch_data_t
+ * @param [in] dispatch_data      @see ::rocprofiler_dispatch_counting_service_data_t
  * @param [in] record_data        Counter record data.
  * @param [in] record_count       Number of counter records.
  * @param [in] user_data          User data instance from dispatch callback
- * @param [in] callback_data_args Callback supplied via buffered_dispatch_profile_counting_service
+ * @param [in] callback_data_args Callback supplied via buffered_dispatch_counting_service
  */
 typedef void (*rocprofiler_profile_counting_record_callback_t)(
-    rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+    rocprofiler_dispatch_counting_service_data_t dispatch_data,
     rocprofiler_record_counter_t*                record_data,
     size_t                                       record_count,
     rocprofiler_user_data_t                      user_data,
@@ -112,14 +112,14 @@ typedef void (*rocprofiler_profile_counting_record_callback_t)(
  *        NOTE: Interface is up for comment as to whether restrictions
  *        on agent should be made here (limiting the CB based on agent)
  *        or if the restriction should be performed by the tool in
- *        @ref rocprofiler_profile_counting_dispatch_callback_t (i.e.
+ *        @ref rocprofiler_dispatch_counting_service_callback_t (i.e.
  *        tool code checking the agent param to see if they want to profile
  *        it).
  *
  *        Interface is up for comment as to whether restrictions
  *        on agent should be made here (limiting the CB based on agent)
  *        or if the restriction should be performed by the tool in
- *        @ref rocprofiler_profile_counting_dispatch_callback_t (i.e.
+ *        @ref rocprofiler_dispatch_counting_service_callback_t (i.e.
  *        tool code checking the agent param to see if they want to profile
  *        it).
  *
@@ -130,10 +130,10 @@ typedef void (*rocprofiler_profile_counting_record_callback_t)(
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_configure_buffered_dispatch_profile_counting_service(
+rocprofiler_configure_buffered_dispatch_counting_service(
     rocprofiler_context_id_t                         context_id,
     rocprofiler_buffer_id_t                          buffer_id,
-    rocprofiler_profile_counting_dispatch_callback_t callback,
+    rocprofiler_dispatch_counting_service_callback_t callback,
     void*                                            callback_data_args) ROCPROFILER_API;
 
 /**
@@ -149,9 +149,9 @@ rocprofiler_configure_buffered_dispatch_profile_counting_service(
  * @return ::rocprofiler_status_t
  */
 rocprofiler_status_t
-rocprofiler_configure_callback_dispatch_profile_counting_service(
+rocprofiler_configure_callback_dispatch_counting_service(
     rocprofiler_context_id_t                         context_id,
-    rocprofiler_profile_counting_dispatch_callback_t dispatch_callback,
+    rocprofiler_dispatch_counting_service_callback_t dispatch_callback,
     void*                                            dispatch_callback_args,
     rocprofiler_profile_counting_record_callback_t   record_callback,
     void*                                            record_callback_args) ROCPROFILER_API;

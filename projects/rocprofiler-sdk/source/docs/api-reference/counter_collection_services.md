@@ -51,14 +51,14 @@ After creating a context and buffer to store results, it is highly recommended (
     // Setup the dispatch profile counting service. This service will trigger the dispatch_callback
     // when a kernel dispatch is enqueued into the HSA queue. The callback will specify what
     // counters to collect by returning a profile config id. 
-    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_profile_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
                          ctx, buff, dispatch_callback, nullptr),
                      "Could not setup buffered service");
 
     /* For Agent Profiling */
     // set_profile is a callback that is use to select the profile to use when
     // the context is started. It is called at every rocprofiler_ctx_start() call.
-    ROCPROFILER_CALL(rocprofiler_configure_agent_profile_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
                          ctx, buff, agent_id, set_profile, nullptr),
                      "Could not setup buffered service");
 ```
@@ -162,13 +162,13 @@ When a kernel is dispatched, a dispatch callback is issued to the tool to allow 
 
 ```CPP
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_profile_config_id_t*             config,
                   rocprofiler_user_data_t* user_data,
                   void* /*callback_data_args*/)
 ```
 
-Dispatch data contains information about the dispatch that is being launched (such as its name) and config is where the tool can specify the profile (and in turn counters) to collect for the dispatch. If no profile is supplied, no counters are collected for this dispatch. User data contains user data supplied to rocprofiler_configure_buffered_dispatch_profile_counting_service. 
+Dispatch data contains information about the dispatch that is being launched (such as its name) and config is where the tool can specify the profile (and in turn counters) to collect for the dispatch. If no profile is supplied, no counters are collected for this dispatch. User data contains user data supplied to rocprofiler_configure_buffered_dispatch_counting_service. 
 
 ### Agent Set Profile Callback
 
@@ -197,7 +197,7 @@ Data from collected counter values is returned via a buffered callback. The buff
         {
             // Print the returned counter data.
             auto* record =
-                static_cast<rocprofiler_profile_counting_dispatch_record_t*>(header->payload);
+                static_cast<rocprofiler_dispatch_counting_service_record_t*>(header->payload);
             ss << "[Dispatch_Id: " << record->dispatch_info.dispatch_id
                << " Kernel_ID: " << record->dispatch_info.kernel_id
                << " Corr_Id: " << record->correlation_id.internal << ")]\n";

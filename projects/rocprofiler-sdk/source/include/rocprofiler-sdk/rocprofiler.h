@@ -65,13 +65,13 @@ ROCPROFILER_EXTERN_C_FINI
 /** @} */
 
 #include "rocprofiler-sdk/agent.h"
-#include "rocprofiler-sdk/agent_profile.h"
 #include "rocprofiler-sdk/buffer.h"
 #include "rocprofiler-sdk/buffer_tracing.h"
 #include "rocprofiler-sdk/callback_tracing.h"
 #include "rocprofiler-sdk/context.h"
 #include "rocprofiler-sdk/counters.h"
-#include "rocprofiler-sdk/dispatch_profile.h"
+#include "rocprofiler-sdk/device_counting_service.h"
+#include "rocprofiler-sdk/dispatch_counting_service.h"
 #include "rocprofiler-sdk/external_correlation.h"
 #include "rocprofiler-sdk/hip.h"
 #include "rocprofiler-sdk/hsa.h"

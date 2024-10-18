@@ -26,7 +26,7 @@
 #include <rocprofiler-sdk/fwd.h>
 
 /**
- * @defgroup AGENT_PROFILE_COUNTING_SERVICE Agent Profile Counting Service
+ * @defgroup device_counting_service Agent Profile Counting Service
  * @brief needs brief description
  *
  * @{
@@ -59,23 +59,23 @@ typedef rocprofiler_status_t (*rocprofiler_agent_set_profile_callback_t)(
  * @param [in]  agent_id agent id
  * @param [in]  set_config Function to call to set the profile config (see
  * rocprofiler_agent_set_profile_callback_t)
- * @param [in]  user_data Data supplied to rocprofiler_configure_agent_profile_counting_service
+ * @param [in]  user_data Data supplied to rocprofiler_configure_device_counting_service
  */
-typedef void (*rocprofiler_agent_profile_callback_t)(
+typedef void (*rocprofiler_device_counting_service_callback_t)(
     rocprofiler_context_id_t                 context_id,
     rocprofiler_agent_id_t                   agent_id,
     rocprofiler_agent_set_profile_callback_t set_config,
     void*                                    user_data);
 
 /**
- * @brief Configure Profile Counting Service for agent. There may only be one agent profile
- * configured per context and can be only one active context that is profiling a single agent
- * at a time. Multiple agent contexts can be started at the same time if they are profiling
+ * @brief Configure Device Counting Service for agent. There may only be one counting service
+ * configured per agent in a context and can be only one active context that is profiling a single
+ * agent at a time. Multiple agent contexts can be started at the same time if they are profiling
  * different agents.
  *
  * @param [in] context_id context id
  * @param [in] buffer_id id of the buffer to use for the counting service. When
- * rocprofiler_sample_agent_profile_counting_service is called, counter data will be written
+ * rocprofiler_sample_device_counting_service is called, counter data will be written
  * to this buffer.
  * @param [in] agent_id agent to configure profiling on.
  * @param [in] cb Callback called when the context is started for the tool to specify what
@@ -87,16 +87,16 @@ typedef void (*rocprofiler_agent_profile_callback_t)(
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if succesfully configured
  */
 rocprofiler_status_t
-rocprofiler_configure_agent_profile_counting_service(rocprofiler_context_id_t context_id,
-                                                     rocprofiler_buffer_id_t  buffer_id,
-                                                     rocprofiler_agent_id_t   agent_id,
-                                                     rocprofiler_agent_profile_callback_t cb,
-                                                     void*                                user_data)
+rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_id,
+                                              rocprofiler_buffer_id_t  buffer_id,
+                                              rocprofiler_agent_id_t   agent_id,
+                                              rocprofiler_device_counting_service_callback_t cb,
+                                              void* user_data)
     ROCPROFILER_NONNULL(4) ROCPROFILER_API;
 
 /**
  * @brief Trigger a read of the counter data for the agent profile. The counter data will be
- * written to the buffer specified in rocprofiler_configure_agent_profile_counting_service.
+ * written to the buffer specified in rocprofiler_configure_device_counting_service.
  * The data in rocprofiler_user_data_t will be written to the buffer along with the counter data.
  * flags can be used to specify if this call should be performed asynchronously (default is
  * synchronous).
@@ -113,9 +113,9 @@ rocprofiler_configure_agent_profile_counting_service(rocprofiler_context_id_t co
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if read request was successful.
  */
 rocprofiler_status_t
-rocprofiler_sample_agent_profile_counting_service(rocprofiler_context_id_t   context_id,
-                                                  rocprofiler_user_data_t    user_data,
-                                                  rocprofiler_counter_flag_t flags) ROCPROFILER_API;
+rocprofiler_sample_device_counting_service(rocprofiler_context_id_t   context_id,
+                                           rocprofiler_user_data_t    user_data,
+                                           rocprofiler_counter_flag_t flags) ROCPROFILER_API;
 
 /** @} */
 

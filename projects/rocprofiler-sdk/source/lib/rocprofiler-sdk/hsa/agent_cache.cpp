@@ -126,7 +126,8 @@ namespace rocprofiler
 namespace hsa
 {
 void
-AgentCache::init_agent_profile_queue(const CoreApiTable& api, const AmdExtTable& ext) const
+AgentCache::init_device_counting_service_queue(const CoreApiTable& api,
+                                               const AmdExtTable&  ext) const
 {
     static std::mutex           m_mutex;
     std::lock_guard<std::mutex> lock(m_mutex);
@@ -135,7 +136,7 @@ AgentCache::init_agent_profile_queue(const CoreApiTable& api, const AmdExtTable&
     const auto* agent_ctx = []() -> const context* {
         for(auto& ctx : rocprofiler::context::get_registered_contexts())
         {
-            if(ctx->agent_counter_collection) return ctx;
+            if(ctx->device_counter_collection) return ctx;
         }
         return nullptr;
     }();
@@ -178,7 +179,7 @@ AgentCache::AgentCache(const rocprofiler_agent_t* rocp_agent,
     {
         init_cpu_pool(ext_table, *this);
         init_gpu_pool(ext_table, *this);
-        init_agent_profile_queue(api, ext_table);
+        init_device_counting_service_queue(api, ext_table);
     } catch(std::runtime_error& e)
     {
         ROCP_WARNING << fmt::format(

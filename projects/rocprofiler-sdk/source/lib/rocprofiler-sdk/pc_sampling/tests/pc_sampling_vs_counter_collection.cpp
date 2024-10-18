@@ -198,7 +198,7 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
 
 // =================== Functions related to the counter collection service
 void
-record_callback(rocprofiler_profile_counting_dispatch_data_t /*dispatch_data*/,
+record_callback(rocprofiler_dispatch_counting_service_data_t /*dispatch_data*/,
                 rocprofiler_record_counter_t* /*record_data*/,
                 size_t /*record_count*/,
                 rocprofiler_user_data_t /*user_data*/,
@@ -206,7 +206,7 @@ record_callback(rocprofiler_profile_counting_dispatch_data_t /*dispatch_data*/,
 {}
 
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t /*dispatch_data*/,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t /*dispatch_data*/,
                   rocprofiler_profile_config_id_t* /*config*/,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
@@ -446,7 +446,7 @@ TEST(pc_sampling, pc_sampling_vs_dispatch_counter_collection)
     auto dispatch_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
                                                    rocprofiler_agent_id_t /*agent_id*/) {
         // Configure dispatch counter collection service on all agents
-        EXPECT_EQ(rocprofiler_configure_callback_dispatch_profile_counting_service(
+        EXPECT_EQ(rocprofiler_configure_callback_dispatch_counting_service(
                       context_id, dispatch_callback, nullptr, record_callback, nullptr),
                   ROCPROFILER_STATUS_SUCCESS);
     };
@@ -454,10 +454,10 @@ TEST(pc_sampling, pc_sampling_vs_dispatch_counter_collection)
     pc_sampling_vs_counter_collection(dispatch_counter_collection_setup_fn);
 }
 
-TEST(pc_sampling, pc_sampling_vs_agent_counter_collection)
+TEST(pc_sampling, pc_sampling_vs_device_counter_collection)
 {
-    auto agent_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
-                                                rocprofiler_agent_id_t   agent_id) {
+    auto device_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
+                                                 rocprofiler_agent_id_t   agent_id) {
         rocprofiler_buffer_id_t cc_buf_id;
         // Create PC sampling buffer
         EXPECT_EQ(rocprofiler_create_buffer(context_id,
@@ -469,12 +469,12 @@ TEST(pc_sampling, pc_sampling_vs_agent_counter_collection)
                                             &cc_buf_id),
                   ROCPROFILER_STATUS_SUCCESS);
 
-        EXPECT_EQ(rocprofiler_configure_agent_profile_counting_service(
+        EXPECT_EQ(rocprofiler_configure_device_counting_service(
                       context_id, cc_buf_id, agent_id, set_profile, nullptr),
                   ROCPROFILER_STATUS_SUCCESS);
     };
 
-    pc_sampling_vs_counter_collection(agent_counter_collection_setup_fn);
+    pc_sampling_vs_counter_collection(device_counter_collection_setup_fn);
 }
 
 TEST(pc_sampling, dispatch_counter_collection_vs_pc_sampling)
@@ -482,7 +482,7 @@ TEST(pc_sampling, dispatch_counter_collection_vs_pc_sampling)
     auto dispatch_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
                                                    rocprofiler_agent_id_t /*agent_id*/) {
         // Configure dispatch counter collection service on all agents
-        EXPECT_EQ(rocprofiler_configure_callback_dispatch_profile_counting_service(
+        EXPECT_EQ(rocprofiler_configure_callback_dispatch_counting_service(
                       context_id, dispatch_callback, nullptr, record_callback, nullptr),
                   ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
     };
@@ -490,10 +490,10 @@ TEST(pc_sampling, dispatch_counter_collection_vs_pc_sampling)
     counter_collection_vs_pc_sampling(dispatch_counter_collection_setup_fn);
 }
 
-TEST(pc_sampling, agent_counter_collection_vs_pc_sampling)
+TEST(pc_sampling, device_counter_collection_vs_pc_sampling)
 {
-    auto agent_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
-                                                rocprofiler_agent_id_t   agent_id) {
+    auto device_counter_collection_setup_fn = [](rocprofiler_context_id_t context_id,
+                                                 rocprofiler_agent_id_t   agent_id) {
         rocprofiler_buffer_id_t cc_buf_id;
         // Create PC sampling buffer
         EXPECT_EQ(rocprofiler_create_buffer(context_id,
@@ -505,10 +505,10 @@ TEST(pc_sampling, agent_counter_collection_vs_pc_sampling)
                                             &cc_buf_id),
                   ROCPROFILER_STATUS_SUCCESS);
 
-        EXPECT_EQ(rocprofiler_configure_agent_profile_counting_service(
+        EXPECT_EQ(rocprofiler_configure_device_counting_service(
                       context_id, cc_buf_id, agent_id, set_profile, nullptr),
                   ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
     };
 
-    counter_collection_vs_pc_sampling(agent_counter_collection_setup_fn);
+    counter_collection_vs_pc_sampling(device_counter_collection_setup_fn);
 }

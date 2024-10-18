@@ -126,7 +126,7 @@ buffered_callback(rocprofiler_context_id_t,
         {
             // Print the returned counter data.
             auto* record =
-                static_cast<rocprofiler_profile_counting_dispatch_record_t*>(header->payload);
+                static_cast<rocprofiler_dispatch_counting_service_record_t*>(header->payload);
             ss << "[Dispatch_Id: " << record->dispatch_info.dispatch_id
                << " Kernel_ID: " << record->dispatch_info.kernel_id
                << " Corr_Id: " << record->correlation_id.internal << ")]\n";
@@ -179,7 +179,7 @@ get_profile_cache()
  * to collect the counter SQ_WAVES for all kernel dispatch packets.
  */
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_profile_config_id_t*             config,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
@@ -255,7 +255,7 @@ build_profile_for_agent(rocprofiler_agent_id_t       agent,
     }
 
     // Create and return the profile
-    rocprofiler_profile_config_id_t profile;
+    rocprofiler_profile_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(rocprofiler_create_profile_config(
                          agent, collect_counters.data(), collect_counters.size(), &profile),
                      "Could not construct profile cfg");
@@ -352,7 +352,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
     // counters to collect by returning a profile config id. In this example, we create the profile
     // configs above and store them in the map get_profile_cache() so we can look them up at
     // dispatch.
-    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_profile_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
                          get_client_ctx(), get_buffer(), dispatch_callback, nullptr),
                      "Could not setup buffered service");
 

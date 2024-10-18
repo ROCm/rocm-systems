@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/hsa/aql_packet.hpp"
+#include <fmt/core.h>
 #include <cstdlib>
 #include <iostream>
 #include "lib/common/logging.hpp"
@@ -115,7 +116,19 @@ CounterAQLPacket::CounterAQLPacket(aqlprofile_agent_handle_t                  ag
                                                         &CounterMemoryPool::Free,
                                                         &CounterMemoryPool::Copy,
                                                         reinterpret_cast<void*>(&pool));
-    if(status != HSA_STATUS_SUCCESS) ROCP_FATAL << "Could not create PMC packets!";
+    if(status != HSA_STATUS_SUCCESS)
+    {
+        std::string event_list;
+        for(const auto& event : events)
+        {
+            event_list += fmt::format("[{},{},{}],",
+                                      event.block_index,
+                                      event.event_id,
+                                      static_cast<int>(event.block_name));
+        }
+        ROCP_FATAL << "Could not create PMC packets! AQLProfile Return Code: " << status
+                   << " Events: " << event_list;
+    }
 
     packets.start_packet.header = VENDOR_BIT;
     packets.stop_packet.header  = VENDOR_BIT | BARRIER_BIT;

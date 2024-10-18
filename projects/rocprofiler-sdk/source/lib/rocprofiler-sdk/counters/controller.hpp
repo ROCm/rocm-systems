@@ -29,7 +29,7 @@
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 
 #include <rocprofiler-sdk/agent.h>
-#include <rocprofiler-sdk/dispatch_profile.h>
+#include <rocprofiler-sdk/dispatch_counting_service.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -81,17 +81,18 @@ public:
     static rocprofiler_status_t configure_dispatch(
         rocprofiler_context_id_t                         context_id,
         rocprofiler_buffer_id_t                          buffer,
-        rocprofiler_profile_counting_dispatch_callback_t callback,
+        rocprofiler_dispatch_counting_service_callback_t callback,
         void*                                            callback_args,
         rocprofiler_profile_counting_record_callback_t   record_callback,
         void*                                            record_callback_args);
     std::shared_ptr<profile_config> get_profile_cfg(rocprofiler_profile_config_id_t id);
 
-    static rocprofiler_status_t configure_agent_collection(rocprofiler_context_id_t context_id,
-                                                           rocprofiler_buffer_id_t  buffer_id,
-                                                           rocprofiler_agent_id_t   agent_id,
-                                                           rocprofiler_agent_profile_callback_t cb,
-                                                           void* user_data);
+    static rocprofiler_status_t configure_agent_collection(
+        rocprofiler_context_id_t                       context_id,
+        rocprofiler_buffer_id_t                        buffer_id,
+        rocprofiler_agent_id_t                         agent_id,
+        rocprofiler_device_counting_service_callback_t cb,
+        void*                                          user_data);
 
 private:
     rocprofiler::common::Synchronized<std::unordered_map<uint64_t, std::shared_ptr<profile_config>>>

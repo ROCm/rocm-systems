@@ -12,7 +12,7 @@
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
-#define PRINT_ONLY_FAILING true
+#define PRINT_ONLY_FAILING false
 
 /**
  * Tests the collection of all counters on the agent the test is run on.
@@ -222,7 +222,7 @@ get_agent_info()
 }
 
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_profile_config_id_t*             config,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
@@ -304,7 +304,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     }
     if(cap.remaining.empty()) return;
 
-    rocprofiler_profile_config_id_t profile;
+    rocprofiler_profile_config_id_t profile = {.handle = 0};
 
     // Select the next counter to collect.
     if(rocprofiler_create_profile_config(
@@ -312,6 +312,8 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
        ROCPROFILER_STATUS_SUCCESS)
     {
         *config = profile;
+        std::clog << "Attempting to read counter "
+                  << cap.expected_counter_names.at(cap.remaining.back().handle) << "\n";
     }
 
     cap.remaining.pop_back();
@@ -338,7 +340,7 @@ tool_init(rocprofiler_client_finalize_t, void*)
 
     ROCPROFILER_CALL(rocprofiler_assign_callback_thread(get_buffer(), client_thread),
                      "failed to assign thread for buffer");
-    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_profile_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
                          get_client_ctx(), get_buffer(), dispatch_callback, nullptr),
                      "Could not setup buffered service");
     rocprofiler_start_context(get_client_ctx());

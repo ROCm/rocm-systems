@@ -171,7 +171,7 @@ configure_pc_sampling_service(context::context*                ctx,
     // counter collection service can enable clock gating and hang might appear.
     // As a workaround, PC sampling and (dispatch) counter collection service
     // cannot coexist in the same context.
-    if(ctx->counter_collection || ctx->agent_counter_collection)
+    if(ctx->counter_collection || ctx->device_counter_collection)
     {
         return ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT;
     }

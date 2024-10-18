@@ -107,28 +107,29 @@ set_tests_properties(
                "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-add_library(counter-collection-agent-profiling-client SHARED)
-target_sources(counter-collection-agent-profiling-client PRIVATE agent_profiling.cpp
-                                                                 client.hpp)
+add_library(counter-collection-device-profiling-client SHARED)
+target_sources(counter-collection-device-profiling-client PRIVATE device_counting.cpp
+                                                                  client.hpp)
 target_link_libraries(
-    counter-collection-agent-profiling-client
+    counter-collection-device-profiling-client
     PUBLIC rocprofiler-sdk::samples-build-flags
     PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::samples-common-library)
 
-add_executable(counter-collection-agent-profiling)
-target_sources(counter-collection-agent-profiling PRIVATE main.cpp)
-target_link_libraries(counter-collection-agent-profiling
-                      PRIVATE counter-collection-agent-profiling-client Threads::Threads)
+add_executable(counter-collection-device-profiling)
+target_sources(counter-collection-device-profiling PRIVATE main.cpp)
+target_link_libraries(counter-collection-device-profiling
+                      PRIVATE counter-collection-device-profiling-client Threads::Threads)
 
-rocprofiler_samples_get_preload_env(PRELOAD_ENV counter-collection-agent-profiling-client)
+rocprofiler_samples_get_preload_env(PRELOAD_ENV
+                                    counter-collection-device-profiling-client)
 
 set(counter-collection-functional-counter-env "${PRELOAD_ENV}" "${LIBRARY_PATH_ENV}")
 
-add_test(NAME counter-collection-agent-profiling
-         COMMAND $<TARGET_FILE:counter-collection-agent-profiling>)
+add_test(NAME counter-collection-device-profiling
+         COMMAND $<TARGET_FILE:counter-collection-device-profiling>)
 
 set_tests_properties(
-    counter-collection-agent-profiling
+    counter-collection-device-profiling
     PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
                "${counter-collection-functional-counter-env}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

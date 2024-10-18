@@ -67,7 +67,7 @@ get_client_ctx()
 }
 
 void
-record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                 rocprofiler_record_counter_t*                record_data,
                 size_t                                       record_count,
                 rocprofiler_user_data_t                      user_data,
@@ -95,7 +95,7 @@ record_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
  * to collect the counter SQ_WAVES for all kernel dispatch packets.
  */
 void
-dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
+dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_profile_config_id_t*             config,
                   rocprofiler_user_data_t* /*user_data*/,
                   void* /*callback_data_args*/)
@@ -168,7 +168,7 @@ dispatch_callback(rocprofiler_profile_counting_dispatch_data_t dispatch_data,
     }
 
     // Create a colleciton profile for the counters
-    rocprofiler_profile_config_id_t profile;
+    rocprofiler_profile_config_id_t profile = {.handle = 0};
     ROCPROFILER_CALL(rocprofiler_create_profile_config(dispatch_data.dispatch_info.agent_id,
                                                        collect_counters.data(),
                                                        collect_counters.size(),
@@ -185,7 +185,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
 {
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "context creation failed");
 
-    ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_profile_counting_service(
+    ROCPROFILER_CALL(rocprofiler_configure_callback_dispatch_counting_service(
                          get_client_ctx(), dispatch_callback, nullptr, record_callback, user_data),
                      "Could not setup counting service");
     ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context");

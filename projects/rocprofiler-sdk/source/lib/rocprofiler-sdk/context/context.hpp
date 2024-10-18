@@ -30,8 +30,8 @@
 #include "lib/common/synchronized.hpp"
 #include "lib/rocprofiler-sdk/context/correlation_id.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
-#include "lib/rocprofiler-sdk/counters/agent_profiling.hpp"
 #include "lib/rocprofiler-sdk/counters/core.hpp"
+#include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "lib/rocprofiler-sdk/external_correlation.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/types.hpp"
 #include "lib/rocprofiler-sdk/thread_trace/att_core.hpp"
@@ -89,7 +89,7 @@ struct dispatch_counter_collection_service
     common::Synchronized<bool> enabled{false};
 };
 
-struct agent_counter_collection_service
+struct device_counting_service
 {
     std::vector<rocprofiler::counters::agent_callback_data> agent_data;
 
@@ -97,7 +97,8 @@ struct agent_counter_collection_service
     {
         DISABLED,
         LOCKED,
-        ENABLED
+        ENABLED,
+        EXIT
     };
     std::atomic<state> status{state::DISABLED};
 
@@ -124,9 +125,9 @@ struct context
     std::unique_ptr<callback_tracing_service> callback_tracer    = {};
     std::unique_ptr<buffer_tracing_service>   buffered_tracer    = {};
     // Only one of counter collection/agent counter collection can exists in the ctx.
-    std::unique_ptr<dispatch_counter_collection_service> counter_collection       = {};
-    std::unique_ptr<agent_counter_collection_service>    agent_counter_collection = {};
-    std::unique_ptr<pc_sampling_service>                 pc_sampler               = {};
+    std::unique_ptr<dispatch_counter_collection_service> counter_collection        = {};
+    std::unique_ptr<device_counting_service>             device_counter_collection = {};
+    std::unique_ptr<pc_sampling_service>                 pc_sampler                = {};
 
     std::unique_ptr<thread_trace::DispatchThreadTracer> dispatch_thread_trace = {};
     std::unique_ptr<thread_trace::AgentThreadTracer>    agent_thread_trace    = {};

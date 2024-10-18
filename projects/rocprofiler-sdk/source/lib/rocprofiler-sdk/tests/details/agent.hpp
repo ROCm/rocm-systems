@@ -56,28 +56,28 @@ struct system_info_t
 // calls, and is later used for reference when displaying the information.
 struct agent_info_t
 {
-    hsa_agent_t                       hsa_agent           = {.handle = 0};
-    char                              name[64]            = {'\0'};
-    char                              vendor_name[64]     = {'\0'};
-    char                              device_mkt_name[64] = {'\0'};
-    hsa_agent_feature_t               agent_feature       = {};
-    hsa_profile_t                     agent_profile       = {};
-    hsa_default_float_rounding_mode_t float_rounding_mode = {};
-    uint32_t                          max_queue           = 0;
-    uint32_t                          queue_min_size      = 0;
-    uint32_t                          queue_max_size      = 0;
-    hsa_queue_type_t                  queue_type          = {};
-    uint32_t                          node                = 0;
-    hsa_device_type_t                 device_type         = {};
-    uint32_t                          cache_size[4]       = {0, 0, 0, 0};
-    uint32_t                          chip_id             = 0;
-    uint32_t                          cacheline_size      = 0;
-    uint32_t                          max_clock_freq      = 0;
-    uint32_t                          internal_node_id    = 0;
-    uint32_t                          max_addr_watch_pts  = 0;
-    uint32_t                          family_id           = 0;
-    uint32_t                          ucode_version       = 0;
-    uint32_t                          sdma_ucode_version  = 0;
+    hsa_agent_t                       hsa_agent               = {.handle = 0};
+    char                              name[64]                = {'\0'};
+    char                              vendor_name[64]         = {'\0'};
+    char                              device_mkt_name[64]     = {'\0'};
+    hsa_agent_feature_t               agent_feature           = {};
+    hsa_profile_t                     device_counting_service = {};
+    hsa_default_float_rounding_mode_t float_rounding_mode     = {};
+    uint32_t                          max_queue               = 0;
+    uint32_t                          queue_min_size          = 0;
+    uint32_t                          queue_max_size          = 0;
+    hsa_queue_type_t                  queue_type              = {};
+    uint32_t                          node                    = 0;
+    hsa_device_type_t                 device_type             = {};
+    uint32_t                          cache_size[4]           = {0, 0, 0, 0};
+    uint32_t                          chip_id                 = 0;
+    uint32_t                          cacheline_size          = 0;
+    uint32_t                          max_clock_freq          = 0;
+    uint32_t                          internal_node_id        = 0;
+    uint32_t                          max_addr_watch_pts      = 0;
+    uint32_t                          family_id               = 0;
+    uint32_t                          ucode_version           = 0;
+    uint32_t                          sdma_ucode_version      = 0;
     // HSA_AMD_AGENT_INFO_MEMORY_WIDTH is deprecated, so exclude
     // uint32_t mem_max_freq; Not supported by get_info
     uint32_t   compute_unit           = 0;
