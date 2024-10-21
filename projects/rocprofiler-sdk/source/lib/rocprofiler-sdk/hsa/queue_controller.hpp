@@ -46,8 +46,10 @@ public:
     using queue_iterator_cb_t    = std::function<void(const Queue*)>;
     using callback_iterator_cb_t = std::function<void(ClientID, const agent_callback_tuple_t&)>;
     using queue_map_t            = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
+    using agent_cache_map_t      = std::unordered_map<uint32_t, AgentCache>;
 
     QueueController() = default;
+    ~QueueController() { ROCP_ERROR << "Destroying Queue"; }
     // Initializes the QueueInterceptor. This must be delayed until
     // HSA has been inited.
     void init(CoreApiTable& core_table, AmdExtTable& ext_table);
@@ -68,8 +70,9 @@ public:
     const AmdExtTable&  get_ext_table() const { return _ext_table; }
 
     // Gets the list of supported HSA agents that can be Pintercepted
-    const auto& get_supported_agents() const { return _supported_agents; }
-    auto&       get_supported_agents() { return _supported_agents; }
+    const agent_cache_map_t& get_supported_agents() const;
+
+    agent_cache_map_t& get_supported_agents();
 
     const Queue* get_queue(const hsa_queue_t&) const;
 
@@ -101,8 +104,8 @@ public:
 #endif
 
 private:
-    using client_id_map_t   = std::unordered_map<ClientID, agent_callback_tuple_t>;
-    using agent_cache_map_t = std::unordered_map<uint32_t, AgentCache>;
+    using client_id_map_t  = std::unordered_map<ClientID, agent_callback_tuple_t>;
+    using resource_alloc_t = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 
     CoreApiTable                                   _core_table       = {};
     AmdExtTable                                    _ext_table        = {};

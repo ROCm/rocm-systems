@@ -255,8 +255,18 @@ QueueController::init(CoreApiTable& core_table, AmdExtTable& ext_table)
     for(const auto* itr : agents)
     {
         const auto* cached_agent = agent::get_agent_cache(itr);
+        ROCP_TRACE << fmt::format(
+            "RocP Agent {:x} has Cache Agent? {}", itr->id.handle, cached_agent ? "yes" : "no");
+        if(cached_agent)
+        {
+            ROCP_TRACE << fmt::format("RocP Agent {:x} Type {}",
+                                      itr->id.handle,
+                                      (int) cached_agent->get_rocp_agent()->type);
+        }
+
         if(cached_agent && cached_agent->get_rocp_agent()->type == ROCPROFILER_AGENT_TYPE_GPU)
         {
+            ROCP_TRACE << fmt::format("RocP Agent {:x} is added to cache", itr->id.handle);
             get_supported_agents().emplace(cached_agent->index(), *cached_agent);
         }
     }
@@ -378,10 +388,23 @@ QueueController::iterate_callbacks(const callback_iterator_cb_t& cb) const
     });
 }
 
+const QueueController::agent_cache_map_t&
+QueueController::get_supported_agents() const
+{
+    return _supported_agents;
+}
+
+QueueController::agent_cache_map_t&
+QueueController::get_supported_agents()
+{
+    return _supported_agents;
+}
+
 QueueController*
 get_queue_controller()
 {
     static auto*& controller = common::static_object<QueueController>::construct();
+    LOG(ERROR) << (uint64_t) controller;
     return controller;
 }
 
