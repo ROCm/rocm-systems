@@ -1,4 +1,4 @@
-ARG DISTRO=rockylinux
+ARG DISTRO=rockylinux/rockylinux
 ARG VERSION=8
 FROM ${DISTRO}:${VERSION}
 
@@ -15,12 +15,11 @@ ENV LIBRARY_PATH ${LIBRARY_PATH}:/opt/amdgpu/lib64
 
 RUN yum groupinstall -y "Development Tools" && \
     yum install -y epel-release && crb enable && \
-    yum install -y --allowerasing curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip texinfo wget which zlib-devel && \
-    yum clean all && \
-    python3 -m pip install 'cmake==3.21.4'
+    yum install -y --allowerasing cmake curl dpkg-devel numactl-devel openmpi-devel papi-devel python3-pip texinfo wget which zlib-devel && \
+    yum clean all
 
 ARG ROCM_VERSION=0.0
-ARG AMDGPU_RPM=5.4/rhel/8.7/amdgpu-install-5.4.50400-1.el8.noarch.rpm
+ARG AMDGPU_RPM=6.2/rhel/9.4/amdgpu-install-6.2.60202-1.el9.noarch.rpm
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}') && \

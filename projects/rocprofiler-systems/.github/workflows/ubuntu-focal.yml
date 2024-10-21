@@ -3,7 +3,7 @@ run-name: ubuntu-focal
 
 on:
   push:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -15,7 +15,7 @@ on:
       - '.github/workflows/formatting.yml'
       - 'docker/**'
   pull_request:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -39,7 +39,7 @@ jobs:
   ubuntu-focal-external:
     runs-on: ubuntu-20.04
     container:
-      image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
@@ -98,7 +98,6 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.16.3' &&
           for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
@@ -238,18 +237,18 @@ jobs:
   ubuntu-focal-external-rocm:
     runs-on: ubuntu-20.04
     container:
-      image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
     strategy:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        rocm-version: ['5.4', '5.5', '5.6']
+        rocm-version: ['6.2']
         mpi-headers: ['OFF']
         build-jobs: ['3']
         ctest-exclude: ['-LE "mpi-example|transpose"']
         include:
           - compiler: 'g++'
-            rocm-version: 'debian'
+            rocm-version: 'latest'
             mpi-headers: 'ON'
             build-jobs: '2'
             ctest-exclude: '-LE transpose'
@@ -280,7 +279,6 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21.4' &&
           for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
@@ -443,7 +441,6 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.16.3' &&
           sudo apt-get -y --purge autoremove &&
           sudo apt-get -y clean
 
@@ -572,7 +569,7 @@ jobs:
     runs-on: ubuntu-20.04
 
     container:
-      image: jrmadsen/omnitrace:ci-base-ubuntu-20.04
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-20.04
       options: --cap-add CAP_SYS_ADMIN
 
     env:
@@ -596,7 +593,6 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.24.1' &&
           for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&

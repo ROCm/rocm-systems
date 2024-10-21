@@ -3,7 +3,7 @@ run-name: ubuntu-jammy
 
 on:
   push:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -15,7 +15,7 @@ on:
       - '.github/workflows/formatting.yml'
       - 'docker/**'
   pull_request:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -39,7 +39,7 @@ jobs:
   ubuntu-jammy-external:
     runs-on: ubuntu-20.04
     container:
-      image: jrmadsen/omnitrace:ci-base-ubuntu-22.04
+      image: dgaliffiamd/rocprofiler-systems:ci-base-ubuntu-22.04
     strategy:
       fail-fast: false
       matrix:
@@ -73,7 +73,7 @@ jobs:
             static-libgcc: 'OFF'
             static-libstdcxx: 'OFF'
             build-dyninst: 'OFF'
-            rocm-version: '5.3'
+            rocm-version: '6.2'
           - compiler: 'g++'
             hip: 'ON'
             mpi: 'OFF'
@@ -114,7 +114,6 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21.4' &&
           for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages

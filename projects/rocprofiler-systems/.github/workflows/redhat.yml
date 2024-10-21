@@ -3,7 +3,7 @@ run-name: redhat
 
 on:
   push:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -15,7 +15,7 @@ on:
       - '.github/workflows/formatting.yml'
       - 'docker/**'
   pull_request:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -37,25 +37,16 @@ env:
 
 jobs:
   rhel:
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-latest
     container:
-      image: jrmadsen/omnitrace:ci-base-rhel-${{ matrix.os-release }}
+      image: dgaliffiamd/rocprofiler-systems:ci-base-rhel-${{ matrix.os-release }}
     strategy:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '8.7', '9.0', '9.1' ]
-        rocm-version: [ '0.0', '5.3', '5.4' ]
+        os-release: [ '8.8', '8.10', '9.2', '9.4' ]
+        rocm-version: [ '0.0', '6.2' ]
         build-type: ['Release']
-        include:
-            - compiler: 'g++'
-              os-release: '9.1'
-              rocm-version: '5.5'
-              build-type: 'Release'
-            - compiler: 'g++'
-              os-release: '9.1'
-              rocm-version: '5.6'
-              build-type: 'Release'
 
     steps:
     - uses: actions/checkout@v4
@@ -74,7 +65,6 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21.4' &&
           for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages

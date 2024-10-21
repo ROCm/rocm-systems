@@ -3,7 +3,7 @@ run-name: opensuse-15
 
 on:
   push:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -15,7 +15,7 @@ on:
       - '.github/workflows/formatting.yml'
       - 'docker/**'
   pull_request:
-    branches: [ main, develop, amd-mainline, amd-staging, release/** ]
+    branches: [ amd-mainline, amd-staging, release/** ]
     paths-ignore:
       - '*.md'
       - 'docs/**'
@@ -39,12 +39,12 @@ jobs:
   opensuse:
     runs-on: ubuntu-20.04
     container:
-      image: jrmadsen/omnitrace:ci-base-opensuse-${{ matrix.os-release }}
+      image: dgaliffiamd/rocprofiler-systems:ci-base-opensuse-${{ matrix.os-release }}
     strategy:
       fail-fast: false
       matrix:
         compiler: ['g++']
-        os-release: [ '15.3', '15.4' ]
+        os-release: [ '15.5', '15.6' ]
         build-type: ['Release']
 
     steps:
@@ -62,7 +62,6 @@ jobs:
           chmod +x /opt/trace_processor/bin/trace_processor_shell
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          python3 -m pip install 'cmake==3.21.4' &&
           for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Configure Env

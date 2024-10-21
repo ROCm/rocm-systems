@@ -24,8 +24,7 @@ ENV PATH ${HOME}/.local/bin:${PATH}
 
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y apt-utils autoconf autotools-dev bash-completion bison build-essential cmake curl git-core gnupg2 libnuma1 libopenmpi-dev libpapi-dev libpfm4-dev librpm-dev libtool libudev1 lsb-release m4 python3-pip rpm texinfo wget && \
-    python3 -m pip install 'cmake==3.21.4'
+    apt-get install -y apt-utils autoconf autotools-dev bash-completion bison build-essential cmake curl git-core gnupg2 libnuma1 libopenmpi-dev libpapi-dev libpfm4-dev librpm-dev libtool libudev1 lsb-release m4 python3-pip rpm texinfo wget
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
         wget https://repo.radeon.com/amdgpu-install/${ROCM_VERSION}/ubuntu/${ROCM_REPO_DIST}/${AMDGPU_DEB} && \

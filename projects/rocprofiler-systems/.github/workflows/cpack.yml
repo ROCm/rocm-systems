@@ -4,7 +4,7 @@ run-name: cpack
 on:
   workflow_dispatch:
   push:
-    branches: [main, amd-mainline, release/**]
+    branches: [amd-staging, amd-mainline, release/**]
     tags:
       - "v[1-9].[0-9]+.[0-9]+*"
       - "rocm-[1-9].[0-9]+.[0-9]+*"
@@ -13,7 +13,7 @@ on:
       - 'docs/**'
       - 'source/docs/**'
   pull_request:
-    branches: [main, amd-mainline]
+    branches: [amd-staging, amd-mainline, release/**]
     paths:
       - '.github/workflows/cpack.yml'
       - 'docker/**'
@@ -27,7 +27,7 @@ env:
 
 jobs:
   installers:
-    if: github.repository == 'ROCm/omnitrace'
+    if: github.repository == 'ROCm/rocprofiler-systems'
     runs-on: ubuntu-20.04
     strategy:
       fail-fast: false
@@ -39,24 +39,6 @@ jobs:
             rocm-version: "0.0"
           - os-distro: "ubuntu"
             os-version: "20.04"
-            rocm-version: "5.4"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "5.5"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "5.6"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "5.7"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "6.0"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
-            rocm-version: "6.1"
-          - os-distro: "ubuntu"
-            os-version: "20.04"
             rocm-version: "6.2"
           # ubuntu 22.04
           - os-distro: "ubuntu"
@@ -64,174 +46,62 @@ jobs:
             rocm-version: "0.0"
           - os-distro: "ubuntu"
             os-version: "22.04"
-            rocm-version: "5.4"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "5.5"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "5.6"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "5.7"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "6.0"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
-            rocm-version: "6.1"
-          - os-distro: "ubuntu"
-            os-version: "22.04"
             rocm-version: "6.2"
-          # opensuse 15.3
-          - os-distro: "opensuse"
-            os-version: "15.3"
-            rocm-version: "0.0"
-          - os-distro: "opensuse"
-            os-version: "15.3"
-            rocm-version: "5.2"
-          - os-distro: "opensuse"
-            os-version: "15.3"
-            rocm-version: "5.3"
-          - os-distro: "opensuse"
-            os-version: "15.3"
-            rocm-version: "5.4"
-          - os-distro: "opensuse"
-            os-version: "15.3"
-            rocm-version: "5.5"
-          # opensuse 15.4
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "0.0"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "5.2"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "5.3"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "5.4"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "5.5"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "5.6"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "5.7"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "6.0"
-          - os-distro: "opensuse"
-            os-version: "15.4"
-            rocm-version: "6.1"
           # opensuse 15.5
           - os-distro: "opensuse"
             os-version: "15.5"
             rocm-version: "0.0"
           - os-distro: "opensuse"
             os-version: "15.5"
-            rocm-version: "5.6"
-          - os-distro: "opensuse"
-            os-version: "15.5"
-            rocm-version: "5.7"
-          - os-distro: "opensuse"
-            os-version: "15.5"
-            rocm-version: "6.0"
-          - os-distro: "opensuse"
-            os-version: "15.5"
-            rocm-version: "6.1"
-          - os-distro: "opensuse"
-            os-version: "15.5"
             rocm-version: "6.2"
-          # RHEL 8.7
-          - os-distro: "rhel"
-            os-version: "8.7"
+          # opensuse 15.6
+          - os-distro: "opensuse"
+            os-version: "15.6"
             rocm-version: "0.0"
-          - os-distro: "rhel"
-            os-version: "8.7"
-            rocm-version: "5.3"
-          - os-distro: "rhel"
-            os-version: "8.7"
-            rocm-version: "5.4"
-          - os-distro: "rhel"
-            os-version: "8.7"
-            rocm-version: "5.5"
-          - os-distro: "rhel"
-            os-version: "8.7"
-            rocm-version: "5.6"
-          - os-distro: "rhel"
-            os-version: "8.7"
-            rocm-version: "5.7"
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "6.2"
           # RHEL 8.8
           - os-distro: "rhel"
             os-version: "8.8"
             rocm-version: "0.0"
           - os-distro: "rhel"
             os-version: "8.8"
-            rocm-version: "5.6"
-          - os-distro: "rhel"
-            os-version: "8.8"
-            rocm-version: "5.7"
-          - os-distro: "rhel"
-            os-version: "8.8"
-            rocm-version: "6.0"
-          - os-distro: "rhel"
-            os-version: "8.8"
-            rocm-version: "6.1"
+            rocm-version: "6.2"
           # RHEL 8.9
           - os-distro: "rhel"
             os-version: "8.9"
             rocm-version: "0.0"
           - os-distro: "rhel"
             os-version: "8.9"
-            rocm-version: "6.0"
-          - os-distro: "rhel"
-            os-version: "8.9"
-            rocm-version: "6.1"
-          - os-distro: "rhel"
-            os-version: "8.9"
             rocm-version: "6.2"
-          # RHEL 9.1
+          # RHEL 8.10
           - os-distro: "rhel"
-            os-version: "9.1"
+            os-version: "8.10"
             rocm-version: "0.0"
           - os-distro: "rhel"
-            os-version: "9.1"
-            rocm-version: "5.4"
-          - os-distro: "rhel"
-            os-version: "9.1"
-            rocm-version: "5.5"
-          - os-distro: "rhel"
-            os-version: "9.1"
-            rocm-version: "5.6"
-          - os-distro: "rhel"
-            os-version: "9.1"
-            rocm-version: "5.7"
+            os-version: "8.10"
+            rocm-version: "6.2"
           # RHEL 9.2
           - os-distro: "rhel"
             os-version: "9.2"
             rocm-version: "0.0"
           - os-distro: "rhel"
             os-version: "9.2"
-            rocm-version: "6.0"
-          - os-distro: "rhel"
-            os-version: "9.2"
-            rocm-version: "6.1"
+            rocm-version: "6.2"
           # RHEL 9.3
           - os-distro: "rhel"
             os-version: "9.3"
             rocm-version: "0.0"
           - os-distro: "rhel"
             os-version: "9.3"
-            rocm-version: "6.0"
+            rocm-version: "6.2"
+          # RHEL 9.4
           - os-distro: "rhel"
-            os-version: "9.3"
-            rocm-version: "6.1"
+            os-version: "9.4"
+            rocm-version: "0.0"
           - os-distro: "rhel"
-            os-version: "9.3"
+            os-version: "9.4"
             rocm-version: "6.2"
 
     steps:
@@ -310,7 +180,7 @@ jobs:
 
       - name: Upload STGZ Release Assets
         uses: softprops/action-gh-release@v2
-        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'ROCm/omnitrace'
+        if: startsWith(github.ref, 'refs/tags/') && github.repository == 'ROCm/rocprofiler-systems'
         with:
           fail_on_unmatched_files: True
           files: |

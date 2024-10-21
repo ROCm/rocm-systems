@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 : ${USER:=$(whoami)}
-: ${ROCM_VERSIONS:="5.0"}
+: ${ROCM_VERSIONS:="6.2"}
 : ${DISTRO:=ubuntu}
 : ${VERSIONS:=20.04}
 : ${PYTHON_VERSIONS:="6 7 8 9 10 11 12"}
@@ -159,7 +159,7 @@ do
     VERSION_PATCH=$(echo ${VERSION} | sed 's/\./ /g' | awk '{print $3}')
     for ROCM_VERSION in ${ROCM_VERSIONS}
     do
-        CONTAINER=${USER}/omnitrace:release-base-${DISTRO}-${VERSION}-rocm-${ROCM_VERSION}
+        CONTAINER=${USER}/rocprofiler-systems:release-base-${DISTRO}-${VERSION}-rocm-${ROCM_VERSION}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_PATCH=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $3}')
@@ -174,7 +174,7 @@ do
             ROCM_REPO_DIST="ubuntu"
             ROCM_REPO_VERSION=${ROCM_VERSION}
             case "${ROCM_VERSION}" in
-                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.* | 6.*)
+                6.*)
                     case "${VERSION}" in
                         22.04)
                             ROCM_REPO_DIST="jammy"
@@ -193,7 +193,7 @@ do
             verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg ROCM_REPO_VERSION=${ROCM_REPO_VERSION} --build-arg ROCM_REPO_DIST=${ROCM_REPO_DIST} --build-arg AMDGPU_DEB=${ROCM_DEB} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "rhel" ]; then
             if [ -z "${VERSION_MINOR}" ]; then
-                send-error "Please provide a major and minor version of the OS. Supported: >= 8.7, <= 9.3"
+                send-error "Please provide a major and minor version of the OS. Supported: >= 8.8, <= 9.4"
             fi
 
             # Components used to create the sub-URL below
@@ -203,11 +203,8 @@ do
 
             # set the sub-URL in https://repo.radeon.com/amdgpu-install/<sub-URL>
             case "${ROCM_VERSION}" in
-                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.* | 6.*)
+                6.*)
                     ROCM_RPM=${ROCM_VERSION}/rhel/${RPM_PATH}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1${RPM_TAG}.noarch.rpm
-                    ;;
-                5.2 | 5.2.* | 5.1 | 5.1.* | 5.0 | 5.0.* | 4.*)
-                    send-error "Invalid ROCm version ${ROCM_VERSION}. Supported: >= 5.3.0, <= 5.5.x"
                     ;;
                 0.0)
                     ;;
@@ -217,7 +214,7 @@ do
             esac
 
             # use Rocky Linux as a base image for RHEL builds
-            DISTRO_BASE_IMAGE=rockylinux
+            DISTRO_BASE_IMAGE=rockylinux/rockylinux
 
             verbose-build docker build . ${PULL} --progress plain -f ${DOCKER_FILE} --tag ${CONTAINER} --build-arg DISTRO=${DISTRO_BASE_IMAGE} --build-arg VERSION=${VERSION} --build-arg ROCM_VERSION=${ROCM_VERSION} --build-arg AMDGPU_RPM=${ROCM_RPM} --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
         elif [ "${DISTRO}" = "opensuse" ]; then
@@ -231,20 +228,8 @@ do
                     ;;
             esac
             case "${ROCM_VERSION}" in
-                5.3 | 5.3.* | 5.4 | 5.4.* | 5.5 | 5.5.* | 5.6 | 5.6.* | 5.7 | 5.7.* | 6.*)
+                6.*)
                     ROCM_RPM=${ROCM_VERSION}/sle/${VERSION}/amdgpu-install-${ROCM_MAJOR}.${ROCM_MINOR}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                5.2 | 5.2.*)
-                    ROCM_RPM=22.20${ROCM_SEP}${ROCM_PATCH}/sle/${VERSION}/amdgpu-install-22.20.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                5.1 | 5.1.*)
-                    ROCM_RPM=22.10${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-22.10${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                5.0 | 5.0.*)
-                    ROCM_RPM=21.50${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-21.50${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
-                    ;;
-                4.5 | 4.5.*)
-                    ROCM_RPM=21.40${ROCM_SEP}${ROCM_PATCH}/sle/15/amdgpu-install-21.40${ROCM_SEP}${ROCM_PATCH}.${ROCM_VERSN}-1.noarch.rpm
                     ;;
                 0.0)
                     ;;

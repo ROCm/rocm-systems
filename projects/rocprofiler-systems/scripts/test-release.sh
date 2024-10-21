@@ -107,10 +107,10 @@ test-install()
 change-directory()
 {
     if [ ! -f "${1}" ]; then
-        if [ -f "/home/omnitrace/${1}" ]; then
-            cd /home/omnitrace
-        elif [ -f "/home/omnitrace/docker/${1}" ]; then
-            cd /home/omnitrace/docker
+        if [ -f "/home/rocprofiler-systems/${1}" ]; then
+            cd /home/rocprofiler-systems
+        elif [ -f "/home/rocprofiler-systems/docker/${1}" ]; then
+            cd /home/rocprofiler-systems/docker
         fi
     fi
     realpath ${1}
@@ -121,12 +121,12 @@ test-stgz()
     if [ -z "${1}" ]; then return; fi
 
     local INSTALLER=$(change-directory ${1})
-    mkdir /opt/rocprof-sys-stgz
-    setup-env /opt/rocprof-sys-stgz
+    mkdir /opt/rocprofiler-systems-stgz
+    setup-env /opt/rocprofiler-systems-stgz
 
-    verbose-run ${INSTALLER} --prefix=/opt/rocprof-sys-stgz --skip-license --exclude-dir
+    verbose-run ${INSTALLER} --prefix=/opt/rocprofiler-systems-stgz --skip-license --exclude-dir
 
-    test-install /opt/rocprof-sys-stgz
+    test-install /opt/rocprofiler-systems-stgz
 }
 
 test-deb()
@@ -134,16 +134,16 @@ test-deb()
     if [ -z "${1}" ]; then return; fi
 
     local INSTALLER=$(change-directory ${1})
-    setup-env /opt/rocprof-sys
+    setup-env /opt/rocprofiler-systems
 
     verbose-run ${SUDO_CMD} dpkg --contents ${INSTALLER}
     verbose-run ${SUDO_CMD} dpkg -i ${INSTALLER}
 
-    test-install /opt/rocprof-sys
-    remove-pycache /opt/rocprof-sys
-    verbose-run apt-get remove -y rocprof-sys
-    if [ -d /opt/rocprof-sys ]; then
-        find /opt/rocprof-sys -type f
+    test-install /opt/rocprofiler-systems
+    remove-pycache /opt/rocprofiler-systems
+    verbose-run apt-get remove -y rocprofiler-systems
+    if [ -d /opt/rocprofiler-systems ]; then
+        find /opt/rocprofiler-systems -type f
     fi
 }
 
@@ -152,16 +152,16 @@ test-rpm()
     if [ -z "${1}" ]; then return; fi
 
     local INSTALLER=$(change-directory ${1})
-    setup-env /opt/rocprof-sys
+    setup-env /opt/rocprofiler-systems
 
     verbose-run ${SUDO_CMD} rpm -ql -p ${INSTALLER}
     verbose-run ${SUDO_CMD} rpm -v -i -p ${INSTALLER} --nodeps
 
-    test-install /opt/rocprof-sys
-    remove-pycache /opt/rocprof-sys
-    verbose-run rpm -e rocprof-sys
-    if [ -d /opt/rocprof-sys ]; then
-        find /opt/rocprof-sys -type f
+    test-install /opt/rocprofiler-systems
+    remove-pycache /opt/rocprofiler-systems
+    verbose-run rpm -e rocprofiler-systems
+    if [ -d /opt/rocprofiler-systems ]; then
+        find /opt/rocprofiler-systems -type f
     fi
 }
 

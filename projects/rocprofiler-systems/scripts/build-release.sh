@@ -265,13 +265,13 @@ build-and-package-base()
                 DEST="stgz"
                 ;;
             DEB)
-                verbose-run cpack -G DEB -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/rocprof-sys
+                verbose-run cpack -G DEB -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/rocprofiler-systems
                 EXT="deb"
                 SEP="_"
                 DEST="deb"
                 ;;
             RPM)
-                verbose-run cpack -G RPM -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/rocprof-sys
+                verbose-run cpack -G RPM -D CPACK_PACKAGING_INSTALL_PREFIX=/opt/rocprofiler-systems
                 EXT="rpm"
                 SEP="-"
                 DEST="rpm"
@@ -325,7 +325,7 @@ build-and-package-base()
         esac
         popd
         verbose-run mkdir -p ${BUILD_DIR}/${DEST}
-        verbose-run copy-installer ${i} ${BUILD_DIR}/${DEST} ${BUILD_DIR}/${DIR}/omnitrace${SEP}${VERSION}-*.${EXT}
+        verbose-run copy-installer ${i} ${BUILD_DIR}/${DEST} ${BUILD_DIR}/${DIR}/rocprofiler-systems${SEP}${VERSION}-*.${EXT}
     done
 }
 
@@ -370,7 +370,7 @@ fi
 
 if [ "${IS_DOCKER}" -ne 0 ]; then git config --global --add safe.directory ${PWD}; fi
 
-verbose-run echo "Build omnitrace installers with generators: ${GENERATORS}"
+verbose-run echo "Build rocprofiler-systems installers with generators: ${GENERATORS}"
 
 build-and-package ${WITH_CORE} ${DISTRO}-core -DROCPROFSYS_USE_HIP=OFF -DROCPROFSYS_USE_MPI=OFF
 build-and-package ${WITH_MPI} ${DISTRO}-${MPI_IMPL} -DROCPROFSYS_USE_HIP=OFF -DROCPROFSYS_USE_MPI=ON

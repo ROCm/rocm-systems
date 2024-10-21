@@ -42,7 +42,7 @@ usage()
     print_default_option versions "[VERSION] [VERSION...]" "Ubuntu, OpenSUSE, or RHEL release" "${VERSIONS}"
     print_default_option python-versions "[VERSION] [VERSION...]" "Python 3 minor releases" "${PYTHON_VERSIONS}"
     print_default_option "jobs -j" "[N]" "parallel build jobs" "${NJOBS}"
-    print_default_option elfutils-version "[0.183..0.186]" "ElfUtils version" "${ELFUTILS_VERSION}"
+    print_default_option elfutils-version "[0.183..0.188]" "ElfUtils version" "${ELFUTILS_VERSION}"
     print_default_option boost-version "[1.67.0..1.79.0]" "Boost version" "${BOOST_VERSION}"
     print_default_option user "[USERNAME]" "DockerHub username" "${USER}"
 }
@@ -142,7 +142,7 @@ set -e
 if [ "${DISTRO}" = "opensuse" ]; then
     DISTRO_IMAGE="opensuse/leap"
 elif [ "${DISTRO}" = "rhel" ]; then
-    DISTRO_IMAGE="rockylinux"
+    DISTRO_IMAGE="rockylinux/rockylinux"
 else
     DISTRO_IMAGE=${DISTRO}
 fi
@@ -152,7 +152,7 @@ do
     verbose-run docker build . \
         ${PULL} \
         -f ${DOCKER_FILE} \
-        --tag ${USER}/omnitrace:ci-base-${DISTRO}-${VERSION} \
+        --tag ${USER}/rocprofiler-systems:ci-base-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
         --build-arg NJOBS=${NJOBS} \
@@ -164,7 +164,7 @@ done
 if [ "${PUSH}" -gt 0 ]; then
     for VERSION in ${VERSIONS}
     do
-        verbose-run docker push ${USER}/omnitrace:ci-base-${DISTRO}-${VERSION}
+        verbose-run docker push ${USER}/rocprofiler-systems:ci-base-${DISTRO}-${VERSION}
     done
 fi
 

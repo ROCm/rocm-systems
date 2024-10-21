@@ -1,5 +1,5 @@
 ARG DISTRO=opensuse/leap
-ARG VERSION=15.3
+ARG VERSION=15.5
 FROM ${DISTRO}:${VERSION}
 
 ENV HOME /root
@@ -23,11 +23,10 @@ RUN set +e; \
 RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
-    zypper --non-interactive install -y python3-pip openmpi3-devel gcc-c++ git libnuma-devel dpkg-devel rpm-build wget curl binutils-gold && \
-    python3 -m pip install 'cmake==3.21.4'
+    zypper --non-interactive install -y binutils-gold cmake curl dpkg-devel gcc-c++ git libnuma-devel openmpi3-devel python3-pip rpm-build wget
 
 ARG ROCM_VERSION=0.0
-ARG AMDGPU_RPM=latest/sle/15/amdgpu-install-21.50.50000-1.noarch.rpm
+ARG AMDGPU_RPM=6.2/sle/15.6/amdgpu-install-6.2.60200-1.noarch.rpm
 ARG PERL_REPO=SLE_15
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \

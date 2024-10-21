@@ -13,29 +13,40 @@ WORKDIR /tmp
 SHELL [ "/bin/bash", "-c" ]
 
 ARG EXTRA_PACKAGES=""
-ARG ELFUTILS_DOWNLOAD_VERSION="0.186"
+ARG ELFUTILS_DOWNLOAD_VERSION="0.188"
 ARG BOOST_DOWNLOAD_VERSION="1.79.0"
-ARG NJOBS="12"
-ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
+ARG NJOBS="8"
+
 
 ENV PATH /usr/local/bin:${PATH}
 ENV LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LIBRARY_PATH}
 ENV LD_LIBRARY_PATH /usr/local/lib:/usr/local/lib64:${LD_LIBRARY_PATH}
 ENV CMAKE_PREFIX_PATH /usr/local:${CMAKE_PREFIX_PATH}
 
-COPY ./dyninst-source /tmp/dyninst
-
 RUN apt-get update && \
     apt-get dist-upgrade -y && \
-    apt-get install -y autoconf autotools-dev bash-completion bison build-essential bzip2 cmake curl environment-modules git-core gnupg2 gzip libiberty-dev libpapi-dev libpfm4-dev libtool locales lsb-release m4 python3-pip texinfo unzip wget zip zlib1g-dev && \
-    python3 -m pip install 'cmake==3.18.4' && \
-    apt-get autoclean && \
-    locale -a && \
-    cd /tmp/dyninst && \
-    cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_BOOST=ON -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON -DELFUTILS_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} -DBOOST_DOWNLOAD_VERSION=${BOOST_DOWNLOAD_VERSION} && \
+    apt-get install -y autoconf autotools-dev bash-completion bison build-essential \
+        bzip2 cmake curl environment-modules git-core gnupg2 gzip libiberty-dev \
+        libpapi-dev libpfm4-dev libtool locales lsb-release m4 python3-pip texinfo \
+        unzip wget zip zlib1g-dev && \
+    apt-get autoclean
+
+COPY ./dyninst-source /tmp/dyninst
+
+RUN cd /tmp/dyninst && \
+    cmake -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo -DBUILD_BOOST=ON \
+        -DBUILD_TBB=ON -DBUILD_ELFUTILS=ON -DBUILD_LIBIBERTY=ON \
+        -DElfUtils_DOWNLOAD_VERSION=${ELFUTILS_DOWNLOAD_VERSION} \
+        -DBOOST_DOWNLOAD_VERSION=${BOOST_DOWNLOAD_VERSION} && \
     cmake --build build --target all --parallel ${NJOBS} && \
     cmake --build build --target install --parallel ${NJOBS} && \
-    wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
+    cd /tmp && \
+    shopt -s dotglob extglob && \
+    rm -rf *
+
+ARG PYTHON_VERSIONS="6 7 8 9 10 11 12"
+
+RUN wget https://repo.continuum.io/miniconda/Miniconda3-latest-Linux-x86_64.sh -O miniconda.sh && \
     bash miniconda.sh -b -p /opt/conda && \
     export PATH="/opt/conda/bin:${PATH}" && \
     conda config --set always_yes yes --set changeps1 no && \
