@@ -40,10 +40,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtCreateEvent(HsaEventDescriptor *EventDesc,
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtDestroyEvent(HsaEvent *Event) {
   CHECK_DXG_OPEN();
-  pr_warn_once("not supported\n");
   if (!Event)
-    return HSAKMT_STATUS_INVALID_HANDLE;
+    return HSAKMT_STATUS_SUCCESS;
 
+  pr_warn_once("not supported\n");
   assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
