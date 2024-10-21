@@ -31,6 +31,7 @@
 #include <set>
 #include <shared_mutex>
 #include <sstream>
+#include <stdexcept>
 #include <unordered_map>
 #include <vector>
 
@@ -62,6 +63,12 @@ start()
 
 namespace
 {
+rocprofiler_agent_id_t&
+expected_agent()
+{
+    static rocprofiler_agent_id_t expected_agent = {.handle = 0};
+    return expected_agent;
+}
 rocprofiler_context_id_t&
 get_client_ctx()
 {
@@ -104,6 +111,14 @@ buffered_callback(rocprofiler_context_id_t,
             auto* record = static_cast<rocprofiler_record_counter_t*>(header->payload);
             ss << "  (Id: " << record->id << " Value [D]: " << record->counter_value << ","
                << " user_data: " << record->user_data.value << "),";
+
+            // Check that the agent is what we expect
+            if(record->agent_id.handle != expected_agent().handle)
+            {
+                throw std::runtime_error("Unexpected agent - " +
+                                         std::to_string(record->agent_id.handle) + " " +
+                                         std::to_string(expected_agent().handle));
+            }
         }
     }
 
@@ -249,13 +264,12 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
                      "failed to assign thread for buffer");
 
     // Construct the profiles in advance for each agent that is a GPU
-    rocprofiler_agent_id_t agent_id;
     for(const auto& agent : agents)
     {
         if(agent.type == ROCPROFILER_AGENT_TYPE_GPU)
         {
             get_profile_cache().emplace(agent.id.handle, build_profile_for_agent(agent.id));
-            agent_id = agent.id;
+            expected_agent() = agent.id;
             break;
         }
     }
@@ -267,7 +281,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
     }
 
     ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
-                         get_client_ctx(), get_buffer(), agent_id, set_profile, nullptr),
+                         get_client_ctx(), get_buffer(), expected_agent(), set_profile, nullptr),
                      "Could not setup buffered service");
 
     std::thread([=]() {

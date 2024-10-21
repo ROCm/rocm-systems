@@ -688,6 +688,7 @@ typedef struct
     double                            counter_value;  ///< counter value
     rocprofiler_dispatch_id_t         dispatch_id;
     rocprofiler_user_data_t           user_data;
+    rocprofiler_agent_id_t            agent_id;
 
     /// @var dispatch_id
     /// @brief A value greater than zero indicates that this counter record is associated with a

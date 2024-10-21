@@ -238,6 +238,7 @@ completed_cb(const context::context*                       ctx,
         out.reserve(out.size() + ret->size());
         for(auto& val : *ret)
         {
+            val.agent_id    = prof_config->agent->id;
             val.dispatch_id = _dispatch_id;
             out.emplace_back(val);
         }

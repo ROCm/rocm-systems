@@ -719,7 +719,8 @@ TEST(evaluate_ast, counter_reduction_sum)
                  times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                       .counter_value = 5.0,
                                                                       .dispatch_id   = 0,
-                                                                      .user_data = {.value = 0}}},
+                                                                      .user_data     = {.value = 0},
+                                                                      .agent_id = {.handle = 0}}},
                            sum_vec(base_counter_data["VOORHEES"])),
                  sum_vec(base_counter_data["KRUEGER"])),
              2},
@@ -730,7 +731,8 @@ TEST(evaluate_ast, counter_reduction_sum)
                           std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                      .counter_value = 5.0,
                                                                      .dispatch_id   = 0,
-                                                                     .user_data = {.value = 0}}})),
+                                                                     .user_data     = {.value = 0},
+                                                                     .agent_id = {.handle = 0}}})),
              2},
         };
 
@@ -805,7 +807,8 @@ TEST(evaluate_ast, counter_reduction_min)
                  times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                       .counter_value = 5.0,
                                                                       .dispatch_id   = 0,
-                                                                      .user_data = {.value = 0}}},
+                                                                      .user_data     = {.value = 0},
+                                                                      .agent_id = {.handle = 0}}},
                            min_vec(base_counter_data["VOORHEES"])),
                  min_vec(base_counter_data["KRUEGER"])),
              2},
@@ -816,7 +819,8 @@ TEST(evaluate_ast, counter_reduction_min)
                           std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                      .counter_value = 5.0,
                                                                      .dispatch_id   = 0,
-                                                                     .user_data = {.value = 0}}})),
+                                                                     .user_data     = {.value = 0},
+                                                                     .agent_id = {.handle = 0}}})),
              2},
         };
 
@@ -891,7 +895,8 @@ TEST(evaluate_ast, counter_reduction_max)
                  times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                       .counter_value = 5.0,
                                                                       .dispatch_id   = 0,
-                                                                      .user_data = {.value = 0}}},
+                                                                      .user_data     = {.value = 0},
+                                                                      .agent_id = {.handle = 0}}},
                            max_vec(base_counter_data["VOORHEES"])),
                  max_vec(base_counter_data["KRUEGER"])),
              2},
@@ -902,7 +907,8 @@ TEST(evaluate_ast, counter_reduction_max)
                           std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                      .counter_value = 5.0,
                                                                      .dispatch_id   = 0,
-                                                                     .user_data = {.value = 0}}})),
+                                                                     .user_data     = {.value = 0},
+                                                                     .agent_id = {.handle = 0}}})),
              2},
         };
 
@@ -979,7 +985,8 @@ TEST(evaluate_ast, counter_reduction_avg)
                  times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                       .counter_value = 5.0,
                                                                       .dispatch_id   = 0,
-                                                                      .user_data = {.value = 0}}},
+                                                                      .user_data     = {.value = 0},
+                                                                      .agent_id = {.handle = 0}}},
                            avg_vec(base_counter_data["VOORHEES"])),
                  avg_vec(base_counter_data["KRUEGER"])),
              2},
@@ -990,7 +997,8 @@ TEST(evaluate_ast, counter_reduction_avg)
                           std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                      .counter_value = 5.0,
                                                                      .dispatch_id   = 0,
-                                                                     .user_data = {.value = 0}}})),
+                                                                     .user_data     = {.value = 0},
+                                                                     .agent_id = {.handle = 0}}})),
              2},
         };
 
@@ -1050,23 +1058,28 @@ TEST(evaluate_ast, evaluate_mixed_counters)
     std::vector<std::tuple<std::string, std::vector<rocprofiler_record_counter_t>, int64_t>>
         derived_counters = {
             {"BATES",
-             times_vec(
-                 std::vector<rocprofiler_record_counter_t>{
-                     {.id = 0, .counter_value = 32, .dispatch_id = 0, .user_data = {.value = 0}}},
-                 sum_vec(base_counter_data["VOORHEES"])),
+             times_vec(std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                  .counter_value = 32,
+                                                                  .dispatch_id   = 0,
+                                                                  .user_data     = {.value = 0},
+                                                                  .agent_id      = {.handle = 0}}},
+                       sum_vec(base_counter_data["VOORHEES"])),
              2},
             {"KRAMER",
              times_vec(sum_vec(base_counter_data["KRUEGER"]),
                        std::vector<rocprofiler_record_counter_t>{{.id            = 0,
                                                                   .counter_value = 8.0 / 5.0,
                                                                   .dispatch_id   = 0,
-                                                                  .user_data     = {.value = 0}}}),
+                                                                  .user_data     = {.value = 0},
+                                                                  .agent_id      = {.handle = 0}}}),
              3},
             {"TORRANCE",
-             times_vec(
-                 sum_vec(base_counter_data["KRUEGER"]),
-                 std::vector<rocprofiler_record_counter_t>{
-                     {.id = 0, .counter_value = 624, .dispatch_id = 0, .user_data = {.value = 0}}}),
+             times_vec(sum_vec(base_counter_data["KRUEGER"]),
+                       std::vector<rocprofiler_record_counter_t>{{.id            = 0,
+                                                                  .counter_value = 624,
+                                                                  .dispatch_id   = 0,
+                                                                  .user_data     = {.value = 0},
+                                                                  .agent_id      = {.handle = 0}}}),
              2},
         };
 
