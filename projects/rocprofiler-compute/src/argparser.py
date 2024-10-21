@@ -416,7 +416,7 @@ Examples:
         dest="gpu_kernel",
         nargs="+",
         action="append",
-        help="\t\tSpecify kernel id(s) from --list-kernels for filtering.",
+        help="\t\tSpecify kernel id(s) from --list-stats for filtering.",
     )
     analyze_group.add_argument(
         "-d",
