@@ -7,6 +7,7 @@ default_field_ids = [
         rdc_field_t.RDC_FI_GPU_MEMORY_TOTAL,
         rdc_field_t.RDC_FI_GPU_MM_ENC_UTIL,
         rdc_field_t.RDC_FI_GPU_MM_DEC_UTIL,
+        rdc_field_t.RDC_FI_GPU_MEMORY_ACTIVITY,
         rdc_field_t.RDC_FI_OAM_ID,
         rdc_field_t.RDC_FI_POWER_USAGE,
         rdc_field_t.RDC_FI_GPU_CLOCK,

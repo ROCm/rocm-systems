@@ -564,6 +564,15 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     }
+    case RDC_FI_GPU_MEMORY_ACTIVITY: {
+      amdsmi_engine_usage_t engine_usage;
+      value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+      }
+      break;
+    }
     case RDC_FI_GPU_COUNT: {
       uint32_t processor_count = 0;
       // amdsmi is initialized in AMDSMI_INIT_AMD_GPUS mode -> returned sockets are GPUs
