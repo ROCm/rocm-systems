@@ -4117,25 +4117,6 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                rsmi_compute_partition_type_t compute_partition);
 
 /**
- *  @brief Reverts a selected device's compute partition setting back to its
- *  boot state.
- *
- *  @details Given a device index @p dv_ind , this function will attempt to
- *  revert its compute partition setting back to its boot state.
- *
- *  @param[in] dv_ind a device index
- *
- *  @retval ::RSMI_STATUS_SUCCESS call was successful
- *  @retval ::RSMI_STATUS_PERMISSION function requires root access
- *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
- *  because it is already being used - device is busy
- *
- */
-rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind);
-
-/**
  *  @brief Retrieves the partition_id for a desired device
  *
  *  @details
@@ -4226,27 +4207,6 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
 rsmi_status_t
 rsmi_dev_memory_partition_set(uint32_t dv_ind,
                               rsmi_memory_partition_type_t memory_partition);
-
-/**
- *  @brief Reverts a selected device's memory partition setting back to its
- *  boot state.
- *
- *  @details Given a device index @p dv_ind , this function will attempt to
- *  revert its current memory partition setting back to its boot state.
- *
- *  @param[in] dv_ind a device index
- *
- *  @retval ::RSMI_STATUS_SUCCESS call was successful
- *  @retval ::RSMI_STATUS_PERMISSION function requires root access
- *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
- *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
- *  because it is already being used - device is busy
- *
- */
-rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind);
 
 /** @} */  // end of memory_partition
 
