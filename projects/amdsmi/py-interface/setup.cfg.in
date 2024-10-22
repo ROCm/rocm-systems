@@ -18,7 +18,7 @@ include_package_data = True
 packages = find:
 python_requires = >=3.6
 install_requires=
-   PyYAML >= 3.12
+   PyYAML >= 3.0
 
 [options.package_data]
 * = *.so

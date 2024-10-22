@@ -1431,12 +1431,6 @@ amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                           static_cast<rsmi_compute_partition_type_t>(compute_partition));
 }
 
-amdsmi_status_t
-amdsmi_reset_gpu_compute_partition(amdsmi_processor_handle processor_handle) {
-    AMDSMI_CHECK_INIT();
-    return rsmi_wrapper(rsmi_dev_compute_partition_reset, processor_handle);
-}
-
 // Memory Partition functions
 amdsmi_status_t
 amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
@@ -1452,12 +1446,6 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
     AMDSMI_CHECK_INIT();
     return rsmi_wrapper(rsmi_dev_memory_partition_set, processor_handle,
                           static_cast<rsmi_memory_partition_type_t>(memory_partition));
-}
-
-amdsmi_status_t
-amdsmi_reset_gpu_memory_partition(amdsmi_processor_handle processor_handle) {
-    AMDSMI_CHECK_INIT();
-    return rsmi_wrapper(rsmi_dev_memory_partition_reset, processor_handle);
 }
 
 amdsmi_status_t

@@ -568,6 +568,10 @@ GPU: 0
 
 ### Removals
 
+- **Removed `amd-smi reset --compute-partition` and `... --memory-partition` and associated APIs**.  
+  - This change is part of the partition redesign. Reset functionality will be reintroduced in a later update.
+  - associated APIs include `amdsmi_reset_gpu_compute_partition()` and `amdsmi_reset_gpu_memory_partition()`
+
 - **Removed usage of _validate_positive in Parser and replaced with _positive_int and _not_negative_int as appropriate**.  
   - This will allow 0 to be a valid input for several options in setting CPUs where appropriate (for example, as a mode or NBIOID)
 
@@ -648,6 +652,33 @@ GPU  POWER  GPU_TEMP  MEM_TEMP  VRAM_USED  VRAM_TOTAL
 ### Upcoming changes
 
 - **Python API for `amdsmi_get_energy_count()` will deprecate the `power` field in ROCm 6.4 and use `energy_accumulator` field instead**.  
+
+- **New memory and compute partition APIs incoming for ROCm 6.4**.  
+  - These APIs will be updated to fully populate the CLI and allowing compute (accelerator) partitions to be set by profile ID.
+  - One API will be provided, to reset both memory and compute (accelerator).
+    - There are dependencies regarding available compute partitions when in other memory modes.
+    - Driver will be providing these default modes
+    - Memory partition resets (for BM) require driver reloads - this will allow us to notify users before taking this action, then change to the default compute partition modes.
+  - The following APIs will remain:
+
+```C
+amdsmi_status_t
+amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
+                                  amdsmi_compute_partition_type_t compute_partition);
+amdsmi_status_t
+amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
+                                  char *compute_partition, uint32_t len);
+amdsmi_status_t
+amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
+
+                                  char *memory_partition, uint32_t len);
+amdsmi_status_t
+amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
+                                  amdsmi_memory_partition_type_t memory_partition);
+```
+
+- **amd-smi set --compute-partition "SPX/DPX/CPX..." will no longer be supported for ROCm 6.4**.  
+  - This is due to aligning with Host setups and providing more robust partition information through the APIs outlined above. Furthermore, new APIs which will be available on both BM/Host can set by profile ID. (functionality coming soon!)
 
 - **Added preliminary `amd-smi partition` command**.  
   - The new partition command can be used to display GPU information, including memory and accelerator partition information.

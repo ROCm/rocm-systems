@@ -2691,15 +2691,6 @@ def amdsmi_set_gpu_compute_partition(processor_handle: amdsmi_wrapper.amdsmi_pro
     )
 
 
-def amdsmi_reset_gpu_compute_partition(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(
-            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
-        )
-
-    _check_res(amdsmi_wrapper.amdsmi_reset_gpu_compute_partition(processor_handle))
-
-
 def amdsmi_get_gpu_memory_partition(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(
@@ -2735,15 +2726,6 @@ def amdsmi_set_gpu_memory_partition(processor_handle: amdsmi_wrapper.amdsmi_proc
             processor_handle, memory_partition
         )
     )
-
-
-def amdsmi_reset_gpu_memory_partition(processor_handle: amdsmi_wrapper.amdsmi_processor_handle):
-    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
-        raise AmdSmiParameterException(
-            processor_handle, amdsmi_wrapper.amdsmi_processor_handle
-        )
-
-    _check_res(amdsmi_wrapper.amdsmi_reset_gpu_memory_partition(processor_handle))
 
 
 def amdsmi_get_gpu_accelerator_partition_profile(

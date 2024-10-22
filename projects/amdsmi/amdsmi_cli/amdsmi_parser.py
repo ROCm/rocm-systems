@@ -1128,8 +1128,6 @@ class AMDSMIParser(argparse.ArgumentParser):
         reset_profile_help = "Reset power profile back to default"
         reset_xgmierr_help = "Reset XGMI error counts"
         reset_perf_det_help = "Disable performance determinism"
-        reset_compute_help = "Reset compute partitions on the specified GPU"
-        reset_memory_help = "Reset memory partitions on the specified GPU"
         reset_power_cap_help = "Reset power capacity limit to max capable"
         reset_gpu_clean_local_data_help = "Clean up local data in LDS/GPRs on a per partition basis"
 
@@ -1152,8 +1150,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             reset_parser.add_argument('-p', '--profile', action='store_true', required=False, help=reset_profile_help)
             reset_parser.add_argument('-x', '--xgmierr', action='store_true', required=False, help=reset_xgmierr_help)
             reset_parser.add_argument('-d', '--perf-determinism', action='store_true', required=False, help=reset_perf_det_help)
-            reset_parser.add_argument('-C', '--compute-partition', action='store_true', required=False, help=reset_compute_help)
-            reset_parser.add_argument('-M', '--memory-partition', action='store_true', required=False, help=reset_memory_help)
             reset_parser.add_argument('-o', '--power-cap', action='store_true', required=False, help=reset_power_cap_help)
 
         # Add Baremetal and Virtual OS reset arguments

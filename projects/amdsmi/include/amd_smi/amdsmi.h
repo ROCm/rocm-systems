@@ -4578,25 +4578,6 @@ amdsmi_status_t
 amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_compute_partition_type_t compute_partition);
 
-/**
- *  @brief Reverts a selected device's compute partition setting back to its
- *  boot state.
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, this function will attempt to
- *  revert its compute partition setting back to its boot state.
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires root access
- *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *
- */
-amdsmi_status_t amdsmi_reset_gpu_compute_partition(amdsmi_processor_handle processor_handle);
-
 /** @} */  // end of compute_partition
 
 /*****************************************************************************/
@@ -4666,27 +4647,6 @@ amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
 amdsmi_status_t
 amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_memory_partition_type_t memory_partition);
-
-/**
- *  @brief Reverts a selected device's memory partition setting back to its
- *  boot state.
- *
- *  @platform{gpu_bm_linux}
- *
- *  @details Given a processor handle @p processor_handle, this function will attempt to
- *  revert its current memory partition setting back to its boot state.
- *
- *  @param[in] processor_handle Device which to query
- *
- *  @retval ::AMDSMI_STATUS_SUCCESS call was successful
- *  @retval ::AMDSMI_STATUS_PERMISSION function requires root access
- *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @retval ::AMDSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
- *
- */
-amdsmi_status_t amdsmi_reset_gpu_memory_partition(amdsmi_processor_handle processor_handle);
 
 /** @} */  // end of memory_partition
 

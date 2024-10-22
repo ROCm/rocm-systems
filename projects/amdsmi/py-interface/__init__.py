@@ -222,10 +222,8 @@ from .amdsmi_interface import amdsmi_get_link_topology_nearest
 # # Partition Functions
 from .amdsmi_interface import amdsmi_get_gpu_compute_partition
 from .amdsmi_interface import amdsmi_set_gpu_compute_partition
-from .amdsmi_interface import amdsmi_reset_gpu_compute_partition
 from .amdsmi_interface import amdsmi_get_gpu_memory_partition
 from .amdsmi_interface import amdsmi_set_gpu_memory_partition
-from .amdsmi_interface import amdsmi_reset_gpu_memory_partition
 from .amdsmi_interface import amdsmi_get_gpu_accelerator_partition_profile
 
 # # Individual GPU Metrics Functions

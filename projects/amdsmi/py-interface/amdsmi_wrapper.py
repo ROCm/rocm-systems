@@ -2349,18 +2349,12 @@ amdsmi_get_gpu_compute_partition.argtypes = [amdsmi_processor_handle, ctypes.POI
 amdsmi_set_gpu_compute_partition = _libraries['libamd_smi.so'].amdsmi_set_gpu_compute_partition
 amdsmi_set_gpu_compute_partition.restype = amdsmi_status_t
 amdsmi_set_gpu_compute_partition.argtypes = [amdsmi_processor_handle, amdsmi_compute_partition_type_t]
-amdsmi_reset_gpu_compute_partition = _libraries['libamd_smi.so'].amdsmi_reset_gpu_compute_partition
-amdsmi_reset_gpu_compute_partition.restype = amdsmi_status_t
-amdsmi_reset_gpu_compute_partition.argtypes = [amdsmi_processor_handle]
 amdsmi_get_gpu_memory_partition = _libraries['libamd_smi.so'].amdsmi_get_gpu_memory_partition
 amdsmi_get_gpu_memory_partition.restype = amdsmi_status_t
 amdsmi_get_gpu_memory_partition.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_char), uint32_t]
 amdsmi_set_gpu_memory_partition = _libraries['libamd_smi.so'].amdsmi_set_gpu_memory_partition
 amdsmi_set_gpu_memory_partition.restype = amdsmi_status_t
 amdsmi_set_gpu_memory_partition.argtypes = [amdsmi_processor_handle, amdsmi_memory_partition_type_t]
-amdsmi_reset_gpu_memory_partition = _libraries['libamd_smi.so'].amdsmi_reset_gpu_memory_partition
-amdsmi_reset_gpu_memory_partition.restype = amdsmi_status_t
-amdsmi_reset_gpu_memory_partition.argtypes = [amdsmi_processor_handle]
 amdsmi_get_gpu_accelerator_partition_profile = _libraries['libamd_smi.so'].amdsmi_get_gpu_accelerator_partition_profile
 amdsmi_get_gpu_accelerator_partition_profile.restype = amdsmi_status_t
 amdsmi_get_gpu_accelerator_partition_profile.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_accelerator_partition_profile_t), ctypes.POINTER(ctypes.c_uint32)]
@@ -2899,10 +2893,9 @@ __all__ = \
     'amdsmi_process_info_t', 'amdsmi_processor_handle',
     'amdsmi_range_t', 'amdsmi_ras_err_state_t',
     'amdsmi_ras_feature_t', 'amdsmi_reg_type_t', 'amdsmi_reset_gpu',
-    'amdsmi_reset_gpu_compute_partition', 'amdsmi_reset_gpu_fan',
-    'amdsmi_reset_gpu_memory_partition',
-    'amdsmi_reset_gpu_xgmi_error', 'amdsmi_retired_page_record_t',
-    'amdsmi_set_clk_freq', 'amdsmi_set_cpu_core_boostlimit',
+    'amdsmi_reset_gpu_fan', 'amdsmi_reset_gpu_xgmi_error',
+    'amdsmi_retired_page_record_t', 'amdsmi_set_clk_freq',
+    'amdsmi_set_cpu_core_boostlimit',
     'amdsmi_set_cpu_df_pstate_range',
     'amdsmi_set_cpu_gmi3_link_width_range',
     'amdsmi_set_cpu_pcie_link_rate',
@@ -2970,5 +2963,6 @@ __all__ = \
     'struct_cache_', 'struct_engine_usage_', 'struct_fw_info_list_',
     'struct_memory_usage_', 'struct_nps_flags_',
     'struct_pcie_metric_', 'struct_pcie_static_',
-    'struct_amdsmi_bdf_t','uint32_t', 'uint64_t', 'uint8_t',
+    'struct_amdsmi_bdf_t', 'uint32_t', 'uint64_t', 'uint8_t',
     'union_amdsmi_bdf_t', 'union_amdsmi_nps_caps_t']
+

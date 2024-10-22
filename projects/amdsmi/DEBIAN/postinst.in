@@ -134,10 +134,10 @@ do_install_amdsmi_python_lib() {
   export PIP_BREAK_SYSTEM_PACKAGES=1
 
   # Remove old python library
-  local pip_list_output
-  pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
+  local amdsmi_pip_list_output
+  amdsmi_pip_list_output=$(python3 -m pip list --format=columns --disable-pip-version-check)
   # check pip list output for amdsmi
-  if [[ $pip_list_output == *"amdsmi"* ]]; then
+  if [[ $amdsmi_pip_list_output == *"amdsmi"* ]]; then
     echo "Detected old AMD-SMI python library (amdsmi)..."
     python3 -m pip uninstall amdsmi --yes --quiet --disable-pip-version-check
     echo "Removed old AMD-SMI python library (amdsmi)..."
@@ -148,9 +148,32 @@ do_install_amdsmi_python_lib() {
     return
   fi
 
-  # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
-  local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
-  python3 -m pip install "$python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index
+ check_and_install_amdsmi() {
+  local setuptools_version
+  setuptools_version=$(python3 -c 'import setuptools; print(setuptools.__version__)')
+  if [ $? -ne 0 ]; then
+    echo "[WARNING] Could not determine setuptools version. "\
+      "AMD-SMI python library will not be installed."
+    return
+  fi
+
+  local amdsmi_python_lib_path="/opt/rocm/share/amd_smi"
+  local amdsmi_setup_py_path="/opt/rocm/share/amd_smi/setup.py"
+
+  # Decide installation method based on setuptools version
+  if [[ "$(printf '%s\n' "$setuptools_version" "28.5" | sort -V | head -n1)" == "$setuptools_version" ]]; then
+    echo "[WARNING] Setuptools version is less than 28.5. AMD-SMI will not be installed."
+  elif [[ "$(printf '%s\n' "$setuptools_version" "41.0.1" | sort -V | head -n1)" != "41.0.1" ]]; then
+    echo "Using setup.py for installation due to setuptools version $setuptools_version"
+    python3 "$amdsmi_setup_py_path" install
+  else
+    echo "Using pyproject.toml for installation due to setuptools version $setuptools_version"
+    python3 -m pip install "$amdsmi_python_lib_path" --quiet --disable-pip-version-check --no-build-isolation --no-index
+  fi
+}
+
+  # Call the function
+  check_and_install_amdsmi
 
   export PIP_ROOT_USER_ACTION="$PREVIOUS_PIP_ROOT_USER_ACTION"
   export PIP_BREAK_SYSTEM_PACKAGES="$PREVIOUS_PIP_BREAK_SYSTEM_PACKAGES"

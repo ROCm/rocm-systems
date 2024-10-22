@@ -3704,36 +3704,6 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_reset_gpu_compute_partition
-
-Description: Reset the compute partitioning on the given GPU
-
-Input parameters:
-
-* `processor_handle` the device handle
-
-Output: String of the partition type
-
-Exceptions that can be thrown by `amdsmi_reset_gpu_compute_partition` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-* `AmdSmiParameterException`
-
-Example:
-
-```python
-try:
-    devices = amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi_reset_gpu_compute_partition(device)
-except AmdSmiException as e:
-    print(e)
-```
-
 ### amdsmi_get_gpu_memory_partition
 
 Description: Get the memory partition from the given GPU
@@ -3797,35 +3767,6 @@ except AmdSmiException as e:
     print(e)
 ```
 
-### amdsmi_reset_gpu_memory_partition
-
-Description: Reset the memory partitioning on the given GPU
-
-Input parameters:
-
-* `processor_handle` the device handle
-
-Output: String of the partition type
-
-Exceptions that can be thrown by `amdsmi_reset_gpu_memory_partition` function:
-
-* `AmdSmiLibraryException`
-* `AmdSmiRetryException`
-* `AmdSmiParameterException`
-
-Example:
-
-```python
-try:
-    devices = amdsmi_get_processor_handles()
-    if len(devices) == 0:
-        print("No GPUs on machine")
-    else:
-        for device in devices:
-            amdsmi_reset_gpu_memory_partition(device)
-except AmdSmiException as e:
-    print(e)
-```
 
 ### amdsmi_get_gpu_accelerator_partition_profile
 
