@@ -37,45 +37,45 @@ TEST(parser, base_ops)
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"BA\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}"},
         {"AB + BA",
          "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"BA\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}"},
         {"CD - ZX",
          "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"ZX\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}"},
         {"NM / DB",
          "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"NM\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"DB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"}};
+         "\"Select_Dimension_Map\":[]}"}};
 
     for(auto [op, expected] : expressionToExpected)
     {
@@ -99,16 +99,16 @@ TEST(parser, order_of_ops)
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"BA\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[],"
-         " \"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         " \"Select_Dimension_Map\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
         {"(AB / BA) - BN",
          "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", "
@@ -116,49 +116,49 @@ TEST(parser, order_of_ops)
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"AB\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"BA\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"Select_Dimension_Map\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"BN\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
         {"AD / (CD - ZX)",
          "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"AD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"SUBTRACTION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CD\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", "
+         "\"Select_Dimension_Map\":[]},{\"Type\":\"REFERENCE_NODE\", "
          "\"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", \"Value\":\"ZX\", \"Counter_Set\":[], "
          "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
         {"MN * (NM / DB)",
          "{\"Type\":\"MULTIPLY_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"MN\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"DIVIDE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"NM\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},"
+         "\"Select_Dimension_Map\":[]},"
          "{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"DB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"}};
+         "\"Select_Dimension_Map\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]}"}};
 
     for(auto [op, expected] : expressionToExpected)
     {
@@ -179,8 +179,8 @@ TEST(parser, reduction)
          "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Set\":[]}"},
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Map\":[]}"},
         {"reduce(AB+CD, SUM, [DIMENSION_XCC,DIMENSION_SHADER_ENGINE])",
          "{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", "
@@ -188,12 +188,12 @@ TEST(parser, reduction)
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
          "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"Select_Dimension_Map\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Value\":\"CD\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[\"3\",\"1\"], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]}], \"Reduce_Dimension_Set\":[\"3\",\"1\"], "
+         "\"Select_Dimension_Map\":[]}"},
         {"reduce(AB,DIV, [DIMENSION_XCC,DIMENSION_SHADER_ENGINE])+reduce(DC,SUM, "
          "[DIMENSION_XCC,DIMENSION_SHADER_ENGINE])",
          "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
@@ -201,15 +201,15 @@ TEST(parser, reduction)
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
          "\"Reduce_Dimension_Set\":[\"3\",\"1\"], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
+         "\"Select_Dimension_Map\":[]},{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"SUM\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"DC\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"}};
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[\"3\",\"1\"], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"}};
 
     for(auto [op, expected] : expressionToExpected)
     {
@@ -223,36 +223,43 @@ TEST(parser, reduction)
     }
 }
 
-TEST(parser, DISABLED_selection)
+TEST(parser, selection)
 {
     std::map<std::string, std::string> expressionToExpected = {
-        {"select(AB, [SE=1,XCC=0])+select(DC,[SE=2])",
+        {"select(AB, "
+         "[DIMENSION_SHADER_ENGINE=[1:5,7:9],DIMENSION_XCC=[0,2:4,8]])+select(DC,[DIMENSION_SHADER_"
+         "ENGINE=[1:3,6,8]])",
          "{\"Type\":\"ADDITION_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"XCC\", 0)\",\"(\"SE\", "
-         "1)\"]},{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[\"DIMENSION_XCC:\"0,2:4,8\"\",\"DIMENSION_SHADER_ENGINE:\"1:5,"
+         "7:9\"\"]},"
+         "{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"DC\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"SE\", 2)\"]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}"},
-        {"select(AB, [SE=2,XCC=1,WGP=3])",
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[\"DIMENSION_SHADER_ENGINE:\"1:3,6,8\"\"]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}"},
+        {"select(AB, [DIMENSION_SHADER_ENGINE=[2],DIMENSION_XCC=[1,4],DIMENSION_WGP=[3:5]])",
          "{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"WGP\", 3)\",\"(\"XCC\", "
-         "1)\",\"(\"SE\", 2)\"]}"},
-        {"select(AB, [XCC=0])",
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[\"DIMENSION_XCC:\"1,4\"\",\"DIMENSION_SHADER_ENGINE:\"2\"\","
+         "\"DIMENSION_WGP:\"3:5\"\"]}"},
+        {"select(AB, [DIMENSION_XCC=[0,3:6,9,11:13]])",
          "{\"Type\":\"SELECT_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"AB\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[\"(\"XCC\", 0)\"]}"}};
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[\"DIMENSION_XCC:\"0,3:6,9,11:13\"\"]}"}};
 
     for(auto [op, expected] : expressionToExpected)
     {
@@ -292,17 +299,17 @@ TEST(parser, parse_accum_counter)
         {"accumulate(SQ_WAVES,NONE)",
          "{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", \"Value\""
          ":\"SQ_WAVES\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}"},
         {"accumulate(SQ_WAVES,HIGH_RES)",
          "{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"HIGH_RES\", "
          "\"Value"
          "\":\"SQ_WAVES\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"},
+         "\"Select_Dimension_Map\":[]}"},
         {"accumulate(SQ_WAVES,LOW_RES)",
          "{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"LOW_RES\", "
          "\"Value\""
          ":\"SQ_WAVES\", \"Counter_Set\":[], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"}};
+         "\"Select_Dimension_Map\":[]}"}};
 
     for(auto [op, expected] : expressionToExpected)
     {
@@ -327,16 +334,16 @@ TEST(parser, parse_nested_accum_counter)
          "\"REDUCE_OP\":\"sum\", \"ACCUMULATE_OP\":\"NONE\", "
          "\"Counter_Set\":[{\"Type\":\"ACCUMULATE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"HIGH_RES\", \"Value\":\"SQ_LEVEL_WAVES\", \"Counter_Set\":[], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"max\", "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]},{\"Type\":\"REDUCE_NODE\", \"REDUCE_OP\":\"max\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Counter_Set\":[{\"Type\":\"REFERENCE_NODE\", "
          "\"REDUCE_OP\":\"\", \"ACCUMULATE_OP\":\"NONE\", \"Value\":\"GRBM_GUI_ACTIVE\", "
-         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
+         "\"Counter_Set\":[], \"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], "
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]},{\"Type\":\"REFERENCE_NODE\", \"REDUCE_OP\":\"\", "
          "\"ACCUMULATE_OP\":\"NONE\", \"Value\":\"CU_NUM\", \"Counter_Set\":[], "
-         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Set\":[]}], \"Reduce_Dimension_Set\":[], "
-         "\"Select_Dimension_Set\":[]}"}};
+         "\"Reduce_Dimension_Set\":[], \"Select_Dimension_Map\":[]}], \"Reduce_Dimension_Set\":[], "
+         "\"Select_Dimension_Map\":[]}"}};
 
     for(auto [op, expected] : expressionToExpected)
     {

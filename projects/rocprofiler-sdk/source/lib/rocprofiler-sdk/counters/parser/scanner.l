@@ -39,10 +39,14 @@ EXP	([Ee][-+]?[0-9]+)
     yylval.s = strdup(yytext); 
     return NAME; }
 
+([0-9]+(:[0-9]+)?)(,[0-9]+(:[0-9]+)?)* {
+    yylval.s = strdup(yytext);
+    return DIM_ARGS_RANGE;
+}
+
 
 \n      { return EOL; }
 "//".*  
 [ \t]   { /* ignore white space */ }
 .	{ throw std::runtime_error(fmt::format("Mystery character {}", *yytext)); }
 %%
-

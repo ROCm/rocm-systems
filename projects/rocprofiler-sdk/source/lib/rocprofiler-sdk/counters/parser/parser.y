@@ -40,8 +40,9 @@ void yyerror(rocprofiler::counters::RawAST**, const char *s) { ROCP_ERROR << s; 
 %token NAME                      /* set data type for variables and user-defined functions */
 %token REDUCE SELECT             /* set data type for special functions */
 %token ACCUMULATE
+%token DIM_ARGS_RANGE
 %type <a> exp                    /* set data type for expressions */
-%type <s> NAME
+%type <s> NAME DIM_ARGS_RANGE
 %type <d> NUMBER
 %type <ll> reduce_dim_args select_dim_args
 
@@ -95,11 +96,23 @@ reduce_dim_args: NAME                     { $$ = new LinkedList($1, NULL);
 
 
 
-select_dim_args: NAME EQUALS NUMBER       { $$ = new LinkedList($1, $3, NULL);
+select_dim_args: NAME EQUALS O_SQ NUMBER C_SQ { 
+                                            $$ = new LinkedList($1, $4, NULL);
                                             free($1);
                                           }
- | NAME EQUALS NUMBER CM select_dim_args { $$ = new LinkedList($1, $3, $5);
+ | NAME EQUALS O_SQ NUMBER C_SQ CM select_dim_args { 
+                                            $$ = new LinkedList($1, $4, $7);
                                             free($1);
+                                          }
+ | NAME EQUALS O_SQ DIM_ARGS_RANGE C_SQ { 
+                                            $$ = new LinkedList($1, $4, NULL);
+                                            free($1);
+                                            free($4);
+                                          }
+ | NAME EQUALS O_SQ DIM_ARGS_RANGE C_SQ CM select_dim_args { 
+                                            $$ = new LinkedList($1, $4, $7);
+                                            free($1);
+                                            free($4);
                                           }
  ;
 

@@ -82,8 +82,9 @@ enum yytokentype
     REDUCE          = 275, /* REDUCE  */
     SELECT          = 276, /* SELECT  */
     ACCUMULATE      = 277, /* ACCUMULATE  */
-    LOWER_THAN_ELSE = 278, /* LOWER_THAN_ELSE  */
-    ELSE            = 279  /* ELSE  */
+    DIM_ARGS_RANGE  = 278, /* DIM_ARGS_RANGE  */
+    LOWER_THAN_ELSE = 279, /* LOWER_THAN_ELSE  */
+    ELSE            = 280  /* ELSE  */
 };
 typedef enum yytokentype yytoken_kind_t;
 #endif

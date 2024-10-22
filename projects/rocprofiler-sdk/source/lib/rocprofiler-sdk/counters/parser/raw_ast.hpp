@@ -22,6 +22,7 @@
 
 #pragma once
 
+#include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 
@@ -68,6 +69,7 @@ struct LinkedList
 {
     std::string name;
     int         data{-1};
+    std::string range_data;
     LinkedList* next{nullptr};
     LinkedList(const char* v, LinkedList* next_node)
     : name(std::string{CHECK_NOTNULL(v)})
@@ -76,6 +78,11 @@ struct LinkedList
     LinkedList(const char* v, int d, LinkedList* next_node)
     : name(std::string{CHECK_NOTNULL(v)})
     , data(d)
+    , next(next_node)
+    {}
+    LinkedList(const char* v, const char* r, LinkedList* next_node)
+    : name(std::string{CHECK_NOTNULL(v)})
+    , range_data(std::string{CHECK_NOTNULL(r)})
     , next(next_node)
     {}
 };
@@ -100,7 +107,7 @@ struct RawAST
     std::unordered_set<rocprofiler_profile_counter_instance_types> reduce_dimension_set;
 
     // Dimension set to select certain dimensions from the result
-    std::unordered_map<rocprofiler_profile_counter_instance_types, int> select_dimension_set;
+    std::map<rocprofiler_profile_counter_instance_types, std::string> select_dimension_map;
 
     // Range restriction on this node
     RawAST* range{nullptr};
@@ -197,8 +204,7 @@ struct RawAST
     {
         if(dimensions)
         {
-            LinkedList* ptr = dimensions;
-            while(ptr)
+            while(dimensions)
             {
                 const rocprofiler_profile_counter_instance_types* dim =
                     rocprofiler::common::get_val(get_dim_map(), dimensions->name);
@@ -208,9 +214,12 @@ struct RawAST
                         fmt::format("Unknown Dimension - {}", dimensions->name));
                 }
 
-                select_dimension_set.insert({*dim, ptr->data});
-                LinkedList* current = ptr;
-                ptr                 = ptr->next;
+                select_dimension_map.insert({*dim,
+                                             (dimensions->data != -1)
+                                                 ? std::to_string(dimensions->data)
+                                                 : dimensions->range_data});
+                LinkedList* current = dimensions;
+                dimensions          = dimensions->next;
                 delete current;
             }
         }
@@ -285,6 +294,38 @@ struct formatter<rocprofiler::counters::RawAST>
             out = fmt::format_to(out, " \"Range\":{},", *ast.range);
         }
 
+        static const std::map<rocprofiler::counters::rocprofiler_profile_counter_instance_types,
+                              std::string>
+            SelectDimensionTypeToString = {
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_NONE,
+                 "DIMENSION_NONE"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_XCC,
+                 "DIMENSION_XCC"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_AID,
+                 "DIMENSION_AID"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_SHADER_ENGINE,
+                 "DIMENSION_SHADER_ENGINE"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_AGENT,
+                 "DIMENSION_AGENT"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_SHADER_ARRAY,
+                 "DIMENSION_SHADER_ARRAY"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_WGP,
+                 "DIMENSION_WGP"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_INSTANCE,
+                 "DIMENSION_INSTANCE"},
+                {rocprofiler::counters::rocprofiler_profile_counter_instance_types::
+                     ROCPROFILER_DIMENSION_LAST,
+                 "DIMENSION_LAST"},
+            };
+
         out = fmt::format_to(out, " \"Counter_Set\":[");
         for(const auto& ref : ast.counter_set)
         {
@@ -302,15 +343,15 @@ struct formatter<rocprofiler::counters::RawAST>
                                  ++ReduceSetIndex == ast.reduce_dimension_set.size() ? "" : ",");
         }
 
-        out                   = fmt::format_to(out, "], \"Select_Dimension_Set\":[");
+        out                   = fmt::format_to(out, "], \"Select_Dimension_Map\":[");
         size_t SelectSetIndex = 0;
-        for(const auto& [type, val] : ast.select_dimension_set)
+        for(const auto& [type, val] : ast.select_dimension_map)
         {
             out = fmt::format_to(out,
-                                 "\"{},{}\"{}",
-                                 static_cast<int>(type),
+                                 "\"{}:\"{}\"\"{}",
+                                 SelectDimensionTypeToString.at(type),
                                  val,
-                                 ++SelectSetIndex == ast.select_dimension_set.size() ? "" : ",");
+                                 ++SelectSetIndex == ast.select_dimension_map.size() ? "" : ",");
         }
 
         return fmt::format_to(out, "]}}");
