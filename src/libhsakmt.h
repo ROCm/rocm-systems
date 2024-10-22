@@ -177,6 +177,30 @@ bool is_forked_child(void);
 
 void clear_allocation_map(void);
 
+class BlockAllocator {
+private:
+    static const size_t block_size_ = 128 * 1024 * 1024;  // 128MB blocks.
+
+public:
+    void* alloc(size_t request_size, size_t& allocated_size) const;
+    void free(void* ptr, size_t length) const;
+    size_t block_size() const { return block_size_; }
+};
+
+void reset_suballocator(void);
+void trim_suballocator(void);
+
+HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
+                                            HSAuint64 SizeInBytes,
+                                            HSAuint64 Alignment,
+                                            HsaMemFlags MemFlags,
+                                            void **MemoryAddress,
+                                            bool SkipSubAlloc = false);
+
+HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
+                                    HSAuint64 SizeInBytes,
+                                    bool SkipSubAlloc = false);
+
 bool queue_acquire_buffer(void *MemoryAddress);
 bool queue_release_buffer(void *MemoryAddress);
 /* Calculate VGPR and SGPR register file size per CU */

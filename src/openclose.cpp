@@ -80,6 +80,7 @@ static void child_fork_handler(void) {
  * in the child process so it is not cleared
  */
 static void clear_after_fork(void) {
+  reset_suballocator();
   clear_allocation_map();
   if (dxg_fd) {
     close(dxg_fd);
@@ -194,6 +195,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtOpenKFD(void) {
     result = HSAKMT_STATUS_KERNEL_ALREADY_OPENED;
   }
 
+  reset_suballocator();
   pthread_mutex_unlock(&hsakmt_mutex);
   return result;
 topology_sysfs_failed:

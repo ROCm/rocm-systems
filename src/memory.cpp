@@ -33,6 +33,7 @@
 #include <sys/sysinfo.h>
 #include <fcntl.h>
 #include "inc/wddm/gpu_memory.h"
+#include "util/simple_heap.h"
 
 struct Allocation {
   Allocation()
@@ -112,11 +113,45 @@ bool isSystemMemoryAvailable(HSAuint64 SizeInBytes) {
   return SizeInBytes <= info.freeram;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
-                                               HSAuint64 SizeInBytes,
-                                               HSAuint64 Alignment,
-                                               HsaMemFlags MemFlags,
-                                               void **MemoryAddress) {
+void* BlockAllocator::alloc(size_t request_size, size_t& allocated_size) const {
+  void *address;
+  HsaMemFlags MemFlags;
+
+  MemFlags.Value = 0;
+  MemFlags.ui32.CoarseGrain = 1;
+  MemFlags.ui32.NoSubstitute = 1;
+  allocated_size = wsl::AlignUp(request_size, block_size());
+  if (HSAKMT_STATUS_SUCCESS == hsaKmtAllocMemoryAlignInternal(1, allocated_size, 0, MemFlags, &address, true))
+    return address;
+
+  return nullptr;
+}
+
+void BlockAllocator::free(void* ptr, size_t length) const {
+  if (HSAKMT_STATUS_SUCCESS != hsaKmtFreeMemoryInternal(ptr, length, true))
+    pr_err("wsl-thunk: BlockAllocator::free() err, address %p, length:%zu\n", ptr, length);
+}
+
+static wsl::SimpleHeap<BlockAllocator> fragment_allocator_;
+static std::unique_ptr<std::mutex> fragment_allocator_lock_ = std::make_unique<std::mutex>();
+
+void reset_suballocator(void) {
+  fragment_allocator_lock_ = std::make_unique<std::mutex>();
+  std::lock_guard<std::mutex> lock(*fragment_allocator_lock_);
+  fragment_allocator_.reset();
+}
+
+void trim_suballocator(void) {
+  std::lock_guard<std::mutex> lock(*fragment_allocator_lock_);
+  fragment_allocator_.trim();
+}
+
+HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
+                                             HSAuint64 SizeInBytes,
+                                             HSAuint64 Alignment,
+                                             HsaMemFlags MemFlags,
+                                             void **MemoryAddress,
+                                             bool SkipSubAlloc) {
   CHECK_DXG_OPEN();
 
   if (!MemoryAddress)
@@ -174,6 +209,33 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
   if (create_info.flags.virtual_alloc || create_info.flags.physical_only)
     create_info.domain = thunk_proxy::AllocDomain::kLocal;
 
+  /* Only allow using the suballocator for ordinary VRAM.*/
+  bool trim_safe = false;
+  if (!SkipSubAlloc &&
+    create_info.domain == thunk_proxy::AllocDomain::kLocal &&
+    !(create_info.flags.virtual_alloc || create_info.flags.physical_only)) {
+    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
+
+    /* just quickly skip SA if size is bigger than SA block size.*/
+    gpusize real_size;
+    if (create_info.size > GPU_HUGE_PAGE_SIZE)
+      real_size = wsl::AlignUp(create_info.size, GPU_HUGE_PAGE_SIZE);
+    else
+      real_size = wsl::AlignUp(create_info.size, getpagesize());
+
+    if (real_size < fragment_allocator_.default_block_size()) {
+      *MemoryAddress = fragment_allocator_.alloc(real_size);
+      if (*MemoryAddress)
+        return HSAKMT_STATUS_SUCCESS;
+    }
+
+    /* SA might keep a lot of free blocks as *cache*.
+       * We can trim them if direct allocation fails at first time.
+       */
+    trim_safe = true;
+  }
+
+after_trim:
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
@@ -189,17 +251,40 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
         create_info.size, false, nullptr, SizeInBytes,
         MemFlags.ui32.GTTAccess ? 0 : PreferredNode, MemFlags.Value);
     return HSAKMT_STATUS_SUCCESS;
+  } else if (trim_safe) {
+    /* attempt to release memory from the block allocator and retry */
+    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
+    fragment_allocator_.trim();
+    trim_safe = false;
+    goto after_trim;
   }
 
   return HSAKMT_STATUS_ERROR;
 }
 
-HSAKMT_STATUS HSAKMTAPI hsaKmtFreeMemory(void *MemoryAddress,
-                                         HSAuint64 SizeInBytes) {
+HSAKMT_STATUS HSAKMTAPI hsaKmtAllocMemoryAlign(HSAuint32 PreferredNode,
+                                               HSAuint64 SizeInBytes,
+                                               HSAuint64 Alignment,
+                                               HsaMemFlags MemFlags,
+                                               void **MemoryAddress) {
+  return hsaKmtAllocMemoryAlignInternal(PreferredNode, SizeInBytes,
+                                        Alignment, MemFlags,
+                                        MemoryAddress);
+}
+
+HSAKMT_STATUS hsaKmtFreeMemoryInternal(void *MemoryAddress,
+                                       HSAuint64 SizeInBytes,
+                                       bool SkipSubAlloc) {
   CHECK_DXG_OPEN();
 
   if (!MemoryAddress)
     return HSAKMT_STATUS_INVALID_PARAMETER;
+
+  if (!SkipSubAlloc) {
+    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
+    if (fragment_allocator_.free(MemoryAddress))
+      return HSAKMT_STATUS_SUCCESS;
+  }
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
@@ -220,23 +305,28 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtFreeMemory(void *MemoryAddress,
   return HSAKMT_STATUS_SUCCESS;
 }
 
+HSAKMT_STATUS HSAKMTAPI hsaKmtFreeMemory(void *MemoryAddress,
+                     HSAuint64 SizeInBytes) {
+  return hsaKmtFreeMemoryInternal(MemoryAddress, SizeInBytes);
+}
+
 bool queue_acquire_buffer(void *MemoryAddress) {
   if (!MemoryAddress)
-    return false;
+  return false;
 
   wsl::thunk::GpuMemory *gpu_mem = nullptr;
   {
-    std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_.find(MemoryAddress);
-    if (it == allocation_map_.end()) {
-      return HSAKMT_STATUS_ERROR;
-    }
+  std::lock_guard<std::mutex> gard(*allocation_map_lock_);
+  auto it = allocation_map_.find(MemoryAddress);
+  if (it == allocation_map_.end()) {
+    return HSAKMT_STATUS_ERROR;
+  }
 
-    gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
-    gpu_mem->GetQueueReference();
+  gpu_mem = wsl::thunk::GpuMemory::Convert(it->second.handle);
+  gpu_mem->GetQueueReference();
   }
   if (gpu_mem == nullptr)
-    return false;
+  return false;
 
   return true;
 }
@@ -479,6 +569,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
   size_t aligned_size = end - start;
 
   {
+    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
+    if (nullptr != fragment_allocator_.block_base(aligned_ptr))
+      return HSAKMT_STATUS_SUCCESS;
+  }
+
+  {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     // GTT mem
     auto it_gtt = allocation_map_.find(aligned_ptr);
@@ -557,6 +653,12 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtUnmapMemoryToGPU(void *MemoryAddress) {
 
   pr_debug("address %p\n", MemoryAddress);
 
+  {
+    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
+    if (nullptr != fragment_allocator_.block_base(MemoryAddress))
+      return HSAKMT_STATUS_SUCCESS;
+  }
+
   wsl::thunk::GpuMemoryHandle handle = nullptr;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
@@ -623,13 +725,21 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   pr_debug("pointer %p\n", Pointer);
+  void *pointer = const_cast<void*>(Pointer);
 
   memset(PointerInfo, 0, sizeof(HsaPointerInfo));
+  void* block_base = nullptr;
+  {
+    std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
+      block_base = fragment_allocator_.block_base(pointer);
+    if (block_base != nullptr)
+      pointer = block_base;
+  }
 
   Allocation allocation_info;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_.find(Pointer);
+    auto it = allocation_map_.find(pointer);
     if (it == allocation_map_.end()) {
       PointerInfo->Type = HSA_POINTER_UNKNOWN;
       return HSAKMT_STATUS_ERROR;
@@ -649,6 +759,13 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
   PointerInfo->MemFlags.Value = allocation_info.mem_flags_value;
   PointerInfo->CPUAddress = allocation_info.cpu_addr;
   PointerInfo->GPUAddress = allocation_info.gpu_addr;
+  if (block_base != nullptr) {
+    uint64_t offset = reinterpret_cast<uint64_t>(Pointer) -
+      reinterpret_cast<uint64_t>(block_base);
+    PointerInfo->CPUAddress = reinterpret_cast<void*>(
+      reinterpret_cast<uint64_t>(PointerInfo->CPUAddress) + offset);
+    PointerInfo->GPUAddress += offset;
+  }
   PointerInfo->UserData = allocation_info.user_data;
 
   return HSAKMT_STATUS_SUCCESS;

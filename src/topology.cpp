@@ -1377,6 +1377,7 @@ void topology_drop_snapshot(void) {
   free(g_system);
   g_system = NULL;
 
+  trim_suballocator();
   for (auto device : wdevices_)
     delete device;
   wdevices_.clear();
