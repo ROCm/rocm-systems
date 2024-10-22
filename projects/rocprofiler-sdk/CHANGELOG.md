@@ -119,3 +119,4 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 ### Removed
 - Removed gfx8 metric definitions.
+- Removed rocprofv3 installation to sbin directory.
