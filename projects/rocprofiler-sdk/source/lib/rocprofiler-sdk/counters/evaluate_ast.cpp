@@ -78,7 +78,7 @@ perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_coun
         {
             result =
                 *std::max_element(input_array->begin(), input_array->end(), [](auto& a, auto& b) {
-                    return a.counter_value > b.counter_value;
+                    return a.counter_value < b.counter_value;
                 });
             break;
         }
@@ -669,11 +669,7 @@ EvaluateAST::evaluate(
         break;
         case REDUCE_NODE:
         {
-            auto* result = rocprofiler::common::get_val(results_map, _children[0]._metric.id());
-            if(!result)
-                throw std::runtime_error(fmt::format("Unable to lookup results for metric {}",
-                                                     _children[0]._metric.name()));
-
+            auto* result = _children.at(0).evaluate(results_map, cache);
             if(_reduce_op == REDUCE_NONE)
                 throw std::runtime_error(fmt::format("Invalid Second argument to reduce(): {}",
                                                      static_cast<int>(_reduce_op)));
