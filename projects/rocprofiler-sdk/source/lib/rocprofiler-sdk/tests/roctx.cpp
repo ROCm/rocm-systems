@@ -309,7 +309,7 @@ TEST(rocprofiler_lib, roctx_callback_tracing)
         cb_data->client_workflow_count++;
         cb_data->client_fini_func = fini_func;
 
-        auto pause_resume_ctx = rocprofiler_context_id_t{};
+        auto pause_resume_ctx = rocprofiler_context_id_t{0};
         ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
 
         ROCPROFILER_CALL(rocprofiler_create_context(&cb_data->client_ctx),
@@ -425,7 +425,7 @@ TEST(rocprofiler_lib, roctx_buffered_tracing)
         cb_data->client_workflow_count++;
         cb_data->client_fini_func = fini_func;
 
-        auto pause_resume_ctx = rocprofiler_context_id_t{};
+        auto pause_resume_ctx = rocprofiler_context_id_t{0};
 
         ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(

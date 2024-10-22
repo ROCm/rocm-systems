@@ -904,23 +904,23 @@ void
 pop_external_correlation();
 
 // contexts
-rocprofiler_context_id_t hsa_api_callback_ctx         = {};
-rocprofiler_context_id_t hip_api_callback_ctx         = {};
-rocprofiler_context_id_t marker_api_callback_ctx      = {};
-rocprofiler_context_id_t code_object_ctx              = {};
-rocprofiler_context_id_t rccl_api_callback_ctx        = {};
-rocprofiler_context_id_t hsa_api_buffered_ctx         = {};
-rocprofiler_context_id_t hip_api_buffered_ctx         = {};
-rocprofiler_context_id_t marker_api_buffered_ctx      = {};
-rocprofiler_context_id_t memory_copy_callback_ctx     = {};
-rocprofiler_context_id_t memory_copy_buffered_ctx     = {};
-rocprofiler_context_id_t rccl_api_buffered_ctx        = {};
-rocprofiler_context_id_t counter_collection_ctx       = {};
-rocprofiler_context_id_t scratch_memory_ctx           = {};
-rocprofiler_context_id_t corr_id_retire_ctx           = {};
-rocprofiler_context_id_t kernel_dispatch_callback_ctx = {};
-rocprofiler_context_id_t kernel_dispatch_buffered_ctx = {};
-rocprofiler_context_id_t page_migration_ctx           = {};
+rocprofiler_context_id_t hsa_api_callback_ctx         = {0};
+rocprofiler_context_id_t hip_api_callback_ctx         = {0};
+rocprofiler_context_id_t marker_api_callback_ctx      = {0};
+rocprofiler_context_id_t code_object_ctx              = {0};
+rocprofiler_context_id_t rccl_api_callback_ctx        = {0};
+rocprofiler_context_id_t hsa_api_buffered_ctx         = {0};
+rocprofiler_context_id_t hip_api_buffered_ctx         = {0};
+rocprofiler_context_id_t marker_api_buffered_ctx      = {0};
+rocprofiler_context_id_t memory_copy_callback_ctx     = {0};
+rocprofiler_context_id_t memory_copy_buffered_ctx     = {0};
+rocprofiler_context_id_t rccl_api_buffered_ctx        = {0};
+rocprofiler_context_id_t counter_collection_ctx       = {0};
+rocprofiler_context_id_t scratch_memory_ctx           = {0};
+rocprofiler_context_id_t corr_id_retire_ctx           = {0};
+rocprofiler_context_id_t kernel_dispatch_callback_ctx = {0};
+rocprofiler_context_id_t kernel_dispatch_buffered_ctx = {0};
+rocprofiler_context_id_t page_migration_ctx           = {0};
 // buffers
 rocprofiler_buffer_id_t hsa_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t hip_api_buffered_buffer    = {};

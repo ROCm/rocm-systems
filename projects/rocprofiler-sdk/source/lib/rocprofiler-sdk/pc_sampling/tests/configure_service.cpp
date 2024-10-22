@@ -48,7 +48,7 @@ struct callback_data
 {
     rocprofiler_client_id_t*                    client_id             = nullptr;
     rocprofiler_client_finalize_t               client_fini_func      = nullptr;
-    rocprofiler_context_id_t                    client_ctx            = {};
+    rocprofiler_context_id_t                    client_ctx            = {0};
     rocprofiler_buffer_id_t                     client_buffer         = {};
     rocprofiler_callback_thread_t               client_thread         = {};
     uint64_t                                    client_workflow_count = {};
@@ -344,7 +344,7 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
 
         // We will create another context and try configuring pc sampling inside it,
         // that is supposed to fail.
-        rocprofiler_context_id_t another_ctx;
+        rocprofiler_context_id_t another_ctx{0};
         ROCPROFILER_CALL(rocprofiler_create_context(&another_ctx), "failed to create context");
         rocprofiler_buffer_id_t another_buff;
         ROCPROFILER_CALL(rocprofiler_create_buffer(another_ctx,

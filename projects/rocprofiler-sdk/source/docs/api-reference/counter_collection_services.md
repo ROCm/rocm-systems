@@ -31,7 +31,7 @@ This guide explains how to setup dispatch and agent profiling along will describ
 The setup for dispatch and agent profiling is similar (with only minor changes needed to adapt code from one to another). In tool_init, similar to tracing services, you need to create a context and a buffer to collect the output. Important Note: buffered_callback in rocprofiler_create_buffer is called when the buffer is full with a vector of collected counter samples, see the buffered callback section below for processing.  
 
 ```CPP
-rocprofiler_context_id_t ctx;
+rocprofiler_context_id_t ctx{0};
 rocprofiler_buffer_id_t buff;
 ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 ROCPROFILER_CALL(rocprofiler_create_buffer(ctx,

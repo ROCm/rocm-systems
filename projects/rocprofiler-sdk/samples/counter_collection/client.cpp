@@ -63,7 +63,7 @@ namespace
 rocprofiler_context_id_t&
 get_client_ctx()
 {
-    static rocprofiler_context_id_t ctx;
+    static rocprofiler_context_id_t ctx{0};
     return ctx;
 }
 

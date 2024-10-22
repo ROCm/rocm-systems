@@ -71,7 +71,7 @@ using common::source_location;
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
-rocprofiler_context_id_t      client_ctx       = {};
+rocprofiler_context_id_t      client_ctx       = {0};
 
 void
 print_call_stack(const call_stack_t& _call_stack)
@@ -163,7 +163,7 @@ tool_control_init(rocprofiler_context_id_t& primary_ctx)
     // A separate context is used because if the context that is associated with roctxProfilerPause
     // disabled that same context, a call to roctxProfilerResume would be ignored because the
     // context that enables the callback for that API call is disabled.
-    auto cntrl_ctx = rocprofiler_context_id_t{};
+    auto cntrl_ctx = rocprofiler_context_id_t{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&cntrl_ctx), "control context creation failed");
 
     // enable callback marker tracing with only the pause/resume operations

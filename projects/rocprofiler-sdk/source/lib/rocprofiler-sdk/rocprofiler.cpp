@@ -55,6 +55,8 @@ ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID,
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_STARTED, "Context failed to start")
 ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT,
                           "Context has a conflict with another context")
+ROCPROFILER_STATUS_STRING(ROCPROFILER_STATUS_ERROR_CONTEXT_ID_NOT_ZERO,
+                          "Context ID should be initialized to zero")
 ROCPROFILER_STATUS_STRING(
     ROCPROFILER_STATUS_ERROR_BUFFER_BUSY,
     "Buffer operation failed because it is currently busy handling another request")

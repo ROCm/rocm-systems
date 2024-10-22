@@ -66,7 +66,7 @@ namespace
 {
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
-rocprofiler_context_id_t      client_ctx;
+rocprofiler_context_id_t      client_ctx{0};
 
 int
 tool_init(rocprofiler_client_finalize_t fini_func, void* /*tool_data*/)

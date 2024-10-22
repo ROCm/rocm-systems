@@ -72,7 +72,7 @@ int
 tool_init(rocprofiler_client_finalize_t /* fini_func */, void* tool_data)
 {
     Callbacks::callbacks_init();
-    static rocprofiler_context_id_t client_ctx = {};
+    static rocprofiler_context_id_t client_ctx = {0};
 
     ROCPROFILER_CALL(rocprofiler_create_context(&client_ctx), "context creation");
 

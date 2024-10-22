@@ -134,7 +134,7 @@ TEST(thread_trace, configure_test)
     registration::init_logging();
     registration::set_init_status(-1);
     context::push_client(1);
-    rocprofiler_context_id_t ctx;
+    rocprofiler_context_id_t ctx{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
     std::vector<rocprofiler_att_parameter_t> params;
@@ -171,7 +171,7 @@ TEST(thread_trace, perfcounters_configure_test)
     registration::init_logging();
     registration::set_init_status(-1);
     context::push_client(1);
-    rocprofiler_context_id_t ctx;
+    rocprofiler_context_id_t ctx{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
     // Only GFX9 SQ Block counters are supported
@@ -299,7 +299,7 @@ TEST(thread_trace, agent_configure_test)
     registration::init_logging();
     registration::set_init_status(-1);
     context::push_client(1);
-    rocprofiler_context_id_t ctx;
+    rocprofiler_context_id_t ctx{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&ctx), "context creation failed");
 
     ROCPROFILER_CALL(rocprofiler_query_available_agents(ROCPROFILER_AGENT_INFO_VERSION_0,

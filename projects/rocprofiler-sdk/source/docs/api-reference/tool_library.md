@@ -92,7 +92,7 @@ tool_init(rocprofiler_client_finalize_t fini_func,
           void* data_v)
 {
     // create a context
-    auto ctx = rocprofiler_context_id_t{};
+    auto ctx = rocprofiler_context_id_t{0};
     rocprofiler_create_context(&ctx);
 
     // ... associate services with context ...
@@ -178,7 +178,7 @@ tool_init(rocprofiler_client_finalize_t fini_func,
     tool_data->finalizer = fini_func;
 
     // create a context
-    auto ctx = rocprofiler_context_id_t{};
+    auto ctx = rocprofiler_context_id_t{0};
     rocprofiler_create_context(&ctx);
 
     // Save your contexts

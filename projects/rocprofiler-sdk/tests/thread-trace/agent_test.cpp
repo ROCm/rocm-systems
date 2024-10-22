@@ -51,7 +51,7 @@ namespace ATTTest
 {
 namespace Agent
 {
-rocprofiler_context_id_t client_ctx = {};
+rocprofiler_context_id_t client_ctx = {0};
 rocprofiler_client_id_t* client_id  = nullptr;
 std::atomic<bool>        valid_data{false};
 

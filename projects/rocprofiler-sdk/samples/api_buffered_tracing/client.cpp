@@ -81,7 +81,7 @@ using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
-rocprofiler_context_id_t      client_ctx       = {};
+rocprofiler_context_id_t      client_ctx       = {0};
 rocprofiler_buffer_id_t       client_buffer    = {};
 buffer_name_info              client_name_info = {};
 kernel_symbol_map_t           client_kernels   = {};

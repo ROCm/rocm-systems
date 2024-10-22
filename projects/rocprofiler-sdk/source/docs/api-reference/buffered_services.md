@@ -84,7 +84,7 @@ rocprofiler_assign_callback_thread(rocprofiler_buffer_id_t       buffer_id,
 ```cpp
 {
     // create a context
-    auto context_id = rocprofiler_context_id_t{};
+    auto context_id = rocprofiler_context_id_t{0};
     rocprofiler_create_context(&context_id);
 
     // create a buffer associated with the context

@@ -266,7 +266,7 @@ is_targeted_kernel(uint64_t _kern_id)
 auto&
 get_client_ctx()
 {
-    static rocprofiler_context_id_t context_id;
+    static rocprofiler_context_id_t context_id{0};
     return context_id;
 }
 
@@ -1270,7 +1270,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     ROCPROFILER_CALL(rocprofiler_create_context(&get_client_ctx()), "create context failed");
 
-    auto code_obj_ctx = rocprofiler_context_id_t{};
+    auto code_obj_ctx = rocprofiler_context_id_t{0};
     ROCPROFILER_CALL(rocprofiler_create_context(&code_obj_ctx), "failed to create context");
 
     ROCPROFILER_CALL(
@@ -1294,7 +1294,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              nullptr),
                          "callback tracing service failed to configure");
 
-        auto pause_resume_ctx = rocprofiler_context_id_t{};
+        auto pause_resume_ctx = rocprofiler_context_id_t{0};
         ROCPROFILER_CALL(rocprofiler_create_context(&pause_resume_ctx), "failed to create context");
 
         ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
@@ -1465,7 +1465,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     if(tool::get_config().kernel_rename)
     {
-        auto rename_ctx            = rocprofiler_context_id_t{};
+        auto rename_ctx            = rocprofiler_context_id_t{0};
         auto marker_core_api_kinds = std::array<rocprofiler_tracing_operation_t, 3>{
             ROCPROFILER_MARKER_CORE_API_ID_roctxMarkA,
             ROCPROFILER_MARKER_CORE_API_ID_roctxRangePushA,

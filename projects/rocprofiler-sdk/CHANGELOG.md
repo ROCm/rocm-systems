@@ -115,6 +115,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - Fixed MeanOccupancy* metrics
 - Fix aborted-app validation test to properly check for hipExtHostAlloc command now that it is supported
 - Fix for SQ and GRBM metrics implicitly reduced.
+- Check to force tools to initialize context id with zero.
 - Fix to handle a range of values for select() dimension in expressions parser.
 
 ### Removed

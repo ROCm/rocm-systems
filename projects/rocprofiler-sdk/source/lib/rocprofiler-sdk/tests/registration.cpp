@@ -225,7 +225,7 @@ TEST(rocprofiler_lib, registration_lambda_no_result)
         return nullptr;
     };
 
-    auto ctx = rocprofiler_context_id_t{};
+    auto ctx = rocprofiler_context_id_t{0};
     EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_EQ(rocprofiler_force_configure(rocp_init), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
@@ -313,7 +313,7 @@ TEST(rocprofiler_lib, callback_registration_lambda_with_result)
         return std::chrono::steady_clock::now().time_since_epoch().count();
     };
 
-    auto ctx = rocprofiler_context_id_t{};
+    auto ctx = rocprofiler_context_id_t{0};
     EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_EQ(rocprofiler_force_configure(rocp_init), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
@@ -469,7 +469,7 @@ TEST(rocprofiler_lib, buffer_registration_lambda_with_result)
         return &cfg_result;
     };
 
-    auto ctx = rocprofiler_context_id_t{};
+    auto ctx = rocprofiler_context_id_t{0};
     EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_EQ(rocprofiler_force_configure(rocp_init), ROCPROFILER_STATUS_SUCCESS);
     EXPECT_NE(rocprofiler_create_context(&ctx), ROCPROFILER_STATUS_SUCCESS);

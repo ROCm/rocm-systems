@@ -95,7 +95,7 @@ using CodeobjAddressTranslate = rocprofiler::sdk::codeobj::disassembly::CodeobjA
 
 rocprofiler_client_id_t*      client_id          = nullptr;
 rocprofiler_client_finalize_t client_fini_func   = nullptr;
-rocprofiler_context_id_t      client_ctx         = {};
+rocprofiler_context_id_t      client_ctx         = {0};
 kernel_symbol_map_t           registered_kernels = {};
 
 CodeobjAddressTranslate codeobjTranslate;

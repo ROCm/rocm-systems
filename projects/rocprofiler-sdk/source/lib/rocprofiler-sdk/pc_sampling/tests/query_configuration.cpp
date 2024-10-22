@@ -46,7 +46,7 @@ struct callback_data
 {
     rocprofiler_client_id_t*                    client_id             = nullptr;
     rocprofiler_client_finalize_t               client_fini_func      = nullptr;
-    rocprofiler_context_id_t                    client_ctx            = {};
+    rocprofiler_context_id_t                    client_ctx            = {0};
     rocprofiler_buffer_id_t                     client_buffer         = {};
     rocprofiler_callback_thread_t               client_thread         = {};
     uint64_t                                    client_workflow_count = {};

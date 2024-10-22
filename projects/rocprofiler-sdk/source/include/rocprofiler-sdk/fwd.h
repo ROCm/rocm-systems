@@ -68,6 +68,7 @@ typedef enum  // NOLINT(performance-enum-size)
                                                    ///< into active array failed)
     ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT,  ///< Context operation failed due to a conflict with
                                                 ///< another context
+    ROCPROFILER_STATUS_ERROR_CONTEXT_ID_NOT_ZERO,  ///< Context ID is not initialized to zero
     ROCPROFILER_STATUS_ERROR_BUFFER_BUSY,  ///< buffer operation failed because it currently busy
                                            ///< handling another request (e.g. flushing)
     ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED,  ///< service has already been configured

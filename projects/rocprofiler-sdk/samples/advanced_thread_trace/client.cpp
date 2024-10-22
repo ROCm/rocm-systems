@@ -111,7 +111,7 @@ using CodeobjAddressTranslate = rocprofiler::sdk::codeobj::disassembly::CodeobjA
 using SymbolInfo              = rocprofiler::sdk::codeobj::disassembly::SymbolInfo;
 
 rocprofiler_client_id_t* client_id  = nullptr;
-rocprofiler_context_id_t client_ctx = {};
+rocprofiler_context_id_t client_ctx = {0};
 
 struct isa_map_elem_t
 {
