@@ -53,6 +53,35 @@ TEST_CASE("Unit_hipEventCreate_Positive") {
 }
 
 /**
+ * Test Description
+ * ------------------------
+ *  - Test event creation while stream is capturing.
+ * Test source
+ * ------------------------
+ *  - unit/event/hipEventCreate.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_hipEventCreate_Verify_Capture") {
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                       hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  hipEvent_t event;
+  HIP_CHECK(hipEventCreate(&event));
+  REQUIRE(event != nullptr);
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
+/**
  * End doxygen group hipEventCreate.
  * @}
  */

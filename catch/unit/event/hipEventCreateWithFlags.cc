@@ -347,10 +347,42 @@ TEST_CASE("Unit_hipEventCreateWithFlags_DefaultFlg_CohHstMem") {
     eMemoryToTest::eCoherentHostMemory, hipEventDefault);
   }
 }
+#endif
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Test event creation with hipEventCreateWithFlags while stream is capturing
+ * Test source
+ * ------------------------
+ *    - catch\unit\event\hipEventCreateWithFlags.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_hipEventCreateWithFlags_Verify_Capture") {
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+
+  hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                       hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+
+  const unsigned int flags = GENERATE(hipEventDefault, hipEventBlockingSync, hipEventDisableTiming,
+                                      hipEventInterprocess | hipEventDisableTiming);
+  hipEvent_t event;
+  HIP_CHECK(hipEventCreateWithFlags(&event, flags));
+  REQUIRE(event != nullptr);
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipEventDestroy(event));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
 
 /**
  * End doxygen group hipEventCreateWithFlags.
  * @}
  */
 
-#endif

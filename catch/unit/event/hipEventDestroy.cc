@@ -151,6 +151,24 @@ TEST_CASE("Unit_hipEventDestroy_Negative") {
 }
 #endif
 
+TEST_CASE("Unit_hipEventDestroy_Verify_Capture") {
+  hipEvent_t event;
+  HIP_CHECK(hipEventCreate(&event));
+  REQUIRE(event != nullptr);
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                       hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  HIP_CHECK(hipEventDestroy(event));
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+}
+
 /**
 * End doxygen group EventTest.
 * @}

@@ -209,6 +209,32 @@ TEST_CASE("Unit_hipEventElapsedTime") {
   HIP_CHECK(hipEventDestroy(stop));
 }
 
+TEST_CASE("Unit_hipEventElapsedTime_Verify_Capture") {
+  hipEvent_t start, stop;
+
+  HIP_CHECK(hipEventCreate(&start));
+  HIP_CHECK(hipEventCreate(&stop));
+  HIP_CHECK(hipEventRecord(start, nullptr));
+  HIP_CHECK(hipEventSynchronize(start));
+  HIP_CHECK(hipEventRecord(stop, nullptr));
+  HIP_CHECK(hipEventSynchronize(stop));
+
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreate(&stream));
+  hipStreamCaptureMode mode = GENERATE(hipStreamCaptureModeGlobal, hipStreamCaptureModeThreadLocal,
+                                       hipStreamCaptureModeRelaxed);
+  HIP_CHECK(hipStreamBeginCapture(stream, mode));
+  float tElapsed = 1.0f;
+  HIP_CHECK(hipEventElapsedTime(&tElapsed, start, stop));
+  hipGraph_t graph;
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipEventDestroy(start));
+  HIP_CHECK(hipEventDestroy(stop));
+}
+
 /**
 * End doxygen group EventTest.
 * @}
