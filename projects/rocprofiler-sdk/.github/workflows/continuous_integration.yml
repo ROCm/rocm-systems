@@ -23,7 +23,6 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
   PATH: "/usr/bin:$PATH"
-  PC_SAMPLING_TESTS_REGEX: ".*pc-sampling.*"
 
 jobs:
   core-deb:
@@ -66,12 +65,6 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm/.info/version
         ls -la
-
-    - name: Exclude PC Sampling Tests
-      if: ${{ !contains(matrix.runner, 'mi200') && !contains(matrix.runner, 'mi300') }}
-      shell: bash
-      run: |
-          echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') }}
@@ -194,12 +187,6 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm/.info/version
         ls -la
-
-    - name: Exclude PC Sampling Tests
-      if: ${{ !contains(matrix.runner, 'mi200') && !contains(matrix.runner, 'mi300') }}
-      shell: bash
-      run: |
-          echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') }}
@@ -563,12 +550,6 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm/.info/version
         ls -la
-
-    - name: Exclude PC Sampling Tests
-      if: ${{ !contains(matrix.runner, 'mi200') && !contains(matrix.runner, 'mi300') }}
-      shell: bash
-      run: |
-          echo 'EXCLUDED_TESTS=${{ env.PC_SAMPLING_TESTS_REGEX }}' >> $GITHUB_ENV
 
     - name: Enable PC Sampling
       if: ${{ contains(matrix.runner, 'mi200') }}

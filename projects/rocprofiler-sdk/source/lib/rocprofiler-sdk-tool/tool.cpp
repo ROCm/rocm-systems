@@ -1181,10 +1181,9 @@ list_metrics_iterate_agents(rocprofiler_agent_version_t,
                 return ROCPROFILER_STATUS_SUCCESS;
             },
             reinterpret_cast<void*>(&node_id));
-        if(status != ROCPROFILER_STATUS_SUCCESS)
-        {
-            ROCP_ERROR << "Failed to iterate counters for agent " << node_id;
-        }
+
+        ROCP_ERROR_IF(status != ROCPROFILER_STATUS_SUCCESS)
+            << "Failed to iterate counters for agent " << node_id << " (" << agent->name << ")";
     }
     return ROCPROFILER_STATUS_SUCCESS;
 }

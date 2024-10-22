@@ -11,6 +11,9 @@
 # @PACKAGE_NAME@::@PACKAGE_NAME@
 #
 
+# prevent "target already exists" error
+include_guard(DIRECTORY)
+
 # compute paths
 get_filename_component(@PACKAGE_NAME@_CMAKE_DIR "${CMAKE_CURRENT_LIST_FILE}" PATH)
 

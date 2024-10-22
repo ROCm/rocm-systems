@@ -71,14 +71,9 @@
         {                                                                                          \
             std::string status_msg =                                                               \
                 rocprofiler_get_status_string(ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__));        \
-            std::cerr << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg            \
-                      << " failed with error code " << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) \
-                      << ": " << status_msg << "\n"                                                \
-                      << std::flush;                                                               \
-            std::stringstream errmsg{};                                                            \
-            errmsg << "[" #result "][" << __FILE__ << ":" << __LINE__ << "] " << msg " failure ("  \
-                   << status_msg << ")";                                                           \
-            throw std::runtime_error(errmsg.str());                                                \
+            ROCP_FATAL << " :: [" << __FILE__ << ":" << __LINE__ << "]\n\t" << #result << "\n\n"   \
+                       << msg << " failed with error code "                                        \
+                       << ROCPROFILER_VARIABLE(CHECKSTATUS, __LINE__) << ": " << status_msg;       \
         }                                                                                          \
     }
 

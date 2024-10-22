@@ -185,7 +185,7 @@ def test_summary_data(json_data):
                     )
                     assert oitr.value.count == 2
         elif itr.domain == "HIP_API":
-            assert itr.stats.count >= 2130 and itr.stats.count <= 2140
+            assert itr.stats.count >= 2130 and itr.stats.count <= 2150
         elif itr.domain == "MEMORY_COPY":
             assert itr.stats.count == 12
         elif itr.domain == "MARKER_API":

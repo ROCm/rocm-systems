@@ -830,7 +830,7 @@ def run(app_args, args, **kwargs):
         sys.stderr.flush()
 
     if args.list_metrics:
-        app_args = [f"{ROCM_DIR}/lib/rocprofiler-sdk/rocprofv3-trigger-list-metrics"]
+        app_args = [f"{ROCM_DIR}/libexec/rocprofv3-trigger-list-metrics"]
 
     elif not app_args:
         log_config(app_env)
