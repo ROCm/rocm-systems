@@ -120,6 +120,12 @@ set(POLICY_EXAMPLE_EXE "policy")
 add_executable(${POLICY_EXAMPLE_EXE} "${POLICY_EXAMPLE_SRC_LIST}")
 target_link_libraries(${POLICY_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
+set(HEALTH_EXAMPLE_SRC_LIST "health_example.cc")
+cmake_print_variables(HEALTH_EXAMPLE_SRC_LIST)
+set(HEALTH_EXAMPLE_EXE "health")
+add_executable(${HEALTH_EXAMPLE_EXE} "${HEALTH_EXAMPLE_SRC_LIST}")
+target_link_libraries(${HEALTH_EXAMPLE_EXE} pthread dl rdc_bootstrap)
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                          ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

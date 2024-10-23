@@ -335,6 +335,18 @@ typedef enum {
   RDC_EVNT_NOTIF_RING_HANG,         //!< GPU ring hang just occurred
 
   RDC_EVNT_NOTIF_LAST = RDC_EVNT_NOTIF_RING_HANG,
+
+  /**
+   * @brief RDC health related fields
+   */
+  RDC_HEALTH_XGMI_ERROR = 3000,       //!< XGMI one or more errors detected
+  RDC_HEALTH_PCIE_REPLAY_COUNT,       //!< Total PCIE replay count
+  RDC_HEALTH_RETIRED_PAGE_NUM,        //!< Retired page number
+  RDC_HEALTH_PENDING_PAGE_NUM,        //!< Pending page number
+  RDC_HEALTH_RETIRED_PAGE_LIMIT,      //!< The threshold of retired page
+  RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT,//!< The threshold of uncorrectable page
+  RDC_HEALTH_POWER_THROTTLE_TIME,     //!< Power throttle status counter
+  RDC_HEALTH_THERMAL_THROTTLE_TIME,   //!< Total time in thermal throttle status (microseconds)
 } rdc_field_t;
 
 // even and odd numbers are used for correctable and uncorrectable errors
@@ -588,6 +600,81 @@ typedef struct {
   rdc_policy_condition_t condition;  //!< condition to meet
   rdc_policy_action_t action; //!< Action to take
 } rdc_policy_t;
+
+/**
+ * @brief type of health watches
+ */
+typedef enum {
+    RDC_HEALTH_WATCH_PCIE       = 0x1,   //!< PCIe system watches
+    RDC_HEALTH_WATCH_XGMI       = 0x2,   //!< XGMI system watches
+    RDC_HEALTH_WATCH_MEM        = 0x4,   //!< Memory watches
+    RDC_HEALTH_WATCH_INFOROM    = 0x8,   //!< Inforom watches
+    RDC_HEALTH_WATCH_THERMAL    = 0x10,  //!< Temperature watches
+    RDC_HEALTH_WATCH_POWER      = 0x20,  //!< Power watches
+} rdc_health_system_t;
+
+/**
+ * @brief type of health result
+ */
+typedef enum {
+  RDC_HEALTH_RESULT_PASS,  //!< The health test pass
+  RDC_HEALTH_RESULT_WARN,  //!< The health test has warnings
+  RDC_HEALTH_RESULT_FAIL   //!< The health test fail
+} rdc_health_result_t;
+
+/**
+ * @brief The maximum length of the health messages
+ */
+#define MAX_HEALTH_MSG_LENGTH 4096
+
+/**
+ * 8 replays per minute is the maximum recommended
+ */
+#define PCIE_MAX_REPLAYS_PERMIN 8
+
+// The error code set at rdc_health_incidents_t.error.code
+typedef enum {
+  RDC_FR_PCI_REPLAY_RATE = 1000,
+  RDC_FR_ECC_UNCORRECTABLE_DETECTED = 1001,
+  RDC_FR_PENDING_PAGE_RETIREMENTS = 1002,
+  RDC_FR_RETIRED_PAGES_LIMIT = 1003,
+  RDC_FR_RETIRED_PAGES_UNCORRECTABLE_LIMIT = 1004,
+  RDC_FR_CLOCKS_THROTTLE_THERMAL = 1005,
+  RDC_FR_CLOCKS_THROTTLE_POWER = 1006,
+  RDC_FR_XGMI_SINGLE_ERROR = 1007,
+  RDC_FR_XGMI_MULTIPLE_ERROR = 1008,
+  RDC_FR_CORRUPT_INFOROM = 1009
+} rdc_health_error_code_t;
+
+/**
+ * @brief details of the health errors
+ */
+typedef struct {
+  char      msg[MAX_HEALTH_MSG_LENGTH];  //!< The test result details
+  uint32_t  code;                        //!< The low level error code
+} rdc_health_detail_t;
+
+/**
+ * @brief details of the per health incidents
+ */
+typedef struct {
+    uint32_t              gpu_index;  //!< which GPU in this group have the issue
+    rdc_health_system_t   component;  //!< which components have the issue
+    rdc_health_result_t   health;     //!< health diagnosis of this incident
+    rdc_health_detail_t   error;      //!< The details of the error, rdc_health_error_code_t
+} rdc_health_incidents_t;
+
+
+#define HEALTH_MAX_ERROR_ITEMS 64
+
+/**
+ * @brief The health responses for test cases
+ */
+typedef struct {
+    rdc_health_result_t       overall_health;                     //!< The overall health of this entire host
+    unsigned int              incidents_count;                    //!< The number of health incidents reported in this struct
+    rdc_health_incidents_t    incidents[HEALTH_MAX_ERROR_ITEMS];  //!< Report of the errors detected
+} rdc_health_response_t;
 
 /**
  *  @brief Initialize ROCm RDC.
@@ -1273,6 +1360,72 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
 rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
+
+/**
+ *  @brief enable the health check for a group
+ *
+ *  @details For each group, only one parameter can be set. If you want to
+ *  clear the setting for a group, set component == 0x0
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[in] components  The list of components that should be enabled for health check
+ *  for example, RDC_HEALTH_WATCH_THERMAL | RDC_HEALTH_WATCH_POWER
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_health_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            unsigned int components);
+
+/**
+ *  @brief get the health check settings of a group
+ *
+ *  @details get the health check settings of a component
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[out] components  The list of components that should be enabled for health check
+ *  for example, RDC_HEALTH_WATCH_THERMAL | RDC_HEALTH_WATCH_POWER
+ *  if it is 0x0, then the health check not set for the group yet.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            unsigned int* components);
+
+/**
+ *  @brief Check health watch results
+ *
+ *  @details If it has incidents.
+ *  For each incident, check the component and error message.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @param[inout] response  The detail results of the health.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                              rdc_health_response_t* response);
+
+/**
+ *  @brief clear the health watch
+ *
+ *  @details For each group, clear the setting.
+ *
+ *  @param[in] p_rdc_handle The RDC handler.
+ *
+ *  @param[in] group_id The GPU group id.
+ *
+ *  @retval ::RDC_ST_OK is returned upon successful call.
+ */
+rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
 #ifdef __cplusplus
 }

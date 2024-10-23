@@ -870,5 +870,87 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
   return error_handle(status, reply.status());
 }
 
+// Health RdcAPI
+rdc_status_t RdcStandaloneHandler::rdc_health_set(rdc_gpu_group_t group_id,
+                                                  unsigned int components) {
+  ::rdc::SetHealthRequest request;
+  ::rdc::SetHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  request.set_components(components);
+  ::grpc::Status status = stub_->SetHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+
+  return err_status;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_health_get(rdc_gpu_group_t group_id,
+                                                  unsigned int* components) {
+  if (!components) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::GetHealthRequest request;
+  ::rdc::GetHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  ::grpc::Status status = stub_->GetHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  *components = reply.components();
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_health_check(rdc_gpu_group_t group_id,
+                                                    rdc_health_response_t *response) {
+  if (!response) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  ::rdc::CheckHealthRequest request;
+  ::rdc::CheckHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  ::grpc::Status status = stub_->CheckHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  auto res = reply.response();
+  response->overall_health = static_cast<rdc_health_result_t>(res.overall_health());
+  response->incidents_count = res.incidents_count();
+
+  for (int i = 0; i < res.incidents_size(); i++) {
+    const ::rdc::HealthIncidents& result = res.incidents(i);
+    rdc_health_incidents_t& to_result = response->incidents[i];
+
+    to_result.gpu_index = result.gpu_index();
+    to_result.component = static_cast<rdc_health_system_t>(result.component());
+    to_result.health = static_cast<rdc_health_result_t>(result.health());
+
+    //set error
+    to_result.error.code = result.error().code();
+    strncpy_with_null(to_result.error.msg, result.error().msg().c_str(), MAX_HEALTH_MSG_LENGTH);
+  }
+
+  return RDC_ST_OK;
+}
+
+rdc_status_t RdcStandaloneHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
+  ::rdc::ClearHealthRequest request;
+  ::rdc::ClearHealthResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  ::grpc::Status status = stub_->ClearHealth(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  return RDC_ST_OK;
+}
+
 }  // namespace rdc
 }  // namespace amd

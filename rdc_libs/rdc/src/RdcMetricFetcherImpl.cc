@@ -804,6 +804,66 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       read_gpu_metrics_uint64_t();
       break;
 
+    case RDC_HEALTH_XGMI_ERROR: {
+      amdsmi_xgmi_status_t status;
+      ret = amdsmi_gpu_xgmi_error_status(processor_handle, &status);
+      value->status = Smi2RdcError(ret);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(status);
+      }
+      break;
+    }
+
+    case RDC_HEALTH_PCIE_REPLAY_COUNT: {
+      amdsmi_pcie_info_t pcie_info;
+      ret = amdsmi_get_pcie_info(processor_handle, &pcie_info);
+      value->status = Smi2RdcError(ret);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(pcie_info.pcie_metric.pcie_replay_count);
+      }
+      break;
+    }
+
+    case RDC_HEALTH_RETIRED_PAGE_NUM:
+    case RDC_HEALTH_PENDING_PAGE_NUM: {
+      uint32_t num_pages = 0;
+      ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages, nullptr);
+      if (AMDSMI_STATUS_SUCCESS == ret) {
+          if (RDC_HEALTH_RETIRED_PAGE_NUM == field_id) {
+            value->status = Smi2RdcError(ret);
+            value->type = INTEGER;
+            value->value.l_int = static_cast<int64_t>(num_pages);
+            break;
+          }
+
+          if ((0 < num_pages) &&
+              (RDC_HEALTH_PENDING_PAGE_NUM == field_id)) {
+            std::vector<amdsmi_retired_page_record_t> bad_page_info(num_pages);
+            ret = amdsmi_get_gpu_bad_page_info(processor_handle, &num_pages,
+                                               bad_page_info.data());
+            value->status = Smi2RdcError(ret);
+            value->type = INTEGER;
+            if (AMDSMI_STATUS_SUCCESS == ret) {
+              uint64_t pending_page_num = 0;
+              for (uint32_t i=0; i < num_pages; i++) {
+                if (AMDSMI_MEM_PAGE_STATUS_PENDING == bad_page_info[i].status)
+                    pending_page_num++;
+              }
+
+              value->value.l_int = static_cast<int64_t>(pending_page_num);
+            }
+          }
+      } else
+         value->status = Smi2RdcError(ret);
+      break;
+    }
+
+    case RDC_HEALTH_RETIRED_PAGE_LIMIT:
+    case RDC_HEALTH_UNCORRECTABLE_PAGE_LIMIT:
+    case RDC_HEALTH_POWER_THROTTLE_TIME: //gpu_metrics 1.6
+    case RDC_HEALTH_THERMAL_THROTTLE_TIME: //gpu_metrics 1.6
     default:
       break;
   }

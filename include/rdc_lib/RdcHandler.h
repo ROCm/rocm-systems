@@ -106,6 +106,12 @@ class RdcHandler {
 
   virtual rdc_status_t rdc_policy_unregister(rdc_gpu_group_t group_id) = 0;
 
+  // Health API
+  virtual rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) = 0;
+  virtual rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) = 0;
+  virtual rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t *response) = 0;
+  virtual rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) = 0;
+
   virtual ~RdcHandler() {}
 };
 

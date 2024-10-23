@@ -105,6 +105,12 @@ class RdcStandaloneHandler : public RdcHandler {
 
   rdc_status_t rdc_policy_unregister(rdc_gpu_group_t group_id) override;
 
+  // Health API
+  rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) override;
+  rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) override;
+  rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t *response) override;
+  rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
+
   explicit RdcStandaloneHandler(const char* ip_and_port, const char* root_ca,
                                 const char* client_cert, const char* client_key);
 
