@@ -79,7 +79,7 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
       metric_fetcher_(new RdcMetricFetcherImpl()),
       rdc_module_mgr_(new RdcModuleMgrImpl(metric_fetcher_)),
       rdc_notif_(new RdcNotificationImpl()),
-      watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, rdc_module_mgr_, rdc_notif_)),
+      watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, metric_fetcher_, rdc_module_mgr_, rdc_notif_)),
       metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_, METIC_UPDATE_FREQUENCY)),
       policy_(new RdcPolicyImpl(group_settings_,metric_fetcher_)) {
   if (mode == RDC_OPERATION_MODE_AUTO) {
@@ -458,6 +458,39 @@ rdc_status_t RdcEmbeddedHandler::rdc_policy_register(rdc_gpu_group_t group_id,
 
 rdc_status_t RdcEmbeddedHandler::rdc_policy_unregister(rdc_gpu_group_t group_id) {
   return policy_->rdc_policy_unregister(group_id);
+}
+
+// Health API
+rdc_status_t RdcEmbeddedHandler::rdc_health_set(rdc_gpu_group_t group_id,
+                                                unsigned int components) {
+  if (0 == components) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return watch_table_->rdc_health_set(group_id, components);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_health_get(rdc_gpu_group_t group_id,
+                                                unsigned int *components) {
+  if (components == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return watch_table_->rdc_health_get(group_id, components);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_health_check(rdc_gpu_group_t group_id,
+                                                  rdc_health_response_t *response) {
+  if (response == nullptr) {
+    return RDC_ST_BAD_PARAMETER;
+  }
+
+  return watch_table_->rdc_health_check(group_id, response);
+}
+
+rdc_status_t RdcEmbeddedHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
+
+  return watch_table_->rdc_health_clear(group_id);
 }
 
 }  // namespace rdc

@@ -190,6 +190,18 @@ service RdcAPI {
   //  rdc_policy_condition_t condition);
   rpc UnRegisterPolicy(UnRegisterPolicyRequest) returns (UnRegisterPolicyResponse) {}
 
+  // Health API
+  // rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components);
+  rpc SetHealth(SetHealthRequest) returns (SetHealthResponse) {}
+
+  // rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components);
+  rpc GetHealth(GetHealthRequest) returns (GetHealthResponse) {}
+
+  // rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t r*esponse);
+  rpc CheckHealth(CheckHealthRequest) returns (CheckHealthResponse) {}
+
+  // rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id);
+  rpc ClearHealth(ClearHealthRequest) returns (ClearHealthResponse) {}
 }
 
 message Empty {
@@ -618,5 +630,57 @@ message UnRegisterPolicyRequest {
 }
 
 message UnRegisterPolicyResponse {
+  uint32 status = 1;
+}
+
+message SetHealthRequest {
+  uint32 group_id = 1;
+  uint32 components = 2;
+}
+
+message SetHealthResponse {
+  uint32 status = 1;
+}
+message GetHealthRequest {
+  uint32 group_id = 1;
+}
+
+message GetHealthResponse {
+  uint32 status = 1;
+  uint32 components = 2;
+}
+
+message CheckHealthRequest {
+  uint32 group_id = 1;
+}
+
+message HealthDetail {
+  string msg = 1;
+  uint32 code = 2;
+}
+
+message HealthIncidents {
+  uint32 gpu_index = 1;
+  uint32 component = 2;
+  uint32 health = 3;
+  HealthDetail error = 4;
+}
+
+message HealthResponse {
+  uint32 overall_health = 1;
+  uint32 incidents_count = 2;
+  repeated HealthIncidents incidents = 3;
+}
+
+message CheckHealthResponse {
+  uint32 status = 1;
+  HealthResponse response = 2;
+}
+
+message ClearHealthRequest {
+  uint32 group_id = 1;
+}
+
+message ClearHealthResponse {
   uint32 status = 1;
 }

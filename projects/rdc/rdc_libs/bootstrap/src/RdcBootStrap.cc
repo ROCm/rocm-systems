@@ -401,6 +401,45 @@ rdc_field_t get_field_id_from_name(const char* name) {
   return RDC_FI_INVALID;
 }
 
+rdc_status_t rdc_health_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            unsigned int components) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_health_set(group_id, components);
+}
+
+rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                            unsigned int* components) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_health_get(group_id, components);
+}
+
+rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
+                              rdc_health_response_t *response) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_health_check(group_id, response);
+}
+
+rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id) {
+  if (!p_rdc_handle) {
+    return RDC_ST_INVALID_HANDLER;
+  }
+
+  return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
+      ->rdc_health_clear(group_id);
+}
+
 char* strncpy_with_null(char* dest, const char* src, size_t n) {
   if (n == 0) {
     return dest;

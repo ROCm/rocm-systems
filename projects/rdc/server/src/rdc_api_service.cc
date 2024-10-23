@@ -947,5 +947,93 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
   return ::grpc::Status::OK;
 }
 
+::grpc::Status RdcAPIServiceImpl::SetHealth(::grpc::ServerContext* context,
+                                            const ::rdc::SetHealthRequest* request,
+                                            ::rdc::SetHealthResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_status_t result = rdc_health_set(rdc_handle_, request->group_id(), request->components());
+
+  reply->set_status(result);
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetHealth(::grpc::ServerContext* context,
+                                            const ::rdc::GetHealthRequest* request,
+                                            ::rdc::GetHealthResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  unsigned int components;
+  rdc_status_t result = rdc_health_get(rdc_handle_, request->group_id(), &components);
+
+  reply->set_status(result);
+  if (result != RDC_ST_OK) {
+    return ::grpc::Status::OK;
+  }
+
+  reply->set_components(components);
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::CheckHealth(::grpc::ServerContext* context,
+                                              const ::rdc::CheckHealthRequest* request,
+                                              ::rdc::CheckHealthResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_health_response_t response;
+  rdc_status_t result = rdc_health_check(rdc_handle_, request->group_id(), &response);
+
+  reply->set_status(result);
+  if (result != RDC_ST_OK) {
+    return ::grpc::Status::OK;
+  }
+
+  ::rdc::HealthResponse* to_response = reply->mutable_response();
+  to_response->set_overall_health(response.overall_health);
+  to_response->set_incidents_count(response.incidents_count);
+
+  for (uint32_t i = 0; i < response.incidents_count; i++) {
+    const rdc_health_incidents_t& incident = response.incidents[i];
+    ::rdc::HealthIncidents* to_incidents = to_response->add_incidents();
+
+    to_incidents->set_gpu_index(incident.gpu_index);
+    to_incidents->set_component(incident.component);
+    to_incidents->set_health(incident.health);
+
+    //error
+    auto to_error = to_incidents->mutable_error();
+    to_error->set_code(incident.error.code);
+    to_error->set_msg(incident.error.msg);
+  }
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::ClearHealth(::grpc::ServerContext* context,
+                                              const ::rdc::ClearHealthRequest* request,
+                                              ::rdc::ClearHealthResponse* reply) {
+  (void)(context);
+  if (!reply || !request) {
+    return ::grpc::Status(::grpc::StatusCode::INTERNAL, "Empty contents");
+  }
+
+  rdc_status_t result = rdc_health_clear(rdc_handle_, request->group_id());
+
+  reply->set_status(result);
+
+  return ::grpc::Status::OK;
+}
+
 }  // namespace rdc
 }  // namespace amd

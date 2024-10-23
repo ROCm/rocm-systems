@@ -153,6 +153,22 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
                                   const ::rdc::UnRegisterPolicyRequest* request,
                                   ::rdc::UnRegisterPolicyResponse* reply) override;
 
+  ::grpc::Status SetHealth(::grpc::ServerContext* context,
+                           const ::rdc::SetHealthRequest* request,
+                           ::rdc::SetHealthResponse* reply) override;
+
+  ::grpc::Status GetHealth(::grpc::ServerContext* context,
+                           const ::rdc::GetHealthRequest* request,
+                           ::rdc::GetHealthResponse* reply) override;
+
+  ::grpc::Status CheckHealth(::grpc::ServerContext* context,
+                             const ::rdc::CheckHealthRequest* request,
+                             ::rdc::CheckHealthResponse* reply) override;
+
+  ::grpc::Status ClearHealth(::grpc::ServerContext* context,
+                             const ::rdc::ClearHealthRequest* request,
+                             ::rdc::ClearHealthResponse* reply) override;
+
  private:
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);
   rdc_handle_t rdc_handle_;
