@@ -179,9 +179,7 @@ get_os_info()
 find_package(PkgConfig)
 # Check for libraries required for building
 find_library(LIBC NAMES c REQUIRED)
-find_library(NUMA NAMES numa REQUIRED)
 message(STATUS "LIBC:" ${LIBC})
-message(STATUS "NUMA:" ${NUMA})
 
 ## If environment variable DRM_DIR is set, the script
 ## will pick up the corresponding libraries from that path.
@@ -195,7 +193,7 @@ include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
 include_directories(${DRM_INCLUDE_DIRS})
 
 target_link_libraries ( ${HSAKMT_TARGET}
-  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt c numa ${CMAKE_DL_LIBS}
+  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt c ${CMAKE_DL_LIBS}
 )
 
 target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_CXX_FLAGS})
@@ -324,7 +322,7 @@ if ( NOT BUILD_SHARED_LIBS)
   endif()
   # Link drm_amdgpu and drm library statically
   target_link_libraries ( ${HSAKMT_STATIC_DRM_TARGET}
-    PRIVATE pthread rt c numa ${CMAKE_DL_LIBS}
+    PRIVATE pthread rt c ${CMAKE_DL_LIBS}
     INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
   )
   target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
