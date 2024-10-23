@@ -192,7 +192,11 @@ void AttTracer::InsertPacketStop(
       rsignal.session_id_snapshot,
       queue.GetQueueID(),
       rsignal.writer_id,
-      interrupt_signal
+      interrupt_signal,
+      HSASupport_Singleton::GetInstance()
+                        .GetHSAAgentInfo(agent_handle)
+                        .GetDeviceInfo()
+                        .getNumaNode()
   });
 
   //codeobj_record::stop_capture(rocprofiler_record_id_t{rsignal.record_id});

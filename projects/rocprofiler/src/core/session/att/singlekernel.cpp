@@ -217,7 +217,11 @@ bool AttTracer::ATTSingleWriteInterceptor(
       session_id_,
       queue_info.GetQueueID(),
       writer_id,
-      interrupt_signal
+      interrupt_signal,
+      HSASupport_Singleton::GetInstance()
+                        .GetHSAAgentInfo(queue_info.GetGPUAgent().handle)
+                        .GetDeviceInfo()
+                        .getNumaNode()
     });
   }
   /* Write the transformed packets to the hardware queue.  */
