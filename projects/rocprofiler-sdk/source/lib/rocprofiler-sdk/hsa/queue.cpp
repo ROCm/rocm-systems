@@ -67,6 +67,14 @@ namespace hsa
 {
 namespace
 {
+static std::atomic<int64_t>&
+get_balanced_signal_slots()
+{
+    constexpr int64_t NUM_SIGNALS = 16;
+    static auto*&     atomic = common::static_object<std::atomic<int64_t>>::construct(NUM_SIGNALS);
+    return *atomic;
+}
+
 template <typename DomainT, typename... Args>
 inline bool
 context_filter(const context::context* ctx, DomainT domain, Args... args)
@@ -105,6 +113,8 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         delete _session;
         return false;
     }
+
+    get_balanced_signal_slots().fetch_add(1);
 
     auto& queue_info_session = *static_cast<Queue::queue_info_session_t*>(data);
     auto  dispatch_time      = kernel_dispatch::get_dispatch_time(queue_info_session);
@@ -341,6 +351,13 @@ WriteInterceptor(const void* packets,
             tracing_data_v.external_correlation_ids,
             thr_id,
             ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_KERNEL_DISPATCH);
+
+        // If there is a lot of contention for HSA signals, then schedule out the thread
+        if(get_balanced_signal_slots().fetch_sub(1) <= 0)
+        {
+            sched_yield();
+            std::this_thread::sleep_for(std::chrono::microseconds(1));
+        }
 
         // Stores the instrumentation pkt (i.e. AQL packets for counter collection)
         // along with an ID of the client we got the packet from (this will be returned via
