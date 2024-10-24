@@ -2096,7 +2096,7 @@ class AMDSMICommands():
         if "throttle" in current_platform_args:
             if args.throttle:
                 throttle_status = {
-                    # violation status values - counter/accumulated
+                    # Current values - counter/accumulated
                     'accumulation_counter': "N/A",
                     'prochot_accumulated': "N/A",
                     'ppt_accumulated': "N/A",
@@ -2104,19 +2104,19 @@ class AMDSMICommands():
                     'vr_thermal_accumulated': "N/A",
                     'hbm_thermal_accumulated': "N/A",
 
-                    # violation status values - active
-                    'prochot_violation_active': "N/A",
-                    'ppt_violation_active': "N/A",
-                    'socket_thermal_violation_active': "N/A",
-                    'vr_thermal_violation_active': "N/A",
-                    'hbm_thermal_violation_active': "N/A",
+                    # violation status values - active/not active
+                    'prochot_violation_status': "N/A",
+                    'ppt_violation_status': "N/A",
+                    'socket_thermal_violation_status': "N/A",
+                    'vr_thermal_violation_status': "N/A",
+                    'hbm_thermal_violation_status': "N/A",
 
-                    # violation status values - percent
-                    'prochot_violation_percent': "N/A",
-                    'ppt_violation_percent': "N/A",
-                    'socket_thermal_violation_percent': "N/A",
-                    'vr_thermal_violation_percent': "N/A",
-                    'hbm_thermal_violation_percent': "N/A"
+                    # violation activity values - percent
+                    'prochot_violation_activity': "N/A",
+                    'ppt_violation_activity': "N/A",
+                    'socket_thermal_violation_activity': "N/A",
+                    'vr_thermal_violation_activity': "N/A",
+                    'hbm_thermal_violation_activity': "N/A"
                     }
 
                 try:
@@ -2128,31 +2128,31 @@ class AMDSMICommands():
                     throttle_status['vr_thermal_accumulated'] = violation_status['acc_vr_thrm']
                     throttle_status['hbm_thermal_accumulated'] = violation_status['acc_hbm_thrm']
 
-                    throttle_status['prochot_violation_active'] = violation_status['active_prochot_thrm']
-                    throttle_status['ppt_violation_active'] = violation_status['active_ppt_pwr']
-                    throttle_status['socket_thermal_violation_active'] = violation_status['active_socket_thrm']
-                    throttle_status['vr_thermal_violation_active'] = violation_status['active_vr_thrm']
-                    throttle_status['hbm_thermal_violation_active'] = violation_status['active_hbm_thrm']
+                    throttle_status['prochot_violation_status'] = violation_status['active_prochot_thrm']
+                    throttle_status['ppt_violation_status'] = violation_status['active_ppt_pwr']
+                    throttle_status['socket_thermal_violation_status'] = violation_status['active_socket_thrm']
+                    throttle_status['vr_thermal_violation_status'] = violation_status['active_vr_thrm']
+                    throttle_status['hbm_thermal_violation_status'] = violation_status['active_hbm_thrm']
 
-                    throttle_status['prochot_violation_percent'] = violation_status['per_prochot_thrm']
-                    throttle_status['ppt_violation_percent'] = violation_status['per_ppt_pwr']
-                    throttle_status['socket_thermal_violation_percent'] = violation_status['per_socket_thrm']
-                    throttle_status['vr_thermal_violation_percent'] = violation_status['per_vr_thrm']
-                    throttle_status['hbm_thermal_violation_percent'] = violation_status['per_hbm_thrm']
+                    throttle_status['prochot_violation_activity'] = violation_status['per_prochot_thrm']
+                    throttle_status['ppt_violation_activity'] = violation_status['per_ppt_pwr']
+                    throttle_status['socket_thermal_violation_activity'] = violation_status['per_socket_thrm']
+                    throttle_status['vr_thermal_violation_activity'] = violation_status['per_vr_thrm']
+                    throttle_status['hbm_thermal_violation_activity'] = violation_status['per_hbm_thrm']
 
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     values_dict['throttle'] = throttle_status
                     logging.debug("Failed to get violation status' for gpu %s | %s", gpu_id, e.get_error_info())
 
                 for key, value in throttle_status.items():
-                    if "active" in key:
+                    if "_status" in key:
                         if value is True:
                             throttle_status[key] = "ACTIVE"
                         elif value is False:
                             throttle_status[key] = "NOT ACTIVE"
                         continue
 
-                    if "percent" not in key:
+                    if "_activity" not in key:
                         continue
 
                     activity_unit = '%'

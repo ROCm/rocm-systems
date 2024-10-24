@@ -632,8 +632,10 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
     if (violation_status == nullptr) {
         return AMDSMI_STATUS_INVAL;
     }
+
     // 1 sec = 1000 ms = 1000000 us
-    constexpr uint64_t kFASTEST_POLL_TIME_MS = 1;  // fastest SMU FW sample time is 1ms
+    // 0.1 sec = 100 ms = 100000 us
+    constexpr uint64_t kFASTEST_POLL_TIME_MS = 100;  // fastest SMU FW sample time is 100 ms
 
     violation_status->reference_timestamp = std::numeric_limits<uint64_t>::max();
     violation_status->violation_timestamp = std::numeric_limits<uint64_t>::max();
@@ -700,7 +702,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
         return AMDSMI_STATUS_NOT_SUPPORTED;
     }
 
-    // wait 1ms before reading again
+    // wait 100ms before reading again
     system_wait(static_cast<int>(kFASTEST_POLL_TIME_MS));
 
     amdsmi_gpu_metrics_t metric_info_b = {};

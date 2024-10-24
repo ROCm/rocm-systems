@@ -5099,12 +5099,16 @@ amdsmi_get_gpu_vram_usage(amdsmi_processor_handle processor_handle, amdsmi_vram_
 /**
  *  @brief          Returns the violations for a processor
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
+ *  Warning: API will be slow due to polling driver for 2 samples. Require
+ *  a minimum wait of 100ms between the 2 samples in order to calculate. Otherwise
+ *  users would need to use amdsmi_get_gpu_metrics_info for BM. See that API's struct
+ *  for calculations.
+ *
+ *  @platform{gpu_bm_linux} @platform{host}
  *
  *  @param[in]      processor_handle Device which to query
  *
- *
- *  @param[in,out]  info Reference to all violation status details available.
+ *  @param[out]     info Reference to all violation status details available.
  *                  Must be allocated by user.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
