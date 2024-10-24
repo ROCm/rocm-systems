@@ -274,20 +274,20 @@ class webui_analysis(OmniAnalyze_Base):
             args = self.get_args()
             file_io.create_df_kernel_top_stats(
                 raw_data_dir=self.dest_dir,
-                filter_gpu_ids=self._runs[self.dest_dir].filter_gpu_ids,
-                filter_dispatch_ids=self._runs[self.dest_dir].filter_dispatch_ids,
+                filter_gpu_ids=self._runs[0].filter_gpu_ids,
+                filter_dispatch_ids=self._runs[0].filter_dispatch_ids,
                 time_unit=args.time_unit,
                 max_stat_num=args.max_stat_num,
                 kernel_verbose=self.get_args().kernel_verbose,
             )
             # create 'mega dataframe'
-            self._runs[self.dest_dir].raw_pmc = file_io.create_df_pmc(
+            self._runs[0].raw_pmc = file_io.create_df_pmc(
                 self.dest_dir, self.get_args().kernel_verbose, args.verbose
             )
             # create the loaded kernel stats
-            parser.load_kernel_top(self._runs[self.dest_dir], self.dest_dir)
+            parser.load_kernel_top(self._runs[0], self.dest_dir)
             # set architecture
-            self.arch = self._runs[self.dest_dir].sys_info.iloc[0]["gpu_arch"]
+            self.arch = self._runs[0].sys_info.iloc[0]["gpu_arch"]
 
         else:
             console_error(
@@ -300,9 +300,9 @@ class webui_analysis(OmniAnalyze_Base):
         super().run_analysis()
         args = self.get_args()
         input_filters = {
-            "kernel": self._runs[self.dest_dir].filter_kernel_ids,
-            "gpu": self._runs[self.dest_dir].filter_gpu_ids,
-            "dispatch": self._runs[self.dest_dir].filter_dispatch_ids,
+            "kernel": self._runs[0].filter_kernel_ids,
+            "gpu": self._runs[0].filter_gpu_ids,
+            "dispatch": self._runs[0].filter_dispatch_ids,
             "normalization": args.normal_unit,
             "top_n": args.max_stat_num,
         }

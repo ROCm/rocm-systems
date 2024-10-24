@@ -38,27 +38,25 @@ class cli_analysis(OmniAnalyze_Base):
         super().pre_processing()
         if self.get_args().random_port:
             console_error("--gui flag is required to enable --random-port")
-        for d in self.get_args().path:
+        for i, d in enumerate(self.get_args().path):
             file_io.create_df_kernel_top_stats(
                 raw_data_dir=d[0],
-                filter_gpu_ids=self._runs[d[0]].filter_gpu_ids,
-                filter_dispatch_ids=self._runs[d[0]].filter_dispatch_ids,
+                filter_gpu_ids=self._runs[i].filter_gpu_ids,
+                filter_dispatch_ids=self._runs[i].filter_dispatch_ids,
                 time_unit=self.get_args().time_unit,
                 max_stat_num=self.get_args().max_stat_num,
                 kernel_verbose=self.get_args().kernel_verbose,
             )
             # create 'mega dataframe'
-            self._runs[d[0]].raw_pmc = file_io.create_df_pmc(
+            self._runs[i].raw_pmc = file_io.create_df_pmc(
                 d[0], self.get_args().kernel_verbose, self.get_args().verbose
             )
             # demangle and overwrite original 'Kernel_Name'
-            kernel_name_shortener(
-                self._runs[d[0]].raw_pmc, self.get_args().kernel_verbose
-            )
+            kernel_name_shortener(self._runs[i].raw_pmc, self.get_args().kernel_verbose)
 
             # create the loaded table
             parser.load_table_data(
-                workload=self._runs[d[0]],
+                workload=self._runs[i],
                 dir=d[0],
                 is_gui=False,
                 debug=self.get_args().debug,
@@ -73,17 +71,13 @@ class cli_analysis(OmniAnalyze_Base):
             tty.show_kernel_stats(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[
-                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]
-                ],
+                self._arch_configs[self._runs[0].sys_info.iloc[0]["gpu_arch"]],
                 self._output,
             )
         else:
             tty.show_all(
                 self.get_args(),
                 self._runs,
-                self._arch_configs[
-                    self._runs[self.get_args().path[0][0]].sys_info.iloc[0]["gpu_arch"]
-                ],
+                self._arch_configs[self._runs[0].sys_info.iloc[0]["gpu_arch"]],
                 self._output,
             )

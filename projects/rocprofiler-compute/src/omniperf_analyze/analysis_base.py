@@ -151,7 +151,7 @@ class OmniAnalyze_Base:
 
         self.load_options(normalization_filter)
 
-        for d in self.__args.path:
+        for i, d in enumerate(self.__args.path):
             w = schema.Workload()
             w.sys_info = file_io.load_sys_info(Path(d[0], "sysinfo.csv"))
             arch = w.sys_info.iloc[0]["gpu_arch"]
@@ -161,7 +161,7 @@ class OmniAnalyze_Base:
             w.avail_ips = w.sys_info["ip_blocks"].item().split("|")
             w.dfs = copy.deepcopy(self._arch_configs[arch].dfs)
             w.dfs_type = self._arch_configs[arch].dfs_type
-            self._runs[d[0]] = w
+            self._runs[i] = w
 
         return self._runs
 
@@ -184,15 +184,6 @@ class OmniAnalyze_Base:
             # validate profiling data
             is_workload_empty(dir[0])
 
-        # no using same paths
-        occurances = set()
-        for dir in self.__args.path:
-            dir = dir[0]
-            if dir in occurances:
-                console_error("You cannot provide the same path twice.")
-            else:
-                occurances.add(dir)
-
     # ----------------------------------------------------
     # Required methods to be implemented by child classes
     # ----------------------------------------------------
@@ -211,20 +202,20 @@ class OmniAnalyze_Base:
 
         # set filters
         if self.__args.gpu_kernel:
-            for d, gk in zip(self.__args.path, self.__args.gpu_kernel):
-                self._runs[d[0]].filter_kernel_ids = gk
+            for i, gk in enumerate(self.__args.gpu_kernel):
+                self._runs[i].filter_kernel_ids = gk
         if self.__args.gpu_id:
             if len(self.__args.gpu_id) == 1 and len(self.__args.path) != 1:
                 for i in range(len(self.__args.path) - 1):
                     self.__args.gpu_id.extend(self.__args.gpu_id)
-            for d, gi in zip(self.__args.path, self.__args.gpu_id):
-                self._runs[d[0]].filter_gpu_ids = gi
+            for i, gi in enumerate(self.__args.gpu_id):
+                self._runs[i].filter_gpu_ids = gi
         if self.__args.gpu_dispatch_id:
             if len(self.__args.gpu_dispatch_id) == 1 and len(self.__args.path) != 1:
                 for i in range(len(self.__args.path) - 1):
                     self.__args.gpu_dispatch_id.extend(self.__args.gpu_dispatch_id)
-            for d, gd in zip(self.__args.path, self.__args.gpu_dispatch_id):
-                self._runs[d[0]].filter_dispatch_ids = gd
+            for i, gd in enumerate(self.__args.gpu_dispatch_id):
+                self._runs[i].filter_dispatch_ids = gd
 
     @abstractmethod
     def run_analysis(self):

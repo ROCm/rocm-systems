@@ -1136,7 +1136,7 @@ def test_baseline():
             ],
         ):
             omniperf.main()
-    assert e.value.code == 1
+    assert e.value.code == 0
 
     with pytest.raises(SystemExit) as e:
         with patch(
@@ -1151,7 +1151,53 @@ def test_baseline():
             ],
         ):
             omniperf.main()
-    assert e.value.code == 1
+    assert e.value.code == 0
+
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            [
+                "omniperf",
+                "analyze",
+                "--path",
+                "tests/workloads/multikernel/MI200",
+                "-k",
+                "0",
+                "--path",
+                "tests/workloads/multikernel/MI200",
+                "-k",
+                "1",
+                "--path",
+                "tests/workloads/multikernel/MI200",
+                "-k",
+                "2",
+            ],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
+
+    with pytest.raises(SystemExit) as e:
+        with patch(
+            "sys.argv",
+            [
+                "omniperf",
+                "analyze",
+                "--path",
+                "tests/workloads/multikernel/MI200",
+                "-k",
+                "0",
+                "--path",
+                "tests/workloads/multikernel/MI200",
+                "-k",
+                "1",
+                "--path",
+                "tests/workloads/vcopy/MI100",
+                "-k",
+                "0",
+            ],
+        ):
+            omniperf.main()
+    assert e.value.code == 0
 
 
 @pytest.mark.misc
