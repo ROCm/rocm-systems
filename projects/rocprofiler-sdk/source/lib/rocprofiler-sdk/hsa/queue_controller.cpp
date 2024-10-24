@@ -404,7 +404,6 @@ QueueController*
 get_queue_controller()
 {
     static auto*& controller = common::static_object<QueueController>::construct();
-    LOG(ERROR) << (uint64_t) controller;
     return controller;
 }
 
