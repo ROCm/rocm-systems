@@ -185,6 +185,9 @@ typedef enum {
   RDC_FI_GPU_UTIL = 500,    //!< GPU Utilization
   RDC_FI_GPU_MEMORY_USAGE,  //!< Memory usage of the GPU instance
   RDC_FI_GPU_MEMORY_TOTAL,  //!< Total memory of the GPU instance
+  RDC_FI_GPU_MM_ENC_UTIL,  //!< Multimedia encoder busy percentage
+  RDC_FI_GPU_MM_DEC_UTIL,  //!< Multimedia decoder busy percentage
+  RDC_FI_GPU_MEMORY_ACTIVITY,  //!< Memory busy percentage
 
   /**
    * @brief ECC related fields
