@@ -564,6 +564,15 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
       }
       break;
     }
+    case RDC_FI_GPU_MEMORY_ACTIVITY: {
+      amdsmi_engine_usage_t engine_usage;
+      value->status = amdsmi_get_gpu_activity(processor_handle, &engine_usage);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(engine_usage.umc_activity);
+      }
+      break;
+    }
     case RDC_FI_GPU_COUNT: {
       uint32_t processor_count = 0;
       // amdsmi is initialized in AMDSMI_INIT_AMD_GPUS mode -> returned sockets are GPUs
@@ -666,6 +675,25 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
         } else {
           value->value.l_int = asic_info.oam_id;
         }
+      }
+      break;
+    }
+    case RDC_FI_GPU_MM_ENC_UTIL: {
+      value->status = AMDSMI_STATUS_NOT_SUPPORTED;
+      RDC_LOG(RDC_ERROR, "AMDSMI No Supported: cannot get MM_ENC_ACTIVITY");
+      return RDC_ST_NO_DATA;
+    }
+    case RDC_FI_GPU_MM_DEC_UTIL: {
+      constexpr uint32_t kUTILIZATION_COUNTERS(1);
+      amdsmi_utilization_counter_t utilization_counters[kUTILIZATION_COUNTERS];
+      utilization_counters[0].type = AMDSMI_COARSE_DECODER_ACTIVITY;
+      uint64_t timestamp;
+
+      value->status = amdsmi_get_utilization_count(processor_handle, utilization_counters,
+                                                  kUTILIZATION_COUNTERS, &timestamp);
+      value->type = INTEGER;
+      if (value->status == AMDSMI_STATUS_SUCCESS) {
+        value->value.l_int = static_cast<int64_t>(utilization_counters[0].value);
       }
       break;
     }
