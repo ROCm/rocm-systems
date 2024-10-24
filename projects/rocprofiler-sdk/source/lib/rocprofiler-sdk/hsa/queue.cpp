@@ -67,7 +67,7 @@ namespace hsa
 {
 namespace
 {
-static std::atomic<int64_t>&
+std::atomic<int64_t>&
 get_balanced_signal_slots()
 {
     constexpr int64_t NUM_SIGNALS = 16;

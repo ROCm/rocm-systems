@@ -48,8 +48,8 @@ public:
     using queue_map_t            = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
     using agent_cache_map_t      = std::unordered_map<uint32_t, AgentCache>;
 
-    QueueController() = default;
-    ~QueueController() {}
+    QueueController()  = default;
+    ~QueueController() = default;
     // Initializes the QueueInterceptor. This must be delayed until
     // HSA has been inited.
     void init(CoreApiTable& core_table, AmdExtTable& ext_table);
