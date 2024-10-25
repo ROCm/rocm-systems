@@ -578,8 +578,7 @@ rdc_status_t RdcStandaloneHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
   // * response - delivered when the diagnostic run completes
   while (reader->Read(&reply)) {
     if (reply.has_log()) {
-      // TODO: Remove cout?
-      RDC_LOG(RDC_INFO, "LOG: " << reply.log());
+      // TODO: Add different logging levels
       std::cout << "LOG: " << reply.log() << std::endl;
       continue;
     }
