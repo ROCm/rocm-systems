@@ -542,6 +542,21 @@ Properties
         - WRITE_SIZE
 
 
+Command-Line
++++++++++++++
+
+Desired counters can now be collected as ``command-line`` option as well.
+
+To supply the counters via ``command-line`` options, use:
+
+.. code-block:: shell
+
+   rocprofv3 --pmc SQ_WAVES GRBM_COUNT GRBM_GUI_ACTIVE -- <app_relative_path>
+
+.. note::
+   1. Please note that more than 1 counters should be separated by a space or a comma.
+   2. Job will fail if entire set of counters cannot be collected in single pass
+
 Kernel profiling output
 +++++++++++++++++++++++++
 

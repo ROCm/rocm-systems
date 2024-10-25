@@ -55,3 +55,43 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
                    "rocprofv3-test-tracing-plus-cc-execute" FAIL_REGULAR_EXPRESSION
                    "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 endforeach()
+
+set(cmdl_single "GRBM_COUNT")
+set(cmdl_multiple "SQ_WAVES" "GRBM_GUI_ACTIVE" "SQ_CYCLES:device=16384"
+                  "SQ_BUSY_CYCLES:device=65536")
+
+foreach(_GROUP "single" "multiple")
+
+    set(_TEST_NAME_PREFIX rocprofv3-test-tracing-plus-counter-collection-cmdl-${_GROUP})
+
+    add_test(
+        NAME ${_TEST_NAME_PREFIX}-execute
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --hsa-trace --pmc
+            ${cmdl_${_GROUP}} -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace -o
+            cmdl/${_GROUP} --output-format JSON PFTRACE CSV --
+            $<TARGET_FILE:simple-transpose>)
+
+    set_tests_properties(
+        ${_TEST_NAME_PREFIX}-execute
+        PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-tracing-env}"
+                   FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
+    set(_TEST_OUTPUT_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/cmdl/${_GROUP})
+
+    add_test(
+        NAME ${_TEST_NAME_PREFIX}-validate
+        COMMAND
+            ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+            "${_TEST_OUTPUT_PREFIX}_results.json" --pftrace-input
+            "${_TEST_OUTPUT_PREFIX}_results.pftrace" --hsa-input
+            "${_TEST_OUTPUT_PREFIX}_hsa_api_trace.csv" --agent-input
+            "${_TEST_OUTPUT_PREFIX}_agent_info.csv" --counter-input
+            "${_TEST_OUTPUT_PREFIX}_counter_collection.csv")
+
+    set_tests_properties(
+        ${_TEST_NAME_PREFIX}-validate
+        PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
+                   "${_TEST_NAME_PREFIX}-execute" FAIL_REGULAR_EXPRESSION
+                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+endforeach()

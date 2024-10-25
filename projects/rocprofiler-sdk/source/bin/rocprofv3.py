@@ -100,7 +100,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     io_options.add_argument(
         "-i",
         "--input",
-        help="Input file for counter collection",
+        help="Input file for run configuration (JSON or YAML) or counter collection (TXT)",
         required=False,
     )
     io_options.add_argument(
@@ -225,6 +225,18 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         extended_tracing_options,
         "--hsa-finalizer-trace",
         help="For collecting HSA API Traces (Finalizer-extension API), e.g. HSA functions prefixed with only 'hsa_ext_program_' (i.e. hsa_ext_program_create).",
+    )
+
+    counter_collection_options = parser.add_argument_group("Counter collection options")
+
+    counter_collection_options.add_argument(
+        "--pmc",
+        help=(
+            "Specify Performance Monitoring Counters to collect(comma OR space separated in case of more than 1 counters). "
+            "Note: job will fail if entire set of counters cannot be collected in single pass"
+        ),
+        default=None,
+        nargs="*",
     )
 
     post_processing_options = parser.add_argument_group("Post-processing tracing options")
@@ -644,7 +656,7 @@ def run(app_args, args, **kwargs):
 
     update_env("ROCPROF_OUTPUT_FILE_NAME", _output_file)
     update_env("ROCPROF_OUTPUT_PATH", _output_path)
-    if app_pass is not None:
+    if app_pass is not None and args.sub_directory is not None:
         app_env["ROCPROF_OUTPUT_PATH"] = os.path.join(
             f"{_output_path}", f"{args.sub_directory}{app_pass}"
         )
@@ -885,7 +897,7 @@ def main(argv=None):
     if len(inp_args) == 1:
         args = get_args(cmd_args, inp_args[0])
         pass_idx = None
-        if hasattr(args, "pmc") and args.pmc is not None and len(args.pmc) > 0:
+        if has_set_attr(args, "pmc") and len(args.pmc) > 0:
             pass_idx = 1
         run(app_args, args, pass_id=pass_idx)
     else:
