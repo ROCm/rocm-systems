@@ -119,6 +119,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 - Fix Support for derived counters in reduce operation and bug fix for max in reduce
 - Check to force tools to initialize context id with zero.
 - Fix to handle a range of values for select() dimension in expressions parser.
+- PMC dispatch based Counter Collection Serialization is now per-device instead of global across all devices.
 
 ### Removed
 

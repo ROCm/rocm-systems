@@ -62,12 +62,14 @@ queue_cb(const context::context*                                         ctx,
     // and maybe adds barrier packets if the state is transitioning from serialized <->
     // unserialized
     auto maybe_add_serialization = [&](auto& gen_pkt) {
-        CHECK_NOTNULL(hsa::get_queue_controller())->serializer().rlock([&](const auto& serializer) {
-            for(auto& s_pkt : serializer.kernel_dispatch(queue))
-            {
-                gen_pkt->before_krn_pkt.push_back(s_pkt.ext_amd_aql_pm4);
-            }
-        });
+        CHECK_NOTNULL(hsa::get_queue_controller())
+            ->serializer(&queue)
+            .rlock([&](const auto& serializer) {
+                for(auto& s_pkt : serializer.kernel_dispatch(queue))
+                {
+                    gen_pkt->before_krn_pkt.push_back(s_pkt.ext_amd_aql_pm4);
+                }
+            });
     };
 
     // Packet generated when no instrumentation is performed. May contain serialization
@@ -189,9 +191,9 @@ completed_cb(const context::context*                       ctx,
 
     if(!pkt) return;
 
-    CHECK_NOTNULL(hsa::get_queue_controller())->serializer().wlock([&](auto& serializer) {
-        serializer.kernel_completion_signal(session.queue);
-    });
+    CHECK_NOTNULL(hsa::get_queue_controller())
+        ->serializer(&session.queue)
+        .wlock([&](auto& serializer) { serializer.kernel_completion_signal(session.queue); });
 
     // We have no profile config, nothing to output.
     if(!prof_config) return;

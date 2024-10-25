@@ -192,8 +192,14 @@ TEST(hsa_barrier, no_block_single)
     auto queues = create_queue_map(1);
 
     // Immediate return of barrier due to no active async packets
-    hsa::hsa_barrier barrier(finished_func, get_api_table());
-    barrier.set_barrier(queues);
+    hsa::hsa_barrier             barrier(finished_func, get_api_table());
+    hsa_barrier::queue_map_ptr_t q_map;
+    for(const auto& [k, v] : queues)
+    {
+        q_map[k] = v.get();
+    }
+
+    barrier.set_barrier(q_map);
     executed_handlers = 0;
     ASSERT_TRUE(barrier.complete());
     should_execute_handler = true;
@@ -224,7 +230,14 @@ TEST(hsa_barrier, no_block_multi)
 
     // Immediate return of barrier due to no active async packets
     hsa::hsa_barrier barrier(finished_func, get_api_table());
-    barrier.set_barrier(queues);
+
+    hsa_barrier::queue_map_ptr_t q_map;
+    for(const auto& [k, v] : queues)
+    {
+        q_map[k] = v.get();
+    }
+
+    barrier.set_barrier(q_map);
     ASSERT_TRUE(barrier.complete());
     should_execute_handler = true;
     executed_handlers      = 0;
@@ -265,7 +278,13 @@ TEST(hsa_barrier, block_single)
     should_execute_handler = false;
     executed_handlers      = 0;
 
-    barrier.set_barrier(queues);
+    hsa_barrier::queue_map_ptr_t q_map;
+    for(const auto& [k, v] : queues)
+    {
+        q_map[k] = v.get();
+    }
+
+    barrier.set_barrier(q_map);
     ASSERT_FALSE(barrier.complete());
 
     should_execute_handler = false;
@@ -323,7 +342,13 @@ TEST(hsa_barrier, block_multi)
     should_execute_handler = false;
     executed_handlers      = 0;
 
-    barrier.set_barrier(queues);
+    hsa_barrier::queue_map_ptr_t q_map;
+    for(const auto& [k, v] : queues)
+    {
+        q_map[k] = v.get();
+    }
+
+    barrier.set_barrier(q_map);
     ASSERT_FALSE(barrier.complete());
 
     should_execute_handler = false;

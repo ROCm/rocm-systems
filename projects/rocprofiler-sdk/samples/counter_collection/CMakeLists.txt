@@ -53,6 +53,28 @@ set_tests_properties(
                "${counter-collection-buffer-env}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
+set_source_files_properties(per_dev_serialization.cpp PROPERTIES LANGUAGE HIP)
+add_executable(counter-collection-buffer-device-serialization)
+target_sources(counter-collection-buffer-device-serialization
+               PRIVATE per_dev_serialization.cpp)
+target_link_libraries(counter-collection-buffer-device-serialization
+                      PRIVATE counter-collection-buffer-client Threads::Threads)
+
+rocprofiler_samples_get_ld_library_path_env(LIBRARY_PATH_ENV)
+rocprofiler_samples_get_preload_env(PRELOAD_ENV counter-collection-buffer-client)
+
+set(counter-collection-buffer-device-serialization-env "${PRELOAD_ENV}"
+                                                       "${LIBRARY_PATH_ENV}")
+
+add_test(NAME counter-collection-buffer-device-serialization
+         COMMAND $<TARGET_FILE:counter-collection-buffer-device-serialization>)
+
+set_tests_properties(
+    counter-collection-buffer-device-serialization
+    PROPERTIES TIMEOUT 120 LABELS "samples" ENVIRONMENT
+               "${counter-collection-buffer-device-serialization-env}"
+               FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+
 add_library(counter-collection-callback-client SHARED)
 target_sources(counter-collection-callback-client PRIVATE callback_client.cpp client.hpp)
 target_link_libraries(

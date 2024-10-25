@@ -49,13 +49,13 @@ hsa_barrier::~hsa_barrier()
 }
 
 void
-hsa_barrier::set_barrier(const queue_map_t& q)
+hsa_barrier::set_barrier(const queue_map_ptr_t& q)
 {
     _core_api.hsa_signal_store_screlease_fn(_barrier_signal, 1);
     _queue_waiting.wlock([&](auto& queue_waiting) {
         for(const auto& [_, queue] : q)
         {
-            queue->lock_queue([ptr = queue.get(), &queue_waiting]() {
+            queue->lock_queue([ptr = queue, &queue_waiting]() {
                 if(ptr->active_async_packets() > 0)
                 {
                     queue_waiting[ptr->get_id().handle] = ptr->active_async_packets();

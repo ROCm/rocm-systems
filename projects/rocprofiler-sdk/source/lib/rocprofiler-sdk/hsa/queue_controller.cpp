@@ -28,6 +28,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
+#include <memory>
 
 namespace rocprofiler
 {
@@ -62,8 +63,9 @@ create_queue(hsa_agent_t        agent,
                                                      controller->get_ext_table(),
                                                      queue);
 
-            controller->serializer().wlock(
-                [&](auto& serializer) { serializer.add_queue(queue, *new_queue); });
+            controller->serializer(new_queue.get()).wlock([&](auto& serializer) {
+                serializer.add_queue(queue, *new_queue);
+            });
             controller->add_queue(*queue, std::move(new_queue));
 
             return HSA_STATUS_SUCCESS;
@@ -316,23 +318,88 @@ QueueController::get_queue(const hsa_queue_t& _hsa_queue) const
         _hsa_queue);
 }
 
+common::Synchronized<hsa::profiler_serializer>&
+QueueController::serializer(const Queue* queue)
+{
+    CHECK(queue);
+    common::Synchronized<hsa::profiler_serializer>* ret = nullptr;
+    _profiler_serializer.ulock(
+        [&](const auto& m) {
+            if(auto ptr = m.find(queue->get_agent().get_rocp_agent()->id); ptr != m.end())
+            {
+                ret = ptr->second.get();
+                return true;
+            }
+            return false;
+        },
+        [&](auto& m) {
+            ret = m.emplace(queue->get_agent().get_rocp_agent()->id,
+                            std::make_shared<common::Synchronized<hsa::profiler_serializer>>())
+                      .first->second.get();
+            if(_serialized_enabled.load() == true)
+            {
+                ret->wlock([&](auto& serializer) { serializer.enable({}); });
+            }
+            return true;
+        });
+    return *ret;
+}
+
+namespace
+{
+std::unordered_map<rocprofiler_agent_id_t, hsa_barrier::queue_map_ptr_t>
+per_dev_map(const QueueController::queue_map_t& _queues_v)
+{
+    std::unordered_map<rocprofiler_agent_id_t, hsa_barrier::queue_map_ptr_t> dmap;
+    for(const auto& [k, v] : _queues_v)
+    {
+        dmap[v->get_agent().get_rocp_agent()->id][k] = v.get();
+    }
+    return dmap;
+}
+};  // namespace
+
 void
 QueueController::disable_serialization()
 {
-    _queues.rlock([](const queue_map_t& _queues_v) {
-        if(get_queue_controller())
-            get_queue_controller()->serializer().wlock(
-                [&](auto& serializer) { serializer.disable(_queues_v); });
+    _queues.rlock([&](const queue_map_t& _queues_v) {
+        _serialized_enabled.store(false);
+        auto pd_map = per_dev_map(_queues_v);
+        _profiler_serializer.wlock([&](auto& m) {
+            for(auto& [k, v] : m)
+            {
+                if(auto it = pd_map.find(k); it != pd_map.end())
+                {
+                    v->wlock([&](auto& serializer) { serializer.disable(it->second); });
+                }
+                else
+                {
+                    v->wlock([&](auto& serializer) { serializer.disable({}); });
+                }
+            }
+        });
     });
 }
 
 void
 QueueController::enable_serialization()
 {
-    _queues.rlock([](const queue_map_t& _queues_v) {
-        if(get_queue_controller())
-            get_queue_controller()->serializer().wlock(
-                [&](auto& serializer) { serializer.enable(_queues_v); });
+    _queues.rlock([&](const queue_map_t& _queues_v) {
+        _serialized_enabled.store(true);
+        auto pd_map = per_dev_map(_queues_v);
+        _profiler_serializer.wlock([&](auto& m) {
+            for(auto& [k, v] : m)
+            {
+                if(auto it = pd_map.find(k); it != pd_map.end())
+                {
+                    v->wlock([&](auto& serializer) { serializer.enable(it->second); });
+                }
+                else
+                {
+                    v->wlock([&](auto& serializer) { serializer.enable({}); });
+                }
+            }
+        });
     });
 }
 

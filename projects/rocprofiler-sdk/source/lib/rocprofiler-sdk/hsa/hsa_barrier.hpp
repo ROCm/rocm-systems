@@ -46,12 +46,11 @@ class Queue;
 class hsa_barrier
 {
 public:
-    using queue_map_t = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
-
+    using queue_map_ptr_t = std::unordered_map<hsa_queue_t*, Queue*>;
     hsa_barrier(std::function<void()>&& finished, CoreApiTable core_api);
     ~hsa_barrier();
 
-    void set_barrier(const queue_map_t& q);
+    void set_barrier(const queue_map_ptr_t& q);
 
     std::optional<rocprofiler_packet> enqueue_packet(const Queue* queue);
     bool                              register_completion(const Queue* queue);

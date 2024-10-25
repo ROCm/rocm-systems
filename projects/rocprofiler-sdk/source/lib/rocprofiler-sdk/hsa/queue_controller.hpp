@@ -23,6 +23,7 @@
 #pragma once
 
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/hash.hpp>
 
 #include "lib/rocprofiler-sdk/hsa/profile_serializer.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
@@ -83,7 +84,7 @@ public:
 
     void iterate_callbacks(const callback_iterator_cb_t&) const;
 
-    common::Synchronized<hsa::profiler_serializer>& serializer() { return _profiler_serializer; }
+    common::Synchronized<hsa::profiler_serializer>& serializer(const Queue*);
 
     /**
      * Disable serialization for QueueController, has no effect if counter collection
@@ -107,12 +108,16 @@ private:
     using client_id_map_t  = std::unordered_map<ClientID, agent_callback_tuple_t>;
     using resource_alloc_t = void(const AgentCache&, const CoreApiTable&, const AmdExtTable&);
 
-    CoreApiTable                                   _core_table       = {};
-    AmdExtTable                                    _ext_table        = {};
-    common::Synchronized<queue_map_t>              _queues           = {};
-    common::Synchronized<client_id_map_t>          _callback_cache   = {};
-    agent_cache_map_t                              _supported_agents = {};
-    common::Synchronized<hsa::profiler_serializer> _profiler_serializer;
+    CoreApiTable                          _core_table         = {};
+    AmdExtTable                           _ext_table          = {};
+    common::Synchronized<queue_map_t>     _queues             = {};
+    common::Synchronized<client_id_map_t> _callback_cache     = {};
+    agent_cache_map_t                     _supported_agents   = {};
+    std::atomic<bool>                     _serialized_enabled = {false};
+    common::Synchronized<
+        std::unordered_map<rocprofiler_agent_id_t,
+                           std::shared_ptr<common::Synchronized<hsa::profiler_serializer>>>>
+        _profiler_serializer;
 };
 
 QueueController*

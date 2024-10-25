@@ -334,10 +334,12 @@ DispatchThreadTracer::pre_kernel_call(const hsa::Queue&              queue,
     // and maybe adds barrier packets if the state is transitioning from serialized <->
     // unserialized
     auto maybe_add_serialization = [&](auto& gen_pkt) {
-        CHECK_NOTNULL(hsa::get_queue_controller())->serializer().rlock([&](const auto& serializer) {
-            for(auto& s_pkt : serializer.kernel_dispatch(queue))
-                gen_pkt->before_krn_pkt.push_back(s_pkt.ext_amd_aql_pm4);
-        });
+        CHECK_NOTNULL(hsa::get_queue_controller())
+            ->serializer(&queue)
+            .rlock([&](const auto& serializer) {
+                for(auto& s_pkt : serializer.kernel_dispatch(queue))
+                    gen_pkt->before_krn_pkt.push_back(s_pkt.ext_amd_aql_pm4);
+            });
     };
 
     auto control_flags = params.dispatch_cb_fn(queue.get_id(),
@@ -381,8 +383,9 @@ public:
         auto* controller = hsa::get_queue_controller();
         if(!controller) return;
 
-        controller->serializer().wlock(
-            [&](auto& serializer) { serializer.kernel_completion_signal(session.queue); });
+        controller->serializer(&session.queue).wlock([&](auto& serializer) {
+            serializer.kernel_completion_signal(session.queue);
+        });
     }
     const hsa::Queue::queue_info_session_t& session;
 };

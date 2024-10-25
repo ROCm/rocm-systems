@@ -68,7 +68,6 @@ public:
         std::unique_ptr<hsa_barrier> barrier;
     };
 
-    using queue_map_t = std::unordered_map<hsa_queue_t*, std::unique_ptr<Queue>>;
     void kernel_completion_signal(const Queue&);
     // Signal a kernel dispatch is taking place, generates packets needed to be
     // inserted to support kernel dispatch
@@ -76,9 +75,9 @@ public:
 
     void queue_ready(hsa_queue_t* hsa_queue, const Queue& queue);
     // Enable the serializer
-    void enable(const queue_map_t& queues);
+    void enable(const hsa_barrier::queue_map_ptr_t& queues);
     // Disable the serializer
-    void disable(const queue_map_t& queues);
+    void disable(const hsa_barrier::queue_map_ptr_t& queues);
 
     void destroy_queue(hsa_queue_t* id, const Queue& queue);
 

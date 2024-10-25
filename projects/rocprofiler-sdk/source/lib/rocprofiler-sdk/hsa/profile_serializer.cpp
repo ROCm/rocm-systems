@@ -36,7 +36,7 @@ profiler_serializer_ready_signal_handler(hsa_signal_value_t /* signal_value */, 
     auto*       hsa_queue = static_cast<hsa_queue_t*>(data);
     const auto* queue     = CHECK_NOTNULL(get_queue_controller())->get_queue(*hsa_queue);
     CHECK(queue);
-    CHECK_NOTNULL(get_queue_controller())->serializer().wlock([&](auto& serializer) {
+    CHECK_NOTNULL(get_queue_controller())->serializer(queue).wlock([&](auto& serializer) {
         serializer.queue_ready(hsa_queue, *queue);
     });
     return true;
@@ -242,7 +242,7 @@ profiler_serializer::destroy_queue(hsa_queue_t* id, const Queue& queue)
 
 // Enable the serializer
 void
-profiler_serializer::enable(const queue_map_t& queues)
+profiler_serializer::enable(const hsa_barrier::queue_map_ptr_t& queues)
 {
     if(_serializer_status == Status::ENABLED) return;
 
@@ -257,14 +257,14 @@ profiler_serializer::enable(const queue_map_t& queues)
                           std::make_unique<hsa_barrier>(
                               [] {}, CHECK_NOTNULL(get_queue_controller())->get_core_table()));
     _serializer_status = Status::ENABLED;
-    _barrier.back().barrier->set_barrier(queues);
 
+    _barrier.back().barrier->set_barrier(queues);
     ROCP_INFO << "Profiler serialization enabled";
 }
 
 // Disable the serializer
 void
-profiler_serializer::disable(const queue_map_t& queues)
+profiler_serializer::disable(const hsa_barrier::queue_map_ptr_t& queues)
 {
     if(_serializer_status == Status::DISABLED) return;
 
@@ -279,8 +279,8 @@ profiler_serializer::disable(const queue_map_t& queues)
                           std::make_unique<hsa_barrier>(
                               [] {}, CHECK_NOTNULL(get_queue_controller())->get_core_table()));
     _serializer_status = Status::DISABLED;
-    _barrier.back().barrier->set_barrier(queues);
 
+    _barrier.back().barrier->set_barrier(queues);
     ROCP_INFO << "Profiler serialization disabled";
 }
 
