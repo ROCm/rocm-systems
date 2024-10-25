@@ -23,15 +23,60 @@ THE SOFTWARE.
 #define RDC_MODULES_RDC_RVS_RVSBASE_H_
 
 #include <cstddef>
+#include <cstdio>
+#include <string>
 
+#include "rdc/rdc.h"
 #include "rvs/rvs.h"
 
 namespace amd {
 namespace rdc {
 
-void session_callback(rvs_session_id_t session_id, const rvs_results_t* results);
+class RdcRVSBase {
+ public:
+  RdcRVSBase() { s_instance = this; };
+  ~RdcRVSBase() {
+    if (s_instance == this) {
+      s_instance = nullptr;
+    }
+  };
 
-rvs_status_t run_rvs_app(const char* config, size_t config_size);
+  // only one instance allowed
+  RdcRVSBase(const RdcRVSBase&) = delete;
+  RdcRVSBase& operator=(const RdcRVSBase&) = delete;
+
+  // no moving allowed
+  RdcRVSBase(RdcRVSBase&&) = delete;
+  RdcRVSBase& operator=(RdcRVSBase&&) = delete;
+
+  rvs_status_t run_rvs_app(const char* config, size_t config_size, cookie_t* cookie);
+
+ private:
+  static RdcRVSBase* s_instance;
+  volatile rvs_session_state_t _state = RVS_SESSION_STATE_IDLE;
+  cookie_t* _cookie = nullptr;
+  rvs_session_callback _rvs_callback = nullptr;
+
+  // Static callback function that the C API will call
+  static void static_callback(rvs_session_id_t session_id, const rvs_results_t* results) {
+    // Forward the call to the current instance if it exists
+    if (s_instance) {
+      s_instance->session_callback(session_id, results);
+    }
+  }
+  void session_callback(rvs_session_id_t session_id, const rvs_results_t* results) {
+    _state = results->state;
+    // std::string output = "\n";
+    // output += "session id -> " + std::to_string(session_id) + "\n";
+    // output += "  state  -> " + std::to_string(results->state) + "\n";
+    // output += "  status -> " + std::to_string(results->status) + "\n";
+    // output += "  output -> " + std::string(results->output_log);
+    std::string output = std::string(results->output_log);
+    if (_cookie != nullptr && _cookie->callback != nullptr && _cookie->writer != nullptr) {
+      _cookie->callback(_cookie->writer, output.data());
+    }
+  }
+};
 }  // namespace rdc
 }  // namespace amd
 

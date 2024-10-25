@@ -27,22 +27,12 @@ THE SOFTWARE.
 #include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rvs/RvsBase.h"
 
-// TODO: Replace with client-side feedback channel
-#define RVS_LOG() RDC_LOG(RDC_DEBUG, "!HELLO_FROM_RVS! " << __FILE__ << ":" << __LINE__)
+rdc_status_t rdc_diag_init(uint64_t) { return RDC_ST_OK; }
 
-rdc_status_t rdc_diag_init(uint64_t) {
-  RVS_LOG();
-  return RDC_ST_OK;
-}
-
-rdc_status_t rdc_diag_destroy() {
-  RVS_LOG();
-  return RDC_ST_OK;
-}
+rdc_status_t rdc_diag_destroy() { return RDC_ST_OK; }
 
 rdc_status_t rdc_diag_test_cases_query(rdc_diag_test_cases_t test_cases[MAX_TEST_CASES],
                                        uint32_t* test_case_count) {
-  RVS_LOG();
   if (test_case_count == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -59,7 +49,6 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
                                     const char* config, size_t config_size,
                                     rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
   rvs_status_t rvs_status = RVS_STATUS_SUCCESS;
-  RVS_LOG();
   if (result == nullptr || gpu_count == 0) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -68,16 +57,22 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
     return RDC_ST_BAD_PARAMETER;
   }
 
+  amd::rdc::RdcRVSBase rvs_base;
+
   // init the return data
   *result = {};
   result->test_case = test_case;
   result->status = RDC_DIAG_RESULT_PASS;
   result->per_gpu_result_count = 0;
 
+  if (cookie != nullptr && cookie->callback != nullptr && cookie->writer != nullptr) {
+    std::string str = "RVS test";
+    cookie->callback(cookie->writer, str.data());
+  }
   switch (test_case) {
     case RDC_DIAG_RVS_TEST:
-      strncpy_with_null(result->info, "Finished running RDC_DIAG_RVS_TEST!", MAX_DIAG_MSG_LENGTH);
-      rvs_status = amd::rdc::run_rvs_app(config, config_size);
+      strncpy_with_null(result->info, "Finished running RDC_DIAG_RVS_TEST", MAX_DIAG_MSG_LENGTH);
+      rvs_status = rvs_base.run_rvs_app(config, config_size, cookie);
       break;
     default:
       result->status = RDC_DIAG_RESULT_SKIP;
