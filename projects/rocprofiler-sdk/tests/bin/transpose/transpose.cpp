@@ -20,26 +20,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <hip/hip_runtime.h>
-#include <sstream>
-
 #if defined(USE_ROCTRACER_ROCTX)
 #    include <roctracer/roctx.h>
 #else
 #    include <rocprofiler-sdk-roctx/roctx.h>
 #endif
 
-#include <chrono>
-#include <cstdio>
-#include <cstdlib>
-#include <iostream>
-#include <mutex>
-#include <random>
-#include <stdexcept>
+#include <hip/hip_runtime.h>
 
 #if defined(USE_MPI)
 #    include <mpi.h>
 #endif
+
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <iomanip>
+#include <iostream>
+#include <mutex>
+#include <random>
+#include <sstream>
+#include <stdexcept>
 
 #define HIP_API_CALL(CALL)                                                                         \
     {                                                                                              \
@@ -229,8 +230,27 @@ run(int rank, int tid, int devid, int argc, char** argv)
     int* in  = nullptr;
     int* out = nullptr;
 
-    HIP_API_CALL(hipMallocAsync(&in, size, stream));
-    HIP_API_CALL(hipMallocAsync(&out, size, stream));
+    // lock during malloc to get more accurate memory info
+    {
+        _lk.lock();
+        constexpr auto MiB           = (1024UL * 1024UL);
+        size_t         free_gpu_mem  = 0;
+        size_t         total_gpu_mem = 0;
+
+        HIP_API_CALL(hipMemGetInfo(&free_gpu_mem, &total_gpu_mem));
+        free_gpu_mem /= MiB;
+        total_gpu_mem /= MiB;
+
+        std::cout << "[transpose][" << rank << "][" << tid
+                  << "] Available GPU memory (MiB): " << std::setw(6) << free_gpu_mem << " / "
+                  << std::setw(6) << total_gpu_mem << std::endl;
+
+        HIP_API_CALL(hipMallocAsync(&in, size, stream));
+        HIP_API_CALL(hipMallocAsync(&out, size, stream));
+
+        _lk.unlock();
+    }
+
     HIP_API_CALL(hipMemsetAsync(in, 0, size, stream));
     HIP_API_CALL(hipMemsetAsync(out, 0, size, stream));
     HIP_API_CALL(hipMemcpyAsync(in, inp_matrix, size, hipMemcpyHostToDevice, stream));

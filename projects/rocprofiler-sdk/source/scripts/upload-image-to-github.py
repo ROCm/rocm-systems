@@ -122,12 +122,16 @@ if __name__ == "__main__":
                 check=True,
             )
 
+        _branch = f"images-{args.name}"
+        _ref_branch = f"refs/{_branch}/image-ref"
+
         run(["pwd"])
-        run([git_cmd, "switch", "--orphan", "images"], check=True)
+        run([git_cmd, "switch", "--orphan", _branch], check=True)
         run([git_cmd, "commit", "--allow-empty", "-m", "Empty commit"], check=True)
-        run([git_cmd, "fetch", "origin", "refs/images/image-ref"], check=True)
-        run([git_cmd, "pull", "--rebase", "origin", "refs/images/image-ref"], check=True)
-        run([git_cmd, "reset", "--hard", "HEAD^"], check=True)
+        run([git_cmd, "push", "origin", f"HEAD:{_ref_branch}"], check=False)
+        run([git_cmd, "fetch", "origin", _ref_branch], check=True)
+        run([git_cmd, "pull", "--rebase", "origin", _ref_branch], check=True)
+        run([git_cmd, "reset", "--hard", "HEAD^"], check=False)
 
         if not os.path.exists(args.name):
             os.makedirs(args.name)
@@ -142,11 +146,8 @@ if __name__ == "__main__":
 
         run([git_cmd, "add", args.name])
         run([git_cmd, "status"])
-        run([git_cmd, "commit", "-m", "code coverage files"])
-        run(
-            [git_cmd, "push", "--force", "origin", "HEAD:refs/images/image-ref"],
-            check=True,
-        )
+        run([git_cmd, "commit", "-m", f"{args.name} code coverage files"])
+        run([git_cmd, "push", "--force", "origin", f"HEAD:{_ref_branch}"], check=True)
 
         log = run([git_cmd, "log", "-n", "1", "--format=%H"], capture_output=True)
         hash = log.stdout.decode("utf-8").strip()

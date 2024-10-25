@@ -421,7 +421,7 @@ jobs:
         ls -la
 
         for i in "all" "tests" "samples"; do
-            wkhtmltoimage --enable-local-file-access --quality 85 .codecov/${i}.html .codecov/${i}.png
+            wkhtmltoimage --enable-local-file-access --quality 70 .codecov/${i}.html .codecov/${i}.png
         done
         ls -la .codecov
         which -a git

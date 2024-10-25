@@ -235,15 +235,15 @@ def test_summary_display_data(json_data, summary_data):
     hip_and_marker = get_df("HIP_API + MARKER_API") if num_summary_grps > 1 else None
     total = get_df("SUMMARY")
 
-    expected_hip_and_marker_dims = [20, 9] if hip_and_marker is not None else [0, 0]
+    expected_hip_and_marker_dims = [21, 9] if hip_and_marker is not None else [0, 0]
 
     assert get_dims(marker) == [7, 9], f"{marker}"
     assert get_dims(memcpy) == [2, 9], f"{memcpy}"
     assert get_dims(dispatch) == [3, 9], f"{dispatch}"
     assert get_dims(dispatch_and_copy) == [5, 9], f"{dispatch_and_copy}"
-    assert get_dims(hip) == [13, 9], f"{hip}"
+    assert get_dims(hip) == [14, 9], f"{hip}"
     assert get_dims(hip_and_marker) == expected_hip_and_marker_dims, f"{hip_and_marker}"
-    assert get_dims(total) == [22, 9], f"{total}"
+    assert get_dims(total) == [23, 9], f"{total}"
 
 
 def test_perfetto_data(pftrace_data, json_data):
