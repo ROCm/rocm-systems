@@ -11,8 +11,9 @@ add_executable(buffering-test)
 target_sources(buffering-test PRIVATE ${buffering_sources})
 target_link_libraries(
     buffering-test
-    PRIVATE rocprofiler-sdk::rocprofiler-headers
-            rocprofiler-sdk::rocprofiler-common-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-common-library GTest::gtest
+            GTest::gtest_main)
 
 gtest_add_tests(
     TARGET buffering-test

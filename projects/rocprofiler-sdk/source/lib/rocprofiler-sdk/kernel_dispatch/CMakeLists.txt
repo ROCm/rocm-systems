@@ -5,5 +5,5 @@ set(ROCPROFILER_LIB_KERNEL_DISPATCH_HEADERS kernel_dispatch.hpp profiling_time.h
                                             tracing.hpp)
 
 target_sources(
-    rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_KERNEL_DISPATCH_SOURCES}
-                                       ${ROCPROFILER_LIB_KERNEL_DISPATCH_HEADERS})
+    rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_KERNEL_DISPATCH_SOURCES}
+                                           ${ROCPROFILER_LIB_KERNEL_DISPATCH_HEADERS})

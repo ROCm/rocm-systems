@@ -10,77 +10,83 @@ include(rocprofiler_utilities)
 # interfaces for build flags
 #
 rocprofiler_add_interface_library(
-    rocprofiler-headers
+    rocprofiler-sdk-headers
     "Provides minimal set of include flags to compile with rocprofiler")
 rocprofiler_add_interface_library(
-    rocprofiler-build-flags "Provides generalized build flags for rocprofiler" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-threading "Enables multithreading support"
+    rocprofiler-sdk-build-flags "Provides generalized build flags for rocprofiler"
+    INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-threading
+                                  "Enables multithreading support" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-perfetto "Enables Perfetto support"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-perfetto "Enables Perfetto support"
+rocprofiler_add_interface_library(rocprofiler-sdk-otf2 "Enables OTF2 support" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-cereal "Enables Cereal support"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-otf2 "Enables OTF2 support" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-cereal "Enables Cereal support" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-compile-definitions "Compile definitions"
-                                  INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-static-libgcc
+rocprofiler_add_interface_library(rocprofiler-sdk-compile-definitions
+                                  "Compile definitions" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-static-libgcc
                                   "Link to static version of libgcc" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-static-libstdcxx
+rocprofiler_add_interface_library(rocprofiler-sdk-static-libstdcxx
                                   "Link to static version of libstdc++" INTERNAL)
 rocprofiler_add_interface_library(
-    rocprofiler-developer-flags "Compiler flags for developers (more warnings, etc.)"
+    rocprofiler-sdk-developer-flags "Compiler flags for developers (more warnings, etc.)"
     INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-debug-flags
+rocprofiler_add_interface_library(rocprofiler-sdk-debug-flags
                                   "Compiler flags for more debug info" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-release-flags
+rocprofiler_add_interface_library(rocprofiler-sdk-release-flags
                                   "Compiler flags for more debug info" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-stack-protector
+rocprofiler_add_interface_library(rocprofiler-sdk-stack-protector
                                   "Adds stack-protector compiler flags" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-memcheck INTERFACE INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-memcheck INTERFACE INTERNAL)
 
 #
 # interfaces for libraries (general)
 #
-rocprofiler_add_interface_library(rocprofiler-dl
+rocprofiler_add_interface_library(rocprofiler-sdk-dl
                                   "Build flags for dynamic linking library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-rt "Build flags for runtime library"
+rocprofiler_add_interface_library(rocprofiler-sdk-rt "Build flags for runtime library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-atomic "atomic library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-gtest "Google Test library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-glog "Google Log library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-fmt "C++ format string library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-cxx-filesystem "C++ filesystem library"
+rocprofiler_add_interface_library(rocprofiler-sdk-atomic "atomic library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-gtest "Google Test library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-glog "Google Log library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-fmt "C++ format string library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-ptl "Parallel Tasking Library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-elf "ElfUtils elf library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-dw "ElfUtils dw library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-elfio "ELFIO header-only C++ library"
+rocprofiler_add_interface_library(rocprofiler-sdk-cxx-filesystem "C++ filesystem library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-yaml-cpp "YAML CPP Parser" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-ptl "Parallel Tasking Library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-elf "ElfUtils elf library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-dw "ElfUtils dw library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-elfio "ELFIO header-only C++ library"
+                                  INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-yaml-cpp "YAML CPP Parser" INTERNAL)
 
 #
 # interface for libraries (ROCm-specific)
 #
-rocprofiler_add_interface_library(rocprofiler-hip "HIP library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-hsa-runtime "HSA runtime library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-amd-comgr "AMD comgr library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-hsa-aql "AQL library" INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-hsakmt "HSAKMT library for AMD KFD support"
+rocprofiler_add_interface_library(rocprofiler-sdk-hip "HIP library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-hsa-runtime "HSA runtime library"
                                   INTERNAL)
-rocprofiler_add_interface_library(rocprofiler-drm "drm (amdgpu) library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-amd-comgr "AMD comgr library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-hsa-aql "AQL library" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-hsakmt
+                                  "HSAKMT library for AMD KFD support" INTERNAL)
+rocprofiler_add_interface_library(rocprofiler-sdk-drm "drm (amdgpu) library" INTERNAL)
 
 #
 # "nolink" interface targets emulate another interface target but do not link to the
-# library. E.g. rocprofiler-hip-nolink has the include directories, compile definitions,
-# and compile options of rocprofiler-hip but does not link to the HIP runtime library
+# library. E.g. rocprofiler-sdk-hip-nolink has the include directories, compile
+# definitions, and compile options of rocprofiler-sdk-hip but does not link to the HIP
+# runtime library
 #
 
 rocprofiler_add_interface_library(
-    rocprofiler-hip-nolink "rocprofiler-hip without linking to HIP library" IMPORTED)
-rocprofiler_add_interface_library(
-    rocprofiler-hsa-runtime-nolink
-    "rocprofiler-hsa-runtime without linking to HSA library" IMPORTED)
-rocprofiler_add_interface_library(
-    rocprofiler-hsakmt-nolink "rocprofiler-hsakmt without linking to HSAKMT library"
+    rocprofiler-sdk-hip-nolink "rocprofiler-sdk-hip without linking to HIP library"
     IMPORTED)
-rocprofiler_add_interface_library(rocprofiler-rccl-nolink
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-hsa-runtime-nolink
+    "rocprofiler-sdk-hsa-runtime without linking to HSA library" IMPORTED)
+rocprofiler_add_interface_library(
+    rocprofiler-sdk-hsakmt-nolink
+    "rocprofiler-sdk-hsakmt without linking to HSAKMT library" IMPORTED)
+rocprofiler_add_interface_library(rocprofiler-sdk-rccl-nolink
                                   "RCCL headers without linking to RCCL library" IMPORTED)

@@ -41,14 +41,14 @@ target_sources(rocprofiler-sdk-tool PRIVATE ${TOOL_SOURCES} ${TOOL_HEADERS})
 
 target_link_libraries(
     rocprofiler-sdk-tool
-    PRIVATE rocprofiler-sdk::rocprofiler-shared-library
-            rocprofiler-sdk::rocprofiler-headers
-            rocprofiler-sdk::rocprofiler-build-flags
-            rocprofiler-sdk::rocprofiler-memcheck
-            rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-cereal
-            rocprofiler-sdk::rocprofiler-perfetto
-            rocprofiler-sdk::rocprofiler-otf2)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::rocprofiler-sdk-headers
+            rocprofiler-sdk::rocprofiler-sdk-build-flags
+            rocprofiler-sdk::rocprofiler-sdk-memcheck
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-cereal
+            rocprofiler-sdk::rocprofiler-sdk-perfetto
+            rocprofiler-sdk::rocprofiler-sdk-otf2)
 
 set_target_properties(
     rocprofiler-sdk-tool

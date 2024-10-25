@@ -8,11 +8,11 @@ target_sources(codeobj-library-test PRIVATE ${CODEOBJ_LIB_TEST_SOURCES})
 
 target_link_libraries(
     codeobj-library-test
-    PRIVATE rocprofiler-sdk::rocprofiler-static-library
-            rocprofiler-sdk::rocprofiler-glog
-            rocprofiler-sdk::rocprofiler-hsa-runtime
-            rocprofiler-sdk::rocprofiler-hip
-            rocprofiler-sdk::rocprofiler-common-library
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-glog
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-hip
+            rocprofiler-sdk::rocprofiler-sdk-common-library
             GTest::gtest
             GTest::gtest_main
             rocprofiler-sdk::rocprofiler-sdk-codeobj)

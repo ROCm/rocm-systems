@@ -50,9 +50,10 @@ target_sources(
 
 target_link_libraries(
     counter_test_constants
-    PRIVATE rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-static-library rocprofiler-sdk::rocprofiler-hip
-            rocprofiler-sdk::rocprofiler-hsa-runtime)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-hip
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime)
 
 set(ROCPROFILER_LIB_COUNTER_TEST_SOURCES
     metrics_test.cpp evaluate_ast_test.cpp dimension.cpp init_order.cpp core.cpp
@@ -69,10 +70,10 @@ add_dependencies(counter-test agent_hasco_targets)
 target_link_libraries(
     counter-test
     PRIVATE rocprofiler-sdk::counter-test-constants
-            rocprofiler-sdk::rocprofiler-hsa-runtime
-            rocprofiler-sdk::rocprofiler-hip
-            rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-static-library
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-hip
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library
             GTest::gtest
             GTest::gtest_main)
 

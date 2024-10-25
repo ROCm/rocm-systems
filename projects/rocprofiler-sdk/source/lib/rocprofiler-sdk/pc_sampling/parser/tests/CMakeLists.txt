@@ -18,8 +18,9 @@ target_include_directories(pcs_gfx9_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
 target_link_libraries(
     pcs_gfx9_test
-    PRIVATE rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
 
 gtest_add_tests(
     TARGET pcs_gfx9_test
@@ -36,8 +37,9 @@ target_include_directories(pcs_id_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
 target_link_libraries(
     pcs_id_test
-    PRIVATE rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
 
 gtest_add_tests(
     TARGET pcs_id_test
@@ -56,8 +58,9 @@ target_include_directories(pcs_bench_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
 target_link_libraries(
     pcs_bench_test
-    PRIVATE rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
 
 add_executable(pcs_thread_test)
 target_compile_options(pcs_thread_test PRIVATE "-Ofast")
@@ -67,8 +70,9 @@ target_include_directories(pcs_thread_test PRIVATE ${PCTEST_INCLUDE_DIR})
 
 target_link_libraries(
     pcs_thread_test
-    PRIVATE rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-static-library GTest::gtest GTest::gtest_main)
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-static-library GTest::gtest
+            GTest::gtest_main)
 
 gtest_add_tests(
     TARGET pcs_thread_test

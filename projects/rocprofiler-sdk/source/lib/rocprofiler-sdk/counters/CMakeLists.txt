@@ -4,8 +4,8 @@ set(ROCPROFILER_LIB_COUNTERS_SOURCES
 set(ROCPROFILER_LIB_COUNTERS_HEADERS
     metrics.hpp dimensions.hpp evaluate_ast.hpp core.hpp id_decode.hpp
     dispatch_handlers.hpp controller.hpp device_counting.hpp)
-target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
-                                                  ${ROCPROFILER_LIB_COUNTERS_HEADERS})
+target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_COUNTERS_SOURCES}
+                                                      ${ROCPROFILER_LIB_COUNTERS_HEADERS})
 
 add_subdirectory(xml)
 add_subdirectory(parser)

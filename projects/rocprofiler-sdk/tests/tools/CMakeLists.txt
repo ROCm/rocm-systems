@@ -15,7 +15,7 @@ add_library(rocprofiler-sdk-json-tool SHARED)
 target_sources(rocprofiler-sdk-json-tool PRIVATE json-tool.cpp)
 target_link_libraries(
     rocprofiler-sdk-json-tool
-    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::rocprofiler-cereal
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk rocprofiler-sdk::rocprofiler-sdk-cereal
             rocprofiler-sdk::tests-build-flags rocprofiler-sdk::tests-common-library
             rocprofiler-sdk::tests-perfetto)
 set_target_properties(

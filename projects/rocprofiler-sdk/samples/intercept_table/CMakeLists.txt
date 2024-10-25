@@ -25,7 +25,10 @@ foreach(_TYPE DEBUG MINSIZEREL RELEASE RELWITHDEBINFO)
     endif()
 endforeach()
 
-find_package(rocprofiler-sdk REQUIRED)
+#
+# below is equivalent to: ``find_package(rocprofiler-sdk REQUIRED)``. Use COMPONENTS below
+# to demonstrate/test support for COMPONENTS
+find_package(rocprofiler-sdk REQUIRED COMPONENTS headers shared-library)
 
 add_library(intercept-table-client SHARED)
 target_sources(intercept-table-client PRIVATE client.cpp client.hpp)

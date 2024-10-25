@@ -13,8 +13,8 @@ set(ROCPROFILER_PC_SAMPLING_SOURCES hsa_adapter.cpp utils.cpp service.cpp cid_ma
 set(ROCPROFILER_PC_SAMPLING_HEADERS hsa_adapter.hpp utils.hpp service.hpp types.hpp
                                     cid_manager.hpp code_object.hpp)
 
-target_sources(rocprofiler-object-library PRIVATE ${ROCPROFILER_PC_SAMPLING_SOURCES}
-                                                  ${ROCPROFILER_PC_SAMPLING_HEADERS})
+target_sources(rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_PC_SAMPLING_SOURCES}
+                                                      ${ROCPROFILER_PC_SAMPLING_HEADERS})
 
 add_subdirectory(ioctl)
 

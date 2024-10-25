@@ -15,10 +15,10 @@ set_property(CACHE ROCPROFILER_MEMCHECK PROPERTY STRINGS "${ROCPROFILER_MEMCHECK
 
 function(rocprofiler_add_memcheck_flags _TYPE _FLAG _LIB_BASE)
     target_compile_options(
-        rocprofiler-memcheck
+        rocprofiler-sdk-memcheck
         INTERFACE $<BUILD_INTERFACE:-g3 -Og -fno-omit-frame-pointer
                   -fno-optimize-sibling-calls -fno-inline-functions -fsanitize=${_FLAG}>)
-    target_link_options(rocprofiler-memcheck INTERFACE
+    target_link_options(rocprofiler-sdk-memcheck INTERFACE
                         $<BUILD_INTERFACE:-fsanitize=${_FLAG} -Wl,--no-undefined>)
 
     if(NOT EXISTS ${PROJECT_BINARY_DIR}/CMakeFiles/CMakeTmp)
@@ -60,7 +60,7 @@ function(rocprofiler_set_memcheck_env _TYPE _LIB_BASE)
         endforeach()
     endif()
 
-    target_link_libraries(rocprofiler-memcheck INTERFACE ${_LIB_BASE})
+    target_link_libraries(rocprofiler-sdk-memcheck INTERFACE ${_LIB_BASE})
 
     if(${_TYPE}_LIBRARY)
         set(ROCPROFILER_MEMCHECK_PRELOAD_ENV

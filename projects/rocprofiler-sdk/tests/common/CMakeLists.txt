@@ -37,22 +37,23 @@ set(AMDGPU_TARGETS
           FORCE)
 
 # build flags
-add_library(rocprofiler-tests-build-flags INTERFACE)
-add_library(rocprofiler-sdk::tests-build-flags ALIAS rocprofiler-tests-build-flags)
-target_compile_options(rocprofiler-tests-build-flags INTERFACE -W -Wall -Wextra -Wshadow)
-target_compile_features(rocprofiler-tests-build-flags INTERFACE cxx_std_17)
+add_library(rocprofiler-sdk-tests-build-flags INTERFACE)
+add_library(rocprofiler-sdk::tests-build-flags ALIAS rocprofiler-sdk-tests-build-flags)
+target_compile_options(rocprofiler-sdk-tests-build-flags INTERFACE -W -Wall -Wextra
+                                                                   -Wshadow)
+target_compile_features(rocprofiler-sdk-tests-build-flags INTERFACE cxx_std_17)
 
 if(ROCPROFILER_BUILD_CI OR ROCPROFILER_BUILD_WERROR)
-    target_compile_options(rocprofiler-tests-build-flags INTERFACE -Werror)
+    target_compile_options(rocprofiler-sdk-tests-build-flags INTERFACE -Werror)
 endif()
 
 # serialization library
-if(NOT TARGET rocprofiler-sdk::rocprofiler-cereal)
+if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-cereal)
     get_filename_component(ROCPROFILER_SOURCE_DIR "${PROJECT_SOURCE_DIR}/.." REALPATH)
 
-    add_library(rocprofiler-cereal INTERFACE)
-    add_library(rocprofiler-sdk::rocprofiler-cereal ALIAS rocprofiler-cereal)
-    target_compile_definitions(rocprofiler-cereal
+    add_library(rocprofiler-sdk-cereal INTERFACE)
+    add_library(rocprofiler-sdk::rocprofiler-sdk-cereal ALIAS rocprofiler-sdk-cereal)
+    target_compile_definitions(rocprofiler-sdk-cereal
                                INTERFACE $<BUILD_INTERFACE:CEREAL_THREAD_SAFE=1>)
 
     if(EXISTS ${ROCPROFILER_SOURCE_DIR}/external AND COMMAND
@@ -65,7 +66,7 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-cereal)
             REPO_BRANCH "rocprofiler")
 
         target_include_directories(
-            rocprofiler-cereal SYSTEM
+            rocprofiler-sdk-cereal SYSTEM
             INTERFACE $<BUILD_INTERFACE:${ROCPROFILER_SOURCE_DIR}/external/cereal/include>
             )
     else()
@@ -85,12 +86,12 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-cereal)
         endif()
 
         target_include_directories(
-            rocprofiler-cereal SYSTEM
+            rocprofiler-sdk-cereal SYSTEM
             INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/cereal/include>)
     endif()
 endif()
 
-if(NOT TARGET rocprofiler-sdk::rocprofiler-perfetto)
+if(NOT TARGET rocprofiler-sdk::rocprofiler-sdk-perfetto)
     # perfetto
     fetchcontent_declare(
         perfetto
@@ -106,34 +107,35 @@ if(NOT TARGET rocprofiler-sdk::rocprofiler-perfetto)
         fetchcontent_populate(perfetto)
     endif()
 
-    add_library(rocprofiler-tests-perfetto STATIC)
-    add_library(rocprofiler-sdk::tests-perfetto ALIAS rocprofiler-tests-perfetto)
+    add_library(rocprofiler-sdk-tests-perfetto STATIC)
+    add_library(rocprofiler-sdk::tests-perfetto ALIAS rocprofiler-sdk-tests-perfetto)
     target_sources(
-        rocprofiler-tests-perfetto
+        rocprofiler-sdk-tests-perfetto
         PRIVATE ${PROJECT_BINARY_DIR}/external/perfetto/sdk/perfetto.h
                 ${PROJECT_BINARY_DIR}/external/perfetto/sdk/perfetto.cc)
     target_include_directories(
-        rocprofiler-tests-perfetto SYSTEM
+        rocprofiler-sdk-tests-perfetto SYSTEM
         INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/perfetto/sdk>)
-    set_target_properties(rocprofiler-tests-perfetto PROPERTIES POSITION_INDEPENDENT_CODE
-                                                                ON)
+    set_target_properties(rocprofiler-sdk-tests-perfetto
+                          PROPERTIES POSITION_INDEPENDENT_CODE ON)
 else()
-    add_library(rocprofiler-tests-perfetto INTERFACE)
-    add_library(rocprofiler-sdk::tests-perfetto ALIAS rocprofiler-tests-perfetto)
-    target_link_libraries(rocprofiler-tests-perfetto
-                          INTERFACE rocprofiler-sdk::rocprofiler-perfetto)
+    add_library(rocprofiler-sdk-tests-perfetto INTERFACE)
+    add_library(rocprofiler-sdk::tests-perfetto ALIAS rocprofiler-sdk-tests-perfetto)
+    target_link_libraries(rocprofiler-sdk-tests-perfetto
+                          INTERFACE rocprofiler-sdk::rocprofiler-sdk-perfetto)
 endif()
 
 # common utilities
 cmake_path(GET CMAKE_CURRENT_SOURCE_DIR PARENT_PATH COMMON_LIBRARY_INCLUDE_DIR)
 
-add_library(rocprofiler-tests-common-library INTERFACE)
-add_library(rocprofiler-sdk::tests-common-library ALIAS rocprofiler-tests-common-library)
+add_library(rocprofiler-sdk-tests-common-library INTERFACE)
+add_library(rocprofiler-sdk::tests-common-library ALIAS
+            rocprofiler-sdk-tests-common-library)
 target_link_libraries(
-    rocprofiler-tests-common-library INTERFACE rocprofiler-sdk::tests-build-flags
-                                               rocprofiler-sdk::rocprofiler-cereal)
-target_compile_features(rocprofiler-tests-common-library INTERFACE cxx_std_17)
-target_include_directories(rocprofiler-tests-common-library
+    rocprofiler-sdk-tests-common-library
+    INTERFACE rocprofiler-sdk::tests-build-flags rocprofiler-sdk::rocprofiler-sdk-cereal)
+target_compile_features(rocprofiler-sdk-tests-common-library INTERFACE cxx_std_17)
+target_include_directories(rocprofiler-sdk-tests-common-library
                            INTERFACE ${COMMON_LIBRARY_INCLUDE_DIR})
 
 set(EXTERNAL_SUBMODULE_DIR "${PROJECT_SOURCE_DIR}/../external")
@@ -141,10 +143,10 @@ cmake_path(ABSOLUTE_PATH EXTERNAL_SUBMODULE_DIR NORMALIZE)
 
 if(EXISTS ${EXTERNAL_SUBMODULE_DIR}/filesystem/include/ghc/filesystem.hpp)
     target_compile_definitions(
-        rocprofiler-tests-common-library
+        rocprofiler-sdk-tests-common-library
         INTERFACE $<BUILD_INTERFACE:ROCPROFILER_SAMPLES_HAS_GHC_LIB_FILESYSTEM=1>)
     target_include_directories(
-        rocprofiler-tests-common-library SYSTEM
+        rocprofiler-sdk-tests-common-library SYSTEM
         INTERFACE $<BUILD_INTERFACE:${EXTERNAL_SUBMODULE_DIR}/filesystem/include>)
 endif()
 

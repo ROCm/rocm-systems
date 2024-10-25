@@ -14,19 +14,20 @@ include(GoogleTest)
 set(rocprofiler_lib_sources agent.cpp buffer.cpp contexts.cpp hsa.cpp naming.cpp
                             timestamp.cpp version.cpp hsa_barrier.cpp)
 
-add_executable(rocprofiler-lib-tests)
-target_sources(rocprofiler-lib-tests PRIVATE ${rocprofiler_lib_sources} details/agent.cpp)
+add_executable(rocprofiler-sdk-lib-tests)
+target_sources(rocprofiler-sdk-lib-tests PRIVATE ${rocprofiler_lib_sources}
+                                                 details/agent.cpp)
 target_link_libraries(
-    rocprofiler-lib-tests
-    PRIVATE rocprofiler-sdk::rocprofiler-static-library
-            rocprofiler-sdk::rocprofiler-common-library
+    rocprofiler-sdk-lib-tests
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-static-library
+            rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::counter-test-constants
-            rocprofiler-sdk::rocprofiler-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
             GTest::gtest
             GTest::gtest_main)
 
 gtest_add_tests(
-    TARGET rocprofiler-lib-tests
+    TARGET rocprofiler-sdk-lib-tests
     SOURCES ${rocprofiler_lib_sources}
     TEST_LIST lib_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
@@ -43,29 +44,29 @@ set(rocprofiler_shared_lib_sources
     external_correlation.cpp intercept_table.cpp page_migration.cpp registration.cpp
     roctx.cpp status.cpp)
 
-add_executable(rocprofiler-lib-tests-shared)
-target_sources(rocprofiler-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
+add_executable(rocprofiler-sdk-lib-tests-shared)
+target_sources(rocprofiler-sdk-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})
 target_link_libraries(
-    rocprofiler-lib-tests-shared
-    PRIVATE rocprofiler-sdk::rocprofiler-shared-library
-            rocprofiler-sdk::rocprofiler-common-library
-            rocprofiler-sdk::rocprofiler-hsa-runtime
-            rocprofiler-sdk::rocprofiler-drm
+    rocprofiler-sdk-lib-tests-shared
+    PRIVATE rocprofiler-sdk::rocprofiler-sdk-shared-library
+            rocprofiler-sdk::rocprofiler-sdk-common-library
+            rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-drm
             rocprofiler-sdk::rocprofiler-sdk-roctx-shared-library
             GTest::gtest
             GTest::gtest_main)
-set_target_properties(rocprofiler-lib-tests-shared PROPERTIES BUILD_RPATH
-                                                              "\$ORIGIN/../lib")
+set_target_properties(rocprofiler-sdk-lib-tests-shared PROPERTIES BUILD_RPATH
+                                                                  "\$ORIGIN/../lib")
 
 gtest_add_tests(
-    TARGET rocprofiler-lib-tests-shared
+    TARGET rocprofiler-sdk-lib-tests-shared
     SOURCES ${rocprofiler_shared_lib_sources}
     TEST_LIST shared_lib_TESTS
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 
-set(rocprofiler-lib-tests-env
+set(rocprofiler-sdk-lib-tests-env
     "LD_LIBRARY_PATH=${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}:$ENV{LD_LIBRARY_PATH}")
 
 set_tests_properties(
     ${shared_lib_TESTS} PROPERTIES TIMEOUT 120 LABELS "unittests" ENVIRONMENT
-                                   "${rocprofiler-lib-tests-env}")
+                                   "${rocprofiler-sdk-lib-tests-env}")

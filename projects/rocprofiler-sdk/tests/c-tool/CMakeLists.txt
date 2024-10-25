@@ -21,7 +21,7 @@ add_test(NAME test-c-tool-execute COMMAND $<TARGET_FILE:transpose> 1)
 
 set(c-tool-env
     "${PRELOAD_ENV}"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 set_tests_properties(
@@ -44,7 +44,7 @@ add_test(NAME test-c-tool-rocp-tool-lib-execute COMMAND $<TARGET_FILE:transpose>
 set(c-tool-rocp-tool-lib-env
     "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}"
     "ROCP_TOOL_LIBRARIES=$<TARGET_FILE:rocprofiler-sdk-c-tool>"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 set_tests_properties(

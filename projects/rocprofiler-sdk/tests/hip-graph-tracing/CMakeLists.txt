@@ -27,7 +27,7 @@ add_test(NAME test-hip-graph-tracing-execute COMMAND $<TARGET_FILE:hip-graph>)
 set(hip-graph-tracing-env
     "${PRELOAD_ENV}"
     "ROCPROFILER_TOOL_OUTPUT_FILE=hip-graph-tracing-test.json"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     "ROCPROFILER_TOOL_CONTEXTS=HIP_API_CALLBACK,HIP_API_BUFFERED,KERNEL_DISPATCH_CALLBACK,KERNEL_DISPATCH_BUFFERED,CODE_OBJECT"
     )
 

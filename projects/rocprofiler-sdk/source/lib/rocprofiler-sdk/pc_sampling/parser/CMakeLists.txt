@@ -4,8 +4,8 @@ set(ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS
     translation.hpp)
 
 target_sources(
-    rocprofiler-object-library PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_SOURCES}
-                                       ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS})
+    rocprofiler-sdk-object-library PRIVATE ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_SOURCES}
+                                           ${ROCPROFILER_LIB_PC_SAMPLING_PARSER_HEADERS})
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

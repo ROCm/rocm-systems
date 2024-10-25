@@ -22,7 +22,7 @@ add_test(NAME test-async-copy-tracing-execute COMMAND $<TARGET_FILE:transpose>)
 set(async-copy-tracing-env
     "${PRELOAD_ENV}"
     "ROCPROFILER_TOOL_OUTPUT_FILE=async-copy-tracing-test.json"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 set_tests_properties(

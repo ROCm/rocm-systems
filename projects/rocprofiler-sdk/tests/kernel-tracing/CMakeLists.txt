@@ -27,7 +27,7 @@ add_test(NAME test-kernel-tracing-execute COMMAND $<TARGET_FILE:reproducible-run
 set(kernel-tracing-env
     "${PRELOAD_ENV}"
     "ROCPROFILER_TOOL_OUTPUT_FILE=kernel-tracing-test.json"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 set_tests_properties(

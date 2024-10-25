@@ -28,8 +28,8 @@ target_include_directories(
 
 target_link_libraries(
     rocprofiler-sdk-codeobj
-    INTERFACE rocprofiler-sdk::rocprofiler-amd-comgr rocprofiler-sdk::rocprofiler-dw
-              rocprofiler-sdk::rocprofiler-elf)
+    INTERFACE rocprofiler-sdk::rocprofiler-sdk-amd-comgr
+              rocprofiler-sdk::rocprofiler-sdk-dw rocprofiler-sdk::rocprofiler-sdk-elf)
 
 if(ROCPROFILER_BUILD_TESTS)
     add_subdirectory(tests)

@@ -22,7 +22,7 @@ add_test(NAME test-scratch-memory-tracing-execute COMMAND $<TARGET_FILE:scratch-
 set(scratch-memory-tracing-env
     "${PRELOAD_ENV}"
     "ROCPROFILER_TOOL_OUTPUT_FILE=scratch-memory-tracing-test.json"
-    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-shared-library>:$ENV{LD_LIBRARY_PATH}"
+    "LD_LIBRARY_PATH=$<TARGET_FILE_DIR:rocprofiler-sdk::rocprofiler-sdk-shared-library>:$ENV{LD_LIBRARY_PATH}"
     )
 
 set_tests_properties(

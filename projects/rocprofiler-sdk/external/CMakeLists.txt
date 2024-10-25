@@ -24,10 +24,10 @@ if(ROCPROFILER_BUILD_GHC_FS)
         REPO_BRANCH "v1.5.14")
 
     target_compile_definitions(
-        rocprofiler-cxx-filesystem
+        rocprofiler-sdk-cxx-filesystem
         INTERFACE $<BUILD_INTERFACE:ROCPROFILER_HAS_GHC_LIB_FILESYSTEM=1>)
     target_include_directories(
-        rocprofiler-cxx-filesystem SYSTEM
+        rocprofiler-sdk-cxx-filesystem SYSTEM
         INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/filesystem/include>)
 endif()
 
@@ -50,9 +50,9 @@ if(ROCPROFILER_BUILD_TESTS)
             message(FATAL_ERROR "missing GTest::gtest")
         endif()
 
-        target_link_libraries(rocprofiler-gtest INTERFACE GTest::gtest)
+        target_link_libraries(rocprofiler-sdk-gtest INTERFACE GTest::gtest)
         target_include_directories(
-            rocprofiler-gtest SYSTEM
+            rocprofiler-sdk-gtest SYSTEM
             INTERFACE ${CMAKE_CURRENT_LIST_DIR}/googletest/googletest/include)
 
         mark_as_advanced(INSTALL_GTEST)
@@ -60,7 +60,7 @@ if(ROCPROFILER_BUILD_TESTS)
         mark_as_advanced(GTEST_HAS_ABSL)
     else()
         find_package(GTest REQUIRED)
-        target_link_libraries(rocprofiler-gtest INTERFACE GTest::gtest)
+        target_link_libraries(rocprofiler-sdk-gtest INTERFACE GTest::gtest)
     endif()
 endif()
 
@@ -79,14 +79,14 @@ if(ROCPROFILER_BUILD_GLOG)
     set(WITH_UNWIND "none")
     add_subdirectory(glog EXCLUDE_FROM_ALL)
 
-    target_link_libraries(rocprofiler-glog INTERFACE $<BUILD_INTERFACE:glog::glog>)
+    target_link_libraries(rocprofiler-sdk-glog INTERFACE $<BUILD_INTERFACE:glog::glog>)
     target_include_directories(
-        rocprofiler-glog SYSTEM
+        rocprofiler-sdk-glog SYSTEM
         INTERFACE $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/external/glog>
                   $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/glog/src>)
 else()
     find_package(glog REQUIRED)
-    target_link_libraries(rocprofiler-glog INTERFACE glog::glog)
+    target_link_libraries(rocprofiler-sdk-glog INTERFACE glog::glog)
 endif()
 
 if(ROCPROFILER_BUILD_FMT)
@@ -101,13 +101,13 @@ if(ROCPROFILER_BUILD_FMT)
     set(FMT_TEST OFF)
     add_subdirectory(fmt EXCLUDE_FROM_ALL)
 
-    target_link_libraries(rocprofiler-fmt INTERFACE $<BUILD_INTERFACE:fmt::fmt>)
+    target_link_libraries(rocprofiler-sdk-fmt INTERFACE $<BUILD_INTERFACE:fmt::fmt>)
     target_include_directories(
-        rocprofiler-fmt SYSTEM
+        rocprofiler-sdk-fmt SYSTEM
         INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/fmt/include>)
 else()
     find_package(fmt REQUIRED)
-    target_link_libraries(rocprofiler-fmt INTERFACE fmt::fmt)
+    target_link_libraries(rocprofiler-sdk-fmt INTERFACE fmt::fmt)
 endif()
 
 if(NOT TARGET PTL::ptl-static)
@@ -135,10 +135,10 @@ rocprofiler_checkout_git_submodule(
 
 add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
 
-target_link_libraries(rocprofiler-yaml-cpp
+target_link_libraries(rocprofiler-sdk-yaml-cpp
                       INTERFACE $<BUILD_INTERFACE:yaml-cpp::yaml-cpp>)
 target_include_directories(
-    rocprofiler-yaml-cpp
+    rocprofiler-sdk-yaml-cpp
     INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/yaml-cpp/include>)
 
 # checkout submodule if not already checked out or clone repo if no .gitmodules file
@@ -149,10 +149,10 @@ rocprofiler_checkout_git_submodule(
     REPO_URL https://github.com/jrmadsen/cereal.git
     REPO_BRANCH "rocprofiler")
 
-target_compile_definitions(rocprofiler-cereal
+target_compile_definitions(rocprofiler-sdk-cereal
                            INTERFACE $<BUILD_INTERFACE:CEREAL_THREAD_SAFE=1>)
 target_include_directories(
-    rocprofiler-cereal
+    rocprofiler-sdk-cereal
     INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cereal/include>)
 
 # doxygen-awesome
@@ -175,19 +175,20 @@ rocprofiler_checkout_git_submodule(
     REPO_URL https://android.googlesource.com/platform/external/perfetto external/perfetto
     REPO_BRANCH "v44.0")
 
-add_library(rocprofiler-perfetto-static-library STATIC)
+add_library(rocprofiler-sdk-perfetto-static-library STATIC)
 target_sources(
-    rocprofiler-perfetto-static-library
+    rocprofiler-sdk-perfetto-static-library
     PRIVATE ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.h
             ${PROJECT_SOURCE_DIR}/external/perfetto/sdk/perfetto.cc)
 target_include_directories(
-    rocprofiler-perfetto-static-library SYSTEM
+    rocprofiler-sdk-perfetto-static-library SYSTEM
     INTERFACE $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/external/perfetto/sdk>)
 set_target_properties(
-    rocprofiler-perfetto-static-library PROPERTIES POSITION_INDEPENDENT_CODE ON
-                                                   OUTPUT_NAME rocprofiler-sdk-perfetto)
-target_link_libraries(rocprofiler-perfetto
-                      INTERFACE $<BUILD_INTERFACE:rocprofiler-perfetto-static-library>)
+    rocprofiler-sdk-perfetto-static-library
+    PROPERTIES POSITION_INDEPENDENT_CODE ON OUTPUT_NAME rocprofiler-sdk-perfetto)
+target_link_libraries(
+    rocprofiler-sdk-perfetto
+    INTERFACE $<BUILD_INTERFACE:rocprofiler-sdk-perfetto-static-library>)
 
 # ELFIO
 rocprofiler_checkout_git_submodule(
@@ -200,9 +201,10 @@ rocprofiler_checkout_git_submodule(
 set(ELFIO_BUILD_EXAMPLES OFF)
 set(ELFIO_BUILD_TESTS OFF)
 add_subdirectory(elfio EXCLUDE_FROM_ALL)
-if(TARGET rocprofiler-elfio)
+if(TARGET rocprofiler-sdk-elfio)
     get_target_property(ELFIO_INCLUDE_DIR elfio::elfio INTERFACE_INCLUDE_DIRECTORIES)
-    target_include_directories(rocprofiler-elfio SYSTEM INTERFACE ${ELFIO_INCLUDE_DIR})
+    target_include_directories(rocprofiler-sdk-elfio SYSTEM
+                               INTERFACE ${ELFIO_INCLUDE_DIR})
 endif()
 
 # OTF2
