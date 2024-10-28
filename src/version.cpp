@@ -25,6 +25,8 @@
 
 #include "libhsakmt.h"
 
+const char rocr4wslbuildid[] __attribute__((used)) = "ROCR4WSL BUILD ID: " STRING(ROCR4WSL_VERSION);
+
 HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
   CHECK_DXG_OPEN();
 
@@ -33,6 +35,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetVersion(HsaVersionInfo *VersionInfo) {
 
   return HSAKMT_STATUS_SUCCESS;
 }
+
 HSAKMT_STATUS HSAKMTAPI
 hsaKmtGetVersionCapInfo(HsaVersionCapability *VersionCapInfo) {
   CHECK_DXG_OPEN();
