@@ -137,6 +137,7 @@ FLD_DESC_ENT(RDC_FI_PROF_EVAL_MEM_W_BW,         "Written to video memory kb / ms
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_16,         "Number of fp16 OPS / ms",               "FLOPS_16",          false)
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_32,         "Number of fp32 OPS / ms",               "FLOPS_32",          false)
 FLD_DESC_ENT(RDC_FI_PROF_EVAL_FLOPS_64,         "Number of fp64 OPS / ms",               "FLOPS_64",          false)
+FLD_DESC_ENT(RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,  "Percent of Active Pipe VALU",           "VALU_UTILIZATION",  false)
 
 // Events
 FLD_DESC_ENT(RDC_EVNT_XGMI_0_NOP_TX,     "NOPs sent to neighbor 0",                     "XGMI_NOP_0",       false)

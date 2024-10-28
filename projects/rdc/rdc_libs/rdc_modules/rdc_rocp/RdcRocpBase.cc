@@ -258,6 +258,7 @@ RdcRocpBase::RdcRocpBase() {
       {RDC_FI_PROF_EVAL_FLOPS_16, "TOTAL_16_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_32, "TOTAL_32_OPS"},
       {RDC_FI_PROF_EVAL_FLOPS_64, "FP64_ACTIVE"},
+      {RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL, "ValuPipeIssueUtil"},
   };
 
   std::vector<std::string> all_fields;

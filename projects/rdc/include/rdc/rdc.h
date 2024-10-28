@@ -277,6 +277,7 @@ typedef enum {
   RDC_FI_PROF_EVAL_FLOPS_16,
   RDC_FI_PROF_EVAL_FLOPS_32,
   RDC_FI_PROF_EVAL_FLOPS_64,
+  RDC_FI_PROF_VALU_PIPE_ISSUE_UTIL,
 
   /**
    * @brief Raw XGMI counter events
