@@ -580,7 +580,7 @@ Here are the contents of ``counter_collection.csv`` file:
 
 .. csv-table:: Counter collection
    :file: /data/counter_collection.csv
-   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10
+   :widths: 10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10,10
    :header-rows: 1
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
