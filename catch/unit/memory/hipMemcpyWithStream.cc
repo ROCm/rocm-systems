@@ -65,8 +65,6 @@ TEST_CASE("Unit_hipMemcpy_Positive_Synchronization_Behavior") {
   // respect to the host
   SECTION("Host memory to host memory") {
     MemcpyHtoHSyncBehavior(std::bind(hipMemcpy, _1, _2, _3, hipMemcpyHostToHost), true);
-    MemcpyHPinnedtoHPinnedSyncBehavior(
-        std::bind(hipMemcpyAsync, _1, _2, _3, hipMemcpyHostToHost, nullptr), true);
   }
 }
 

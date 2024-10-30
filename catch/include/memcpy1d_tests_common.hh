@@ -298,21 +298,11 @@ template <typename F>
 void MemcpyHtoHSyncBehavior(F memcpy_func, const bool should_sync,
                             const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
-  const auto [src_alloc_type, dst_alloc_type] = GENERATE(
-      std::make_tuple(LA::malloc, LA::hipHostMalloc),
-      std::make_tuple(LA::hipHostMalloc, LA::malloc), std::make_tuple(LA::malloc, LA::malloc));
+  auto src_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
+  auto dst_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
 
   LinearAllocGuard<int> src_alloc(src_alloc_type, kPageSize);
   LinearAllocGuard<int> dst_alloc(dst_alloc_type, kPageSize);
-  MemcpySyncBehaviorCheck(std::bind(memcpy_func, dst_alloc.ptr(), src_alloc.ptr(), kPageSize),
-                          should_sync, kernel_stream);
-}
-
-template <typename F>
-void MemcpyHPinnedtoHPinnedSyncBehavior(F memcpy_func, const bool should_sync,
-                            const hipStream_t kernel_stream = nullptr) {
-  LinearAllocGuard<int> src_alloc(LinearAllocs::hipHostMalloc, kPageSize);
-  LinearAllocGuard<int> dst_alloc(LinearAllocs::hipHostMalloc, kPageSize);
   MemcpySyncBehaviorCheck(std::bind(memcpy_func, dst_alloc.ptr(), src_alloc.ptr(), kPageSize),
                           should_sync, kernel_stream);
 }
