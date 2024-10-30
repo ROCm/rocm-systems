@@ -618,7 +618,6 @@ save(ArchiveT& ar, HSA_CAPABILITY data)
     ROCP_SDK_SAVE_DATA_BITFIELD("SVMAPISupported", ui32.SVMAPISupported);
     ROCP_SDK_SAVE_DATA_BITFIELD("CoherentHostAccess", ui32.CoherentHostAccess);
     ROCP_SDK_SAVE_DATA_BITFIELD("DebugSupportedFirmware", ui32.DebugSupportedFirmware);
-    ROCP_SDK_SAVE_DATA_BITFIELD("Reserved", ui32.Reserved);
 }
 
 template <typename ArchiveT>
