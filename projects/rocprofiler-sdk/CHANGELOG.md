@@ -94,7 +94,7 @@ Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/
 
 - Miscellaneous bug fixes
 
-## ROCprofiler-SDK for AFAR VII
+## ROCprofiler-SDK 0.5.0 for ROCm Release 6.3 (AFAR VII)
 
 ### Additions
 
