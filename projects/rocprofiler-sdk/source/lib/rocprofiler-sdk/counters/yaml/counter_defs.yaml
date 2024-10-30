@@ -215,13 +215,15 @@ FETCH_SIZE:
     gfx908/gfx90a/gfx9/gfx900:
       expression: (TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024
     gfx942/gfx941/gfx940:
-      expression: (TCC_EA0_RDREQ_32B_sum*32+(TCC_EA0_RDREQ_sum-TCC_EA0_RDREQ_32B_sum)*128)/1024
+      expression: (TCC_BUBBLE_sum*128 + (TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum-TCC_EA0_RDREQ_32B_sum)*64 + TCC_EA0_RDREQ_32B_sum*32)/1024
   description: The total kilobytes fetched from the video memory. This is measured with all extra fetches
     and any cache or memory effects taken into account.
 BANDWIDTH_EA:
   architectures:
-    gfx90a/gfx940/gfx941/gfx942:
-      expression: 1024*(FETCH_SIZE+WRITE_SIZE)/reduce(GRBM_GUI_ACTIVE,max)
+    gfx940/gfx941/gfx942:
+      expression: (WRITE_SIZE*1024+TCC_BUBBLE_sum*128+(TCC_BUBBLE_sum-TCC_EA0_RDREQ_sum)*64)/reduce(GRBM_GUI_ACTIVE,max)
+    gfx90a:
+      expression: 1024*(WRITE_SIZE+FETCH_SIZE)/reduce(GRBM_GUI_ACTIVE,max)
   description: Memory Bandwidth measured at the TCC_EA interface. In units of bytes/cycle.
 FetchSize:
   architectures:
@@ -3210,6 +3212,17 @@ TCC_WRREQ_STALL_max:
     gfx942/gfx941/gfx940:
       expression: reduce(TCC_EA0_WRREQ_STALL,max)
   description: Number of cycles a write request was stalled. Max over TCC instances.
+TCC_BUBBLE:
+  architectures:
+    gfx942/gfx941/gfx940:
+      block: TCC
+      event: 56
+  description: Number of 128-byte read requests sent to EA.
+TCC_BUBBLE_sum:
+  architectures:
+    gfx942/gfx941/gfx940:
+      expression: reduce(TCC_BUBBLE,sum)
+  description: Number of 128-byte read requests sent to EA. Sum over all TCC instances.
 # TCP Block (Texture Cache per Pipe)
 TCP_ATOMIC_TAGCONFLICT_STALL_CYCLES:
   architectures:
