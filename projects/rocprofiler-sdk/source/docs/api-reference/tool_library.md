@@ -1,4 +1,11 @@
-# Tool library
+---
+myst:
+    html_meta:
+        "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
+        "keywords": "ROCprofiler-SDK API reference, ROCprofiler-SDK tool library, Tool library API"
+---
+
+# ROCprofiler-SDK tool library
 
 The tool library utilizes APIs from `rocprofiler-sdk` and `rocprofiler-register` libraries for profiling and tracing HIP applications. This document provides information to help you design a tool by utilizing the `rocprofiler-sdk` and `rocprofiler-register` libraries efficiently. The command-line tool `rocprofv3` is also built on `librocprofiler-sdk-tool.so.0.4.0`, which uses these libraries.
 
@@ -144,9 +151,9 @@ tool_init(rocprofiler_client_finalize_t fini_func,
 
 Otherwise, ROCprofiler-SDK invokes the `finalize` callback via an `atexit` handler.
 
-## Full `rocprofiler_configure` Sample
+## Full rocprofiler-configure sample
 
-All of the snippets from the previous sections have been combined here for convenience.
+All the code snippets from the previous sections are combined here to demonstrate complete ROCProfiler configuration.
 
 ```cpp
 #include <rocprofiler-sdk/registration.h>
@@ -184,7 +191,7 @@ tool_init(rocprofiler_client_finalize_t fini_func,
     // Save your contexts
     tool_data->contexts.emplace_back(ctx);
 
-    // associate code object tracing with this context
+    // Associate code object tracing with this context
     rocprofiler_configure_callback_tracing_service(
         ctx,
         ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,
@@ -193,7 +200,7 @@ tool_init(rocprofiler_client_finalize_t fini_func,
         tool_tracing_callback,
         tool_data);
 
-    // ... associate services with contexts ...
+    // ... Associate services with contexts ...
 
     return 0;
 }
@@ -213,14 +220,14 @@ rocprofiler_configure(uint32_t                 version,
     // (optional) Provide a name for this tool to rocprofiler
     client_id->name = "ExampleTool";
 
-    // info provided back to tool_init and tool_fini
+    // Info provided back to tool_init and tool_fini
     auto* my_tool_data = new rocp_tool_data{ version,
                                              runtime_version,
                                              priority,
                                              client_id,
                                              nullptr };
 
-    // create configure data
+    // Create configure data
     static auto cfg =
         rocprofiler_tool_configure_result_t{ sizeof(rocprofiler_tool_configure_result_t),
                                              &tool_init,

@@ -1,14 +1,29 @@
-# Counter collection services
+---
+myst:
+    html_meta:
+        "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
+        "keywords": "ROCprofiler-SDK API reference, ROCprofiler-SDK counter collection services, Counter collection services API"
+---
+
+# ROCprofiler-SDK counter collection services
+
+There are two modes of counter collection service:
+
+- Dispatch profiling: In this mode, counters are collected on a per-kernel launch basis. This mode is useful for collecting highly detailed counters for a specific kernel execution in isolation. Note that dispatch profiling allows only a single kernel to execute in hardware at a time.
+
+- Agent profiling: In this mode, counters are collected on a device level. This mode is useful for collecting device level counters not tied to a specific kernel execution, which encompasses collecting counter values for a specific time range.
+
+This topic explains how to setup dispatch and agent profiling and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and agent profiling, see [Samples](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples).
 
 ## Definitions
 
-*Profile Config*: A configuration to specify what counters should be collected on an agent. This needs to be supplied to various counter collection APIs to initiate collection of counter data. Profiles are agent specific and cannot be used on different agents.
+Profile Config: A configuration to specify the counters to be collected on an agent. This must be supplied to various counter collection APIs to initiate collection of counter data. Profiles are agent-specific and can't be used on different agents.
 
-*Counter ID*: Unique ID (per-architecture) that specifies the counter. The counter interface can be used to fetch information about the counter (such as its name or expression).
+Counter ID: Unique Id (per-architecture) that specifies the counter. The counter Id can be used to fetch counter information such as its name or expression.
 
-*Instance ID*: Unique record id encoding both the counter id and dimension for a specific collected value.
+Instance ID: Unique record Id that encodes the counter Id and dimension for a collected value.
 
-*Dimension*: Dimensions provide context to the raw counter values to specify the specific hardware register (such as shader engine) that the value was collected from. All counter values have dimension data encoded in its instance id and functions in the counter interface can be used to extract the values for individual dimensions. There following dimensions are currently supported by rocprofiler-sdk:
+Dimension: Dimensions help to provide context to the raw counter values by specifying the hardware register that is the source of counter collection such as a shader engine. All counter values have dimension data encoded in their instance Id, which allows you to extract the values for individual dimensions using functions in the counter interface. The following dimensions are supported:
 
 ```c
     ROCPROFILER_DIMENSION_XCC,            ///< XCC dimension of result
@@ -20,15 +35,17 @@
     ROCPROFILER_DIMENSION_INSTANCE,       ///< From unspecified hardware register
 ```
 
-## Using The Counter Collection Service
+## Using the counter collection service
 
-There are two modes for the counter collection service: *dispatch profiling* where counters are collected on a per kernel launch basis and *agent profiling* where counters are collected on a device level. Dispatch profiling is useful for collecting highly detailed counters for a specific kernel execution in isolation (Note: dispatch profiling allows only a single kernel to execute in hardware at a time). Agent profiling is useful for collecting device level counters not tied to a specific kernel execution (i.e. collecting counter values for a specific time range). 
-
-This guide explains how to setup dispatch and agent profiling along will describing the usage of the common counter collection APIs. More detail on the APIs themselves (as well as non-common options) is available in the API documentation. Fully functional examples of both dispatch and agent profiling can be found on the sample directory of rocprofiler-sdk.
+The setup for dispatch and agent profiling is similar with only minor changes needed to adapt code from one to another.
+Here are the steps required to configure the counter collection services:
 
 ### tool_init() setup
 
-The setup for dispatch and agent profiling is similar (with only minor changes needed to adapt code from one to another). In tool_init, similar to tracing services, you need to create a context and a buffer to collect the output. Important Note: buffered_callback in rocprofiler_create_buffer is called when the buffer is full with a vector of collected counter samples, see the buffered callback section below for processing.  
+Similar to tracing services, you must create a context and a buffer to collect the output when initializing the tool.
+:::{note}
+`Buffered_callback` in `rocprofiler_create_buffer` is invoked with a vector of collected counter samples, when the buffer is full. For details, see the [Buffered callback](#buffered-callback) section.
+:::
 
 ```CPP
 rocprofiler_context_id_t ctx{0};
@@ -44,13 +61,13 @@ ROCPROFILER_CALL(rocprofiler_create_buffer(ctx,
                     "buffer creation failed");
 ```
 
-After creating a context and buffer to store results, it is highly recommended (but not required) that you construct the profiles for each agent containing the counters you wish to collect in tool_init. Profile creation has a high time cost associated with it due to validating that the counters can be collected on the agent and thus should be avoided in the time critical dispatch profiling callback. After profile setup, the collection service for dispatch or agent profiling can be setup. The following two calls can be used to setup either dispatch or agent profiling (only one can be in use at a time).
+After creating a context and buffer to store results in `tool_init`, it is highly recommended but not mandatory for you to construct the profiles for each agent, containing the counters for collection. Profile creation should be avoided in the time critical dispatch profiling callback as it involves validating if the counters can be collected on the agent. After profile setup, you can set up the collection service for dispatch or agent profiling. To set up either dispatch or agent profiling (only one can be used at a time), use:
 
 ```CPP
     /* For Dispatch Profiling */
     // Setup the dispatch profile counting service. This service will trigger the dispatch_callback
     // when a kernel dispatch is enqueued into the HSA queue. The callback will specify what
-    // counters to collect by returning a profile config id. 
+    // counters to collect by returning a profile config id.
     ROCPROFILER_CALL(rocprofiler_configure_buffered_dispatch_counting_service(
                          ctx, buff, dispatch_callback, nullptr),
                      "Could not setup buffered service");
@@ -63,9 +80,9 @@ After creating a context and buffer to store results, it is highly recommended (
                      "Could not setup buffered service");
 ```
 
-#### Profile Setup
+#### Profile setup
 
-The first step in constructing a counter collection profile is to find the GPU agents on the machine. A profile will need to be created for each set of counters you want to collect on every agent on the machine. You can use rocprofiler_query_available_agents to find agents on the system. The below example will collect all GPU agents on the device and store them in the vector agents.
+1. The first step in constructing a counter collection profile is to find the GPU agents on the machine. You must create a profile for each set of counters to be collected on every agent on the machine. You can use `rocprofiler_query_available_agents` to find agents on the system. The following example collects all GPU agents on the device and stores them in the vector agents:
 
 ```CPP
     std::vector<rocprofiler_agent_v0_t> agents;
@@ -98,7 +115,7 @@ The first step in constructing a counter collection profile is to find the GPU a
         "query available agents");
 ```
 
-To identify the counters that an agent supports, you can query the available counters with rocprofiler_iterate_agent_supported_counters. An example with a single agent (returning the available counters in gpu_counters) would be the following:
+2. To identify the counters supported by an agent, query the available counters with `rocprofiler_iterate_agent_supported_counters`. Here is an example of a single agent returning the available counters in `gpu_counters`:
 
 ```CPP
     std::vector<rocprofiler_counter_id_t> gpu_counters;
@@ -122,7 +139,7 @@ To identify the counters that an agent supports, you can query the available cou
                      "Could not fetch supported counters");
 ```
 
-rocprofiler_counter_id_t is a handle to a counter. The information about the counter (such as its name) can be fetched using rocprofiler_query_counter_info.
+3. `rocprofiler_counter_id_t` is a handle to a counter. To fetch information about the counter such as its name, use `rocprofiler_query_counter_info`:
 
 ```CPP
     for(auto& counter : gpu_counters)
@@ -137,7 +154,7 @@ rocprofiler_counter_id_t is a handle to a counter. The information about the cou
     }
 ```
 
-After you have identified a set of counters you wish to collect, a profile can be constructed by passing a list of these counters to rocprofiler_create_profile_config.
+4. After identifying the counters to be collected, construct a profile by passing a list of these counters to `rocprofiler_create_profile_config`.
 
 ```C++
     // Create and return the profile
@@ -147,18 +164,21 @@ After you have identified a set of counters you wish to collect, a profile can b
                      "Could not construct profile cfg");
 ```
 
-The created profile can in turn be used for both dispatch and agent counter collection services. 
+5. You can use the created profile for both dispatch and agent counter collection services.
 
-##### Special Notes On Profile Behavior
+:::{note}
+
+Points to note on profile behavior:
 
 - Profile created is *only valid* for the agent it was created for.
-- Profiles are immutable. If a new counter set is desired to be collected, construct a new profile. 
-- A single profile can be used multiple times on the same agent. 
-- Counter IDs that are supplied to rocprofiler_create_profile_config are *agent specific* and cannot be used to construct profiles for other agents.
+- Profiles are immutable. To collect a new counter set, construct a new profile.
+- A single profile can be used multiple times on the same agent.
+- Counter Ids supplied to `rocprofiler_create_profile_config` are *agent-specific* and can't be used to construct profiles for other agents.
+:::
 
-### Dispatch Profiling Callback
+### Dispatch profiling callback
 
-When a kernel is dispatched, a dispatch callback is issued to the tool to allow for the selection of counters to collect for the dispatch (via supplying a profile). 
+When a kernel is dispatched, a dispatch callback is issued to the tool to allow selection of counters to be collected for the dispatch by supplying a profile.
 
 ```CPP
 void
@@ -168,11 +188,11 @@ dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   void* /*callback_data_args*/)
 ```
 
-Dispatch data contains information about the dispatch that is being launched (such as its name) and config is where the tool can specify the profile (and in turn counters) to collect for the dispatch. If no profile is supplied, no counters are collected for this dispatch. User data contains user data supplied to rocprofiler_configure_buffered_dispatch_counting_service. 
+`dispatch_data` contains information about the dispatch being launched such as its name. `config` is used by the tool to specify the profile, which allows counter collection for the dispatch. If no profile is supplied, no counters are collected for this dispatch. `user_data` contains user data supplied to `rocprofiler_configure_buffered_dispatch_profile_counting_service`.
 
-### Agent Set Profile Callback
+### Agent set profile callback
 
-This callback is called when the context is started and allows for the tool to specify the profile to be used. 
+This callback is invoked after the context starts and allows the tool to specify the profile to be used.
 
 ```CPP
 void
@@ -182,11 +202,11 @@ set_profile(rocprofiler_context_id_t                 context_id,
             void*)
 ```
 
-The profile to be used for this agent is specified by calling set_config(agent, profile). 
+The profile to be used for this agent is specified by calling `set_config(agent, profile)`.
 
-### Buffered Callback
+### Buffered callback
 
-Data from collected counter values is returned via a buffered callback. The buffered callback routines are similar between dispatch and agent profiling with the exception that some data (such as kernel launch ids) are not available in agent profiling mode. A sample iteration to print out counter collection data is the following:
+Data from collected counter values is returned through a buffered callback. The buffered callback routines are similar for dispatch and agent profiling except that some data such as kernel launch Ids is not available in agent profiling mode. Here is a sample iteration to print out counter collection data:
 
 ```CPP
     for(size_t i = 0; i < num_headers; ++i)
@@ -225,14 +245,14 @@ Data from collected counter values is returned via a buffered callback. The buff
     }
 ```
 
-## Counter Definitions
+## Counter definitions
 
-Counters are defined in yaml format in the file counter_defs.yaml. The counter definition has the following format
+Counters are defined in yaml format in the `counter_defs.yaml` file. The counter definition has the following format:
 
 ```yaml
 counter_name:       # Counter name
   architectures:
-    gfx90a:         # Architecture name 
+    gfx90a:         # Architecture name
       block:        # Block information (SQ/etc)
       event:        # Event ID (used by AQLProfile to identify counter register)
       expression:   # Formula for the counter (if derived counter)
@@ -242,11 +262,12 @@ counter_name:       # Counter name
   description:      # Description of the counter
 ```
 
-Architectures can be separately defined with their own definitions (i.e. gfx90a and gfx1010 in the above example). If two or more architectures share the same block/event/expression definition, they can be "/" delimited on a single line (i.e. "gfx90a/gfx1010:"). Hardware metrics have the elements block, event, and description defined. Derived metrics have the element expression defined (and cannot have block or event defined).
+You can separately define the counters for different architectures as shown in the preceding example for gfx90a and gfx1010. If two or more architectures share the same block, event, or expression definition, they can be specified together using "/" delimiter ("gfx90a/gfx1010:").
+Hardware metrics have the elements block, event, and description defined. Derived metrics have the element expression defined and can't have block or event defined.
 
-## Derived Metrics
+## Derived metrics
 
-Derived metrics allow for computations (via expressions) to be performed on collected hardware metrics with the result returned as it it were a real hardware counter.
+Derived metrics are expressions performing computation on collected hardware metrics. These expressions produce result similar to a real hardware counter.
 
 ```yaml
 GPU_UTIL:
@@ -256,30 +277,35 @@ GPU_UTIL:
   description: Percentage of the time that GUI is active
 ```
 
-GPU_UTIL is an example of a derived metric which takes the values of two GRBM hardware counters (GRBM_GUI_ACTIVE and GRBM_COUNT) and uses a mathematic expression to calculate the utilization rate of the GPU. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions (reduce and accumulate).
+In the preceding example, `GPU_UTIL` is a derived metric that uses a mathematic expression to calculate the utilization rate of the GPU using values of two GRBM hardware counters `GRBM_GUI_ACTIVE` and `GRBM_COUNT`. Expressions support the standard set of math operators (/,*,-,+) along with a set of special functions such as reduce and accumulate.
 
-### Reduce Function
-
-```yaml
-expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
-```
-
-Reduce() reduces counter values across all dimensions (shader engine, SIMD, etc) to produce a single output value. This is useful when you want to collect and compare values across the entire device. There are a number of reduction operations that can be perfomed: sum, average (avr), minimum value (selects minimum value across all dimensions, min), and max (selects the maximum value across all dimensions). For example reduce(GL2C_HIT,sum) sums all GL2C_HIT hardware register values together to return a single output value.
-
-### Accumulate Function
+### Reduce function
 
 ```yaml
-expression: accumulate(<basic_level_counter>, <resolution>)
+Expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
 ```
 
-#### Description
+The reduce function reduces counter values across all dimensions such as shader engine, SIMD, and so on, to produce a single output value. This helps to collect and compare values across the entire device.
+Here are the common reduction operations:
 
-- The accumulate metric is used to sum the values of a basic level counter over a specified number of cycles. By setting the resolution parameter, you can control the frequency of the summing operation:
-  - HIGH_RES: Sums up the basic counter every clock cycle. Captures the value every single cycle for higher accuracy, suitable for fine-grained analysis.
-  - LOW_RES: Sums up the basic counter every four clock cycles. Reduces the data points and provides less detailed summing, useful for reducing data volume.
-  - NONE: Does nothing and is equivalent to collecting basic_level_counter. Outputs the value of the basic counter without any summing operation.
+- `sum`: Sums to create a single output. For example, `reduce(GL2C_HIT,sum)` sums all `GL2C_HIT` hardware register values.
+- `avr`: Calculates the average across all dimensions.
+- `min`: Selects minimum value across all dimensions.
+- `max`: Selects the maximum value across all dimensions.
 
-#### Usage
+### Accumulate function
+
+```yaml
+Expression: accumulate(<basic_level_counter>, <resolution>)
+```
+
+- The accumulate function sums the values of a basic level counter over the specified number of cycles. The `resolution` parameter allows you to control the frequency of the following summing operation:
+
+  - `HIGH_RES`: Sums up the basic level counter every clock cycle. Captures the value every cycle for higher accuracy, which helps in fine-grained analysis.
+  - `LOW_RES`: Sums up the basic level counter every four clock cycles. Reduces the data points and provides less detailed summing, which helps in reducing data volume.
+  - `NONE`: Does nothing and is equivalent to collecting basic level counter. Outputs the value of the basic level counter without performing any summing operation.
+
+**Example:**
 
 ```yaml
 MeanOccupancyPerCU:
@@ -291,4 +317,5 @@ MeanOccupancyPerCU:
 
 <metric name="MeanOccupancyPerCU" expr=accumulate(SQ_LEVEL_WAVES,HIGH_RES)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM descr="Mean occupancy per compute unit."></metric>
 
-- MeanOccupancyPerCU: This metric calculates the mean occupancy per compute unit. It uses the accumulate function with HIGH_RES to sum the SQ_LEVEL_WAVES counter at every clock cycle. This sum is then divided by GRBM_GUI_ACTIVE and the number of compute units (CU_NUM) to derive the mean occupancy.
+- `MeanOccupancyPerCU`: In the preceding example, the `MeanOccupancyPerCU` metric calculates the mean occupancy per compute unit. It uses the accumulate function with `HIGH_RES` to sum the `SQ_LEVEL_WAVES` counter every clock cycle.
+This sum is then divided by the maximum value of GRBM_GUI_ACTIVE and the number of compute units `CU_NUM` to derive the mean occupancy.

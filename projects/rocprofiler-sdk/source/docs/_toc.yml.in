@@ -16,11 +16,17 @@ subtrees:
   - caption: API reference
     entries:
     - file: api-reference/buffered_services
+      title: Buffered services
     - file: api-reference/callback_services
+      title: Callback tracing services
     - file: api-reference/counter_collection_services
+      title: Counter collection services
     - file: api-reference/intercept_table
+      title: Runtime intercept tables
     - file: api-reference/pc_sampling
+      title: PC sampling
     - file: api-reference/tool_library
+      title: Tool library
     - file: _doxygen/html/index
       title: API library
   - caption: Conceptual

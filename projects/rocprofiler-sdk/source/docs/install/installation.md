@@ -1,4 +1,11 @@
-# Installation
+---
+myst:
+    html_meta:
+        "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
+        "keywords": "ROCprofiler-SDK installation, Install ROCprofiler-SDK, Build ROCprofiler-SDK"
+---
+
+# ROCprofiler-SDK installation
 
 This document provides information required to install ROCprofiler-SDK from source.
 
@@ -53,7 +60,7 @@ cmake                                         \
       -D CMAKE_INSTALL_PREFIX=/opt/rocm       \
        rocprofiler-sdk-source
 
-cmake --build rocprofiler-sdk-build --target all --parallel 8  
+cmake --build rocprofiler-sdk-build --target all --parallel 8
 ```
 
 ## Installing ROCprofiler-SDK

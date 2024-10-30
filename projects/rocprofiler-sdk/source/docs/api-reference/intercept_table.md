@@ -1,12 +1,18 @@
-# Runtime intercept tables
+---
+myst:
+    html_meta:
+        "description": "ROCprofiler-SDK is a tooling infrastructure for profiling general-purpose GPU compute applications running on the ROCm software."
+        "keywords": "ROCprofiler-SDK API reference, ROCprofiler-SDK intercept table, Intercept table API"
+---
 
-Although most tools will want to leverage the callback or buffer tracing services for tracing the HIP, HSA, and ROCTx
-APIs, rocprofiler-sdk does provide access to the raw API dispatch tables. Each of the aforementioned APIs are
-designed similar to the following sample.
+# ROCprofiler-SDK runtime intercept tables
 
-## Dispatch Table Overview
+While tools commonly leverage the callback or buffer tracing services for tracing the HIP, HSA, and ROCTx
+APIs, ROCprofiler-SDK also provides access to the raw API dispatch tables.
 
-### Forward Declaration of public C API function
+## Forward declaration of public C API function
+
+All the aforementioned APIs are designed similar to the following sample:
 
 ```cpp
 extern "C"
@@ -17,7 +23,7 @@ foo(int) __attribute__((visibility("default")));
 }
 ```
 
-### Internal Implementation of API function
+## Internal implementation of API function
 
 ```cpp
 namespace impl
@@ -31,7 +37,7 @@ foo(int val)
 }
 ```
 
-### Dispatch Table Implementation
+## Dispatch table implementation
 
 ```cpp
 namespace impl
@@ -41,21 +47,21 @@ struct dispatch_table
     int (*foo_fn)(int) = nullptr;
 };
 
-// invoked once: populates the dispatch_table with function pointers to implementation
+// Invoked once: populates the dispatch_table with function pointers to implementation
 dispatch_table*&
 construct_dispatch_table()
 {
     static dispatch_table* tbl = new dispatch_table{};
     tbl->foo_fn                = impl::foo;
 
-    // in between above and below, rocprofiler-sdk gets passed the pointer
+    // In between, ROCprofiler-SDK gets passed the pointer
     // to the dispatch table and has the opportunity to wrap the function
     // pointers for interception
 
     return tbl;
 }
 
-// constructs dispatch table and stores it in static variable
+// Constructs dispatch table and stores it in static variable
 dispatch_table*
 get_dispatch_table()
 {
@@ -65,7 +71,7 @@ get_dispatch_table()
 }  // namespace impl
 ```
 
-### Implementation of public C API function
+## Implementation of public C API function
 
 ```cpp
 extern "C"
@@ -79,18 +85,9 @@ foo(int val)
 }
 ```
 
-### Dispatch Table Chaining
+## Dispatch table chaining
 
-rocprofiler-sdk is given an opportunity within `impl::construct_dispatch_table()` to
-save the original value(s) of the function pointers such as `foo_fn` and install
-it's own function pointers in its place -- this results in the public C API function `foo`
-calling into the rocprofiler-sdk function pointer, which then in turn, calls the original
-function pointer to `impl::foo` (this is called "chaining"). Once rocprofiler-sdk
-has made any necessary modifications to the dispatch table, tools which indicated
-they also want access to the raw dispatch table via `rocprofiler_at_intercept_table_registration`
-will be passed the pointer to the dispatch table.
+ROCprofiler-SDK can save the original values of the function pointers such as `foo_fn` in `impl::construct_dispatch_table()` and install its own function pointers in its place. This results in the public C API function `foo` calling into the ROCprofiler-SDK function pointer, which in turn, calls the original function pointer to `impl::foo`. This phenomenon is named chaining. Once ROCprofiler-SDK
+makes necessary modifications to the dispatch table, tools requesting access to the raw dispatch table via `rocprofiler_at_intercept_table_registration`, are provided the pointer to the dispatch table.
 
-## Sample
-
-For a demo of dispatch table chaining, please see the `samples/intercept_table` example in the
-[rocprofiler-sdk GitHub repository](https://github.com/ROCm/rocproifler-sdk).
+For an example of dispatch table chaining, see [samples/intercept_table](https://github.com/ROCm/rocprofiler-sdk-internal/tree/amd-staging/samples/intercept_table).

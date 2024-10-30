@@ -1,128 +1,139 @@
 # Changelog for ROCprofiler-SDK
 
-Full documentation for ROCprofiler-SDK is available at [Click Here](source/docs/index.md)
+Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](source/docs/index.rst)
 
 ## ROCprofiler-SDK for AFAR I
 
-### Additions
+### Added
 
-- HSA API Tracing
-- Kernel Dispatch Tracing
-- Kernel Dispatch Counter Collection
-  - Instances are reported as single dimensions
+- HSA API tracing
+- Kernel dispatch tracing
+- Kernel dispatch counter collection
+  - Instances reported as single dimension
   - No serialization
 
 ## ROCprofiler-SDK for AFAR II
 
-### Additions
+### Added
 
-- HIP API Tracing
-- ROCTx Tracing
+- HIP API tracing
+- ROCTx tracing
 - Tracing ROCProf Tool V3
-- Packaging Documentation
-- ROCTx start/stop
-- Memory Copy Tracing
+- Documentation packaging
+- ROCTx control (start and stop)
+- Memory copy tracing
 
 ## ROCprofiler-SDK for AFAR III
 
-### Additions
+### Added
 
-- Kernel Dispatch Counter Collection – (includes serialization and multidimensional instances)
-- Kernel serialization
-- Serialization on/off handling
-- ROCprof Tool Plugin Interface V3 for Counters and Dimensions
-- List metrics support
-- Correlation-id retirement
-- HIP and HSA trace distinction
-  - --hip-runtime-trace          For Collecting HIP Runtime API Traces
-  - --hip-compiler-trace         For Collecting HIP Compiler generated code Traces
-  - --hsa-core-trace                For Collecting HSA API Traces (core API)
-  - --hsa-amd-trace                For Collecting HSA API Traces (AMD-extension API)
-  - --hsa-image-trace             For Collecting HSA API Traces (Image-extension API)
-  - --hsa-finalizer-trace          For Collecting HSA API Traces (Finalizer-extension API)
+- Kernel dispatch counter collection. This includes serialization and multidimensional instances.
+- Kernel serialization.
+- Serialization control (on and off).
+- ROCprof tool plugin interface V3 for counters and dimensions.
+- Support to list metrics.
+- Correlation-Id retirement
+- HIP and HSA trace distinction:
+  - --hip-runtime-trace          For collecting HIP Runtime API traces
+  - --hip-compiler-trace         For collecting HIP compiler-generated code traces
+  - --hsa-core-trace             For collecting HSA API traces (core API)
+  - --hsa-amd-trace              For collecting HSA API traces (AMD-extension API)
+  - --hsa-image-trace            For collecting HSA API traces (image-extension API)
+  - --hsa-finalizer-trace        For collecting HSA API traces (finalizer-extension API)
 
 ## ROCprofiler-SDK for AFAR IV
 
-### Additions
+### Added
 
-- Page Migration Reporting (API)
-- Scratch Memory Reporting (API)
-- Kernel Dispatch Callback Tracing (API)
-- External Correlation ID Request Service (API)
-- Buffered counter collection record headers (API)
-- Remove HSA dependency from counter collection (API)
-- rocprofv3 Multi-GPU support in single-process (tool)
+**API:**
+
+- Page migration reporting
+- Scratch memory reporting
+- Kernel dispatch callback tracing
+- External correlation Id request service
+- Buffered counter collection record headers
+- Option to remove HSA dependency from counter collection
+
+**Tool:**
+
+- `rocprofv3` multi-GPU support in a single-process
 
 ## ROCprofiler-SDK for AFAR V
 
-### Additions
+### Added
 
-- Agent/Device Counter Collection (API)
-- Single JSON output format support (tool)
-- Perfetto output format support(.pftrace) (tool)
-- Input YAML support for counter collection (tool)
-- Input JSON support for counter collection (tool)
-- Application Replay (Counter collection)
-- PC Sampling (Beta)(API)
-- ROCProf V3 Multi-GPU Support:
-  - Multi-process (multiple files)
+**API:**
 
-### Fixes
+- Agent or device counter collection
+- PC sampling (beta)
 
-- SQ_ACCUM_PREV and SQ_ACCUM_PREV_HIRE overwriting issue
+**Tool:**
 
-### Changes
+- Single JSON output format support
+- Perfetto output format support (.pftrace)
+- Input YAML support for counter collection
+- Input JSON support for counter collection
+- Application replay in counter collection
+- `rocprofv3` multi-GPU support:
+  - Multiprocess (multiple files)
 
-- rocprofv3 tool now needs `--` in front of application. For detailed uses, please [Click Here](source/docs/rocprofv3.md)
+### Changed
 
-## ROCprofiler-SDK for AFAR VI
+- `rocprofv3` tool now requires mentioning `--` before the application. For detailed use, see [Using rocprofv3](source/docs/how-to/using-rocprofv3.rst)
 
-### Additions
+### Resolved issues
 
-- OTF2 Tool Support
-- Kernel and Range Filtering
-- Counter Collection Definitions in YAML
-- Documentation updates (SQ Block, Counter Collection, Tracing, Tool Usage)
-- Added rocprofv3 option --kernel-rename
-- Added rocprofv3 options for perfetto settings (buffer size, etc.)
-- Added CSV columns for kernel trace
-  - Thread_Id
-  - Dispatch_Id
-- Added CSV column for counter_collection
+- Fixed `SQ_ACCUM_PREV` and `SQ_ACCUM_PREV_HIRE` overwriting issue
 
-### Fixes
+## ROCprofiler-SDK 0.4.0 for ROCm release 6.2 (AFAR VI)
 
-- Miscellaneous bug fixes
+### Added
 
-## ROCprofiler-SDK 0.5.0 for ROCm Release 6.3 (AFAR VII)
+- OTF2 tool support
+- Kernel and range filtering
+- Counter collection definitions in YAML
+- Documentation updates (SQ block, counter collection, tracing, tool usage)
+- `rocprofv3` option `--kernel-rename`
+- `rocprofv3` options for Perfetto settings (buffer size and so on)
+- CSV columns for kernel trace
+  - `Thread_Id`
+  - `Dispatch_Id`
+- CSV column for counter collection
 
-### Additions
 
-### Changes
+## ROCprofiler-SDK 0.5.0 for ROCm release 6.3 (AFAR VII)
 
-- Support `--marker-trace` on application linked against old (roctracer) ROCTx (i.e. `libroctx64.so`)
-- Replaced deprecated hipHostMalloc and hipHostFree functions with hipExtHostAlloc and hipFreeHost in when ROCm version is greater than or equal to 6.3
+### Added
+
+- Start and end timestamp columns to the counter collection csv output
+- Check to force tools to initialize context id with zero
+
+### Changed
+
+- `--marker-trace` option for `rocprofv3` now supports the legacy ROCTx library `libroctx64.so` when the application is linked against the new library `librocprofiler-sdk-roctx.so`.
+- Replaced deprecated `hipHostMalloc` and `hipHostFree` functions with `hipExtHostAlloc` and `hipFreeHost` for ROCm versions starting 6.3.
 - Updated `rocprofv3` `--help` options.
-- Adding start and end timestamp columns to the counter collection csv output.
-- Changed naming of agent profiling to device counting service (which more closely follows its name). To convert existing tool/user code to the new names, the following sed can be used: `find . -type f -exec sed -i 's/rocprofiler_agent_profile_callback_t/rocprofiler_device_counting_service_callback_t/g; s/rocprofiler_configure_agent_profile_counting_service/rocprofiler_configure_device_counting_service/g; s/agent_profile.h/device_counting_service.h/g; s/rocprofiler_sample_agent_profile_counting_service/rocprofiler_sample_device_counting_service/g' {} +`
-- Changed naming of dispatch profiling service to dispatch counting service (which more closely follows its name). To convert existing tool/user code to the new names, the following sed can be used: `-type f -exec sed -i -e 's/dispatch_profile_counting_service/dispatch_counting_service/g' -e 's/dispatch_profile.h/dispatch_counting_service.h/g' -e 's/rocprofiler_profile_counting_dispatch_callback_t/rocprofiler_dispatch_counting_service_callback_t/g' -e 's/rocprofiler_profile_counting_dispatch_data_t/rocprofiler_dispatch_counting_service_data_t/g'  -e 's/rocprofiler_profile_counting_dispatch_record_t/rocprofiler_dispatch_counting_service_record_t/g' {} +`
+- Changed naming of "agent profiling" to a more descriptive "device counting service". To convert existing tool or user code to the new name, use the following sed:
+`find . -type f -exec sed -i 's/rocprofiler_agent_profile_callback_t/rocprofiler_device_counting_service_callback_t/g; s/rocprofiler_configure_agent_profile_counting_service/rocprofiler_configure_device_counting_service/g; s/agent_profile.h/device_counting_service.h/g; s/rocprofiler_sample_agent_profile_counting_service/rocprofiler_sample_device_counting_service/g' {} +`
+- Changed naming of "dispatch profiling service" to a more descriptive "dispatch counting service". To convert existing tool or user code to the new names, the following sed can be used: `-type f -exec sed -i -e 's/dispatch_profile_counting_service/dispatch_counting_service/g' -e 's/dispatch_profile.h/dispatch_counting_service.h/g' -e 's/rocprofiler_profile_counting_dispatch_callback_t/rocprofiler_dispatch_counting_service_callback_t/g' -e 's/rocprofiler_profile_counting_dispatch_data_t/rocprofiler_dispatch_counting_service_data_t/g'  -e 's/rocprofiler_profile_counting_dispatch_record_t/rocprofiler_dispatch_counting_service_record_t/g' {} +`
 - Support specifying HW counters via command-line in rocprofv3, e.g. `rocprofv3 --pmc [COUNTER [COUNTER ...]]`
-- FETCH_SIZE metric on gfx94x uses TCC_BUBBLE for 128B reads.
+- `FETCH_SIZE` metric on gfx94x now uses `TCC_BUBBLE` for 128B reads.
+- PMC dispatch-based counter collection serialization is now per-device instead of being global across all devices.
 
-### Fixes
 
-- Creation of subdirection when rocprofv3 `--output-file` contains a folder path
-- Fix misaligned stores (undefined behavior) for buffer records
-- Fix crash when only scratch reporting is enabled
-- Fixed MeanOccupancy* metrics
-- Fix aborted-app validation test to properly check for hipExtHostAlloc command now that it is supported
-- Fix for SQ and GRBM metrics implicitly reduced.
-- Fix Support for derived counters in reduce operation and bug fix for max in reduce
-- Check to force tools to initialize context id with zero.
-- Fix to handle a range of values for select() dimension in expressions parser.
-- PMC dispatch based Counter Collection Serialization is now per-device instead of global across all devices.
+### Resolved issues
+
+- Introduced subdirection when `rocprofv3 --output-file` used to specify a folder path
+- Fixed misaligned stores (undefined behavior) for buffer records
+- Fixed crash when only scratch reporting is enabled
+- Fixed `MeanOccupancy` metrics
+- Fixed aborted-application validation test to properly check for `hipExtHostAlloc` command
+- Fixed implicit reduction of SQ and GRBM metrics
+- Fixed support for derived counters in reduce operation
+- Bug fixed in max-in-reduce operation
+- Introduced fix to handle a range of values for `select()` dimension in expressions parser
 
 ### Removed
 
-- Removed gfx8 metric definitions.
-- Removed rocprofv3 installation to sbin directory.
+- Removed gfx8 metric definitions
+- Removed `rocprofv3` installation to sbin directory

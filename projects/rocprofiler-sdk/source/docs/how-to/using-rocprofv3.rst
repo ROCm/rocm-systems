@@ -1,6 +1,6 @@
 .. meta::
   :description: Documentation of the installation, configuration, use of the ROCprofiler-SDK, and rocprofv3 command-line tool
-  :keywords: ROCprofiler-SDK tool, ROCprofiler-SDK library, rocprofv3, ROCm, API, reference
+  :keywords: ROCprofiler-SDK tool, ROCprofiler-SDK library, rocprofv3, rocprofv3 tool usage, Using rocprofv3, ROCprofiler-SDK command line tool, ROCprofiler-SDK CLI
 
 .. _using-rocprofv3:
 
@@ -137,19 +137,19 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
   * - ``--preload``
     - Libraries to prepend to LD_PRELOAD (usually for sanitizers)
     - Extension
-  
+
   * - ``--perfetto-backend {inprocess,system}``
     - Perfetto data collection backend. 'system' mode requires starting traced and perfetto daemons
     - Extension
-  
+
   * - ``--perfetto-buffer-size KB``
     - Size of buffer for perfetto output in KB. default: 1 GB
     - Extension
-  
+
   * - ``--perfetto-buffer-fill-policy {discard,ring_buffer}``
     - Policy for handling new records when perfetto has reached the buffer limit
     - Extension
-  
+
   * - ``--perfetto-shmem-size-hint KB``
     - Perfetto shared memory size hint in KB. default: 64 KB
     - Extension
@@ -266,9 +266,9 @@ Here is a list of useful APIs for code instrumentation.
 See how to use ``ROCTx`` APIs in the MatrixTranspose application below:
 
 .. code-block:: bash
-    
+
     #include <rocprofiler-sdk-roctx/roctx.h>
-    
+
     roctxMark("before hipLaunchKernel");
     int rangeId = roctxRangeStart("hipLaunchKernel range");
     roctxRangePush("hipLaunchKernel");
@@ -542,7 +542,7 @@ Properties
         - WRITE_SIZE
 
 
-Command-Line
+Command-line
 +++++++++++++
 
 Desired counters can now be collected as ``command-line`` option as well.
@@ -585,7 +585,7 @@ Here are the contents of ``counter_collection.csv`` file:
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
-Kernel Filtering
+Kernel filtering
 +++++++++++++++++
 
 rocprofv3 supports kernel filtering in case of profiling. A kernel filter is a set of a regex string (to include the kernels matching this filter), a regex string (to exclude the kernels matching this filter),
@@ -768,7 +768,7 @@ Properties
             - **`simd_per_cu`** `(integer)`: SIMDs per CU.
             - **`max_slots_scratch_cu`** `(integer)`: Maximum slots for scratch CU.
             - **`gfx_target_version`** `(integer)`: GFX target version.
-            - **`vendor_id`** `(integer)`: Vendor ID. 
+            - **`vendor_id`** `(integer)`: Vendor ID.
             - **`device_id`** `(integer)`: Device ID.
             - **`location_id`** `(integer)`: Location ID.
             - **`domain`** `(integer)`: Domain identifier.
