@@ -30,6 +30,7 @@
 #include <stdint.h>
 #include <limits.h>
 #include "hsakmt/hsakmt.h"
+#include "hsakmt/hsakmt_drm.h"
 
 #include "inc/wddm/types.h"
 #include "inc/wddm/device.h"

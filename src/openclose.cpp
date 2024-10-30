@@ -31,7 +31,6 @@
 #include <cstdio>
 #include <strings.h>
 #include <cassert>
-#include <amdgpu.h>
 #include "libhsakmt.h"
 
 static const char dxg_device_name[] = "/dev/dxg";

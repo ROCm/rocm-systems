@@ -182,22 +182,11 @@ find_package(PkgConfig)
 find_library(LIBC NAMES c REQUIRED)
 message(STATUS "LIBC:" ${LIBC})
 
-## If environment variable DRM_DIR is set, the script
-## will pick up the corresponding libraries from that path.
-list (PREPEND CMAKE_PREFIX_PATH "${DRM_DIR}")
-
-# The module name passed to pkg_check_modules() is determined by the
-# name of file *.pc
-pkg_check_modules(DRM REQUIRED IMPORTED_TARGET libdrm)
-pkg_check_modules(DRM_AMDGPU REQUIRED IMPORTED_TARGET libdrm_amdgpu)
-include_directories(${DRM_AMDGPU_INCLUDE_DIRS})
-include_directories(${DRM_INCLUDE_DIRS})
-
 target_link_libraries ( ${HSAKMT_TARGET}
-  PRIVATE ${DRM_LDFLAGS} ${DRM_AMDGPU_LDFLAGS} pthread rt c ${CMAKE_DL_LIBS}
+  PRIVATE pthread rt c ${CMAKE_DL_LIBS}
 )
 
-target_compile_options(${HSAKMT_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_CXX_FLAGS})
+target_compile_options(${HSAKMT_TARGET} PRIVATE ${HSAKMT_CXX_FLAGS})
 
 ## Define default paths and packages.
 if( CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT )
@@ -295,7 +284,6 @@ install ( FILES ${CMAKE_CURRENT_BINARY_DIR}/libhsakmt.pc DESTINATION ${CMAKE_INS
 
 if ( NOT BUILD_SHARED_LIBS)
   ## Create separate target file for static builds
-  ## In static builds, libdrm and libdrm_amdgpu need to be linked statically
   add_library (${HSAKMT_STATIC_DRM_TARGET}  STATIC "")
   target_sources (${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${HSAKMT_SRC})
 
@@ -315,16 +303,9 @@ if ( NOT BUILD_SHARED_LIBS)
               PROPERTY VERSION "${LIB_VERSION_STRING}"
               PROPERTY SOVERSION "${LIB_VERSION_MAJOR}" )
 
-  #Additional search path for static libraries
-  if(${DISTRO_ID} MATCHES "ubuntu")
-      set(AMDGPU_STATIC_LIB_PATHS "-L/opt/amdgpu/lib/x86_64-linux-gnu")
-  else()
-      set(AMDGPU_STATIC_LIB_PATHS "-L/opt/amdgpu/lib64" "-L/opt/amdgpu/lib")
-  endif()
-  # Link drm_amdgpu and drm library statically
   target_link_libraries ( ${HSAKMT_STATIC_DRM_TARGET}
     PRIVATE pthread rt c ${CMAKE_DL_LIBS}
-    INTERFACE -Wl,-Bstatic ${AMDGPU_STATIC_LIB_PATHS} ${DRM_AMDGPU_LDFLAGS} ${DRM_LDFLAGS} -Wl,-Bdynamic
+    INTERFACE -Wl,-Bdynamic
   )
   target_compile_options(${HSAKMT_STATIC_DRM_TARGET} PRIVATE ${DRM_CFLAGS} ${HSAKMT_C_FLAGS})
 

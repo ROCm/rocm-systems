@@ -26,8 +26,6 @@
 #ifndef _HSAKMT_H_
 #define _HSAKMT_H_
 
-#include <amdgpu.h>
-#include <amdgpu_drm.h>
 #include "hsakmttypes.h"
 
 #ifdef __cplusplus

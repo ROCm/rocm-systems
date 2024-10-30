@@ -40,9 +40,6 @@
 //
 ////////////////////////////////////////////////////////////////////////////////
 #include <cstdint>
-#include <xf86drm.h>
-#include <amdgpu.h>
-#include <amdgpu_drm.h>
 
 #include "inc/wddm/types.h"
 #include "inc/wddm/device.h"
@@ -106,7 +103,7 @@ HSAKMTAPI int amdgpu_bo_import(amdgpu_device_handle dev,
   HSAKMT_STATUS ret = hsaKmtImportDMABufHandle(shared_handle, &MemoryAddress);
   if (ret == HSAKMT_STATUS_SUCCESS) {
     //use GpuMemory object's address as drm buf handle
-    output->buf_handle = reinterpret_cast<amdgpu_bo*>(MemoryAddress);
+    output->buf_handle = reinterpret_cast<amdgpu_bo_handle>(MemoryAddress);
     return 0;
   } else {
     return -1;

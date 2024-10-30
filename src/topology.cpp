@@ -37,10 +37,6 @@
 #include <unistd.h>
 #include <sys/sysinfo.h>
 
-#include <xf86drm.h>
-#include <amdgpu.h>
-#include <amdgpu_drm.h>
-
 #include "libhsakmt.h"
 #include "inc/wddm/types.h"
 #include "inc/wddm/device.h"
