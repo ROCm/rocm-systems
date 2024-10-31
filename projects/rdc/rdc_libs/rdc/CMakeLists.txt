@@ -25,6 +25,7 @@ set(RDC_LIB_SRC_LIST ${RDC_LIB_SRC_LIST}
     "${SRC_DIR}/RdcRVSLib.cc"
     "${SRC_DIR}/RdcSmiDiagnosticImpl.cc"
     "${SRC_DIR}/RdcSmiLib.cc"
+    "${SRC_DIR}/RdcConfigSettingsImpl.cc"
     "${SRC_DIR}/RdcTelemetryModule.cc"
     "${SRC_DIR}/RdcWatchTableImpl.cc"
     "${SRC_DIR}/SmiUtils.cc")

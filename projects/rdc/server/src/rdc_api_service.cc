@@ -1009,7 +1009,7 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
     to_incidents->set_component(incident.component);
     to_incidents->set_health(incident.health);
 
-    //error
+    // error
     auto to_error = to_incidents->mutable_error();
     to_error->set_code(incident.error.code);
     to_error->set_msg(incident.error.msg);
@@ -1062,6 +1062,47 @@ int RdcAPIServiceImpl::PolicyCallback(rdc_policy_callback_response_t* userData) 
         static_cast<::rdc::TopologyLinkInfo_LinkType>(topology_results.link_infos[i].link_type));
     linkinfos->set_p2p_accessible(topology_results.link_infos[i].is_p2p_accessible);
   }
+    return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::SetConfig(::grpc::ServerContext* context,
+                                            const ::rdc::SetConfigRequest* request,
+                                            ::rdc::SetConfigResponse* reply) {
+  (void)(context);
+  rdc_config_setting_t setting;
+  ::rdc::rdc_config_setting setting_ref = request->setting();
+  setting.type = static_cast<rdc_config_type_t>(setting_ref.type());
+  setting.target_value = setting_ref.target_value();
+
+  rdc_status_t status = rdc_config_set(rdc_handle_, request->group_id(), setting);
+  reply->set_status(static_cast<::uint32_t>(status));
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::GetConfig(::grpc::ServerContext* context,
+                                            const ::rdc::GetConfigRequest* request,
+                                            ::rdc::GetConfigResponse* reply) {
+  (void)(context);
+  rdc_config_setting_list_t settings;
+
+  rdc_status_t status = rdc_config_get(rdc_handle_, request->group_id(), &settings);
+
+  reply->set_status(status);
+  for (uint32_t i = 0; i < settings.total_settings && i < RDC_MAX_CONFIG_SETTINGS; ++i) {
+    auto result = reply->add_settings();
+    result->set_type(static_cast<::rdc::rdc_config_type>(settings.settings[i].type));
+    result->set_target_value(settings.settings[i].target_value);
+  }
+
+  return ::grpc::Status::OK;
+}
+
+::grpc::Status RdcAPIServiceImpl::ClearConfig(::grpc::ServerContext* context,
+                                              const ::rdc::ClearConfigRequest* request,
+                                              ::rdc::ClearConfigResponse* reply) {
+  (void)(context);
+  rdc_status_t status = rdc_config_clear(rdc_handle_, request->group_id());
+  reply->set_status(status);
   return ::grpc::Status::OK;
 }
 
