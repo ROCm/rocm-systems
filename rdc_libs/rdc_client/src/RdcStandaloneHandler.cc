@@ -702,6 +702,69 @@ rdc_status_t RdcStandaloneHandler::rdc_field_update_all(uint32_t wait_for_update
   return error_handle(status, reply.status());
 }
 
+// Set one configure
+rdc_status_t RdcStandaloneHandler::rdc_config_set(rdc_gpu_group_t group_id,
+                                                  rdc_config_setting_t setting) {
+  ::rdc::SetConfigRequest request;
+  ::rdc::SetConfigResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+
+  ::rdc::rdc_config_setting* setting_ref = (::rdc::rdc_config_setting*)request.mutable_setting();
+  setting_ref->set_type(static_cast<::rdc::rdc_config_type>(setting.type));
+  setting_ref->set_target_value(setting.target_value);
+
+  ::grpc::Status status = stub_->SetConfig(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+
+  return err_status;
+}
+
+// Get the setting
+rdc_status_t RdcStandaloneHandler::rdc_config_get(rdc_gpu_group_t group_id,
+                                                  rdc_config_setting_list_t* settings) {
+  int i = 0;
+  ::rdc::GetConfigRequest request;
+  ::rdc::GetConfigResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+  ::grpc::Status status = stub_->GetConfig(&context, request, &reply);
+  rdc_status_t err_status = error_handle(status, reply.status());
+  if (err_status != RDC_ST_OK) return err_status;
+
+  auto res = reply.settings();
+  if (reply.settings_size() > RDC_MAX_CONFIG_SETTINGS) return RDC_ST_MAX_LIMIT;
+
+  for (i = 0; i < reply.settings_size() && i < RDC_MAX_CONFIG_SETTINGS; ++i) {
+    const ::rdc::rdc_config_setting& result = reply.settings(i);
+    settings->settings[i].type = static_cast<rdc_config_type_t>(result.type());
+    settings->settings[i].target_value = result.target_value();
+  }
+
+  settings->total_settings = (reply.settings_size() >= RDC_MAX_CONFIG_SETTINGS)
+                                 ? RDC_MAX_CONFIG_SETTINGS
+                                 : reply.settings_size();
+  err_status = error_handle(status, reply.status());
+  return err_status;
+}
+
+// Clear the setting
+rdc_status_t RdcStandaloneHandler::rdc_config_clear(rdc_gpu_group_t group_id) {
+  ::rdc::ClearConfigRequest request;
+  ::rdc::ClearConfigResponse reply;
+  ::grpc::ClientContext context;
+
+  request.set_group_id(group_id);
+
+  ::grpc::Status status = stub_->ClearConfig(&context, request, &reply);
+
+  rdc_status_t err_status = error_handle(status, reply.status());
+
+  return err_status;
+}
+
 // It is only an interface for the client under the GRPC framework and is not used as an RDC API.
 rdc_status_t RdcStandaloneHandler::get_mixed_component_version(
     mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
@@ -804,7 +867,7 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
   }
 
   // no registered callback, start the thread to read the stream from rdcd
-  struct policy_thread_context ctx = {true,nullptr};
+  struct policy_thread_context ctx = {true, nullptr};
 
   ctx.t = new std::thread([this, group_id, callback]() {
     // call rdcd
@@ -905,7 +968,7 @@ rdc_status_t RdcStandaloneHandler::rdc_health_get(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcStandaloneHandler::rdc_health_check(rdc_gpu_group_t group_id,
-                                                    rdc_health_response_t *response) {
+                                                    rdc_health_response_t* response) {
   if (!response) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -931,7 +994,7 @@ rdc_status_t RdcStandaloneHandler::rdc_health_check(rdc_gpu_group_t group_id,
     to_result.component = static_cast<rdc_health_system_t>(result.component());
     to_result.health = static_cast<rdc_health_result_t>(result.health());
 
-    //set error
+    // set error
     to_result.error.code = result.error().code();
     strncpy_with_null(to_result.error.msg, result.error().msg().c_str(), MAX_HEALTH_MSG_LENGTH);
   }

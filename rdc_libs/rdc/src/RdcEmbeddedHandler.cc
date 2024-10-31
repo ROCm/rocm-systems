@@ -30,6 +30,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/RdcNotification.h"
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
+#include "rdc_lib/impl/RdcConfigSettingsImpl.h"
 #include "rdc_lib/impl/RdcGroupSettingsImpl.h"
 #include "rdc_lib/impl/RdcMetricFetcherImpl.h"
 #include "rdc_lib/impl/RdcMetricsUpdaterImpl.h"
@@ -80,10 +81,12 @@ RdcEmbeddedHandler::RdcEmbeddedHandler(rdc_operation_mode_t mode)
       metric_fetcher_(new RdcMetricFetcherImpl()),
       rdc_module_mgr_(new RdcModuleMgrImpl(metric_fetcher_)),
       rdc_notif_(new RdcNotificationImpl()),
-      watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, metric_fetcher_, rdc_module_mgr_, rdc_notif_)),
+      watch_table_(new RdcWatchTableImpl(group_settings_, cache_mgr_, metric_fetcher_,
+                                         rdc_module_mgr_, rdc_notif_)),
       metrics_updater_(new RdcMetricsUpdaterImpl(watch_table_, METIC_UPDATE_FREQUENCY)),
-      policy_(new RdcPolicyImpl(group_settings_,metric_fetcher_)),
-      topologylink_(new RdcTopologyLinkImpl(group_settings_, metric_fetcher_)) {
+      policy_(new RdcPolicyImpl(group_settings_, metric_fetcher_)),
+      topologylink_(new RdcTopologyLinkImpl(group_settings_, metric_fetcher_)),
+      config_handler_(new RdcConfigSettingsImpl(group_settings_)) {
   if (mode == RDC_OPERATION_MODE_AUTO) {
     RDC_LOG(RDC_DEBUG, "Run RDC with RDC_OPERATION_MODE_AUTO");
     metrics_updater_->start();
@@ -199,7 +202,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_attributes(uint32_t gpu_index,
   return status;
 }
 
-rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
+rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(
+    rdc_component_t component, rdc_component_version_t* p_rdc_compv) {
   if (!p_rdc_compv) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -211,7 +215,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_get_component_version(rdc_component_
     ret = amdsmi_get_lib_version(&ver);
 
     if (ret != AMDSMI_STATUS_SUCCESS) {
-      RDC_LOG(RDC_ERROR, "Failed to obtain the version of the server's amd-smi library. reason: " << (ret == AMDSMI_STATUS_INVAL ? "Invalid parameters" : "unknown"));
+      RDC_LOG(RDC_ERROR, "Failed to obtain the version of the server's amd-smi library. reason: "
+                             << (ret == AMDSMI_STATUS_INVAL ? "Invalid parameters" : "unknown"));
       return RDC_ST_MSI_ERROR;
     }
 
@@ -383,7 +388,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_unwatch(rdc_gpu_group_t group_id,
 rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
                                                     rdc_diag_level_t level, const char* config,
                                                     size_t config_size,
-                                                    rdc_diag_response_t* response, rdc_diag_callback_t* callback) {
+                                                    rdc_diag_response_t* response,
+                                                    rdc_diag_callback_t* callback) {
   if (!response) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -400,7 +406,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_diagnostic_run(rdc_gpu_group_t group_id,
 rdc_status_t RdcEmbeddedHandler::rdc_test_case_run(rdc_gpu_group_t group_id,
                                                    rdc_diag_test_cases_t test_case,
                                                    const char* config, size_t config_size,
-                                                   rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) {
+                                                   rdc_diag_test_result_t* result,
+                                                   rdc_diag_callback_t* callback) {
   if (!result) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -428,7 +435,8 @@ rdc_status_t RdcEmbeddedHandler::rdc_field_update_all(uint32_t wait_for_update) 
 
 // It is just a client interface under the GRPC framework and is not used as an RDC API.
 // Just write an empty function to solve compilation errors
-rdc_status_t RdcEmbeddedHandler::get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
+rdc_status_t RdcEmbeddedHandler::get_mixed_component_version(
+    mixed_component_t component, mixed_component_version_t* p_mixed_compv) {
   (void)(component);
   (void)(p_mixed_compv);
   return RDC_ST_OK;
@@ -463,8 +471,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_policy_unregister(rdc_gpu_group_t group_id)
 }
 
 // Health API
-rdc_status_t RdcEmbeddedHandler::rdc_health_set(rdc_gpu_group_t group_id,
-                                                unsigned int components) {
+rdc_status_t RdcEmbeddedHandler::rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) {
   if (0 == components) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -473,7 +480,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_health_set(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_health_get(rdc_gpu_group_t group_id,
-                                                unsigned int *components) {
+                                                unsigned int* components) {
   if (components == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -482,7 +489,7 @@ rdc_status_t RdcEmbeddedHandler::rdc_health_get(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_health_check(rdc_gpu_group_t group_id,
-                                                  rdc_health_response_t *response) {
+                                                  rdc_health_response_t* response) {
   if (response == nullptr) {
     return RDC_ST_BAD_PARAMETER;
   }
@@ -491,7 +498,6 @@ rdc_status_t RdcEmbeddedHandler::rdc_health_check(rdc_gpu_group_t group_id,
 }
 
 rdc_status_t RdcEmbeddedHandler::rdc_health_clear(rdc_gpu_group_t group_id) {
-
   return watch_table_->rdc_health_clear(group_id);
 }
 
@@ -502,6 +508,23 @@ rdc_status_t RdcEmbeddedHandler::rdc_device_topology_get(uint32_t gpu_index,
 
 rdc_status_t RdcEmbeddedHandler::rdc_link_status_get(rdc_link_status_t* results) {
   return topologylink_->rdc_link_status_get(results);
+}
+
+// Set one configure
+rdc_status_t RdcEmbeddedHandler::rdc_config_set(rdc_gpu_group_t group_id,
+                                                rdc_config_setting_t setting) {
+  return config_handler_->rdc_config_set(group_id, setting);
+}
+
+// Get the setting
+rdc_status_t RdcEmbeddedHandler::rdc_config_get(rdc_gpu_group_t group_id,
+                                                rdc_config_setting_list_t* settings) {
+  return config_handler_->rdc_config_get(group_id, settings);
+}
+
+// Clear the setting
+rdc_status_t RdcEmbeddedHandler::rdc_config_clear(rdc_gpu_group_t group_id) {
+  return config_handler_->rdc_config_clear(group_id);
 }
 
 }  // namespace rdc

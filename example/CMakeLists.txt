@@ -126,6 +126,12 @@ set(HEALTH_EXAMPLE_EXE "health")
 add_executable(${HEALTH_EXAMPLE_EXE} "${HEALTH_EXAMPLE_SRC_LIST}")
 target_link_libraries(${HEALTH_EXAMPLE_EXE} pthread dl rdc_bootstrap)
 
+set(CONFIG_EXAMPLE_SRC_LIST "config_example.cc")
+cmake_print_variables(CONFIG_EXAMPLE_SRC_LIST)
+set(CONFIG_EXAMPLE_EXE "config")
+add_executable(${CONFIG_EXAMPLE_EXE} "${CONFIG_EXAMPLE_SRC_LIST}")
+target_link_libraries(${CONFIG_EXAMPLE_EXE} pthread dl rdc_bootstrap)
+
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")
 message("                    Finished Cmake Example                          ")
 message("&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&&")

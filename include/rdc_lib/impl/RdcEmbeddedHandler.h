@@ -25,6 +25,7 @@ THE SOFTWARE.
 #include <future>  // NOLINT(build/c++11)
 
 #include "rdc_lib/RdcCacheManager.h"
+#include "rdc_lib/RdcConfigSettings.h"
 #include "rdc_lib/RdcGroupSettings.h"
 #include "rdc_lib/RdcHandler.h"
 #include "rdc_lib/RdcMetricFetcher.h"
@@ -86,17 +87,20 @@ class RdcEmbeddedHandler final : public RdcHandler {
   // Diagnostic API
   rdc_status_t rdc_diagnostic_run(rdc_gpu_group_t group_id, rdc_diag_level_t level,
                                   const char* config, size_t config_size,
-                                  rdc_diag_response_t* response, rdc_diag_callback_t* callback) override;
+                                  rdc_diag_response_t* response,
+                                  rdc_diag_callback_t* callback) override;
   rdc_status_t rdc_test_case_run(rdc_gpu_group_t group_id, rdc_diag_test_cases_t test_case,
                                  const char* config, size_t config_size,
-                                 rdc_diag_test_result_t* result, rdc_diag_callback_t* callback) override;
+                                 rdc_diag_test_result_t* result,
+                                 rdc_diag_callback_t* callback) override;
 
   // Control API
   rdc_status_t rdc_field_update_all(uint32_t wait_for_update) override;
 
   // It is just a client interface under the GRPC framework and is not used as an RDC API.
   // Pure virtual functions need to be overridden.
-  rdc_status_t get_mixed_component_version(mixed_component_t component, mixed_component_version_t* p_mixed_compv) override;
+  rdc_status_t get_mixed_component_version(mixed_component_t component,
+                                           mixed_component_version_t* p_mixed_compv) override;
   // Policy API
   rdc_status_t rdc_policy_set(rdc_gpu_group_t group_id, rdc_policy_t policy) override;
 
@@ -106,18 +110,29 @@ class RdcEmbeddedHandler final : public RdcHandler {
   rdc_status_t rdc_policy_delete(rdc_gpu_group_t group_id,
                                  rdc_policy_condition_type_t condition_type) override;
 
-  rdc_status_t rdc_policy_register(rdc_gpu_group_t group_id, rdc_policy_register_callback callback) override;
+  rdc_status_t rdc_policy_register(rdc_gpu_group_t group_id,
+                                   rdc_policy_register_callback callback) override;
 
   rdc_status_t rdc_policy_unregister(rdc_gpu_group_t group_id) override;
 
   // Health API
   rdc_status_t rdc_health_set(rdc_gpu_group_t group_id, unsigned int components) override;
   rdc_status_t rdc_health_get(rdc_gpu_group_t group_id, unsigned int* components) override;
-  rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t *response) override;
+  rdc_status_t rdc_health_check(rdc_gpu_group_t group_id, rdc_health_response_t* response) override;
   rdc_status_t rdc_health_clear(rdc_gpu_group_t group_id) override;
   rdc_status_t rdc_device_topology_get(uint32_t gpu_index, rdc_device_topology_t* results) override;
   
   rdc_status_t rdc_link_status_get(rdc_link_status_t* results) override;
+
+  // Set one configure
+  rdc_status_t rdc_config_set(rdc_gpu_group_t group_id, rdc_config_setting_t setting) override;
+
+  // Get the setting
+  rdc_status_t rdc_config_get(rdc_gpu_group_t group_id,
+                              rdc_config_setting_list_t* settings) override;
+
+  // Clear the setting
+  rdc_status_t rdc_config_clear(rdc_gpu_group_t group_id) override;
 
   explicit RdcEmbeddedHandler(rdc_operation_mode_t op_mode);
   ~RdcEmbeddedHandler() final;
@@ -132,6 +147,7 @@ class RdcEmbeddedHandler final : public RdcHandler {
   RdcWatchTablePtr watch_table_;
   RdcMetricsUpdaterPtr metrics_updater_;
   RdcPolicyPtr policy_;
+  RdcConfigSettingsPtr config_handler_;
   std::future<void> updater_;
   RdcTopologyLinkPtr topologylink_;
 };
