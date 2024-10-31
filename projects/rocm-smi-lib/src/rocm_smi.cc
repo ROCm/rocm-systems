@@ -1873,7 +1873,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
     return ret;
   }
 
-  int ret_i;
+  rsmi_status_t status;
   amd::smi::DevInfoTypes dev_type;
 
   const auto & clk_type_it = kClkTypeMap.find(clk_type);
@@ -1883,8 +1883,19 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  ret_i = dev->writeDevInfo(dev_type, freq_enable_str);
-  return amd::smi::ErrnoToRsmiStatus(ret_i);
+  status =  amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
+
+  // If an operation is not supported, the dev file, ie /sys/class/drm/card1/device/pp_dpm_pcie
+  // will have read-only perms, and the OS will deny access, before the request hits the driver level
+  if (status == RSMI_STATUS_PERMISSION){
+    bool read_only = false;
+    int perms = amd::smi::isReadOnlyForAll(dev->path(), &read_only);
+    if(read_only){
+      return RSMI_STATUS_NOT_SUPPORTED;
+    }
+  }
+
+  return status;
 
   CATCH
 }

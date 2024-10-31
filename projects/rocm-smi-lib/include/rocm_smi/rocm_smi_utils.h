@@ -82,6 +82,7 @@ int SameFile(const std::string fileA, const std::string fileB);
 bool FileExists(char const *filename);
 std::vector<std::string> globFilesExist(const std::string& filePattern);
 int isRegularFile(std::string fname, bool *is_reg);
+int isReadOnlyForAll(const std::string& fname, bool *is_read_only);
 int ReadSysfsStr(std::string path, std::string *retStr);
 int WriteSysfsStr(std::string path, std::string val);
 bool IsInteger(const std::string & n_str);
