@@ -372,6 +372,11 @@ add_custom_target(
         "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
     )
 
+install(
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT main)
+
 # TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
 if(INSTALL_TESTS)

@@ -8,7 +8,7 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-  
+
 jobs:
   distbuild:
     runs-on: ubuntu-latest
@@ -91,6 +91,7 @@ jobs:
           test -d $INSTALL_DIR/rocprofiler-compute/libexec/rocprofiler-compute/utils
           test -s $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/sample/vcopy.cpp
           test -d $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/modulefiles
+          test -s $INSTALL_DIR/rocprofiler-compute/share/doc/rocprofiler-compute/LICENSE
       - name: Query version (setting PYTHONPATH by hand)
         run: |
           export PYTHONPATH=${INSTALL_DIR}/python-libs:$PYTHONPATH
