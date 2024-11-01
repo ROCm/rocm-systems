@@ -67,9 +67,13 @@ TEST_CASE("Unit___threadfence_system_Positive_Basic_Peer") {
     return;
   }
 
-  int can_access_peer;
+  int can_access_peer = 0;
   HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, 0, 1));
-  REQUIRE(can_access_peer);
+  if (!can_access_peer) {
+    std::string msg = "Skipped as peer access cannot be enabled between devices";
+    HipTest::HIP_SKIP_TEST(msg.c_str());
+    return;
+  }
 
   HIP_CHECK(hipSetDevice(0));
 
