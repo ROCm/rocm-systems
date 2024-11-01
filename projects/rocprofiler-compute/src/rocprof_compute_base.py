@@ -40,7 +40,11 @@ from utils.utils import (
     console_error,
     set_locale_encoding,
 )
-from utils.logger import setup_console_handler, setup_logging_priority, setup_file_handler
+from utils.logger import (
+    setup_console_handler,
+    setup_logging_priority,
+    setup_file_handler,
+)
 from argparser import omniarg_parser
 import config
 import pandas as pd
@@ -62,7 +66,7 @@ MI300_CHIP_IDS = {
 }
 
 
-class Omniperf:
+class RocProfCompute:
     def __init__(self):
         self.__args = None
         self.__profiler_mode = None
@@ -98,12 +102,12 @@ class Omniperf:
     def print_graphic(self):
         """Log program name as ascii art to terminal."""
         ascii_art = r"""
-  ___                  _                  __ 
- / _ \ _ __ ___  _ __ (_)_ __   ___ _ __ / _|
-| | | | '_ ` _ \| '_ \| | '_ \ / _ \ '__| |_ 
-| |_| | | | | | | | | | | |_) |  __/ |  |  _|
- \___/|_| |_| |_|_| |_|_| .__/ \___|_|  |_|  
-                        |_|                  
+                                 __                                       _
+ _ __ ___   ___ _ __  _ __ ___  / _|       ___ ___  _ __ ___  _ __  _   _| |_ ___
+| '__/ _ \ / __| '_ \| '__/ _ \| |_ _____ / __/ _ \| '_ ` _ \| '_ \| | | | __/ _ \
+| | | (_) | (__| |_) | | | (_) |  _|_____| (_| (_) | | | | | | |_) | |_| | ||  __/
+|_|  \___/ \___| .__/|_|  \___/|_|        \___\___/|_| |_| |_| .__/ \__,_|\__\___|
+               |_|                                           |_|                  
 """
         print(ascii_art)
 
@@ -111,7 +115,7 @@ class Omniperf:
         return self.__mode
 
     def set_version(self):
-        vData = get_version(config.omniperf_home)
+        vData = get_version(config.rocprof_compute_home)
         self.__version["ver"] = vData["version"]
         self.__version["ver_pretty"] = get_version_display(
             vData["version"], vData["sha"], vData["mode"]
@@ -137,7 +141,7 @@ class Omniperf:
             else:
                 console_error(
                     "Incompatible profiler: %s. Supported profilers include: %s"
-                    % (rocprof_cmd, get_submodules("omniperf_profile"))
+                    % (rocprof_cmd, get_submodules("rocprof_compute_profile"))
                 )
         return
 
@@ -150,7 +154,7 @@ class Omniperf:
 
     @demarcate
     def load_soc_specs(self, sysinfo: dict = None):
-        """Load OmniSoC instance for Omniperf run"""
+        """Load OmniSoC instance for RocProfCompute run"""
         self.__mspec = generate_machine_specs(self.__args, sysinfo)
         if self.__args.specs:
             print(self.__mspec)
@@ -162,22 +166,22 @@ class Omniperf:
         if arch not in self.__supported_archs.keys():
             console_error("%s is an unsupported SoC" % arch)
 
-        soc_module = importlib.import_module("omniperf_soc.soc_" + arch)
+        soc_module = importlib.import_module("rocprof_compute_soc.soc_" + arch)
         soc_class = getattr(soc_module, arch + "_soc")
         self.__soc[arch] = soc_class(self.__args, self.__mspec)
         return
 
     def parse_args(self):
         parser = argparse.ArgumentParser(
-            description="Command line interface for AMD's GPU profiler, Omniperf",
+            description="Command line interface for AMD's GPU profiler, ROCm Compute Profiler",
             prog="tool",
             formatter_class=lambda prog: argparse.RawTextHelpFormatter(
                 prog, max_help_position=30
             ),
-            usage="omniperf [mode] [options]",
+            usage="rocprof-compute [mode] [options]",
         )
         omniarg_parser(
-            parser, config.omniperf_home, self.__supported_archs, self.__version
+            parser, config.rocprof_compute_home, self.__supported_archs, self.__version
         )
         self.__args = parser.parse_args()
 
@@ -186,7 +190,9 @@ class Omniperf:
                 print(generate_machine_specs(self.__args))
                 sys.exit(0)
             parser.print_help(sys.stderr)
-            console_error("Omniperf requires you pass a valid mode. Detected None.")
+            console_error(
+                "rocprof-compute requires you pass a valid mode. Detected None."
+            )
         return
 
     @demarcate
@@ -202,19 +208,19 @@ class Omniperf:
 
         # instantiate desired profiler
         if self.__profiler_mode == "rocprofv1":
-            from omniperf_profile.profiler_rocprof_v1 import rocprof_v1_profiler
+            from rocprof_compute_profile.profiler_rocprof_v1 import rocprof_v1_profiler
 
             profiler = rocprof_v1_profiler(
                 self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch]
             )
         elif self.__profiler_mode == "rocprofv2":
-            from omniperf_profile.profiler_rocprof_v2 import rocprof_v2_profiler
+            from rocprof_compute_profile.profiler_rocprof_v2 import rocprof_v2_profiler
 
             profiler = rocprof_v2_profiler(
                 self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch]
             )
         elif self.__profiler_mode == "rocscope":
-            from omniperf_profile.profiler_rocscope import rocscope_profiler
+            from rocprof_compute_profile.profiler_rocscope import rocscope_profiler
 
             profiler = rocscope_profiler(
                 self.__args, self.__profiler_mode, self.__soc[self.__mspec.gpu_arch]
@@ -262,11 +268,11 @@ class Omniperf:
         console_log("Analysis mode = %s" % self.__analyze_mode)
 
         if self.__analyze_mode == "cli":
-            from omniperf_analyze.analysis_cli import cli_analysis
+            from rocprof_compute_analyze.analysis_cli import cli_analysis
 
             analyzer = cli_analysis(self.__args, self.__supported_archs)
         elif self.__analyze_mode == "web_ui":
-            from omniperf_analyze.analysis_webui import webui_analysis
+            from rocprof_compute_analyze.analysis_webui import webui_analysis
 
             analyzer = webui_analysis(self.__args, self.__supported_archs)
         else:

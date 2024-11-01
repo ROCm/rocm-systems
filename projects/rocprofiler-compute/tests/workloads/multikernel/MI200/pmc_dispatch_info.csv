@@ -1,8 +1,0 @@
-Dispatch_ID,Kernel_Name,GPU_ID
-0,__amd_rocclr_fillBufferAligned.kd,2
-1,"global_write(int*, int) [clone .kd]",2
-2,"generic_write(int*, int, int) [clone .kd]",2
-3,"global_read(int*, int) [clone .kd]",2
-4,"generic_read(int*, int, int) [clone .kd]",2
-5,"global_atomic(int*, int) [clone .kd]",2
-6,"generic_atomic(int*, int, int) [clone .kd]",2

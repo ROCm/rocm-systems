@@ -23,16 +23,12 @@
 ##############################################################################el
 
 import os
-import shlex
-from omniperf_profile.profiler_base import OmniProfiler_Base
-from utils.utils import (
-    demarcate,
-    console_log,
-    replace_timestamps,
-)
+
+from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from utils.utils import demarcate, replace_timestamps, console_log
 
 
-class rocprof_v2_profiler(OmniProfiler_Base):
+class rocprof_v1_profiler(RocProfCompute_Base):
     def __init__(self, profiling_args, profiler_mode, soc):
         super().__init__(profiling_args, profiler_mode, soc)
         self.ready_to_profile = (
@@ -43,13 +39,17 @@ class rocprof_v2_profiler(OmniProfiler_Base):
 
     def get_profiler_options(self, fname):
         fbase = os.path.splitext(os.path.basename(fname))[0]
-        app_cmd = shlex.split(self.get_args().remaining)
+        app_cmd = self.get_args().remaining
         args = [
-            # v2 requires output directory argument
-            "-d",
-            self.get_args().path + "/" + "out",
+            # v1 requires request for timestamps
+            "--timestamp",
+            "on",
+            # v1 requires csv extension
+            "-o",
+            self.get_args().path + "/" + fbase + ".csv",
+            # v1 does require quotes on app cmd
+            '"' + app_cmd + '"',
         ]
-        args.extend(app_cmd)
         return args
 
     # -----------------------
@@ -61,7 +61,7 @@ class rocprof_v2_profiler(OmniProfiler_Base):
         super().pre_processing()
 
     @demarcate
-    def run_profiling(self, version, prog):
+    def run_profiling(self, version: str, prog: str):
         """Run profiling."""
         if self.ready_to_profile:
             if self.get_args().roof_only:

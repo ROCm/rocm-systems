@@ -45,13 +45,13 @@ import config
 import pandas as pd
 
 
-class OmniProfiler_Base:
+class RocProfCompute_Base:
     def __init__(self, args, profiler_mode, soc):
         self.__args = args
         self.__profiler = profiler_mode
         self._soc = soc  # OmniSoC obj
         self.__perfmon_dir = os.path.join(
-            str(config.omniperf_home), "omniperf_soc", "profile_configs"
+            str(config.rocprof_compute_home), "rocprof_compute_soc", "profile_configs"
         )
 
     def get_args(self):
@@ -220,7 +220,7 @@ class OmniProfiler_Base:
         df["End_Timestamp"] = endNs
         # finally, join the drop key
         df = df.drop(columns=["key"])
-        # save to file and delete old file(s), skip if we're being called outside of Omniperf
+        # save to file and delete old file(s), skip if we're being called outside of rocprof-compute
         if type(self.__args.path) == str:
             df.to_csv(out, index=False)
             if not self.__args.verbose:
@@ -266,7 +266,7 @@ class OmniProfiler_Base:
             self.__args.remaining = " ".join(self.__args.remaining)
         else:
             console_error(
-                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. omniperf profile -n vcopy -- ./vcopy -n 1048576 -b 256"
+                "Profiling command required. Pass application executable after -- at the end of options.\n\t\ti.e. rocprof-compute profile -n vcopy -- ./vcopy -n 1048576 -b 256"
             )
 
         # verify name meets MongoDB length requirements and no illegal chars
@@ -375,7 +375,8 @@ class OmniProfiler_Base:
     def post_processing(self):
         """Perform any post-processing steps prior to profiling."""
         console_debug(
-            "profiling", "performing post-processing using %s profiler" % self.__profiler
+            "profiling",
+            "performing post-processing using %s profiler" % self.__profiler,
         )
 
         gen_sysinfo(

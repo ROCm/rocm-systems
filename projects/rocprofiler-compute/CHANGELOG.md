@@ -1,6 +1,6 @@
-# Changelog for Omniperf
+# Changelog for ROCm Compute Profiler
 
-Full documentation for Omniperf is available at [https://rocm.docs.amd.com/projects/omniperf/en/latest/](https://rocm.docs.amd.com/projects/omniperf/en/latest/).
+Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
 ## Omniperf 2.1.0 for ROCm 6.2.2
 

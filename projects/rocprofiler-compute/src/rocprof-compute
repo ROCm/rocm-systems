@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-"""Main entry point for omniperf"""
+"""Main entry point for rocprof-compute"""
 
 ##############################################################################bl
 # MIT License
@@ -34,7 +34,7 @@ import re
 try:
     from pathlib import Path
     from importlib import metadata
-    from omniperf_base import Omniperf
+    from rocprof_compute_base import RocProfCompute
     from utils.utils import console_error
 except ImportError as e:
     # print("Failed to import required modules: " + str(e))
@@ -61,12 +61,12 @@ def verify_deps_version(localVer, desiredVer, operator):
 def verify_deps():
     """Utility to read library dependencies from requirements.txt and endeavor
     to load them within current execution environment.
-    Used in top-level omniperf to provide error messages if necessary
+    Used in top-level rocprofiler-compute to provide error messages if necessary
     dependencies are not available."""
 
     # Check which version of python is being used
     if sys.version_info[0] < 3 or (sys.version_info[0] == 3 and sys.version_info[1] < 8):
-        print("[ERROR] Python 3.8 or higher is required to run omniperf."
+        print("[ERROR] Python 3.8 or higher is required to run rocprofiler-compute."
               f" The current version is {sys.version_info[0]}.{sys.version_info[1]}.")
         sys.exit(1)
 
@@ -108,7 +108,7 @@ def verify_deps():
                         ):
                             print(
                                 f"[ERROR] the '{dependency}' distribution does "
-                                "not meet version requirements to use omniperf."
+                                "not meet version requirements to use rocprofiler-compute."
                             )
                             print("  --> version installed :", localVersion)
                             error = True
@@ -119,7 +119,7 @@ def verify_deps():
                     "Please verify all of the python dependencies called out "
                     "in the requirements file"
                 )
-                print("are installed locally prior to running omniperf.")
+                print("are installed locally prior to running rocprofiler-compute.")
                 print("")
                 print(f"See: {checkFile}")
                 sys.exit(1)
@@ -132,17 +132,17 @@ def main():
     # verify required python dependencies
     verify_deps()
 
-    omniperf = Omniperf()
+    rocprof_compute = RocProfCompute()
 
-    mode = omniperf.get_mode()
+    mode = rocprof_compute.get_mode()
 
-    # major omniperf execution modes
+    # major rocprofiler-compute execution modes
     if mode == "profile":
-        omniperf.run_profiler()
+        rocprof_compute.run_profiler()
     elif mode == "database":
-        omniperf.update_db()
+        rocprof_compute.update_db()
     elif mode == "analyze":
-        omniperf.run_analysis()
+        rocprof_compute.run_analysis()
     else:
         console_error("Unsupported execution mode")
 

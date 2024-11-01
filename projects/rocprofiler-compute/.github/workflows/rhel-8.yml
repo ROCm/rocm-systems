@@ -42,7 +42,7 @@ jobs:
         run: |
           mkdir build
           cd build
-          cmake -DCMAKE_INSTALL_PREFIX=/opt/omniperf -DPYTEST_NUMPROCS=4 ..
+          cmake -DCMAKE_INSTALL_PREFIX=/opt/rocprofiler-compute -DPYTEST_NUMPROCS=4 ..
           make install
       - name: CTest- Analyze Commands
         run: |

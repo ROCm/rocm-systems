@@ -24,18 +24,18 @@
 
 import os
 import config
-from omniperf_soc.soc_base import OmniSoC_Base
+from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.utils import demarcate, console_error
 
 
-class gfx908_soc(OmniSoC_Base):
+class gfx906_soc(OmniSoC_Base):
     def __init__(self, args, mspec):
         super().__init__(args, mspec)
-        self.set_arch("gfx908")
+        self.set_arch("gfx906")
         self.set_perfmon_dir(
             os.path.join(
-                str(config.omniperf_home),
-                "omniperf_soc",
+                str(config.rocprof_compute_home),
+                "rocprof_compute_soc",
                 "profile_configs",
                 self.get_arch(),
             )
@@ -54,24 +54,14 @@ class gfx908_soc(OmniSoC_Base):
                 "SPI": 2,
                 "GRBM": 2,
                 "GDS": 4,
-                "TCC_channels": 32,
+                "TCC_channels": 16,
             }
         )
 
         # Set arch specific specs
-        self._mspec._l2_banks = 32
+        self._mspec._l2_banks = 16
         self._mspec.lds_banks_per_cu = 32
         self._mspec.pipes_per_gpu = 4
-        # --showmclkrange is broken in Mi100, hardcode freq
-        if self._mspec.gpu_model == "MI100":
-            if self._mspec.max_mclk == None or self._mspec.cur_mclk == None:
-                self._mspec.max_mclk = 1200
-                self._mspec.cur_mclk = 1200
-
-    @demarcate
-    def get_profiler_options(self):
-        # Mi100 requires a custom xml config
-        return ["-m", self.get_workload_perfmon_dir() + "/" + "metrics.xml"]
 
     # -----------------------
     # Required child methods
@@ -83,7 +73,7 @@ class gfx908_soc(OmniSoC_Base):
         if self.get_args().roof_only:
             console_error("%s does not support roofline analysis" % self.get_arch())
         # Perfmon filtering
-        self.perfmon_filter(self.get_args().roof_only)
+        self.perfmon_filter()
 
     @demarcate
     def post_profiling(self):

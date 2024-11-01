@@ -12733,8 +12733,8 @@
       {
         "current": {
           "selected": true,
-          "text": "omniperf_asw_mix_mi200",
-          "value": "omniperf_asw_mix_mi200"
+          "text": "rocprofiler-compute_asw_mix_mi200",
+          "value": "rocprofiler-compute_asw_mix_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -13318,7 +13318,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Omniperf_v1.0.7_pub",
+  "title": "rocprofiler-compute_v1.0.7_pub",
   "uid": "MIPerf_v1_0_06302022112",
   "version": 2,
   "weekStart": ""

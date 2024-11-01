@@ -22,13 +22,35 @@
 # SOFTWARE.
 ##############################################################################el
 
-from omniperf_profile.profiler_base import OmniProfiler_Base
-from utils.utils import demarcate, console_log
+import os
+import shlex
+from rocprof_compute_profile.profiler_base import RocProfCompute_Base
+from utils.utils import (
+    demarcate,
+    console_log,
+    replace_timestamps,
+)
 
 
-class rocscope_profiler(OmniProfiler_Base):
+class rocprof_v2_profiler(RocProfCompute_Base):
     def __init__(self, profiling_args, profiler_mode, soc):
         super().__init__(profiling_args, profiler_mode, soc)
+        self.ready_to_profile = (
+            self.get_args().roof_only
+            and not os.path.isfile(os.path.join(self.get_args().path, "pmc_perf.csv"))
+            or not self.get_args().roof_only
+        )
+
+    def get_profiler_options(self, fname):
+        fbase = os.path.splitext(os.path.basename(fname))[0]
+        app_cmd = shlex.split(self.get_args().remaining)
+        args = [
+            # v2 requires output directory argument
+            "-d",
+            self.get_args().path + "/" + "out",
+        ]
+        args.extend(app_cmd)
+        return args
 
     # -----------------------
     # Required child methods
@@ -36,22 +58,28 @@ class rocscope_profiler(OmniProfiler_Base):
     @demarcate
     def pre_processing(self):
         """Perform any pre-processing steps prior to profiling."""
-        self.__profiler = "rocscope"
-        console_log("profiling", "pre-processing using %s profiler" % self.__profiler)
-        # TODO: Finish implementation
+        super().pre_processing()
 
     @demarcate
     def run_profiling(self, version, prog):
         """Run profiling."""
-        console_log(
-            "profiling", "performing profiling using %s profiler" % self.__profiler
-        )
-        # TODO: Finish implementation
+        if self.ready_to_profile:
+            if self.get_args().roof_only:
+                console_log(
+                    "roofline", "Generating pmc_perf.csv (roofline counters only)."
+                )
+            # Log profiling options and setup filtering
+            super().run_profiling(version, prog)
+        else:
+            console_log("roofline", "Detected existing pmc_perf.csv")
 
     @demarcate
     def post_processing(self):
         """Perform any post-processing steps prior to profiling."""
-        console_log(
-            "profiling", "performing post-processing using %s profiler" % self.__profiler
-        )
-        # TODO: Finish implementation
+        super().post_processing()
+
+        if self.ready_to_profile:
+            # Manually join each pmc_perf*.csv output
+            self.join_prof()
+            # Replace timestamp data to solve a known rocprof bug
+            replace_timestamps(self.get_args().path)

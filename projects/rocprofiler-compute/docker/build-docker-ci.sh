@@ -137,7 +137,7 @@ do
     verbose-run docker build . \
         ${PULL} \
         -f ${DOCKER_FILE} \
-        --tag ${USER}/omniperf:ci-base-${DISTRO}-${VERSION} \
+        --tag ${USER}/rocprofiler-compute:ci-base-${DISTRO}-${VERSION} \
         --build-arg DISTRO=${DISTRO_IMAGE} \
         --build-arg VERSION=${VERSION} \
         --build-arg PYTHON_VERSIONS=\"${PYTHON_VERSIONS}\"
@@ -149,6 +149,6 @@ done
 if [ "${PUSH}" -gt 0 ]; then
     for VERSION in ${VERSIONS}
     do
-        verbose-run docker push ${USER}/omniperf:ci-base-${DISTRO}-${VERSION}
+        verbose-run docker push ${USER}/rocprofiler-compute:ci-base-${DISTRO}-${VERSION}
     done
 fi

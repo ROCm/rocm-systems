@@ -33,8 +33,8 @@ from utils.utils import demarcate, console_debug, console_log, console_error
 from pathlib import Path
 from collections import OrderedDict
 
-from omniperf_base import SUPPORTED_ARCHS
-from omniperf_base import MI300_CHIP_IDS
+from rocprof_compute_base import SUPPORTED_ARCHS
+from rocprof_compute_base import MI300_CHIP_IDS
 
 
 class OmniSoC_Base:

@@ -27,11 +27,11 @@ if __name__ == "__main__":
                     + arch
                     + "():"
                     + "\n\twith pytest.raises(SystemExit) as e:"
-                    + "\n\t\twith patch('sys.argv',['omniperf', 'analyze', '--path', '"
+                    + "\n\t\twith patch('sys.argv',['rocprof-compute', 'analyze', '--path', '"
                     + workload
                     + "/"
                     + arch
-                    + "']):\n\t\t\tomniperf.main()"
+                    + "']):\n\t\t\trocprof_compute.main()"
                     + "\n\tassert e.value.code == 0"
                 )
                 f.write(test)

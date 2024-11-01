@@ -17,7 +17,7 @@ exclude = '''
     | external
     | .pytest_cache
     | build
-    | build-omniperf
+    | build-rocprof_compute
   )/
 )
 '''
@@ -29,9 +29,9 @@ addopts = [
 pythonpath = [
       ".",
       "src",
-      "src/omniperf_soc",
+      "src/rocprof_compute_soc",
       "src/utils",
-      "src/omniperf_analyze/utils",
+      "src/rocprof_compute_analyze/utils",
       "tests"
     ]
 

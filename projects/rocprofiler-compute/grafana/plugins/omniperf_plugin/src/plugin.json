@@ -1,6 +1,6 @@
 {
-	"name": "Omniperf Data",
-	"id": "amd-omniperf-data-plugin",
+	"name": "ROCm Compute Profiler Data",
+	"id": "amd-rocprofiler-compute-data-plugin",
 	"type": "datasource",
 	"backend": true,
 	"partials": {
@@ -9,14 +9,14 @@
 	"metrics": true,
 	"annotations": false,
 	"info": {
-		"description": "An Omniperf datasource build for MongoDB",
+		"description": "An ROCm Compute Profiler datasource build for MongoDB",
 		"author": {
 			"name": "Audacious Software Group",
 			"url": ""
 		},
 		"logos": {
-			"small": "img/omniperf_circle.png",
-			"large": "img/omniperf_circle.png"
+			"small": "img/rocprofiler-compute_circle.png",
+			"large": "img/rocprofiler-compute_circle.png"
 		},
 		"version": "%VERSION%",
 		"updated": "%TODAY%"

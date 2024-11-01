@@ -26,16 +26,16 @@ FROM ubuntu:20.04
 
 USER root
 
-COPY rocm_install.sh /omniperf/rocm_install.sh
+COPY rocm_install.sh /rocprofiler-compute/rocm_install.sh
 
-ENV PATH="/omniperf:${PATH}"
+ENV PATH="/rocprofiler-compute:${PATH}"
 ENV TZ="US/Chicago"
 ENV DEBIAN_FRONTEND noninteractive
 
 #pyenv dependencies
 RUN apt update && \
 	apt-get install -y make build-essential libssl-dev zlib1g-dev libbz2-dev libreadline-dev libsqlite3-dev wget curl llvm libncurses5-dev libncursesw5-dev xz-utils tk-dev libffi-dev liblzma-dev python-openssl
-ENV HOME="/omniperf"
+ENV HOME="/rocprofiler-compute"
 WORKDIR $HOME
 ENV  PYENV_ROOT="$HOME/.pyenv"
 ENV PATH="$PYENV_ROOT/bin:$PATH"

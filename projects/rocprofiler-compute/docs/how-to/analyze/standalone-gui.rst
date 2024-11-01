@@ -47,7 +47,7 @@ desired analysis command. For example:
    [analysis] deriving Omniperf metrics...
    Dash is running on http://0.0.0.0:8050/
 
-    * Serving Flask app 'omniperf_analyze.analysis_webui' (lazy loading)
+    * Serving Flask app 'rocprof_compute_analyze.analysis_webui' (lazy loading)
     * Environment: production
       WARNING: This is a development server. Do not use it in a production deployment.
       Use a production WSGI server instead.

@@ -24,20 +24,20 @@
 
 import os
 import config
-from omniperf_soc.soc_base import OmniSoC_Base
+from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.utils import demarcate, mibench, console_log, console_error
 from roofline import Roofline
 
 
-class gfx940_soc(OmniSoC_Base):
+class gfx941_soc(OmniSoC_Base):
     def __init__(self, args, mspec):
         super().__init__(args, mspec)
-        self.set_arch("gfx940")
+        self.set_arch("gfx941")
         if hasattr(self.get_args(), "roof_only") and self.get_args().roof_only:
             self.set_perfmon_dir(
                 os.path.join(
-                    str(config.omniperf_home),
-                    "omniperf_soc",
+                    str(config.rocprof_compute_home),
+                    "rocprof_compute_soc",
                     "profile_configs",
                     "gfx940",
                     "roofline",
@@ -47,7 +47,10 @@ class gfx940_soc(OmniSoC_Base):
             # NB: We're using generalized Mi300 perfmon configs
             self.set_perfmon_dir(
                 os.path.join(
-                    str(config.omniperf_home), "omniperf_soc", "profile_configs", "gfx940"
+                    str(config.rocprof_compute_home),
+                    "rocprof_compute_soc",
+                    "profile_configs",
+                    "gfx940",
                 )
             )
         self.set_compatible_profilers(["rocprofv1", "rocprofv2"])

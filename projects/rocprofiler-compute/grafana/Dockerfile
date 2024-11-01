@@ -1,6 +1,6 @@
 # -----------------------------------------------------------------------
 # NOTE:
-# Dependencies are not included as part of Omniperf.
+# Dependencies are not included as part of ROCm Compute Profiler.
 # It's the user's responsibility to accept any licensing implications 
 # before building the project
 # -----------------------------------------------------------------------
@@ -15,7 +15,7 @@ ENV TZ "US/Chicago"
 ENV NVM_DIR /usr/local/nvm
 ENV NODE_VERSION 20.12.2
 
-ADD plugins/omniperf_plugin /var/lib/grafana/plugins/omniperf_plugin
+ADD plugins/rocprofiler-compute_plugin /var/lib/grafana/plugins/rocprofiler-compute_plugin
 
 # Install Grafana and MongoDB Community Edition
 # Note: Grafana install is stubbed to 10.4.3
@@ -50,7 +50,7 @@ RUN apt-get install -y tzdata systemd apt-utils npm vim net-tools && \
     /usr/sbin/grafana-cli plugins install grafana-image-renderer && \
     /usr/sbin/grafana-cli plugins install aceiot-svg-panel && \
     chown root:grafana /etc/grafana && \
-    cd /var/lib/grafana/plugins/omniperf_plugin && \
+    cd /var/lib/grafana/plugins/rocprofiler-compute_plugin && \
     npm install && \
     npm run build && \
     apt-get autoremove -y && \

@@ -1,18 +1,18 @@
 local help_message = [[
 
-Omniperf is an open-source performance analysis tool for profiling
+ROCm Compute Profiler is an open-source performance analysis tool for profiling
 machine learning/HPC workloads running on AMD MI GPUs.
 
-Version @OMNIPERF_FULL_VERSION@
+Version @ROCPROFCOMPUTE_FULL_VERSION@
 ]]
 
 help(help_message,"\n")
 
-whatis("Name: omniperf")
-whatis("Version: @OMNIPERF_FULL_VERSION@")
+whatis("Name: @PROJECT_NAME@")
+whatis("Version: @ROCPROFCOMPUTE_FULL_VERSION@")
 whatis("Keywords: Profiling, Performance, GPU")
 whatis("Description: tool for GPU performance profiling")
-whatis("URL: https://github.com/ROCm/omniperf")
+whatis("URL: https://github.com/ROCm/rocprofiler-compute")
 
 -- Export environmental variables
 local topDir="@CMAKE_INSTALL_PREFIX@"
@@ -20,9 +20,9 @@ local binDir="@CMAKE_INSTALL_FULL_BINDIR@"
 local shareDir="@CMAKE_INSTALL_FULL_DATADIR@"
 local pythonDeps="@PYTHON_DEPS@"
 
-setenv("OMNIPERF_DIR",topDir)
-setenv("OMNIPERF_BIN",binDir)
-setenv("OMNIPERF_SHARE",shareDir)
+setenv("ROCPROFCOMPUTE_DIR",topDir)
+setenv("ROCPROFCOMPUTE_BIN",binDir)
+setenv("ROCPROFCOMPUTE_SHARE",shareDir)
 
 -- Update relevant PATH variables
 prepend_path("PATH",binDir)

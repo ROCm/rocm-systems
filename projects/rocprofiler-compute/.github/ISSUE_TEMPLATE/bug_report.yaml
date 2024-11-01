@@ -38,13 +38,13 @@ body:
       required: true
 
   - type: input
-    id: omniperf-version
+    id: rocprofiler-compute-version
     attributes:
-      label: Omniperf Version
+      label: ROCm Compute Profiler Version
       description: |
-        What version of Omniperf are you using? Hint:
+        What version of ROCm Compute Profiler are you using? Hint:
         ```shell
-        omniperf --version
+        rocprof-compute --version
         ```
       placeholder: e.g. 2.1.0
     validations:
@@ -115,7 +115,7 @@ body:
     id: logs
     attributes:
       label: Relevant log output
-      description: Please copy and paste Omniperf's `log.txt` file. This will be automatically formatted into code, so no need for backticks.
+      description: Please copy and paste rocprofiler-compute's `log.txt` file. This will be automatically formatted into code, so no need for backticks.
       render: shell
 
   - type: textarea

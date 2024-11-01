@@ -58,7 +58,7 @@ VERSION_LOC = [
 
 
 def detect_arch(_rocminfo):
-    from omniperf_base import SUPPORTED_ARCHS
+    from rocprof_compute_base import SUPPORTED_ARCHS
 
     for idx1, linetext in enumerate(_rocminfo):
         gpu_arch = search(r"^\s*Name\s*:\s+ ([a-zA-Z0-9]+)\s*$", linetext)
@@ -91,7 +91,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
             console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
             )
-        version = get_version(config.omniperf_home)["version"]
+        version = get_version(config.rocprof_compute_home)["version"]
         if sysinfo_ver != version[: version.find(".")]:
             console_error(
                 "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
@@ -106,7 +106,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
     hostname = socket.gethostname()
 
     # set specs version
-    vData = get_version(config.omniperf_home)
+    vData = get_version(config.rocprof_compute_home)
     version = vData["version"]
     # NB: Just taking major as specs version. May want to make this more specific in the future
     specs_version = version[
@@ -174,7 +174,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
     )
     # Load above SoC specs via module import
     try:
-        soc_module = importlib.import_module("omniperf_soc.soc_" + specs.gpu_arch)
+        soc_module = importlib.import_module("rocprof_compute_soc.soc_" + specs.gpu_arch)
     except ModuleNotFoundError as e:
         console_error(
             "Arch %s marked as supported, but couldn't find class implementation %s."
@@ -253,7 +253,8 @@ class MachineSpecs:
     ## A. Machine Specs
     ##########################################
     hostname: str = field(
-        default=None, metadata={"doc": "The hostname of the machine.", "name": "Hostname"}
+        default=None,
+        metadata={"doc": "The hostname of the machine.", "name": "Hostname"},
     )
     cpu_model: str = field(
         default=None,
@@ -547,7 +548,7 @@ class MachineSpecs:
         return pd.DataFrame(data, index=[0])
 
     def __repr__(self):
-        topstr = "Machine Specifications: describing the state of the machine that Omniperf data was collected on.\n"
+        topstr = "Machine Specifications: describing the state of the machine that ROCm Compute Profiler data was collected on.\n"
         data = []
         for field in fields(self):
             name = field.name

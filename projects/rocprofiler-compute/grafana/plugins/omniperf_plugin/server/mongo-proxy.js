@@ -398,7 +398,7 @@ function runAggregateQuery( requestId, queryId, body, queryArgs, res, next )
                 results = getTimeseriesResults(docs)
               }
 
-              // This is where omniperf will go for most results
+              // This is where rocprofiler-compute will go for most results
               else
               {
                 results = getTableResults(docs)

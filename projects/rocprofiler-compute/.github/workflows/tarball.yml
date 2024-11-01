@@ -8,7 +8,7 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
-
+  
 jobs:
   distbuild:
     runs-on: ubuntu-latest
@@ -47,7 +47,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: tarball-testing
-          path: build/omniperf-*.tar.gz
+          path: build/rocprofiler-compute-*.tar.gz
           retention-days: 3
   disttest:
     runs-on: ubuntu-latest
@@ -61,47 +61,47 @@ jobs:
         with:
           name: tarball-testing
       - name: Expand
-        run:  tar xfz omniperf-*.tar.gz; rm omniperf-*.tar.gz
+        run:  tar xfz rocprofiler-compute-*.tar.gz; rm rocprofiler-compute-*.tar.gz
       - name: Python dependency installs
         run: |
-          cd omniperf-*
+          cd rocprofiler-compute-*
           python3 -m pip install -t${INSTALL_DIR}/python-libs -r requirements.txt
       - name: Configure
         run:  |
-          cd omniperf-*
+          cd rocprofiler-compute-*
           mkdir build
           cd build
-          cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/omniperf \
+          cmake -DCMAKE_INSTALL_PREFIX=${INSTALL_DIR}/rocprofiler-compute \
             -DPYTHON_DEPS=${INSTALL_DIR}/python-libs ..
       - name: Install
         run:  |
-          cd omniperf-*
+          cd rocprofiler-compute-*
           cd build
           make install
       - name: Verify expected paths
         run: |
           # find $INSTALL_DIR
-          test -d $INSTALL_DIR/omniperf
-          test -x $INSTALL_DIR/omniperf/bin/omniperf
-          test -s $INSTALL_DIR/omniperf/libexec/omniperf/VERSION
-          test -s $INSTALL_DIR/omniperf/libexec/omniperf/VERSION.sha
-          test -d $INSTALL_DIR/omniperf/libexec/omniperf/omniperf_analyze
-          test -d $INSTALL_DIR/omniperf/libexec/omniperf/omniperf_profile
-          test -d $INSTALL_DIR/omniperf/libexec/omniperf/omniperf_soc
-          test -d $INSTALL_DIR/omniperf/libexec/omniperf/utils
-          test -s $INSTALL_DIR/omniperf/share/omniperf/sample/vcopy.cpp
-          test -d $INSTALL_DIR/omniperf/share/omniperf/modulefiles
+          test -d $INSTALL_DIR/rocprofiler-compute
+          test -x $INSTALL_DIR/rocprofiler-compute/bin/rocprof-compute
+          test -s $INSTALL_DIR/rocprofiler-compute/libexec/rocprofiler-compute/VERSION
+          test -s $INSTALL_DIR/rocprofiler-compute/libexec/rocprofiler-compute/VERSION.sha
+          test -d $INSTALL_DIR/rocprofiler-compute/libexec/rocprofiler-compute/rocprof_compute_analyze
+          test -d $INSTALL_DIR/rocprofiler-compute/libexec/rocprofiler-compute/rocprof_compute_profile
+          test -d $INSTALL_DIR/rocprofiler-compute/libexec/rocprofiler-compute/rocprof_compute_soc
+          test -d $INSTALL_DIR/rocprofiler-compute/libexec/rocprofiler-compute/utils
+          test -s $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/sample/vcopy.cpp
+          test -d $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/modulefiles
       - name: Query version (setting PYTHONPATH by hand)
         run: |
           export PYTHONPATH=${INSTALL_DIR}/python-libs:$PYTHONPATH
-          $INSTALL_DIR/omniperf/bin/omniperf --version
+          $INSTALL_DIR/rocprofiler-compute/bin/rocprof-compute --version
       - name: Install Lmod
         run: sudo apt-get install -y lmod
-      - name: Access omniperf using modulefile
+      - name: Access rocprofiler-compute using modulefile
         run: |
           . /etc/profile.d/lmod.sh
-          module use $INSTALL_DIR/omniperf/share/omniperf/modulefiles
-          module load omniperf
+          module use $INSTALL_DIR/rocprofiler-compute/share/rocprofiler-compute/modulefiles
+          module load rocprofiler-compute
           module list
-          omniperf --version
+          rocprof-compute --version
 

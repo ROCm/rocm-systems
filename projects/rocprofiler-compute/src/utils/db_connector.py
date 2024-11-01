@@ -79,7 +79,12 @@ class DatabaseConnector:
             )
 
         self.connection_info["db"] = (
-            "omniperf_" + str(self.args.team) + "_" + str(name) + "_" + str(soc)
+            "rocprofiler-compute_"
+            + str(self.args.team)
+            + "_"
+            + str(name)
+            + "_"
+            + str(soc)
         )
 
     @demarcate
@@ -157,7 +162,7 @@ class DatabaseConnector:
             is_full_workload_name = self.args.workload.count("_") >= 3
             if not is_full_workload_name:
                 console_error(
-                    "-w/--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. omniperf_asw_vcopy_mi200)"
+                    "-w/--workload is not valid. Please use full workload name as seen in GUI when removing (i.e. rocprofiler-compute_asw_vcopy_mi200)"
                 )
             if (
                 self.connection_info["host"] == None
