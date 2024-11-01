@@ -93,7 +93,7 @@ def generate_machine_specs(args, sysinfo: dict = None):
             )
         version = get_version(config.rocprof_compute_home)["version"]
         if sysinfo_ver != version[: version.find(".")]:
-            console_error(
+            console_warning(
                 "Detected mismatch in sysinfo versioning. You need to reprofile to update data."
             )
         return MachineSpecs(**sysinfo)
