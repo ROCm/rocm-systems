@@ -978,21 +978,21 @@ hsa_status_t ComputeQueue::Process(void) {
 }
 
 void SDMAQueue::SdmaThread(SDMAQueue *queue) {
-  // This timing system is used for sleeping this Thread
-  // when one packet is invalid for about 2 seconds.
-  std::chrono::steady_clock::time_point start_time, time;
-  // Set the polling timeout value for 2 seconds
-  const std::chrono::milliseconds kMaxElapsed(2000);
-  bool sleep = false;
-  start_time = std::chrono::steady_clock::now();
 
   while (true) {
-    if (!queue->wptr_queue_.empty()) {
-      std::unique_lock<std::mutex> lock(queue->wptr_queue_lock_);
-      uint64_t start = queue->wptr_queue_.front().first;
-      uint64_t end = queue->wptr_queue_.front().second;
-      queue->wptr_queue_.pop();
-      lock.unlock();
+    decltype(queue->wptr_queue_) pendings;
+    {
+      std::unique_lock<std::mutex> lock(queue->thread_cond_lock_);
+      while (queue->wptr_queue_.empty() && !queue->thread_stop_)
+        queue->thread_cond_.wait(lock);
+
+      if (queue->thread_stop_)
+        break;
+
+      pendings.swap(queue->wptr_queue_);
+    }
+
+    for (const auto [start, end] : pendings) {
       pr_debug("wptr %lx %lx\n", start, end);
 
       SDMA_PKT_POLL_REGMEM* poll_pkt = reinterpret_cast<SDMA_PKT_POLL_REGMEM*>(queue->cmdbuf_addr + queue->WrapIntoRocrRing(start));
@@ -1031,24 +1031,9 @@ void SDMAQueue::SdmaThread(SDMAQueue *queue) {
       queue->PreparePacket(queue->WrapIntoRocrRing(start), end - start);
       std::atomic_thread_fence(std::memory_order_release);
       queue->Submit();
-    } else {
-      time = std::chrono::steady_clock::now();
-      if (time - start_time > kMaxElapsed)
-        sleep = true;
-    }
-
-    std::unique_lock<std::mutex> lock(queue->thread_cond_lock_);
-    if (sleep && queue->wptr_queue_.empty()) {
-      while (!queue->thread_stop_ && queue->wptr_queue_.empty()) {
-        queue->thread_cond_.wait(lock);
-      }
-      if (queue->thread_stop_)
-        break;
-      sleep = false;
-      start_time = std::chrono::steady_clock::now();
     }
   }
-  pr_debug("thread exit\n");
+  pr_debug("sdma thread exit\n");
 }
 
 SDMAQueue::SDMAQueue(WDDMDevice *device,
@@ -1081,12 +1066,12 @@ SDMAQueue::~SDMAQueue() {
 
 void SDMAQueue::RingDoorbell() {
   pr_debug("ringdoorbell %#lx %#lx\n", wptr_pre_, wptr_next_);
+  thread_cond_lock_.lock();
 
-  {
-    std::lock_guard<std::mutex> lock(wptr_queue_lock_);
-    wptr_queue_.emplace(wptr_pre_, wptr_next_);
-  }
+  wptr_queue_.emplace_back(wptr_pre_, wptr_next_);
   thread_cond_.notify_one();
+
+  thread_cond_lock_.unlock();
   wptr_pre_ = wptr_next_;
 }
 
