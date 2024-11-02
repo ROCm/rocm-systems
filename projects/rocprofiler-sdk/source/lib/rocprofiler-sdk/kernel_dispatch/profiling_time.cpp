@@ -21,10 +21,13 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/common/defines.hpp"
+#include "lib/common/environment.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
@@ -36,93 +39,35 @@ namespace rocprofiler
 {
 namespace kernel_dispatch
 {
-namespace
-{
-hsa_amd_profiling_dispatch_time_t&
-operator+=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
-{
-    lhs.start += rhs;
-    lhs.end += rhs;
-    return lhs;
-}
-
-hsa_amd_profiling_dispatch_time_t&
-operator-=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
-{
-    lhs.start -= rhs;
-    lhs.end -= rhs;
-    return lhs;
-}
-
-hsa_amd_profiling_dispatch_time_t&
-operator*=(hsa_amd_profiling_dispatch_time_t& lhs, uint64_t rhs)
-{
-    lhs.start *= rhs;
-    lhs.end *= rhs;
-    return lhs;
-}
-}  // namespace
-
-profiling_time&
-profiling_time::operator+=(uint64_t offset)
-{
-    start += offset;
-    end += offset;
-    return *this;
-}
-
-profiling_time&
-profiling_time::operator-=(uint64_t offset)
-{
-    start -= offset;
-    end -= offset;
-    return *this;
-}
-
-profiling_time&
-profiling_time::operator*=(uint64_t scale)
-{
-    start *= scale;
-    end *= scale;
-    return *this;
-}
-
 profiling_time
 get_dispatch_time(hsa_agent_t             _hsa_agent,
                   hsa_signal_t            _signal,
                   rocprofiler_kernel_id_t _kernel_id,
                   std::optional<uint64_t> _baseline)
 {
-    static auto sysclock_period = hsa::get_hsa_timestamp_period();
-
     auto ts                   = common::timestamp_ns();
     auto dispatch_time        = hsa_amd_profiling_dispatch_time_t{};
     auto dispatch_time_status = hsa::get_amd_ext_table()->hsa_amd_profiling_get_dispatch_time_fn(
         _hsa_agent, _signal, &dispatch_time);
 
-    if(dispatch_time_status == HSA_STATUS_SUCCESS)
+    auto _profile_time =
+        tracing::profiling_time{dispatch_time_status, dispatch_time.start, dispatch_time.end};
+
+    if(_profile_time.status == HSA_STATUS_SUCCESS)
     {
         // if we encounter this in CI, it will cause test to fail
-        ROCP_CI_LOG_IF(ERROR, dispatch_time.end < dispatch_time.start)
+        ROCP_CI_LOG_IF(ERROR, _profile_time.end < _profile_time.start)
             << "hsa_amd_profiling_get_dispatch_time for kernel_id=" << _kernel_id
             << " on rocprofiler_agent="
-            << CHECK_NOTNULL(agent::get_rocprofiler_agent(_hsa_agent))->id.handle
-            << " returned dispatch times where the end time (" << dispatch_time.end
-            << ") was less than the start time (" << dispatch_time.start << ")";
+            << CHECK_NOTNULL(agent::get_rocprofiler_agent(_hsa_agent))->node_id
+            << " returned dispatch times where the end time (" << _profile_time.end
+            << ") was less than the start time (" << _profile_time.start << ")";
 
-        // normalize
-        dispatch_time *= sysclock_period;
-
-        // below is a hack for clock skew issues:
-        // the timestamp of this handler for the kernel dispatch will always be after when the
-        // kernel completed
-        if(ts < dispatch_time.end) dispatch_time -= (dispatch_time.end - ts);
-
-        // below is a hack for clock skew issues:
-        // the timestamp of the packet rewriter for the kernel packet will always be before when the
-        // kernel started
-        if(_baseline && dispatch_time.start < *_baseline)
-            dispatch_time += (*_baseline - dispatch_time.start);
+        _profile_time = tracing::adjust_profiling_time(
+            "dispatch",
+            _profile_time,
+            tracing::profiling_time{
+                HSA_STATUS_SUCCESS, _baseline.value_or(dispatch_time.start), ts});
     }
     else
     {
@@ -133,8 +78,7 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
                            << " :: " << hsa::get_hsa_status_string(dispatch_time_status);
     }
 
-    return profiling_time{
-        .status = dispatch_time_status, .start = dispatch_time.start, .end = dispatch_time.end};
+    return _profile_time;
 }
 }  // namespace kernel_dispatch
 }  // namespace rocprofiler

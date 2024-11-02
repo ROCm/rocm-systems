@@ -23,7 +23,7 @@
 #pragma once
 
 #include "lib/rocprofiler-sdk/hsa/queue_info_session.hpp"
-// #include "lib/rocprofiler-sdk/kernel_dispatch/profiling_time.hpp"
+#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
@@ -45,7 +45,7 @@ using context_t              = context::context;
 using user_data_map_t        = std::unordered_map<const context_t*, rocprofiler_user_data_t>;
 using external_corr_id_map_t = user_data_map_t;
 
-struct profiling_time;
+using profiling_time = tracing::profiling_time;
 
 profiling_time
 get_dispatch_time(const hsa::queue_info_session& session);

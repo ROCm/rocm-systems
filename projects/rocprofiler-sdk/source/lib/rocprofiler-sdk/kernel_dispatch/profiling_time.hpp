@@ -22,6 +22,8 @@
 
 #pragma once
 
+#include "lib/rocprofiler-sdk/tracing/profiling_time.hpp"
+
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 
@@ -34,16 +36,7 @@ namespace rocprofiler
 {
 namespace kernel_dispatch
 {
-struct profiling_time
-{
-    hsa_status_t status = HSA_STATUS_ERROR_INVALID_SIGNAL;
-    uint64_t     start  = 0;
-    uint64_t     end    = 0;
-
-    profiling_time& operator+=(uint64_t offset);
-    profiling_time& operator-=(uint64_t offset);
-    profiling_time& operator*=(uint64_t scale);
-};
+using profiling_time = tracing::profiling_time;
 
 // get the profiling time for a signal on an agent, if start time is less than baseline, correct to
 // start at baseline. If kernel_id is provided, it will be included in error log message if there is

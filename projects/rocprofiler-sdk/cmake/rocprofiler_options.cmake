@@ -38,6 +38,9 @@ rocprofiler_add_option(ROCPROFILER_BUILD_TESTS "Enable building the tests"
                        ${ROCPROFILER_BUILD_CI})
 rocprofiler_add_option(ROCPROFILER_BUILD_SAMPLES "Enable building the code samples"
                        ${ROCPROFILER_BUILD_CI})
+rocprofiler_add_option(
+    ROCPROFILER_BUILD_CI_STRICT_TIMESTAMPS
+    "Disable adjusting for clock skew b/t CPU and GPU timestamps" OFF ADVANCED)
 rocprofiler_add_option(ROCPROFILER_BUILD_CODECOV
                        "Enable building for code coverage analysis" OFF)
 rocprofiler_add_option(ROCPROFILER_BUILD_DOCS

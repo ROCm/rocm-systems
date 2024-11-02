@@ -198,6 +198,11 @@ if(ROCPROFILER_UNSAFE_NO_VERSION_CHECK)
                                            INTERFACE ROCPROFILER_UNSAFE_NO_VERSION_CHECK)
 endif()
 
+if(ROCPROFILER_BUILD_CI_STRICT_TIMESTAMPS)
+    rocprofiler_target_compile_definitions(rocprofiler-sdk-build-flags
+                                           INTERFACE ROCPROFILER_CI_STRICT_TIMESTAMPS)
+endif()
+
 # ----------------------------------------------------------------------------------------#
 # user customization
 #
