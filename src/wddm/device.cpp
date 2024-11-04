@@ -737,14 +737,14 @@ NTSTATUS WDDMGetAdapters(D3DKMT_ADAPTERINFO *&adapters, int &num_adapters)
     }
   }
 
-  delete info;
+  delete[] info;
   return STATUS_SUCCESS;
 
  err_out1:
-  delete adapters;
+  delete[] adapters;
   adapters = NULL;
  err_out0:
-  delete info;
+  delete[] info;
   return ret;
 }
 
