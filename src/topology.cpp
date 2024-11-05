@@ -40,6 +40,7 @@
 #include "libhsakmt.h"
 #include "inc/wddm/types.h"
 #include "inc/wddm/device.h"
+#include "util/utils.h"
 
 /* Number of memory banks added by thunk on top of topology
  * This only includes static heaps like LDS, scratch and SVM,
@@ -1522,7 +1523,7 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
   pthread_mutex_lock(&hsakmt_mutex);
 
   memset(MemoryProperties, 0, NumBanks * sizeof(HsaMemoryProperties));
-  for (i = 0; i < MIN(g_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
+  for (i = 0; i < wsl::Min(g_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
     assert(g_props[NodeId].mem);
     MemoryProperties[i] = g_props[NodeId].mem[i];
   }
@@ -1576,7 +1577,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(
     goto out;
   }
 
-  for (i = 0; i < MIN(g_props[NodeId].node.NumCaches, NumCaches); i++) {
+  for (i = 0; i < wsl::Min(g_props[NodeId].node.NumCaches, NumCaches); i++) {
     assert(g_props[NodeId].cache);
     CacheProperties[i] = g_props[NodeId].cache[i];
   }

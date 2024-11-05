@@ -163,14 +163,6 @@ void topology_setup_is_dgpu_param(HsaNodeProperties *props);
 
 HSAuint32 PageSizeFromFlags(unsigned int pageSizeFlags);
 
-#define MIN(a, b) ({				\
-	typeof(a) tmp1 = (a), tmp2 = (b);	\
-	tmp1 < tmp2 ? tmp1 : tmp2; })
-
-#define MAX(a, b) ({				\
-	typeof(a) tmp1 = (a), tmp2 = (b);	\
-	tmp1 > tmp2 ? tmp1 : tmp2; })
-
 uint32_t get_num_sysfs_nodes(void);
 
 bool is_forked_child(void);
