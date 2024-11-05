@@ -22,9 +22,12 @@
 
 #include "perfetto.hpp"
 #include "config.hpp"
+#include "debug.hpp"
 #include "library/runtime.hpp"
 #include "perfetto_fwd.hpp"
 #include "utility.hpp"
+
+#include <chrono>
 
 namespace rocprofsys
 {
@@ -120,18 +123,18 @@ start()
         if(!_tmp_file)
         {
             _tmp_file = config::get_tmp_file("perfetto-trace", "proto");
-            _tmp_file->fopen("w+");
-        }
-        else
-        {
-            ROCPROFSYS_VERBOSE(2, "Resuming perfetto...\n");
-            _tmp_file->fopen("a+");
+            _tmp_file->open(O_RDWR | O_CREAT | O_TRUNC, 0600);
         }
     }
 
     ROCPROFSYS_VERBOSE(2, "Setup perfetto...\n");
     int   _fd = (_tmp_file) ? _tmp_file->fd : -1;
     auto& cfg = get_config();
+    tracing_session->SetOnErrorCallback([](::perfetto::TracingError _err) {
+        if(_err.code == ::perfetto::TracingError::kTracingFailed)
+            ROCPROFSYS_WARNING(0, "perfetto encountered a tracing error: %s\n",
+                               _err.message.c_str());
+    });
     tracing_session->Setup(cfg, _fd);
     tracing_session->StartBlocking();
 }
@@ -174,7 +177,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
         if(_tmp_file && *_tmp_file)
         {
             _tmp_file->close();
-            FILE* _fdata = fopen(_tmp_file->filename.c_str(), "rb");
+            FILE* _fdata = ::fopen(_tmp_file->filename.c_str(), "rb");
 
             if(!_fdata)
             {
@@ -184,22 +187,25 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
                 return char_vec_t{ tracing_session->ReadTraceBlocking() };
             }
 
-            fseek(_fdata, 0, SEEK_END);
-            size_t _fnum_elem = ftell(_fdata);
-            fseek(_fdata, 0, SEEK_SET);  // same as rewind(f);
+            ::fseek(_fdata, 0, SEEK_END);
+            size_t _fnum_elem = ::ftell(_fdata);
+            ::fseek(_fdata, 0, SEEK_SET);  // same as rewind(f);
 
-            _data.resize(_fnum_elem + 1);
-            auto _fnum_read = fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
-            fclose(_fdata);
+            _data.resize(_fnum_elem, '\0');
+            auto _fnum_read = ::fread(_data.data(), sizeof(char), _fnum_elem, _fdata);
+            ::fclose(_fdata);
 
             ROCPROFSYS_CI_THROW(
                 _fnum_read != _fnum_elem,
                 "Error! read %zu elements from perfetto trace file '%s'. Expected %zu\n",
                 _fnum_read, _tmp_file->filename.c_str(), _fnum_elem);
         }
+        else
+        {
+            _data = char_vec_t{ tracing_session->ReadTraceBlocking() };
+        }
 
-        return utility::combine(_data,
-                                char_vec_t{ tracing_session->ReadTraceBlocking() });
+        return _data;
     };
 
     auto trace_data = char_vec_t{};
@@ -251,7 +257,7 @@ post_process(tim::manager* _timemory_manager, bool& _perfetto_output_error)
         else
         {
             // Write the trace into a file.
-            ofs.write(&trace_data[0], trace_data.size());
+            ofs.write(trace_data.data(), trace_data.size());
             if(config::get_verbose() >= 0) _fom.append("%s", "Done");  // NOLINT
             if(_timemory_manager)
                 _timemory_manager->add_file_output("protobuf", "perfetto", _filename);

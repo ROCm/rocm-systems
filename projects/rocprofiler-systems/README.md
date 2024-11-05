@@ -7,10 +7,6 @@
 [![Installer Packaging (CPack)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/cpack.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/cpack.yml)
 [![Documentation](https://github.com/ROCm/rocprofiler-systems/actions/workflows/docs.yml/badge.svg)](https://github.com/ROCm/rocprofiler-systems/actions/workflows/docs.yml)
 
-> [!NOTE]
-> Perfetto validation is done with trace_processor v46.0, as there is a known issue with v47.0.
-If you are experiencing problems viewing your trace in the latest version of [Perfetto](http://ui.perfetto.dev), then try using [Perfetto UI v46.0](https://ui.perfetto.dev/v46.0-35b3d9845/#!/).
-
 ## Overview
 
 ROCm Systems Profiler (rocprofiler-systems), formerly Omnitrace, is a comprehensive profiling and tracing tool for parallel applications written in C, C++, Fortran, HIP, OpenCL, and Python which execute on the CPU or CPU+GPU.

@@ -56,23 +56,25 @@ jobs:
       run:
         echo "CC=$(echo '${{ matrix.compiler }}' | sed 's/+/c/g')" >> $GITHUB_ENV &&
         echo "CXX=${{ matrix.compiler }}" >> $GITHUB_ENV &&
+        echo "OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')" >> $GITHUB_ENV &&
         env
 
     - name: Install Packages
       shell: bash
       run: |
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v46.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
-          chmod +x /opt/trace_processor/bin/trace_processor_shell
+          if [ $OS_VERSION_MAJOR -eq 8 ]; then
+            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+            chmod +x /opt/trace_processor/bin/trace_processor_shell
+          fi
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
       if: ${{ matrix.rocm-version > 0 }}
       timeout-minutes: 30
       shell: bash
       run: |
-        OS_VERSION_MAJOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $1}')
         RPM_TAG=".el${OS_VERSION_MAJOR}"
         ROCM_VERSION=${{ matrix.rocm-version }}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')

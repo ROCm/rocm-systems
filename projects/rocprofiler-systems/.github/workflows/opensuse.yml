@@ -58,11 +58,13 @@ jobs:
         timeout_minutes: 25
         max_attempts: 5
         command: |
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v46.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
-          chmod +x /opt/trace_processor/bin/trace_processor_shell
+          if [ "${{ matrix.os-release }}" == "15.5" ]; then
+            wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+            chmod +x /opt/trace_processor/bin/trace_processor_shell
+          fi
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
 
     - name: Configure Env
       run:

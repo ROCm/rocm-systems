@@ -93,12 +93,12 @@ jobs:
           add-apt-repository -y ppa:ubuntu-toolchain-r/test &&
           apt-get update &&
           apt-get upgrade -y &&
-          apt-get install -y build-essential m4 autoconf libtool python3-pip libiberty-dev clang libmpich-dev mpich environment-modules ${{ matrix.compiler }} &&
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v46.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          apt-get install -y autoconf bison build-essential clang environment-modules gettext libiberty-dev libmpich-dev libtool m4 mpich python3-pip texinfo ${{ matrix.compiler }} &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
           /opt/conda/bin/conda clean -y -a
@@ -274,12 +274,12 @@ jobs:
           wget -q -O - https://repo.radeon.com/rocm/rocm.gpg.key | apt-key add - &&
           echo "deb [arch=amd64] https://repo.radeon.com/rocm/apt/${{ matrix.rocm-version }}/ ubuntu main" | tee /etc/apt/sources.list.d/rocm.list &&
           apt-get update &&
-          apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev ${{ matrix.compiler }} libudev1 libnuma1 rocm-dev rocm-utils rocm-smi-lib roctracer-dev rocprofiler-dev rccl-dev hip-base hsa-amd-aqlprofile hsa-rocr-dev hsakmt-roct-dev libpapi-dev curl libopenmpi-dev openmpi-bin libfabric-dev &&
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v46.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          apt-get install -y autoconf bison build-essential clang curl gettext libfabric-dev libnuma1 libomp-dev libopenmpi-dev libpapi-dev libtool libudev1 m4 openmpi-bin python3-pip rocm-dev texinfo &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
           /opt/conda/bin/conda clean -y -a
@@ -434,10 +434,10 @@ jobs:
         max_attempts: 5
         command: |
           sudo apt-get update &&
-          sudo apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules ${{ matrix.deps }} ${{ matrix.compiler }} &&
+          sudo apt-get install -y autoconf bison build-essential clang environment-modules gettext libomp-dev libtool m4 python3-pip texinfo ${{ matrix.compiler }} ${{ matrix.deps }} &&
           if [ "${{ matrix.mpi }}" = "mpich" ]; then sudo apt-get install -y libmpich-dev mpich; fi &&
           if [ "${{ matrix.mpi }}" = "openmpi" ]; then sudo apt-get install -y libopenmpi-dev openmpi-bin libfabric-dev; fi &&
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v46.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
@@ -588,12 +588,12 @@ jobs:
         max_attempts: 5
         command: |
           apt-get update &&
-          apt-get install -y build-essential m4 autoconf libtool python3-pip clang libomp-dev environment-modules gcc g++ mpich libmpich-dev texinfo &&
-          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v46.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
+          apt-get install -y autoconf bison build-essential clang environment-modules gcc g++ libmpich-dev libomp-dev libtool m4 mpich python3-pip texinfo &&
+          wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
           python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
           /opt/conda/bin/conda clean -y -a
