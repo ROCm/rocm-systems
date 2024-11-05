@@ -1,5 +1,5 @@
 {
-	"name": "amd-omniperf-data-plugin",
+	"name": "amd-rocprofiler-compute-data-plugin",
 	"version": "1.0.0",
 	"description": "",
 	"main": "server/mongo-proxy.js",
@@ -39,5 +39,5 @@
 		"mongodb": "^4.12.1",
 		"statman-stopwatch": "^2.7.0"
 	},
-	"_comments": "Dependencies are not included as part of Omniperf. It's the user's responsibility to accept any licensing implications before building the project."
+	"_comments": "Dependencies are not included as part of ROCm Compute Profiler. It's the user's responsibility to accept any licensing implications before building the project."
 }

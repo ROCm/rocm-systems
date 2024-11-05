@@ -181,7 +181,7 @@ Analysis mode = cli
                 2.1.30 -> L1I Fetch Latency
 ...
 ```
-3. Choose your own customized subset of metrics with `-b` (a.k.a. `--block`), or build your own config following [config_template](https://github.com/ROCm/omniperf/blob/amd-mainline/src/omniperf_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
+3. Choose your own customized subset of metrics with `-b` (a.k.a. `--block`), or build your own config following [config_template](https://github.com/ROCm/omniperf/blob/amd-mainline/src/rocprof_compute_analyze/configs/panel_config_template.yaml). Below shows how to generate a report containing only metric 2 (a.k.a. System Speed-of-Light).
 ```shell-session
 $ omniperf analyze -p workloads/vcopy/MI200/ -b 2
 --------
@@ -407,7 +407,7 @@ Analysis mode = web_ui
 [analysis] deriving Omniperf metrics...
 Dash is running on http://0.0.0.0:8050/
 
- * Serving Flask app 'omniperf_analyze.analysis_webui' (lazy loading)
+ * Serving Flask app 'rocprof_compute_analyze.analysis_webui' (lazy loading)
  * Environment: production
    WARNING: This is a development server. Do not use it in a production deployment.
    Use a production WSGI server instead.

@@ -30,6 +30,6 @@ def get_resource_path(relative_path):
     rel_path = pathlib.Path(relative_path)
     dev_base_path = (
         pathlib.Path(__file__).resolve().parent.parent.parent.parent
-    )  # omniperf dir (whereas equiv comd in omniperf.py returns src dir)
+    )  # rocprof_compute dir (whereas equiv comd in rocprof_compute.py returns src dir)
     base_path = getattr(sys, "_MEIPASS", dev_base_path)
     return dev_base_path

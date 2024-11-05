@@ -418,7 +418,7 @@ class Roofline:
                 if not self.__args.remaining:
                     console_error(
                         "profiling"
-                        "An <app_cmd> is required to run.\nomniperf profile -n test -- <app_cmd>"
+                        "An <app_cmd> is required to run.\rrocprof-compute profile -n test -- <app_cmd>"
                     )
                 # TODO: Add an equivelent of characterize_app() to run profiling directly out of this module
 
@@ -427,7 +427,7 @@ class Roofline:
         else:
             mibench(self.__args, self.__mspec)
 
-    # NB: Currently the post_prossesing() method is the only one being used by omniperf,
+    # NB: Currently the post_prossesing() method is the only one being used by rocprofiler-compute,
     # we include pre_processing() and profile() methods for those who wish to borrow the roofline module
     @abstractmethod
     def post_processing(self):

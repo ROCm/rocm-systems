@@ -178,7 +178,9 @@ class Exec(RectFrame):
         )
         canvas.text(self.x_min + 4.0, self.y_max - 13.0, "LDS Alloc:")
         canvas.text(
-            self.x_min + 4.0, self.y_max - 14.0, "{val:>13.0f}".format(val=self.lds_alloc)
+            self.x_min + 4.0,
+            self.y_max - 14.0,
+            "{val:>13.0f}".format(val=self.lds_alloc),
         )
 
         canvas.rect(

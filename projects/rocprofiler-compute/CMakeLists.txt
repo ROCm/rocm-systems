@@ -16,20 +16,27 @@ message(STATUS "Hostname: ${LOCALHOST}")
 # Versioning info derived from file
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FULL_VERSION_STRING LIMIT_COUNT 1)
 string(REGEX REPLACE "(\n|\r)" "" FULL_VERSION_STRING "${FULL_VERSION_STRING}")
-set(OMNIPERF_FULL_VERSION "${FULL_VERSION_STRING}")
-string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3" OMNIPERF_VERSION
-                     "${FULL_VERSION_STRING}")
+set(ROCPROFCOMPUTE_FULL_VERSION "${FULL_VERSION_STRING}")
+string(REGEX REPLACE "([0-9]+)\.([0-9]+)\.([0-9]+)(.*)" "\\1.\\2.\\3"
+                     ROCPROFCOMPUTE_VERSION "${FULL_VERSION_STRING}")
 
-# string(REGEX REPLACE "(${OMNIPERF_VERSION})(.*)" "\\2" OMNIPERF_VERSION_TWEAK
+# string(REGEX REPLACE "(${ROCPROFCOMPUTE_VERSION})(.*)" "\\2"
+# ROCPROFCOMPUTE_VERSION_TWEAK
 # "${FULL_VERSION_STRING}")
-# string(REGEX REPLACE "^\\." "" OMNIPERF_VERSION_TWEAK "${OMNIPERF_VERSION_TWEAK}")
+# string(REGEX REPLACE "^\\." "" ROCPROFCOMPUTE_VERSION_TWEAK
+# "${ROCPROFCOMPUTE_VERSION_TWEAK}")
 
 project(
-    omniperf
-    VERSION ${OMNIPERF_VERSION}
+    rocprofiler-compute
+    VERSION ${ROCPROFCOMPUTE_VERSION}
     LANGUAGES C
-    DESCRIPTION "OmniPerf"
-    HOMEPAGE_URL "https://github.com/ROCm/omniperf")
+    DESCRIPTION
+        "A kernel-level profiling tool for machine learning/HPC workloads running on AMD MI GPUs"
+    HOMEPAGE_URL "https://github.com/ROCm/rocprofiler-compute")
+
+set(PACKAGE_NAME "rocprofiler-compute")
+set(PACKAGE_NAME_UNDERSCORE "rocprofiler_compute")
+set(EXECUTABLE_NAME "rocprof-compute")
 
 include(ExternalProject)
 include(GNUInstallDirs)
@@ -39,9 +46,9 @@ find_package(Git)
 if(Git_FOUND AND EXISTS "${PROJECT_SOURCE_DIR}/.git")
     execute_process(
         COMMAND git log --pretty=format:%h -n 1
-        OUTPUT_VARIABLE OMNIPERF_GIT_REV
+        OUTPUT_VARIABLE ROCPROFCOMPUTE_GIT_REV
         OUTPUT_STRIP_TRAILING_WHITESPACE)
-    message(STATUS "Git revision: ${OMNIPERF_GIT_REV}")
+    message(STATUS "Git revision: ${ROCPROFCOMPUTE_GIT_REV}")
     set(GIT_CLONE TRUE)
 else()
     set(GIT_CLONE FALSER)
@@ -133,18 +140,19 @@ set(MOD_INSTALL_PATH
     CACHE STRING "Install path for modulefile")
 message(STATUS "Modulefile install path: ${MOD_INSTALL_PATH}")
 
-set(moduleFileTemplate "omniperf.lua.in")
+set(moduleFileTemplate "rocprofcompute.lua.in")
 
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/${moduleFileTemplate}
-    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua @ONLY)
+    ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua @ONLY)
 
 # Thera mods
 if(LOCALHOST MATCHES "TheraS01|.*\.thera\.amd\.com|thera-hn")
     list(APPEND CMAKE_MESSAGE_INDENT "  ")
     message(STATUS "Using thera-specific modulefile modification")
     file(READ ${PROJECT_SOURCE_DIR}/cmake/modfile.thera.mod mod_additions)
-    file(APPEND ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua
+    file(APPEND
+         ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
          ${mod_additions})
     list(POP_BACK CMAKE_MESSAGE_INDENT)
 endif()
@@ -274,9 +282,9 @@ add_test(
 # Install
 # ---------
 
-# top-level omniperf utility
+# top-level rocprofiler-compute utility
 install(
-    PROGRAMS src/omniperf
+    PROGRAMS src/${EXECUTABLE_NAME}
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main)
 # python dependency requirements
@@ -286,16 +294,16 @@ install(
     COMPONENT main)
 # support files and version info
 install(
-    FILES src/argparser.py src/config.py src/omniperf_base.py src/roofline.py VERSION
-          VERSION.sha
+    FILES src/argparser.py src/config.py src/rocprof_compute_base.py src/roofline.py
+          VERSION VERSION.sha
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main)
-# src/omniperf_analyze
+# src/rocprof_compute_analyze
 install(
-    DIRECTORY src/omniperf_analyze
+    DIRECTORY src/rocprof_compute_analyze
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
-    PATTERN src/omniperf_analyze/tests EXCLUDE
+    PATTERN src/rocprof_compute_analyze/tests EXCLUDE
     PATTERN "__pycache__" EXCLUDE)
 # src/utils
 install(
@@ -310,15 +318,15 @@ install(
     PROGRAMS ${rooflinebins}
     DESTINATION ${CMAKE_INSTALL_BINDIR}
     COMPONENT main)
-# src/omniperf_soc
+# src/rocprof_compute_soc
 install(
-    DIRECTORY src/omniperf_soc
+    DIRECTORY src/rocprof_compute_soc
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE)
-# src/omniperf_profile
+# src/rocprof_compute_profile
 install(
-    DIRECTORY src/omniperf_profile
+    DIRECTORY src/rocprof_compute_profile
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE)
@@ -339,16 +347,16 @@ install(
     PATTERN "workloads" EXCLUDE)
 # modulefile
 install(
-    FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${OMNIPERF_FULL_VERSION}.lua
+    FILES ${PROJECT_BINARY_DIR}/${MOD_INSTALL_PATH}/${ROCPROFCOMPUTE_FULL_VERSION}.lua
     DESTINATION ${MOD_INSTALL_PATH}
     COMPONENT main)
 
-# top-level symlink for bin/omniperf
+# top-level symlink for bin/rocprof-compute
 install(
     CODE "execute_process(
     COMMAND bash -c \"set -e
     cd \$ENV{DESTDIR}\${CMAKE_INSTALL_PREFIX}
-    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/omniperf ${CMAKE_INSTALL_BINDIR}/omniperf
+    ln -sf ../${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}/${EXECUTABLE_NAME} ${CMAKE_INSTALL_BINDIR}/${EXECUTABLE_NAME}
     \")"
     COMPONENT main)
 
@@ -361,8 +369,13 @@ add_custom_target(
     COMMAND
         ${PROJECT_SOURCE_DIR}/utils/update_license.py --source ${PROJECT_SOURCE_DIR}
         --license ${PROJECT_SOURCE_DIR}/LICENSE --file
-        "src/omniperf,cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/omniperf_analyze/convertor/mongodb/convert"
+        "src/${PACKAGE_NAME},cmake/Dockerfile,cmake/rocm_install.sh,docker/docker-entrypoint.sh,src/rocprof_compute_analyze/convertor/mongodb/convert"
     )
+
+install(
+    FILES ${PROJECT_SOURCE_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DOCDIR}
+    COMPONENT main)
 
 # TEST collateral
 option(INSTALL_TESTS "Build test suite" OFF)
@@ -396,9 +409,11 @@ set(CPACK_GENERATOR
 set(CPACK_PACKAGE_NAME
     "${PROJECT_NAME}"
     CACHE STRING "")
-set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/omniperf")
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Omniperf: tool for GPU performance profiling")
-set(CPACK_RPM_PACKAGE_DESCRIPTION "Omniperf is a performance analysis tool for profiling
+set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-compute")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
+    "ROCm Compute Profiler: tool for GPU performance profiling")
+set(CPACK_RPM_PACKAGE_DESCRIPTION
+    "ROCm Compute Profiler is a performance analysis tool for profiling
 machine learning/HPC workloads running on AMD GPUs.")
 set(CPACK_PACKAGE_VENDOR "Advanced Micro Devices, Inc.")
 

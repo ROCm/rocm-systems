@@ -56,6 +56,6 @@ echo "starting"
 for key in "${!commands[@]}"; do
     echo profiling $key;
     command="${commands[$key]}"
-    echo "$key = ./src/omniperf profile -n $key ${dirs[@]}"
-    ./src/omniperf profile -n $key $command -p tests/workloads/$key/$soc  -- ./tests/vcopy -n 1048576 -b 256 -i 3 ; 
+    echo "$key = ./src/rocprof-compute profile -n $key ${dirs[@]}"
+    ./src/rocprof-compute profile -n $key $command -p tests/workloads/$key/$soc  -- ./tests/vcopy -n 1048576 -b 256 -i 3 ; 
 echo "done" ; done

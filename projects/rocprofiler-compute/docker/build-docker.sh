@@ -159,7 +159,7 @@ do
     VERSION_PATCH=$(echo ${VERSION} | sed 's/\./ /g' | awk '{print $3}')
     for ROCM_VERSION in ${ROCM_VERSIONS}
     do
-        CONTAINER=${USER}/omniperf:release-base-${DISTRO}-${VERSION}-rocm-${ROCM_VERSION}
+        CONTAINER=${USER}/rocprofiler-compute:release-base-${DISTRO}-${VERSION}-rocm-${ROCM_VERSION}
         ROCM_MAJOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $1}')
         ROCM_MINOR=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $2}')
         ROCM_PATCH=$(echo ${ROCM_VERSION} | sed 's/\./ /g' | awk '{print $3}')

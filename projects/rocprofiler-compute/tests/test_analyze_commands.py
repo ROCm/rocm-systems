@@ -7,9 +7,9 @@ import shutil
 import pandas as pd
 import test_utils
 
-omniperf = SourceFileLoader("omniperf", "src/omniperf").load_module()
+rocprof_compute = SourceFileLoader("rocprof-compute", "src/rocprof-compute").load_module()
 
-baseline_opts = ["omniperf", "analyze"]
+baseline_opts = ["rocprof-compute", "analyze"]
 
 config = {}
 config["cleanup"] = True if "PYTEST_XDIST_WORKER_COUNT" in os.environ else False
@@ -29,9 +29,9 @@ def test_valid_path():
         with pytest.raises(SystemExit) as e:
             with patch(
                 "sys.argv",
-                ["omniperf", "analyze", "--path", workload_dir],
+                ["rocprof-compute", "analyze", "--path", workload_dir],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -45,14 +45,14 @@ def test_list_kernels():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
                     "--list-stats",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
 
@@ -60,8 +60,10 @@ def test_list_kernels():
 @pytest.mark.list_metrics
 def test_list_metrics_gfx90a():
     with pytest.raises(SystemExit) as e:
-        with patch("sys.argv", ["omniperf", "analyze", "--list-metrics", "gfx90a"]):
-            omniperf.main()
+        with patch(
+            "sys.argv", ["rocprof-compute", "analyze", "--list-metrics", "gfx90a"]
+        ):
+            rocprof_compute.main()
     assert e.value.code == 1
 
     for dir in indirs:
@@ -70,7 +72,7 @@ def test_list_metrics_gfx90a():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -78,7 +80,7 @@ def test_list_metrics_gfx90a():
                     "gfx90a",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -87,8 +89,10 @@ def test_list_metrics_gfx90a():
 @pytest.mark.list_metrics
 def test_list_metrics_gfx906():
     with pytest.raises(SystemExit) as e:
-        with patch("sys.argv", ["omniperf", "analyze", "--list-metrics", "gfx906"]):
-            omniperf.main()
+        with patch(
+            "sys.argv", ["rocprof-compute", "analyze", "--list-metrics", "gfx906"]
+        ):
+            rocprof_compute.main()
     assert e.value.code == 1
 
     for dir in indirs:
@@ -97,7 +101,7 @@ def test_list_metrics_gfx906():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -105,7 +109,7 @@ def test_list_metrics_gfx906():
                     "gfx906",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -114,8 +118,10 @@ def test_list_metrics_gfx906():
 @pytest.mark.list_metrics
 def test_list_metrics_gfx908():
     with pytest.raises(SystemExit) as e:
-        with patch("sys.argv", ["omniperf", "analyze", "--list-metrics", "gfx908"]):
-            omniperf.main()
+        with patch(
+            "sys.argv", ["rocprof-compute", "analyze", "--list-metrics", "gfx908"]
+        ):
+            rocprof_compute.main()
     assert e.value.code == 1
 
     for dir in indirs:
@@ -124,7 +130,7 @@ def test_list_metrics_gfx908():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -132,7 +138,7 @@ def test_list_metrics_gfx908():
                     "gfx908",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -146,7 +152,7 @@ def test_filter_block_1():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -154,7 +160,7 @@ def test_filter_block_1():
                     "1",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -168,7 +174,7 @@ def test_filter_block_2():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -176,7 +182,7 @@ def test_filter_block_2():
                     "5",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -190,7 +196,7 @@ def test_filter_block_3():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -198,7 +204,7 @@ def test_filter_block_3():
                     "5.2.2",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -212,7 +218,7 @@ def test_filter_block_4():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -220,7 +226,7 @@ def test_filter_block_4():
                     "6.1",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -234,7 +240,7 @@ def test_filter_block_5():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -242,7 +248,7 @@ def test_filter_block_5():
                     "10",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -256,7 +262,7 @@ def test_filter_block_6():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -264,7 +270,7 @@ def test_filter_block_6():
                     "100",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -278,7 +284,7 @@ def test_filter_kernel_1():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -286,7 +292,7 @@ def test_filter_kernel_1():
                     "0",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -300,7 +306,7 @@ def test_filter_kernel_2():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -308,7 +314,7 @@ def test_filter_kernel_2():
                     "1",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -322,7 +328,7 @@ def test_filter_kernel_3():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -331,7 +337,7 @@ def test_filter_kernel_3():
                     "1",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -345,7 +351,7 @@ def test_dispatch_1():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -353,7 +359,7 @@ def test_dispatch_1():
                     "0",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -367,7 +373,7 @@ def test_dispatch_2():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -375,7 +381,7 @@ def test_dispatch_2():
                     "1",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -389,7 +395,7 @@ def test_dispatch_3():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -397,7 +403,7 @@ def test_dispatch_3():
                     "2",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -411,7 +417,7 @@ def test_dispatch_4():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -420,7 +426,7 @@ def test_dispatch_4():
                     "4",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -434,7 +440,7 @@ def test_dispatch_5():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -443,7 +449,7 @@ def test_dispatch_5():
                     "6",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 1
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -457,7 +463,7 @@ def test_gpu_ids():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -465,7 +471,7 @@ def test_gpu_ids():
                     "2",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -479,7 +485,7 @@ def test_normal_unit_per_wave():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -487,7 +493,7 @@ def test_normal_unit_per_wave():
                     "per_wave",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -501,7 +507,7 @@ def test_normal_unit_per_cycle():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -509,7 +515,7 @@ def test_normal_unit_per_cycle():
                     "per_cycle",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -523,7 +529,7 @@ def test_normal_unit_per_second():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -531,7 +537,7 @@ def test_normal_unit_per_second():
                     "per_second",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -545,7 +551,7 @@ def test_normal_unit_per_kernel():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -553,7 +559,7 @@ def test_normal_unit_per_kernel():
                     "per_kernel",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -567,7 +573,7 @@ def test_max_stat_num_1():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -575,7 +581,7 @@ def test_max_stat_num_1():
                     "0",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -589,7 +595,7 @@ def test_max_stat_num_2():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -597,7 +603,7 @@ def test_max_stat_num_2():
                     "5",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -611,7 +617,7 @@ def test_max_stat_num_3():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -619,7 +625,7 @@ def test_max_stat_num_3():
                     "10",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -633,7 +639,7 @@ def test_max_stat_num_4():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -641,7 +647,7 @@ def test_max_stat_num_4():
                     "15",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -655,7 +661,7 @@ def test_time_unit_s():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -663,7 +669,7 @@ def test_time_unit_s():
                     "s",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -677,7 +683,7 @@ def test_time_unit_ms():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -685,7 +691,7 @@ def test_time_unit_ms():
                     "ms",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -699,7 +705,7 @@ def test_time_unit_us():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -707,7 +713,7 @@ def test_time_unit_us():
                     "us",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -721,7 +727,7 @@ def test_time_unit_ns():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -729,7 +735,7 @@ def test_time_unit_ns():
                     "ns",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -743,7 +749,7 @@ def test_decimal_1():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -751,7 +757,7 @@ def test_decimal_1():
                     "0",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -765,7 +771,7 @@ def test_decimal_2():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -773,7 +779,7 @@ def test_decimal_2():
                     "1",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -787,7 +793,7 @@ def test_decimal_3():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -795,7 +801,7 @@ def test_decimal_3():
                     "4",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -810,7 +816,7 @@ def test_save_dfs():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -818,7 +824,7 @@ def test_save_dfs():
                     output_path,
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
         files_in_workload = os.listdir(output_path)
@@ -843,7 +849,7 @@ def test_save_dfs():
         with patch(
             "sys.argv",
             [
-                "omniperf",
+                "rocprof-compute",
                 "analyze",
                 "--path",
                 workload_dir,
@@ -851,7 +857,7 @@ def test_save_dfs():
                 output_path,
             ],
         ):
-            omniperf.main()
+            rocprof_compute.main()
     assert e.value.code == 0
 
     files_in_workload = os.listdir(output_path)
@@ -872,7 +878,7 @@ def test_col_1():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -880,7 +886,7 @@ def test_col_1():
                     "0",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -894,7 +900,7 @@ def test_col_2():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -902,7 +908,7 @@ def test_col_2():
                     "2",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -916,7 +922,7 @@ def test_col_3():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -925,7 +931,7 @@ def test_col_3():
                     "2",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -939,14 +945,14 @@ def test_g():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
                     "-g",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -960,7 +966,7 @@ def test_kernel_verbose_0():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -968,7 +974,7 @@ def test_kernel_verbose_0():
                     "0",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -982,7 +988,7 @@ def test_kernel_verbose_1():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -990,7 +996,7 @@ def test_kernel_verbose_1():
                     "1",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1004,7 +1010,7 @@ def test_kernel_verbose_2():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -1012,7 +1018,7 @@ def test_kernel_verbose_2():
                     "2",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1026,7 +1032,7 @@ def test_kernel_verbose_3():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -1034,7 +1040,7 @@ def test_kernel_verbose_3():
                     "3",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1048,7 +1054,7 @@ def test_kernel_verbose_4():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -1056,7 +1062,7 @@ def test_kernel_verbose_4():
                     "4",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1070,7 +1076,7 @@ def test_kernel_verbose_5():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -1078,7 +1084,7 @@ def test_kernel_verbose_5():
                     "5",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1092,7 +1098,7 @@ def test_kernel_verbose_6():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
@@ -1100,7 +1106,7 @@ def test_kernel_verbose_6():
                     "6",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
 
     test_utils.clean_output_dir(config["cleanup"], workload_dir)
@@ -1112,7 +1118,7 @@ def test_baseline():
         with patch(
             "sys.argv",
             [
-                "omniperf",
+                "rocprof-compute",
                 "analyze",
                 "--path",
                 "tests/workloads/vcopy/MI200",
@@ -1120,7 +1126,7 @@ def test_baseline():
                 "tests/workloads/vcopy/MI100",
             ],
         ):
-            omniperf.main()
+            rocprof_compute.main()
     assert e.value.code == 0
 
     with pytest.raises(SystemExit) as e:
@@ -1135,7 +1141,7 @@ def test_baseline():
                 "tests/workloads/vcopy/MI200",
             ],
         ):
-            omniperf.main()
+            rocprof_compute.main()
     assert e.value.code == 1
 
     with pytest.raises(SystemExit) as e:
@@ -1150,7 +1156,7 @@ def test_baseline():
                 "tests/workloads/vcopy/MI100",
             ],
         ):
-            omniperf.main()
+            rocprof_compute.main()
     assert e.value.code == 1
 
 
@@ -1162,13 +1168,13 @@ def test_dependency_MI100():
             with patch(
                 "sys.argv",
                 [
-                    "omniperf",
+                    "rocprof-compute",
                     "analyze",
                     "--path",
                     workload_dir,
                     "--dependency",
                 ],
             ):
-                omniperf.main()
+                rocprof_compute.main()
         assert e.value.code == 0
     test_utils.clean_output_dir(config["cleanup"], workload_dir)

@@ -12827,8 +12827,8 @@
       {
         "current": {
           "selected": true,
-          "text": "omniperf_pymongo4_Vcopy_gfx90a",
-          "value": "omniperf_pymongo4_Vcopy_gfx90a"
+          "text": "rocprofiler-compute_pymongo4_Vcopy_gfx90a",
+          "value": "rocprofiler-compute_pymongo4_Vcopy_gfx90a"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -12973,8 +12973,8 @@
       {
         "current": {
           "selected": false,
-          "text": "omniperf_pymongo4_Vcopy_gfx908",
-          "value": "omniperf_pymongo4_Vcopy_gfx908"
+          "text": "rocprofiler-compute_pymongo4_Vcopy_gfx908",
+          "value": "rocprofiler-compute_pymongo4_Vcopy_gfx908"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -13408,8 +13408,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Omniperf_v2.0_pubx",
-  "uid": "Omniperf_v20x",
+  "title": "rocprofiler-compute_v2.0_pubx",
+  "uid": "rocprofiler-compute_v20x",
   "version": 2,
   "weekStart": ""
 }
