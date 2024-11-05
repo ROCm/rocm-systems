@@ -374,6 +374,7 @@ struct tmp_file
     tmp_file(std::string);
     ~tmp_file();
 
+    bool open(int, int);
     bool open(std::ios::openmode = std::ios::binary | std::ios::in | std::ios::out);
     bool fopen(const char* = "r+");
     bool flush();
@@ -386,6 +387,12 @@ struct tmp_file
     std::fstream stream   = {};
     FILE*        file     = nullptr;
     int          fd       = -1;
+
+private:
+    void touch() const;
+
+private:
+    pid_t m_pid = getpid();
 };
 
 std::shared_ptr<tmp_file>

@@ -2454,18 +2454,37 @@ tmp_file::~tmp_file()
     remove();
 }
 
+void
+tmp_file::touch() const
+{
+    if(!filepath::exists(filename))
+    {
+        // if the filepath does not exist, open in out mode to create it
+        auto _ofs = std::ofstream{};
+        filepath::open(_ofs, filename);
+    }
+}
+
+bool
+tmp_file::open(int _mode, int _perms)
+{
+    ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
+
+    touch();
+    m_pid = getpid();
+    fd    = ::open(filename.c_str(), _mode, _perms);
+
+    return (fd > 0);
+}
+
 bool
 tmp_file::open(std::ios::openmode _mode)
 {
     ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
 
-    if(!filepath::exists(filename))
-    {
-        // if the filepath does not exist, open in out mode to create it
-        std::ofstream _ofs{};
-        filepath::open(_ofs, filename);
-    }
+    touch();
 
+    m_pid = getpid();
     stream.open(filename, _mode);
 
     return (stream.is_open() && stream.good());
@@ -2476,14 +2495,10 @@ tmp_file::fopen(const char* _mode)
 {
     ROCPROFSYS_BASIC_VERBOSE(2, "Opening temporary file '%s'...\n", filename.c_str());
 
-    if(!filepath::exists(filename))
-    {
-        // if the filepath does not exist, open in out mode to create it
-        std::ofstream _ofs{};
-        filepath::open(_ofs, filename);
-    }
+    touch();
 
-    file = filepath::fopen(filename, _mode);
+    m_pid = getpid();
+    file  = filepath::fopen(filename, _mode);
     if(file) fd = ::fileno(file);
 
     return (file != nullptr && fd > 0);
@@ -2492,6 +2507,8 @@ tmp_file::fopen(const char* _mode)
 bool
 tmp_file::flush()
 {
+    if(m_pid != getpid()) return false;
+
     if(stream.is_open())
     {
         stream.flush();
@@ -2508,6 +2525,18 @@ tmp_file::flush()
         }
         return (_ret == 0);
     }
+    else if(fd > 0)
+    {
+        int _ret = ::fsync(fd);
+        int _cnt = 0;
+        while(_ret == EAGAIN || _ret == EINTR)
+        {
+            std::this_thread::sleep_for(std::chrono::milliseconds{ 100 });
+            _ret = ::fsync(fd);
+            if(++_cnt > 10) break;
+        }
+        return (_ret == 0);
+    }
 
     return true;
 }
@@ -2516,6 +2545,8 @@ bool
 tmp_file::close()
 {
     flush();
+
+    if(m_pid != getpid()) return false;
 
     if(stream.is_open())
     {
@@ -2532,6 +2563,15 @@ tmp_file::close()
         }
         return (_ret == 0);
     }
+    else if(fd > 0)
+    {
+        auto _ret = ::close(fd);
+        if(_ret == 0)
+        {
+            fd = -1;
+        }
+        return (_ret == 0);
+    }
 
     return true;
 }
@@ -2539,6 +2579,8 @@ tmp_file::close()
 bool
 tmp_file::remove()
 {
+    if(m_pid != getpid()) return false;
+
     close();
     if(filepath::exists(filename))
     {
@@ -2553,7 +2595,9 @@ tmp_file::remove()
 
 tmp_file::operator bool() const
 {
-    return (stream.is_open() && stream.good()) || (file != nullptr && fd > 0);
+    return (m_pid == getpid()) &&
+           ((stream.is_open() && stream.good()) || (file != nullptr && fd > 0) ||
+            (file == nullptr && fd > 0));
 }
 
 std::shared_ptr<tmp_file>
