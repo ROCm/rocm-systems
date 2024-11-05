@@ -698,6 +698,7 @@ def eval_metric(dfs, dfs_type, sys_info, raw_pmc_df, debug):
     ammolite__hbm_bw = sys_info.hbm_bw
     ammolite__total_l2_chan = calc_builtin_var("$total_l2_chan", sys_info)
     ammolite__num_xcd = sys_info.num_xcd
+    ammolite__wave_size = sys_info.wave_size
 
     # TODO: fix all $normUnit in Unit column or title
 

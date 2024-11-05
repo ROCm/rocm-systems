@@ -83,8 +83,8 @@ def setup_console_handler():
     setattr(logging, "trace", trace_logger)
 
     color_setting = 1
-    if "OMNIPERF_COLOR" in os.environ.keys():
-        color_setting = int(os.environ["OMNIPERF_COLOR"])
+    if "ROCPROFCOMPUTE_COLOR" in os.environ.keys():
+        color_setting = int(os.environ["ROCPROFCOMPUTE_COLOR"])
 
     if color_setting == 0:
         # non-colored
@@ -99,7 +99,7 @@ def setup_console_handler():
         # no color or levelname for INFO, other log messages entirely in color
         formatter = ColoredFormatterAll()
     else:
-        print("Unsupported setting for OMNIPERF_COLOR - set to 0, 1, 2 or 3.")
+        print("Unsupported setting for ROCPROFCOMPUTE_COLOR - set to 0, 1, 2 or 3.")
         sys.exit(1)
 
     console_handler = logging.StreamHandler(sys.stdout)
@@ -130,8 +130,8 @@ def setup_logging_priority(verbosity, quietmode, appmode):
         loglevel = levels[min(verbosity, len(levels) - 1)]  # cap to last level index
 
     # optional: override of default loglevel via env variable which takes precedence
-    if "OMNIPERF_LOGLEVEL" in os.environ.keys():
-        loglevel = os.environ["OMNIPERF_LOGLEVEL"]
+    if "ROCPROFCOMPUTE_LOGLEVEL" in os.environ.keys():
+        loglevel = os.environ["ROCPROFCOMPUTE_LOGLEVEL"]
         if loglevel in {"DEBUG", "debug"}:
             loglevel = logging.DEBUG
         elif loglevel in {"TRACE", "trace"}:
@@ -141,7 +141,7 @@ def setup_logging_priority(verbosity, quietmode, appmode):
         elif loglevel in {"ERROR", "error"}:
             loglevel = logging.ERROR
         else:
-            print("Ignoring unsupported OMNIPERF_LOGLEVEL setting (%s)" % loglevel)
+            print("Ignoring unsupported ROCPROFCOMPUTE_LOGLEVEL setting (%s)" % loglevel)
             sys.exit(1)
 
     # update console loglevel based on command-line args/env settings

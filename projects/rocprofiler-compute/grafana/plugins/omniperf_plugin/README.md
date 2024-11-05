@@ -1,6 +1,6 @@
-# Omniperf Data Source Plugin
+# ROCm Compute Profiler Data Source Plugin
 
-This plugin allows users of Omniperf to connect their MongoDB database to for visualization in Grafana
+This plugin allows users of ROCm Compute Profiler to connect their MongoDB database to for visualization in Grafana
 
 ## Info
 

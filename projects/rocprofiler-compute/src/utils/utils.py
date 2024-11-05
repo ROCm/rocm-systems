@@ -87,12 +87,12 @@ def trace_logger(message, *args, **kwargs):
     logging.log(logging.TRACE, message, *args, **kwargs)
 
 
-def get_version(omniperf_home) -> dict:
-    """Return Omniperf versioning info"""
+def get_version(rocprof_compute_home) -> dict:
+    """Return ROCm Compute Profiler versioning info"""
 
     # symantic version info - note that version file(s) can reside in
     # two locations depending on development vs formal install
-    searchDirs = [omniperf_home, omniperf_home.parent]
+    searchDirs = [rocprof_compute_home, rocprof_compute_home.parent]
     found = False
     versionDir = None
 
@@ -110,7 +110,7 @@ def get_version(omniperf_home) -> dict:
         console_error("Cannot find VERSION file at {}".format(searchDirs))
 
     # git version info
-    gitDir = os.path.join(omniperf_home.parent, ".git")
+    gitDir = os.path.join(rocprof_compute_home.parent, ".git")
     if (shutil.which("git") is not None) and os.path.exists(gitDir):
         gitQuery = subprocess.run(
             ["git", "log", "--pretty=format:%h", "-n", "1"],
@@ -142,7 +142,7 @@ def get_version_display(version, sha, mode):
     """Pretty print versioning info"""
     buf = io.StringIO()
     print("-" * 40, file=buf)
-    print("Omniperf version: %s (%s)" % (version, mode), file=buf)
+    print("rocprofiler-compute version: %s (%s)" % (version, mode), file=buf)
     print("Git revision:     %s" % sha, file=buf)
     print("-" * 40, file=buf)
     return buf.getvalue()
@@ -205,14 +205,18 @@ def capture_subprocess_output(subprocess_args, new_env=None, profileMode=False):
     buf = io.StringIO()
 
     def handle_output(stream, mask):
-        # Because the process' output is line buffered, there's only ever one
-        # line to read when this function is called
-        line = stream.readline()
-        buf.write(line)
-        if profileMode:
-            console_log(rocprof_cmd, line.strip(), indent_level=1)
-        else:
-            console_log(line.strip())
+        try:
+            # Because the process' output is line buffered, there's only ever one
+            # line to read when this function is called
+            line = stream.readline()
+            buf.write(line)
+            if profileMode:
+                console_log(rocprof_cmd, line.strip(), indent_level=1)
+            else:
+                console_log(line.strip())
+        except UnicodeDecodeError:
+            # Skip this line
+            pass
 
     # Register callback for an "available for read" event from subprocess' stdout stream
     selector = selectors.DefaultSelector()
@@ -396,7 +400,11 @@ def detect_roofline(mspec):
         rooflineBinary = os.environ["ROOFLINE_BIN"]
         if os.path.exists(rooflineBinary):
             console_warning("roofline", "Detected user-supplied binary")
-            return {"rocm_ver": "override", "distro": "override", "path": rooflineBinary}
+            return {
+                "rocm_ver": "override",
+                "distro": "override",
+                "path": rooflineBinary,
+            }
         else:
             msg = "user-supplied path to binary not accessible"
             msg += "--> ROOFLINE_BIN = %s\n" % target_binary
@@ -466,8 +474,8 @@ def mibench(args, mspec):
         # check two potential locations for roofline binaries due to differences in
         # development usage vs formal install
         potential_paths = [
-            "%s/utils/rooflines/roofline" % config.omniperf_home,
-            "%s/bin/roofline" % config.omniperf_home.parent.parent,
+            "%s/utils/rooflines/roofline" % config.rocprof_compute_home,
+            "%s/bin/roofline" % config.rocprof_compute_home.parent.parent,
         ]
 
         for dir in potential_paths:

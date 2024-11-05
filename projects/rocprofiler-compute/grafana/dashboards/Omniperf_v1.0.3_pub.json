@@ -32,7 +32,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -92,7 +92,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -103,7 +103,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -139,7 +139,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -151,7 +151,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -333,7 +333,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -344,7 +344,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -458,7 +458,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -543,7 +543,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "tlh8EwUnk"
               },
               "rawQuery": true,
@@ -571,7 +571,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -583,7 +583,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -641,7 +641,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "u5Z2zJhnk"
               },
               "hide": false,
@@ -1015,7 +1015,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "HV80ot2nz"
               },
               "rawQuery": true,
@@ -1437,7 +1437,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "HV80ot2nz"
               },
               "rawQuery": true,
@@ -1504,7 +1504,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -1516,7 +1516,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -1812,7 +1812,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "oVK0I__nk"
               },
               "rawQuery": true,
@@ -1822,7 +1822,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "oVK0I__nk"
               },
               "hide": false,
@@ -1833,7 +1833,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "oVK0I__nk"
               },
               "hide": false,
@@ -1844,7 +1844,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "oVK0I__nk"
               },
               "hide": false,
@@ -1855,7 +1855,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "oVK0I__nk"
               },
               "hide": false,
@@ -1890,7 +1890,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -1902,7 +1902,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -2488,7 +2488,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "rawQuery": true,
@@ -2498,7 +2498,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2509,7 +2509,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2520,7 +2520,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2531,7 +2531,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2542,7 +2542,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2553,7 +2553,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2564,7 +2564,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2575,7 +2575,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -2586,7 +2586,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "jYrBWHfnz"
               },
               "hide": false,
@@ -3175,7 +3175,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3186,7 +3186,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3197,7 +3197,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3208,7 +3208,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3219,7 +3219,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3230,7 +3230,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3241,7 +3241,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3252,7 +3252,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "LJKvMZank"
               },
               "hide": false,
@@ -3263,7 +3263,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "jYrBWHfnz"
               },
               "hide": false,
@@ -3274,7 +3274,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "jYrBWHfnz"
               },
               "hide": false,
@@ -3292,7 +3292,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -3304,7 +3304,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -3390,7 +3390,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -3400,7 +3400,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -3595,7 +3595,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -3605,7 +3605,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -3658,7 +3658,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -3670,7 +3670,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -3829,7 +3829,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -3839,7 +3839,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4036,7 +4036,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -4046,7 +4046,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4098,7 +4098,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -4110,7 +4110,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -4306,7 +4306,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -4316,7 +4316,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4502,7 +4502,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4513,7 +4513,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4568,7 +4568,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -4580,7 +4580,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -4644,7 +4644,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -4654,7 +4654,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4735,7 +4735,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4746,7 +4746,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4825,7 +4825,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -4835,7 +4835,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4919,7 +4919,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -4929,7 +4929,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -4969,7 +4969,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -4981,7 +4981,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -5052,7 +5052,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -5062,7 +5062,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -5196,7 +5196,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "rawQuery": true,
@@ -5206,7 +5206,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5370,7 +5370,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -5380,7 +5380,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -5477,7 +5477,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "rawQuery": true,
@@ -5487,7 +5487,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5498,7 +5498,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5509,7 +5509,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5520,7 +5520,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5531,7 +5531,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5542,7 +5542,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5553,7 +5553,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -5600,7 +5600,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -5612,7 +5612,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -5683,7 +5683,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -5693,7 +5693,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -5875,7 +5875,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -5886,7 +5886,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -5941,7 +5941,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -5953,7 +5953,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -6021,7 +6021,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -6031,7 +6031,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -6131,7 +6131,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "rawQuery": true,
@@ -6141,7 +6141,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -6189,7 +6189,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -6201,7 +6201,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -6284,7 +6284,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -6295,7 +6295,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "sY628IJnz"
               },
               "hide": false,
@@ -6393,7 +6393,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -6404,7 +6404,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "bhNVuvBnk"
               },
               "hide": false,
@@ -6547,7 +6547,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -6558,7 +6558,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -6610,7 +6610,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -6622,7 +6622,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -6709,7 +6709,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -6719,7 +6719,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -6891,7 +6891,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -6901,7 +6901,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -6953,7 +6953,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -6965,7 +6965,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -7032,7 +7032,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -7042,7 +7042,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -7195,7 +7195,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -7205,7 +7205,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -7391,7 +7391,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -7402,7 +7402,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -7558,7 +7558,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "tlh8EwUnk"
               },
               "rawQuery": true,
@@ -7635,7 +7635,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -7645,7 +7645,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -7697,7 +7697,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -7709,7 +7709,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -7919,7 +7919,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -7929,7 +7929,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -8067,7 +8067,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -8077,7 +8077,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -8237,7 +8237,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -8248,7 +8248,7 @@
             },
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "hide": false,
@@ -8403,7 +8403,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -8420,7 +8420,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -8432,7 +8432,7 @@
     {
       "collapsed": true,
       "datasource": {
-        "type": "amd-omniperf-data-plugin",
+        "type": "amd-rocprofiler-compute-data-plugin",
         "uid": "oVK0I__nk"
       },
       "gridPos": {
@@ -10245,7 +10245,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -10364,7 +10364,7 @@
           "targets": [
             {
               "datasource": {
-                "type": "amd-omniperf-data-plugin",
+                "type": "amd-rocprofiler-compute-data-plugin",
                 "uid": "Zzw1yR27k"
               },
               "rawQuery": true,
@@ -12540,7 +12540,7 @@
       "targets": [
         {
           "datasource": {
-            "type": "amd-omniperf-data-plugin",
+            "type": "amd-rocprofiler-compute-data-plugin",
             "uid": "oVK0I__nk"
           },
           "refId": "A"
@@ -12737,8 +12737,8 @@
       {
         "current": {
           "selected": false,
-          "text": "omniperf_asw_mixbench_mi200",
-          "value": "omniperf_asw_mixbench_mi200"
+          "text": "rocprofiler-compute_asw_mixbench_mi200",
+          "value": "rocprofiler-compute_asw_mixbench_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -12883,8 +12883,8 @@
       {
         "current": {
           "selected": false,
-          "text": "omniperf_asw_mixbench_mi200",
-          "value": "omniperf_asw_mixbench_mi200"
+          "text": "rocprofiler-compute_asw_mixbench_mi200",
+          "value": "rocprofiler-compute_asw_mixbench_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -13318,8 +13318,8 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Omniperf_v1.0.3_pub",
-  "uid": "Omniperf_v1_0_063020221",
+  "title": "rocprofiler-compute_v1.0.3_pub",
+  "uid": "rocprofiler-compute_v1_0_063020221",
   "version": 4,
   "weekStart": ""
 }

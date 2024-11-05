@@ -12809,8 +12809,8 @@
       {
         "current": {
           "selected": true,
-          "text": "omniperf_asw_mixbench_mi200",
-          "value": "omniperf_asw_mixbench_mi200"
+          "text": "rocprofiler-compute_asw_mixbench_mi200",
+          "value": "rocprofiler-compute_asw_mixbench_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -12955,8 +12955,8 @@
       {
         "current": {
           "selected": true,
-          "text": "omniperf_asw_mixbench_mi200",
-          "value": "omniperf_asw_mixbench_mi200"
+          "text": "rocprofiler-compute_asw_mixbench_mi200",
+          "value": "rocprofiler-compute_asw_mixbench_mi200"
         },
         "definition": "workload_names.names.aggregate([\n  {\"$group\": {\n    \"_id\": \"&name\"\n  }}\n]);",
         "hide": 0,
@@ -13390,7 +13390,7 @@
   },
   "timepicker": {},
   "timezone": "",
-  "title": "Omniperf_v1.0.8_pub",
+  "title": "rocprofiler-compute_v1.0.8_pub",
   "uid": "MIPerf_v1_0_0630202211210",
   "version": 4,
   "weekStart": ""

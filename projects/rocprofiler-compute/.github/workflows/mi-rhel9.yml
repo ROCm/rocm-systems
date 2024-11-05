@@ -85,17 +85,17 @@ jobs:
         run: |
           cd build
           make
-          srun -N 1 -J omniperf -p $CI_QUEUE -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
+          srun -N 1 -J rocprof-compute -p $CI_QUEUE -t 00:20:00 ctest -j 4 --resource-spec-file ../tests/4gpus.json --verbose -L profile
       - name: Run [analyze workloads] mode
         if: '!cancelled()'
         run: |
           cd build
-          srun -N 1 -J omniperf -p $CI_QUEUE -t 00:10:00 ctest --verbose -R test_analyze_workloads
+          srun -N 1 -J rocprof-compute -p $CI_QUEUE -t 00:10:00 ctest --verbose -R test_analyze_workloads
       - name: Run [analyze commands] mode
         if: '!cancelled()'
         run: |
           cd build
-          srun -N 1 -J omniperf -p $CI_QUEUE -t 00:10:00 ctest --verbose -R test_analyze_commands
+          srun -N 1 -J rocprof-compute -p $CI_QUEUE -t 00:10:00 ctest --verbose -R test_analyze_commands
       - name: Publish Test Results
         uses: EnricoMi/publish-unit-test-result-action/linux@v2
         if: always()

@@ -1,22 +1,22 @@
-[![Ubuntu 22.04](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/ubuntu-jammy.yml)
-[![RHEL 8](https://github.com/ROCm/omniperf/actions/workflows/rhel-8.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/rhel-8.yml)
-[![Instinct](https://github.com/ROCm/omniperf/actions/workflows/mi-rhel9.yml/badge.svg)](https://github.com/ROCm/omniperf/actions/workflows/mi-rhel9.yml)
-[![Docs](https://github.com/ROCm/omniperf/actions/workflows/docs.yml/badge.svg)](https://rocm.github.io/omniperf/)
+[![Ubuntu 22.04](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/ubuntu-jammy.yml)
+[![RHEL 8](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/rhel-8.yml)
+[![Instinct](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml/badge.svg)](https://github.com/ROCm/rocprofiler-compute/actions/workflows/mi-rhel9.yml)
+[![Docs](https://github.com/ROCm/rocprofiler-compute/actions/workflows/docs.yml/badge.svg)](https://rocm.github.io/rocprofiler-compute/)
 [![DOI](https://zenodo.org/badge/561919887.svg)](https://zenodo.org/badge/latestdoi/561919887)
 
-# Omniperf
+# ROCm Compute Profiler
 
 ## General
 
-Omniperf is a system performance profiling tool for machine
+ROCm Compute Profiler is a system performance profiling tool for machine
 learning/HPC workloads running on AMD MI GPUs. The tool presently
 targets usage on MI100, MI200, and MI300 accelerators.
 
 * For more information on available features, installation steps, and
 workload profiling and analysis, please refer to the online
-[documentation](https://rocm.docs.amd.com/projects/omniperf/en/latest/).
+[documentation](https://rocm.docs.amd.com/projects/rocprofiler-compute/en/latest/).
 
-* Omniperf is an AMD open source research project and is not supported
+* ROCm Compute Profiler is an AMD open source research project and is not supported
 as part of the ROCm software stack. We welcome contributions and
 feedback from the community. Please see the
 [CONTRIBUTING.md](CONTRIBUTING.md) file for additional details on our
@@ -26,7 +26,7 @@ contribution process.
 
 ## Development
 
-Omniperf follows a
+ROCm Compute Profiler follows a
 [main-dev](https://nvie.com/posts/a-successful-git-branching-model/)
 branching model. As a result, our latest stable release is shipped
 from the `amd-mainline` branch, while new features are developed in our
@@ -50,11 +50,11 @@ style reference is provided below for convenience:
                   Keith Lowery and
                   Nicholas Curtis and
                   Cristian Di Pietrantonio},
-  title        = {AMDResearch/omniperf: v2.1.0 (27 Sept 2024)},
-  month        = sept,
+  title        = {ROCm/rocprofiler-compute: v3.0.0 (01 November 2024)},
+  month        = November,
   year         = 2024,
   publisher    = {Zenodo},
-  version      = {v2.1.0},
+  version      = {v3.0.0},
   doi          = {10.5281/zenodo.7314631},
   url          = {https://doi.org/10.5281/zenodo.7314631}
 }

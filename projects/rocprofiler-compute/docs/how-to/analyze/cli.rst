@@ -186,7 +186,7 @@ Walkthrough
 
 3. Choose your own customized subset of metrics with the ``-b`` (or ``--block``)
    option. Or, build your own configuration following
-   `config_template <https://github.com/ROCm/omniperf/blob/amd-mainline/src/omniperf_soc/analysis_configs/panel_config_template.yaml>`_.
+   `config_template <https://github.com/ROCm/omniperf/blob/amd-mainline/src/rocprof_compute_soc/analysis_configs/panel_config_template.yaml>`_.
    The following snippet shows how to generate a report containing only metric 2
    (:doc:`System Speed-of-Light </conceptual/system-speed-of-light>`).
 
