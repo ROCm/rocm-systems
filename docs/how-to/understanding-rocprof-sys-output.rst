@@ -323,11 +323,6 @@ absolute path, then all ``ROCPROFSYS_OUTPUT_PATH`` and similar
 settings are ignored. Visit `ui.perfetto.dev <https://ui.perfetto.dev>`_ and open
 this file.
 
-.. important::
-   Perfetto validation is done with trace_processor v46.0 as there is a known issue with v47.0.
-   If you are experiencing problems viewing your trace in the latest version of `Perfetto <http://ui.perfetto.dev>`_,
-   then try using `Perfetto UI v46.0 <https://ui.perfetto.dev/v46.0-35b3d9845/#!/>`_.
-
 .. image:: ../data/rocprof-sys-perfetto.png
    :alt: Visualization of a performance graph in Perfetto
 
