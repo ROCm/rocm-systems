@@ -1,6 +1,6 @@
 # Changelog for ROCprofiler-SDK
 
-Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](source/docs/index.rst)
+Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projects/rocprofiler-sdk](https://rocm.docs.amd.com/projects/rocprofiler-sdk/en/latest/index.html)
 
 ## ROCprofiler-SDK for AFAR I
 
@@ -107,6 +107,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - Start and end timestamp columns to the counter collection csv output
 - Check to force tools to initialize context id with zero
+- Support to specify hardware counters for collection using rocprofv3 as `rocprofv3 --pmc [COUNTER [COUNTER ...]]`
 
 ### Changed
 
@@ -116,10 +117,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Changed naming of "agent profiling" to a more descriptive "device counting service". To convert existing tool or user code to the new name, use the following sed:
 `find . -type f -exec sed -i 's/rocprofiler_agent_profile_callback_t/rocprofiler_device_counting_service_callback_t/g; s/rocprofiler_configure_agent_profile_counting_service/rocprofiler_configure_device_counting_service/g; s/agent_profile.h/device_counting_service.h/g; s/rocprofiler_sample_agent_profile_counting_service/rocprofiler_sample_device_counting_service/g' {} +`
 - Changed naming of "dispatch profiling service" to a more descriptive "dispatch counting service". To convert existing tool or user code to the new names, the following sed can be used: `-type f -exec sed -i -e 's/dispatch_profile_counting_service/dispatch_counting_service/g' -e 's/dispatch_profile.h/dispatch_counting_service.h/g' -e 's/rocprofiler_profile_counting_dispatch_callback_t/rocprofiler_dispatch_counting_service_callback_t/g' -e 's/rocprofiler_profile_counting_dispatch_data_t/rocprofiler_dispatch_counting_service_data_t/g'  -e 's/rocprofiler_profile_counting_dispatch_record_t/rocprofiler_dispatch_counting_service_record_t/g' {} +`
-- Support specifying HW counters via command-line in rocprofv3, e.g. `rocprofv3 --pmc [COUNTER [COUNTER ...]]`
 - `FETCH_SIZE` metric on gfx94x now uses `TCC_BUBBLE` for 128B reads.
 - PMC dispatch-based counter collection serialization is now per-device instead of being global across all devices.
-
 
 ### Resolved issues
 
