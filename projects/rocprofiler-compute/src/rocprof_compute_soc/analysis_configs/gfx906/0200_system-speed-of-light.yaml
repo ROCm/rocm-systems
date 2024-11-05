@@ -102,9 +102,8 @@ Panel Config:
             value: AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
               != 0) else None))
             unit: Threads
-            peak: 64
-            pop: (AVG(((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU) if (SQ_ACTIVE_INST_VALU
-              != 0) else None)) * 1.5625)
+            peak: $wave_size
+            pop: (100 * AVG((SQ_THREAD_CYCLES_VALU / SQ_ACTIVE_INST_VALU / $wave_size) if (SQ_ACTIVE_INST_VALU != 0) else None))
             tips: 
           IPC:
             value: AVG((SQ_INSTS / SQ_BUSY_CU_CYCLES))
