@@ -9,11 +9,11 @@ myst:
 
 There are two modes of counter collection service:
 
-- Dispatch profiling: In this mode, counters are collected on a per-kernel launch basis. This mode is useful for collecting highly detailed counters for a specific kernel execution in isolation. Note that dispatch profiling allows only a single kernel to execute in hardware at a time.
+- Dispatch counting: In this mode, counters are collected on a per-kernel launch basis. This mode is useful for collecting highly detailed counters for a specific kernel execution in isolation. Note that dispatch counting allows only a single kernel to execute in hardware at a time.
 
-- Agent profiling: In this mode, counters are collected on a device level. This mode is useful for collecting device level counters not tied to a specific kernel execution, which encompasses collecting counter values for a specific time range.
+- Device counting: In this mode, counters are collected on a device level. This mode is useful for collecting device level counters not tied to a specific kernel execution, which encompasses collecting counter values for a specific time range.
 
-This topic explains how to setup dispatch and agent profiling and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and agent profiling, see [Samples](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples).
+This topic explains how to setup dispatch and device counting and use common counter collection APIs. For details on the APIs including the less commonly used counter collection APIs, see the API library. For fully functional examples of both dispatch and device counting, see [Samples](https://github.com/ROCm/rocprofiler-sdk/tree/amd-mainline/samples).
 
 ## Definitions
 
@@ -35,9 +35,10 @@ Dimension: Dimensions help to provide context to the raw counter values by speci
     ROCPROFILER_DIMENSION_INSTANCE,       ///< From unspecified hardware register
 ```
 
+
 ## Using the counter collection service
 
-The setup for dispatch and agent profiling is similar with only minor changes needed to adapt code from one to another.
+The setup for dispatch and device counting is similar with only minor changes needed to adapt code from one to another.
 Here are the steps required to configure the counter collection services:
 
 ### tool_init() setup
@@ -61,10 +62,11 @@ ROCPROFILER_CALL(rocprofiler_create_buffer(ctx,
                     "buffer creation failed");
 ```
 
-After creating a context and buffer to store results in `tool_init`, it is highly recommended but not mandatory for you to construct the profiles for each agent, containing the counters for collection. Profile creation should be avoided in the time critical dispatch profiling callback as it involves validating if the counters can be collected on the agent. After profile setup, you can set up the collection service for dispatch or agent profiling. To set up either dispatch or agent profiling (only one can be used at a time), use:
+
+After creating a context and buffer to store results in `tool_init`, it is highly recommended but not mandatory for you to construct the profiles for each agent, containing the counters for collection. Profile creation should be avoided in the time critical dispatch counting callback as it involves validating if the counters can be collected on the agent. After profile setup, you can set up the collection service for dispatch or device counting. To set up either dispatch or device counting (only one can be used at a time), use:
 
 ```CPP
-    /* For Dispatch Profiling */
+    /* For Dispatch Counting */
     // Setup the dispatch profile counting service. This service will trigger the dispatch_callback
     // when a kernel dispatch is enqueued into the HSA queue. The callback will specify what
     // counters to collect by returning a profile config id.
@@ -72,7 +74,7 @@ After creating a context and buffer to store results in `tool_init`, it is highl
                          ctx, buff, dispatch_callback, nullptr),
                      "Could not setup buffered service");
 
-    /* For Agent Profiling */
+    /* For Agent Counting */
     // set_profile is a callback that is use to select the profile to use when
     // the context is started. It is called at every rocprofiler_ctx_start() call.
     ROCPROFILER_CALL(rocprofiler_configure_device_counting_service(
@@ -176,7 +178,7 @@ Points to note on profile behavior:
 - Counter Ids supplied to `rocprofiler_create_profile_config` are *agent-specific* and can't be used to construct profiles for other agents.
 :::
 
-### Dispatch profiling callback
+### Dispatch counting callback
 
 When a kernel is dispatched, a dispatch callback is issued to the tool to allow selection of counters to be collected for the dispatch by supplying a profile.
 
@@ -206,7 +208,7 @@ The profile to be used for this agent is specified by calling `set_config(agent,
 
 ### Buffered callback
 
-Data from collected counter values is returned through a buffered callback. The buffered callback routines are similar for dispatch and agent profiling except that some data such as kernel launch Ids is not available in agent profiling mode. Here is a sample iteration to print out counter collection data:
+Data from collected counter values is returned through a buffered callback. The buffered callback routines are similar for dispatch and device counting except that some data such as kernel launch Ids is not available in device counting mode. Here is a sample iteration to print out counter collection data:
 
 ```CPP
     for(size_t i = 0; i < num_headers; ++i)
@@ -319,3 +321,14 @@ MeanOccupancyPerCU:
 
 - `MeanOccupancyPerCU`: In the preceding example, the `MeanOccupancyPerCU` metric calculates the mean occupancy per compute unit. It uses the accumulate function with `HIGH_RES` to sum the `SQ_LEVEL_WAVES` counter every clock cycle.
 This sum is then divided by the maximum value of GRBM_GUI_ACTIVE and the number of compute units `CU_NUM` to derive the mean occupancy.
+
+## Kernel Serialization
+
+In *dispatch counting* mode, counter collection requires serialized execution of kernels on a target device to function. Kernel serialization isolates kernel executions, which helps to collect performance counter data. However, kernel serialization also leads to deadlock when applications requiring two kernels to execute on the same device simultaneously (co-dependent kernels) in dispatch counting mode. To avoid deadlock in such applications, opt for any of the following options:
+
+- Avoid co-dependent kernels in application.
+
+- Don't collect performance data for co-dependent kernels by specifying `filter` tag in the rocprofv3’s PMC file.
+
+- Use ROCprofiler-SDK's device-wide counter collection mode to collect performance data. You can use tools such as RDC and PAPI to collect information. Note that the device-wide counter collection captures data for all executions on the device and not specific to the kernels.
+
