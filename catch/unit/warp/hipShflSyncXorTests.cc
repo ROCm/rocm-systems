@@ -58,6 +58,9 @@ static void runTestShflXor_1() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 template <typename T>
@@ -104,6 +107,9 @@ static void runTestShflXor_2() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 template <typename T>
@@ -146,6 +152,100 @@ static void runTestShflXor_3() {
   for (int i = 0; i != warpSize; ++i) {
     REQUIRE(compareEqual(Output[i], Expected[i]));
   }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
+}
+
+template <typename T>
+__global__ void shflXor_4(T *Input, T *Output) {
+  int tid = threadIdx.x;
+
+  Output[tid] = __shfl_xor_sync(AllThreads, Input[tid], 2, 2);
+}
+
+
+template <typename T>
+static void runTestShflXor_4() {
+  const int size = 64;
+  T Input[size];
+  T Output[size];
+  T Expected[size];
+  int Values[size] = {  0, -1,   0,  -1,   4,   5,   4,   5,
+                        8, -9,   8,  -9,  12,  13,  12,  13,
+                       16, 17,  16,  17,  20, -21,  20, -21,
+                       24, 25,  24,  25,  28,  29,  28,  29,
+                      -32, 33, -32,  33, -36,  37, -36,  37,
+                       40, 41,  40,  41, -44, -45, -44, -45,
+                       48, 49,  48,  49,  52,  53,  52,  53,
+                       56, 57,  56,  57,  60,  61,  60,  61};
+
+  initializeInput(Input, size);
+  initializeExpected(Expected, Values, size);
+
+  int warpSize = getWarpSize();
+
+  T* d_Input;
+  T* d_Output;
+  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
+  HIP_CHECK(hipMalloc(&d_Output, sizeof(T) * size));
+
+  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault));
+  hipLaunchKernelGGL(shflXor_4<T>, 1, warpSize, 0, 0, d_Input, d_Output);
+
+  HIP_CHECK(hipMemcpy(&Output, d_Output, sizeof(T) * size, hipMemcpyDefault));
+  for (int i = 0; i != warpSize; ++i) {
+    REQUIRE(compareEqual(Output[i], Expected[i]));
+  }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
+}
+
+template <typename T>
+__global__ void shflXor_5(T * Input, T *Output) {
+  int tid = threadIdx.x;
+  auto mask = __match_any_sync(AllThreads, (int)(tid < 16));
+  int width = (tid < 16) ? 2 : 4;
+  Output[tid] = __shfl_xor_sync(mask, Input[tid], width, width);
+}
+
+
+template <typename T>
+static void runTestShflXor_5() {
+  const int size = 64;
+  T Input[size];
+  T Output[size];
+  T Expected[size];
+  int Values[size] = {  0,  -1,   0,  -1,   4,   5,   4,   5,
+                        8,  -9,   8,  -9,  12,  13,  12,  13,
+                       16,  17, -18,  19,  16,  17, -18,  19,
+                       24,  25,  26, -27,  24,  25,  26, -27,
+                      -32,  33,  34,  35, -32,  33,  34,  35,
+                       40,  41,  42,  43,  40,  41,  42,  43,
+                       48,  49,  50, -51,  48,  49,  50, -51,
+                       56,  57, -58,  59,  56,  57, -58,  59};
+
+  initializeInput(Input, size);
+  initializeExpected(Expected, Values, size);
+
+  int warpSize = getWarpSize();
+
+  T* d_Input;
+  T* d_Output;
+  HIP_CHECK(hipMalloc(&d_Input, sizeof(T) * size));
+  HIP_CHECK(hipMalloc(&d_Output, sizeof(T) * size));
+
+  HIP_CHECK(hipMemcpy(d_Input, &Input, sizeof(T) * size, hipMemcpyDefault));
+  hipLaunchKernelGGL(shflXor_5<T>, 1, warpSize, 0, 0, d_Input, d_Output);
+
+  HIP_CHECK(hipMemcpy(&Output, d_Output, sizeof(T) * size, hipMemcpyDefault));
+  for (int i = 0; i != warpSize; ++i) {
+    REQUIRE(compareEqual(Output[i], Expected[i]));
+  }
+
+  HIP_CHECK(hipFree(d_Input));
+  HIP_CHECK(hipFree(d_Output));
 }
 
 __global__ void shflXor_4(int *Input, int *Output) {
@@ -220,61 +320,85 @@ TEST_CASE("Unit_hipShflSync_Xor") {
     runTestShflXor_1<short>();
     runTestShflXor_2<short>();
     runTestShflXor_3<short>();
+    runTestShflXor_4<short>();
+    runTestShflXor_5<short>();
   }
   SECTION("run test for unsigned short") {
     runTestShflXor_1<unsigned short>();
     runTestShflXor_2<unsigned short>();
     runTestShflXor_3<unsigned short>();
+    runTestShflXor_4<unsigned short>();
+    runTestShflXor_5<unsigned short>();
   }
   SECTION("run test for int") {
     runTestShflXor_1<int>();
     runTestShflXor_2<int>();
     runTestShflXor_3<int>();
+    runTestShflXor_4<int>();
+    runTestShflXor_5<int>();
   }
   SECTION("run test for unsigned int") {
     runTestShflXor_1<unsigned int>();
     runTestShflXor_2<unsigned int>();
     runTestShflXor_3<unsigned int>();
+    runTestShflXor_4<unsigned int>();
+    runTestShflXor_5<unsigned int>();
   }
   SECTION("run test for long") {
     runTestShflXor_1<long>();
     runTestShflXor_2<long>();
     runTestShflXor_3<long>();
+    runTestShflXor_4<long>();
+    runTestShflXor_5<long>();
   }
   SECTION("run test for unsigned long") {
     runTestShflXor_1<unsigned long>();
     runTestShflXor_2<unsigned long>();
     runTestShflXor_3<unsigned long>();
+    runTestShflXor_4<unsigned long>();
+    runTestShflXor_5<unsigned long>();
   }
   SECTION("run test for long long") {
     runTestShflXor_1<long long>();
     runTestShflXor_2<long long>();
     runTestShflXor_3<long long>();
+    runTestShflXor_4<long long>();
+    runTestShflXor_5<long long>();
   }
   SECTION("run test for unsigned long long") {
     runTestShflXor_1<unsigned long long>();
     runTestShflXor_2<unsigned long long>();
     runTestShflXor_3<unsigned long long>();
+    runTestShflXor_4<unsigned long long>();
+    runTestShflXor_5<unsigned long long>();
   }
   SECTION("run test for float") {
     runTestShflXor_1<float>();
     runTestShflXor_2<float>();
     runTestShflXor_3<float>();
+    runTestShflXor_4<float>();
+    runTestShflXor_5<float>();
   }
   SECTION("run test for double") {
     runTestShflXor_1<double>();
     runTestShflXor_2<double>();
     runTestShflXor_3<double>();
+    runTestShflXor_4<double>();
+    runTestShflXor_5<double>();
   }
   SECTION("run test for __half") {
     runTestShflXor_1<__half>();
     runTestShflXor_2<__half>();
     runTestShflXor_3<__half>();
+    runTestShflXor_4<__half>();
+    runTestShflXor_5<__half>();
   }
   SECTION("run test for __half2") {
     runTestShflXor_1<__half2>();
     runTestShflXor_2<__half2>();
     runTestShflXor_3<__half2>();
+    runTestShflXor_4<__half2>();
+    runTestShflXor_5<__half2>();
   }
   SECTION("run divergent exec tests") {
     runTestShflXor_4();
