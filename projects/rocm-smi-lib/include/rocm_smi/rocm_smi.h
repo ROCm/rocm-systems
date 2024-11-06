@@ -4182,6 +4182,39 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
                               uint32_t len);
 
 /**
+ *  @brief Retrieves the available memory partition capabilities
+ *  for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a string @p memory_partition_caps ,
+ *  and uint32 @p len , this function will attempt to obtain the device's
+ *  available memory partition capabilities string. Upon successful
+ *  retreival, the obtained device's available memory partition capablilities
+ *  string shall be stored in the passed @p memory_partition_caps
+ *  char string variable.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] memory_partition_caps a pointer to a char string variable,
+ *  which the device's available memory partition capabilities will be written to.
+ *
+ *  @param[in] len the length of the caller provided buffer @p len ,
+ *  suggested length is 30 or greater.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire memory partition value. In this case,
+ *  only @p len bytes will be written.
+ *
+ */
+rsmi_status_t rsmi_dev_memory_partition_capabilities_get(
+                uint32_t dv_ind, char *memory_partition_caps, uint32_t len);
+
+/**
  *  @brief Modifies a selected device's current memory partition setting.
  *
  *  @details Given a device index @p dv_ind and a type of memory partition

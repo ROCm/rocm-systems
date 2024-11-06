@@ -394,11 +394,16 @@ def getTargetGfxVersion(device, silent=False):
     :param silent: Turn on to silence error output
         (you plan to handle manually). Default is off.
     """
-    gfx_version = c_uint64()
+    target_graphics_version = c_uint64()
+    market_name = str(getDeviceName(device, True))
     gfx_ver_ret = "N/A"
-    ret = rocmsmi.rsmi_dev_target_graphics_version_get(device, byref(gfx_version))
+    ret = rocmsmi.rsmi_dev_target_graphics_version_get(device, byref(target_graphics_version))
+    target_graphics_version = str(target_graphics_version.value)
     if rsmi_ret_ok(ret, device, 'get_target_gfx_version', silent=silent):
-        gfx_ver_ret = "gfx" + str(gfx_version.value)
+        if len(target_graphics_version) == 4 and ("Instinct MI2" in market_name):
+            hex_part = str(hex(int(str(target_graphics_version)[2:]))).replace("0x", "")
+            target_graphics_version = str(target_graphics_version)[:2] + hex_part
+        gfx_ver_ret = "gfx" + str(target_graphics_version)
     return gfx_ver_ret
 
 def getNodeId(device, silent=False):
@@ -754,6 +759,19 @@ def getMemoryPartition(device, silent=True):
     ret = rocmsmi.rsmi_dev_memory_partition_get(device, currentMemoryPartition, MAX_BUFF_SIZE)
     if rsmi_ret_ok(ret, device, 'get_memory_partition', silent) and currentMemoryPartition.value.decode():
         return str(currentMemoryPartition.value.decode())
+    return "N/A"
+
+def getMemoryPartitionCapabilities(device, silent=True):
+    """ Return the current memory partition capablities of a given device
+
+    :param device: DRM device identifier
+    :param silent: Turn on to silence error output
+        (you plan to handle manually). Default is on.
+    """
+    memoryPartitionCapabilities = create_string_buffer(MAX_BUFF_SIZE)
+    ret = rocmsmi.rsmi_dev_memory_partition_capabilities_get(device, memoryPartitionCapabilities, MAX_BUFF_SIZE)
+    if rsmi_ret_ok(ret, device, 'get_compute_partition', silent) and memoryPartitionCapabilities.value.decode():
+        return str(memoryPartitionCapabilities.value.decode())
     return "N/A"
 
 
@@ -1827,14 +1845,20 @@ def showProgressbar(title="", timeInSeconds=13):
         time.sleep(1)
 
 
-def setMemoryPartition(deviceList, memoryPartition):
+def setMemoryPartition(deviceList, memoryPartition, autoRespond):
     """ Sets memory partition (memory partition) for a list of devices
 
     :param deviceList: List of DRM devices (can be a single-item list)
     :param memoryPartition: Memory Partition type to set as
     """
+    addExtraLine=False
     printLogSpacer(' Set memory partition to %s ' % (str(memoryPartition).upper()))
+    confirmChangingMemoryPartitionAndReloadingAMDGPU(autoRespond)
     for device in deviceList:
+        current_memory_partition = getMemoryPartition(device, silent=True)
+        if current_memory_partition == 'N/A':
+            printLog(device, 'Not supported on the given system', None, addExtraLine)
+            continue
         memoryPartition = memoryPartition.upper()
         if memoryPartition not in memory_partition_type_l:
             printErrLog(device, 'Invalid memory partition type %s'
@@ -1843,8 +1867,9 @@ def setMemoryPartition(deviceList, memoryPartition):
                         (', '.join(map(str, memory_partition_type_l))) ))
             return (None, None)
 
+        kTimeWait = 40
         t1 = multiprocessing.Process(target=showProgressbar,
-                            args=("Updating memory partition",13,))
+                            args=("Updating memory partition",kTimeWait,))
         t1.start()
         addExtraLine=True
         start=time.time()
@@ -1866,12 +1891,19 @@ def setMemoryPartition(deviceList, memoryPartition):
             printLog(device, 'Permission denied', None, addExtraLine)
         elif ret == rsmi_status_t.RSMI_STATUS_NOT_SUPPORTED:
             printLog(device, 'Not supported on the given system', None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_INVALID_ARGS:
+            printLog(device, 'Device does not support setting to ' + str(memoryPartition).upper(), None, addExtraLine)
+            memory_partition_caps = getMemoryPartitionCapabilities(device, silent=True)
+            printLog(device, 'Available memory partition modes: ' + str(memory_partition_caps).upper(), None, addExtraLine)
         elif ret == rsmi_status_t.RSMI_STATUS_BUSY:
             printLog(device, 'Device is currently busy, try again later',
                      None, addExtraLine)
+        elif ret == rsmi_status_t.RSMI_STATUS_AMDGPU_RESTART_ERR:
+            printLog(device, 'Issue reloading driver, please check dmsg for errors',
+                     None, addExtraLine)
         else:
             rsmi_ret_ok(ret, device, 'set_memory_partition')
-            printErrLog(device, 'Failed to retrieve memory partition, even though device supports it.')
+            printErrLog(device, 'Failed to set memory partition, even though device supports it.')
     printLogSpacer()
 
 def showVersion(isCSV=False):
@@ -3848,6 +3880,32 @@ def confirmOutOfSpecWarning(autoRespond):
     else:
         sys.exit('Confirmation not given. Exiting without setting value')
 
+def confirmChangingMemoryPartitionAndReloadingAMDGPU(autoRespond):
+    """ Print the warning for running outside of specification and prompt user to accept the terms.
+
+    :param autoRespond: Response to automatically provide for all prompts
+    """
+    print('''
+          ******WARNING******\n
+          Setting Dynamic Memory (NPS) partition modes require users to quit all GPU workloads.
+          ROCm SMI will then attempt to change memory (NPS) partition mode.
+          Upon a successful set, ROCm SMI will then initiate an action to restart amdgpu driver.
+          This action will change all GPU's in the hive to the requested memory (NPS) partition mode.
+
+          Please use this utility with caution.
+          ''')
+    if not autoRespond:
+        user_input = input('Do you accept these terms? [Y/N] ')
+    else:
+        user_input = autoRespond
+    if user_input in ['Yes', 'yes', 'y', 'Y', 'YES']:
+        print('')
+        return
+    else:
+        print('Confirmation not given. Exiting without setting value')
+        printLogSpacer()
+        sys.exit(1)
+
 
 def doesDeviceExist(device):
     """ Check whether the specified device exists
@@ -4507,7 +4565,7 @@ if __name__ == '__main__':
     if args.setcomputepartition:
         setComputePartition(deviceList, args.setcomputepartition[0])
     if args.setmemorypartition:
-        setMemoryPartition(deviceList, args.setmemorypartition[0])
+        setMemoryPartition(deviceList, args.setmemorypartition[0], args.autorespond)
     if args.resetprofile:
         resetProfile(deviceList)
     if args.resetxgmierr:

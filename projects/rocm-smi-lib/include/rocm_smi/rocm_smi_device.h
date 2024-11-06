@@ -172,7 +172,8 @@ enum DevInfoTypes {
   kDevGpuReset,
   kDevAvailableComputePartition,
   kDevComputePartition,
-  kDevMemoryPartition
+  kDevMemoryPartition,
+  kDevAvailableMemoryPartition,
 };
 
 typedef struct {
@@ -227,6 +228,8 @@ class Device {
     bool DeviceAPISupported(std::string name, uint64_t variant,
                                                         uint64_t sub_variant);
     rsmi_status_t restartAMDGpuDriver(void);
+    rsmi_status_t isRestartInProgress(bool *isRestartInProgress,
+                                      bool *isAMDGPUModuleLive);
     rsmi_status_t storeDevicePartitions(uint32_t dv_ind);
     template <typename T> std::string readBootPartitionState(uint32_t dv_ind);
     rsmi_status_t check_amdgpu_property_reinforcement_query(uint32_t dev_idx, AMDGpuVerbTypes_t verb_type);
@@ -244,6 +247,7 @@ class Device {
     static const std::map<DevInfoTypes, const char*> devInfoTypesStrings;
     void set_smi_device_id(uint32_t i) { m_device_id = i; }
     void set_smi_partition_id(uint32_t i) { m_partition_id = i; }
+    static const char* get_type_string(DevInfoTypes type);
 
  private:
     std::shared_ptr<Monitor> monitor_;

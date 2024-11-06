@@ -8,6 +8,11 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ### Added
 
+- **Added `rsmi_dev_memory_partition_capabilities_get` which returns driver memory partition capablities.**  
+Driver now has the ability to report what the user can set memory partition modes to. User can now see available
+memory partition modes upon an invalid argument return from memory partition mode set (`rsmi_dev_memory_partition_set`).
+
+
 - **Added support for GPU metrics 1.6 to `rsmi_dev_gpu_metrics_info_get()`**  
 Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for PVIOL / TVIOL,  XCP (Graphics Compute Partitions) stats, and pcie_lc_perf_other_end_recovery:  
   - `uint64_t accumulation_counter` - used for all throttled calculations
@@ -27,17 +32,26 @@ Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to 
 - **Added ability to view raw GPU metrics`rocm-smi --showmetrics`**  
 Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD SMI (or other ROCM-SMI interfaces), these values are ***not*** converted into applicable units as users may see in `amd-smi metric`. Units listed display as indicated by the driver, they are not converted (eg. in other AMD SMI/ROCm SMI interfaces which use the data provided). It is important to note, that fields displaying `N/A` data mean this ASIC does not support or backward compatibility was not provided in a newer ASIC's GPU metric structure.   
 
+### Changed
+
+- **Added back in C++ tests for `memorypartition_read_write`**.  
+Due to driver adding in all needed features for memory partition write. We have re-enabled memorypartition_read_write.
+
+- **Updated `rsmi_dev_memory_partition_set` to not return until a successful restart of AMD GPU Driver.**  
+This change keeps checking for ~ up to 40 seconds for a successful restart of the AMD GPU driver. Additionally, the API call continues to check if memory partition (NPS) SYSFS files are successfully updated to reflect the user's requested memory partition (NPS) mode change. Otherwise, reports an error back to the user. Due to these changes, we have updated ROCm SMI's CLI to reflect the maximum wait of 40 seconds, while memory partition change is in progress.
+
+- **All APIs now have the ability to catch driver reporting invalid arguments.**  
+Now ROCm SMI APIs can show RSMI_STATUS_INVALID_ARGS when driver returns EINVAL.
+
 ### Removed
 
 - **Removed `--resetcomputepartition`, and  `--resetmemorypartition` options and associated APIs**.
   - This change is part of the partition feature redesign.
   - The related APIs `rsmi_dev_compute_partition_reset()` and `rsmi_dev_memory_partition_reset()`.
 
-- **Temporary Disabled C++ tests for `memorypartition_read_write`**.  
-  - This change is part of the partition feature redesign.
-  - SMI's workflow needs to be adjusted in order to accomidate incoming driver changes to enable
-  Dynamic memory partition feature. We plan on re-enabling testing for this feature during ROCm
-  6.4.
+### Resolved issues
+
+- **Fixed `rsmi_dev_target_graphics_version_get`, `rocm-smi --showhw`, and `rocm-smi --showprod` not displaying properly for MI2x or Navi 3x ASICs.**  
 
 ### Upcoming changes
 
