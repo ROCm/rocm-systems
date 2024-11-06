@@ -725,26 +725,36 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueryPointerInfo(const void *Pointer,
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   pr_debug("pointer %p\n", Pointer);
-  void *pointer = const_cast<void*>(Pointer);
+  void *ptr = const_cast<void*>(Pointer);
 
   memset(PointerInfo, 0, sizeof(HsaPointerInfo));
   void* block_base = nullptr;
   {
     std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
-      block_base = fragment_allocator_.block_base(pointer);
+      block_base = fragment_allocator_.block_base(ptr);
     if (block_base != nullptr)
-      pointer = block_base;
+      ptr = block_base;
   }
 
   Allocation allocation_info;
+  bool found = false;
   {
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
-    auto it = allocation_map_.find(pointer);
-    if (it == allocation_map_.end()) {
-      PointerInfo->Type = HSA_POINTER_UNKNOWN;
-      return HSAKMT_STATUS_ERROR;
+    auto it = allocation_map_.upper_bound(ptr);
+    if (it != allocation_map_.begin()) {
+      --it;
+      if (ptr >= it->first &&
+        (ptr < reinterpret_cast<const uint8_t*>(it->first) + it->second.size_requested)) {
+        allocation_info = it->second;
+        found = true;
+      }
     }
-    allocation_info = it->second;
+  }
+
+  if (!found) {
+    pr_debug("can't found allocation for %p\n", Pointer);
+    PointerInfo->Type = HSA_POINTER_UNKNOWN;
+    return HSAKMT_STATUS_ERROR;
   }
 
   if (allocation_info.userptr) {
