@@ -384,8 +384,3 @@ Timing Difference Between rocprofv3 and rocprofv1/v2
 ========================================================
 
 Rocprofv3 has improved the accuracy of timing information by reducing the tool overhead required to collect data and reducing the interference to the timing of the kernel being measured. The result of this work is a reduction in variance of kernel times received for the same kernel execution and more accurate timing in general. These changes have not been backported (and will not be backported) to rocprofv1/v2, so there can be substantial (20%) differences in execution time reported by v1/v2 vs v3 for a single kernel execution. Over a large number of samples of the same kernel, the difference in average execution time is in the low single digit percentage time with a much tighter variance of results on rocprofv3. We have included testing in the test suite to verify the timing information outputted by rocprofv3 to ensure that the values we are returning are accurate.  
-
-Limitations (these apply to all versions of rocprof): 
-
-- Kernels shorter than 4 microseconds in execution time will return between 3-4 microseconds due to device overheads in collecting counter information.  
-- Only a single timestamp is returned even if the Kernel was executed on multiple XCD’s/XCC’s. This timestamp is the MAX of the timestamps on the XCD’s/XCC’s. 
