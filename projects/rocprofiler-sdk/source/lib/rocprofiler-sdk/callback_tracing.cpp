@@ -82,6 +82,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_DISPATCH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_COPY)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RCCL_API)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OPENMP)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -250,6 +251,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::hsa::async_copy::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_OPENMP:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+            break;
+        }
     };
 
     if(!val)
@@ -362,6 +368,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         {
             ops = rocprofiler::hsa::async_copy::get_ids();
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_OPENMP:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
             break;
         }
     };
@@ -494,6 +505,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
+        case ROCPROFILER_CALLBACK_TRACING_OPENMP:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

@@ -172,6 +172,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,      ///< @see ::rocprofiler_memory_copy_operation_t
     ROCPROFILER_CALLBACK_TRACING_RCCL_API,         ///< @RCCL tracing
+    ROCPROFILER_CALLBACK_TRACING_OPENMP,           ///< @see ::rocprofiler_ompt_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -197,6 +198,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
     ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
+    ROCPROFILER_BUFFER_TRACING_OPENMP,                     ///< @see ::rocprofiler_ompt_operation_t
     ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_buffer_tracing_kind_t;
 

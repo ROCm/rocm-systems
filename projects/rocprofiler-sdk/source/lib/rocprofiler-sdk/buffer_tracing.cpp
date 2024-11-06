@@ -85,6 +85,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(PAGE_MIGRATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(CORRELATION_ID_RETIREMENT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RCCL_API)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(OPENMP)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -267,6 +268,10 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
+        case ROCPROFILER_BUFFER_TRACING_OPENMP:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
     };
 
     if(!val)
@@ -380,6 +385,10 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
+        {
+            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+        }
+        case ROCPROFILER_BUFFER_TRACING_OPENMP:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

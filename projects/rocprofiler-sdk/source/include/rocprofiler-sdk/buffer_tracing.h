@@ -126,6 +126,63 @@ typedef struct
 } rocprofiler_buffer_tracing_hip_api_record_t;
 
 /**
+ * @brief Additional trace data for OpenMP target routines
+ */
+
+typedef struct rocprofiler_buffer_tracing_ompt_target_t
+{
+    int32_t     kind;        // ompt_target_t target region kind
+    int32_t     device_num;  // ompt device number for the region
+    uint64_t    task_id;     // Task ID from the task_data argument to the OMPT callback
+    uint64_t    target_id;   // Target identifier from the target_data argument to the callback
+    const void* codeptr_ra;  // pointer to the callsite of the target region
+} rocprofiler_buffer_tracing_ompt_target_t;
+
+typedef struct rocprofiler_buffer_tracing_ompt_target_data_op_t
+{
+    uint64_t    host_op_id;       // from the host_op_id argument to the OMPT callback
+    int32_t     optype;           // ompt_target_data_op_t kind of operation
+    int32_t     src_device_num;   // ompt device number for data source
+    int32_t     dest_device_num;  // ompt device number for data destination
+    int32_t     reserved;         // for padding
+    uint64_t    bytes;            // size in bytes of the operation
+    const void* codeptr_ra;       // pointer to the callsite of the target_data_op
+} rocprofiler_buffer_tracing_ompt_target_data_op_t;
+
+typedef struct rocprofiler_buffer_tracing_ompt_target_kernel_t
+{
+    uint64_t host_op_id;           // from the host_op_id argument to the OMPT callback
+    int32_t  device_num;           // strangely missing from the OpenMP spec,
+    uint32_t requested_num_teams;  // from the compiler
+} rocprofiler_buffer_tracing_ompt_target_kernel_t;
+
+/**
+ * @brief ROCProfiler Buffer OPENMP API Tracer Record.
+ */
+typedef struct rocprofiler_buffer_tracing_ompt_api_record_t
+{
+    uint64_t                          size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t kind;
+    rocprofiler_tracing_operation_t   operation;
+    rocprofiler_correlation_id_t      correlation_id;   ///< correlation ids for record
+    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
+    union
+    {
+        rocprofiler_buffer_tracing_ompt_target_t         target;
+        rocprofiler_buffer_tracing_ompt_target_data_op_t target_data;
+        rocprofiler_buffer_tracing_ompt_target_kernel_t  kernel;
+        uint64_t                                         reserved[5];
+    };
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_OPENMP
+    /// @var operation
+    /// @brief Specification of the API function,::rocprofiler_ompt_operation_t
+} rocprofiler_buffer_tracing_ompt_api_record_t;
+
+/**
  * @brief ROCProfiler Buffer Marker Tracer Record.
  */
 typedef struct
