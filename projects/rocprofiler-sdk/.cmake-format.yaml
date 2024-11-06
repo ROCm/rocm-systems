@@ -253,6 +253,15 @@ parse:
         BINARY_DIR: '*'
         INSTALL_DIR: '*'
         COMPONENT: '*'
+    rocprofiler_sdk_custom_compilation:
+      flags:
+        - GLOBAL
+        - PROJECT
+      kwargs:
+        COMPILER: '*'
+        DIRECTORY: '*'
+        TARGET: '*'
+        SOURCE: '*'
   override_spec: {}
   vartags: []
   proptags: []

@@ -44,6 +44,11 @@ install(
     DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}
     COMPONENT development)
 
+install(
+    FILES ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-custom-compilation.cmake
+    DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules
+    COMPONENT development)
+
 rocprofiler_install_env_setup_files(
     NAME ${PACKAGE_NAME}
     VERSION ${PROJECT_VERSION}
@@ -86,6 +91,11 @@ write_basic_package_version_file(
 configure_file(
     ${PROJECT_SOURCE_DIR}/cmake/rocprofiler_config_nolink_target.cmake
     ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PROJECT_NAME}-sdk/${PROJECT_NAME}-sdk-config-nolink-target.cmake
+    COPYONLY)
+
+configure_file(
+    ${PROJECT_SOURCE_DIR}/cmake/Modules/rocprofiler-sdk-custom-compilation.cmake
+    ${PROJECT_BINARY_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake/${PACKAGE_NAME}/Modules/rocprofiler-sdk-custom-compilation.cmake
     COPYONLY)
 
 install(
