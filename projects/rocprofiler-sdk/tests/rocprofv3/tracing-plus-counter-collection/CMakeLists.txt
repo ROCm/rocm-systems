@@ -19,8 +19,9 @@ add_test(
     NAME rocprofv3-test-tracing-plus-counter-collection-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hsa-trace -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace
-        -o pmc3 --output-format JSON PFTRACE CSV -- $<TARGET_FILE:simple-transpose>)
+        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace -o pmc3 --output-format
+        JSON PFTRACE CSV -- $<TARGET_FILE:simple-transpose>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -38,22 +39,22 @@ foreach(_DIR "pmc_1" "pmc_2" "pmc_3" "pmc_4")
         NAME rocprofv3-test-tracing-plus-counter-collection-validate-${_DIR}
         COMMAND
             ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_results.json"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_results.json"
             --pftrace-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_results.pftrace"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_results.pftrace"
             --hsa-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_hsa_api_trace.csv"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_hsa_api_trace.csv"
             --agent-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_agent_info.csv"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_agent_info.csv"
             --counter-input
-            "${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/${_DIR}/pmc3_counter_collection.csv"
+            "${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/${_DIR}/pmc3_counter_collection.csv"
         )
 
     set_tests_properties(
         rocprofv3-test-tracing-plus-counter-collection-validate-${_DIR}
         PROPERTIES TIMEOUT 45 LABELS "integration-tests;application-replay" DEPENDS
-                   "rocprofv3-test-tracing-plus-cc-execute" FAIL_REGULAR_EXPRESSION
-                   "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+                   "rocprofv3-test-tracing-plus-counter-collection-execute"
+                   FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 endforeach()
 
 set(cmdl_single "GRBM_COUNT")
@@ -68,8 +69,8 @@ foreach(_GROUP "single" "multiple")
         NAME ${_TEST_NAME_PREFIX}-execute
         COMMAND
             $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --hip-trace --hsa-trace --pmc
-            ${cmdl_${_GROUP}} -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace -o
-            cmdl/${_GROUP} --output-format JSON PFTRACE CSV --
+            ${cmdl_${_GROUP}} -d ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace
+            -o cmdl/${_GROUP} --output-format JSON PFTRACE CSV --
             $<TARGET_FILE:simple-transpose>)
 
     set_tests_properties(
@@ -77,7 +78,8 @@ foreach(_GROUP "single" "multiple")
         PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT "${cc-tracing-env}"
                    FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
-    set(_TEST_OUTPUT_PREFIX ${CMAKE_CURRENT_BINARY_DIR}/out_cc_trace/cmdl/${_GROUP})
+    set(_TEST_OUTPUT_PREFIX
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_trace/cmdl/${_GROUP})
 
     add_test(
         NAME ${_TEST_NAME_PREFIX}-validate

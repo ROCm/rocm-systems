@@ -14,7 +14,7 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
                                                           input_range.json)
 
 add_test(
-    NAME rocprofv3-test-cc-kernel-filtering-range-filter-execute
+    NAME rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
         ${CMAKE_CURRENT_BINARY_DIR}/input_range.json -d
@@ -26,13 +26,13 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 set(cc-env-kernel-filtering "${PRELOAD_ENV}")
 
 set_tests_properties(
-    rocprofv3-test-cc-kernel-filtering-range-filter-execute
+    rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
                "${cc-env-kernel-filtering}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 
 add_test(
-    NAME rocprofv3-test-cc-kernel-filtering-range-filter-validate
+    NAME rocprofv3-test-counter-collection-kernel-filtering-range-filter-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-config
         ${CMAKE_CURRENT_BINARY_DIR}/input_range.json --input-json-pass1
@@ -43,7 +43,7 @@ add_test(
         ${CMAKE_CURRENT_BINARY_DIR}/range_filter/pass_3/out_results.json)
 
 set_tests_properties(
-    rocprofv3-test-cc-kernel-filtering-range-filter-validate
+    rocprofv3-test-counter-collection-kernel-filtering-range-filter-validate
     PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               "rocprofv3-test-cc-kernel-filtering-range-filter-execute"
+               "rocprofv3-test-counter-collection-kernel-filtering-range-filter-execute"
                FAIL_REGULAR_EXPRESSION "${ROCPROFILER_DEFAULT_FAIL_REGEX}")

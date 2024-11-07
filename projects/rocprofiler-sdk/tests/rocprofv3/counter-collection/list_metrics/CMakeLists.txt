@@ -14,9 +14,11 @@ rocprofiler_configure_pytest_files(CONFIG pytest.ini COPY validate.py conftest.p
                                                           input.json)
 
 # basic-metrics
-add_test(NAME rocprofv3-test-list-metrics-execute
-         COMMAND $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
-                 ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2 -o metrics --list-metrics)
+add_test(
+    NAME rocprofv3-test-list-metrics-execute
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2 -o metrics --list-metrics)
 
 # list-metrics-stdout
 add_test(NAME rocprofv3-test-list-metrics-std-out-execute
@@ -45,17 +47,18 @@ set_tests_properties(
         PASS_REGULAR_EXPRESSION
         "gpu-agent[0-9]*:[a-zA-Z_]*\\n;Description:(.*)\\n*;Expression:(.)*\\n*;Block:[a-zA-Z]*\\n*;Dimensions:([A-Z_]*\\[[0-9]*:[0-9]*\\])*\\n*;"
     )
-set(VALIDATION_FILES ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_basic_metrics.csv
-                     ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_derived_metrics.csv)
+set(VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_basic_metrics.csv
+    ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_derived_metrics.csv)
 
 add_test(
     NAME rocprofv3-test-list-metrics-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py
         --derived-metrics-input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_derived_metrics.csv
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_derived_metrics.csv
         --basic-metrics-input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_cc_2/metrics_basic_metrics.csv)
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_2/metrics_basic_metrics.csv)
 
 set_tests_properties(
     rocprofv3-test-list-metrics-validate

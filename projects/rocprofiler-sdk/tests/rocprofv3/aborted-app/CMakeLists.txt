@@ -51,7 +51,7 @@ set_tests_properties(
 add_test(
     NAME rocprofv3-test-validate-app-abort
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
-            ${CMAKE_CURRENT_BINARY_DIR}/out-aborted-app/pass_1/out_results.json)
+            ${CMAKE_CURRENT_BINARY_DIR}/out-aborted-app/out_results.json)
 
 set_tests_properties(
     rocprofv3-test-validate-app-abort

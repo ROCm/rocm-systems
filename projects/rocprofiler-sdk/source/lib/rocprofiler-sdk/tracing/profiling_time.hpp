@@ -72,7 +72,10 @@ struct profiling_time
 };
 
 inline profiling_time
-adjust_profiling_time(std::string_view _label, profiling_time _value, profiling_time&& _bounds)
+adjust_profiling_time(std::string_view _label,
+                      std::string_view _responsible,
+                      profiling_time   _value,
+                      profiling_time&& _bounds)
 {
     static auto sysclock_period = hsa::get_hsa_timestamp_period();
     static auto normalize_env   = common::get_env("ROCPROFILER_CI_FREQ_SCALE_TIMESTAMPS", false);
@@ -84,19 +87,21 @@ adjust_profiling_time(std::string_view _label, profiling_time _value, profiling_
 
     if(strict_ts_env)
     {
-        ROCP_FATAL_IF(ROCPROFILER_UNLIKELY(_value.end < _value.start))
-            << fmt::format("Invalid {} time value: {} end time ({}) is less than the {} start time "
-                           "({}) :: difference={}",
+        ROCP_FATAL_IF(ROCPROFILER_UNLIKELY(_value.start > _value.end))
+            << fmt::format("{} returned invalid {} time value: {} start time is greater than the "
+                           "{} end time ({} > {}) :: difference={}",
+                           _responsible,
                            _label,
                            _label,
-                           _value.end,
                            _label,
                            _value.start,
-                           (_value.end - _value.start));
+                           _value.end,
+                           (_value.start - _value.end));
 
         ROCP_FATAL_IF(ROCPROFILER_UNLIKELY(_value.start < _bounds.start))
-            << fmt::format("Invalid {} time value: {} start time ({}) is less than the enqueue "
-                           "time on the CPU ({}) :: difference={}",
+            << fmt::format("{} returned invalid {} time value: {} start time is before the API "
+                           "call enqueuing the operation on the CPU ({} < {}) :: difference={}",
+                           _responsible,
                            _label,
                            _label,
                            _value.start,
@@ -105,14 +110,30 @@ adjust_profiling_time(std::string_view _label, profiling_time _value, profiling_
                            (_bounds.start - _value.start));
 
         ROCP_FATAL_IF(ROCPROFILER_UNLIKELY(_value.end > _bounds.end))
-            << fmt::format("Invalid {} time value: {} end time ({}) is greater than the current "
-                           "time on the CPU ({}) :: difference={}",
+            << fmt::format("{} returned invalid {} time value: {} end time is greater than the "
+                           "current time on the CPU ({} > {}) :: difference={}",
+                           _responsible,
                            _label,
                            _label,
                            _value.end,
                            _label,
                            _bounds.end,
                            (_value.end - _bounds.end));
+    }
+
+    if(_value.start > _value.end)
+    {
+        ROCP_ERROR << fmt::format(
+            "{} returned {} times where the start time is after end time ({} > {}) :: "
+            "difference={}. Swapping the values. Set the environment variable "
+            "ROCPROFILER_CI_STRICT_TIMESTAMPS=1 to cause a failure instead",
+            _responsible,
+            _label,
+            _value.start,
+            _value.end,
+            (_value.start - _value.end));
+
+        std::swap(_value.start, _value.end);
     }
 
     // below are hacks for clock skew issues:

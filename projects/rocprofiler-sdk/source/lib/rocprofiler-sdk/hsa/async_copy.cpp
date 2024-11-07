@@ -342,14 +342,20 @@ async_copy_handler(hsa_signal_value_t signal_value, void* arg)
     {
         _profile_time = tracing::adjust_profiling_time(
             "memcpy",
+            "hsa_amd_profiling_get_async_copy_time",
             _profile_time,
             tracing::profiling_time{HSA_STATUS_SUCCESS, _data->start_ts, ts});
-
-        // if we encounter this in CI, it will cause test to fail
-        ROCP_CI_LOG_IF(ERROR, _profile_time.end < _profile_time.start)
-            << "hsa_amd_profiling_get_async_copy_time for returned async times where the end time ("
-            << _profile_time.end << ") was less than the start time (" << _profile_time.start
-            << ")";
+    }
+    else
+    {
+        ROCP_CI_LOG(ERROR) << fmt::format(
+            "hsa_amd_profiling_get_async_copy_time for the {} copy operation from agent-{} to "
+            "agent-{} returned status={} :: {}",
+            std::string_view{hsa::async_copy::name_by_id(_data->direction)},
+            CHECK_NOTNULL(agent::get_agent(_data->src_agent))->node_id,
+            CHECK_NOTNULL(agent::get_agent(_data->dst_agent))->node_id,
+            static_cast<int>(copy_time_status),
+            hsa::get_hsa_status_string(copy_time_status));
     }
 
     // get the contexts that were active when the signal was created

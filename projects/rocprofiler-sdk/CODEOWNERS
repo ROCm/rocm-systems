@@ -6,7 +6,7 @@
 #
 source/docs                                 @bgopesh
 
-source/include                              @bwelton       @ammarwa
+source/include                              @jrmadsen      @bwelton     @ammarwa
 source/include/rocprofiler-sdk/rccl         @MythreyaK
 source/include/rocprofiler-sdk/cxx/codeobj  @ApoKalipse-V
 
@@ -23,4 +23,3 @@ source/lib/rocprofiler-sdk/rccl             @MythreyaK
 source/lib/rocprofiler-sdk-tool             @SrirakshaNag
 
 source/lib/rocprofiler-sdk-codeobj          @ApoKalipse-V
-

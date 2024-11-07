@@ -922,9 +922,8 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
                     name_v        = itr.substr(0, pos);
                     auto dev_id_s = itr.substr(pos + device_qualifier.length());
 
-                    LOG_IF(FATAL,
-                           dev_id_s.empty() ||
-                               dev_id_s.find_first_not_of("0123456789") != std::string::npos)
+                    ROCP_FATAL_IF(dev_id_s.empty() ||
+                                  dev_id_s.find_first_not_of("0123456789") != std::string::npos)
                         << "invalid device qualifier format (':device=N) where N is the GPU id: "
                         << itr;
 
@@ -1203,6 +1202,7 @@ void
 initialize_rocprofv3()
 {
     ROCP_INFO << "initializing rocprofv3...";
+
     if(int status = 0;
        rocprofiler_is_initialized(&status) == ROCPROFILER_STATUS_SUCCESS && status == 0)
     {
@@ -1210,20 +1210,25 @@ initialize_rocprofv3()
                          "force configuration");
     }
 
-    LOG_IF(FATAL, !client_identifier) << "nullptr to client identifier!";
-    LOG_IF(FATAL, !client_finalizer && !tool::get_config().list_metrics)
+    ROCP_FATAL_IF(!client_identifier) << "nullptr to client identifier!";
+    ROCP_FATAL_IF(!client_finalizer && !tool::get_config().list_metrics)
         << "nullptr to client finalizer!";  // exception for listing metrics
 }
 
 void
-finalize_rocprofv3()
+finalize_rocprofv3(std::string_view context)
 {
-    ROCP_INFO << "finalizing rocprofv3...";
+    ROCP_INFO << "invoked: finalize_rocprofv3";
     if(client_finalizer && client_identifier)
     {
+        ROCP_INFO << "finalizing rocprofv3: caller='" << context << "'...";
         client_finalizer(*client_identifier);
         client_finalizer  = nullptr;
         client_identifier = nullptr;
+    }
+    else
+    {
+        ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
     }
 }
 
@@ -1820,7 +1825,9 @@ rocprofv3_set_main(main_func_t main_func) ROCPROFV3_INTERNAL_API;
 void
 rocprofv3_error_signal_handler(int signo)
 {
-    finalize_rocprofv3();
+    ROCP_WARNING << __FUNCTION__ << " caught signal " << signo << "...";
+
+    finalize_rocprofv3(__FUNCTION__);
     // below is for testing purposes. re-raising the signal causes CTest to ignore WILL_FAIL ON
     if(signal_handler_exit) ::exit(signo);
     ::raise(signo);
@@ -1863,7 +1870,7 @@ rocprofiler_configure(uint32_t                 version,
     add_destructor(stats_timestamp);
 
     // in case main wrapper is not used
-    ::atexit(finalize_rocprofv3);
+    ::atexit([]() { finalize_rocprofv3("atexit"); });
 
     if(tool::get_config().list_metrics)
     {
@@ -1927,9 +1934,13 @@ rocprofv3_main(int argc, char** argv, char** envp)
         }
     }
 
+    ROCP_INFO << "rocprofv3: main function wrapper will be invoked...";
+
     auto ret = CHECK_NOTNULL(get_main_function())(argc, argv, envp);
 
-    finalize_rocprofv3();
+    ROCP_INFO << "rocprofv3: main function has returned with exit code: " << ret;
+
+    finalize_rocprofv3(__FUNCTION__);
 
     ROCP_INFO << "rocprofv3 finished. exit code: " << ret;
     return ret;

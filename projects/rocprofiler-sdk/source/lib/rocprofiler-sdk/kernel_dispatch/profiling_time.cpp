@@ -55,27 +55,22 @@ get_dispatch_time(hsa_agent_t             _hsa_agent,
 
     if(_profile_time.status == HSA_STATUS_SUCCESS)
     {
-        // if we encounter this in CI, it will cause test to fail
-        ROCP_CI_LOG_IF(ERROR, _profile_time.end < _profile_time.start)
-            << "hsa_amd_profiling_get_dispatch_time for kernel_id=" << _kernel_id
-            << " on rocprofiler_agent="
-            << CHECK_NOTNULL(agent::get_rocprofiler_agent(_hsa_agent))->node_id
-            << " returned dispatch times where the end time (" << _profile_time.end
-            << ") was less than the start time (" << _profile_time.start << ")";
-
         _profile_time = tracing::adjust_profiling_time(
             "dispatch",
+            "hsa_amd_profiling_get_dispatch_time",
             _profile_time,
             tracing::profiling_time{
                 HSA_STATUS_SUCCESS, _baseline.value_or(dispatch_time.start), ts});
     }
     else
     {
-        ROCP_CI_LOG(ERROR) << "hsa_amd_profiling_get_dispatch_time for kernel id=" << _kernel_id
-                           << " on rocprofiler_agent="
-                           << CHECK_NOTNULL(agent::get_rocprofiler_agent(_hsa_agent))->id.handle
-                           << " returned status=" << dispatch_time_status
-                           << " :: " << hsa::get_hsa_status_string(dispatch_time_status);
+        ROCP_CI_LOG(ERROR) << fmt::format(
+            "hsa_amd_profiling_get_dispatch_time for kernel id={} on agent-{} returned status={} "
+            ":: {}",
+            _kernel_id,
+            CHECK_NOTNULL(agent::get_rocprofiler_agent(_hsa_agent))->node_id,
+            static_cast<int>(dispatch_time_status),
+            hsa::get_hsa_status_string(dispatch_time_status));
     }
 
     return _profile_time;

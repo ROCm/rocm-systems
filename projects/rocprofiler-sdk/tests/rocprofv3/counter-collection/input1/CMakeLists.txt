@@ -18,8 +18,9 @@ add_test(
     NAME rocprofv3-test-counter-collection-txt-pmc1-execute
     COMMAND
         $<TARGET_FILE:rocprofiler-sdk::rocprofv3> -i
-        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -T -d ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1
-        -o pmc1 --output-format csv json -- $<TARGET_FILE:vector-ops>)
+        ${CMAKE_CURRENT_BINARY_DIR}/input.txt -T -d
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1 -o pmc1 --output-format csv
+        json -- $<TARGET_FILE:vector-ops>)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
                "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
@@ -35,8 +36,9 @@ add_test(
     NAME rocprofv3-test-counter-collection-pmc1-validate
     COMMAND
         ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
-        ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1/pmc_1/pmc1_counter_collection.csv
-        --json-input ${CMAKE_CURRENT_BINARY_DIR}/out_cc_1/pmc_1/pmc1_results.json)
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1/pmc_1/pmc1_counter_collection.csv
+        --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/out_counter_collection_1/pmc_1/pmc1_results.json)
 
 set_tests_properties(
     rocprofv3-test-counter-collection-pmc1-validate
