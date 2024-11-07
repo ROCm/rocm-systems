@@ -1,6 +1,6 @@
 [submodule "external/timemory"]
 	path = external/timemory
-	url = https://github.com/NERSC/timemory.git
+	url = https://github.com/ROCm/timemory.git
 [submodule "external/perfetto"]
 	path = external/perfetto
 	url = https://github.com/google/perfetto.git

@@ -163,55 +163,18 @@ get_clock_skew()
     static auto _use = tim::get_env("ROCPROFSYS_USE_ROCTRACER_CLOCK_SKEW", true);
     if(!_use) return 0;
     static auto _v = []() {
-        namespace cpu = tim::cpu;
-        // synchronize timestamps
-        // We'll take a CPU timestamp before and after taking a GPU timestmp, then
-        // take the average of those two, hoping that it's roughly at the same time
-        // as the GPU timestamp.
-        static auto _cpu_now = []() {
-            cpu::fence();
-            return comp::wall_clock::record();
-        };
-
-        static auto _gpu_now = []() {
-            cpu::fence();
+        auto _gpu_now = []() {
             uint64_t _ts = 0;
-            ROCPROFSYS_ROCTRACER_CALL(roctracer_get_timestamp(&_ts));
+            roctracer_get_timestamp(&_ts);
             return _ts;
         };
 
-        do
-        {
-            // warm up cache and allow for any static initialization
-            (void) _cpu_now();
-            (void) _gpu_now();
-        } while(false);
+        // discard (warm-up)
+        (void) tracing::get_clock_skew(_gpu_now, 1);
 
-        auto _compute = [](volatile uint64_t& _cpu_ts, volatile uint64_t& _gpu_ts) {
-            _cpu_ts = 0;
-            _gpu_ts = 0;
-            _cpu_ts += _cpu_now() / 2;
-            _gpu_ts += _gpu_now() / 1;
-            _cpu_ts += _cpu_now() / 2;
-            return static_cast<int64_t>(_cpu_ts) - static_cast<int64_t>(_gpu_ts);
-        };
-        constexpr int64_t _n       = 10;
-        int64_t           _cpu_ave = 0;
-        int64_t           _gpu_ave = 0;
-        int64_t           _diff    = 0;
-        for(int64_t i = 0; i < _n; ++i)
-        {
-            volatile uint64_t _cpu_ts = 0;
-            volatile uint64_t _gpu_ts = 0;
-            _diff += _compute(_cpu_ts, _gpu_ts);
-            _cpu_ave += _cpu_ts / _n;
-            _gpu_ave += _gpu_ts / _n;
-        }
-        ROCPROFSYS_BASIC_VERBOSE(2, "CPU timestamp: %li\n", _cpu_ave);
-        ROCPROFSYS_BASIC_VERBOSE(2, "HIP timestamp: %li\n", _gpu_ave);
+        auto _diff = tracing::get_clock_skew(_gpu_now, 10);
         ROCPROFSYS_BASIC_VERBOSE(1, "CPU/HIP timestamp skew: %li (used: %s)\n", _diff,
                                  _use ? "yes" : "no");
-        _diff /= _n;
         return _diff;
     }();
     return _v;
