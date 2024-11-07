@@ -7,7 +7,7 @@ The ROCm Systems Profiler feature set and use cases
 ***************************************
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is designed to be highly extensible.
-Internally, it leverages the `Timemory performance analysis toolkit <https://github.com/NERSC/timemory>`_
+Internally, it leverages the `Timemory performance analysis toolkit <https://github.com/ROCm/timemory>`_
 to manage extensions, resources, data, and other items. It supports the following features,
 modes, metrics, and APIs.
 

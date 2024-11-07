@@ -207,7 +207,7 @@ EOF
 verbose-run cd ${BINARY_DIR}
 
 cat << EOF > dashboard.cmake
-cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
+cmake_minimum_required(VERSION 3.18.4 FATAL_ERROR)
 
 include("\${CMAKE_CURRENT_LIST_DIR}/CTestCustom.cmake")
 

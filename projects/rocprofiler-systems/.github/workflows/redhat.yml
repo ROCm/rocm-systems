@@ -67,8 +67,9 @@ jobs:
             chmod +x /opt/trace_processor/bin/trace_processor_shell
           fi
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.18.4' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
       if: ${{ matrix.rocm-version > 0 }}
