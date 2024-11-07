@@ -39,12 +39,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetClockCounters(HSAuint32 NodeId,
 
   wsl::thunk::WDDMDevice *device_ = get_wddmdev(NodeId);
   assert(device_);
-  device_->GetClockCounters(&Counters->GPUClockCounter, nullptr);
+  device_->GetClockCounters(&Counters->GPUClockCounter, &Counters->CPUClockCounter);
 
   struct timespec ts;
-  if (clock_gettime(CLOCK_REALTIME, &ts) == 0)
-    Counters->CPUClockCounter = ts.tv_sec * 1e9 + ts.tv_nsec;
-  if (clock_gettime(CLOCK_BOOTTIME, &ts) == 0)
+  if (clock_gettime(CLOCK_MONOTONIC_RAW, &ts) == 0)
     Counters->SystemClockCounter = ts.tv_sec * 1e9 + ts.tv_nsec;
   Counters->SystemClockFrequencyHz = 1000000000;
 
