@@ -106,7 +106,7 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::samples-common-library rocprofiler-sdk::rocprofiler-sdk
             amd_comgr rocprofiler-sdk::samples-build-flags)
 
-rocprofiler_samples_get_preload_env(PRELOAD_ENV code-object-isa-decode)
+rocprofiler_samples_get_preload_env(PRELOAD_ENV)
 
 add_test(NAME code-object-isa-decode COMMAND $<TARGET_FILE:code-object-isa-decode>)
 

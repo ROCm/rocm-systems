@@ -22,7 +22,8 @@
 
 #pragma once
 
-#include "helper.hpp"
+#include "counter_info.hpp"
+#include "generator.hpp"
 #include "statistics.hpp"
 #include "tmp_file_buffer.hpp"
 
@@ -30,6 +31,8 @@
 #include "lib/common/logging.hpp"
 
 #include <fmt/format.h>
+
+#include <deque>
 
 namespace rocprofiler
 {
@@ -41,25 +44,27 @@ using stats_data_t = statistics<uint64_t, float_type>;
 template <typename Tp, domain_type DomainT>
 struct buffered_output
 {
-    using ring_buffer_type              = rocprofiler::common::container::ring_buffer<Tp>;
+    using type                          = Tp;
     static constexpr auto buffer_type_v = DomainT;
 
     explicit buffered_output(bool _enabled);
     ~buffered_output()                          = default;
     buffered_output(const buffered_output&)     = delete;
     buffered_output(buffered_output&&) noexcept = delete;
-    buffered_output& operator=(const buffered_output&) = default;
-    buffered_output& operator=(buffered_output&&) noexcept = default;
+    buffered_output& operator=(const buffered_output&) = delete;
+    buffered_output& operator=(buffered_output&&) noexcept = delete;
+
+    operator bool() const { return enabled; }
 
     void flush();
     void read();
     void clear();
     void destroy();
 
-    operator bool() const { return enabled; }
+    generator<Tp>  get_generator() const { return generator<Tp>{get_tmp_file_buffer<Tp>(DomainT)}; }
+    std::deque<Tp> load_all();
 
-    std::deque<Tp> element_data = {};
-    stats_entry_t  stats        = {};
+    stats_entry_t stats = {};
 
 private:
     bool enabled = false;
@@ -76,7 +81,7 @@ buffered_output<Tp, DomainT>::flush()
 {
     if(!enabled) return;
 
-    flush_tmp_buffer<ring_buffer_type>(buffer_type_v);
+    flush_tmp_buffer<type>(buffer_type_v);
 }
 
 template <typename Tp, domain_type DomainT>
@@ -87,7 +92,26 @@ buffered_output<Tp, DomainT>::read()
 
     flush();
 
-    element_data = get_buffer_elements(read_tmp_file<ring_buffer_type>(buffer_type_v));
+    read_tmp_file<type>(buffer_type_v);
+}
+
+template <typename Tp, domain_type DomainT>
+std::deque<Tp>
+buffered_output<Tp, DomainT>::load_all()
+{
+    auto data = std::deque<Tp>{};
+    if(enabled)
+    {
+        auto gen = get_generator();
+        for(auto ditr : gen)
+        {
+            for(auto itr : gen.get(ditr))
+            {
+                data.emplace_back(itr);
+            }
+        }
+    }
+    return data;
 }
 
 template <typename Tp, domain_type DomainT>
@@ -95,8 +119,6 @@ void
 buffered_output<Tp, DomainT>::clear()
 {
     if(!enabled) return;
-
-    element_data.clear();
 }
 
 template <typename Tp, domain_type DomainT>
@@ -106,10 +128,30 @@ buffered_output<Tp, DomainT>::destroy()
     if(!enabled) return;
 
     clear();
-    auto [_tmp_buf, _tmp_file] = get_tmp_file_buffer<ring_buffer_type>(buffer_type_v);
-    _tmp_buf->destroy();
-    delete _tmp_buf;
-    delete _tmp_file;
+    auto*&             filebuf = get_tmp_file_buffer<type>(buffer_type_v);
+    file_buffer<type>* tmp     = nullptr;
+    std::swap(filebuf, tmp);
+    tmp->buffer.destroy();
+    delete tmp;
 }
+
+using hip_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_hip_api_record_t, domain_type::HIP>;
+using hsa_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_hsa_api_record_t, domain_type::HSA>;
+using kernel_dispatch_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_kernel_dispatch_record_t,
+                    domain_type::KERNEL_DISPATCH>;
+using memory_copy_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_memory_copy_record_t, domain_type::MEMORY_COPY>;
+using marker_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_marker_api_record_t, domain_type::MARKER>;
+using rccl_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_rccl_api_record_t, domain_type::RCCL>;
+using counter_collection_buffered_output_t =
+    buffered_output<tool_counter_record_t, domain_type::COUNTER_COLLECTION>;
+using scratch_memory_buffered_output_t =
+    buffered_output<rocprofiler_buffer_tracing_scratch_memory_record_t,
+                    domain_type::SCRATCH_MEMORY>;
 }  // namespace tool
 }  // namespace rocprofiler

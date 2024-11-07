@@ -22,8 +22,9 @@
 
 #pragma once
 
-#include "config.hpp"
 #include "csv.hpp"
+#include "domain_type.hpp"
+#include "output_stream.hpp"
 
 #include "lib/common/filesystem.hpp"
 
@@ -40,59 +41,24 @@ namespace rocprofiler
 {
 namespace tool
 {
-using ostream_dtor_t = void (*)(std::ostream*&);
-
-using output_stream_pair_t = std::pair<std::ostream*, ostream_dtor_t>;
-
-struct output_stream_t
-{
-    output_stream_t() = default;
-    output_stream_t(std::ostream* _os, ostream_dtor_t _dtor)
-    : stream{_os}
-    , dtor{_dtor}
-    {}
-
-    ~output_stream_t() { close(); }
-    output_stream_t(const output_stream_t&)     = delete;
-    output_stream_t(output_stream_t&&) noexcept = default;
-    output_stream_t& operator=(const output_stream_t&) = delete;
-    output_stream_t& operator=(output_stream_t&&) noexcept = default;
-
-    explicit operator bool() const { return stream != nullptr; }
-
-    template <typename Tp>
-    std::ostream& operator<<(Tp&& value)
-    {
-        return ((stream) ? *stream : std::cerr) << std::forward<Tp>(value) << std::flush;
-    }
-
-    void close()
-    {
-        if(stream) (*stream) << std::flush;
-        if(dtor) dtor(stream);
-    }
-
-    bool writes_to_file() const { return (dynamic_cast<std::ofstream*>(stream) != nullptr); }
-
-    std::ostream*  stream = nullptr;
-    ostream_dtor_t dtor   = nullptr;
-};
-
-std::string
-get_output_filename(std::string_view fname, std::string_view ext);
-
-output_stream_t
-get_output_stream(std::string_view fname, std::string_view ext);
-
-struct output_file
+struct csv_output_file
 {
     template <size_t N>
-    output_file(std::string name, csv::csv_encoder<N>, std::array<std::string_view, N>&& header);
+    csv_output_file(const output_config& cfg,
+                    std::string_view     name,
+                    csv::csv_encoder<N>,
+                    std::array<std::string_view, N>&& header);
 
-    ~output_file();
+    template <size_t N>
+    csv_output_file(const output_config& cfg,
+                    domain_type          domain,
+                    csv::csv_encoder<N>,
+                    std::array<std::string_view, N>&& header);
 
-    output_file(const output_file&) = delete;
-    output_file& operator=(const output_file&) = delete;
+    ~csv_output_file();
+
+    csv_output_file(const csv_output_file&) = delete;
+    csv_output_file& operator=(const csv_output_file&) = delete;
 
     std::string name() const { return m_name; }
 
@@ -108,15 +74,16 @@ struct output_file
 private:
     const std::string m_name  = {};
     std::mutex        m_mutex = {};
-    output_stream_t   m_os    = {};
+    output_stream     m_os    = {};
 };
 
 template <size_t N>
-output_file::output_file(std::string                       name,
-                         csv::csv_encoder<N>               encoder,
-                         std::array<std::string_view, N>&& header)
-: m_name{std::move(name)}
-, m_os{get_output_stream(m_name, ".csv")}
+csv_output_file::csv_output_file(const output_config&              cfg,
+                                 std::string_view                  name,
+                                 csv::csv_encoder<N>               encoder,
+                                 std::array<std::string_view, N>&& header)
+: m_name{std::string{name}}
+, m_os{get_output_stream(cfg, m_name, ".csv")}
 {
     for(auto& itr : header)
     {
@@ -127,5 +94,13 @@ output_file::output_file(std::string                       name,
     // write the csv header
     if(m_os.stream) encoder.write_row(*m_os.stream, header);
 }
+
+template <size_t N>
+csv_output_file::csv_output_file(const output_config&              cfg,
+                                 domain_type                       domain,
+                                 csv::csv_encoder<N>               encoder,
+                                 std::array<std::string_view, N>&& header)
+: csv_output_file{cfg, get_domain_trace_file_name(domain), encoder, std::move(header)}
+{}
 }  // namespace tool
 }  // namespace rocprofiler

@@ -22,27 +22,50 @@
 
 #pragma once
 
-#include "helper.hpp"
-#include "statistics.hpp"
+#include <rocprofiler-sdk/agent.h>
+#include <rocprofiler-sdk/cxx/serialization.hpp>
+
+#include <unordered_map>
+#include <vector>
+#include "rocprofiler-sdk/fwd.h"
 
 namespace rocprofiler
 {
 namespace tool
 {
-void
-write_json(tool_table*                                                      tool_functions,
-           uint64_t                                                         pid,
-           const domain_stats_vec_t&                                        domain_stats,
-           std::vector<rocprofiler_agent_v0_t>                              agent_data,
-           std::vector<rocprofiler_tool_counter_info_t>                     counter_data,
-           std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_deque,
-           std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_deque,
-           std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_deque,
-           std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_deque,
-           std::deque<rocprofiler_tool_counter_collection_record_t>*       counter_collection_deque,
-           std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*     marker_api_deque,
-           std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* scratch_memory_deque,
-           std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*       rccl_api_deque);
+struct agent_info : rocprofiler_agent_v0_t
+{
+    using base_type = rocprofiler_agent_v0_t;
 
+    agent_info(base_type _base)
+    : base_type{_base}
+    {}
+
+    ~agent_info()                     = default;
+    agent_info(const agent_info&)     = default;
+    agent_info(agent_info&&) noexcept = default;
+    agent_info& operator=(const agent_info&) = default;
+    agent_info& operator=(agent_info&&) noexcept = default;
+
+    int64_t gpu_index =
+        (base_type::type == ROCPROFILER_AGENT_TYPE_GPU) ? base_type::logical_node_type_id : -1;
+};
+
+using agent_info_vec_t = std::vector<agent_info>;
+using agent_info_map_t = std::unordered_map<rocprofiler_agent_id_t, agent_info>;
 }  // namespace tool
 }  // namespace rocprofiler
+
+namespace cereal
+{
+#define SAVE_DATA_FIELD(FIELD) ar(make_nvp(#FIELD, data.FIELD))
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const ::rocprofiler::tool::agent_info& data)
+{
+    cereal::save(ar, static_cast<const rocprofiler_agent_v0_t&>(data));
+}
+
+#undef SAVE_DATA_FIELD
+}  // namespace cereal

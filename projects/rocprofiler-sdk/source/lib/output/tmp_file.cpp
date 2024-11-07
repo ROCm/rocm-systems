@@ -21,9 +21,9 @@
 // SOFTWARE.
 
 #include "tmp_file.hpp"
-#include "config.hpp"
 
 #include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
 
 namespace fs = ::rocprofiler::common::filesystem;
 
@@ -38,6 +38,8 @@ tmp_file::fopen(const char* _mode)
         // if the filepath does not exist, open in out mode to create it
         std::ofstream _ofs{filename};
     }
+
+    ROCP_INFO << "opening (via fopen) temporary file: '" << filename << "'...";
     file = std::fopen(filename.c_str(), _mode);
     if(file) fd = ::fileno(file);
 
@@ -59,10 +61,12 @@ tmp_file::flush()
 {
     if(stream.is_open())
     {
+        ROCP_INFO << "flushing temporary file: '" << filename << "'...";
         stream.flush();
     }
     else if(file != nullptr)
     {
+        ROCP_INFO << "flushing temporary file: '" << filename << "'...";
         int _ret = fflush(file);
         int _cnt = 0;
         while(_ret == EAGAIN || _ret == EINTR)
@@ -84,11 +88,13 @@ tmp_file::close()
 
     if(stream.is_open())
     {
+        ROCP_INFO << "closing temporary file: '" << filename << "'...";
         stream.close();
         return !stream.is_open();
     }
     else if(file != nullptr)
     {
+        ROCP_INFO << "closing temporary file: '" << filename << "'...";
         auto _ret = fclose(file);
         if(_ret == 0)
         {
@@ -114,6 +120,7 @@ tmp_file::open(std::ios::openmode _mode)
         _ofs.open(filename, std::ofstream::binary | std::ofstream::out);
     }
 
+    ROCP_INFO << "opening temporary file: '" << filename << "'...";
     stream.open(filename, _mode);
     return (stream.is_open() && stream.good());
 }
@@ -124,6 +131,7 @@ tmp_file::remove()
     close();
     if(fs::exists(filename))
     {
+        ROCP_INFO << "removing temporary file: '" << filename << "'...";
         auto _ret = ::remove(filename.c_str());
         return (_ret == 0);
     }

@@ -73,6 +73,9 @@ public:
     // Do not allow this data structure to be copied, std::move only.
     Synchronized(const Synchronized&) = delete;
 
+    // return a copy of the data
+    value_type get() const;
+
     template <typename FuncT, typename... Args>
     decltype(auto) rlock(FuncT&& lambda, Args&&... args) const;
 
@@ -100,6 +103,14 @@ private:
 //
 //      member definitions
 //
+template <typename LockedType, bool IsMappedTypeV>
+typename Synchronized<LockedType, IsMappedTypeV>::value_type
+Synchronized<LockedType, IsMappedTypeV>::get() const
+{
+    auto lock = std::shared_lock{m_mutex};
+    return m_data;
+}
+
 template <typename LockedType, bool IsMappedTypeV>
 template <typename FuncT, typename... Args>
 decltype(auto)

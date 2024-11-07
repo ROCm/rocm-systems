@@ -22,23 +22,29 @@
 
 #pragma once
 
-#include <string_view>
+#include "agent_info.hpp"
+#include "generator.hpp"
+#include "metadata.hpp"
+#include "output_config.hpp"
 
-enum class domain_type
+#include <cstdint>
+#include <deque>
+
+namespace rocprofiler
 {
-    HSA = 0,
-    HIP,
-    MARKER,
-    KERNEL_DISPATCH,
-    MEMORY_COPY,
-    SCRATCH_MEMORY,
-    COUNTER_COLLECTION,
-    RCCL,
-    LAST,
-};
-
-std::string_view
-get_domain_file_name(domain_type val);
-
-std::string_view
-get_domain_column_name(domain_type _buffer_type);
+namespace tool
+{
+void
+write_perfetto(
+    const output_config&                                                  cfg,
+    const metadata&                                                       tool_metadata,
+    std::vector<agent_info>                                               agent_data,
+    const generator<rocprofiler_buffer_tracing_hip_api_record_t>&         hip_api_gen,
+    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&         hsa_api_gen,
+    const generator<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& kernel_dispatch_gen,
+    const generator<rocprofiler_buffer_tracing_memory_copy_record_t>&     memory_copy_gen,
+    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&      marker_api_gen,
+    const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&  scratch_memory_gen,
+    const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&        rccl_api_gen);
+}  // namespace tool
+}  // namespace rocprofiler

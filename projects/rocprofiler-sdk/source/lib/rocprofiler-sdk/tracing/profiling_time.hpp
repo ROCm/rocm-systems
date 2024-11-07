@@ -105,7 +105,6 @@ adjust_profiling_time(std::string_view _label,
                            _label,
                            _label,
                            _value.start,
-                           _label,
                            _bounds.start,
                            (_bounds.start - _value.start));
 
@@ -116,7 +115,6 @@ adjust_profiling_time(std::string_view _label,
                            _label,
                            _label,
                            _value.end,
-                           _label,
                            _bounds.end,
                            (_value.end - _bounds.end));
     }

@@ -257,8 +257,13 @@ active_signals::sync()
 {
     if(m_signal.handle == 0) return;
 
+#if defined(ROCPROFILER_CI_STRICT_TIMESTAMPS) && ROCPROFILER_CI_STRICT_TIMESTAMPS > 0
+    constexpr auto timeout_sec = std::chrono::seconds{5};
+#else
     // wait a maximum of thirty seconds
     constexpr auto timeout_sec = std::chrono::seconds{30};
+#endif
+
     constexpr auto timeout =
         std::chrono::duration_cast<std::chrono::nanoseconds>(timeout_sec).count();
 

@@ -22,8 +22,11 @@
 
 #pragma once
 
-#include "helper.hpp"
+#include "agent_info.hpp"
+#include "metadata.hpp"
+#include "output_config.hpp"
 
+#include <cstdint>
 #include <deque>
 
 namespace rocprofiler
@@ -31,9 +34,10 @@ namespace rocprofiler
 namespace tool
 {
 void
-write_otf2(tool_table*                                                      tool_functions,
+write_otf2(const output_config&                                             cfg,
+           const metadata&                                                  tool_metadata,
            uint64_t                                                         pid,
-           const std::vector<rocprofiler_agent_v0_t>&                       agent_data,
+           const std::vector<agent_info>&                                   agent_data,
            std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_data,
            std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_data,
            std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,

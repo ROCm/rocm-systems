@@ -21,9 +21,8 @@
 // SOFTWARE.
 
 #include "generateOTF2.hpp"
-#include "config.hpp"
-#include "helper.hpp"
-#include "output_file.hpp"
+#include "output_stream.hpp"
+#include "timestamps.hpp"
 
 #include "lib/common/filesystem.hpp"
 #include "lib/common/mpl.hpp"
@@ -273,11 +272,11 @@ add_event(std::string_view             name,
 }
 
 void
-setup()
+setup(const output_config& cfg)
 {
     namespace fs = common::filesystem;
 
-    auto _filename = get_output_filename("results", std::string_view{});
+    auto _filename = get_output_filename(cfg, "results", std::string_view{});
     auto _filepath = fs::path{_filename};
     auto _name     = _filepath.filename().string();
     auto _path     = _filepath.parent_path().string();
@@ -344,9 +343,10 @@ create_attribute_list()
 }  // namespace
 
 void
-write_otf2(tool_table*                                                      tool_functions,
+write_otf2(const output_config&                                             cfg,
+           const metadata&                                                  tool_metadata,
            uint64_t                                                         pid,
-           const std::vector<rocprofiler_agent_v0_t>&                       agent_data,
+           const std::vector<agent_info>&                                   agent_data,
            std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_data,
            std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_data,
            std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
@@ -357,16 +357,14 @@ write_otf2(tool_table*                                                      tool
 {
     namespace sdk = ::rocprofiler::sdk;
 
-    setup();
+    setup(cfg);
 
-    auto _app_ts    = *tool_functions->tool_get_app_timestamps_fn();
-    auto agents_map = std::unordered_map<rocprofiler_agent_id_t, rocprofiler_agent_t>{};
-    for(auto itr : agent_data)
-        agents_map.emplace(itr.id, itr);
+    auto _app_ts    = timestamps_t{tool_metadata.process_start_ns, tool_metadata.process_end_ns};
+    auto agents_map = tool_metadata.agents_map;
 
-    const auto kernel_sym_data = get_kernel_symbol_data();
-    const auto buffer_names    = sdk::get_buffer_tracing_names();
-    auto       tids            = std::set<rocprofiler_thread_id_t>{};
+    const auto  kernel_sym_data = tool_metadata.get_kernel_symbols();
+    const auto& buffer_names    = tool_metadata.buffer_names;
+    auto        tids            = std::set<rocprofiler_thread_id_t>{};
     auto agent_thread_ids = std::map<rocprofiler_thread_id_t, std::set<rocprofiler_agent_id_t>>{};
     auto agent_queue_ids =
         std::map<rocprofiler_thread_id_t,
@@ -387,7 +385,7 @@ write_otf2(tool_table*                                                      tool
 
     auto _get_kernel_sym_data =
         [&kernel_sym_data](
-            const rocprofiler_kernel_dispatch_info_t& _info) -> const kernel_symbol_data* {
+            const rocprofiler_kernel_dispatch_info_t& _info) -> const kernel_symbol_info* {
         for(const auto& kitr : kernel_sym_data)
             if(kitr.kernel_id == _info.kernel_id) return &kitr;
         return CHECK_NOTNULL(nullptr);
@@ -514,7 +512,7 @@ write_otf2(tool_table*                                                      tool
         auto add_event_data = [&buffer_names,
                                &_hash_data,
                                &_data,
-                               &tool_functions,
+                               &tool_metadata,
                                &thread_event_info,
                                &get_attr](const auto* _inp, auto _attrib) {
             if(!_inp) return;
@@ -533,7 +531,7 @@ write_otf2(tool_table*                                                      tool
                     paradigm = OTF2_PARADIGM_USER;
                     if(itr.kind == ROCPROFILER_BUFFER_TRACING_MARKER_CORE_API &&
                        itr.operation != ROCPROFILER_MARKER_CORE_API_ID_roctxGetThreadId)
-                        name = tool_functions->tool_get_roctx_msg_fn(itr.correlation_id.internal);
+                        name = tool_metadata.get_marker_message(itr.correlation_id.internal);
                 }
 
                 _hash_data.emplace(
@@ -591,8 +589,8 @@ write_otf2(tool_table*                                                      tool
         const auto* sym  = _get_kernel_sym_data(info);
         CHECK(sym != nullptr);
 
-        auto name = tool_functions->tool_get_kernel_name_fn(info.kernel_id,
-                                                            itr.correlation_id.external.value);
+        auto name =
+            tool_metadata.get_kernel_name(info.kernel_id, itr.correlation_id.external.value);
         _hash_data.emplace(
             get_hash_id(name),
             region_info{std::string{name}, OTF2_REGION_ROLE_FUNCTION, OTF2_PARADIGM_HIP});

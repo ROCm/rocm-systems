@@ -3,6 +3,7 @@
 #
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "core")
 add_subdirectory(common)
+add_subdirectory(output)
 add_subdirectory(rocprofiler-sdk)
 
 set(CMAKE_INSTALL_DEFAULT_COMPONENT_NAME "tools")

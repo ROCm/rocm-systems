@@ -20,14 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "output_file.hpp"
-#include "config.hpp"
+#include "output_stream.hpp"
 
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 
 #include <fmt/core.h>
 #include <fmt/format.h>
+
+#include <string_view>
+#include <unordered_set>
 
 namespace rocprofiler
 {
@@ -42,9 +44,9 @@ const auto stderr_names = std::unordered_set<std::string_view>{"stderr", "STDERR
 }  // namespace
 
 std::string
-get_output_filename(std::string_view fname, std::string_view ext)
+get_output_filename(const output_config& cfg, std::string_view fname, std::string_view ext)
 {
-    auto cfg_output_path = tool::format(tool::get_config().output_path);
+    auto cfg_output_path = tool::format_path(cfg.output_path);
 
     // add a period to provided file extension if necessary
     constexpr auto period   = std::string_view{"."};
@@ -53,7 +55,7 @@ get_output_filename(std::string_view fname, std::string_view ext)
         fmt::format("{}{}", (!ext.empty() && ext.find('.') != 0) ? period : noperiod, ext);
 
     auto output_path   = fs::path{cfg_output_path};
-    auto output_prefix = tool::format(tool::get_config().output_file);
+    auto output_prefix = tool::format_path(cfg.output_file);
 
     if(fs::exists(output_path) && !fs::is_directory(fs::status(output_path)))
     {
@@ -66,7 +68,8 @@ get_output_filename(std::string_view fname, std::string_view ext)
         fs::create_directories(output_path);
     }
 
-    auto _ofname = tool::format(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
+    auto _ofname =
+        tool::format_path(output_path / fmt::format("{}_{}{}", output_prefix, fname, _ext));
 
     // the prefix may contain a subdirectory
     if(auto _ofname_path = fs::path{_ofname}.parent_path(); !fs::exists(_ofname_path))
@@ -83,10 +86,10 @@ get_output_filename(std::string_view fname, std::string_view ext)
     return _ofname;
 }
 
-output_stream_t
-get_output_stream(std::string_view fname, std::string_view ext)
+output_stream
+get_output_stream(const output_config& cfg, std::string_view fname, std::string_view ext)
 {
-    auto cfg_output_path = tool::format(tool::get_config().output_path);
+    auto cfg_output_path = tool::format_path(cfg.output_path);
 
     if(stdout_names.count(cfg_output_path) > 0 || stdout_names.count(fname) > 0)
         return {&std::cout, [](auto*&) {}};
@@ -95,7 +98,7 @@ get_output_stream(std::string_view fname, std::string_view ext)
     else if(cfg_output_path.empty() || fname.empty())
         return {&std::clog, [](auto*&) {}};
 
-    auto  output_file = get_output_filename(fname, ext);
+    auto  output_file = get_output_filename(cfg, fname, ext);
     auto* _ofs        = new std::ofstream{output_file};
 
     LOG_IF(FATAL, !_ofs && !*_ofs) << fmt::format("Failed to open {} for output", output_file);
@@ -106,16 +109,6 @@ get_output_stream(std::string_view fname, std::string_view ext)
                 delete v;
                 v = nullptr;
             }};
-}
-
-output_file::~output_file()
-{
-    if(m_os.stream)
-        ROCP_INFO << "Closing result file: " << m_name;
-    else
-        ROCP_WARNING << "output_file::~output_file does not have a output stream instance!";
-
-    m_os.close();
 }
 }  // namespace tool
 }  // namespace rocprofiler

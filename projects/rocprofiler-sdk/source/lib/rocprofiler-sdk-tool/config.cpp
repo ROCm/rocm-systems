@@ -30,6 +30,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/units.hpp"
 #include "lib/common/utility.hpp"
+#include "lib/output/output_key.hpp"
 
 #include <rocprofiler-sdk/cxx/details/tokenize.hpp>
 
@@ -55,20 +56,6 @@ namespace tool
 {
 namespace
 {
-template <typename Tp>
-auto
-as_pointer(Tp&& _val)
-{
-    return new Tp{_val};
-}
-
-std::string*
-get_local_datetime(const std::string& dt_format, std::time_t*& dt_curr);
-
-std::time_t* launch_time  = nullptr;
-const auto*  launch_clock = as_pointer(std::chrono::system_clock::now());
-const auto*  launch_datetime =
-    get_local_datetime(get_env("ROCP_TIME_FORMAT", "%F_%H.%M"), launch_time);
 const auto env_regexes =
     new std::array<std::regex, 3>{std::regex{"(.*)%(env|ENV)\\{([A-Z0-9_]+)\\}%(.*)"},
                                   std::regex{"(.*)\\$(env|ENV)\\{([A-Z0-9_]+)\\}(.*)"},
@@ -78,38 +65,6 @@ const auto env_regexes =
 //  - $ENV{USER}        Similar to CMake
 //  - %q{USER}          Compatibility with NVIDIA
 //
-
-std::string*
-get_local_datetime(const std::string& dt_format, std::time_t*& _dt_curr)
-{
-    constexpr auto strsize = 512;
-
-    if(!_dt_curr) _dt_curr = new std::time_t{std::time_t{std::time(nullptr)}};
-
-    char mbstr[strsize] = {};
-    memset(mbstr, '\0', sizeof(mbstr) * sizeof(char));
-
-    if(std::strftime(mbstr, sizeof(mbstr) - 1, dt_format.c_str(), std::localtime(_dt_curr)) != 0)
-        return new std::string{mbstr};
-
-    return nullptr;
-}
-
-std::string
-get_hostname()
-{
-    auto _hostname_buff = std::array<char, PATH_MAX>{};
-    _hostname_buff.fill('\0');
-    if(gethostname(_hostname_buff.data(), _hostname_buff.size() - 1) != 0)
-    {
-        auto _err = errno;
-        ROCP_WARNING << "Hostname unknown. gethostname failed with error code " << _err << ": "
-                     << strerror(_err);
-        return std::string{"UNKNOWN_HOSTNAME"};
-    }
-
-    return std::string{_hostname_buff.data()};
-}
 
 inline bool
 not_is_space(int ch)
@@ -137,29 +92,6 @@ trim(std::string s, bool (*f)(int) = not_is_space)
     ltrim(s, f);
     rtrim(s, f);
     return s;
-}
-
-inline std::vector<pid_t>
-get_siblings(pid_t _id = getppid())
-{
-    auto _data = std::vector<pid_t>{};
-
-    std::ifstream _ifs{"/proc/" + std::to_string(_id) + "/task/" + std::to_string(_id) +
-                       "/children"};
-    while(_ifs)
-    {
-        pid_t _n = 0;
-        _ifs >> _n;
-        if(!_ifs || _n <= 0) break;
-        _data.emplace_back(_n);
-    }
-    return _data;
-}
-
-inline auto
-get_num_siblings(pid_t _id = getppid())
-{
-    return get_siblings(_id).size();
 }
 
 // replace unsuported specail chars with space
@@ -256,295 +188,13 @@ parse_counters(std::string line)
 }
 }  // namespace
 
-int
-get_mpi_size()
-{
-    static int _v = get_env<int>("OMPI_COMM_WORLD_SIZE",
-                                 get_env<int>("MV2_COMM_WORLD_SIZE", get_env<int>("MPI_SIZE", 0)));
-    return _v;
-}
-
-int
-get_mpi_rank()
-{
-    static int _v = get_env<int>("OMPI_COMM_WORLD_RANK",
-                                 get_env<int>("MV2_COMM_WORLD_RANK", get_env<int>("MPI_RANK", -1)));
-    return _v;
-}
-
 config::config()
-: kernel_filter_range{get_kernel_filter_range(
+: base_type{base_type::load_from_env()}
+, kernel_filter_range{get_kernel_filter_range(
       get_env("ROCPROF_KERNEL_FILTER_RANGE", std::string{}))}
 , counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
 {
-    auto to_upper = [](std::string val) {
-        for(auto& vitr : val)
-            vitr = toupper(vitr);
-        return val;
-    };
-
-    auto output_format = get_env("ROCPROF_OUTPUT_FORMAT", "CSV");
-    auto entries       = std::set<std::string>{};
-    for(const auto& itr : sdk::parse::tokenize(output_format, " \t,;:"))
-        entries.emplace(to_upper(itr));
-
-    csv_output     = entries.count("CSV") > 0 || entries.empty();
-    json_output    = entries.count("JSON") > 0;
-    pftrace_output = entries.count("PFTRACE") > 0;
-    otf2_output    = entries.count("OTF2") > 0;
-
-    const auto supported_formats = std::set<std::string_view>{"CSV", "JSON", "PFTRACE", "OTF2"};
-    for(const auto& itr : entries)
-    {
-        LOG_IF(FATAL, supported_formats.count(itr) == 0)
-            << "Unsupported output format type: " << itr;
-    }
-    if(kernel_filter_include.empty()) kernel_filter_include = std::string(".*");
-
-    const auto supported_perfetto_backends = std::set<std::string_view>{"inprocess", "system"};
-    LOG_IF(FATAL, supported_perfetto_backends.count(perfetto_backend) == 0)
-        << "Unsupported perfetto backend type: " << perfetto_backend;
-
-    if(stats_summary_unit == "sec")
-        stats_summary_unit_value = common::units::sec;
-    else if(stats_summary_unit == "msec")
-        stats_summary_unit_value = common::units::msec;
-    else if(stats_summary_unit == "usec")
-        stats_summary_unit_value = common::units::usec;
-    else if(stats_summary_unit == "nsec")
-        stats_summary_unit_value = common::units::nsec;
-    else
-    {
-        ROCP_FATAL << "Unsupported summary units value: " << stats_summary_unit;
-    }
-
-    if(auto _summary_grps = get_env("ROCPROF_STATS_SUMMARY_GROUPS", ""); !_summary_grps.empty())
-    {
-        stats_summary_groups =
-            sdk::parse::tokenize(_summary_grps, std::vector<std::string_view>{"##@@##"});
-
-        // remove any empty strings (just in case these slipped through)
-        stats_summary_groups.erase(std::remove_if(stats_summary_groups.begin(),
-                                                  stats_summary_groups.end(),
-                                                  [](const auto& itr) { return itr.empty(); }),
-                                   stats_summary_groups.end());
-    }
-
-    // enable summary output if any of these are enabled
-    summary_output = (stats_summary || stats_summary_per_domain || !stats_summary_groups.empty());
-}
-
-std::vector<output_key>
-output_keys(std::string _tag)
-{
-    using strpair_t = std::pair<std::string, std::string>;
-
-    auto _cmdline = common::read_command_line(getpid());
-
-    if(_tag.empty() && !_cmdline.empty()) _tag = ::basename(_cmdline.front().c_str());
-
-    std::string        _argv_string = {};    // entire argv cmd
-    std::string        _args_string = {};    // cmdline args
-    std::string        _argt_string = _tag;  // prefix + cmdline args
-    const std::string& _tag0_string = _tag;  // only the basic prefix
-    auto               _options     = std::vector<output_key>{};
-
-    auto _replace = [](auto& _v, const strpair_t& pitr) {
-        auto pos = std::string::npos;
-        while((pos = _v.find(pitr.first)) != std::string::npos)
-            _v.replace(pos, pitr.first.length(), pitr.second);
-    };
-
-    if(_cmdline.size() > 1 && _cmdline.at(1) == "--") _cmdline.erase(_cmdline.begin() + 1);
-
-    for(auto& itr : _cmdline)
-    {
-        itr = trim(itr);
-        _replace(itr, {"/", "_"});
-        while(!itr.empty() && itr.at(0) == '.')
-            itr = itr.substr(1);
-        while(!itr.empty() && itr.at(0) == '_')
-            itr = itr.substr(1);
-    }
-
-    if(!_cmdline.empty())
-    {
-        for(size_t i = 0; i < _cmdline.size(); ++i)
-        {
-            const auto _l = std::string{(i == 0) ? "" : "_"};
-            auto       _v = _cmdline.at(i);
-            _argv_string += _l + _v;
-            if(i > 0)
-            {
-                _argt_string += (i > 1) ? (_l + _v) : _v;
-                _args_string += (i > 1) ? (_l + _v) : _v;
-            }
-        }
-    }
-
-    auto _mpi_size = get_mpi_size();
-    auto _mpi_rank = get_mpi_rank();
-
-    auto _dmp_size      = fmt::format("{}", (_mpi_size) > 0 ? _mpi_size : 1);
-    auto _dmp_rank      = fmt::format("{}", (_mpi_rank) > 0 ? _mpi_rank : 0);
-    auto _proc_id       = fmt::format("{}", getpid());
-    auto _parent_id     = fmt::format("{}", getppid());
-    auto _pgroup_id     = fmt::format("{}", getpgid(getpid()));
-    auto _session_id    = fmt::format("{}", getsid(getpid()));
-    auto _proc_size     = fmt::format("{}", get_num_siblings());
-    auto _pwd_string    = get_env<std::string>("PWD", ".");
-    auto _slurm_job_id  = get_env<std::string>("SLURM_JOB_ID", "0");
-    auto _slurm_proc_id = get_env("SLURM_PROCID", _dmp_rank);
-
-    auto _uniq_id = _proc_id;
-    if(get_env<int32_t>("SLURM_PROCID", -1) >= 0)
-    {
-        _uniq_id = _slurm_proc_id;
-    }
-    else if(_mpi_size > 0 || _mpi_rank >= 0)
-    {
-        _uniq_id = _dmp_rank;
-    }
-
-    for(auto&& itr : std::initializer_list<output_key>{
-            {"%argv%", _argv_string, "Entire command-line condensed into a single string"},
-            {"%argt%",
-             _argt_string,
-             "Similar to `%argv%` except basename of first command line argument"},
-            {"%args%", _args_string, "All command line arguments condensed into a single string"},
-            {"%tag%", _tag0_string, "Basename of first command line argument"}})
-    {
-        _options.emplace_back(itr);
-    }
-
-    if(!_cmdline.empty())
-    {
-        for(size_t i = 0; i < _cmdline.size(); ++i)
-        {
-            auto _v = _cmdline.at(i);
-            _options.emplace_back(fmt::format("%arg{}%", i), _v, fmt::format("Argument #{}", i));
-        }
-    }
-
-    auto _launch_time = (launch_datetime) ? *launch_datetime : std::string{".UNKNOWN_LAUNCH_TIME."};
-    auto _hostname    = get_hostname();
-
-    for(auto&& itr : std::initializer_list<output_key>{
-            {"%hostname%", _hostname, "Network hostname"},
-            {"%pid%", _proc_id, "Process identifier"},
-            {"%ppid%", _parent_id, "Parent process identifier"},
-            {"%pgid%", _pgroup_id, "Process group identifier"},
-            {"%psid%", _session_id, "Process session identifier"},
-            {"%psize%", _proc_size, "Number of sibling process"},
-            {"%job%", _slurm_job_id, "SLURM_JOB_ID env variable"},
-            {"%rank%", _slurm_proc_id, "MPI/UPC++ rank"},
-            {"%size%", _dmp_size, "MPI/UPC++ size"},
-            {"%nid%", _uniq_id, "%rank% if possible, otherwise %pid%"},
-            {"%launch_time%", _launch_time, "Data and/or time of run according to time format"},
-        })
-    {
-        _options.emplace_back(itr);
-    }
-
-    for(auto&& itr : std::initializer_list<output_key>{
-            {"%h", _hostname, "Shorthand for %hostname%"},
-            {"%p", _proc_id, "Shorthand for %pid%"},
-            {"%j", _slurm_job_id, "Shorthand for %job%"},
-            {"%r", _slurm_proc_id, "Shorthand for %rank%"},
-            {"%s", _dmp_size, "Shorthand for %size"},
-        })
-    {
-        _options.emplace_back(itr);
-    }
-
-    return _options;
-}
-
-namespace
-{
-std::string
-format_impl(std::string _fpath, const std::vector<output_key>& _keys)
-{
-    if(_fpath.find('%') == std::string::npos && _fpath.find('$') == std::string::npos)
-        return _fpath;
-
-    auto _replace = [](auto& _v, const output_key& pitr) {
-        auto pos = std::string::npos;
-        while((pos = _v.find(pitr.key)) != std::string::npos)
-            _v.replace(pos, pitr.key.length(), pitr.value);
-    };
-
-    for(auto&& itr : _keys)
-        _replace(_fpath, itr);
-
-    // environment and configuration variables
-    try
-    {
-        auto strip_leading_and_replace =
-            [](std::string_view inp_v, std::initializer_list<char> keys, const char* val) {
-                auto inp = std::string{inp_v};
-                for(auto key : keys)
-                {
-                    auto pos = std::string::npos;
-                    while((pos = inp.find(key)) == 0)
-                        inp = inp.substr(pos + 1);
-
-                    while((pos = inp.find(key)) != std::string::npos)
-                        inp = inp.replace(pos, 1, val);
-                }
-                return inp;
-            };
-
-        for(const auto& _re : *env_regexes)
-        {
-            while(std::regex_search(_fpath, _re))
-            {
-                auto        _var = std::regex_replace(_fpath, _re, "$3");
-                std::string _val = get_env<std::string>(_var, "");
-                _val             = strip_leading_and_replace(_val, {'\t', ' ', '/'}, "_");
-                auto _beg        = std::regex_replace(_fpath, _re, "$1");
-                auto _end        = std::regex_replace(_fpath, _re, "$4");
-                _fpath           = fmt::format("{}{}{}", _beg, _val, _end);
-            }
-        }
-    } catch(std::exception& _e)
-    {
-        ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
-                     << "\n";
-    }
-
-    // remove %arg<N>% where N >= argc
-    try
-    {
-        std::regex _re{"(.*)%(arg[0-9]+)%([-/_]*)(.*)"};
-        while(std::regex_search(_fpath, _re))
-            _fpath = std::regex_replace(_fpath, _re, "$1$4");
-    } catch(std::exception& _e)
-    {
-        ROCP_WARNING << "[rocprofiler] " << __FUNCTION__ << " threw an exception :: " << _e.what()
-                     << "\n";
-    }
-
-    return _fpath;
-}
-
-std::string
-format(std::string _fpath, const std::vector<output_key>& _keys)
-{
-    if(_fpath.find('%') == std::string::npos && _fpath.find('$') == std::string::npos)
-        return _fpath;
-
-    auto _ref = _fpath;
-    _fpath    = format_impl(std::move(_fpath), _keys);
-
-    return (_fpath == _ref) ? _fpath : format(std::move(_fpath), _keys);
-}
-}  // namespace
-
-std::string
-format(std::string _fpath, const std::string& _tag)
-{
-    return format(std::move(_fpath), output_keys(_tag));
+    if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
 }
 
 std::string
@@ -566,11 +216,5 @@ initialize()
 {
     (void) get_config<config_context::global>();
 }
-
-output_key::output_key(std::string _key, std::string _val, std::string _desc)
-: key{std::move(_key)}
-, value{std::move(_val)}
-, description{std::move(_desc)}
-{}
 }  // namespace tool
 }  // namespace rocprofiler

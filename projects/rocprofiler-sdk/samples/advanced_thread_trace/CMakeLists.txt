@@ -49,7 +49,7 @@ target_link_libraries(
     PRIVATE rocprofiler-sdk::rocprofiler-sdk amd_comgr
             rocprofiler-sdk::samples-common-library rocprofiler-sdk::samples-build-flags)
 
-rocprofiler_samples_get_preload_env(PRELOAD_ENV advanced-thread-trace)
+rocprofiler_samples_get_preload_env(PRELOAD_ENV)
 
 add_test(NAME advanced-thread-trace COMMAND $<TARGET_FILE:advanced-thread-trace>)
 

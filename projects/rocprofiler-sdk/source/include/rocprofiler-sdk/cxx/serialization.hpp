@@ -172,6 +172,9 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_code_object_kernel_symbol_regist
     ROCP_SDK_SAVE_DATA_FIELD(kernarg_segment_alignment);
     ROCP_SDK_SAVE_DATA_FIELD(group_segment_size);
     ROCP_SDK_SAVE_DATA_FIELD(private_segment_size);
+    ROCP_SDK_SAVE_DATA_FIELD(sgpr_count);
+    ROCP_SDK_SAVE_DATA_FIELD(arch_vgpr_count);
+    ROCP_SDK_SAVE_DATA_FIELD(accum_vgpr_count);
 }
 
 template <typename ArchiveT>
@@ -301,7 +304,6 @@ save(ArchiveT& ar, rocprofiler_kernel_dispatch_info_t data)
     ROCP_SDK_SAVE_DATA_FIELD(private_segment_size);
     ROCP_SDK_SAVE_DATA_FIELD(group_segment_size);
     ROCP_SDK_SAVE_DATA_FIELD(workgroup_size);
-    ROCP_SDK_SAVE_DATA_FIELD(group_segment_size);
     ROCP_SDK_SAVE_DATA_FIELD(grid_size);
 }
 

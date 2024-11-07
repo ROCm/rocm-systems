@@ -36,13 +36,16 @@
     } while(0)
 
 __global__ void
-kernelA(int* wait_on, int value, int* no_opt)
+kernelA(int devid, volatile int* wait_on, int value, int* no_opt)
 {
+    printf("[device=%i][begin]  Wait on %i: %i (%i)\n", devid, value, *wait_on, *no_opt);
     while(*wait_on != value)
     {
         (*no_opt)++;
     };
+    printf("[device=%i][break]  Wait on %i: %i (%i)\n", devid, value, *wait_on, *no_opt);
     (*wait_on)--;
+    printf("[device=%i][return] Wait on %i: %i (%i)\n", devid, value, *wait_on, *no_opt);
 }
 
 int
@@ -53,17 +56,23 @@ main(int, char**)
     if(ntotdevice < 2) return 0;
 
     start();
-    int* check_value = nullptr;
-    int* no_opt      = nullptr;
+    volatile int* check_value = nullptr;
+    int*          no_opt_0    = nullptr;
+    int*          no_opt_1    = nullptr;
     HIP_CALL(hipMallocManaged(&check_value, sizeof(*check_value)));
-    HIP_CALL(hipMallocManaged(&no_opt, sizeof(*no_opt)));
-    *no_opt      = 0;
+    HIP_CALL(hipMallocManaged(&no_opt_0, sizeof(*no_opt_0)));
+    HIP_CALL(hipMallocManaged(&no_opt_1, sizeof(*no_opt_1)));
+    *no_opt_0    = 0;
+    *no_opt_1    = 0;
     *check_value = 1;
+
     // Will hang if per-device serialization is not functional
     HIP_CALL(hipSetDevice(0));
-    hipLaunchKernelGGL(kernelA, dim3(1), dim3(1), 0, 0, check_value, 0, no_opt);
+    hipLaunchKernelGGL(kernelA, dim3(1), dim3(1), 0, 0, 0, check_value, 0, no_opt_0);
+
     HIP_CALL(hipSetDevice(1));
-    hipLaunchKernelGGL(kernelA, dim3(1), dim3(1), 0, 0, check_value, 1, no_opt);
+    hipLaunchKernelGGL(kernelA, dim3(1), dim3(1), 0, 0, 1, check_value, 1, no_opt_1);
+
     HIP_CALL(hipSetDevice(0));
     HIP_CALL(hipDeviceSynchronize());
 

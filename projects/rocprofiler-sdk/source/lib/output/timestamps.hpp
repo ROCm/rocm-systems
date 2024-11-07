@@ -22,25 +22,16 @@
 
 #pragma once
 
-#include "helper.hpp"
-
-#include <deque>
+#include <rocprofiler-sdk/fwd.h>
 
 namespace rocprofiler
 {
 namespace tool
 {
-void
-write_perfetto(
-    tool_table*                                                      tool_functions,
-    uint64_t                                                         pid,
-    std::vector<rocprofiler_agent_v0_t>                              agent_data,
-    std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_data,
-    std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_data,
-    std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
-    std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_data,
-    std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*      marker_api_data,
-    std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>*  scratch_memory_data,
-    std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*        rccl_api_data);
+struct timestamps_t
+{
+    rocprofiler_timestamp_t app_start_time;
+    rocprofiler_timestamp_t app_end_time;
+};
 }  // namespace tool
 }  // namespace rocprofiler

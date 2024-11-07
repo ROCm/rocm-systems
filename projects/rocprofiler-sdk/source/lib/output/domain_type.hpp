@@ -20,17 +20,28 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "tmp_file_buffer.hpp"
+#pragma once
 
-#include <fmt/format.h>
+#include <string_view>
 
-#include <utility>
-
-std::string
-compose_tmp_file_name(domain_type buffer_type)
+enum class domain_type
 {
-    return rocprofiler::tool::format(fmt::format("{}/.rocprofv3/{}-{}.dat",
-                                                 rocprofiler::tool::get_config().tmp_directory,
-                                                 "%ppid%-%pid%",
-                                                 get_domain_file_name(buffer_type)));
-}
+    HSA = 0,
+    HIP,
+    MARKER,
+    KERNEL_DISPATCH,
+    MEMORY_COPY,
+    SCRATCH_MEMORY,
+    COUNTER_COLLECTION,
+    RCCL,
+    LAST,
+};
+
+std::string_view
+get_domain_trace_file_name(domain_type val);
+
+std::string_view
+get_domain_stats_file_name(domain_type val);
+
+std::string_view
+get_domain_column_name(domain_type _buffer_type);

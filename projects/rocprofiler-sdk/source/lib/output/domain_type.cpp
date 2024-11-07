@@ -29,33 +29,51 @@ namespace
 template <domain_type DomainT>
 struct domain_type_name;
 
-#define DEFINE_BUFFER_TYPE_NAME(ENUM_VALUE, COLUMN_NAME, FILENAME)                                 \
+#define DEFINE_BUFFER_TYPE_NAME(ENUM_VALUE, COLUMN_NAME, TRACE_FILENAME, STATS_FILENAME)           \
     template <>                                                                                    \
     struct domain_type_name<domain_type::ENUM_VALUE>                                               \
     {                                                                                              \
-        static constexpr auto column_name = COLUMN_NAME;                                           \
-        static constexpr auto filename    = FILENAME;                                              \
+        static constexpr auto column_name    = COLUMN_NAME;                                        \
+        static constexpr auto trace_filename = TRACE_FILENAME;                                     \
+        static constexpr auto stats_filename = STATS_FILENAME;                                     \
     };
 
-DEFINE_BUFFER_TYPE_NAME(HSA, "HSA_API", "hsa_api")
-DEFINE_BUFFER_TYPE_NAME(HIP, "HIP_API", "hip_api")
-DEFINE_BUFFER_TYPE_NAME(MARKER, "MARKER_API", "marker_api")
-DEFINE_BUFFER_TYPE_NAME(KERNEL_DISPATCH, "KERNEL_DISPATCH", "kernel_dispatch")
-DEFINE_BUFFER_TYPE_NAME(MEMORY_COPY, "MEMORY_COPY", "memory_copy")
-DEFINE_BUFFER_TYPE_NAME(SCRATCH_MEMORY, "SCRATCH_MEMORY", "scratch_memory")
-DEFINE_BUFFER_TYPE_NAME(COUNTER_COLLECTION, "COUNTER_COLLECTION", "counter_collection")
-DEFINE_BUFFER_TYPE_NAME(RCCL, "RCCL_API", "rccl_api")
+DEFINE_BUFFER_TYPE_NAME(HSA, "HSA_API", "hsa_api_trace", "hsa_api_stats")
+DEFINE_BUFFER_TYPE_NAME(HIP, "HIP_API", "hip_api_trace", "hip_api_stats")
+DEFINE_BUFFER_TYPE_NAME(MARKER, "MARKER_API", "marker_api_trace", "marker_api_stats")
+DEFINE_BUFFER_TYPE_NAME(KERNEL_DISPATCH, "KERNEL_DISPATCH", "kernel_trace", "kernel_stats")
+DEFINE_BUFFER_TYPE_NAME(MEMORY_COPY, "MEMORY_COPY", "memory_copy_trace", "memory_copy_stats")
+DEFINE_BUFFER_TYPE_NAME(SCRATCH_MEMORY,
+                        "SCRATCH_MEMORY",
+                        "scratch_memory_trace",
+                        "scratch_memory_stats")
+DEFINE_BUFFER_TYPE_NAME(COUNTER_COLLECTION,
+                        "COUNTER_COLLECTION",
+                        "counter_collection",
+                        "counter_collection_stats")
+DEFINE_BUFFER_TYPE_NAME(RCCL, "RCCL_API", "rccl_api_trace", "rccl_api_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 
 template <size_t Idx, size_t... TailIdx>
 std::string_view
-get_domain_file_name(domain_type _buffer_type, std::index_sequence<Idx, TailIdx...>)
+get_domain_trace_file_name(domain_type _buffer_type, std::index_sequence<Idx, TailIdx...>)
 {
     if(static_cast<size_t>(_buffer_type) == Idx)
-        return domain_type_name<static_cast<domain_type>(Idx)>::filename;
+        return domain_type_name<static_cast<domain_type>(Idx)>::trace_filename;
     if constexpr(sizeof...(TailIdx) > 0)
-        return get_domain_file_name(_buffer_type, std::index_sequence<TailIdx...>{});
+        return get_domain_trace_file_name(_buffer_type, std::index_sequence<TailIdx...>{});
+    return std::string_view{};
+}
+
+template <size_t Idx, size_t... TailIdx>
+std::string_view
+get_domain_stats_file_name(domain_type _buffer_type, std::index_sequence<Idx, TailIdx...>)
+{
+    if(static_cast<size_t>(_buffer_type) == Idx)
+        return domain_type_name<static_cast<domain_type>(Idx)>::stats_filename;
+    if constexpr(sizeof...(TailIdx) > 0)
+        return get_domain_stats_file_name(_buffer_type, std::index_sequence<TailIdx...>{});
     return std::string_view{};
 }
 
@@ -73,11 +91,19 @@ get_domain_column_name(domain_type buffer_type, std::index_sequence<Idx, IdxTail
 }  // namespace
 
 std::string_view
-get_domain_file_name(domain_type _buffer_type)
+get_domain_trace_file_name(domain_type _buffer_type)
 {
     constexpr auto buffer_type_last_v = static_cast<size_t>(domain_type::LAST);
 
-    return get_domain_file_name(_buffer_type, std::make_index_sequence<buffer_type_last_v>{});
+    return get_domain_trace_file_name(_buffer_type, std::make_index_sequence<buffer_type_last_v>{});
+}
+
+std::string_view
+get_domain_stats_file_name(domain_type _buffer_type)
+{
+    constexpr auto buffer_type_last_v = static_cast<size_t>(domain_type::LAST);
+
+    return get_domain_stats_file_name(_buffer_type, std::make_index_sequence<buffer_type_last_v>{});
 }
 
 std::string_view
