@@ -132,7 +132,7 @@ export LD_LIBRARY_PATH=/opt/rocprofiler-systems/lib:${LD_LIBRARY_PATH}
 
 Generate a rocprofiler-systems configuration file using `rocprof-sys-avail -G rocprof-sys.cfg`. Optionally, use `rocprof-sys-avail -G rocprof-sys.cfg --all` for
 a verbose configuration file with descriptions, categories, etc. Modify the configuration file as desired, e.g. enable
-[perfetto](https://perfetto.dev/), [timemory](https://github.com/NERSC/timemory), sampling, and process-level sampling by default
+[perfetto](https://perfetto.dev/), [timemory](https://github.com/ROCm/timemory), sampling, and process-level sampling by default
 and tweak some sampling default values:
 
 ```console

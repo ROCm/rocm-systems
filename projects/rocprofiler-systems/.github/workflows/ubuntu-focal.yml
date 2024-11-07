@@ -46,7 +46,7 @@ jobs:
         compiler: ['g++-7', 'g++-8']
         lto: ['OFF']
         strip: ['OFF']
-        python: ['ON']
+        python: ['OFF']
         build-type: ['Release']
         mpi-headers: ['OFF']
         static-libgcc: ['OFF']
@@ -97,8 +97,9 @@ jobs:
           wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.18.4' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
           /opt/conda/bin/conda clean -y -a
@@ -278,8 +279,9 @@ jobs:
           wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.18.4' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
           /opt/conda/bin/conda clean -y -a
@@ -408,16 +410,6 @@ jobs:
         ompt: ['ON']
         papi: ['ON']
         deps: ['libtbb-dev libboost-{atomic,system,thread,date-time,filesystem,timer}-dev']
-        include:
-        - compiler: 'g++'
-          mpi: 'nompi'
-          boost: 'ON'
-          tbb: 'ON'
-          build-type: 'Release'
-          python: 'ON'
-          ompt: 'OFF'
-          papi: 'OFF'
-          deps: ''
 
     env:
       ELFUTILS_DOWNLOAD_VERSION: 0.186
@@ -440,7 +432,8 @@ jobs:
           wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install numpy perfetto dataclasses &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.18.4' &&
           sudo apt-get -y --purge autoremove &&
           sudo apt-get -y clean
 
@@ -592,8 +585,9 @@ jobs:
           wget https://commondatastorage.googleapis.com/perfetto-luci-artifacts/v47.0/linux-amd64/trace_processor_shell -P /opt/trace_processor/bin &&
           chmod +x /opt/trace_processor/bin/trace_processor_shell &&
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done &&
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.18.4' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done &&
           apt-get -y --purge autoremove &&
           apt-get -y clean &&
           /opt/conda/bin/conda clean -y -a

@@ -28,7 +28,7 @@ use the ``rocprof-sys-avail -G ~/.rocprof-sys.cfg --all`` option
 for a verbose configuration file with descriptions, categories, and additional information.
 
 Modify ``${HOME}/.rocprof-sys.cfg`` as required. For example, enable `Perfetto <https://perfetto.dev/>`_,
-`Timemory <https://github.com/NERSC/timemory>`_, sampling, and process-level sampling by default
+`Timemory <https://github.com/ROCm/timemory>`_, sampling, and process-level sampling by default
 and tweak the default sampling values.
 
 .. code-block:: shell
@@ -64,7 +64,7 @@ accepts a case insensitive match for nearly all common Boolean logic expressions
 Exploring components
 -----------------------------------
 
-ROCm Systems Profiler uses `Timemory <https://github.com/NERSC/timemory>`_ extensively to provide
+ROCm Systems Profiler uses `Timemory <https://github.com/ROCm/timemory>`_ extensively to provide
 various capabilities and manage
 data and resources. By default, with ``ROCPROFSYS_PROFILE=ON``, ROCm Systems Profiler only collects wall-clock
 timing values. However, by modifying the ``ROCPROFSYS_TIMEMORY_COMPONENTS`` setting,

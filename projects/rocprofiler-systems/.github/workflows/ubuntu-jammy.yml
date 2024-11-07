@@ -111,8 +111,9 @@ jobs:
           apt-get upgrade -y &&
           apt-get install -y autoconf bison build-essential clang environment-modules gettext libfabric-dev libiberty-dev libomp-dev libopenmpi-dev libtool m4 openmpi-bin python3-pip texinfo ${{ matrix.compiler }} &&
           python3 -m pip install --upgrade pip &&
-          python3 -m pip install numpy perfetto dataclasses &&
-          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install numpy perfetto dataclasses; done
+          python3 -m pip install --upgrade numpy perfetto dataclasses &&
+          python3 -m pip install 'cmake==3.18.4' &&
+          for i in 6 7 8 9 10 11; do /opt/conda/envs/py3.${i}/bin/python -m pip install --upgrade numpy perfetto dataclasses; done
 
     - name: Install ROCm Packages
       timeout-minutes: 25
