@@ -23,14 +23,16 @@ RUN set +e; \
 RUN zypper --non-interactive update -y && \
     zypper --non-interactive dist-upgrade -y && \
     zypper --non-interactive install -y -t pattern devel_basis && \
-    zypper --non-interactive install -y binutils-gold cmake curl dpkg-devel gcc-c++ git libnuma-devel openmpi3-devel python3-pip rpm-build wget
+    zypper --non-interactive install -y binutils-gold cmake curl dpkg-devel \
+        gcc-c++ git libnuma-devel openmpi3-devel python3-pip rpm-build wget && \
+    python3 -m pip install 'cmake==3.18.4'
 
 ARG ROCM_VERSION=0.0
 ARG AMDGPU_RPM=6.2/sle/15.6/amdgpu-install-6.2.60200-1.noarch.rpm
-ARG PERL_REPO=SLE_15
 
 RUN if [ "${ROCM_VERSION}" != "0.0" ]; then \
-        zypper --non-interactive addrepo https://mirrorcache-us.opensuse.org/repositories/devel:/languages:/perl/${PERL_REPO}/devel:languages:perl.repo && \
+        OS_VERSION_MINOR=$(cat /etc/os-release | grep 'VERSION_ID' | sed 's/=/ /1' | awk '{print $NF}' | sed 's/"//g' | sed 's/\./ /g' | awk '{print $2}') && \
+        zypper --non-interactive addrepo https://download.opensuse.org/repositories/devel:languages:perl/15.${OS_VERSION_MINOR}/devel:languages:perl.repo && \
         zypper --non-interactive --no-gpg-checks install -y https://repo.radeon.com/amdgpu-install/${AMDGPU_RPM} && \
         zypper --non-interactive --gpg-auto-import-keys refresh && \
         zypper --non-interactive install -y rocm-dev rocm-smi-lib roctracer-dev rocprofiler-dev rccl-devel libpciaccess0 && \

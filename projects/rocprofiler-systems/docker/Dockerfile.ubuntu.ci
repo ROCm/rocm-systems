@@ -29,7 +29,8 @@ RUN apt-get update && \
         bzip2 cmake curl environment-modules git-core gnupg2 gzip libiberty-dev \
         libpapi-dev libpfm4-dev libtool locales lsb-release m4 python3-pip texinfo \
         unzip wget zip zlib1g-dev && \
-    apt-get autoclean
+    apt-get autoclean && \
+    python3 -m pip install 'cmake==3.18.4'
 
 COPY ./dyninst-source /tmp/dyninst
 
