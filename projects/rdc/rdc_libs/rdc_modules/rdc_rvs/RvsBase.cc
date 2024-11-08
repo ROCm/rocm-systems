@@ -23,6 +23,7 @@ THE SOFTWARE.
 
 #include <string.h>
 
+#include "rdc/rdc.h"
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
 #include "rdc_modules/rdc_rvs/RvsBase.h"
@@ -35,7 +36,7 @@ static constexpr size_t MAX_CONFIG_LENGTH = 1024;
 amd::rdc::RdcRVSBase* amd::rdc::RdcRVSBase::s_instance = nullptr;
 
 rvs_status_t amd::rdc::RdcRVSBase::run_rvs_app(const char* config, const size_t config_size,
-                                               cookie_t* cookie) {
+                                               rdc_diag_callback_t* callback) {
   char active_config[MAX_CONFIG_LENGTH];
   rvs_session_property_t session_property = {RVS_SESSION_TYPE_DEFAULT_CONF, {{RVS_MODULE_GST}}};
   rvs_session_id_t session_id;
@@ -78,7 +79,7 @@ rvs_status_t amd::rdc::RdcRVSBase::run_rvs_app(const char* config, const size_t 
 
   /* Using custom gst configuration in string format */
 
-  _cookie = cookie;
+  _callback = callback;
   status = rvs_session_create(&session_id, &RdcRVSBase::static_callback);
 
   session_property.type = RVS_SESSION_TYPE_CUSTOM_ACTION;
@@ -97,7 +98,7 @@ rvs_status_t amd::rdc::RdcRVSBase::run_rvs_app(const char* config, const size_t 
   while (_state != RVS_SESSION_STATE_COMPLETED) {
   };
 
-  _cookie = nullptr;
+  _callback = nullptr;
 
   status = rvs_session_destroy(session_id);
   if (status != RVS_STATUS_SUCCESS) {
