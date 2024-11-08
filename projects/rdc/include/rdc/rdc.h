@@ -177,7 +177,7 @@ typedef enum {
   RDC_FI_PCIE_RX,        //!< PCIe Rx utilization information
   // RDC_FI_PCIE_TX, RDC_FI_PCIE_RX are not supported on new ASIC
   // The RDC_FI_PCIE_BANDWIDTH should be used
-  RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in GB/sec
+  RDC_FI_PCIE_BANDWIDTH,  //!< PCIe bandwidth in Mbps
 
   /**
    * @brief GPU usage related fields
