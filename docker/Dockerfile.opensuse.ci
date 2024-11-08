@@ -30,7 +30,8 @@ RUN zypper --non-interactive update -y && \
     zypper --non-interactive install -y binutils-gold cmake curl dpkg-devel \
         gcc-c++ git libnuma-devel openmpi3-devel papi-devel python3-pip \
         rpm-build wget && \
-    zypper --non-interactive clean --all
+    zypper --non-interactive clean --all && \
+    python3 -m pip install 'cmake==3.18.4'
 
 COPY ./dyninst-source /tmp/dyninst
 
