@@ -208,14 +208,14 @@ EaWrStarveRate:
   description: 'Unit: percent'
 FETCH_SIZE:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
-      expression: (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024
     gfx906:
       expression: (TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64+RDATA1_SIZE)/1024
     gfx908/gfx90a/gfx9/gfx900:
       expression: (TCC_EA_RDREQ_32B_sum*32+(TCC_EA_RDREQ_sum-TCC_EA_RDREQ_32B_sum)*64)/1024
     gfx942/gfx941/gfx940:
       expression: (TCC_BUBBLE_sum*128 + (TCC_EA0_RDREQ_sum-TCC_BUBBLE_sum-TCC_EA0_RDREQ_32B_sum)*64 + TCC_EA0_RDREQ_32B_sum*32)/1024
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      expression: (GL2C_EA_RDREQ_32B_sum*32+GL2C_EA_RDREQ_64B_sum*64+GL2C_EA_RDREQ_96B_sum*96+GL2C_EA_RDREQ_128B_sum*128)/1024
   description: The total kilobytes fetched from the video memory. This is measured with all extra fetches
     and any cache or memory effects taken into account.
 BANDWIDTH_EA:
@@ -257,86 +257,86 @@ GDS_UTIL:
 # Block GL2C (Graphic L2 Cache) - The GL2C block is a cache that sits between the L1 cache and the memory
 GL2C_EA_RDREQ_128B:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 102
   description: Number of 128-byte GL2C/EA read requests
 GL2C_EA_RDREQ_128B_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_EA_RDREQ_128B,sum)
   description: Number of 128-byte GL2C/EA read requests. Sum over GL2C instances.
 GL2C_EA_RDREQ_32B:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 99
   description: Number of 32-byte GL2C/EA read requests
 GL2C_EA_RDREQ_32B_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_EA_RDREQ_32B,sum)
   description: Number of 32-byte GL2C/EA read requests. Sum over GL2C instances.
 GL2C_EA_RDREQ_64B:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 100
   description: Number of 64-byte GL2C/EA read requests
 GL2C_EA_RDREQ_64B_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_EA_RDREQ_64B,sum)
   description: Number of 64-byte GL2C/EA read requests. Sum over GL2C instances.
 GL2C_EA_RDREQ_96B:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 101
   description: Number of 96-byte GL2C/EA read requests
 GL2C_EA_RDREQ_96B_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_EA_RDREQ_96B,sum)
   description: Number of 96-byte GL2C/EA read requests. Sum over GL2C instances.
 GL2C_EA_WRREQ_64B:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 85
   description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the TC_EA_wrreq interface.
 GL2C_EA_WRREQ_64B_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_EA_WRREQ_64B,sum)
   description: Number of 64-byte transactions going (64-byte write or CMPSWAP) over the GL2C_EA_wrreq
     interface. Sum over GL2C instances.
 GL2C_HIT:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 42
   description: Number of cache hits
 GL2C_HIT_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_HIT,sum)
   description: Number of cache hits. Sum over GL2C instances.
 GL2C_MC_RDREQ:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 96
   description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte).
 GL2C_MC_RDREQ_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_MC_RDREQ,sum)
   description: Number of GL2C/EA read requests (either 32-byte or 64-byte or 128-byte). Sum over GL2C
     instances.
 GL2C_MC_WRREQ:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 83
   description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_EA_wrreq interface.
@@ -344,30 +344,30 @@ GL2C_MC_WRREQ:
     not include probe commands
 GL2C_MC_WRREQ_STALL:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 88
   description: Number of cycles a write request was stalled.
 GL2C_MC_WRREQ_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_MC_WRREQ,sum)
   description: Number of transactions (either 32-byte or 64-byte) going over the GL2C_MC_wrreq interface.
     Sum over GL2C instances.
 GL2C_MISS:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: GL2C
       event: 43
   description: Number of cache misses.  UC reads count as misses.
 GL2C_MISS_sum:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_MISS,sum)
   description: Number of cache misses. Sum over GL2C instances.
 GL2C_WRREQ_STALL_max:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(GL2C_MC_WRREQ_STALL,max)
   description: Number of cycles a write request was stalled. Max over GL2C instances.
 GPUBusy:
@@ -377,13 +377,13 @@ GPUBusy:
   description: The percentage of time GPU was busy.
 GPU_UTIL:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900/gfx12/gfx1200/gfx1201:
       expression: 100*reduce(GRBM_GUI_ACTIVE,max)/reduce(GRBM_COUNT,max)
   description: Percentage of the time that GUI is active
 # Block GRBM (Graphics Register Bus Manager Block)
 GRBM_COUNT:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       block: GRBM
       event: 0
   description: Tie High - Count Number of Clocks
@@ -425,7 +425,7 @@ GRBM_GL2CC_BUSY:
   description: The GL2CC block is busy.
 GRBM_GUI_ACTIVE:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       block: GRBM
       event: 2
   description: The GUI is Active
@@ -470,10 +470,10 @@ L1iCacheHitRate:
   description: 'Unit: percent'
 L2CacheHit:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
-      expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
     gfx906/gfx908/gfx90a/gfx9/gfx900:
       expression: 100*reduce(TCC_HIT,sum)/(reduce(TCC_HIT,sum)+reduce(TCC_MISS,sum))
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum))
   description: 'The percentage of fetch, write, atomic, and other instructions that hit the data in L2
     cache. Value range: 0% (no hit) to 100% (optimal).'
 L2CacheTagRamStallRate:
@@ -483,7 +483,7 @@ L2CacheTagRamStallRate:
   description: 'Unit: percent'
 LDSBankConflict:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: 100*reduce(SQC_LDS_BANK_CONFLICT,sum)/reduce(SQC_LDS_IDX_ACTIVE,sum)
     gfx906/gfx908/gfx90a/gfx9/gfx900:
       expression: 100*reduce(SQ_LDS_BANK_CONFLICT,sum)/reduce(GRBM_GUI_ACTIVE,max)/CU_NUM
@@ -861,7 +861,7 @@ SQC_LDS_BANK_CONFLICT:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 285
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 256
   description: Number of cycles LDS is stalled by bank conflicts. (emulated, C1)
@@ -870,7 +870,7 @@ SQC_LDS_IDX_ACTIVE:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 290
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 261
   description: Number of cycles LDS is used for indexed (non-direct,non-interpolation) operations. {per-simd,
@@ -915,7 +915,7 @@ SQC_TC_STALL:
     unwindowed)
 SQ_ACCUM_PREV:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx940/gfx90a:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx940/gfx90a/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 1
   description: This is a hardware register that can be used for accumulating values for other counters.
@@ -1048,7 +1048,7 @@ SQ_BUSY_CU_CYCLES:
     with units in quad-cycles(4 cycles).
 SQ_BUSY_CYCLES:
   architectures:
-    gfx942/gfx941/gfx940/gfx90a/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx940/gfx90a/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 3
   description: Number of clock cycles there are active waves in a shader engine (as reported by the distributed
@@ -1117,9 +1117,6 @@ SQ_INSTS_FLAT:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 57
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 56
     gfx906/gfx900/gfx9:
       block: SQ
       event: 32
@@ -1132,6 +1129,9 @@ SQ_INSTS_FLAT:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 62
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 56
   description: Total number of FLAT instructions issued. When used in combination with SQ_ACTIVE_INST_FLAT
     (cycle count for executing instructions) the average latency of FLAT instruction execution can be
     calculated (SQ_ACTIVE_INST_FLAT / SQ_INSTS). This value is returned per-SE (aggregate of values in
@@ -1155,9 +1155,6 @@ SQ_INSTS_GDS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 55
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 54
     gfx906/gfx900/gfx9:
       block: SQ
       event: 35
@@ -1170,6 +1167,9 @@ SQ_INSTS_GDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 66
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 54
   description: Total number of GDS (global data sync) instructions issued. This value is returned per-SE
     (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on GDS (global data sync)
     instructions.
@@ -1178,9 +1178,6 @@ SQ_INSTS_LDS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 59
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 57
     gfx906/gfx900/gfx9:
       block: SQ
       event: 34
@@ -1193,6 +1190,9 @@ SQ_INSTS_LDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 65
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 57
   description: Total number of LDS instructions issued (including FLAT). This value is returned per-SE
     (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on LDS instructions.
 SQ_INSTS_MFMA:
@@ -1207,9 +1207,6 @@ SQ_INSTS_MFMA:
     per-SE (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on MFMA instructions.
 SQ_INSTS_SALU:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 58
     gfx906/gfx900/gfx9:
       block: SQ
       event: 30
@@ -1222,6 +1219,9 @@ SQ_INSTS_SALU:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx940:
       block: SQ
       event: 60
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 58
   description: Total Number of SALU (Scalar ALU) instructions issued. This value is returned per-SE (aggregate
     of values in SIMDs in the SE). See AMD ISAs for more information on SALU instructions.
 SQ_INSTS_SENDMSG:
@@ -1237,9 +1237,6 @@ SQ_INSTS_SENDMSG:
     on Sendmsg instructions.
 SQ_INSTS_SMEM:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 59
     gfx906/gfx900/gfx9:
       block: SQ
       event: 31
@@ -1252,6 +1249,9 @@ SQ_INSTS_SMEM:
     gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx1032/gfx940:
       block: SQ
       event: 61
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 59
   description: Total number of SMEM (Scalar Memory Read) instructions issued. This value is returned per-SE
     (aggregate of values in SIMDs in the SE). See AMD ISAs for more information on SMEM instructions.
 SQ_INSTS_SMEM_NORM:
@@ -1269,7 +1269,7 @@ SQ_INSTS_SMEM_NORM:
     of values in SIMDs in the SE).
 SQ_INSTS_TEX_LOAD:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 66
   description: The number of buffer load, image load, sample, or atomic (with return) texture instructions
@@ -1277,7 +1277,7 @@ SQ_INSTS_TEX_LOAD:
     information on TEX_LOAD instructions.
 SQ_INSTS_TEX_STORE:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 67
   description: The number of buffer store, image store, or atomic (without return) texture instructions
@@ -1288,12 +1288,12 @@ SQ_INSTS_VALU:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 64
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 62
     gfx942/gfx941/gfx906/gfx940/gfx908/gfx900/gfx90a/gfx9:
       block: SQ
       event: 26
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 62
   description: The number of VALU (Vector ALU) instructions issued. The value is returned per-SE (aggregate
     of values in SIMDs in the SE). See AMD ISAs for more information on VALU instructions.
 SQ_INSTS_VALU_ADD_F16:
@@ -1588,7 +1588,7 @@ SQ_INSTS_WAVE32:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 71
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 70
   description: Number of wave32 instructions issued, for flat, lds, valu, tex. {emulated, C1}
@@ -1597,7 +1597,7 @@ SQ_INSTS_WAVE32_LDS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 74
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 72
   description: Number of wave32 LDS indexed instructions issued. Wave64 may count 1 or 2, depending on
@@ -1607,7 +1607,7 @@ SQ_INSTS_WAVE32_VALU:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 75
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 73
   description: Number of wave32 valu instructions issued. Wave64 may count 1 or 2, depending on what gets
@@ -1644,7 +1644,7 @@ SQ_INST_CYCLES_VMEM:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 120
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 106
   description: The number of cycles needed to send addr and data for VMEM (lds, buffer, image, flat, scratch,
@@ -1677,7 +1677,7 @@ SQ_INST_LEVEL_GDS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 98
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 87
   description: Number of in-flight GDS (global) instructions. This value represents the number of instructions
@@ -1689,15 +1689,15 @@ SQ_INST_LEVEL_LDS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 99
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 88
     gfx90a:
       block: SQ
       event: 69
     gfx942/gfx941/gfx940:
       block: SQ
       event: 74
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 88
   description: Number of in-flight LDS instructions. This value represents the number of instructions
     each wave spends executing instructions accessing the local data store (data shared between SIMDs
     on the same CU). Set next counter to ACCUM_PREV and divide by INSTS_LDS for average latency. Includes
@@ -1840,15 +1840,15 @@ SQ_WAIT_ANY:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 37
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 35
     gfx90a:
       block: SQ
       event: 85
     gfx942/gfx941/gfx940:
       block: SQ
       event: 90
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 35
   description: Number of wave-cycles spent waiting for anything (per-simd, nondeterministic). Units in
     quad-cycles(4 cycles)
 SQ_WAIT_INST_ANY:
@@ -1856,24 +1856,21 @@ SQ_WAIT_INST_ANY:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 28
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 26
     gfx90a:
       block: SQ
       event: 88
     gfx942/gfx941/gfx940:
       block: SQ
       event: 93
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 26
   description: Number of wave-cycles spent waiting for any instruction issue. Units in quad-cycles(4 cycles).
 SQ_WAIT_INST_LDS:
   architectures:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 31
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 29
     gfx906/gfx900/gfx9:
       block: SQ
       event: 63
@@ -1886,6 +1883,9 @@ SQ_WAIT_INST_LDS:
     gfx942/gfx941/gfx940:
       block: SQ
       event: 96
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 29
   description: Number of wave-cycles spent waiting for LDS instruction issue. In units of 4 cycles. (per-simd,
     nondeterministic)
 SQ_WAVE32_INSTS:
@@ -1893,7 +1893,7 @@ SQ_WAVE32_INSTS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 84
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 82
   description: Number of instructions issued by wave32 waves. Skipped instructions are not counted. {emulated}
@@ -1902,13 +1902,13 @@ SQ_WAVE64_INSTS:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 85
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 83
   description: Number of instructions issued by wave64 waves. Skipped instructions are not counted. {emulated}
 SQ_WAVES:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
       block: SQ
       event: 4
   description: Count number of waves sent to distributed sequencers (SQs). This value represents the number
@@ -2014,15 +2014,15 @@ SQ_WAVE_CYCLES:
     gfx10/gfx1010/gfx1030/gfx1031/gfx1032:
       block: SQ
       event: 26
-    gfx11/gfx1102/gfx1100/gfx1101:
-      block: SQ
-      event: 24
     gfx90a:
       block: SQ
       event: 74
     gfx942/gfx941/gfx940:
       block: SQ
       event: 79
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      block: SQ
+      event: 24
   description: The cycles spent executing waves in the CUs. This value is reported per-SE (aggregates
     of SIMD values) and is nondeterministic. Units are in quad-cycles (4 cycles). Useful for determining
     how much time is spent executing wave code vs overhead/waiting. Low cycle count relative to actual
@@ -2118,13 +2118,13 @@ TA_BUFFER_COALESCED_WRITE_CYCLES_sum:
   description: Number of buffer coalesced write cycles issued to TC. Sum over TA instances.
 TA_BUFFER_LOAD_WAVEFRONTS:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: TA
       event: 45
   description: Number of buffer load vec32 packets processed by TA
 TA_BUFFER_LOAD_WAVEFRONTS_sum:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(TA_BUFFER_LOAD_WAVEFRONTS,sum)
   description: Number of buffer load vec32 packets processed by the TA. Sum over TA instances.
 TA_BUFFER_READ_WAVEFRONTS:
@@ -2143,13 +2143,13 @@ TA_BUFFER_READ_WAVEFRONTS_sum:
   description: Number of buffer read wavefronts processed by TA. Sum over TA instances.
 TA_BUFFER_STORE_WAVEFRONTS:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       block: TA
       event: 46
   description: Number of buffer store vec32 packets processed by TA
 TA_BUFFER_STORE_WAVEFRONTS_sum:
   architectures:
-    gfx11/gfx1102/gfx1100/gfx1101:
+    gfx11/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: reduce(TA_BUFFER_STORE_WAVEFRONTS,sum)
   description: Number of buffer store vec32 packets processed by the TA. Sum over TA instances.
 TA_BUFFER_TOTAL_CYCLES:
@@ -2196,17 +2196,17 @@ TA_BUFFER_WRITE_WAVEFRONTS_sum:
   description: Number of buffer write wavefronts processed by TA. Sum over TA instances.
 TA_BUSY_avr:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900/gfx12/gfx1200/gfx1201:
       expression: reduce(TA_TA_BUSY,avr)
   description: TA block is busy. Average over TA instances.
 TA_BUSY_max:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900/gfx12/gfx1200/gfx1201:
       expression: reduce(TA_TA_BUSY,max)
   description: TA block is busy. Max over TA instances.
 TA_BUSY_min:
   architectures:
-    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx90a/gfx9/gfx900/gfx12/gfx1200/gfx1201:
       expression: reduce(TA_TA_BUSY,min)
   description: TA block is busy. Min over TA instances.
 TA_DATA_STALLED_BY_TC_CYCLES:
@@ -2306,12 +2306,12 @@ TA_FLAT_WRITE_WAVEFRONTS_sum:
   description: Number of flat opcode writes processed by the TA. Sum over TA instances.
 TA_TA_BUSY:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx900/gfx90a/gfx9:
-      block: TA
-      event: 15
     gfx942/gfx941/gfx940:
       block: TA
       event: 13
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx900/gfx90a/gfx9/gfx12/gfx1200/gfx1201:
+      block: TA
+      event: 15
   description: TA block is busy. Perf_Windowing not supported for this counter.
 TA_TA_BUSY_sum:
   architectures:
@@ -3962,12 +3962,12 @@ VmemPipeIssueUtil:
   description: 'Unit: percent'
 WAVE_DEP_WAIT:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: 100*reduce(SQ_WAIT_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
   description: Percentage of the SQ_WAVE_CYCLE time spent waiting for anything.
 WAVE_ISSUE_WAIT:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
       expression: 100*reduce(SQ_WAIT_INST_ANY,sum)/reduce(SQ_WAVE_CYCLES,sum)
   description: Percentage of the SQ_WAVE_CYCLE time spent waiting for any instruction issue.
 WDATA1_SIZE:
@@ -4029,10 +4029,10 @@ WriteSize:
     and any cache or memory effects taken into account.
 WriteUnitStalled:
   architectures:
-    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101:
-      expression: 100*GL2C_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
     gfx906/gfx908/gfx90a/gfx9/gfx900:
       expression: 100*TCC_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
+    gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx1100/gfx1101/gfx12/gfx1200/gfx1201:
+      expression: 100*GL2C_WRREQ_STALL_max/reduce(GRBM_GUI_ACTIVE,max)
   description: 'The percentage of GPUTime the Write unit is stalled. Value range: 0% to 100% (bad).'
 sL1dCacheHitRate:
   architectures:
