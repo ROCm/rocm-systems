@@ -4270,7 +4270,7 @@ class AMDSMICommands():
         # Error if no subcommand args are passed
         if self.helpers.is_baremetal():
             if not any([args.gpureset, args.clocks, args.fans, args.profile, args.xgmierr, \
-                        args.perf_determinism, args.compute_partition, args.memory_partition, \
+                        args.perf_determinism, \
                         args.power_cap, args.clean_local_data]):
                 command = " ".join(sys.argv[1:])
                 raise AmdSmiRequiredCommandException(command, self.logger.format)
@@ -4337,8 +4337,8 @@ class AMDSMICommands():
                     logging.debug("Failed to reset fans on gpu %s | %s", gpu_id, e.get_error_info())
                 self.logger.store_output(args.gpu, 'reset_fans', result)
             if args.profile:
-                reset_profile_results = {'power_profile' : '',
-                                        'performance_level': ''}
+                reset_profile_results = {'power_profile' : 'N/A',
+                                        'performance_level': 'N/A'}
                 try:
                     power_profile_mask = amdsmi_interface.AmdSmiPowerProfilePresetMasks.BOOTUP_DEFAULT
                     amdsmi_interface.amdsmi_set_gpu_power_profile(args.gpu, 0, power_profile_mask)
@@ -4349,48 +4349,48 @@ class AMDSMICommands():
                     reset_profile_results['power_profile'] = "N/A"
                     logging.debug("Failed to reset power profile on gpu %s | %s", gpu_id, e.get_error_info())
 
-            try:
-                level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
-                amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
-                reset_profile_results['performance_level'] = 'Successfully reset Performance Level'
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                reset_profile_results['performance_level'] = "N/A"
-                logging.debug("Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info())
+                try:
+                    level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
+                    amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
+                    reset_profile_results['performance_level'] = 'Successfully reset Performance Level'
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    reset_profile_results['performance_level'] = "N/A"
+                    logging.debug("Failed to reset perf level on gpu %s | %s", gpu_id, e.get_error_info())
 
-            self.logger.store_output(args.gpu, 'reset_profile', reset_profile_results)
-        if args.xgmierr:
-            try:
-                amdsmi_interface.amdsmi_reset_gpu_xgmi_error(args.gpu)
-                result = 'Successfully reset XGMI Error count'
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                result = "N/A"
-                logging.debug("Failed to reset xgmi error count on gpu %s | %s", gpu_id, e.get_error_info())
-            self.logger.store_output(args.gpu, 'reset_xgmi_err', result)
-        if args.perf_determinism:
-            try:
-                level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
-                amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
-                result = 'Successfully disabled performance determinism'
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
-                    raise PermissionError('Command requires elevation') from e
-                result = "N/A"
-                logging.debug("Failed to set perf level on gpu %s | %s", gpu_id, e.get_error_info())
-            self.logger.store_output(args.gpu, 'reset_perf_determinism', result)
-        if args.power_cap:
-            try:
-                power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
-                logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
-                default_power_cap_in_w = power_cap_info["default_power_cap"]
-                default_power_cap_in_w = self.helpers.convert_SI_unit(default_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
-                current_power_cap_in_w = power_cap_info["power_cap"]
-                current_power_cap_in_w = self.helpers.convert_SI_unit(current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
-            except amdsmi_exception.AmdSmiLibraryException as e:
-                raise ValueError(f"Unable to get power cap info from {gpu_id}") from e
+                self.logger.store_output(args.gpu, 'reset_profile', reset_profile_results)
+            if args.xgmierr:
+                try:
+                    amdsmi_interface.amdsmi_reset_gpu_xgmi_error(args.gpu)
+                    result = 'Successfully reset XGMI Error count'
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    result = "N/A"
+                    logging.debug("Failed to reset xgmi error count on gpu %s | %s", gpu_id, e.get_error_info())
+                self.logger.store_output(args.gpu, 'reset_xgmi_err', result)
+            if args.perf_determinism:
+                try:
+                    level_auto = amdsmi_interface.AmdSmiDevPerfLevel.AUTO
+                    amdsmi_interface.amdsmi_set_gpu_perf_level(args.gpu, level_auto)
+                    result = 'Successfully disabled performance determinism'
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
+                        raise PermissionError('Command requires elevation') from e
+                    result = "N/A"
+                    logging.debug("Failed to set perf level on gpu %s | %s", gpu_id, e.get_error_info())
+                self.logger.store_output(args.gpu, 'reset_perf_determinism', result)
+            if args.power_cap:
+                try:
+                    power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(args.gpu)
+                    logging.debug(f"Power cap info for gpu {gpu_id} | {power_cap_info}")
+                    default_power_cap_in_w = power_cap_info["default_power_cap"]
+                    default_power_cap_in_w = self.helpers.convert_SI_unit(default_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
+                    current_power_cap_in_w = power_cap_info["power_cap"]
+                    current_power_cap_in_w = self.helpers.convert_SI_unit(current_power_cap_in_w, AMDSMIHelpers.SI_Unit.MICRO)
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    raise ValueError(f"Unable to get power cap info from {gpu_id}") from e
 
                 if current_power_cap_in_w == default_power_cap_in_w:
                     self.logger.store_output(args.gpu, 'powercap', f"Power cap is already set to {default_power_cap_in_w}")
@@ -5239,6 +5239,9 @@ class AMDSMICommands():
                     current_mem_cap = "N/A"
                     logging.debug("Failed to get current memory partition capabilties for GPU %s | %s", gpu_id, e.get_error_info())
 
+                if profile_type == 0:
+                    profile_type = "N/A"
+
                 tabular_output_dict = {"gpu_id": gpu_id,
                                        "memory": current_mem_cap,
                                        "accelerator_type": profile_type,
@@ -5298,6 +5301,7 @@ class AMDSMICommands():
                 self.logger.store_multiple_device_output()
             self.logger.print_output(multiple_device_enabled=True)
             self.logger.clear_multiple_devices_ouput()
+
         if args.accelerator:
             self.logger.table_header = ''.rjust(7)
             current_header = "GPU_ID".ljust(13) + \
@@ -5360,6 +5364,9 @@ class AMDSMICommands():
                     resources = "N/A"
                     mem_caps_str = "N/A"
                     logging.debug("Failed to get accelerator partition profile for GPU %s | %s", gpu_id, e.get_error_info())
+
+                if profile_type == 0:
+                    profile_type = "N/A"
 
                 tabular_output_dict = {"gpu_id": gpu_id,
                                        "profile_index": profile_index,

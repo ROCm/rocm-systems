@@ -4,7 +4,7 @@ option(INSTALL_GTEST "Install GTest (only useful if GTest is not already install
 # Help tests find libraries at runtime
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -Wl,--enable-new-dtags")
 set(CMAKE_INSTALL_RPATH
-    "\$ORIGIN:\$ORIGIN/../../../lib"
+    "\$ORIGIN:\$ORIGIN/../../../lib:CPACK_PACKAGING_INSTALL_PREFIX/lib"
     CACHE STRING "RUNPATH for tests. Helps find libgtest.so and libamd_smi.so")
 
 # Download and compile googletest
@@ -76,6 +76,6 @@ install(
 
 # Install googletest libraries with tests
 install(TARGETS gtest gtest_main
-    DESTINATION ${SHARE_INSTALL_PREFIX}/tests
+    DESTINATION ${CPACK_PACKAGING_INSTALL_PREFIX}/lib
     COMPONENT ${TESTS_COMPONENT})
 

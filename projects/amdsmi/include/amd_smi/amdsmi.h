@@ -691,11 +691,11 @@ typedef union {
 typedef struct {
   amdsmi_accelerator_partition_type_t  profile_type;   // SPX, DPX, QPX, CPX and so on
   uint32_t num_partitions;  // On MI300X, SPX: 1, DPX: 2, QPX: 4, CPX: 8, length of resources array
-  uint32_t profile_index;
   amdsmi_nps_caps_t memory_caps;             // Possible memory partition capabilities
+  uint32_t profile_index;
   uint32_t num_resources;                    // length of index_of_resources_profile
   uint32_t resources[AMDSMI_MAX_ACCELERATOR_PARTITIONS][AMDSMI_MAX_CP_PROFILE_RESOURCES];
-  uint64_t reserved[6];
+  uint64_t reserved[13];
 } amdsmi_accelerator_partition_profile_t;
 
 typedef enum {

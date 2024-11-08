@@ -591,6 +591,8 @@ GPU: 0
 
 ### Resolved issues
 
+- **Fixed `amd-smi reset` commands showing an AttributeError**.  
+
 - **Improved Offline install process & lowered dependency for PyYAML**.  
 
 - **Fixed CPX not showing total number of logical GPUs**.  

@@ -24,6 +24,9 @@ installed to query firmware information and hardware IPs.
 ### Requirements
 
 * python 3.6.8+ 64-bit
+  - prerequisite modules:
+    - python3-wheel
+    - python3-setuptools
 * amdgpu driver must be loaded for amdsmi_init() to pass
 
 ### Installation
@@ -89,6 +92,14 @@ Python 3.8.10 (default, May 26 2023, 14:05:08)
 Type "help", "copyright", "credits" or "license" for more information.
 >>> import amdsmi
 >>>
+```
+
+### Installing the Python Prerequisite Modules
+
+Python3-setuptools and python3-wheel can both be installed through the pip installer as shown below:
+
+```bash
+python3 -m pip install setuptools wheel
 ```
 
 ## Usage Basics for the C Library
