@@ -65,14 +65,14 @@ rdc_status_t rdc_diag_test_case_run(rdc_diag_test_cases_t test_case,
   result->status = RDC_DIAG_RESULT_PASS;
   result->per_gpu_result_count = 0;
 
-  if (cookie != nullptr && cookie->callback != nullptr && cookie->writer != nullptr) {
+  if (callback != nullptr && callback->callback != nullptr && callback->cookie != nullptr) {
     std::string str = "RVS test";
-    cookie->callback(cookie->writer, str.data());
+    callback->callback(callback->cookie, str.data());
   }
   switch (test_case) {
     case RDC_DIAG_RVS_TEST:
       strncpy_with_null(result->info, "Finished running RDC_DIAG_RVS_TEST", MAX_DIAG_MSG_LENGTH);
-      rvs_status = rvs_base.run_rvs_app(config, config_size, cookie);
+      rvs_status = rvs_base.run_rvs_app(config, config_size, callback);
       break;
     default:
       result->status = RDC_DIAG_RESULT_SKIP;

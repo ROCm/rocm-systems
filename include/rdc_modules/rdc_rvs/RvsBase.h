@@ -49,12 +49,12 @@ class RdcRVSBase {
   RdcRVSBase(RdcRVSBase&&) = delete;
   RdcRVSBase& operator=(RdcRVSBase&&) = delete;
 
-  rvs_status_t run_rvs_app(const char* config, size_t config_size, cookie_t* cookie);
+  rvs_status_t run_rvs_app(const char* config, size_t config_size, rdc_diag_callback_t* callback);
 
  private:
   static RdcRVSBase* s_instance;
   volatile rvs_session_state_t _state = RVS_SESSION_STATE_IDLE;
-  cookie_t* _cookie = nullptr;
+  rdc_diag_callback_t* _callback = nullptr;
   rvs_session_callback _rvs_callback = nullptr;
 
   // Static callback function that the C API will call
@@ -72,8 +72,8 @@ class RdcRVSBase {
     // output += "  status -> " + std::to_string(results->status) + "\n";
     // output += "  output -> " + std::string(results->output_log);
     std::string output = std::string(results->output_log);
-    if (_cookie != nullptr && _cookie->callback != nullptr && _cookie->writer != nullptr) {
-      _cookie->callback(_cookie->writer, output.data());
+    if (_callback != nullptr && _callback->callback != nullptr && _callback->cookie != nullptr) {
+      _callback->callback(_callback->cookie, output.data());
     }
   }
 };
