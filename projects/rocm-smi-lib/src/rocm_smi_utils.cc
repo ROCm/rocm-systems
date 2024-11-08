@@ -172,6 +172,24 @@ int isRegularFile(std::string fname, bool *is_reg) {
   return 0;
 }
 
+int isReadOnlyForAll(const std::string& fname, bool *is_read_only){
+  struct stat file_stat;
+  int ret;
+
+  ret = stat(fname.c_str(), &file_stat);
+  if (ret) {
+    return errno;
+  }
+
+  if (is_read_only != nullptr) {
+    *is_read_only = (file_stat.st_mode & (S_IRUSR | S_IRGRP | S_IROTH)) && !(file_stat.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH));
+  } else {
+    ret = 1;
+  }
+
+  return ret;
+}
+
 int WriteSysfsStr(std::string path, std::string val) {
   //  On success, zero is returned.  On error, -1 is returned, and
   //  errno is set to indicate the error.
