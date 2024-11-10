@@ -211,6 +211,7 @@ externalproject_add(
         --prefix=${ROCPROFSYS_PAPI_INSTALL_DIR} --with-static-lib=yes --with-shared-lib=no
         --with-perf-events --with-tests=no
         --with-components=${_ROCPROFSYS_PAPI_COMPONENTS}
+        --libdir=${ROCPROFSYS_PAPI_INSTALL_DIR}/lib
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
                       ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s
     BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
