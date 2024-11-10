@@ -9,7 +9,7 @@
 	url = https://github.com/jrmadsen/ELFIO.git
 [submodule "external/dyninst"]
 	path = external/dyninst
-	url = https://github.com/jrmadsen/dyninst.git
+	url = https://github.com/ROCm/dyninst.git
 [submodule "external/PTL"]
 	path = external/PTL
 	url = https://github.com/jrmadsen/PTL.git
