@@ -104,7 +104,7 @@ void metadata::init(inprocess)
     {
         if(itr.type == ROCPROFILER_AGENT_TYPE_CPU) continue;
 
-        ROCPROFILER_CHECK(rocprofiler_iterate_agent_supported_counters(
+        auto status = rocprofiler_iterate_agent_supported_counters(
             itr.id,
             [](rocprofiler_agent_id_t    id,
                rocprofiler_counter_id_t* counters,
@@ -135,7 +135,16 @@ void metadata::init(inprocess)
                 }
                 return ROCPROFILER_STATUS_SUCCESS;
             },
-            &agent_counter_info));
+            &agent_counter_info);
+
+        if(status != ROCPROFILER_STATUS_ERROR_AGENT_ARCH_NOT_SUPPORTED)
+        {
+            ROCPROFILER_CHECK(status);
+        }
+        else
+        {
+            ROCP_WARNING << "Init failed for agent " << itr.node_id << " (" << itr.name << ")";
+        }
     }
 }
 
