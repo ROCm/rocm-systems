@@ -33,7 +33,9 @@
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 #include "lib/rocprofiler-sdk/counters/id_decode.hpp"
+#include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 namespace
 {
@@ -1338,6 +1340,144 @@ TEST(evatuate_ast, evaluate_select)
                  {{ROCPROFILER_DIMENSION_XCC, {1}}, {ROCPROFILER_DIMENSION_SHADER_ARRAY, {0}}}),
              1},
         };
+    std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> base_counter_decode;
+    for(const auto& [name, base_counter_v] : base_counter_data)
+    {
+        base_counter_decode[metrics[name].id()] = base_counter_v;
+    }
+
+    for(auto& [name, expected, eval_count] : derived_counters)
+    {
+        ROCP_INFO << name;
+        auto eval_counters =
+            rocprofiler::counters::get_required_hardware_counters(asts, "gfx9", metrics[name]);
+        ASSERT_TRUE(eval_counters);
+        ASSERT_EQ(eval_counters->size(), eval_count);
+        std::vector<std::unique_ptr<std::vector<rocprofiler_record_counter_t>>> cache;
+        asts.at("gfx9").at(name).expand_derived(asts.at("gfx9"));
+        auto ret = asts.at("gfx9").at(name).evaluate(base_counter_decode, cache);
+        EXPECT_EQ(ret->size(), expected.size());
+        int pos = 0;
+        asts.at("gfx9").at(name).set_out_id(*ret);
+        for(const auto& v : *ret)
+        {
+            set_counter_in_rec(expected[pos].id, {.handle = metrics[name].id()});
+            EXPECT_EQ(v.id, expected[pos].id);
+            EXPECT_FLOAT_EQ(v.counter_value, expected[pos].counter_value);
+            pos++;
+        }
+    }
+}
+
+TEST(evaluate_ast, counter_reduction_dimension)
+{
+    using namespace rocprofiler::counters;
+
+    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
+
+    auto get_base_rec_id = [](uint64_t counter_id) {
+        rocprofiler_counter_instance_id_t base_id = 0;
+        set_counter_in_rec(base_id, {.handle = counter_id});
+        return base_id;
+    };
+
+    auto max_dim = [&](auto&& a) -> auto
+    {
+        std::unordered_map<int64_t, rocprofiler_record_counter_t> groups_dim;
+        std::vector<rocprofiler_record_counter_t>                 result;
+        for(auto rec : a)
+        {
+            int64_t mask_dim = (MAX_64 >> (64 - bit_length)) << (bit_length * 0);
+
+            rec.id = rec.id | mask_dim;
+            rec.id = rec.id ^ mask_dim;
+            if(groups_dim.find(rec.id) == groups_dim.end())
+            {
+                groups_dim[rec.id] = rec;
+            }
+            else
+            {
+                groups_dim[rec.id].counter_value =
+                    std::max(groups_dim[rec.id].counter_value, rec.counter_value);
+            }
+        }
+        for(auto& rec_pair : groups_dim)
+        {
+            result.push_back(rec_pair.second);
+        }
+        return result;
+    };
+
+    auto sum_dim = [&](auto&& a) -> auto
+    {
+        std::vector<rocprofiler_record_counter_t> result;
+        double                                    counter_value = 0;
+        result.push_back(a[0]);
+        set_dim_in_rec(result.begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
+        for(auto& rec : a)
+        {
+            counter_value += rec.counter_value;
+        }
+        result.begin()->counter_value = counter_value;
+        return result;
+    };
+
+    std::unordered_map<std::string, Metric> metrics = {
+        {"VOORHEES", Metric("gfx9", "VOORHEES", "a", "a", "a", "", "", 0)},
+        {"KRUEGER", Metric("gfx9", "KRUEGER", "a", "a", "a", "", "", 1)},
+        {"max_BATES",
+         Metric("gfx9",
+                "max_BATES",
+                "C",
+                "C",
+                "C",
+                "reduce(VOORHEES+KRUEGER,max, [DIMENSION_XCC])",
+                "",
+                2)},
+        {"sum_BATES",
+         Metric("gfx9",
+                "sum_BATES",
+                "C",
+                "C",
+                "C",
+                "reduce(VOORHEES+KRUEGER,sum, [DIMENSION_XCC, DIMENSION_AID])",
+                "",
+                3)}};
+
+    std::unordered_map<std::string, std::vector<rocprofiler_record_counter_t>> base_counter_data = {
+        {"VOORHEES",
+         construct_test_data_dim(
+             get_base_rec_id(0), {ROCPROFILER_DIMENSION_XCC, ROCPROFILER_DIMENSION_AID}, 8)},
+        {"KRUEGER",
+         construct_test_data_dim(
+             get_base_rec_id(1), {ROCPROFILER_DIMENSION_XCC, ROCPROFILER_DIMENSION_AID}, 8)},
+    };
+
+    std::unordered_map<std::string, std::unordered_map<std::string, EvaluateAST>> asts;
+    for(const auto& [val, metric] : metrics)
+    {
+        RawAST* ast = nullptr;
+        auto    buf = yy_scan_string(metric.expression().empty() ? metric.name().c_str()
+                                                                 : metric.expression().c_str());
+        yyparse(&ast);
+        ASSERT_TRUE(ast) << metric.expression() << " " << metric.name();
+        asts.emplace("gfx9", std::unordered_map<std::string, EvaluateAST>{})
+            .first->second.emplace(val,
+                                   EvaluateAST({.handle = metric.id()}, metrics, *ast, "gfx9"));
+        yy_delete_buffer(buf);
+        delete ast;
+    }
+
+    std::vector<std::tuple<std::string, std::vector<rocprofiler_record_counter_t>, int64_t>>
+        derived_counters = {
+            {"max_BATES",
+             max_dim(plus_vec(base_counter_data["VOORHEES"], base_counter_data["KRUEGER"])),
+             2},
+            {"sum_BATES",
+             sum_dim(plus_vec(base_counter_data["VOORHEES"], base_counter_data["KRUEGER"])),
+             2},
+        };
+
     std::unordered_map<uint64_t, std::vector<rocprofiler_record_counter_t>> base_counter_decode;
     for(const auto& [name, base_counter_v] : base_counter_data)
     {

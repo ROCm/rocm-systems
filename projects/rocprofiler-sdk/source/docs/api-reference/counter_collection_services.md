@@ -289,6 +289,50 @@ Expression: 100*reduce(GL2C_HIT,sum)/(reduce(GL2C_HIT,sum)+reduce(GL2C_MISS,sum)
 
 The reduce function reduces counter values across all dimensions such as shader engine, SIMD, and so on, to produce a single output value. This helps to collect and compare values across the entire device.
 Here are the common reduction operations:
+- `sum`: Sums to create a single output. For example, `reduce(GL2C_HIT,sum)` sums all `GL2C_HIT` hardware register values.
+- `avr`: Calculates the average across all dimensions.
+- `min`: Selects minimum value across all dimensions.
+- `max`: Selects the maximum value across all dimensions.
+
+```yaml
+expression: reduce(X,sum,[DIMENSION_XCC])
+```
+Reduce() also supports dimension wise reduction, when provided dimensions in 3rd parameter. In the expression above, if `X` has two dimensions `DIMENSION_XCC`, `DIMENSION_SHADER_ARRAY`, and `DIMENSION_WGP`, the reduce happens across counter values where `DIMENSION_SHADER_ARRAY` and `DIMENSION_WGP` dimensions are same as shown below.
+
+Let's say DIM sizes of XCC, SHADER_ARRAY(SH), WGP be 2, 4, 4 respectively.
+
+Raw Counter Data in 3D space:
+
+#### XCC[0]:
+|       |WGP[0]|WGP[1]|WGP[2]|WGP[3]|
+|-------|------|------|------|------|
+| SH[0] |   1  |   2  |   3  |   4  |
+| SH[1] |   5  |   6  |   7  |   8  |
+| SH[2] |   9  |   10 |   11 |   12 |
+| SH[3] |   13 |   14 |   15 |   16 |
+
+#### XCC[1]:
+|       |WGP[0]|WGP[1]|WGP[2]|WGP[3]|
+|-------|------|------|------|------|
+| SH[0] |   1  |   2  |   3  |   4  |
+| SH[1] |   5  |   6  |   7  |   8  |
+| SH[2] |   9  |   10 |   11 |   12 |
+| SH[3] |   13 |   14 |   15 |   16 |
+
+Reducing XCC dim with sum, results to 2D space with only WGP and SH.
+
+|       |WGP[0]|WGP[1]|WGP[2]|WGP[3]|
+|-------|------|------|------|------|
+| SH[0] |  2   |   4  |   6  |   8  |
+| SH[1] |  10  |   12 |   14 |   16 |
+| SH[2] |  18  |   20 |   22 |   24 |
+| SH[3] |  26  |   28 |   30 |   32 |
+
+similarly, for `reduce(X,sum,[DIMENSION_XCC,DIMENSION_SHADER_ARRAY])` results in only WGP dimension.
+
+|       |WGP[0]|WGP[1]|WGP[2]|WGP[3]|
+|-------|------|------|------|------|
+|       |  56  |  64  |  72  |  80  |
 
 ### Select Function
 
@@ -332,13 +376,6 @@ similarly, for `select(Y, [DIMENSION_XCC=[0],DIMENSION_SHADER_ENGINE=[2]])` resu
 |       |WGP[0]|WGP[1]|WGP[2]|WGP[3]|
 |-------|------|------|------|------|
 |       |  9   |  10  |  11  |  12  |
-
-### Accumulate Function
-
-- `sum`: Sums to create a single output. For example, `reduce(GL2C_HIT,sum)` sums all `GL2C_HIT` hardware register values.
-- `avr`: Calculates the average across all dimensions.
-- `min`: Selects minimum value across all dimensions.
-- `max`: Selects the maximum value across all dimensions.
 
 ### Accumulate function
 

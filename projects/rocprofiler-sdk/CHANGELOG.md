@@ -142,6 +142,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 - Added support for select() operation in counter expression.
+- Added reduce operation for counter expression wrt dimension. 
+
 ### Changed
 
 ### Resolved issues

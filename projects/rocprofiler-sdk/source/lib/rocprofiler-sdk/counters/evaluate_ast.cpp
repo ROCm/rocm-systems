@@ -60,21 +60,17 @@ get_reduce_op_type_from_string(const std::string& op)
     return type;
 }
 
-std::vector<rocprofiler_record_counter_t>*
-perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_counter_t>* input_array)
+void
+perform_reduction_to_single_instance(ReduceOperation                            reduce_op,
+                                     std::vector<rocprofiler_record_counter_t>* input_array,
+                                     rocprofiler_record_counter_t*              result)
 {
-    rocprofiler_record_counter_t result{.id            = 0,
-                                        .counter_value = 0,
-                                        .dispatch_id   = 0,
-                                        .user_data     = {.value = 0},
-                                        .agent_id      = {.handle = 0}};
-    if(input_array->empty()) return input_array;
     switch(reduce_op)
     {
         case REDUCE_NONE: break;
         case REDUCE_MIN:
         {
-            result =
+            *result =
                 *std::min_element(input_array->begin(), input_array->end(), [](auto& a, auto& b) {
                     return a.counter_value < b.counter_value;
                 });
@@ -82,55 +78,92 @@ perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_coun
         }
         case REDUCE_MAX:
         {
-            result =
+            *result =
                 *std::max_element(input_array->begin(), input_array->end(), [](auto& a, auto& b) {
                     return a.counter_value < b.counter_value;
                 });
             break;
         }
-        case REDUCE_SUM:
-        {
-            result = std::accumulate(input_array->begin(),
-                                     input_array->end(),
-                                     rocprofiler_record_counter_t{.id            = 0,
-                                                                  .counter_value = 0,
-                                                                  .dispatch_id   = 0,
-                                                                  .user_data     = {.value = 0},
-                                                                  .agent_id      = {.handle = 0}},
-                                     [](auto& a, auto& b) {
-                                         return rocprofiler_record_counter_t{
-                                             .id            = a.id,
-                                             .counter_value = a.counter_value + b.counter_value,
-                                             .dispatch_id   = a.dispatch_id,
-                                             .user_data     = {.value = 0},
-                                             .agent_id      = {.handle = 0}};
-                                     });
-            break;
-        }
+        case REDUCE_SUM: [[fallthrough]];
         case REDUCE_AVG:
         {
-            result = std::accumulate(input_array->begin(),
-                                     input_array->end(),
-                                     rocprofiler_record_counter_t{.id            = 0,
-                                                                  .counter_value = 0,
-                                                                  .dispatch_id   = 0,
-                                                                  .user_data     = {.value = 0},
-                                                                  .agent_id      = {.handle = 0}},
-                                     [](auto& a, auto& b) {
-                                         return rocprofiler_record_counter_t{
-                                             .id            = a.id,
-                                             .counter_value = a.counter_value + b.counter_value,
-                                             .dispatch_id   = a.dispatch_id,
-                                             .user_data     = {.value = 0},
-                                             .agent_id      = {.handle = 0}};
-                                     });
-            result.counter_value /= input_array->size();
+            *result = std::accumulate(input_array->begin(),
+                                      input_array->end(),
+                                      rocprofiler_record_counter_t{.id            = 0,
+                                                                   .counter_value = 0,
+                                                                   .dispatch_id   = 0,
+                                                                   .user_data     = {.value = 0},
+                                                                   .agent_id      = {.handle = 0}},
+                                      [](auto& a, auto& b) {
+                                          return rocprofiler_record_counter_t{
+                                              .id            = a.id,
+                                              .counter_value = a.counter_value + b.counter_value,
+                                              .dispatch_id   = a.dispatch_id,
+                                              .user_data     = {.value = 0},
+                                              .agent_id      = {.handle = 0}};
+                                      });
+            if(reduce_op == REDUCE_AVG)
+            {
+                (*result).counter_value /= input_array->size();
+            }
             break;
         }
     }
+}
+
+std::vector<rocprofiler_record_counter_t>*
+perform_reduction(
+    ReduceOperation                                                       reduce_op,
+    std::vector<rocprofiler_record_counter_t>*                            input_array,
+    const std::unordered_set<rocprofiler_profile_counter_instance_types>& _reduce_dimension_set)
+{
+    if(input_array->empty()) return input_array;
+    if(_reduce_dimension_set.empty() ||
+       _reduce_dimension_set.size() == ROCPROFILER_DIMENSION_LAST - 1)
+    {
+        rocprofiler_record_counter_t result{.id            = 0,
+                                            .counter_value = 0,
+                                            .dispatch_id   = 0,
+                                            .user_data     = {.value = 0},
+                                            .agent_id      = {.handle = 0}};
+        perform_reduction_to_single_instance(reduce_op, input_array, &result);
+        input_array->clear();
+        input_array->push_back(result);
+        set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
+        return input_array;
+    }
+
+    std::unordered_map<int64_t, std::vector<rocprofiler_record_counter_t>> rec_groups;
+    size_t bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
+
+    for(auto& rec : *input_array)
+    {
+        for(auto dim : _reduce_dimension_set)
+        {
+            int64_t mask_dim = (MAX_64 >> (64 - bit_length)) << ((dim - 1) * bit_length);
+
+            rec.id = rec.id | mask_dim;
+            rec.id = rec.id ^ mask_dim;
+        }
+        rec_groups[rec.id].push_back(rec);
+    }
+
     input_array->clear();
-    input_array->push_back(result);
-    set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
+    for(auto& rec_pair : rec_groups)
+    {
+        rocprofiler_record_counter_t result{.id            = 0,
+                                            .counter_value = 0,
+                                            .dispatch_id   = 0,
+                                            .user_data     = {.value = 0},
+                                            .agent_id      = {.handle = 0}};
+
+        perform_reduction_to_single_instance(reduce_op, &rec_pair.second, &result);
+        input_array->push_back(result);
+    }
+    if(input_array->size() == 1)
+    {
+        set_dim_in_rec(input_array->begin()->id, ROCPROFILER_DIMENSION_NONE, 0);
+    }
     return input_array;
 }
 
@@ -375,11 +408,30 @@ EvaluateAST::set_dimensions()
         break;
         case REDUCE_NODE:
         {
-            // Reduction down to a single instance supported for now.
-            _dimension_types =
-                std::vector<MetricDimension>{{dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
-                                              1,
-                                              ROCPROFILER_DIMENSION_INSTANCE}};
+            if(_reduce_dimension_set.empty())
+            {
+                _dimension_types = std::vector<MetricDimension>{
+                    {dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
+                     1,
+                     ROCPROFILER_DIMENSION_INSTANCE}};
+            }
+
+            else
+            {
+                _dimension_types = std::vector<MetricDimension>{
+                    {dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
+                     1,
+                     ROCPROFILER_DIMENSION_INSTANCE}};
+                auto first = _children[0].set_dimensions();
+                first.erase(std::remove_if(first.begin(),
+                                           first.end(),
+                                           [&](const MetricDimension& dim) {
+                                               return _reduce_dimension_set.find(dim.type()) !=
+                                                      _reduce_dimension_set.end();
+                                           }),
+                            first.end());
+                if(!first.empty()) _dimension_types = first;
+            }
         }
         break;
         case SELECT_NODE:
@@ -678,10 +730,6 @@ EvaluateAST::evaluate(
 
         if(r1->size() < r2->size()) swap(r1, r2);
 
-        cache.emplace_back(std::make_unique<std::vector<rocprofiler_record_counter_t>>());
-        *cache.back() = *r1;
-        r1            = cache.back().get();
-
         CHECK(!r1->empty() && !r2->empty());
 
         if(r2->size() == 1)
@@ -758,6 +806,9 @@ EvaluateAST::evaluate(
                 throw std::runtime_error(
                     fmt::format("Unable to lookup results for metric {}", _metric.name()));
 
+            cache.emplace_back(std::make_unique<std::vector<rocprofiler_record_counter_t>>());
+            *cache.back() = *result;
+            result        = cache.back().get();
             return result;
         }
         break;
@@ -767,7 +818,7 @@ EvaluateAST::evaluate(
             if(_reduce_op == REDUCE_NONE)
                 throw std::runtime_error(fmt::format("Invalid Second argument to reduce(): {}",
                                                      static_cast<int>(_reduce_op)));
-            return perform_reduction(_reduce_op, result);
+            return perform_reduction(_reduce_op, result, _reduce_dimension_set);
         }
         case SELECT_NODE:
         {
