@@ -122,7 +122,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 ### Resolved issues
 
-- Introduced subdirection when `rocprofv3 --output-file` used to specify a folder path
+- Create subdirectory when `rocprofv3 --output-file` includes a folder path
 - Fixed misaligned stores (undefined behavior) for buffer records
 - Fixed crash when only scratch reporting is enabled
 - Fixed `MeanOccupancy` metrics
@@ -131,6 +131,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed support for derived counters in reduce operation
 - Bug fixed in max-in-reduce operation
 - Introduced fix to handle a range of values for `select()` dimension in expressions parser
+- Conditional `aql::set_profiler_active_on_queue` only when counter collection is registered (resolves Navi3 kernel tracing issues)
 
 ### Removed
 
