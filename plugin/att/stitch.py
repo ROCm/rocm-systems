@@ -230,7 +230,7 @@ class PCTranslator:
                 inst_pos += 1
             return self.getcode(self.insts[inst_pos].cycles)[0][-3]
         except:
-            print('SWAPPC warning: Could not find addr', hex(self.insts[inst_index+1].cycles), 'for', inst_index, line)
+            print('SWAPPC warning: Could not find addr for', inst_index, line)
             return -1
     def setpc(self, line, inst_index):
         try:
@@ -239,7 +239,7 @@ class PCTranslator:
                 inst_pos += 1
             return self.getcode(self.insts[inst_pos].cycles)[0][-3]
         except:
-            print('SETPC warning: Could not find addr', hex(self.insts[inst_index+1].cycles), 'for', inst_index, line)
+            print('SETPC warning: Could not find addr for', inst_index, line)
             return -1
     def scratch(self, line):
         pass
@@ -437,7 +437,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 vsmem_ordering = 1
                 FLAT_INST.append([reverse_map[line], num_inflight])
                 NUM_FLAT += 1
-            elif inst.type == IMMED and "s_wait" in as_line[0]:
+            elif inst.type == IMMED and "s_wait" in as_line[0] and not "s_wait_alu" in as_line[0]:
                 if "lgkmcnt" in as_line[0] or "dscnt" in as_line[0] or "kmcnt" in as_line[0]:
                     try:
                         wait_N = int(as_line[0].split("lgkmcnt(")[1].split(")")[0])
@@ -521,13 +521,15 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
                 insts[i] = insts[i + 1]
                 insts[i + 1] = temp
                 next = line
-            elif "s_wait" in as_line[0] or "_load_" in as_line[0]:
-                if skipped_immed > 0 and "s_wait" in as_line[0]:
-                    matched = True
-                    skipped_immed -= 1
-                elif 'scratch_' not in as_line[0]:
-                    print('WARNING: Parsing terminated at:', as_line)
-                    break
+            else:
+                hasWait = "s_wait" in as_line[0]
+                if hasWait or "_load_" in as_line[0]:
+                    if skipped_immed > 0 and hasWait:
+                        matched = True
+                        skipped_immed -= 1
+                    elif 's_waitcnt' in as_line[0] and 'scratch_' not in as_line[0]:
+                        print('WARNING: Parsing terminated at:', as_line)
+                        break
 
         if matched or as_line[1] != DONT_KNOW:
             if matched:
@@ -549,7 +551,7 @@ def stitch(insts, raw_code, jumps, gfxv, bIsAuto, codeservice):
         line = next
 
     N = max(N, 1)
-    if i != N and insts[i].type == WAVE_ENDED:
+    if i != N and (insts[i].type == WAVE_ENDED or i == N-1):
         print('Warning - Wave ended.')
     elif i < N:
         print('Warning - Stitching rate: '+str(i * 100 / N)+'% matched', i, ' of ', N)
