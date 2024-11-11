@@ -24,8 +24,6 @@
 
 #include <rocprofiler-sdk/defines.h>
 
-#include <hsa/hsa_amd_tool.h>
-
 #include <stddef.h>
 #include <stdint.h>
 
@@ -227,21 +225,6 @@ typedef enum  // NOLINT(performance-enum-size)
 } rocprofiler_memory_copy_operation_t;
 
 /**
- * @brief Page migration event.
- */
-typedef enum  // NOLINT(performance-enum-size)
-{
-    ROCPROFILER_PAGE_MIGRATION_NONE = 0,  ///< Unknown event
-    ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE,
-    ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND,
-    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU,
-    // Any and all events, from all processes. Requires superuser
-    // ROCPROFILER_PAGE_MIGRATION_ANY_ALL_PROCESSES,
-    ROCPROFILER_PAGE_MIGRATION_LAST,
-} rocprofiler_page_migration_operation_t;
-
-/**
  * @brief ROCProfiler Kernel Dispatch Tracing Operation Types.
  */
 typedef enum  // NOLINT(performance-enum-size)
@@ -322,6 +305,22 @@ typedef enum  // NOLINT(performance-enum-size)
 } rocprofiler_buffer_policy_t;
 
 /**
+ * @brief Page migration event.
+ */
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_PAGE_MIGRATION_NONE = 0,  ///< Unknown event
+    ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START,
+    ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END,
+    ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START,
+    ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END,
+    ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION,
+    ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE,
+    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU,
+    ROCPROFILER_PAGE_MIGRATION_LAST,
+} rocprofiler_page_migration_operation_t;
+
+/**
  * @brief Scratch event kind
  */
 typedef enum
@@ -332,19 +331,6 @@ typedef enum
     ROCPROFILER_SCRATCH_MEMORY_ASYNC_RECLAIM,  ///< Scratch memory asynchronously reclaimed
     ROCPROFILER_SCRATCH_MEMORY_LAST,
 } rocprofiler_scratch_memory_operation_t;
-
-/**
- * @brief Allocation flags for @see rocprofiler_buffer_tracing_scratch_memory_record_t
- */
-typedef enum
-{
-    ROCPROFILER_SCRATCH_ALLOC_FLAG_NONE = 0,
-    ROCPROFILER_SCRATCH_ALLOC_FLAG_USE_ONCE =
-        HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_USE_ONCE,  ///< This scratch allocation is only valid for 1
-                                                    ///< dispatch.
-    ROCPROFILER_SCRATCH_ALLOC_FLAG_ALT =
-        HSA_AMD_EVENT_SCRATCH_ALLOC_FLAG_ALT,  ///< Used alternate scratch instead of main scratch
-} rocprofiler_scratch_alloc_flag_t;
 
 /**
  * @brief Enumeration for specifying runtime libraries supported by rocprofiler. This enumeration is

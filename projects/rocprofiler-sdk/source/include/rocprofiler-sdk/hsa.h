@@ -39,6 +39,7 @@
 #include <rocprofiler-sdk/hsa/api_args.h>
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/scratch_memory_args.h>
+#include <rocprofiler-sdk/hsa/scratch_memory_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 
 #if defined(ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD) && ROCPROFILER_DEFINED_AMD_INTERNAL_BUILD > 0

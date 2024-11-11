@@ -22,12 +22,15 @@
 
 #pragma once
 
+#include "lib/common/container/small_vector.hpp"
 #include "lib/rocprofiler-sdk/details/kfd_ioctl.h"
 
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 
+#include <algorithm>
 #include <cstdint>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 
@@ -35,38 +38,32 @@ namespace rocprofiler
 {
 namespace page_migration
 {
-// serves as an overview of what events we capture and report
-enum fault_type_t
-{
-    NONE,
-    READ,
-    WRITE,
-};
+/* serves as an overview of what events we capture and report
 
-struct uvm_event_page_fault_start_t
-{
-    int          kind;
-    uint64_t     start_timestamp;
-    int          pid;
-    int          node_id;
-    uint64_t     address;
-    fault_type_t fault;
-};
-
-struct uvm_event_page_fault_end_t
+struct event_page_fault_start_t
 {
     int      kind;
-    uint64_t end_timestamp;
+    uint64_t timestamp;
+    int      pid;
+    int      node_id;
+    uint64_t address;
+    fault_t  fault;
+};
+
+struct event_page_fault_end_t
+{
+    int      kind;
+    uint64_t timestamp;
     uint32_t pid;
     int      node_id;
     uint64_t address;
     bool     migrated;
 };
 
-struct uvm_event_migrate_start_t
+struct event_migrate_start_t
 {
     int      kind;
-    uint64_t start_timestamp;
+    uint64_t timestamp;
     uint32_t pid;
     uint64_t start;
     uint64_t end_offset;
@@ -77,10 +74,10 @@ struct uvm_event_migrate_start_t
     uint32_t trigger;
 };
 
-struct uvm_event_migrate_end_t
+struct event_migrate_end_t
 {
     int      kind;
-    uint64_t end_timestamp;
+    uint64_t timestamp;
     uint32_t pid;
     uint64_t start;
     uint64_t end_offset;
@@ -89,25 +86,25 @@ struct uvm_event_migrate_end_t
     uint32_t trigger;
 };
 
-struct uvm_event_queue_eviction_t
+struct event_queue_eviction_t
 {
     int      kind;
-    uint64_t start_timestamp;
+    uint64_t timestamp;
     uint32_t pid;
     int      node_id;
     uint32_t trigger;
 };
 
-struct uvm_event_queue_restore_t
+struct event_queue_restore_t
 {
     int      kind;
-    uint64_t end_timestamp;
+    uint64_t timestamp;
     uint32_t pid;
     int      node_id;
     bool     rescheduled;
 };
 
-struct uvm_event_unmap_from_gpu_t
+struct event_unmap_from_gpu_t
 {
     int      kind;
     uint64_t timestamp;
@@ -117,12 +114,12 @@ struct uvm_event_unmap_from_gpu_t
     int      node_id;
     uint32_t trigger;
 };
-
-template <size_t e>
-struct uvm_event_info;
+*/
 
 template <size_t>
 struct page_migration_info;
+
+using namespace rocprofiler::common;
 
 namespace kfd
 {
@@ -145,74 +142,56 @@ constexpr size_t bitmask(std::index_sequence<Args...>)
     return (bitmask(Args) | ...);
 }
 
-enum uvm_event_id_t
+template <size_t... Ints>
+constexpr size_t kfd_bitmask(std::index_sequence<Ints...>)
 {
-    ROCPROFILER_UVM_EVENT_NONE,
-    ROCPROFILER_UVM_EVENT_MIGRATE_START,
-    ROCPROFILER_UVM_EVENT_MIGRATE_END,
-    ROCPROFILER_UVM_EVENT_PAGE_FAULT_START,
-    ROCPROFILER_UVM_EVENT_PAGE_FAULT_END,
-    ROCPROFILER_UVM_EVENT_QUEUE_EVICTION,
-    ROCPROFILER_UVM_EVENT_QUEUE_RESTORE,
-    ROCPROFILER_UVM_EVENT_UNMAP_FROM_GPU,
-    ROCPROFILER_UVM_EVENT_LAST,
-};
+    return (page_migration_info<Ints>::kfd_bitmask | ...);
+}
 
-static_assert(KFD_SMI_EVENT_NONE == 0);
-static_assert(KFD_SMI_EVENT_MIGRATE_START == 5);
-static_assert(KFD_SMI_EVENT_MIGRATE_END == 6);
-static_assert(KFD_SMI_EVENT_PAGE_FAULT_START == 7);
-static_assert(KFD_SMI_EVENT_PAGE_FAULT_END == 8);
-static_assert(KFD_SMI_EVENT_QUEUE_EVICTION == 9);
-static_assert(KFD_SMI_EVENT_QUEUE_RESTORE == 10);
-static_assert(KFD_SMI_EVENT_UNMAP_FROM_GPU == 11);
-static_assert(KFD_SMI_EVENT_ALL_PROCESS == 64);
+template <size_t OpInx, size_t... OpInxs>
+constexpr size_t
+kfd_bitmask_impl(size_t rocprof_op, std::index_sequence<OpInx, OpInxs...>)
+{
+    if(rocprof_op == OpInx) return page_migration_info<OpInx>::kfd_bitmask;
+    if constexpr(sizeof...(OpInxs) > 0)
+        return kfd_bitmask_impl(rocprof_op, std::index_sequence<OpInxs...>{});
+    else
+        return 0;
+}
+
+template <size_t... OpInxs>
+constexpr auto
+kfd_bitmask(const container::small_vector<size_t>& rocprof_event_ids,
+            std::index_sequence<OpInxs...>)
+{
+    uint64_t m{};
+    for(const size_t& event_id : rocprof_event_ids)
+    {
+        m |= kfd_bitmask_impl(event_id, std::index_sequence<OpInxs...>{});
+    }
+    return m;
+}
+
+template <size_t OpInx, size_t... OpInxs>
+constexpr size_t
+kfd_to_rocprof_op(size_t kfd_id, std::index_sequence<OpInx, OpInxs...>)
+{
+    if(kfd_id == page_migration_info<OpInx>::kfd_operation) return OpInx;
+    if constexpr(sizeof...(OpInxs) > 0)
+        return kfd_to_rocprof_op(kfd_id, std::index_sequence<OpInxs...>{});
+    else
+        return 0;
+}
+
+size_t
+get_rocprof_op(const std::string_view event_data);
+
+void
+kfd_readlines(const std::string_view str, void(handler)(std::string_view));
 
 using rocprof_buffer_op_t = rocprofiler_page_migration_operation_t;
 
 using node_fd_t = int;
 
-using event_map_t =
-    std::unordered_map<uint64_t, rocprofiler_buffer_tracing_page_migration_record_t>;
-using events_cache_t = std::array<event_map_t, ROCPROFILER_PAGE_MIGRATION_LAST>;
-
-template <size_t... Ints>
-constexpr size_t to_kfd_bitmask(std::index_sequence<Ints...>)
-{
-    return bitmask(std::index_sequence<uvm_event_info<Ints>::kfd_event...>());
-}
-
-template <rocprofiler_page_migration_operation_t... Ops>
-constexpr size_t to_uvm_bitmask(std::index_sequence<Ops...>)
-{
-    return bitmask(std::index_sequence<static_cast<uint32_t>(Ops)...>());
-}
-
-template <size_t RocprofOpIdx, size_t UvmOpIdx>
-constexpr bool
-is_rocprof_uvm_map()
-{
-    return page_migration_info<RocprofOpIdx>::uvm_bitmask & bitmask(UvmOpIdx);
-}
-
-template <size_t RocprofOpIdx, size_t OpInx, size_t... OpInxs>
-constexpr bool
-_is_rocprof_uvm_map(size_t uvm_event, std::index_sequence<OpInx, OpInxs...>)
-{
-    if(OpInx == uvm_event)
-        return is_rocprof_uvm_map<RocprofOpIdx, OpInx>();
-    else if constexpr(sizeof...(OpInxs) > 0)
-        return _is_rocprof_uvm_map<RocprofOpIdx>(uvm_event, std::index_sequence<OpInxs...>{});
-    else
-        return false;
-}
-
-template <size_t RocprofOpIdx>
-constexpr bool
-is_rocprof_uvm_map(size_t uvm_event)
-{
-    return _is_rocprof_uvm_map<RocprofOpIdx>(
-        uvm_event, std::make_index_sequence<ROCPROFILER_UVM_EVENT_LAST>{});
-}
 }  // namespace page_migration
 }  // namespace rocprofiler

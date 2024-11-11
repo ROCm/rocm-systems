@@ -21,9 +21,9 @@
 // THE SOFTWARE.
 
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
+#include "lib/common/logging.hpp"
 #include "lib/common/mpl.hpp"
 #include "lib/common/static_object.hpp"
-#include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -44,14 +44,15 @@
 #include <sys/poll.h>
 #include <unistd.h>
 #include <atomic>
-#include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
 #include <memory>
+#include <ratio>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -76,25 +77,14 @@ namespace page_migration
 template <typename T>
 using small_vector = common::container::small_vector<T>;
 
-using context_t               = context::context;
-using context_array_t         = common::container::small_vector<const context_t*>;
-using kfd_event_id_t          = decltype(KFD_SMI_EVENT_NONE);
-using page_migration_record_t = rocprofiler_buffer_tracing_page_migration_record_t;
-using migrate_trigger_t       = rocprofiler_page_migration_trigger_t;
-using qsuspend_trigger_t      = rocprofiler_page_migration_queue_suspend_trigger_t;
-using unmap_trigger_t         = rocprofiler_page_migration_unmap_from_gpu_trigger_t;
+using context_t       = context::context;
+using context_array_t = common::container::small_vector<const context_t*>;
 
-// Parsing and utilities
-namespace
-{
-using namespace page_migration;
+template <size_t>
+struct page_migration_info;
 
-constexpr auto
-page_to_bytes(size_t val)
-{
-    // each page is 4KB = 4096 bytes
-    return val << 12;
-}
+template <size_t>
+struct kfd_event_info;
 
 template <typename EnumT, int ValueE>
 struct page_migration_enum_info;
@@ -102,122 +92,88 @@ struct page_migration_enum_info;
 template <typename EnumT>
 struct page_migration_bounds;
 
-#define SPECIALIZE_PM_ENUM_INFO(TYPE, TRIGGER_CATEGORY, NAME)                                      \
-    template <>                                                                                    \
-    struct page_migration_enum_info<TYPE, ROCPROFILER_PAGE_MIGRATION_##TRIGGER_CATEGORY##_##NAME>  \
-    {                                                                                              \
-        static constexpr auto name = #NAME;                                                        \
-    };
-
-#define SPECIALIZE_PM_ENUM_BOUNDS(TYPE, TRIGGER_CATEGORY)                                          \
-    template <>                                                                                    \
-    struct page_migration_bounds<TYPE>                                                             \
-    {                                                                                              \
-        static constexpr auto last = ROCPROFILER_PAGE_MIGRATION_##TRIGGER_CATEGORY##_LAST;         \
-    };
-
-using queue_suspend_trigger_t  = rocprofiler_page_migration_queue_suspend_trigger_t;
-using unmap_from_gpu_trigger_t = rocprofiler_page_migration_unmap_from_gpu_trigger_t;
-
-SPECIALIZE_PM_ENUM_BOUNDS(rocprofiler_page_migration_trigger_t, TRIGGER)
-SPECIALIZE_PM_ENUM_BOUNDS(queue_suspend_trigger_t, QUEUE_SUSPEND_TRIGGER)
-SPECIALIZE_PM_ENUM_BOUNDS(unmap_from_gpu_trigger_t, UNMAP_FROM_GPU_TRIGGER)
-
-SPECIALIZE_PM_ENUM_INFO(rocprofiler_page_migration_trigger_t, TRIGGER, PREFETCH)
-SPECIALIZE_PM_ENUM_INFO(rocprofiler_page_migration_trigger_t, TRIGGER, PAGEFAULT_GPU)
-SPECIALIZE_PM_ENUM_INFO(rocprofiler_page_migration_trigger_t, TRIGGER, PAGEFAULT_CPU)
-SPECIALIZE_PM_ENUM_INFO(rocprofiler_page_migration_trigger_t, TRIGGER, TTM_EVICTION)
-
-SPECIALIZE_PM_ENUM_INFO(queue_suspend_trigger_t, QUEUE_SUSPEND_TRIGGER, SVM)
-SPECIALIZE_PM_ENUM_INFO(queue_suspend_trigger_t, QUEUE_SUSPEND_TRIGGER, USERPTR)
-SPECIALIZE_PM_ENUM_INFO(queue_suspend_trigger_t, QUEUE_SUSPEND_TRIGGER, TTM)
-SPECIALIZE_PM_ENUM_INFO(queue_suspend_trigger_t, QUEUE_SUSPEND_TRIGGER, SUSPEND)
-SPECIALIZE_PM_ENUM_INFO(queue_suspend_trigger_t, QUEUE_SUSPEND_TRIGGER, CRIU_CHECKPOINT)
-SPECIALIZE_PM_ENUM_INFO(queue_suspend_trigger_t, QUEUE_SUSPEND_TRIGGER, CRIU_RESTORE)
-
-SPECIALIZE_PM_ENUM_INFO(unmap_from_gpu_trigger_t, UNMAP_FROM_GPU_TRIGGER, MMU_NOTIFY)
-SPECIALIZE_PM_ENUM_INFO(unmap_from_gpu_trigger_t, UNMAP_FROM_GPU_TRIGGER, MMU_NOTIFY_MIGRATE)
-SPECIALIZE_PM_ENUM_INFO(unmap_from_gpu_trigger_t, UNMAP_FROM_GPU_TRIGGER, UNMAP_FROM_CPU)
-
-using trigger_type_list_t = common::mpl::type_list<rocprofiler_page_migration_trigger_t,
-                                                   queue_suspend_trigger_t,
-                                                   unmap_from_gpu_trigger_t>;
-
-template <typename EnumT, size_t Idx, size_t... IdxTail>
-std::string_view
-to_string_impl(EnumT val, std::index_sequence<Idx, IdxTail...>)
+// Parsing and utilities
+namespace
 {
-    if(val == Idx) return page_migration_enum_info<EnumT, Idx>::name;
-    if constexpr(sizeof...(IdxTail) > 0)
-        return to_string_impl(val, std::index_sequence<IdxTail...>{});
-    else
-        return std::string_view{};
-}
-
-template <typename EnumT, typename Up = EnumT>
-std::string_view
-to_string(EnumT val,
-          std::enable_if_t<std::is_enum<Up>::value &&
-                               common::mpl::is_one_of<Up, trigger_type_list_t>::value,
-                           int> = 0)
+constexpr auto
+page_to_bytes(size_t val)
 {
-    constexpr auto last = page_migration_bounds<EnumT>::last;
-    return to_string_impl(val, std::make_index_sequence<last>{});
+    // each page is 4KB = 4096 bytes
+    return val << 12;
 }
 
 template <size_t>
-page_migration_record_t parse_uvm_event(std::string_view)
+page_migration_record_t parse_event(std::string_view)
 {
-    ROCP_FATAL_IF(false) << uvm_event_info<ROCPROFILER_UVM_EVENT_NONE>::format_str;
+    ROCP_FATAL_IF(false) << page_migration_info<ROCPROFILER_PAGE_MIGRATION_NONE>::format_str;
     return {};
+}
+
+auto
+get_node_agent_id(uint32_t _node_id)
+{
+    using agent_id_map_t = std::unordered_map<uint64_t, rocprofiler_agent_id_t>;
+    static auto*& _data  = static_object<agent_id_map_t>::construct([]() {
+        auto _v = std::unordered_map<uint64_t, rocprofiler_agent_id_t>{};
+        for(const auto* agent : agent::get_agents())
+            _v.emplace(agent->gpu_id, agent->id);
+        return _v;
+    }());
+
+    CHECK(_data != nullptr);
+    ROCP_FATAL_IF(_data->count(_node_id) == 0) << "page_migration: unknown node id: " << _node_id;
+    return _data->at(_node_id);
 }
 
 template <>
 page_migration_record_t
-parse_uvm_event<ROCPROFILER_UVM_EVENT_PAGE_FAULT_START>(std::string_view str)
+parse_event<ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START>(std::string_view str)
 {
-    page_migration_record_t rec{};
-    auto&                   e = rec.page_fault;
-    uint32_t                kind{};
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.page_fault_start;
+    uint32_t kind{};
+    uint32_t _node_id = 0;
 
     char fault;
     std::sscanf(str.data(),
-                uvm_event_info<ROCPROFILER_UVM_EVENT_PAGE_FAULT_START>::format_str.data(),
+                page_migration_info<ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START>::format_str.data(),
                 &kind,
-                &rec.start_timestamp,
+                &rec.timestamp,
                 &rec.pid,
                 &e.address,
-                &e.node_id,
+                &_node_id,
                 &fault);
 
     e.read_fault = (fault == 'R');
     e.address    = page_to_bytes(e.address);
+    e.agent_id   = get_node_agent_id(_node_id);
 
-    ROCP_INFO << fmt::format("Page fault start [ ts: {} pid: {} addr: 0x{:X} node: {} ] \n",
-                             rec.start_timestamp,
-                             rec.pid,
-                             e.address,
-                             e.node_id);
+    ROCP_TRACE << fmt::format("Page fault start [ ts: {} pid: {} addr: 0x{:X} node: {} ] \n",
+                              rec.timestamp,
+                              rec.pid,
+                              e.address,
+                              e.agent_id.handle);
 
     return rec;
 }
 
 template <>
 page_migration_record_t
-parse_uvm_event<ROCPROFILER_UVM_EVENT_PAGE_FAULT_END>(std::string_view str)
+parse_event<ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END>(std::string_view str)
 {
-    page_migration_record_t rec{};
-    auto&                   e = rec.page_fault;
-    uint32_t                kind{};
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.page_fault_end;
+    uint32_t kind{};
+    uint32_t _node_id = 0;
 
     char migrated;
     std::sscanf(str.data(),
-                uvm_event_info<ROCPROFILER_UVM_EVENT_PAGE_FAULT_END>::format_str.data(),
+                page_migration_info<ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END>::format_str.data(),
                 &kind,
-                &rec.end_timestamp,
+                &rec.timestamp,
                 &rec.pid,
                 &e.address,
-                &e.node_id,
+                &_node_id,
                 &migrated);
 
     // M or U -> migrated / unmigrated?
@@ -225,16 +181,18 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_PAGE_FAULT_END>(std::string_view str)
         e.migrated = true;
     else if(migrated == 'U')
         e.migrated = false;
-    // else
-    // throw std::runtime_error("Invalid SVM memory migrate type");
-    e.address = page_to_bytes(e.address);
+    else
+        ROCP_WARNING << "Unknown PAGE_FAULT_END migrated/unmigrated state";
 
-    ROCP_INFO << fmt::format(
+    e.address  = page_to_bytes(e.address);
+    e.agent_id = get_node_agent_id(_node_id);
+
+    ROCP_TRACE << fmt::format(
         "Page fault end [ ts: {} pid: {} addr: 0x{:X} node: {} migrated: {} ] \n",
-        rec.end_timestamp,
+        rec.timestamp,
         rec.pid,
         e.address,
-        e.node_id,
+        e.agent_id.handle,
         migrated);
 
     return rec;
@@ -242,507 +200,310 @@ parse_uvm_event<ROCPROFILER_UVM_EVENT_PAGE_FAULT_END>(std::string_view str)
 
 template <>
 page_migration_record_t
-parse_uvm_event<ROCPROFILER_UVM_EVENT_MIGRATE_START>(std::string_view str)
+parse_event<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START>(std::string_view str)
 {
-    page_migration_record_t rec{};
-    auto&                   e = rec.page_migrate;
-    uint32_t                kind{};
-    uint32_t                trigger{};
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.page_migrate_start;
+    uint32_t kind{};
+    uint32_t trigger{};
+    uint32_t _from_node      = 0;
+    uint32_t _to_node        = 0;
+    uint32_t _prefetch_node  = 0;
+    uint32_t _preferred_node = 0;
 
-    std::sscanf(str.data(),
-                uvm_event_info<ROCPROFILER_UVM_EVENT_MIGRATE_START>::format_str.data(),
-                &kind,
-                &rec.start_timestamp,
-                &rec.pid,
-                &e.start_addr,
-                &e.end_addr,
-                &e.from_node,
-                &e.to_node,
-                &e.prefetch_node,
-                &e.preferred_node,
-                &trigger);
+    std::sscanf(
+        str.data(),
+        page_migration_info<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START>::format_str.data(),
+        &kind,
+        &rec.timestamp,
+        &rec.pid,
+        &e.start_addr,
+        &e.end_addr,
+        &_from_node,
+        &_to_node,
+        &_prefetch_node,
+        &_preferred_node,
+        &trigger);
 
     e.end_addr += e.start_addr;
-    e.trigger    = static_cast<migrate_trigger_t>(trigger);
-    e.start_addr = page_to_bytes(e.start_addr);
-    e.end_addr   = page_to_bytes(e.end_addr) - 1;
+    e.trigger         = static_cast<migrate_trigger_t>(trigger);
+    e.start_addr      = page_to_bytes(e.start_addr);
+    e.end_addr        = page_to_bytes(e.end_addr) - 1;
+    e.from_agent      = get_node_agent_id(_from_node);
+    e.to_agent        = get_node_agent_id(_to_node);
+    e.prefetch_agent  = get_node_agent_id(_prefetch_node);
+    e.preferred_agent = get_node_agent_id(_preferred_node);
 
-    ROCP_INFO << fmt::format(
+    ROCP_TRACE << fmt::format(
         "Page migrate start [ ts: {} pid: {} addr s: 0x{:X} addr "
         "e: 0x{:X} size: {}B from node: {} to node: {} prefetch node: {} preferred node: {} "
         "trigger: {} ] \n",
-        rec.start_timestamp,
+        rec.timestamp,
         rec.pid,
         e.start_addr,
         e.end_addr,
         (e.end_addr - e.start_addr),
-        e.from_node,
-        e.to_node,
-        e.prefetch_node,
-        e.preferred_node,
-        to_string(e.trigger));
+        e.from_agent.handle,
+        e.to_agent.handle,
+        e.prefetch_agent.handle,
+        e.preferred_agent.handle,
+        trigger);
 
     return rec;
 }
 
 template <>
 page_migration_record_t
-parse_uvm_event<ROCPROFILER_UVM_EVENT_MIGRATE_END>(std::string_view str)
+parse_event<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END>(std::string_view str)
 {
-    page_migration_record_t rec{};
-    auto&                   e = rec.page_migrate;
-    uint32_t                kind{};
-    uint32_t                trigger{};
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.page_migrate_end;
+    uint32_t kind{};
+    uint32_t trigger{};
+    uint32_t _from_node = 0;
+    uint32_t _to_node   = 0;
 
     std::sscanf(str.data(),
-                uvm_event_info<ROCPROFILER_UVM_EVENT_MIGRATE_END>::format_str.data(),
+                page_migration_info<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END>::format_str.data(),
                 &kind,
-                &rec.end_timestamp,
+                &rec.timestamp,
                 &rec.pid,
                 &e.start_addr,
                 &e.end_addr,
-                &e.from_node,
-                &e.to_node,
+                &_from_node,
+                &_to_node,
                 &trigger);
 
     e.end_addr += e.start_addr;
     e.trigger    = static_cast<migrate_trigger_t>(trigger);
     e.start_addr = page_to_bytes(e.start_addr);
     e.end_addr   = page_to_bytes(e.end_addr) - 1;
+    e.from_agent = get_node_agent_id(_from_node);
+    e.to_agent   = get_node_agent_id(_to_node);
 
-    ROCP_INFO << fmt::format("Page migrate end [ ts: {} pid: {} addr s: 0x{:X} addr e: "
-                             "0x{:X} from node: {} to node: {} trigger: {} ] \n",
-                             rec.end_timestamp,
-                             rec.pid,
-                             e.start_addr,
-                             e.end_addr,
-                             e.from_node,
-                             e.to_node,
-                             to_string(e.trigger));
+    ROCP_TRACE << fmt::format("Page migrate end [ ts: {} pid: {} addr s: 0x{:X} addr e: "
+                              "0x{:X} from node: {} to node: {} trigger: {} ] \n",
+                              rec.timestamp,
+                              rec.pid,
+                              e.start_addr,
+                              e.end_addr,
+                              e.from_agent.handle,
+                              e.to_agent.handle,
+                              trigger);
 
     return rec;
 }
 
 template <>
 page_migration_record_t
-parse_uvm_event<ROCPROFILER_UVM_EVENT_QUEUE_EVICTION>(std::string_view str)
+parse_event<ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION>(std::string_view str)
 {
-    page_migration_record_t rec{};
-    auto&                   e = rec.queue_suspend;
-    uint32_t                kind{};
-    uint32_t                trigger{};
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.queue_eviction;
+    uint32_t kind{};
+    uint32_t trigger{};
+    uint32_t _node_id = 0;
 
     std::sscanf(str.data(),
-                uvm_event_info<ROCPROFILER_UVM_EVENT_QUEUE_EVICTION>::format_str.data(),
+                page_migration_info<ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION>::format_str.data(),
                 &kind,
-                &rec.start_timestamp,
+                &rec.timestamp,
                 &rec.pid,
-                &e.node_id,
+                &_node_id,
                 &trigger);
 
-    rec.queue_suspend.trigger = static_cast<qsuspend_trigger_t>(trigger);
+    e.trigger  = static_cast<queue_suspend_trigger_t>(trigger);
+    e.agent_id = get_node_agent_id(_node_id);
 
-    ROCP_INFO << fmt::format("Queue evict [ ts: {} pid: {} node: {} trigger: {} ] \n",
-                             rec.start_timestamp,
-                             rec.pid,
-                             e.node_id,
-                             to_string(e.trigger));
+    ROCP_TRACE << fmt::format("Queue evict [ ts: {} pid: {} node: {} trigger: {} ] \n",
+                              rec.timestamp,
+                              rec.pid,
+                              e.agent_id.handle,
+                              trigger);
 
     return rec;
 }
 
 template <>
 page_migration_record_t
-parse_uvm_event<ROCPROFILER_UVM_EVENT_QUEUE_RESTORE>(std::string_view str)
+parse_event<ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE>(std::string_view str)
 {
-    page_migration_record_t rec{};
-    auto&                   e = rec.queue_suspend;
-    uint32_t                kind{};
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.queue_restore;
+    uint32_t kind{};
+    uint32_t _node_id = 0;
 
     std::sscanf(str.data(),
-                uvm_event_info<ROCPROFILER_UVM_EVENT_QUEUE_RESTORE>::format_str.data(),
+                page_migration_info<ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE>::format_str.data(),
                 &kind,
-                &rec.end_timestamp,
+                &rec.timestamp,
                 &rec.pid,
-                &e.node_id);
+                &_node_id);
     // check if we have a valid char at the end. -1 has \0
     if(str[str.size() - 2] == 'R')
         e.rescheduled = true;
     else
         e.rescheduled = false;
+    e.agent_id = get_node_agent_id(_node_id);
 
-    ROCP_INFO << fmt::format(
-        "Queue restore [ ts: {} pid: {} node: {} ] \n", rec.end_timestamp, rec.pid, e.node_id);
+    ROCP_TRACE << fmt::format(
+        "Queue restore [ ts: {} pid: {} node: {} ] \n", rec.timestamp, rec.pid, e.agent_id.handle);
 
     return rec;
 }
 
 template <>
 page_migration_record_t
-parse_uvm_event<ROCPROFILER_UVM_EVENT_UNMAP_FROM_GPU>(std::string_view str)
+parse_event<ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU>(std::string_view str)
 {
-    page_migration_record_t rec{};
-    auto&                   e = rec.unmap_from_gpu;
-    uint32_t                kind{};
-    uint32_t                trigger{};
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.unmap_from_gpu;
+    uint32_t kind{};
+    uint32_t trigger{};
+    uint32_t _node_id = 0;
 
     std::sscanf(str.data(),
-                uvm_event_info<ROCPROFILER_UVM_EVENT_UNMAP_FROM_GPU>::format_str.data(),
+                page_migration_info<ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU>::format_str.data(),
                 &kind,
-                &rec.start_timestamp,
+                &rec.timestamp,
                 &rec.pid,
                 &e.start_addr,
                 &e.end_addr,
-                &e.node_id,
+                &_node_id,
                 &trigger);
 
     e.end_addr += e.start_addr;
-    rec.end_timestamp          = rec.start_timestamp;
-    rec.unmap_from_gpu.trigger = static_cast<unmap_trigger_t>(trigger);
-    e.start_addr               = page_to_bytes(e.start_addr);
-    e.end_addr                 = page_to_bytes(e.end_addr);
+    e.trigger    = static_cast<unmap_from_gpu_trigger_t>(trigger);
+    e.start_addr = page_to_bytes(e.start_addr);
+    e.end_addr   = page_to_bytes(e.end_addr);
+    e.agent_id   = get_node_agent_id(_node_id);
 
-    ROCP_INFO << fmt::format("Unmap from GPU [ ts: {} pid: {} start addr: 0x{:X} end addr: 0x{:X}  "
-                             "node: {} trigger {} ] \n",
-                             rec.start_timestamp,
-                             rec.pid,
-                             e.start_addr,
-                             e.end_addr,
-                             e.node_id,
-                             to_string(e.trigger));
+    ROCP_TRACE << fmt::format(
+        "Unmap from GPU [ ts: {} pid: {} start addr: 0x{:X} end addr: 0x{:X}  "
+        "node: {} trigger {} ] \n",
+        rec.timestamp,
+        rec.pid,
+        e.start_addr,
+        e.end_addr,
+        e.agent_id.handle,
+        trigger);
 
     return rec;
 }
 
+template <>
+page_migration_record_t parse_event<ROCPROFILER_PAGE_MIGRATION_NONE>(std::string_view)
+{
+    throw std::runtime_error(
+        "ROCPROFILER_PAGE_MIGRATION_NONE for parsing page migration events should not happen");
+}
+
 template <size_t OpInx, size_t... OpInxs>
 page_migration_record_t
-parse_uvm_event(uvm_event_id_t   event_id,
-                std::string_view strn,
-                std::index_sequence<OpInx, OpInxs...>)
+parse_event(size_t event_id, std::string_view strn, std::index_sequence<OpInx, OpInxs...>)
 {
     if(OpInx == static_cast<uint32_t>(event_id))
     {
-        auto rec      = parse_uvm_event<OpInx>(strn);
+        auto rec      = parse_event<OpInx>(strn);
         rec.size      = sizeof(page_migration_record_t);
         rec.kind      = ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION;
-        rec.operation = to_rocprof_op(OpInx);
+        rec.operation = static_cast<rocprofiler_page_migration_operation_t>(OpInx);
         return rec;
     }
-    else if constexpr(sizeof...(OpInxs) > 0)
-        return parse_uvm_event(event_id, strn, std::index_sequence<OpInxs...>{});
-    else
-        return page_migration_record_t{};
+
+    if constexpr(sizeof...(OpInxs) > 0)
+        return parse_event(event_id, strn, std::index_sequence<OpInxs...>{});
+
+    return page_migration_record_t{};
 }
 
 /* -----------------------------------------------------------------------------------*/
 
-template <size_t OpInx>
-void
-update_end(const page_migration_record_t& start, page_migration_record_t& end);
-
-template <>
-void
-update_end<ROCPROFILER_UVM_EVENT_PAGE_FAULT_END>(const page_migration_record_t& start,
-                                                 page_migration_record_t&       end)
-{
-    CHECK(start.pid == end.pid);
-    CHECK(start.page_fault.address == end.page_fault.address);
-    CHECK(start.page_fault.node_id == end.page_fault.node_id);
-    COPY_FROM_START_1(start_timestamp);
-    COPY_FROM_START_2(page_fault, migrated);
-}
-
-template <>
-void
-update_end<ROCPROFILER_UVM_EVENT_MIGRATE_END>(const page_migration_record_t& start,
-                                              page_migration_record_t&       end)
-{
-    CHECK(start.pid == end.pid);
-    CHECK(start.page_migrate.start_addr == end.page_migrate.start_addr);
-    CHECK(start.page_migrate.end_addr == end.page_migrate.end_addr);
-    CHECK(start.page_migrate.from_node == end.page_migrate.from_node);
-    CHECK(start.page_migrate.to_node == end.page_migrate.to_node);
-    CHECK(start.page_migrate.trigger == end.page_migrate.trigger);
-    COPY_FROM_START_1(start_timestamp);
-    COPY_FROM_START_2(page_migrate, prefetch_node);
-    COPY_FROM_START_2(page_migrate, preferred_node);
-}
-
-template <>
-void
-update_end<ROCPROFILER_UVM_EVENT_QUEUE_RESTORE>(const page_migration_record_t& start,
-                                                page_migration_record_t&       end)
-{
-    CHECK(start.pid == end.pid);
-    CHECK(start.queue_suspend.node_id == end.queue_suspend.node_id);
-    COPY_FROM_START_1(start_timestamp);
-    COPY_FROM_START_2(queue_suspend, trigger);
-}
-
-/* -----------------------------------------------------------------------------------*/
-
-template <rocprofiler_page_migration_operation_t>
-uint64_t
-get_key(const rocprofiler_buffer_tracing_page_migration_record_t& rec) = delete;
-
-template <>
-uint64_t
-get_key<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE>(
-    const rocprofiler_buffer_tracing_page_migration_record_t& rec)
-{
-    // page migrate, use address as identifier
-    return rec.page_migrate.start_addr;
-}
-
-template <>
-uint64_t
-get_key<ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT>(
-    const rocprofiler_buffer_tracing_page_migration_record_t& rec)
-{
-    // page fault, use address as identifier
-    return rec.page_fault.address;
-}
-
-template <>
-uint64_t
-get_key<ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND>(
-    const rocprofiler_buffer_tracing_page_migration_record_t& rec)
-{
-    // Queue suspend/evict. Node ID and pid are sufficient as in kfd,
-    // eviction is reference-counted per process-device.
-    uint64_t node_id = rec.queue_suspend.node_id;
-    return (node_id << 32) | rec.pid;
-}
-
-/* -----------------------------------------------------------------------------------*/
-
-template <>
-page_migration_record_t parse_uvm_event<0>(std::string_view)
-{
-    throw std::runtime_error("None Op for parsing UVM events should not happen");
-}
-
-template <>
-void
-update_end<ROCPROFILER_UVM_EVENT_NONE>(const page_migration_record_t&, page_migration_record_t&)
-{
-    throw std::runtime_error("None Op for parsing UVM events should not happen");
-}
-
-template <>
-uint64_t
-get_key<ROCPROFILER_PAGE_MIGRATION_NONE>(const page_migration_record_t&)
-{
-    throw std::runtime_error("None Op for parsing UVM events should not happen");
-}
-
-/* -----------------------------------------------------------------------------------*/
-
-template <size_t OpInx, size_t... OpInxs>
-void
-update_end(uvm_event_id_t                 event_id,
-           const page_migration_record_t& start,
-           page_migration_record_t&       end,
-           std::index_sequence<OpInx, OpInxs...>)
-{
-    if(OpInx == static_cast<uint32_t>(event_id))
-        update_end<OpInx>(start, end);
-    else if constexpr(sizeof...(OpInxs) > 0)
-        update_end(event_id, start, end, std::index_sequence<OpInxs...>{});
-    else
-        return;
-}
-
-template <size_t OpInx, size_t... OpInxs>
-uint64_t
-get_key(uvm_event_id_t                 event_id,
-        const page_migration_record_t& record,
-        std::index_sequence<OpInx, OpInxs...>)
-{
-    if constexpr(OpInx == ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU)
-        return {};
-    else if(is_rocprof_uvm_map<OpInx>(event_id))
-        return get_key<page_migration_info<OpInx>::operation_idx>(record);
-    else if constexpr(sizeof...(OpInxs) > 0)
-        return get_key(event_id, record, std::index_sequence<OpInxs...>{});
-    else
-        return {};
-}
-
-void
-update_end(uvm_event_id_t                 event_id,
-           const page_migration_record_t& start,
-           page_migration_record_t&       end)
-{
-    update_end(event_id,
-               start,
-               end,
-               std::index_sequence<ROCPROFILER_UVM_EVENT_NONE,
-                                   ROCPROFILER_UVM_EVENT_MIGRATE_END,
-                                   ROCPROFILER_UVM_EVENT_PAGE_FAULT_END,
-                                   ROCPROFILER_UVM_EVENT_QUEUE_RESTORE>{});
-}
 }  // namespace
+
+size_t
+get_rocprof_op(const std::string_view event_data)
+{
+    uint32_t kfd_event_id{};
+    std::sscanf(event_data.data(), "%x ", &kfd_event_id);
+
+    auto rocprof_id =
+        kfd_to_rocprof_op(static_cast<kfd_event_id_t>(kfd_event_id),
+                          std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
+
+    ROCP_CI_LOG_IF(WARNING, rocprof_id == 0)
+        << fmt::format("Failed to parse KFD event ID {}. Parsed ID: {}, SDK ID: {}\n",
+                       event_data[0],
+                       kfd_event_id,
+                       rocprof_id);
+
+    return rocprof_id;
+}
+
+void
+kfd_readlines(const std::string_view str, void(handler)(std::string_view))
+{
+    const auto  find_newline = [&](auto b) { return std::find(b, str.cend(), '\n'); };
+    const auto* cursor       = str.cbegin();
+
+    for(const auto* pos = find_newline(cursor); pos != str.cend(); pos = find_newline(cursor))
+    {
+        size_t char_count = pos - cursor;
+        assert(char_count > 0);
+        std::string_view event_str{cursor, char_count};
+
+        ROCP_INFO << fmt::format("KFD event: [{}]", event_str);
+        handler(event_str);
+
+        cursor = pos + 1;
+    }
+}
 
 // Event capture and reporting
 namespace
 {
-// Support seems to have been added in kfdv > 1.10
-static_assert(KFD_IOCTL_MAJOR_VERSION == 1, "KFD API major version changed");
-static_assert(KFD_IOCTL_MINOR_VERSION >= 10, "KFD SMI support missing in kfd_ioctl.h");
+constexpr auto kfd_ioctl_version = (1000 * KFD_IOCTL_MAJOR_VERSION) + KFD_IOCTL_MINOR_VERSION;
+// Support has been added in kfdv >= 1.10+
+static_assert(kfd_ioctl_version >= 1010, "KFD SMI support missing in kfd_ioctl.h");
 
-// Convert from public events to KFD enum config
-
-template <size_t OpInx, size_t... OpInxs>
-constexpr size_t
-kfd_bitmask_impl(size_t uvm_event_id, std::index_sequence<OpInx, OpInxs...>)
+auto
+get_contexts(int operation)
 {
-    if(uvm_event_id == OpInx) return page_migration_info<OpInx>::kfd_bitmask;
-    if constexpr(sizeof...(OpInxs) > 0)
-        return kfd_bitmask_impl(uvm_event_id, std::index_sequence<OpInxs...>{});
-    else
-        return 0;
-}
+    auto active_contexts = context::get_active_contexts([](const auto* ctx) {
+        return (ctx->buffered_tracer &&
+                ctx->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION));
+    });
+    auto operation_ctxs  = context::context_array_t{};
 
-template <size_t... OpInxs>
-constexpr auto
-kfd_bitmask(const small_vector<size_t>& rocprof_event_ids, std::index_sequence<OpInxs...>)
-{
-    uint64_t m{};
-    for(const size_t& event_id : rocprof_event_ids)
+    for(const auto* itr : active_contexts)
     {
-        m |= kfd_bitmask_impl(event_id, std::index_sequence<OpInxs...>{});
-    }
-    return m;
-}
-
-template <size_t OpInx, size_t... OpInxs>
-constexpr size_t
-to_uvm_op_impl(size_t kfd_id, std::index_sequence<OpInx, OpInxs...>)
-{
-    // if(kfd_id == uvm_event_info<OpInx>::kfd_event) return uvm_event_info<OpInx>::uvm_event;
-    if(kfd_id == uvm_event_info<OpInx>::kfd_event) return OpInx;
-    if constexpr(sizeof...(OpInxs) > 0)
-        return to_uvm_op_impl(kfd_id, std::index_sequence<OpInxs...>{});
-    else
-        return 0;
-}
-
-constexpr uvm_event_id_t
-kfd_to_uvm_op(kfd_event_id_t kfd_id)
-{
-    return static_cast<uvm_event_id_t>(
-        to_uvm_op_impl(kfd_id, std::make_index_sequence<ROCPROFILER_UVM_EVENT_LAST>{}));
-}
-
-struct buffered_context_data
-{
-    const context::context* ctx = nullptr;
-};
-
-void
-populate_contexts(int operation_idx, std::vector<buffered_context_data>& buffered_contexts)
-{
-    buffered_contexts.clear();
-
-    auto active_contexts = context::context_array_t{};
-    for(const auto* itr : context::get_active_contexts(active_contexts))
-    {
-        if(itr->buffered_tracer)
+        // if the given domain + op is not enabled, skip this context
+        if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION, operation))
         {
-            // if the given domain + op is not enabled, skip this context
-            if(itr->buffered_tracer->domains(ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-                                             operation_idx))
-                buffered_contexts.emplace_back(buffered_context_data{itr});
+            operation_ctxs.emplace_back(itr);
         }
     }
-}
 
-void
-remove_events(events_cache_t& events, size_t timestamp)
-{
-    for(auto map : events)
-    {
-        for(auto i = map.begin(); i != map.end(); ++i)
-        {
-            if(i->second.start_timestamp < timestamp) map.erase(i);
-        }
-    }
-}
-
-bool
-report_event(uvm_event_id_t                                      event_id,
-             rocprofiler_buffer_tracing_page_migration_record_t& end_record)
-{
-    using rocprofiler_page_migr_seq = std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>;
-    static thread_local events_cache_t EVENTS_CACHE{};
-
-    auto& events_map = EVENTS_CACHE[to_rocprof_op(event_id)];
-
-    switch(static_cast<uint32_t>(event_id))
-    {
-        case ROCPROFILER_UVM_EVENT_MIGRATE_START: [[fallthrough]];
-        case ROCPROFILER_UVM_EVENT_PAGE_FAULT_START: [[fallthrough]];
-        case ROCPROFILER_UVM_EVENT_QUEUE_EVICTION:
-        {
-            // insert into map
-            auto key        = get_key(event_id, end_record, rocprofiler_page_migr_seq{});
-            events_map[key] = end_record;
-            return false;
-        }
-        // End events. Pair up and report
-        case ROCPROFILER_UVM_EVENT_UNMAP_FROM_GPU:
-        {
-            return true;
-        }
-        case ROCPROFILER_UVM_EVENT_MIGRATE_END: [[fallthrough]];
-        case ROCPROFILER_UVM_EVENT_PAGE_FAULT_END: [[fallthrough]];
-        case ROCPROFILER_UVM_EVENT_QUEUE_RESTORE:
-        {
-            auto key = get_key(event_id, end_record, rocprofiler_page_migr_seq{});
-            if(auto start_rec = events_map.find(key); start_rec != events_map.end())
-            {
-                update_end(event_id, start_rec->second, end_record);
-            }
-            else
-            {
-                // we got an end record and can't find the start record
-                // drop everything in the map before this timestamp
-                remove_events(EVENTS_CACHE, end_record.end_timestamp);
-            }
-            return true;
-        }
-        default: throw std::runtime_error("Invalid page migration event");
-    }
+    return operation_ctxs;
 }
 
 void
 handle_reporting(std::string_view event_data)
 {
-    uint32_t kfd_event_id;
-    std::sscanf(event_data.data(), "%x ", &kfd_event_id);
-    std::vector<buffered_context_data> buffered_contexts{};
-
-    auto uvm_event_op = kfd_to_uvm_op(static_cast<kfd_event_id_t>(kfd_event_id));
-
-    populate_contexts(uvm_event_op, buffered_contexts);
+    const auto op_inx            = get_rocprof_op(event_data);
+    auto       buffered_contexts = get_contexts(op_inx);
     if(buffered_contexts.empty()) return;
 
     // Parse and process the event
-    auto record = parse_uvm_event(
-        uvm_event_op, event_data, std::make_index_sequence<ROCPROFILER_UVM_EVENT_LAST>{});
+    auto record = parse_event(
+        op_inx, event_data, std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
 
-    // pair up start and end and only then insert it into the buffer
-    if(report_event(uvm_event_op, record))
+    for(const auto& itr : buffered_contexts)
     {
-        for(const auto& itr : buffered_contexts)
-        {
-            auto* _buffer = buffer::get_buffer(itr.ctx->buffered_tracer->buffer_data.at(
-                ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION));
-            CHECK_NOTNULL(_buffer)->emplace(ROCPROFILER_BUFFER_CATEGORY_TRACING,
-                                            ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION,
-                                            record);
-        }
+        auto* buffer = buffer::get_buffer(
+            itr->buffered_tracer->buffer_data.at(ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION));
+        CHECK_NOTNULL(buffer)->emplace(
+            ROCPROFILER_BUFFER_CATEGORY_TRACING, ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION, record);
     }
 }
 
@@ -751,8 +512,7 @@ handle_reporting(std::string_view event_data)
 // KFD utils
 namespace kfd
 {
-void
-poll_events(small_vector<pollfd>, bool);
+void poll_events(small_vector<pollfd>);
 
 using fd_flags_t = decltype(EFD_NONBLOCK);
 using fd_t       = decltype(pollfd::fd);
@@ -824,26 +584,26 @@ struct poll_kfd_t
 
     struct gpu_fd_t
     {
-        unsigned int               node_id{};
-        fd_t                       fd{};
-        const rocprofiler_agent_t* agent{};
+        unsigned int               node_id = 0;
+        fd_t                       fd      = {};
+        const rocprofiler_agent_t* agent   = nullptr;
     };
 
-    kfd_device_fd        kfd_fd{};
-    small_vector<pollfd> file_handles{};
-    pollfd               thread_notify{};
-    std::thread          bg_thread;
-    bool                 active{false};
+    kfd_device_fd        kfd_fd        = {};
+    small_vector<pollfd> file_handles  = {};
+    pollfd               thread_notify = {};
+    std::thread          bg_thread     = {};
+    bool                 active        = {false};
 
     poll_kfd_t() = default;
 
-    poll_kfd_t(const small_vector<size_t>& rprof_ev, bool non_blocking)
+    poll_kfd_t(const small_vector<size_t>& rprof_ev)
     : kfd_fd{kfd_device_fd{}}
     {
         const auto kfd_flags =
             kfd_bitmask(rprof_ev, std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
 
-        ROCP_INFO << fmt::format("Setting KFD flags to [0b{:b}] \n", kfd_flags);
+        ROCP_TRACE << fmt::format("Setting KFD flags to [0b{:b}] \n", kfd_flags);
 
         // Create fd for notifying thread when we want to wake it up, and an eventfd for any events
         // to this thread
@@ -876,7 +636,7 @@ struct poll_kfd_t
             {
                 auto gpu_event_fd = get_node_fd(agent->gpu_id);
                 file_handles.emplace_back(pollfd{gpu_event_fd, POLLIN, 0});
-                ROCP_INFO << fmt::format(
+                ROCP_TRACE << fmt::format(
                     "GPU node {} with fd {} added\n", agent->gpu_id, gpu_event_fd);
             }
         }
@@ -886,14 +646,14 @@ struct poll_kfd_t
         {
             auto& fd         = file_handles[i];
             auto  write_size = write(fd.fd, &kfd_flags, sizeof(kfd_flags));
-            ROCP_INFO << fmt::format(
+            ROCP_TRACE << fmt::format(
                 "Writing {} to GPU fd {} ({} bytes)\n", kfd_flags, fd.fd, write_size);
             CHECK(write_size == sizeof(kfd_flags));
         }
 
         // start bg thread
         internal_threading::notify_pre_internal_thread_create(ROCPROFILER_LIBRARY);
-        bg_thread = std::thread{poll_events, file_handles, non_blocking};
+        bg_thread = std::thread{poll_events, file_handles};
         internal_threading::notify_post_internal_thread_create(ROCPROFILER_LIBRARY);
 
         active = true;
@@ -949,7 +709,7 @@ get_config()
 
 kfd::poll_kfd_t::~poll_kfd_t()
 {
-    ROCP_INFO << fmt::format("Terminating poll_kfd\n");
+    ROCP_TRACE << fmt::format("Terminating poll_kfd\n");
     if(!active) return;
 
     // wake thread up
@@ -961,7 +721,7 @@ kfd::poll_kfd_t::~poll_kfd_t()
     } while(bytes_written == -1 && (errno == EINTR || errno == EAGAIN));
 
     if(bg_thread.joinable()) bg_thread.join();
-    ROCP_INFO << fmt::format("Background thread terminated\n");
+    ROCP_TRACE << fmt::format("Background thread terminated\n");
 
     for(const auto& f : file_handles)
         close(f.fd);
@@ -969,34 +729,28 @@ kfd::poll_kfd_t::~poll_kfd_t()
 }  // namespace
 
 void
-poll_events(small_vector<pollfd> file_handles, bool non_blocking)
+poll_events(small_vector<pollfd> file_handles)
 {
     // storage to write records to, 1MB
     constexpr size_t PREALLOCATE_ELEMENT_COUNT{1024 * 128};
     std::string      scratch_buffer(PREALLOCATE_ELEMENT_COUNT, '\0');
-    auto&            exitfd      = file_handles[1];
-    const auto       timeout_val = non_blocking == true ? 0 : -1;
+    auto&            exitfd = file_handles[1];
 
     // Wait or spin on events.
     //  0 -> return immediately even if no events
     // -1 -> wait indefinitely
 
-    ROCP_INFO << fmt::format("{} polling = {}, polling with timeout = {}",
-                             non_blocking ? "Non-blocking" : "Blocking",
-                             non_blocking,
-                             timeout_val);
-
     pthread_setname_np(pthread_self(), "bg:pagemigr");
 
     for(auto& fd : file_handles)
     {
-        ROCP_INFO << fmt::format(
+        ROCP_TRACE << fmt::format(
             "Handle = {}, events = {}, revents = {}\n", fd.fd, fd.events, fd.revents);
     }
 
     while(!kfd::get_config().should_exit())
     {
-        auto poll_ret = poll(file_handles.data(), file_handles.size(), timeout_val);
+        auto poll_ret = poll(file_handles.data(), file_handles.size(), -1);
 
         if(poll_ret == -1)
             throw std::runtime_error{"Background thread file descriptors are invalid"};
@@ -1009,6 +763,7 @@ poll_events(small_vector<pollfd> file_handles, bool non_blocking)
 
         using namespace std::chrono_literals;
 
+        // 0 and 1 are for generic and pipe-notify handles
         for(size_t i = 2; i < file_handles.size(); ++i)
         {
             auto& fd = file_handles[i];
@@ -1016,15 +771,9 @@ poll_events(small_vector<pollfd> file_handles, bool non_blocking)
             // We have data to read, perhaps multiple events
             if((fd.revents & POLLIN) != 0)
             {
-                size_t status_size = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
-
-                // ROCP_INFO << fmt::format(
-                //     "status_size: {} size {}\n", status_size, scratch_buffer.size());
-                std::string_view event_strings{scratch_buffer.data(), status_size};
-
-                // ROCP_INFO << fmt::format("Raw KFD string [({})]\n",
-                // event_strings.data());
-                KFD_EVENT_PARSE_EVENTS(event_strings, handle_reporting);
+                size_t status_size   = read(fd.fd, scratch_buffer.data(), scratch_buffer.size());
+                auto   event_strings = std::string_view{scratch_buffer.data(), status_size};
+                kfd_readlines(event_strings, handle_reporting);
             }
             fd.revents = 0;
         }
@@ -1051,7 +800,7 @@ get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
         if(_v < static_cast<uint32_t>(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST)) _vec.emplace_back(_v);
     };
 
-    (_emplace(_id_list, page_migration_info<Idx>::operation_idx), ...);
+    (_emplace(_id_list, page_migration_info<Idx>::operation), ...);
 }
 
 bool
@@ -1069,13 +818,13 @@ to_bitmask(small_vector<size_t>& _id_list, std::index_sequence<Idx...>)
         if(_v < static_cast<uint32_t>(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST)) _vec.emplace_back(_v);
     };
 
-    (_emplace(_id_list, page_migration_info<Idx>::operation_idx), ...);
+    (_emplace(_id_list, page_migration_info<Idx>::operation), ...);
 }
 
 namespace
 {
 rocprofiler_status_t
-init(const small_vector<size_t>& event_ids, bool non_blocking)
+init(const small_vector<size_t>& event_ids)
 {
     // Check if version is more than 1.11
     auto ver = kfd::get_version();
@@ -1084,7 +833,7 @@ init(const small_vector<size_t>& event_ids, bool non_blocking)
         if(!context::get_registered_contexts(context_filter).empty())
         {
             if(!kfd::get_config().kfd_handle)
-                kfd::get_config().kfd_handle = new kfd::poll_kfd_t{event_ids, non_blocking};
+                kfd::get_config().kfd_handle = new kfd::poll_kfd_t{event_ids};
         }
         return ROCPROFILER_STATUS_SUCCESS;
     }
@@ -1104,12 +853,13 @@ rocprofiler_status_t
 init()
 {
     // Testing page migration
-    return init({ROCPROFILER_PAGE_MIGRATION_NONE,
-                 ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT,
-                 ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE,
-                 ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND,
-                 ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU},
-                rocprofiler::common::get_env("ROCPROF_PAGE_MIGRATION_NON_BLOCKING", false));
+    return init({ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START,
+                 ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END,
+                 ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START,
+                 ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END,
+                 ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION,
+                 ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE,
+                 ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU});
 }
 
 void

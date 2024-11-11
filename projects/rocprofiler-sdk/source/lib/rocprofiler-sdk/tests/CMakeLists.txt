@@ -11,8 +11,16 @@ include(GoogleTest)
 #
 # -------------------------------------------------------------------------------------- #
 
-set(rocprofiler_lib_sources agent.cpp buffer.cpp contexts.cpp hsa.cpp naming.cpp
-                            timestamp.cpp version.cpp hsa_barrier.cpp)
+set(rocprofiler_lib_sources
+    agent.cpp
+    buffer.cpp
+    contexts.cpp
+    hsa.cpp
+    naming.cpp
+    timestamp.cpp
+    version.cpp
+    hsa_barrier.cpp
+    page_migration.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests)
 target_sources(rocprofiler-sdk-lib-tests PRIVATE ${rocprofiler_lib_sources}
@@ -23,6 +31,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::counter-test-constants
             rocprofiler-sdk::rocprofiler-sdk-hsa-runtime
+            rocprofiler-sdk::rocprofiler-sdk-drm
             GTest::gtest
             GTest::gtest_main)
 
@@ -40,9 +49,8 @@ set_tests_properties(${lib_TESTS} PROPERTIES TIMEOUT 30 LABELS "unittests")
 #
 # -------------------------------------------------------------------------------------- #
 
-set(rocprofiler_shared_lib_sources
-    external_correlation.cpp intercept_table.cpp page_migration.cpp registration.cpp
-    roctx.cpp status.cpp)
+set(rocprofiler_shared_lib_sources external_correlation.cpp intercept_table.cpp
+                                   registration.cpp roctx.cpp status.cpp)
 
 add_executable(rocprofiler-sdk-lib-tests-shared)
 target_sources(rocprofiler-sdk-lib-tests-shared PRIVATE ${rocprofiler_shared_lib_sources})

@@ -12,6 +12,7 @@ set(ROCPROFILER_HSA_HEADER_FILES
     finalize_ext_api_id.h
     image_ext_api_id.h
     scratch_memory_args.h
+    scratch_memory_id.h
     table_id.h)
 
 install(

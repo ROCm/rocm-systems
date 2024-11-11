@@ -271,71 +271,113 @@ def get_allocated_pages(callback_records):
             assert "hostPtr" in itr["args"].keys(), f"{itr}"
             host_register_record.append(itr)
 
-    assert len(host_register_record) == 1
-    alloc_size = int(host_register_record[0]["args"]["sizeBytes"], 10)
-    start_addr = int(host_register_record[0]["args"]["hostPtr"], 16)
-    end_addr = start_addr + alloc_size
+    num_host_register_calls = len(host_register_record)
+    assert num_host_register_calls == 5, "Expected 5 hipHostRegister calls in test"
 
-    return start_addr, end_addr, alloc_size
+    ret = []
+    for i in range(num_host_register_calls):
+        alloc_size = int(host_register_record[0]["args"]["sizeBytes"], 10)
+        start_addr = int(host_register_record[0]["args"]["hostPtr"], 16)
+        end_addr = start_addr + alloc_size
+        ret.append((start_addr, end_addr))
+    return ret
+
+
+def validate_node(id, nodes):
+    assert id.handle in nodes
 
 
 def test_page_migration_data(input_data):
     data = input_data
     sdk_data = data["rocprofiler-sdk-json-tool"]
-    buffer_records = sdk_data["buffer_records"]
-    callback_records = sdk_data["callback_records"]
-    page_migration_buffers = buffer_records["page_migration"]
+    buffer_records = sdk_data.buffer_records
+    callback_records = sdk_data.callback_records
+    page_migtation_buffers = buffer_records.page_migration
 
     _, bf_op_names = get_operation(buffer_records, "PAGE_MIGRATION")
     assert bf_op_names[0] == "PAGE_MIGRATION_NONE"
-    assert "PAGE_MIGRATION_PAGE_MIGRATE" in bf_op_names
-    assert len(bf_op_names) == 5
 
-    node_ids = set(x["gpu_id"] for x in sdk_data["agents"])
-    start_addr, end_addr, alloc_size = get_allocated_pages(callback_records)
+    for op_name in bf_op_names:
+        assert "PAGE_MIGRATION" in op_name
 
-    assert start_addr < end_addr and start_addr + alloc_size == end_addr
-    assert int(alloc_size) == 16 * 4096  # We allocated 16 pages in the test
+    assert len(bf_op_names) == 8
 
-    # PID must be same
-    assert len(set(r["pid"] for r in page_migration_buffers)) == 1
+    nodes = set(x.id.handle for x in sdk_data.agents)
+    allocations = get_allocated_pages(callback_records)
 
-    for r in page_migration_buffers:
-        op = r["operation"]
+    for start_addr, end_addr in allocations:
 
-        assert r["size"] == 136
-        assert op != 0 and bf_op_names[op] != "PAGE_MIGRATION_NONE"
-        assert bf_op_names[op].lower().replace("page_migration_", "") in r.keys()
+        assert (
+            start_addr < end_addr
+        ), "Expected start address less than end address for mmap range"
+        alloc_size = end_addr - start_addr
+        assert int(alloc_size) == 512 * 4096  # We allocated 512 pages in the test
 
-        if "page_migrate" in r:
-            assert r["page_migrate"]["from_node"] in node_ids
-            assert r["page_migrate"]["to_node"] in node_ids
-            assert r["page_migrate"]["prefetch_node"] in node_ids
-            assert r["page_migrate"]["preferred_node"] in node_ids
-            assert r["page_migrate"]["trigger"] >= 0
+        # PID must be same
+        assert len(set(r.pid for r in page_migtation_buffers)) == 1
 
-        if "queue_suspend" in r:
-            assert r["queue_suspend"]["trigger"] >= 0
-            assert r["queue_suspend"]["node_id"] in node_ids
+        for r in page_migtation_buffers:
+            op = r.operation
 
-        if "unmap_from_gpu" in r:
-            assert r["unmap_from_gpu"]["trigger"] >= 0
-            # unmap is "instantaneous"
-            assert 0 < r["start_timestamp"] == r["end_timestamp"]
-        else:
-            assert 0 < r["start_timestamp"] < r["end_timestamp"]
+            assert r.size == 160
+            assert op != 0 and bf_op_names[op] != "PAGE_MIGRATION_NONE"
+            assert bf_op_names[op].lower().replace("page_migration_", "") in r.keys()
 
-    # Check for events with our page
-    for r in page_migration_buffers:
+            if "page_fault_start" in r:
+                arg = r.page_fault_start
+                assert arg.read_fault < 2
+                validate_node(arg.agent_id, nodes)
+                assert arg.address > 0
 
-        if "page_migrate" in r and r["page_migrate"]["start_addr"] == start_addr:
-            assert end_addr == r["page_migrate"]["end_addr"]
+            if "page_fault_end" in r:
+                arg = r.page_fault_end
+                assert arg.migrated < 2
+                validate_node(arg.agent_id, nodes)
+                assert arg.address > 0
 
-        if "unmap_from_gpu" in r and r["unmap_from_gpu"]["start_addr"] == start_addr:
-            assert end_addr == r["unmap_from_gpu"]["end_addr"]
+            if "page_migrate_start" in r:
+                arg = r.page_migrate_start
+                assert (
+                    0 < arg.start_addr < arg.end_addr
+                ), "Expected start addr to be less than end addr"
+                if arg.start_addr == start_addr:
+                    assert arg.end_addr == end_addr
+                validate_node(arg.from_agent, nodes)
+                validate_node(arg.to_agent, nodes)
+                validate_node(arg.prefetch_agent, nodes)
+                validate_node(arg.preferred_agent, nodes)
+                assert 0 <= arg.trigger < 4
 
-    # TODO: Check if a migrate a->b is paired up with b->a
-    # It may not always be reported towards app finalization
+            if "page_migrate_end" in r:
+                arg = r.page_migrate_end
+                assert (
+                    0 < arg.start_addr < arg.end_addr
+                ), "Expected start addr to be less than end addr"
+                if arg.start_addr == start_addr:
+                    assert arg.end_addr == end_addr
+                validate_node(arg.from_agent, nodes)
+                validate_node(arg.to_agent, nodes)
+                assert 0 <= arg.trigger < 4
+
+            if "queue_eviction" in r:
+                arg = r.queue_eviction
+                validate_node(arg.agent_id, nodes)
+                assert 0 <= arg.trigger < 6
+
+            if "queue_restore" in r:
+                arg = r.queue_restore
+                assert arg.rescheduled < 2
+                validate_node(arg.agent_id, nodes)
+
+            if "unmap_from_gpu" in r:
+                arg = r.unmap_from_gpu
+                assert (
+                    0 < arg.start_addr < arg.end_addr
+                ), "Expected start addr to be less than end addr"
+                if arg.start_addr == start_addr:
+                    assert arg.end_addr == end_addr
+                validate_node(arg.agent_id, nodes)
+                assert 0 <= arg.trigger < 3
 
 
 if __name__ == "__main__":

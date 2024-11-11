@@ -27,13 +27,14 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <iomanip>
 #include <iostream>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <thread>
+#include <vector>
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -117,14 +118,14 @@ private:
 };
 
 int
-main()
+run_test(int num_iter)
 {
     using namespace std::chrono_literals;
 
-    static constexpr auto NUM_PAGES       = 16;
-    const auto            PAGE_SIZE_BYTES = ::sysconf(_SC_PAGE_SIZE);
+    constexpr size_t NUM_PAGES       = 512;
+    const size_t     PAGE_SIZE_BYTES = ::sysconf(_SC_PAGE_SIZE);
 
-    size_t elem_count = (NUM_PAGES * PAGE_SIZE_BYTES) / sizeof(size_t);  // one page?
+    const size_t elem_count = (NUM_PAGES * PAGE_SIZE_BYTES) / sizeof(size_t);
 
     auto  alloc  = mmap_allocator(NUM_PAGES);
     void* data_v = alloc.get<void>();
@@ -142,8 +143,10 @@ main()
 
     HIP_API_CALL(hipHostRegister(data, elem_count * sizeof(size_t), hipHostRegisterDefault));
 
-    char maps[1024 * 1024];
-    std::memset(maps, '\0', 1024 * 1024);
+    constexpr size_t MAPS_BUFFER_SIZE = 1024 * 1024;
+
+    char maps[MAPS_BUFFER_SIZE];
+    std::memset(maps, '\0', MAPS_BUFFER_SIZE);
     auto fd = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
 
     if(fd == -1)
@@ -153,7 +156,7 @@ main()
         exit(-1);
     }
 
-    auto bytes = read(fd, maps, 1024 * 1024 - 1);
+    auto bytes = read(fd, maps, MAPS_BUFFER_SIZE - 1);
     if(bytes == -1)
     {
         auto ecode = errno;
@@ -190,33 +193,96 @@ main()
         }
     }
 
-    for(int iter = 0; iter < 1000; ++iter)
+    hipStream_t stream{};
+    HIP_API_CALL(hipStreamCreate(&stream));
+
+    for(int iter = 0; iter < num_iter; ++iter)
     {
         for(size_t i = 0; i < elem_count; ++i)
+        {
             data[i] = i;
+        }
 
         // std::cout << "launching..." << std::endl;
-        hipLaunchKernelGGL(kernel, 128, 64, 0, 0, data, elem_count);
+        hipLaunchKernelGGL(kernel, 1024, 1024, 0, stream, data, elem_count);
 
-        // std::cout << "syncing..." << std::endl;
-        HIP_API_CALL(hipDeviceSynchronize());
+        HIP_API_CALL(hipStreamSynchronize(stream));
 
-        // std::cout << "checking..." << std::endl;
         for(size_t i = 0; i < elem_count; ++i)
         {
-            if(data[i] != (i * 2))
+            const auto data_i = data[i];
+            if(data_i != (i * 2))
             {
                 auto msg = std::stringstream{};
                 msg << "GPU computed value at " << i << " in iteration " << iter
-                    << " is incorrect. Expected " << (i * 2) << ", found " << data[i];
+                    << " is incorrect. Expected " << (i * 2) << ", found " << data_i;
                 throw std::runtime_error{msg.str()};
             }
         }
-
-        std::cout << "Iteration " << std::setw(2) << iter << ": correct\n" << std::flush;
     }
 
+    HIP_API_CALL(hipStreamDestroy(stream));
     HIP_API_CALL(hipDeviceSynchronize());
+
+    return 0;
+}
+
+int
+main(int argc, const char** argv)
+{
+    using namespace std::chrono_literals;
+
+    const auto usage_msg = [](const char** _argv) {
+        fprintf(stderr, "usage: %s <NUMBER OF THREADS> <ITERATIONS PER THREAD>\n", _argv[0]);
+    };
+
+    if(argc != 3)
+    {
+        usage_msg(argv);
+        exit(EXIT_FAILURE);
+    }
+
+    for(int i = 1; i < argc; ++i)
+    {
+        auto _arg = std::string{argv[i]};
+        if(_arg == "?" || _arg == "-h" || _arg == "--help")
+        {
+            usage_msg(argv);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
+    const auto num_threads = std::atoi(argv[1]);
+    if(num_threads < 1)
+    {
+        fprintf(stderr, "Error: Invalid value %d for num_threads (min 1)\n", num_threads);
+        exit(EXIT_FAILURE);
+    }
+
+    const auto num_iter = std::atoi(argv[2]);
+    if(num_iter < 1)
+    {
+        fprintf(stderr, "Error: Invalid value %d for num_iter (min 1)\n", num_iter);
+        exit(EXIT_FAILURE);
+    }
+
+    run_test(num_iter);
+
+    std::vector<std::thread> threads;
+    threads.reserve(num_threads);
+
+    std::cerr << "Running " << num_iter << " iterations/thread on " << num_threads << " threads\n";
+
+    for(auto i = 0; i < num_threads; ++i)
+    {
+        threads.emplace_back([_num_iter = num_iter]() { run_test(_num_iter); });
+    }
+
+    std::cerr << "Waiting for threads\n";
+    for(auto& t : threads)
+    {
+        t.join();
+    }
 
     return 0;
 }

@@ -44,42 +44,16 @@
         }                                                                                          \
     } while(0)
 
-#define APPEND_UVM_EVENT(X)          ROCPROFILER_UVM_EVENT_##X
-#define APPEND_1(X)                  APPEND_UVM_EVENT(X)
-#define CONCAT(X, Y)                 X##Y
-#define APPEND_2(A1, A2)             APPEND_1(A1), APPEND_1(A2)
-#define APPEND_3(A1, A2, A3)         APPEND_2(A1, A2), APPEND_1(A3)
-#define APPEND_4(A1, A2, A3, A4)     APPEND_3(A1, A2, A3), APPEND_1(A4)
-#define APPEND_5(A1, A2, A3, A4, A5) APPEND_4(A1, A2, A3, A4), APPEND_1(A5)
-
-#define MACRO_N(MACRO, N, ...) CONCAT(MACRO, N)(__VA_ARGS__)
-#define APPLY_N(MACRO, ...)    MACRO_N(MACRO, IMPL_DETAIL_FOR_EACH_NARG(__VA_ARGS__), __VA_ARGS__)
-
-#define GET_UVM_ENUMS(...) APPLY_N(APPEND_, __VA_ARGS__)
-
-// static constexpr size_t           uvm_event = UVM_ENUM;
-#define SPECIALIZE_UVM_KFD_EVENT(UVM_ENUM, KFD_ENUM, FORMAT_STRING)                                \
-    template <>                                                                                    \
-    struct uvm_event_info<UVM_ENUM>                                                                \
-    {                                                                                              \
-        static constexpr size_t           kfd_event = KFD_ENUM;                                    \
-        static constexpr std::string_view format_str{FORMAT_STRING};                               \
+#define SPECIALIZE_PAGE_MIGRATION_INFO(ROCPROF_NAME, KFD_NAME, FORMAT_STRING)                        \
+    template <>                                                                                      \
+    struct page_migration_info<ROCPROFILER_PAGE_MIGRATION_##ROCPROF_NAME>                            \
+    {                                                                                                \
+        static constexpr auto             name          = "PAGE_MIGRATION_" #ROCPROF_NAME;           \
+        static constexpr size_t           operation     = ROCPROFILER_PAGE_MIGRATION_##ROCPROF_NAME; \
+        static constexpr size_t           kfd_operation = KFD_SMI_EVENT_##KFD_NAME;                  \
+        static constexpr size_t           kfd_bitmask   = bitmask(KFD_SMI_EVENT_##KFD_NAME);         \
+        static constexpr std::string_view format_str    = FORMAT_STRING;                             \
     };
-
-#define SPECIALIZE_PAGE_MIGRATION_INFO(TYPE, ...)                                                  \
-    template <>                                                                                    \
-    struct page_migration_info<ROCPROFILER_PAGE_MIGRATION_##TYPE>                                  \
-    {                                                                                              \
-        static constexpr auto   operation_idx = ROCPROFILER_PAGE_MIGRATION_##TYPE;                 \
-        static constexpr auto   name          = "PAGE_MIGRATION_" #TYPE;                           \
-        static constexpr size_t uvm_bitmask =                                                      \
-            bitmask(std::index_sequence<GET_UVM_ENUMS(__VA_ARGS__)>());                            \
-        static constexpr size_t kfd_bitmask =                                                      \
-            to_kfd_bitmask(std::index_sequence<GET_UVM_ENUMS(__VA_ARGS__)>());                     \
-    }
-
-#define COPY_FROM_START_1(MEMBER)             end.MEMBER = start.MEMBER;
-#define COPY_FROM_START_2(UNION_TYPE, MEMBER) end.UNION_TYPE.MEMBER = start.UNION_TYPE.MEMBER;
 
 #define SPECIALIZE_KFD_IOC_IOCTL(STRUCT, ARG_IOC)                                                  \
     template <>                                                                                    \

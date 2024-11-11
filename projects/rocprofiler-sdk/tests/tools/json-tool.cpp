@@ -1277,7 +1277,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                          0,
                                                          page_migration_buffer);
 
-        constexpr auto message = "page migration service for memory copy configure";
+        constexpr auto message = "buffer tracing service for page migration configure";
         if(page_migration_status == ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL)
             std::cerr << message
                       << " failed: " << rocprofiler_get_status_string(page_migration_status)

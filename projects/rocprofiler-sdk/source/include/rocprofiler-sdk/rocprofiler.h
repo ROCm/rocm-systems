@@ -77,7 +77,7 @@ ROCPROFILER_EXTERN_C_FINI
 #include "rocprofiler-sdk/hsa.h"
 #include "rocprofiler-sdk/intercept_table.h"
 #include "rocprofiler-sdk/internal_threading.h"
-// #include "rocprofiler-sdk/marker.h"
+#include "rocprofiler-sdk/marker.h"
 #include "rocprofiler-sdk/pc_sampling.h"
 #include "rocprofiler-sdk/profile_config.h"
 // #include "rocprofiler-sdk/spm.h"

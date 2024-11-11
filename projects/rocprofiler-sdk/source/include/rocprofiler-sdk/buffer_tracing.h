@@ -25,6 +25,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/kfd/page_migration_args.h>
 
 #include <stdint.h>
 
@@ -36,49 +37,6 @@ ROCPROFILER_EXTERN_C_INIT
  *
  * @{
  */
-
-/**
- * @brief Page migration triggers
- *
- */
-typedef enum
-{
-    ROCPROFILER_PAGE_MIGRATION_TRIGGER_NONE = -1,
-    ROCPROFILER_PAGE_MIGRATION_TRIGGER_PREFETCH,
-    ROCPROFILER_PAGE_MIGRATION_TRIGGER_PAGEFAULT_GPU,
-    ROCPROFILER_PAGE_MIGRATION_TRIGGER_PAGEFAULT_CPU,
-    ROCPROFILER_PAGE_MIGRATION_TRIGGER_TTM_EVICTION,
-    ROCPROFILER_PAGE_MIGRATION_TRIGGER_LAST,
-} rocprofiler_page_migration_trigger_t;
-
-/**
- * @brief Page migration triggers causing the queue to suspend
- *
- */
-typedef enum
-{
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_NONE = -1,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_SVM,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_USERPTR,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_TTM,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_SUSPEND,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_CRIU_CHECKPOINT,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_CRIU_RESTORE,
-    ROCPROFILER_PAGE_MIGRATION_QUEUE_SUSPEND_TRIGGER_LAST,
-} rocprofiler_page_migration_queue_suspend_trigger_t;
-
-/**
- * @brief Page migration triggers causing an unmap from the GPU
- *
- */
-typedef enum
-{
-    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU_TRIGGER_NONE = -1,
-    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU_TRIGGER_MMU_NOTIFY,
-    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU_TRIGGER_MMU_NOTIFY_MIGRATE,
-    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU_TRIGGER_UNMAP_FROM_CPU,
-    ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU_TRIGGER_LAST,
-} rocprofiler_page_migration_unmap_from_gpu_trigger_t;
 
 /**
  * @brief ROCProfiler Buffer HSA API Tracer Record.
@@ -265,63 +223,17 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
     /// dispatch
 } rocprofiler_buffer_tracing_kernel_dispatch_record_t;
 
-typedef struct
-{
-    uint8_t  read_fault : 1;  ///< Is the fault due to a read or a write
-    uint8_t  migrated   : 1;
-    uint32_t node_id;  ///< GPU or CPU node ID which reports a page fault
-    uint64_t address;  ///< Address access that caused the page fault
-} rocprofiler_buffer_tracing_page_migration_page_fault_record_t;
-
-typedef struct
-{
-    uint64_t                             start_addr;  ///< Start address of the page being migrated
-    uint64_t                             end_addr;    ///< End address of the page being migrated
-    uint32_t                             from_node;   ///< Source node
-    uint32_t                             to_node;     ///< Destination node
-    uint32_t                             prefetch_node;   ///< Node from which page was prefetched
-    uint32_t                             preferred_node;  ///< Preferred destinaion node
-    rocprofiler_page_migration_trigger_t trigger;         ///< Cause of migration
-} rocprofiler_buffer_tracing_page_migration_page_migrate_record_t;
-
-typedef struct
-{
-    uint8_t  rescheduled : 1;
-    uint32_t node_id;  ///< GPU node from which the queue was suspended
-    rocprofiler_page_migration_queue_suspend_trigger_t trigger;  ///< Cause of queue suspension
-} rocprofiler_buffer_tracing_page_migration_queue_suspend_record_t;
-
-typedef struct
-{
-    uint32_t node_id;     ///< Node ID from which page was unmapped
-    uint64_t start_addr;  ///< Start address of unmapped page
-    uint64_t end_addr;    ///< End address of unmapped page
-    rocprofiler_page_migration_unmap_from_gpu_trigger_t trigger;  ///< Cause of unmap
-} rocprofiler_buffer_tracing_page_migration_unmap_from_gpu_record_t;
-
 /**
  * @brief ROCProfiler Buffer Page Migration Tracer Record
  */
 typedef struct rocprofiler_buffer_tracing_page_migration_record_t
 {
-    uint64_t                          size;  ///< size of this struct
-    rocprofiler_buffer_tracing_kind_t kind;  ///< ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION
-    rocprofiler_tracing_operation_t   operation;
-    rocprofiler_timestamp_t           start_timestamp;  ///< start time in nanoseconds
-    rocprofiler_timestamp_t           end_timestamp;    ///< end time in nanoseconds
-    uint32_t                          pid;
-
-    union
-    {
-        rocprofiler_buffer_tracing_page_migration_page_fault_record_t     page_fault;
-        rocprofiler_buffer_tracing_page_migration_page_migrate_record_t   page_migrate;
-        rocprofiler_buffer_tracing_page_migration_queue_suspend_record_t  queue_suspend;
-        rocprofiler_buffer_tracing_page_migration_unmap_from_gpu_record_t unmap_from_gpu;
-        struct
-        {
-            uint64_t reserved[12];
-        };
-    };
+    uint64_t                               size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t      kind;  ///< ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION
+    rocprofiler_page_migration_operation_t operation;
+    rocprofiler_timestamp_t                timestamp;  ///< start time in nanoseconds
+    uint32_t                               pid;
+    rocprofiler_page_migration_args_t      args;
 } rocprofiler_buffer_tracing_page_migration_record_t;
 
 /**

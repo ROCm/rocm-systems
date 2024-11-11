@@ -2,6 +2,7 @@
 
 import json
 import pytest
+from rocprofiler_sdk.pytest_utils.dotdict import dotdict
 
 
 def pytest_addoption(parser):
@@ -24,4 +25,4 @@ def input_data(request):
         return pytest.skip(
             "Skipping test because KFD does not support SVM event reporting"
         )
-    return data
+    return dotdict(data)

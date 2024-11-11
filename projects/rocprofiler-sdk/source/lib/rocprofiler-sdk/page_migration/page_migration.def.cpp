@@ -30,45 +30,30 @@ namespace rocprofiler
 {
 namespace page_migration
 {
+using namespace rocprofiler::common;
+
+using kfd_event_id_t           = decltype(KFD_SMI_EVENT_NONE);
+using migrate_trigger_t        = rocprofiler_page_migration_trigger_t;
+using page_migration_record_t  = rocprofiler_buffer_tracing_page_migration_record_t;
+using queue_suspend_trigger_t  = rocprofiler_page_migration_queue_suspend_trigger_t;
+using unmap_from_gpu_trigger_t = rocprofiler_page_migration_unmap_from_gpu_trigger_t;
+
+using trigger_type_list_t = common::mpl::type_list<rocprofiler_page_migration_trigger_t,
+                                                   queue_suspend_trigger_t,
+                                                   unmap_from_gpu_trigger_t>;
 // clang-format off
 // Map ROCPROF UVM enums to KFD enums
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_NONE,             KFD_SMI_EVENT_NONE,             "Error: Invalid UVM event from KFD" );
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_MIGRATE_START,    KFD_SMI_EVENT_MIGRATE_START,    "%x %ld -%d @%lx(%lx) %x->%x %x:%x %d\n" );
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_MIGRATE_END,      KFD_SMI_EVENT_MIGRATE_END,      "%x %ld -%d @%lx(%lx) %x->%x %d\n"       );
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_PAGE_FAULT_START, KFD_SMI_EVENT_PAGE_FAULT_START, "%x %ld -%d @%lx(%x) %c\n"               );
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_PAGE_FAULT_END,   KFD_SMI_EVENT_PAGE_FAULT_END,   "%x %ld -%d @%lx(%x) %c\n"               );
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_QUEUE_EVICTION,   KFD_SMI_EVENT_QUEUE_EVICTION,   "%x %ld -%d %x %d\n"                     );
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_QUEUE_RESTORE,    KFD_SMI_EVENT_QUEUE_RESTORE,    "%x %ld -%d %x\n"                        );
-SPECIALIZE_UVM_KFD_EVENT(ROCPROFILER_UVM_EVENT_UNMAP_FROM_GPU,   KFD_SMI_EVENT_UNMAP_FROM_GPU,   "%x %ld -%d @%lx(%lx) %x %d\n"          );
+SPECIALIZE_PAGE_MIGRATION_INFO(NONE,                NONE,               "Error: Invalid UVM event from KFD"     );
+SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_MIGRATE_START,  MIGRATE_START,      "%x %ld -%d @%lx(%lx) %x->%x %x:%x %d\n");
+SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_MIGRATE_END,    MIGRATE_END,        "%x %ld -%d @%lx(%lx) %x->%x %d\n"      );
+SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_FAULT_START,    PAGE_FAULT_START,   "%x %ld -%d @%lx(%x) %c\n"              );
+SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_FAULT_END,      PAGE_FAULT_END,     "%x %ld -%d @%lx(%x) %c\n"              );
+SPECIALIZE_PAGE_MIGRATION_INFO(QUEUE_EVICTION,      QUEUE_EVICTION,     "%x %ld -%d %x %d\n"                    );
+SPECIALIZE_PAGE_MIGRATION_INFO(QUEUE_RESTORE,       QUEUE_RESTORE,      "%x %ld -%d %x\n"                       );
+SPECIALIZE_PAGE_MIGRATION_INFO(UNMAP_FROM_GPU,      UNMAP_FROM_GPU,     "%x %ld -%d @%lx(%lx) %x %d\n"          );
+#undef SPECIALIZE_PAGE_MIGRATION_INFO
 // clang-format on
-#    undef SPECIALIZE_UVM_KFD_EVENT
 
-SPECIALIZE_PAGE_MIGRATION_INFO(NONE, NONE);
-SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_MIGRATE, MIGRATE_START, MIGRATE_END);
-SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_FAULT, PAGE_FAULT_START, PAGE_FAULT_END);
-SPECIALIZE_PAGE_MIGRATION_INFO(QUEUE_SUSPEND, QUEUE_EVICTION, QUEUE_RESTORE);
-SPECIALIZE_PAGE_MIGRATION_INFO(UNMAP_FROM_GPU, UNMAP_FROM_GPU);
-
-template <size_t UvmOpInx, size_t... OpInxs>
-constexpr size_t to_rocprof_op_impl(std::index_sequence<OpInxs...>)
-{
-    return ((((bitmask(UvmOpInx) & page_migration_info<OpInxs>::uvm_bitmask) != 0) * OpInxs) + ...);
-}
-
-template <size_t... OpInxs>
-constexpr auto _to_rocprof_op_impl(std::index_sequence<OpInxs...>)
-{
-    return std::array{
-        to_rocprof_op_impl<OpInxs>(std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{})...};
-}
-
-constexpr auto
-to_rocprof_op(size_t pos)
-{
-    using rop = rocprofiler_page_migration_operation_t;
-    return static_cast<rop>(
-        _to_rocprof_op_impl(std::make_index_sequence<ROCPROFILER_UVM_EVENT_LAST>{})[pos]);
-}
 }  // namespace page_migration
 }  // namespace rocprofiler
 #endif

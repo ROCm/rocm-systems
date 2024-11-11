@@ -40,8 +40,3 @@ target_compile_options(page-migration PRIVATE -W -Wall -Wextra -Wpedantic -Wshad
 
 find_package(Threads REQUIRED)
 target_link_libraries(page-migration PRIVATE Threads::Threads)
-
-install(
-    TARGETS page-migration
-    DESTINATION bin
-    COMPONENT tests)

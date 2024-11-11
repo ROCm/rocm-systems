@@ -17,7 +17,7 @@ else()
     set(PRELOAD_ENV "LD_PRELOAD=$<TARGET_FILE:rocprofiler-sdk-json-tool>")
 endif()
 
-add_test(NAME test-page-migration-execute COMMAND $<TARGET_FILE:page-migration>)
+add_test(NAME test-page-migration-execute COMMAND $<TARGET_FILE:page-migration> 4 1024)
 
 set(page-migration-env
     "${PRELOAD_ENV}"
