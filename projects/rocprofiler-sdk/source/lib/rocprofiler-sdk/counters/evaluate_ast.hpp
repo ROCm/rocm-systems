@@ -27,6 +27,7 @@
 
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/metrics.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/raw_ast.hpp"
 
@@ -166,17 +167,18 @@ public:
     const rocprofiler_counter_id_t& out_id() const { return _out_id; }
 
 private:
-    NodeType                                                       _type{NONE};
-    ReduceOperation                                                _reduce_op{REDUCE_NONE};
-    Metric                                                         _metric;
-    double                                                         _raw_value{0};
-    std::vector<EvaluateAST>                                       _children;
-    std::string                                                    _agent;
-    std::vector<MetricDimension>                                   _dimension_types{};
-    std::vector<rocprofiler_record_counter_t>                      _static_value;
-    std::unordered_set<rocprofiler_profile_counter_instance_types> _reduce_dimension_set;
-    bool                                                           _expanded{false};
-    rocprofiler_counter_id_t                                       _out_id{.handle = 0};
+    NodeType                                                          _type{NONE};
+    ReduceOperation                                                   _reduce_op{REDUCE_NONE};
+    Metric                                                            _metric;
+    double                                                            _raw_value{0};
+    std::vector<EvaluateAST>                                          _children;
+    std::string                                                       _agent;
+    std::vector<MetricDimension>                                      _dimension_types{};
+    std::vector<rocprofiler_record_counter_t>                         _static_value;
+    std::unordered_set<rocprofiler_profile_counter_instance_types>    _reduce_dimension_set;
+    std::map<rocprofiler_profile_counter_instance_types, std::string> _select_dimension_map;
+    bool                                                              _expanded{false};
+    rocprofiler_counter_id_t                                          _out_id{.handle = 0};
 };
 
 using EvaluateASTMap = std::unordered_map<std::string, EvaluateAST>;

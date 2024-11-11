@@ -22,10 +22,14 @@
 
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
 
+#include <algorithm>
+#include <cstdint>
 #include <exception>
 #include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <unordered_map>
+#include <vector>
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -33,7 +37,9 @@
 
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/counters/dimensions.hpp"
+#include "lib/rocprofiler-sdk/counters/id_decode.hpp"
 #include "lib/rocprofiler-sdk/counters/parser/reader.hpp"
+#include "rocprofiler-sdk/fwd.h"
 
 namespace rocprofiler
 {
@@ -128,6 +134,75 @@ perform_reduction(ReduceOperation reduce_op, std::vector<rocprofiler_record_coun
     return input_array;
 }
 
+int64_t
+get_int_encoded_dimensions_from_string(const std::string& rangeStr)
+{
+    int64_t            result = 0;
+    std::istringstream iss(rangeStr);
+    std::string        token;
+    size_t             bit_length = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
+
+    while(std::getline(iss, token, ','))
+    {
+        token.erase(std::remove_if(token.begin(), token.end(), ::isspace), token.end());
+
+        size_t dash_pos = token.find(':');
+        if(dash_pos != std::string::npos)
+        {
+            throw std::runtime_error(
+                fmt::format("Range based selection not supported by Dimension API. only select "
+                            "single value for each dimension."));
+            int start = std::stoi(token.substr(0, dash_pos));
+            int end   = std::stoi(token.substr(dash_pos + 1));
+            result |= (1LL << std::min(64, end + 1)) - (1LL << std::max(start, 0));
+        }
+        else
+        {
+            int num = std::stoi(token);
+            if(num < (1 << bit_length))
+            {
+                result |= (1LL << num);
+            }
+            else
+            {
+                throw std::runtime_error(fmt::format("Dimension value exceeds max allowed."));
+            }
+        }
+    }
+    return result;
+}
+
+std::vector<rocprofiler_record_counter_t>*
+perform_selection(std::map<rocprofiler_profile_counter_instance_types, std::string>& dimension_map,
+                  std::vector<rocprofiler_record_counter_t>*                         input_array)
+{
+    if(input_array->empty()) return input_array;
+    for(auto& dim_pair : dimension_map)
+    {
+        int64_t encoded_dim_values = get_int_encoded_dimensions_from_string(dim_pair.second);
+        size_t  bit_length         = DIM_BIT_LENGTH / ROCPROFILER_DIMENSION_LAST;
+        int64_t mask = (MAX_64 >> (64 - bit_length)) << ((dim_pair.first - 1) * bit_length);
+
+        input_array->erase(std::remove_if(input_array->begin(),
+                                          input_array->end(),
+                                          [&](rocprofiler_record_counter_t& rec) {
+                                              bool should_remove =
+                                                  (encoded_dim_values &
+                                                   (1 << rocprofiler::counters::rec_to_dim_pos(
+                                                        rec.id, dim_pair.first))) == 0;
+                                              if(!should_remove)
+                                              {
+                                                  rec.id = rec.id | mask;
+                                                  rec.id = rec.id ^ mask;
+                                              }
+                                              return should_remove;
+                                          }),
+                           input_array->end());
+    }
+
+    return input_array;
+}
+
 }  // namespace
 
 const std::unordered_map<std::string, EvaluateASTMap>&
@@ -214,6 +289,7 @@ EvaluateAST::EvaluateAST(rocprofiler_counter_id_t                       out_id,
 , _reduce_op(get_reduce_op_type_from_string(ast.reduce_op))
 , _agent(std::move(agent))
 , _reduce_dimension_set(ast.reduce_dimension_set)
+, _select_dimension_map(ast.select_dimension_map)
 , _out_id(out_id)
 {
     if(_type == NodeType::REFERENCE_NODE || _type == NodeType::ACCUMULATE_NODE)
@@ -308,7 +384,25 @@ EvaluateAST::set_dimensions()
         break;
         case SELECT_NODE:
         {
-            // TODO: future scope
+            auto first = _children[0].set_dimensions();
+            first.erase(std::remove_if(first.begin(),
+                                       first.end(),
+                                       [&](const MetricDimension& dim) {
+                                           return _select_dimension_map.find(dim.type()) !=
+                                                  _select_dimension_map.end();
+                                       }),
+                        first.end());
+            if(first.empty())
+            {
+                _dimension_types = std::vector<MetricDimension>{
+                    {dimension_map().at(ROCPROFILER_DIMENSION_INSTANCE),
+                     1,
+                     ROCPROFILER_DIMENSION_INSTANCE}};
+            }
+            else
+            {
+                _dimension_types = first;
+            }
         }
         break;
     }
@@ -675,8 +769,11 @@ EvaluateAST::evaluate(
                                                      static_cast<int>(_reduce_op)));
             return perform_reduction(_reduce_op, result);
         }
-        // Currently unsupported
-        case SELECT_NODE: break;
+        case SELECT_NODE:
+        {
+            auto* result = _children.at(0).evaluate(results_map, cache);
+            return perform_selection(_select_dimension_map, result);
+        }
     }
 
     return nullptr;

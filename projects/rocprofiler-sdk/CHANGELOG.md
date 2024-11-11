@@ -136,3 +136,14 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - Removed gfx8 metric definitions
 - Removed `rocprofv3` installation to sbin directory
+
+## ROCprofiler-SDK 0.5.0 for ROCm release 6.4
+
+### Added
+
+- Added support for select() operation in counter expression.
+### Changed
+
+### Resolved issues
+
+### Removed
