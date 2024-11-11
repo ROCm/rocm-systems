@@ -70,8 +70,8 @@
     }
 
 #if HIP_VERSION >= 60300000
-#    define HIP_HOST_ALLOC_FUNC hipExtHostAlloc
-#    define HIP_HOST_FREE_FUNC  hipFreeHost
+#    define HIP_HOST_ALLOC_FUNC hipHostMalloc
+#    define HIP_HOST_FREE_FUNC  hipHostFree
 #else
 #    define HIP_HOST_ALLOC_FUNC hipHostMalloc
 #    define HIP_HOST_FREE_FUNC  hipHostFree

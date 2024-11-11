@@ -99,11 +99,7 @@ def test_hip_api_trace_json(json_data):
             "hipGetLastError",
         ]
     )
-    updated_expected_functions = [
-        func if func != "hipHostMalloc" else "hipExtHostAlloc"
-        for func in expected_functions
-    ]
-    assert functions == expected_functions or functions == updated_expected_functions
+    assert functions == expected_functions
 
 
 if __name__ == "__main__":
