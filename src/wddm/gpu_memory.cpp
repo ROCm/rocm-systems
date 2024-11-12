@@ -59,6 +59,7 @@ ErrorCode GpuMemory::Init(const GpuMemoryCreateInfo &create_info) {
   desc_.engine_flag = create_info.engine_flag;
   desc_.flags.is_virtual = create_info.flags.virtual_alloc;
   desc_.flags.is_physical_only = create_info.flags.physical_only;
+  desc_.flags.is_physical_contiguous = create_info.flags.physical_contiguous;
   desc_.flags.is_shared = create_info.flags.interprocess;
   desc_.flags.is_locked = create_info.flags.locked;
 
@@ -302,6 +303,10 @@ ErrorCode GpuMemory::CreatePhysicalMemory() {
   args.PrivateDriverDataSize = alloc_priv_data_size;
   args.NumAllocations = num_allocations;
   args.pAllocationInfo2 = alloc_info;
+
+  /* The PhysicallyContiguous flag causes allocation failure
+   * args.Flags.PhysicallyContiguous = IsPhysicalContiguous();
+   */
 
   SharedHandleInfo shared_info;
   if (IsShared()) {

@@ -203,17 +203,20 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
 
   create_info.flags.physical_only = MemFlags.ui32.NoAddress;
   create_info.flags.interprocess = MemFlags.ui32.NoAddress;
+  create_info.flags.interprocess |= MemFlags.ui32.Contiguous;
+  create_info.flags.physical_contiguous = MemFlags.ui32.Contiguous;
   create_info.flags.locked = MemFlags.ui32.NoSubstitute;//AllocatePinned
   create_info.flags.virtual_alloc = MemFlags.ui32.OnlyAddress;
   /*when only alloc virtual or only physical, it's vmm allocation, force to local*/
-  if (create_info.flags.virtual_alloc || create_info.flags.physical_only)
+  if (create_info.flags.virtual_alloc || create_info.flags.physical_only
+        || create_info.flags.physical_contiguous) {
     create_info.domain = thunk_proxy::AllocDomain::kLocal;
+    SkipSubAlloc = true;
+  }
 
   /* Only allow using the suballocator for ordinary VRAM.*/
   bool trim_safe = false;
-  if (!SkipSubAlloc &&
-    create_info.domain == thunk_proxy::AllocDomain::kLocal &&
-    !(create_info.flags.virtual_alloc || create_info.flags.physical_only)) {
+  if (!SkipSubAlloc && create_info.domain == thunk_proxy::AllocDomain::kLocal) {
     std::lock_guard<std::mutex> gard(*fragment_allocator_lock_);
 
     /* just quickly skip SA if size is bigger than SA block size.*/
@@ -434,7 +437,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   pr_debug("number of nodes %lu\n", NumberOfNodes);
 
   GraphicsResourceInfo->NodeId = 1;
-  return hsaKmtImportDMABufHandle(GraphicsResourceHandle, &GraphicsResourceInfo->MemoryAddress);
+  return hsaKmtImportDMABufHandle(GraphicsResourceHandle, GraphicsResourceInfo);
 }
 
 
@@ -459,7 +462,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtExportDMABufHandle(void *MemoryAddress,
 
 
 HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
-                                                 void **MemoryAddress) {
+                                       HsaGraphicsResourceInfo *GraphicsResourceInfo) {
 
   CHECK_DXG_OPEN();
 
@@ -470,17 +473,19 @@ HSAKMT_STATUS hsaKmtImportDMABufHandle(int DMABufFd,
 
   auto code = dev->CreateGpuMemory(create_info, &gpu_mem);
   if (code == ErrorCode::Success) {
-    *MemoryAddress = reinterpret_cast<void *>(gpu_mem);
+    void *MemoryAddress = reinterpret_cast<void *>(gpu_mem->HandleApeAddress());
     std::lock_guard<std::mutex> gard(*allocation_map_lock_);
     /*
      * the gpu_mem->Flags() need convert back from GpuMemoryCreateFlags to
      * HsaMemFlags, reference hsaKmtAllocMemoryAlign
      * */
-    allocation_map_[*MemoryAddress] = Allocation(
-      gpu_mem->GetGpuMemoryHandle(), *MemoryAddress, (uint64_t)*MemoryAddress,
+    allocation_map_[MemoryAddress] = Allocation(
+      gpu_mem->GetGpuMemoryHandle(), MemoryAddress, (uint64_t)MemoryAddress,
       gpu_mem->Size(), false, nullptr, gpu_mem->ClientSize(),
       1, gpu_mem->Flags());
 
+    GraphicsResourceInfo->MemoryAddress = MemoryAddress;
+    GraphicsResourceInfo->SizeInBytes = gpu_mem->ClientSize();
     return HSAKMT_STATUS_SUCCESS;
   }
 

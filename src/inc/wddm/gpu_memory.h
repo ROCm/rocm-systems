@@ -57,11 +57,12 @@ class WDDMDevice;
 
 union GpuMemoryCreateFlags {
   struct {
-    uint64_t virtual_alloc : 1;
-    uint64_t physical_only : 1;
-    uint64_t interprocess  : 1;
-    uint64_t locked        : 1;
-    uint64_t unused       : 60;
+    uint64_t virtual_alloc              : 1; // only allocate virtual address, without physical buffer
+    uint64_t physical_only              : 1; // only allocate physical buffer, without virutal address
+    uint64_t interprocess               : 1; // physical buffer need share info between exporter and importer
+    uint64_t locked                     : 1; // lock virtual address space into RAM, preventing that memory from being paged to the swap area
+    uint64_t physical_contiguous        : 1; // contiguous physical pages
+    uint64_t unused                     : 59;
   };
   uint64_t reserved;
 };
@@ -120,8 +121,8 @@ struct GpuMemoryDesc {
       uint32_t is_physical_only : 1;
       uint32_t is_locked : 1;
       uint32_t is_queue_referenced : 1;
-
-      uint32_t unused : 27;
+      uint32_t is_physical_contiguous : 1;
+      uint32_t unused : 25;
     };
 
     uint32_t reserved;
@@ -160,6 +161,7 @@ public:
   inline bool IsSystem() const { return desc_.domain == thunk_proxy::kSystem; }
   inline bool IsUserQueue() const { return desc_.domain == thunk_proxy::kUserQueue; }
   inline bool IsPhysicalOnly() const { return desc_.flags.is_physical_only; }
+  inline bool IsPhysicalContiguous() const { return desc_.flags.is_physical_contiguous; }
   inline bool IsVirtual() const { return desc_.flags.is_virtual; }
   inline bool IsShared() const { return desc_.flags.is_shared; }
   inline bool IsExternal() const { return desc_.flags.is_external; }
