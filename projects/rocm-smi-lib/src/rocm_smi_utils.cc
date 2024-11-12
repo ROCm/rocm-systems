@@ -63,6 +63,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <cmath>
 
 #include "rocm_smi/rocm_smi.h"
 #include "rocm_smi/rocm_smi_utils.h"
@@ -343,6 +344,7 @@ rsmi_status_t ErrnoToRsmiStatus(int err) {
     case EIO:    return RSMI_STATUS_UNEXPECTED_SIZE;
     case ENXIO:  return RSMI_STATUS_UNEXPECTED_DATA;
     case EBUSY:  return RSMI_STATUS_BUSY;
+    case EINVAL: return RSMI_STATUS_INVALID_ARGS;
     default:     return RSMI_STATUS_UNKNOWN_ERROR;
   }
 }
@@ -415,14 +417,14 @@ std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
   char buffer[128];
   std::string stdoutAndErr;
   bool successfulRun = true;
-  command = "stdbuf -i0 -o0 -e0 " + command; // remove stdOut and err buffering
+  command = "stdbuf -i0 -o0 -e0 " + command;  // remove stdOut and err buffering
 
   FILE *pipe = popen(command.c_str(), "r");
   if (!pipe) {
     stdoutAndErr = "[ERROR] popen failed to call " + command;
     successfulRun = false;
   } else {
-    //read until end of process
+    // read until end of process
     while (!feof(pipe)) {
       // use buffer to read and add to stdoutAndErr
       if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
@@ -445,8 +447,19 @@ std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
 
 // originalString - string to search for substring
 // substring - string looking to find
-bool containsString(std::string originalString, std::string substring) {
-  return (originalString.find(substring) != std::string::npos);
+// displayComparisons = defaults to false, set to true to see debug prints
+bool containsString(std::string originalString, std::string substring,
+                  bool displayComparisons) {
+  std::ostringstream ss;
+  bool found = originalString.find(substring) != std::string::npos;
+  if (displayComparisons) {
+    ss << __PRETTY_FUNCTION__
+       << " | originalString: " << originalString
+       << " | substring: " << substring
+       << " | found: " << (found ? "True": "False");
+    LOG_TRACE(ss);
+  }
+  return found;
 }
 
 // Creates and stores supplied data into a temporary file (within /tmp/).
@@ -1180,7 +1193,9 @@ rsmi_status_t rsmi_get_gfx_target_version(uint32_t dv_ind, std::string *gfx_vers
     // separate out parts -> put back into normal graphics version format
     major = static_cast<uint64_t>((orig_target_version / 10000) * 100);
     minor = static_cast<uint64_t>((orig_target_version % 10000 / 100) * 10);
-    if (minor == 0) major *= 10;  // 0 as a minor is correct, but bump up by 10
+    if ((minor == 0) && (countDigit(major) < 4)) {
+      major *= 10;  // 0 as a minor is correct, but bump up by 10
+    }
     rev = static_cast<uint64_t>(orig_target_version % 100);
     *gfx_version = "gfx" + std::to_string(major + minor + rev);
     ss << __PRETTY_FUNCTION__
@@ -1222,6 +1237,31 @@ std::queue<std::string> getAllDeviceGfxVers() {
   return deviceGfxVersions;
 }
 
+// milli_seconds: time to wait, in milliseconds
+// 1 sec = 1000ms
+// .5 sec = 500ms
+void system_wait(int milli_seconds) {
+  std::ostringstream ss;
+  auto start = std::chrono::high_resolution_clock::now();
+  // 1 ms = 1000 us
+  int waitTime = milli_seconds * 1000;
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "** Waiting for " << std::dec << waitTime
+     << " us (" << waitTime/1000 << " milli-seconds) **";
+  LOG_DEBUG(ss);
+  usleep(waitTime);
+  auto stop = std::chrono::high_resolution_clock::now();
+  auto duration =
+      std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
+  ss << __PRETTY_FUNCTION__ << " | "
+     << "** Waiting took " << duration.count() / 1000
+     << " milli-seconds **";
+  LOG_DEBUG(ss);
+}
+
+int countDigit(uint64_t n) {
+  return static_cast<int>(std::floor(log10(n) + 1));
+}
 
 }  // namespace smi
 }  // namespace amd

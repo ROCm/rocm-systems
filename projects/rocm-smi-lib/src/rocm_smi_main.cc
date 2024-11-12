@@ -567,9 +567,9 @@ std::string RocmSMI::getRSMIEnvVarInfo(void) {
   for (auto it=env_vars_.enum_overrides.begin();
        it != env_vars_.enum_overrides.end(); ++it) {
     DevInfoTypes type = static_cast<DevInfoTypes>(*it);
-    ss << (std::to_string(*it) + " (" + Device::devInfoTypesStrings.at(type) + ")");
+    ss << (std::to_string(*it) + " (" + Device::get_type_string(type) + ")");
     auto temp_it = it;
-    if(++temp_it != env_vars_.enum_overrides.end()) {
+    if (++temp_it != env_vars_.enum_overrides.end()) {
       ss << ", ";
     }
   }

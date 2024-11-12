@@ -91,7 +91,8 @@ std::pair<bool, std::string> executeCommand(std::string command,
 rsmi_status_t storeTmpFile(uint32_t dv_ind, std::string parameterName,
                            std::string stateName, std::string storageData);
 std::vector<std::string> getListOfAppTmpFiles();
-bool containsString(std::string originalString, std::string substring);
+bool containsString(std::string originalString, std::string substring,
+                    bool displayComparisons = false);
 std::tuple<bool, std::string> readTmpFile(
                                           uint32_t dv_ind,
                                           std::string stateName,
@@ -139,6 +140,8 @@ std::string removeNewLines(const std::string &s);
 
 std::string removeString(const std::string origStr,
                         const std::string &removeMe);
+void system_wait(int milli_seconds);
+int countDigit(uint64_t n);
 template <typename T>
   std::string print_int_as_hex(T i, bool showHexNotation = true,
   int overloadBitSize = 0) {

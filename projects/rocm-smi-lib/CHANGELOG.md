@@ -1,13 +1,17 @@
-# Change Log for ROCm SMI Library
+# Changelog for ROCm SMI Library
 
 Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/](https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/).
 
 ***All information listed below is for reference and subject to change.***
 
-
 ## rocm_smi_lib for ROCm 6.3
 
-### Changes
+### Added
+
+- **Added `rsmi_dev_memory_partition_capabilities_get` which returns driver memory partition capablities.**  
+Driver now has the ability to report what the user can set memory partition modes to. User can now see available
+memory partition modes upon an invalid argument return from memory partition mode set (`rsmi_dev_memory_partition_set`).
+
 
 - **Added support for GPU metrics 1.6 to `rsmi_dev_gpu_metrics_info_get()`**  
 Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for PVIOL / TVIOL,  XCP (Graphics Compute Partitions) stats, and pcie_lc_perf_other_end_recovery:  
@@ -28,30 +32,26 @@ Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to 
 - **Added ability to view raw GPU metrics`rocm-smi --showmetrics`**  
 Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD SMI (or other ROCM-SMI interfaces), these values are ***not*** converted into applicable units as users may see in `amd-smi metric`. Units listed display as indicated by the driver, they are not converted (eg. in other AMD SMI/ROCm SMI interfaces which use the data provided). It is important to note, that fields displaying `N/A` data mean this ASIC does not support or backward compatibility was not provided in a newer ASIC's GPU metric structure.   
 
-### Removals
+### Changed
+
+- **Added back in C++ tests for `memorypartition_read_write`**.  
+Due to driver adding in all needed features for memory partition write. We have re-enabled memorypartition_read_write.
+
+- **Updated `rsmi_dev_memory_partition_set` to not return until a successful restart of AMD GPU Driver.**  
+This change keeps checking for ~ up to 40 seconds for a successful restart of the AMD GPU driver. Additionally, the API call continues to check if memory partition (NPS) SYSFS files are successfully updated to reflect the user's requested memory partition (NPS) mode change. Otherwise, reports an error back to the user. Due to these changes, we have updated ROCm SMI's CLI to reflect the maximum wait of 40 seconds, while memory partition change is in progress.
+
+- **All APIs now have the ability to catch driver reporting invalid arguments.**  
+Now ROCm SMI APIs can show RSMI_STATUS_INVALID_ARGS when driver returns EINVAL.
+
+### Removed
 
 - **Removed `--resetcomputepartition`, and  `--resetmemorypartition` options and associated APIs**.
   - This change is part of the partition feature redesign.
   - The related APIs `rsmi_dev_compute_partition_reset()` and `rsmi_dev_memory_partition_reset()`.
 
-- **Temporary Disabled C++ tests for `memorypartition_read_write`**.  
-  - This change is part of the partition feature redesign.
-  - SMI's workflow needs to be adjusted in order to accomidate incoming driver changes to enable
-  Dynamic memory partition feature. We plan on re-enabling testing for this feature during ROCm
-  6.4.
-
-### Optimizations
-
-- N/A
-
 ### Resolved issues
 
-- N/A
-
-
-### Known Issues
-
-- N/A
+- **Fixed `rsmi_dev_target_graphics_version_get`, `rocm-smi --showhw`, and `rocm-smi --showprod` not displaying properly for MI2x or Navi 3x ASICs.**  
 
 ### Upcoming changes
 
@@ -61,18 +61,9 @@ Users can now view GPU metrics from our new `rocm-smi --showmetrics`. Unlike AMD
   Dynamic memory partition feature. We plan on re-enabling testing for this feature during ROCm
   6.4.
 
-
 ## rocm_smi_lib for ROCm 6.2.1
 
-### Changes
-
-- N/A
-
-### Removals
-
-- N/A
-
-### Optimizations
+### Optimized
 
 - **Improved handling of UnicodeEncodeErrors with non UTF-8 locales**  
 Non UTF-8 locales were causing crashing on UTF-8 special characters
@@ -94,31 +85,14 @@ c. reload amgpu - `sudo modprobe amdgpu`
 Test needed to keep track of total number of devices, in order to ensure test comes back to the original configuration.
 The test segfault could be seen on all MI3x ASICs, if brought up in a non-SPX configuration upon boot.
 
-
-### Known Issues
-
-- N/A
-
-### Upcoming changes
-
-- N/A
-
 ## rocm_smi_lib for ROCm 6.2
 
-### Changes
+### Changed
 
 - **Added Partition ID API (`rsmi_dev_partition_id_get(..)`)**  
 Previously `rsmi_dev_partition_id_get` could only be retrived by querying through `rsmi_dev_pci_id_get()`
 and parsing optional bits in our python CLI/API. We are now making this available directly through API.
 As well as added testing, in our compute partitioning tests verifing partition IDs update accordingly. 
-
-### Removals
-
-- N/A
-
-### Optimizations
-
-- N/A
 
 ### Resolved issues
 
@@ -133,14 +107,6 @@ plan to eventually remove partition ID from the function portion of the BDF (Bus
   - bits [7:3] = Device
   - bits [2:0] = Function (partition id maybe in bits [2:0]) <-- Fallback for non SPX modes
 
-### Known Issues
-
-- N/A
-
-### Upcoming changes
-
-- N/A
-
 ## rocm_smi_lib for ROCm 6.1.2
 
 ### Added
@@ -148,26 +114,15 @@ plan to eventually remove partition ID from the function portion of the BDF (Bus
 - **Added Ring Hang event**  
 Added `RSMI_EVT_NOTIF_RING_HANG` to the possible events in the `rsmi_evt_notification_type_t` enum.
 
-### Changed
-
-- N/A
-
-### Optimized
-
-- N/A
-
-### Fixed
+### Resolved issues
 
 - **Fixed parsing of `pp_od_clk_voltage` within `get_od_clk_volt_info`**  
 The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropping of voltage curve support on MI series cards.
 
-### Known Issues
-
-- N/A
-
 ## rocm_smi_lib for ROCm 6.1.1
 
 ### Added
+
 - **Unlock mutex if process is dead**
 Added in order to unlock mutex when process is dead. Additional debug output has been added if futher issues are detected.
 
@@ -325,8 +280,8 @@ GPU[3]          : GFX Version:          gfx942
 - **Documentation now includes C++ and Python: tutorials, API guides, and C++ reference pages**
 See [https://rocm.docs.amd.com/](https://rocm.docs.amd.com/projects/rocm_smi_lib/en/latest/) once 6.1.1 is released.
 
-
 ### Changed
+
 - **Aligned `rocm-smi` fields display "N/A" instead of "unknown"/"unsupported": `Card ID`, `DID`, `Model`, `SKU`, and `VBIOS`**
 Impacts the following commands:
   - `rocm-smi` - see other examples above for 6.1.1
@@ -367,10 +322,8 @@ Device  [Model : Revision]    Temp        Power     Partitions      SCLK   MCLK 
 ================================================ End of ROCm SMI Log =================================================
  ```
 
-### Optimizations
-- N/A
+### Resolved issues
 
-### Fixed
 - **Fixed HIP and ROCm SMI mismatch on GPU bus assignments**
 These changes prompted us to to provide better visability for our device nodes and partition IDs (see addition provided above). See examples below for fix overview.
 1. MI300a GPU device `Domain:Bus:Device.function` clashes with another AMD USB device
@@ -459,12 +412,10 @@ NameError: name 'rocmsmi' is not defined
 - **Fixed rsmi_dev_activity_metric_get gfx/memory activity does not update with GPU activity**
     Checks and forces rereading gpu metrics unconditionally.
 
-### Known Issues
-- N/A
-
 ## rocm_smi_lib for ROCm 6.1.0
 
 ### Added
+
 - **Added support to set max/min clock level for sclk (`RSMI_CLK_TYPE_SYS`) or mclk (`RSMI_CLK_TYPE_MEM`)**
 Users can now set a maximum or minimum sclk or mclk value through `rsmi_dev_clk_extremum_set()` API provided ASIC support. Alternatively, users can
 use our Python CLI tool (`rocm-smi --setextremum max sclk 1500`). See example below.
@@ -507,11 +458,8 @@ The individual metric APIs (`rsmi_dev_metrics_*`) were removed in order to keep 
 - **Depricated rsmi_dev_power_ave_get(),  use newer API rsmi_dev_power_get()**
 As outlined in change below for 6.0.0 (***Added a generic power API: rsmi_dev_power_get***), is now depricated. Please update your ROCm SMI API calls accordingly.
 
-### Optimizations
-- N/A
+### Resolved issues
 
-
-### Fixed
 - Fix `--showpids` reporting `[PID] [PROCESS NAME] 1 UNKNOWN UNKNOWN UNKNOWN`
 Output was failing because cu_occupancy debugfs method is not provided on some graphics cards by design. `get_compute_process_info_by_pid` was updated to reflect this and returns with output needed by CLI.
 - Fix `rocm-smi --showpower` output was inconsistent on Navi32/31 devices
@@ -521,7 +469,8 @@ Updated to use `rsmi_dev_power_get()` within CLI to provide a consistent device 
 The  `rsmi_dev_memory_partition_set` API is updated to handle the readonly SYSFS check. Corresponding tests and CLI (`rocm-smi --setmemorypartition` and `rocm-smi --resetmemorypartition`) calls were updated accordingly.
 - Fix `rocm-smi --showclkvolt` and `rocm-smi --showvc` displaying 0 for overdrive and voltage curve is not supported
 
-### Known Issues
+### Known issues
+
 - **HIP and ROCm SMI mismatch on GPU bus assignments**
 Three separate issues have been identified:
 1. MI300a GPU device `Domain:Bus:Device.function` clashes with another AMD USB device
@@ -647,7 +596,6 @@ GPU[11]         : (Topology) Numa Affinity: 3
 ...
 ```
 
-
 ## rocm_smi_lib for ROCm 6.0.0
 
 ### Added
@@ -695,25 +643,19 @@ Older ASICs provided edge temperature, newer ASICs (MI300) provide junction sock
 - **Added deep sleep frequency readings**
 Newer ASICs (MI300) provide ability to know if a clock is in deep sleep.
 
-
-### Optimizations
+### Optimized
 
 - Add new test to measure api execution time.
 - Remove the shared mutex if no process is using it.
 - Updated to C++17, gtest-1.14, and cmake 3.14
 
-### Fixed
+### Resolved issues
+
 - Fix memory usage division by 0
 - Fix missing firmware blocks (rocm-smi --showfw)
 - Fix rocm-smi --showevents shows wrong gpuID
 
-
 ## rocm_smi_lib for ROCm 5.5.0
-
-### Optimizations
-
-- Add new test to measure api execution time.
-- Remove the shared mutex if no process is using it.
 
 ### Added
 
@@ -724,7 +666,12 @@ Newer ASICs (MI300) provide ability to know if a clock is in deep sleep.
 - Relying on vendor ID to detect AMDGPU.
 - Change pragma message to warning for backward compatibility.
 
-### Fixed
+### Optimized
+
+- Add new test to measure api execution time.
+- Remove the shared mutex if no process is using it.
+
+### Resolved issues
 
 - Fix --showproductname when device's SKU cannot be parsed out of the VBIOS string.
 - Fix compile error: ‘memcpy’ was not declared.
