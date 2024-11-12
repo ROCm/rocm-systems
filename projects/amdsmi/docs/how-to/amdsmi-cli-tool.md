@@ -507,8 +507,8 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--core-boost-limit BOOST_LIMIT] [--json | --csv] [--file FILE]
                    [--loglevel LEVEL]
 
-A GPU must be specified to set a configuration.
-A set argument must be provided; Multiple set arguments are accepted.
+If no GPU is specified, will select all GPUs on the system.
+A set argument must be provided; Multiple set arguments are accepted
 
 Set Arguments:
   -h, --help                                   show this help message and exit
@@ -578,7 +578,7 @@ usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                      (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-G] [-c]
                      [-f] [-p] [-x] [-d] [-C] [-M] [-o] [-l]
 
-A GPU must be specified to reset a configuration.
+If no GPU is specified, will select all GPUs on the system.
 A reset argument must be provided; Multiple reset arguments are accepted
 
 Reset Arguments:

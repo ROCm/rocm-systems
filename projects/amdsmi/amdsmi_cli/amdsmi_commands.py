@@ -25,6 +25,9 @@ import sys
 import threading
 import time
 import json
+import multiprocessing
+import threading
+import os
 
 from _version import __version__
 from amdsmi_helpers import AMDSMIHelpers
@@ -3890,10 +3893,10 @@ class AMDSMICommands():
             args.process_isolation = process_isolation
         if clk_limit:
             args.clk_limit = clk_limit
-
+ 
         # Handle No GPU passed
         if args.gpu == None:
-            raise ValueError('No GPU provided, specific GPU target(s) are needed')
+            args.gpu = self.device_handles
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.set_gpu)
@@ -3975,13 +3978,101 @@ class AMDSMICommands():
                     raise ValueError(f"Unable to set compute partition to {args.compute_partition} on {gpu_string}") from e
                 self.logger.store_output(args.gpu, 'computepartition', f"Successfully set compute partition to {args.compute_partition}")
             if args.memory_partition:
+                ####################################################################
+                # Get current and available memory partition modes                 #
+                # Info used if AMDSMI_STATUS_INVAL is caught & to set progress bar #
+                ####################################################################
+                try:
+                    memory_partition = amdsmi_interface.amdsmi_get_gpu_memory_partition(gpu) # this info likely actually comes from different apis than used here
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    memory_partition = "N/A"
+                    logging.debug("Failed to get current memory partition for GPU %s | %s", gpu_id, e.get_error_info())
+                try:
+                    mem_caps_str = "N/A"
+                    partition_dict = amdsmi_interface.amdsmi_get_gpu_accelerator_partition_profile(gpu)
+                    temp_mem_caps = partition_dict['partition_profile']['memory_caps']
+                    mem_caps = temp_mem_caps.nps_cap_mask
+                    if temp_mem_caps.amdsmi_nps_flags_t == None:
+                        mem_caps_list = []
+                        if mem_caps & 1 == 1:
+                            mem_caps_list.append("NPS1")
+                        if mem_caps & 2 == 2:
+                            mem_caps_list.append("NPS2")
+                        if mem_caps & 4 == 4:
+                            mem_caps_list.append("NPS4")
+                        if mem_caps & 8 == 8:
+                            mem_caps_list.append("NPS8")
+                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "")
+                    else:
+                        mem_caps = temp_mem_caps.amdsmi_nps_flags_t
+                        mem_caps_list = []
+                        if mem_caps.nps1_cap == 1:
+                            mem_caps_list.append("NPS1")
+                        if mem_caps.nps2_cap == 1:
+                            mem_caps_list.append("NPS2")
+                        if mem_caps.nps4_cap == 1:
+                            mem_caps_list.append("NPS4")
+                        if mem_caps.nps8_cap == 1:
+                            mem_caps_list.append("NPS8")
+                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
+                    if mem_caps_str == "":
+                        mem_caps_str = "N/A"
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get accelerator partition profile for GPU %s | %s", gpu_id, e.get_error_info())
+                memory_dict = {'caps': mem_caps_str, 'current': memory_partition}
+
+                ###############################################################
+                # memory partition set starts here                            #
+                ###############################################################
+                showProgressBar = False
+                if ((str(memory_dict['current']) != "N/A") and (str(args.memory_partition) in mem_caps_str)
+                   and ((str(memory_dict['current']) != str(args.memory_partition)))):
+                    showProgressBar = True  # Only show progress bar if
+                                            # 1) Device can set memory partition modes
+                                            # 2) Requested mode is a valid mode to set
+                                            # 3) Current is not already the requested mode
+                                            # otherwise function will return fast
+                threads = []
+                kTimeWait = 40
+                self.helpers.increment_set_count()
+                set_count = self.helpers.get_set_count()
+                if set_count == 1: # only show reload warning on 1st set
+                    self.helpers.confirm_changing_memory_partition_gpu_reload_warning()
                 memory_partition = amdsmi_interface.AmdSmiMemoryPartitionType[args.memory_partition]
                 try:
+                    if set_count == 1 and showProgressBar: # only show reload warning on 1st set
+                        string_out = f"Updating memory partition for gpu {gpu_id}"
+                        t1 = multiprocessing.Process(target=self.helpers.showProgressbar,
+                                                    args=(string_out, kTimeWait,))
+                        threads.append(t1)
+                        t1.start()
                     amdsmi_interface.amdsmi_set_gpu_memory_partition(args.gpu, memory_partition)
+                    for thread in threads:
+                        thread.terminate()
+                        thread.join()
+
                 except amdsmi_exception.AmdSmiLibraryException as e:
+                    f = open(os.devnull, 'w') #redirect to /dev/null (crossplatform)
+                    print("\n\n", end='\r', flush=True, file=f)
+                    for thread in threads:
+                        thread.join()
+                        thread.terminate()
+
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
+                    if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_INVAL:
+                        print(f"[amdsmi_wrapper.AMDSMI_STATUS_INVAL] Unable to set memory partition to {args.memory_partition} on {gpu_string}")
+                        print(f"Valid Memory partition Modes: {mem_caps_str}\n")
+                        # fall through for value error
+
+                    f = open(os.devnull, 'w') #redirect to /dev/null (crossplatform)
+                    print("\n\n", end='\r', flush=True, file=f)
                     raise ValueError(f"Unable to set memory partition to {args.memory_partition} on {gpu_string}") from e
+                except Exception as e:
+                    for thread in threads:
+                        thread.join()
+                        thread.terminate()
+                    raise ValueError(f"Generic error found | Unable to set memory partition to {args.memory_partition} on {gpu_string}") from e
                 self.logger.store_output(args.gpu, 'memorypartition', f"Successfully set memory partition to {args.memory_partition}")
             if isinstance(args.power_cap, int):
                 try:
@@ -4226,7 +4317,7 @@ class AMDSMICommands():
                 self.set_core(args, multiple_devices, core, core_boost_limit)
         elif self.helpers.is_amdgpu_initialized(): # Only GPU is initialized
             if args.gpu == None:
-                raise ValueError('No GPU provided, specific GPU target(s) are needed')
+                args.gpu = self.device_handles
             self.logger.clear_multiple_devices_ouput()
             self.set_gpu(args, multiple_devices, gpu, fan, perf_level,
                             profile, perf_determinism, compute_partition,
@@ -4281,7 +4372,7 @@ class AMDSMICommands():
 
         # Handle No GPU passed
         if args.gpu == None:
-            raise ValueError('No GPU provided, specific GPU target(s) are needed')
+            args.gpu = self.device_handles
 
         # Handle multiple GPUs
         handled_multiple_gpus, device_handle = self.helpers.handle_gpus(args, self.logger, self.reset)
@@ -5299,7 +5390,7 @@ class AMDSMICommands():
                             mem_caps_list.append("NPS4")
                         if mem_caps.nps8_cap == 1:
                             mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "")
+                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
                     if mem_caps_str == "":
                         mem_caps_str = "N/A"
                 except amdsmi_exception.AmdSmiLibraryException as e:
@@ -5350,7 +5441,7 @@ class AMDSMICommands():
                             mem_caps_list.append("NPS4")
                         if mem_caps & 8 == 8:
                             mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "")
+                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
                     else:
                         mem_caps = temp_mem_caps.amdsmi_nps_flags_t
                         mem_caps_list = []
@@ -5362,7 +5453,7 @@ class AMDSMICommands():
                             mem_caps_list.append("NPS4")
                         if mem_caps.nps8_cap == 1:
                             mem_caps_list.append("NPS8")
-                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "")
+                        mem_caps_str = str(mem_caps_list).replace("]", "").replace("[", "").replace("\'", "")
                     if mem_caps_str == "":
                         mem_caps_str = "N/A"
                 except amdsmi_exception.AmdSmiLibraryException as e:

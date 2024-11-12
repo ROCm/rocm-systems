@@ -4597,25 +4597,6 @@ rsmi_dev_compute_partition_set(uint32_t dv_ind,
                                rsmi_compute_partition_type_t compute_partition);
 
 /**
- *  @brief Reverts a selected device's compute partition setting back to its
- *  boot state.
- *
- *  @details Given a device index @p dv_ind , this function will attempt to
- *  revert its compute partition setting back to its boot state.
- *
- *  @param[in] dv_ind a device index
- *
- *  @retval ::RSMI_STATUS_SUCCESS call was successful
- *  @retval ::RSMI_STATUS_PERMISSION function requires root access
- *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
- *  because it is already being used - device is busy
- *
- */
-rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind);
-
-/**
  *  @brief Retrieves the partition_id for a desired device
  *
  *  @details
@@ -4681,6 +4662,39 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
                               uint32_t len);
 
 /**
+ *  @brief Retrieves the available memory partition capabilities
+ *  for a desired device
+ *
+ *  @details
+ *  Given a device index @p dv_ind and a string @p memory_partition_caps ,
+ *  and uint32 @p len , this function will attempt to obtain the device's
+ *  available memory partition capabilities string. Upon successful
+ *  retreival, the obtained device's available memory partition capablilities
+ *  string shall be stored in the passed @p memory_partition_caps
+ *  char string variable.
+ *
+ *  @param[in] dv_ind a device index
+ *
+ *  @param[inout] memory_partition_caps a pointer to a char string variable,
+ *  which the device's available memory partition capabilities will be written to.
+ *
+ *  @param[in] len the length of the caller provided buffer @p len ,
+ *  suggested length is 30 or greater.
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS the provided arguments are not valid
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA data provided to function is not valid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
+ *  support this function
+ *  @retval ::RSMI_STATUS_INSUFFICIENT_SIZE is returned if @p len bytes is not
+ *  large enough to hold the entire memory partition value. In this case,
+ *  only @p len bytes will be written.
+ *
+ */
+rsmi_status_t rsmi_dev_memory_partition_capabilities_get(
+                uint32_t dv_ind, char *memory_partition_caps, uint32_t len);
+
+/**
  *  @brief Modifies a selected device's current memory partition setting.
  *
  *  @details Given a device index @p dv_ind and a type of memory partition
@@ -4706,27 +4720,6 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
 rsmi_status_t
 rsmi_dev_memory_partition_set(uint32_t dv_ind,
                               rsmi_memory_partition_type_t memory_partition);
-
-/**
- *  @brief Reverts a selected device's memory partition setting back to its
- *  boot state.
- *
- *  @details Given a device index @p dv_ind , this function will attempt to
- *  revert its current memory partition setting back to its boot state.
- *
- *  @param[in] dv_ind a device index
- *
- *  @retval ::RSMI_STATUS_SUCCESS call was successful
- *  @retval ::RSMI_STATUS_PERMISSION function requires root access
- *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
- *  support this function
- *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver
- *  @retval ::RSMI_STATUS_BUSY A resource or mutex could not be acquired
- *  because it is already being used - device is busy
- *
- */
-rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind);
 
 /** @} */  // end of memory_partition
 

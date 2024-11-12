@@ -624,3 +624,35 @@ amdsmi_status_t smi_amdgpu_is_gpu_power_management_enabled(amd::smi::AMDSmiGPUDe
     return AMDSMI_STATUS_SUCCESS;
 }
 
+std::string smi_amdgpu_split_string(std::string str, char delim) {
+  std::vector<std::string> tokens;
+  std::stringstream ss(str);
+  std::string token;
+
+  if (str.empty()) {
+    return "";
+  }
+
+  while (std::getline(ss, token, delim)) {
+    tokens.push_back(token);
+    return token;  // return 1st match
+  }
+}
+
+// wrapper to return string expression of a rsmi_status_t return
+// rsmi_status_t ret - return value of RSMI API function
+// bool fullStatus - defaults to true, set to false to chop off description
+// Returns:
+// string - if fullStatus == true, returns full decription of return value
+//      ex. 'RSMI_STATUS_SUCCESS: The function has been executed successfully.'
+// string - if fullStatus == false, returns a minimalized return value
+//      ex. 'RSMI_STATUS_SUCCESS'
+std::string smi_amdgpu_get_status_string(amdsmi_status_t ret, bool fullStatus = true) {
+  const char *err_str;
+  amdsmi_status_code_to_string(ret, &err_str);
+  if (!fullStatus) {
+    return smi_amdgpu_split_string(std::string(err_str), ':');
+  }
+  return std::string(err_str);
+}
+

@@ -987,12 +987,12 @@ struct_amdsmi_accelerator_partition_profile_t._pack_ = 1 # source:False
 struct_amdsmi_accelerator_partition_profile_t._fields_ = [
     ('profile_type', amdsmi_accelerator_partition_type_t),
     ('num_partitions', ctypes.c_uint32),
-    ('profile_index', ctypes.c_uint32),
     ('memory_caps', amdsmi_nps_caps_t),
+    ('profile_index', ctypes.c_uint32),
     ('num_resources', ctypes.c_uint32),
     ('resources', ctypes.c_uint32 * 32 * 8),
     ('PADDING_0', ctypes.c_ubyte * 4),
-    ('reserved', ctypes.c_uint64 * 6),
+    ('reserved', ctypes.c_uint64 * 13),
 ]
 
 amdsmi_accelerator_partition_profile_t = struct_amdsmi_accelerator_partition_profile_t

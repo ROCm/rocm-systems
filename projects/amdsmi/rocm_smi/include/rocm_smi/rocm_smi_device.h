@@ -182,6 +182,7 @@ enum DevInfoTypes {
   kDevAvailableComputePartition,
   kDevComputePartition,
   kDevMemoryPartition,
+  kDevAvailableMemoryPartition,
 
   // The information read from pci core sysfs
   kDevPCieTypeStart = 1000,
@@ -245,6 +246,8 @@ class Device {
     bool DeviceAPISupported(std::string name, uint64_t variant,
                                                         uint64_t sub_variant);
     rsmi_status_t restartAMDGpuDriver(void);
+    rsmi_status_t isRestartInProgress(bool *isRestartInProgress,
+                                      bool *isAMDGPUModuleLive);
     rsmi_status_t storeDevicePartitions(uint32_t dv_ind);
     template <typename T> std::string readBootPartitionState(uint32_t dv_ind);
     rsmi_status_t check_amdgpu_property_reinforcement_query(uint32_t dev_idx, AMDGpuVerbTypes_t verb_type);

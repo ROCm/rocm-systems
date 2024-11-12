@@ -156,9 +156,11 @@ do_install_amdsmi_python_lib() {
       "AMD-SMI python library will not be installed."
     return
   fi
-
-  local amdsmi_python_lib_path="/opt/rocm/share/amd_smi"
-  local amdsmi_setup_py_path="/opt/rocm/share/amd_smi/setup.py"
+ 
+  # install python library at @CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@/amdsmi
+  local python_lib_path=@CPACK_PACKAGING_INSTALL_PREFIX@/@SHARE_INSTALL_PREFIX@
+  local amdsmi_python_lib_path="$python_lib_path"
+  local amdsmi_setup_py_path="$python_lib_path/setup.py"
 
   # Decide installation method based on setuptools version
   if [[ "$(printf '%s\n' "$setuptools_version" "28.5" | sort -V | head -n1)" == "$setuptools_version" ]]; then

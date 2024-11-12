@@ -1032,7 +1032,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         set_value_help = "Set options for devices"
-        set_value_subcommand_help = "A GPU must be specified to set a configuration.\
+        set_value_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
                                     \nA set argument must be provided; Multiple set arguments are accepted"
         set_value_optionals_title = "Set Arguments"
 
@@ -1073,8 +1073,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_value_parser.formatter_class=lambda prog: AMDSMISubparserHelpFormatter(prog)
         set_value_parser.set_defaults(func=func)
 
-        # Device args are required as safeguard from the user applying the operation to all gpus unintentionally
-        self._add_device_arguments(set_value_parser, required=True)
+        # Providing no -g 0 or -g all, is not required
+        self._add_device_arguments(set_value_parser, required=False)
 
         if self.helpers.is_amdgpu_initialized():
             if self.helpers.is_baremetal():
@@ -1126,7 +1126,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         reset_help = "Reset options for devices"
-        reset_subcommand_help = "A GPU must be specified to reset a configuration.\
+        reset_subcommand_help = "If no GPU is specified, will select all GPUs on the system.\
                                 \nA reset argument must be provided; Multiple reset arguments are accepted"
         reset_optionals_title = "Reset Arguments"
 
@@ -1148,8 +1148,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Add Universal Arguments
         self._add_command_modifiers(reset_parser)
-        # Device args are required as safeguard from the user applying the operation to all gpus unintentionally
-        self._add_device_arguments(reset_parser, required=True)
+        # Providing no -g 0 or -g all, is not required
+        self._add_device_arguments(reset_parser, required=False)
 
         if self.helpers.is_baremetal():
             # Add Baremetal reset arguments

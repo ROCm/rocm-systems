@@ -26,6 +26,7 @@ import atexit
 import logging
 import signal
 import sys
+import os
 
 from pathlib import Path
 
@@ -134,8 +135,11 @@ def amdsmi_cli_shutdown():
 
 def signal_handler(sig, frame):
     logging.debug(f"Handling signal: {sig}")
-    sys.exit(0)
-
+    try:
+       sys.exit(0)
+    except Exception as e:
+        logging.error("Unable to cleanly shut down amd-smi-lib, exception: %s", str(type(e).__name__))
+        os._exit(0)
 
 if not AMDSMI_INITIALIZED:
     AMDSMI_INIT_FLAG = amdsmi_cli_init()

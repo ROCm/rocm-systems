@@ -140,6 +140,7 @@ static const char *kDevAvailableComputePartitionFName =
                   "available_compute_partition";
 static const char *kDevComputePartitionFName = "current_compute_partition";
 static const char *kDevMemoryPartitionFName = "current_memory_partition";
+static const char *kDevAvailableMemoryPartitionFName = "available_memory_partition";
 
 // Firmware version files
 static const char *kDevFwVersionAsdFName = "fw_version/asd_fw_version";
@@ -328,6 +329,7 @@ static const std::map<DevInfoTypes, const char *> kDevAttribNameMap = {
     {kDevAvailableComputePartition, kDevAvailableComputePartitionFName},
     {kDevComputePartition, kDevComputePartitionFName},
     {kDevMemoryPartition, kDevMemoryPartitionFName},
+    {kDevAvailableMemoryPartition, kDevAvailableMemoryPartitionFName},
 };
 
 static const std::map<rsmi_dev_perf_level, const char *> kDevPerfLvlMap = {
@@ -479,6 +481,7 @@ Device::devInfoTypesStrings = {
   {kDevAvailableComputePartition, "kDevAvailableComputePartition"},
   {kDevComputePartition, "kDevComputePartition"},
   {kDevMemoryPartition, "kDevMemoryPartition"},
+  {kDevAvailableMemoryPartition, "kDevAvailableMemoryPartition"},
   {kDevPCieVendorID, "kDevPCieVendorID"},
   {kDevSocPstate, "kDevSocPstate"},
   {kDevXgmiPlpd, "kDevXgmiPlpd"},
@@ -1308,6 +1311,7 @@ int Device::readDevInfo(DevInfoTypes type, std::string *val) {
     case kDevMemoryPartition:
     case kDevNumaNode:
     case kDevXGMIPhysicalID:
+    case kDevAvailableMemoryPartition:
     case kDevProcessIsolation:
       return readDevInfoStr(type, val);
       break;
@@ -1486,10 +1490,15 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant,
 
 rsmi_status_t Device::restartAMDGpuDriver(void) {
   REQUIRE_ROOT_ACCESS
+  std::ostringstream ss;
   bool restartSuccessful = true;
   bool success = false;
   std::string out;
   bool wasGdmServiceActive = false;
+  bool restartInProgress = true;
+  bool isRestartInProgress = true;
+  bool isAMDGPUModuleLive = false;
+  std::string captureRestartErr;
 
   // sudo systemctl is-active gdm
   // we do not care about the success of checking if gdm is active
@@ -1498,8 +1507,8 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
                          (restartSuccessful = true);
 
   // if gdm is active -> sudo systemctl stop gdm
-  // TODO: are are there other display manager's we need to take into account?
-  // see https://en.wikipedia.org/wiki/GNOME_Display_Manager
+  // TODO(AMD_SMI_team): are are there other display manager's we need to take into account?
+  // see https://help.gnome.org/admin/gdm/stable/overview.html.en_GB
   if (success && (out == "active")) {
     wasGdmServiceActive = true;
     std::tie(success, out) = executeCommand("systemctl stop gdm&", false);
@@ -1509,8 +1518,13 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   // sudo modprobe -r amdgpu
   // sudo modprobe amdgpu
   std::tie(success, out) =
-    executeCommand("modprobe -r amdgpu && modprobe amdgpu&", false);
+    executeCommand("modprobe -r amdgpu && modprobe amdgpu&", true);
   restartSuccessful &= success;
+  captureRestartErr = out;
+
+  if (success) {
+    restartSuccessful = false;
+  }
 
   // if gdm was active -> sudo systemctl start gdm
   if (wasGdmServiceActive) {
@@ -1518,7 +1532,61 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
     restartSuccessful &= success;
   }
 
-  return (restartSuccessful ? RSMI_STATUS_SUCCESS :
+  // Return early if there was an issue restarting amdgpu
+  if (!restartSuccessful) {
+    ss << __PRETTY_FUNCTION__ << " | [WARNING] Issue found during amdgpu restart: "
+    << captureRestartErr << "; retartSuccessful: " << (restartSuccessful ? "True" : "False");
+    LOG_INFO(ss);
+    return RSMI_STATUS_AMDGPU_RESTART_ERR;
+  }
+
+  // wait for amdgpu module to come back up
+  rsmi_status_t status = Device::isRestartInProgress(&isRestartInProgress,
+                                                    &isAMDGPUModuleLive);
+  const int kTimeToWaitForDriverMSec = 1000;
+  int maxLoops = 10;  // wait a max of 10 sec
+  while (status != RSMI_STATUS_SUCCESS) {
+    maxLoops -= 1;
+    if (maxLoops == 0) {
+      break;
+    }
+    amd::smi::system_wait(kTimeToWaitForDriverMSec);
+    status = Device::isRestartInProgress(&isRestartInProgress,
+                                         &isAMDGPUModuleLive);
+  }
+
+  return ((restartSuccessful && (!isRestartInProgress && isAMDGPUModuleLive)) ?
+          RSMI_STATUS_SUCCESS :
+          RSMI_STATUS_AMDGPU_RESTART_ERR);
+}
+
+rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
+                                          bool *isAMDGPUModuleLive) {
+  REQUIRE_ROOT_ACCESS
+  std::ostringstream ss;
+  bool restartSuccessful = true;
+  bool success = false;
+  std::string out;
+  bool deviceRestartInProgress = true;    // Assume in progress, we intend to disprove
+  bool isSystemAMDGPUModuleLive = false;  // Assume AMD GPU module is not live,
+                                          //  we intend to disprove
+
+  // wait for amdgpu module to come back up
+  std::tie(success, out) = executeCommand("cat /sys/module/amdgpu/initstate", true);
+  ss << __PRETTY_FUNCTION__
+     << " | success = " << success
+     << " | out = " << out;
+  LOG_DEBUG(ss);
+  if ((success == true) && (!out.empty())) {
+    isSystemAMDGPUModuleLive = containsString(out, "live");
+  }
+  if (isAMDGPUModuleLive) {
+    deviceRestartInProgress = false;
+  }
+  *isRestartInProgress = deviceRestartInProgress;
+  *isAMDGPUModuleLive = isSystemAMDGPUModuleLive;
+
+  return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS :
           RSMI_STATUS_AMDGPU_RESTART_ERR);
 }
 

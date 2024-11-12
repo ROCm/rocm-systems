@@ -1455,15 +1455,56 @@ amdsmi_get_gpu_accelerator_partition_profile(amdsmi_processor_handle processor_h
                                              amdsmi_accelerator_partition_profile_t *profile,
                                              uint32_t *partition_id) {
     AMDSMI_CHECK_INIT();
-    // TODO: also fill out profile later
-    // default to 0xffffffff if not supported
-    *partition_id = std::numeric_limits<uint32_t>::max();
-    auto tmp_partition_id = uint32_t(0);
+    if (profile == nullptr) {
+        return AMDSMI_STATUS_INVAL;
+    }
+    std::ostringstream ss;
+    // TODO(amdsmi_team): also fill out profile later
+    amdsmi_nps_caps_t flags;
+    flags.amdsmi_nps_flags_t.nps1_cap = 0;
+    flags.amdsmi_nps_flags_t.nps2_cap = 0;
+    flags.amdsmi_nps_flags_t.nps4_cap = 0;
+    flags.amdsmi_nps_flags_t.nps8_cap = 0;
+    profile->memory_caps = flags;
 
-    amdsmi_status_t status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, &tmp_partition_id);
-    if (status == amdsmi_status_t::AMDSMI_STATUS_SUCCESS){
+    // TODO(amdsmi_team): add resources here ^
+    auto tmp_partition_id = uint32_t(0);
+    auto tmp_xcd_count = uint16_t(0);
+    amdsmi_status_t status = AMDSMI_STATUS_NOT_SUPPORTED;
+
+    status = rsmi_wrapper(rsmi_dev_partition_id_get, processor_handle, &tmp_partition_id);
+    if (status == AMDSMI_STATUS_SUCCESS) {
         *partition_id = tmp_partition_id;
     }
+
+    // Add memory partition capabilities here
+    constexpr uint32_t kLenCapsSize = 30;
+    char memory_caps[kLenCapsSize];
+    status = rsmi_wrapper(rsmi_dev_memory_partition_capabilities_get, processor_handle,
+                          memory_caps, kLenCapsSize);
+    ss << __PRETTY_FUNCTION__
+       << " | rsmi_dev_memory_partition_capabilities_get Returning: "
+       << smi_amdgpu_get_status_string(status, false)
+       << " | Type: memory_partition_capabilities"
+       << " | Data: " << memory_caps;
+    LOG_DEBUG(ss);
+    std::string memory_caps_str = "N/A";
+    if (status == AMDSMI_STATUS_SUCCESS) {
+        memory_caps_str = std::string(memory_caps);
+        if (memory_caps_str.find("NPS1") != std::string::npos) {
+            flags.amdsmi_nps_flags_t.nps1_cap = 1;
+        }
+        if (memory_caps_str.find("NPS2") != std::string::npos) {
+            flags.amdsmi_nps_flags_t.nps2_cap = 1;
+        }
+        if (memory_caps_str.find("NPS4") != std::string::npos) {
+            flags.amdsmi_nps_flags_t.nps4_cap = 1;
+        }
+        if (memory_caps_str.find("NPS8") != std::string::npos) {
+            flags.amdsmi_nps_flags_t.nps8_cap = 1;
+        }
+    }
+    profile->memory_caps = flags;
 
     return status;
 }

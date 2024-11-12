@@ -1653,8 +1653,13 @@ def amdsmi_get_gpu_asic_info(
             processor_handle, ctypes.byref(asic_info_struct))
     )
 
+    market_name = _pad_hex_value(asic_info_struct.market_name.decode("utf-8"), 4)
+    target_graphics_version = str(asic_info_struct.target_graphics_version)
+    if len(target_graphics_version) == 4 and ("Instinct MI2" in market_name):
+        hex_part = str(hex(int(str(asic_info_struct.target_graphics_version)[2:]))).replace("0x", "")
+        target_graphics_version = str(asic_info_struct.target_graphics_version)[:2] + hex_part
     asic_info = {
-        "market_name": _pad_hex_value(asic_info_struct.market_name.decode("utf-8"), 4),
+        "market_name": market_name,
         "vendor_id": asic_info_struct.vendor_id,
         "vendor_name": asic_info_struct.vendor_name.decode("utf-8"),
         "subvendor_id": asic_info_struct.subvendor_id,
@@ -1663,7 +1668,7 @@ def amdsmi_get_gpu_asic_info(
         "asic_serial": asic_info_struct.asic_serial.decode("utf-8"),
         "oam_id": asic_info_struct.oam_id,
         "num_compute_units": asic_info_struct.num_of_compute_units,
-        "target_graphics_version": "gfx" + str(asic_info_struct.target_graphics_version)
+        "target_graphics_version": "gfx" + target_graphics_version
     }
 
     string_values = ["market_name", "vendor_name"]

@@ -652,11 +652,6 @@ static rsmi_status_t test_set_compute_partitioning(uint32_t dv_ind) {
     std::cout << "\n" << "\n";
   }
 
-  std::cout << "About to initate compute partition reset..." << "\n";
-  ret = rsmi_dev_compute_partition_reset(dv_ind);
-  CHK_RSMI_NOT_SUPPORTED_RET(ret)
-  std::cout << "Done resetting compute partition." << "\n";
-
   std::string myComputePartition = originalComputePartition;
   if (myComputePartition.empty() == false) {
     std::cout << "Resetting back to original compute partition to "
@@ -708,11 +703,6 @@ static rsmi_status_t test_set_memory_partition(uint32_t dv_ind) {
               << memory_partition_string(newMemoryPartition)
               << "." << "\n\n\n";
   }
-
-  std::cout << "About to initate memory partition reset...\n";
-  ret = rsmi_dev_memory_partition_reset(dv_ind);
-  CHK_RSMI_NOT_SUPPORTED_RET(ret)
-  std::cout << "Done resetting memory partition.\n";
 
   std::string myMemPart = originalMemoryPartition;
   if (myMemPart.empty() == false) {

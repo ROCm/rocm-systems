@@ -8,7 +8,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Added
 
-- **Added support for `amd-smi metric --ecc` & `amd-smi metric --ecc-blocks` on Guest VMs**.
+- **Added support for `amd-smi metric --ecc` & `amd-smi metric --ecc-blocks` on Guest VMs**.  
 Guest VMs now support getting current ECC counts and ras information from the Host cards.
 
 - **Added support for GPU metrics 1.6 to `amdsmi_get_gpu_metrics_info()`**.  
@@ -497,6 +497,56 @@ GPU: 0
 
 ### Changed
 
+- **Improvement: Users now have the ability to set and reset without providing `-g all` using AMD SMI CLI**.  
+Users can now provide set and reset without `-g all`. Previously, users were required to provide:   
+`sudo amd-smi set -g all <set arguments>` or `sudo amd-smi reset -g all <set arguments>`  
+This update allows users to set or reset without providing `-g all` arguments. Allowing commands:  
+`sudo amd-smi set <set arguments>` or `sudo amd-smi reset <set arguments>`  
+This action will default to try to set/reset for all AMD GPUs on the user's system.
+
+- **Improvement: `amd-smi set --memory-partition` now includes a warning banner and progress bar**.  
+For devices which support dynamically changing memory partitions, we now provide a warning for users. We provide this warning to provide users knowledge that this action requires users to quit any gpu workloads. Also to let them know this process will trigger an AMD GPU driver reload. Since this process takes time to complete, a progress bar has been provided until actions can verified as a successful change. Otherwise, AMD SMI will report any errors to users and what actions can be taken. See example below:  
+```shell
+$ sudo amd-smi set -M NPS1
+
+          ****** WARNING ******
+
+          Setting Dynamic Memory (NPS) partition modes require users to quit all GPU workloads.
+          AMD SMI will then attempt to change memory (NPS) partition mode.
+          Upon a successful set, AMD SMI will then initiate an action to restart amdgpu driver.
+          This action will change all GPU's in the hive to the requested memory (NPS) partition mode.
+
+          Please use this utility with caution.
+
+Do you accept these terms? [Y/N] y
+
+Updating memory partition for gpu 0: [████████████████████████████████████████] 40/40 secs remain
+
+GPU: 0
+    MEMORYPARTITION: Successfully set memory partition to NPS1
+
+GPU: 1
+    MEMORYPARTITION: Successfully set memory partition to NPS1
+
+GPU: 2
+    MEMORYPARTITION: Successfully set memory partition to NPS1
+...
+```  
+
+- **Updated `amdsmi_get_gpu_accelerator_partition_profile` to provide driver memory partition capablities**.  
+Driver now has the ability to report what the user can set memory partition modes to. User can now see available
+memory partition modes upon an invalid argument return from memory partition mode set (`amdsmi_set_gpu_memory_partition`).
+This change also updates `amd-smi partition`, `amd-smi partition --memory`, and `amd-smi partition --accelerator` (*see note below)   
+***Note: *Subject to change for ROCm 6.4***
+
+- **Updated `amdsmi_set_gpu_memory_partition` to not return until a successful restart of AMD GPU Driver.**  
+This change keeps checking for ~ up to 40 seconds for a successful restart of the AMD GPU driver. Additionally, the API call continues to check if memory partition (NPS) SYSFS files are successfully updated to reflect the user's requested memory partition (NPS) mode change. Otherwise, reports an error back to the user. Due to these changes, we have updated AMD SMI's CLI to reflect the maximum wait of 40 seconds, while a memory partition change is in progress.
+
+- **All APIs now have the ability to catch driver reporting invalid arguments.**  
+Now AMD SMI APIs can show AMDSMI_STATUS_INVAL when driver returns EINVAL.  
+For example, if user tries to set to NPS8, but the memory partition mode is not an available mode to set to. Commonly referred to as `CAPS` (see `amd-smi partition --memory`), provided by `amdsmi_get_gpu_accelerator_partition_profile`(*see note below).  
+***Note: *Subject to change for ROCm 6.4***
+
 - **Updated BDF commands to look use KFD SYSFS for BDF: `amdsmi_get_gpu_device_bdf()`**.  
 This aligns BDF output with ROCm SMI.
 See below for overview as seen from `rsmi_dev_pci_id_get()` now provides partition ID. See API for better detail. Previously these bits were reserved bits (right before domain) and partition id was within function.
@@ -589,6 +639,8 @@ GPU: 0
   - With this change additional padding was added to PCIE_BW `amd-smi monitor --pcie`
 
 ### Resolved issues
+
+- **Fixed `amdsmi_get_gpu_asic_info`'s `target_graphics_version` and `amd-smi --asic` not displaying properly for MI2x or Navi 3x ASICs**.  
 
 - **Fixed `amd-smi reset` commands showing an AttributeError**.  
 

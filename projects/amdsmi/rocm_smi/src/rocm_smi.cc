@@ -5729,12 +5729,22 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
+  const uint32_t kMaxBoardLength = 128;
   bool isCorrectDevice = false;
-  char boardName[128];
+  char boardName[kMaxBoardLength];
   boardName[0] = '\0';
+
+  const uint32_t kMaxMemoryCapabilitiesSize = 30;
+  char available_memory_capabilities[kMaxMemoryCapabilitiesSize];
+  available_memory_capabilities[0] = '\0';
+
+  const uint32_t kMaxCurrentMemoryMode = 5;
+  char current_memory_mode[kMaxCurrentMemoryMode];
+  current_memory_mode[0] = '\0';
+
   // rsmi_dev_memory_partition_set is only available for for discrete variant,
   // others are required to update through bios settings
-  rsmi_dev_name_get(dv_ind, boardName, 128);
+  rsmi_dev_name_get(dv_ind, boardName, static_cast<size_t>(kMaxBoardLength));
   std::string myBoardName = boardName;
   if (!myBoardName.empty()) {
     std::transform(myBoardName.begin(), myBoardName.end(), myBoardName.begin(),
@@ -5747,18 +5757,19 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
 
   if (!isCorrectDevice) {
     ss << __PRETTY_FUNCTION__
-         << " | ======= end ======= "
-         << " | Fail "
-         << " | Device #: " << dv_ind
-         << " | Type: "
-         << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-         << " | Cause: device board name does not support this action"
-         << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED) << " |";
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Cause: device board name does not support this action"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED, false);
       LOG_ERROR(ss);
     return RSMI_STATUS_NOT_SUPPORTED;
   }
 
+  // Is the current mode already what user requested?
   switch (memory_partition) {
     case RSMI_MEMORY_PARTITION_NPS1:
     case RSMI_MEMORY_PARTITION_NPS2:
@@ -5775,7 +5786,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
          << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
          << " | Cause: requested setting was invalid"
          << " | Returning = "
-         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS) << " |";
+         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
       LOG_ERROR(ss);
       return RSMI_STATUS_INVALID_ARGS;
   }
@@ -5797,7 +5808,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << " | Cause: could retrieve current memory partition or retrieved"
        << " unexpected data"
        << " | Returning = "
-       << getRSMIStatusString(ret_get) << " |";
+       << getRSMIStatusString(ret_get, false);
     LOG_ERROR(ss);
     return ret_get;
   }
@@ -5813,9 +5824,50 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
      << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << newMemoryPartition
      << " | Returning = "
-     << getRSMIStatusString(RSMI_STATUS_SUCCESS) << " |";
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
     LOG_TRACE(ss);
     return RSMI_STATUS_SUCCESS;
+  }
+
+  // is this an available mode to set to?
+  std::string memory_capabilities_str = "unknown";
+  std::string user_requested_memory_partition = newMemoryPartition;
+  std::transform(user_requested_memory_partition.begin(), user_requested_memory_partition.end(),
+                  user_requested_memory_partition.begin(), ::toupper);
+  rsmi_status_t caps_ret = rsmi_dev_memory_partition_capabilities_get(dv_ind,
+                              available_memory_capabilities, kMaxMemoryCapabilitiesSize);
+  memory_capabilities_str = available_memory_capabilities;
+  std::transform(memory_capabilities_str.begin(), memory_capabilities_str.end(),
+                  memory_capabilities_str.begin(), ::toupper);
+  ss << __PRETTY_FUNCTION__ << " | user_requested_memory_partition: "
+     << user_requested_memory_partition
+     << "; memory_capabilities_str: " << memory_capabilities_str
+     << "; rsmi_dev_memory_partition_capabilities_get(" << dv_ind
+     << ", " << user_requested_memory_partition << "): return = "
+     << amd::smi::getRSMIStatusString(caps_ret, false);
+  LOG_DEBUG(ss);
+  if ((caps_ret == RSMI_STATUS_SUCCESS)
+      && (!memory_capabilities_str.empty())
+      && (!user_requested_memory_partition.empty())) {
+    bool is_available_mode = amd::smi::containsString(memory_capabilities_str,
+                                user_requested_memory_partition, true);
+    ss << __PRETTY_FUNCTION__
+       << " | is_available_mode: " << (is_available_mode ? "True": "False");
+    LOG_DEBUG(ss);
+    if (is_available_mode == false) {  // report RSMI_STATUS_INVALID_ARGS
+      ss << __PRETTY_FUNCTION__
+         << " | ======= Check if available mode ======= "
+         << " | WARNING: detected invalid mode to set to, will try to set anyways"
+         << " | Device #: " << dv_ind
+         << " | Type: "
+         << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+         << " | Data (user requested mode): " << user_requested_memory_partition
+         << " | Available Memory Partition Modes: " << memory_capabilities_str
+         << " | Cause: requested setting was not an available mode"
+         << " | Returning = "
+         << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+      LOG_INFO(ss);
+    }
   }
 
   GET_DEV_FROM_INDX
@@ -5835,7 +5887,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
        << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
        << " | Cause: issue writing reqested setting of " + newMemoryPartition
        << " | Returning = "
-       << getRSMIStatusString(err) << " |";
+       << getRSMIStatusString(err, false);
     LOG_ERROR(ss);
     return err;
   }
@@ -5849,8 +5901,76 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
      << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
      << " | Data: " << newMemoryPartition
      << " | Returning = "
-     << getRSMIStatusString(restartRet) << " |";
+     << getRSMIStatusString(restartRet, false);
   LOG_TRACE(ss);
+  if (restartRet != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail - restart AMD GPU detected"
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Cause: issue writing reqested setting of " + newMemoryPartition
+       << " | Returning = "
+       << getRSMIStatusString(restartRet, false);
+    LOG_ERROR(ss);
+    return restartRet;
+  }
+
+  std::string current_memory_mode_str = "unknown";
+  rsmi_status_t can_read_sysfs_again = RSMI_STATUS_AMDGPU_RESTART_ERR;
+  int maxWaitSeconds = 10;
+  const int k1000_MS_WAIT = 1000;
+  // wait until we can read SYSFS again
+  if (restartRet == RSMI_STATUS_SUCCESS) {
+    while (current_memory_mode_str != user_requested_memory_partition) {
+      maxWaitSeconds -= 1;
+      can_read_sysfs_again =
+        rsmi_dev_memory_partition_get(dv_ind, current_memory_mode, kMaxCurrentMemoryMode);
+      if (can_read_sysfs_again == RSMI_STATUS_SUCCESS) {
+        current_memory_mode_str.clear();
+        current_memory_mode_str = current_memory_mode;
+        ss << __PRETTY_FUNCTION__
+           << " | ======= rsmi_dev_memory_partition_get ======= "
+           << " | Success - can read SYSFS"
+           << " | Device #: " << dv_ind
+           << " | Type: "
+           << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+           << " | Data (user requested mode): " << user_requested_memory_partition
+           << " | Current Memory Partition Mode: " << current_memory_mode_str
+           << " | Available Memory Partition Modes: " << memory_capabilities_str
+           << " | total wait time (sec): " << (10 - maxWaitSeconds)
+           << " | Returning = "
+           << getRSMIStatusString(can_read_sysfs_again, false);
+        LOG_TRACE(ss);
+        if (!current_memory_mode_str.empty()
+            && (current_memory_mode_str == user_requested_memory_partition)) {
+          break;
+        }
+      }
+      amd::smi::system_wait(k1000_MS_WAIT);
+    }
+  }
+
+  if (current_memory_mode_str == user_requested_memory_partition) {
+    restartRet = RSMI_STATUS_SUCCESS;
+  } else {
+    restartRet = RSMI_STATUS_AMDGPU_RESTART_ERR;
+  }
+
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success - completed driver restart and all SYSFS are active"
+     << " | Device #: " << dv_ind
+     << " | Type: "
+     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+     << " | Data: " << user_requested_memory_partition
+     << " | Current Memory Partition Mode: " << current_memory_mode_str
+     << " | Available Memory Partition Modes: " << memory_capabilities_str
+     << " | Returning = "
+     << getRSMIStatusString(restartRet, false);
+  LOG_TRACE(ss);
+
   return restartRet;
   CATCH
 }
@@ -5927,79 +6047,73 @@ rsmi_dev_memory_partition_get(uint32_t dv_ind, char *memory_partition,
   CATCH
 }
 
-rsmi_status_t rsmi_dev_compute_partition_reset(uint32_t dv_ind) {
+rsmi_status_t rsmi_dev_memory_partition_capabilities_get(
+      uint32_t dv_ind, char *memory_partition_caps, uint32_t len) {
   TRY
   std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << " | ======= start =======, " << dv_ind;
   LOG_TRACE(ss);
-  REQUIRE_ROOT_ACCESS
+
+  if ((len == 0) || (memory_partition_caps == nullptr)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+       << " | Cause: user sent invalid arguments, len = 0 or memory_partition_caps"
+       << " was a null ptr"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS, false);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+  CHK_SUPPORT_NAME_ONLY(memory_partition_caps)
   DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
 
-  // Only use 1st index, rest are there in-case of future issues
-  // NOTE: Partitions sets cause rocm-smi indexes to fluctuate
-  // since the nodes are grouped in respect to primary node - why we only use
-  // 1st node/device id to reset
-  std::string bootState =
-          dev->readBootPartitionState<rsmi_compute_partition_type_t>(0);
+  std::string availableMemoryPartitions;
+  rsmi_status_t ret =
+      get_dev_value_line(amd::smi::kDevAvailableMemoryPartition,
+                         dv_ind, &availableMemoryPartitions);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | FAIL "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+       << " | Data: could not retrieve requested data"
+       << " | Returning = "
+       << getRSMIStatusString(ret, false);
+    LOG_ERROR(ss);
+    return ret;
+  }
 
-  // Initiate reset
-  // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
-  // Likely due to device not supporting it
-  if (bootState != "UNKNOWN") {
-    rsmi_compute_partition_type_t compute_partition =
-      mapStringToRSMIComputePartitionTypes.at(bootState);
-    ret = rsmi_dev_compute_partition_set(dv_ind, compute_partition);
+  std::size_t length = availableMemoryPartitions.copy(memory_partition_caps, len-1);
+  memory_partition_caps[length]='\0';
+
+  if (len < (availableMemoryPartitions.size() + 1)) {
+    ss << __PRETTY_FUNCTION__
+       << " | ======= end ======= "
+       << " | Fail "
+       << " | Device #: " << dv_ind
+       << " | Type: "
+       << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+       << " | Cause: requested size was insufficient"
+       << " | Returning = "
+       << getRSMIStatusString(RSMI_STATUS_INSUFFICIENT_SIZE, false);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INSUFFICIENT_SIZE;
   }
   ss << __PRETTY_FUNCTION__
      << " | ======= end ======= "
-     << " | Success - if original boot state was not unknown or valid setting"
+     << " | Success "
      << " | Device #: " << dv_ind
      << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevComputePartition)
-     << " | Data: " << bootState
+     << amd::smi::Device::get_type_string(amd::smi::kDevAvailableMemoryPartition)
+     << " | Data: " << memory_partition_caps
      << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
-  LOG_TRACE(ss);
-  return ret;
-  CATCH
-}
-
-rsmi_status_t rsmi_dev_memory_partition_reset(uint32_t dv_ind) {
-  TRY
-  std::ostringstream ss;
-  ss << __PRETTY_FUNCTION__ << "| ======= start =======, " << dv_ind;
-  LOG_TRACE(ss);
-  REQUIRE_ROOT_ACCESS
-  DEVICE_MUTEX
-  GET_DEV_FROM_INDX
-  rsmi_status_t ret = RSMI_STATUS_NOT_SUPPORTED;
-
-  // Only use 1st index, rest are there in-case of future issues
-  // NOTE: Partitions sets cause rocm-smi indexes to fluctuate.
-  // Since the nodes are grouped in respect to primary node - why we only use
-  // 1st node/device id to reset
-  std::string bootState =
-          dev->readBootPartitionState<rsmi_memory_partition_type_t>(0);
-
-  // Initiate reset
-  // If bootState is UNKNOWN, we cannot reset - return RSMI_STATUS_NOT_SUPPORTED
-  // Likely due to device not supporting it
-  if (bootState != "UNKNOWN") {
-    rsmi_memory_partition_type_t memory_partition =
-      mapStringToMemoryPartitionTypes.at(bootState);
-    ret = rsmi_dev_memory_partition_set(dv_ind, memory_partition);
-  }
-  ss << __PRETTY_FUNCTION__
-     << " | ======= end ======= "
-     << " | Success - if original boot state was not unknown or valid setting"
-     << " | Device #: " << dv_ind
-     << " | Type: "
-     << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-     << " | Data: " << bootState
-     << " | Returning = "
-     << getRSMIStatusString(ret) << " |";
+     << getRSMIStatusString(ret, false);
   LOG_TRACE(ss);
   return ret;
   CATCH

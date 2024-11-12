@@ -49,11 +49,13 @@ AMDSMI_ERROR_MESSAGES = {
     31: "Device Not found",
     32: "Device not initialized",
     33: "No more free slot",
+    34: "Driver not loaded",
     # Reserved for future error messages
     40: "No data was found for given input",
     41: "Insufficient size for operation",
     42: "Unexpected size of data was read",
     43: "The data read or provided was unexpected",
+    54: "AMDGPU restart error",
 }
 
 def _get_error_message(error_code):
