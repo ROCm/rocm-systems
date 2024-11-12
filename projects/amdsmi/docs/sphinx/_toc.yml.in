@@ -1,49 +1,51 @@
 defaults:
   numbered: false
 root: index
-subtrees: 
-- entries:
-  - file: what-is-AMDSMI.rst
-    title: What is AMD SMI?
-    
+subtrees:
 - caption: Install
   entries:
-    - file: install/install.rst
-      title: AMD SMI installation
-      
-      
+  - file: install/install.md
+    title: Library and CLI tool installation
+  - file: install/build.md
+    title: Build from source
+
 - caption: How to
   entries:
-    - file: how-to/using-amdsmi-for-C++.rst
-      title: Use AMD SMI for C++ library
-    - file: how-to/using-amdsmi-for-python.md
-      title: Use AMD SMI for Python library
-    - file: how-to/using-AMD-SMI-CLI-tool.md
-      title: Use AMD SMI CLI tool
-  
-- caption: API reference
+  - file: how-to/amdsmi-cpp-lib.md
+    title: C++ library usage
+  - file: how-to/amdsmi-py-lib.md
+    title: Python library usage
+  - file: how-to/amdsmi-cli-tool.md
+    title: CLI tool usage
+
+- caption: Reference
   entries:
+  - file: reference/amdsmi-cpp-api.md
+    title: C++ API
+    entries:
+    - file: doxygen/docBin/html/modules
+      title: Modules
     - file: doxygen/docBin/html/files
       title: Files
     - file: doxygen/docBin/html/globals
       title: Globals
     - file: doxygen/docBin/html/annotated
       title: Data structures
-    - file: doxygen/docBin/html/modules
-      title: Modules
     - file: doxygen/docBin/html/functions_data_fields
       title: Data fields
+  - file: reference/amdsmi-py-api.md
+    title: Python API
+  - file: reference/changelog.md
+    title: Changelog
 
-    
-      
 - caption: Tutorials
   entries:
-    - url: https://github.com/ROCm/amdsmi/tree/amd-staging/example
-      title: AMD SMI GitHub samples
-    - url: https://github.com/ROCm/rocm_smi_lib/tree/amd-staging/docs
-      title: ROCm SMI lib GitHub samples
-      
+  - url: https://github.com/ROCm/amdsmi/tree/amd-staging/example
+    title: AMD SMI examples (GitHub)
+  - url: https://github.com/ROCm/rocm_smi_lib/tree/amd-staging/example
+    title: ROCm SMI lib examples (GitHub)
+
 - caption: About
   entries:
-    - file: license.md
+  - file: license.md
 

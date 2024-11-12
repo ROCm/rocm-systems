@@ -1,14 +1,41 @@
-# Using AMD SMI Command Line Interface tool
+---
+myst:
+  html_meta:
+    "description lang=en": "Learn how to use the AMD SMI command line tool."
+    "keywords": "api, smi, lib, system, management, interface, example"
+---
 
-**Disclaimer: CLI Tool is provided as an example code to aid the development of telemetry tools. Python or C++ Library is recommended as a reliable data source.**  
+# AMD SMI CLI tool usage
 
-AMD-SMI reports the version and current platform detected when running the command line interface (CLI) without arguments:
+This tool is a command line interface (CLI) for manipulating and monitoring the
+`amdgpu` kernel; it is intended to replace and deprecate the existing `rocm_smi`
+CLI tool and `gpuv-smi` tool. The AMD SMI CLI tool uses Ctypes to call the
+`amd_smi_lib` API.
 
-``` bash
+When using the CLI tool, you should have at least one AMD GPU and the driver
+installed.
+
+```{admonition} Disclaimer
+The AMD SMI CLI tool is provided as an example code to aid the development of
+telemetry tools. The [Python](./amdsmi-py-lib) or [C++
+library](./amdsmi-cpp-lib) is recommended as a robust data source.
+```
+
+## Install the CLI Tool and Python library
+
+Refer to the [installation instructions](../install/install.md).
+
+## Get started
+
+The amd-smi command provides system management and monitoring capabilities for
+AMD hardware. When run without arguments, it reports the version and platform
+detected:
+
+```shell-session
 ~$ amd-smi
 usage: amd-smi [-h]  ...
 
-AMD System Management Interface | Version: 24.7.0.0 | ROCm version: 6.2.2 | Platform: Linux Baremetal
+AMD System Management Interface | Version: 24.7.1.0 | ROCm version: 6.3.0 | Platform: Linux Baremetal
 
 options:
   -h, --help          show this help message and exit
@@ -26,35 +53,44 @@ AMD-SMI Commands:
     topology          Displays topology information of the devices
     set               Set options for devices
     reset             Reset options for devices
-    monitor           Monitor metrics for target devices
+    monitor (dmon)    Monitor metrics for target devices
     xgmi              Displays xgmi information of the devices
 ```
 
 Example commands:
 
-``` bash
+```shell-session
 amd-smi static --gpu 0
 amd-smi metric
 amd-smi process --gpu 0 1
 amd-smi reset --gpureset --gpu all
 ```
 
-More detailed verison information is available from `amd-smi version`
+```{note}
+For command-specific help, use `amd-smi [command] --help` for see more detailed
+usage information. See [Commands](#cmds).
 
-Each command will have detailed information via `amd-smi [command] --help`
+For more detailed version information, use `amd-smi version`.
+```
 
+(cmds)=
 ## Commands
 
-For convenience, here is the help output for each command
+The following are the help output for each command, providing quick reference
+details for usage.
 
-```bash
+(cmd-list)=
+### amd-smi list
+
+Lists GPU information.
+
+```shell-session
 ~$ amd-smi list --help
 usage: amd-smi list [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                     [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
 
 Lists all the devices on the system and the links between devices.
-Lists all the sockets and for each socket, GPUs and/or CPUs associated to
-that socket alongside some basic information for each device.
+Lists the BDF, UUID, KFD_ID, and NODE_ID for each GPU and/or CPUs.
 In virtualization environments, it can also list VFs associated to each
 GPU with some basic information for each VF.
 
@@ -84,7 +120,13 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-static)=
+### amd-smi static
+
+Gets static information about the specified GPU. See the [sample
+output](#cli-ex-static) for `amd-smi static`.
+
+```shell-session
 ~$ amd-smi static --help
 usage: amd-smi static [-h] [-g GPU [GPU ...] | -U CPU [CPU ...]] [-a] [-b] [-V] [-d] [-v]
                       [-c] [-B] [-R] [-r] [-p] [-l] [-P] [-x] [-u] [-s] [-i]
@@ -134,7 +176,12 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-firmware)=
+### amd-smi firmware
+
+Gets firmware information about the specified GPU.
+
+```shell-session
 ~$ amd-smi firmware --help
 usage: amd-smi firmware [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                         [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-f]
@@ -168,7 +215,12 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-bad-pages)=
+### amd-smi bad-pages
+
+Gets bad page information about the specified GPU.
+
+```shell-session
 ~$ amd-smi bad-pages --help
 usage: amd-smi bad-pages [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                          [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-p]
@@ -205,7 +257,12 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-metric)=
+### amd-smi metric
+
+Gets metrics and performance information about the specified GPU.
+
+```shell-session
 ~$ amd-smi metric --help
 usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
                       [-w INTERVAL] [-W TIME] [-i ITERATIONS] [-m] [-u] [-p] [-c] [-t]
@@ -222,7 +279,7 @@ usage: amd-smi metric [-h] [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE 
                       [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
 If no GPU is specified, returns metric information for all GPUs on the system.
-If no metric argument is provided all metric information will be displayed.
+If no metric argument is provided, all metric information will be displayed.
 
 Metric arguments:
   -h, --help                                show this help message and exit
@@ -258,6 +315,7 @@ Metric arguments:
   -l, --perf-level                          Current DPM performance level
   -x, --xgmi-err                            XGMI error information since last read
   -E, --energy                              Amount of energy consumed
+  -T, --throttle                            Displays throttle accumulators; Only available for MI300 or newer ASICs
 
 CPU Arguments:
   --cpu-power-metrics                       CPU power metrics
@@ -295,7 +353,12 @@ Command Modifiers:
                                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-process)=
+### amd-smi process
+
+Lists general process information running on the specified GPU.
+
+```shell-session
 ~$ amd-smi process --help
 usage: amd-smi process [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                        [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
@@ -303,7 +366,7 @@ usage: amd-smi process [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                        [-n NAME]
 
 If no GPU is specified, returns information for all GPUs on the system.
-If no process argument is provided all process information will be displayed.
+If no process argument is provided, all process information will be displayed.
 
 Process arguments:
   -h, --help                   show this help message and exit
@@ -329,7 +392,7 @@ Process arguments:
   -e, --engine                 All engine usages
   -p, --pid PID                Gets all process information about the specified process based on Process ID
   -n, --name NAME              Gets all process information about the specified process based on Process Name.
-                               If multiple processes have the same name information is returned for all of them.
+                               If multiple processes have the same name, information is returned for all of them.
 
 Command Modifiers:
   --json                       Displays output in JSON format (human readable by default).
@@ -339,7 +402,12 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-event)=
+### amd-smi event
+
+Displays event information for the given GPU.
+
+```shell-session
 ~$ amd-smi event --help
 usage: amd-smi event [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                      [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
@@ -372,14 +440,19 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-topology)=
+### amd-smi topology
+
+Displays topology information of the specified devices.
+
+```shell-session
 ~$ amd-smi topology --help
 usage: amd-smi topology [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                         [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-a]
                         [-w] [-o] [-t] [-b]
 
 If no GPU is specified, returns information for all GPUs on the system.
-If no topology argument is provided all topology information will be displayed.
+If no topology argument is provided, all topology information will be displayed.
 
 Topology arguments:
   -h, --help                  show this help message and exit
@@ -403,6 +476,10 @@ Topology arguments:
   -o, --hops                  Displays the number of hops between GPUs
   -t, --link-type             Displays the link type between GPUs
   -b, --numa-bw               Display max and min bandwidth between nodes
+  -c, --coherent              Display cache coherant (or non-coherant) link capability between nodes
+  -n, --atomics               Display 32 and 64-bit atomic io link capability between nodes
+  -d, --dma                   Display P2P direct memory access (DMA) link capability between nodes
+  -z, --bi-dir                Display P2P bi-directional link capability between nodes
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).
@@ -412,7 +489,12 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-set)=
+### amd-smi set
+
+Set options for specified devices.
+
+```shell-session
 ~$ amd-smi set --help
 usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-f %]
                    [-l LEVEL] [-P SETPROFILE] [-d SCLKMAX] [-C PARTITION] [-M PARTITION]
@@ -426,7 +508,7 @@ usage: amd-smi set [-h] (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...
                    [--loglevel LEVEL]
 
 A GPU must be specified to set a configuration.
-A set argument must be provided; Multiple set arguments are accepted
+A set argument must be provided; Multiple set arguments are accepted.
 
 Set Arguments:
   -h, --help                                   show this help message and exit
@@ -454,9 +536,12 @@ Set Arguments:
   -M, --memory-partition PARTITION             Set one of the following the memory partition modes:
                                                 NPS1, NPS2, NPS4, NPS8
   -o, --power-cap WATTS                        Set power capacity limit
-  -p, --dpm-policy POLICY_ID                   Set the GPU DPM policy using policy id
+  -p, --soc-pstate POLICY_ID                   Set the GPU soc pstate policy using policy id
   -x, --xgmi-plpd POLICY_ID                    Set the GPU XGMI per-link power down policy using policy id
-  -R, --process-isolation STATUS               Enable or disable the GPU process isolation: 0 for disable and 1 for enable.
+  -L, --clk-limit CLK_TYPE LIM_TYPE VALUE      Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies
+                                                amd-smi set -L (sclk | mclk) (min | max) value
+  -R, --process-isolation STATUS               Enable or disable the GPU process isolation:
+                                                0 for disable and 1 for enable.
 
 CPU Arguments:
   --cpu-pwr-limit PWR_LIMIT                    Set power limit for the given socket. Input parameter is power limit value.
@@ -482,7 +567,12 @@ Command Modifiers:
                                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-reset)=
+### amd-smi reset
+
+Reset options for specified devices.
+
+```shell-session
 ~$ amd-smi reset --help
 usage: amd-smi reset [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                      (-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]) [-G] [-c]
@@ -514,10 +604,8 @@ Reset Arguments:
   -p, --profile               Reset power profile back to default
   -x, --xgmierr               Reset XGMI error counts
   -d, --perf-determinism      Disable performance determinism
-  -C, --compute-partition     Reset compute partitions on the specified GPU
-  -M, --memory-partition      Reset memory partitions on the specified GPU
   -o, --power-cap             Reset power capacity limit to max capable
-  -l, --run-shader SHADER_NAME  Run the shader on processor. Only CLEANER shader can be used to clean up data in LDS/GPRs
+  -l, --clean-local-data      Clean up the local data in the LDS/GPRs on a per partition basis
 
 Command Modifiers:
   --json                      Displays output in JSON format (human readable by default).
@@ -527,7 +615,12 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-monitor)=
+### amd-smi monitor
+
+Monitor metrics for target devices.
+
+```shell-session
 ~$ amd-smi monitor --help
 usage: amd-smi monitor [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                        [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]]
@@ -536,7 +629,7 @@ usage: amd-smi monitor [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
 
 Monitor a target device for the specified arguments.
 If no arguments are provided, all arguments will be enabled.
-Use the watch arguments to run continuously
+Use the watch arguments to run continuously.
 
 Monitor Arguments:
   -h, --help                   show this help message and exit
@@ -568,6 +661,7 @@ Monitor Arguments:
   -v, --vram-usage             Monitor memory usage in MB
   -r, --pcie                   Monitor PCIe bandwidth in Mb/s
   -q, --process                Enable Process information table below monitor output
+  -V, --violation              Monitor power and thermal violation status (%); Only available for MI300 or newer ASICs
 
 Command Modifiers:
   --json                       Displays output in JSON format (human readable by default).
@@ -577,13 +671,18 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
-```bash
+(cmd-xgmi)=
+### amd-smi xgmi
+
+Displays XGMI information of specified devices.
+
+```shell-session
 ~$ amd-smi xgmi --help
 usage: amd-smi xgmi [-h] [--json | --csv] [--file FILE] [--loglevel LEVEL]
                     [-g GPU [GPU ...] | -U CPU [CPU ...] | -O CORE [CORE ...]] [-m]
 
 If no GPU is specified, returns information for all GPUs on the system.
-If no xgmi argument is provided all xgmi information will be displayed.
+If no xgmi argument is provided, all xgmi information will be displayed.
 
 XGMI arguments:
   -h, --help                  show this help message and exit
@@ -612,9 +711,11 @@ Command Modifiers:
                                 DEBUG, INFO, WARNING, ERROR, CRITICAL
 ```
 
+(cli-ex-static)=
 ### Example output from amd-smi static
 
-Here is some example output from the tool:
+To gain a sense of the AMD SMI CLI's output, the following block is sample
+output from the CLI tool:
 
 ```bash
 ~$ amd-smi static
@@ -623,25 +724,7 @@ CPU: 0
         FW_VERSION: 85.90.0
     INTERFACE_VERSION:
         PROTO VERSION: 6
-
-CPU: 1
-    SMU:
-        FW_VERSION: 85.90.0
-    INTERFACE_VERSION:
-        PROTO VERSION: 6
-
-CPU: 2
-    SMU:
-        FW_VERSION: 85.90.0
-    INTERFACE_VERSION:
-        PROTO VERSION: 6
-
-CPU: 3
-    SMU:
-        FW_VERSION: 85.90.0
-    INTERFACE_VERSION:
-        PROTO VERSION: 6
-
+...
 
 GPU: 0
     ASIC:
@@ -650,9 +733,12 @@ GPU: 0
         VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
         SUBVENDOR_ID: 0x1002
         DEVICE_ID: 0x74a0
+        SUBSYSTEM_ID: 0x74a0
         REV_ID: 0x00
         ASIC_SERIAL: 0x7E8F7E20764E2714
         OAM_ID: 0
+        NUM_COMPUTE_UNITS: 228
+        TARGET_GRAPHICS_VERSION: gfx942
     BUS:
         BDF: 0000:01:00.0
         MAX_PCIE_WIDTH: 16
@@ -712,6 +798,7 @@ GPU: 0
     PARTITION:
         COMPUTE_PARTITION: SPX
         MEMORY_PARTITION: NPS1
+        PARTITION_ID: 0
     SOC_PSTATE:
         NUM_SUPPORTED: 4
         CURRENT_ID: 1
@@ -742,6 +829,7 @@ GPU: 0
         TYPE: HBM
         VENDOR: N/A
         SIZE: 64289 MB
+        BIT_WIDTH: 8192
     CACHE_INFO:
         CACHE_0:
             CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
@@ -767,380 +855,5 @@ GPU: 0
             CACHE_LEVEL: 3
             MAX_NUM_CU_SHARED: 228
             NUM_CACHE_INSTANCE: 1
-
-GPU: 1
-    ASIC:
-        MARKET_NAME: MI300A
-        VENDOR_ID: 0x1002
-        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
-        SUBVENDOR_ID: 0x1002
-        DEVICE_ID: 0x74a0
-        REV_ID: 0x00
-        ASIC_SERIAL: 0xB6AE7C8CEFE1F084
-        OAM_ID: 1
-    BUS:
-        BDF: 0001:01:00.0
-        MAX_PCIE_WIDTH: 16
-        MAX_PCIE_SPEED: 32 GT/s
-        PCIE_INTERFACE_VERSION: Gen 5
-        SLOT_TYPE: PCIE
-    VBIOS:
-        NAME: N/A
-        BUILD_DATE: N/A
-        PART_NUMBER: N/A
-        VERSION: N/A
-    LIMIT:
-        MAX_POWER: 550 W
-        MIN_POWER: 0 W
-        SOCKET_POWER: 550 W
-        SLOWDOWN_EDGE_TEMPERATURE: N/A
-        SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
-        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
-        SHUTDOWN_EDGE_TEMPERATURE: N/A
-        SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
-        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
-    DRIVER:
-        NAME: amdgpu
-        VERSION: 6.9.0-rc5+
-    BOARD:
-        MODEL_NUMBER: N/A
-        PRODUCT_SERIAL: N/A
-        FRU_ID: N/A
-        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
-        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
-    RAS:
-        EEPROM_VERSION: 0x0
-        PARITY_SCHEMA: DISABLED
-        SINGLE_BIT_SCHEMA: DISABLED
-        DOUBLE_BIT_SCHEMA: DISABLED
-        POISON_SCHEMA: ENABLED
-        ECC_BLOCK_STATE:
-            UMC: DISABLED
-            SDMA: ENABLED
-            GFX: ENABLED
-            MMHUB: ENABLED
-            ATHUB: DISABLED
-            PCIE_BIF: DISABLED
-            HDP: DISABLED
-            XGMI_WAFL: DISABLED
-            DF: DISABLED
-            SMN: DISABLED
-            SEM: DISABLED
-            MP0: DISABLED
-            MP1: DISABLED
-            FUSE: DISABLED
-            MCA: DISABLED
-            VCN: DISABLED
-            JPEG: DISABLED
-            IH: DISABLED
-            MPIO: DISABLED
-    PARTITION:
-        COMPUTE_PARTITION: SPX
-        MEMORY_PARTITION: NPS1
-    SOC_PSTATE:
-        NUM_SUPPORTED: 4
-        CURRENT_ID: 1
-        POLICIES:
-            POLICY_ID: 0
-            POLICY_DESCRIPTION: pstate_default
-            POLICY_ID: 1
-            POLICY_DESCRIPTION: soc_pstate_0
-            POLICY_ID: 2
-            POLICY_DESCRIPTION: soc_pstate_1
-            POLICY_ID: 3
-            POLICY_DESCRIPTION: soc_pstate_2
-    XGMI_PLPD:
-        NUM_SUPPORTED: 3
-        CURRENT_ID: 1
-        PLPDS:
-            POLICY_ID: 0
-            POLICY_DESCRIPTION: plpd_disallow
-            POLICY_ID: 1
-            POLICY_DESCRIPTION: plpd_default
-            POLICY_ID: 2
-            POLICY_DESCRIPTION: plpd_optimized
-    PROCESS_ISOLATION: N/A
-    NUMA:
-        NODE: 1
-        AFFINITY: 1
-    VRAM:
-        TYPE: HBM
-        VENDOR: N/A
-        SIZE: 64289 MB
-    CACHE_INFO:
-        CACHE_0:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 32 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 348
-        CACHE_1:
-            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-            CACHE_SIZE: 64 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 120
-        CACHE_2:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 4096 KB
-            CACHE_LEVEL: 2
-            MAX_NUM_CU_SHARED: 228
-            NUM_CACHE_INSTANCE: 1
-        CACHE_3:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 262144 KB
-            CACHE_LEVEL: 3
-            MAX_NUM_CU_SHARED: 228
-            NUM_CACHE_INSTANCE: 1
-
-GPU: 2
-    ASIC:
-        MARKET_NAME: MI300A
-        VENDOR_ID: 0x1002
-        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
-        SUBVENDOR_ID: 0x1002
-        DEVICE_ID: 0x74a0
-        REV_ID: 0x00
-        ASIC_SERIAL: 0x367125D815189854
-        OAM_ID: 2
-    BUS:
-        BDF: 0002:01:00.0
-        MAX_PCIE_WIDTH: 16
-        MAX_PCIE_SPEED: 32 GT/s
-        PCIE_INTERFACE_VERSION: Gen 5
-        SLOT_TYPE: PCIE
-    VBIOS:
-        NAME: N/A
-        BUILD_DATE: N/A
-        PART_NUMBER: N/A
-        VERSION: N/A
-    LIMIT:
-        MAX_POWER: 550 W
-        MIN_POWER: 0 W
-        SOCKET_POWER: 550 W
-        SLOWDOWN_EDGE_TEMPERATURE: N/A
-        SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
-        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
-        SHUTDOWN_EDGE_TEMPERATURE: N/A
-        SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
-        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
-    DRIVER:
-        NAME: amdgpu
-        VERSION: 6.9.0-rc5+
-    BOARD:
-        MODEL_NUMBER: N/A
-        PRODUCT_SERIAL: N/A
-        FRU_ID: N/A
-        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
-        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
-    RAS:
-        EEPROM_VERSION: 0x0
-        PARITY_SCHEMA: DISABLED
-        SINGLE_BIT_SCHEMA: DISABLED
-        DOUBLE_BIT_SCHEMA: DISABLED
-        POISON_SCHEMA: ENABLED
-        ECC_BLOCK_STATE:
-            UMC: DISABLED
-            SDMA: ENABLED
-            GFX: ENABLED
-            MMHUB: ENABLED
-            ATHUB: DISABLED
-            PCIE_BIF: DISABLED
-            HDP: DISABLED
-            XGMI_WAFL: DISABLED
-            DF: DISABLED
-            SMN: DISABLED
-            SEM: DISABLED
-            MP0: DISABLED
-            MP1: DISABLED
-            FUSE: DISABLED
-            MCA: DISABLED
-            VCN: DISABLED
-            JPEG: DISABLED
-            IH: DISABLED
-            MPIO: DISABLED
-    PARTITION:
-        COMPUTE_PARTITION: SPX
-        MEMORY_PARTITION: NPS1
-    SOC_PSTATE:
-        NUM_SUPPORTED: 4
-        CURRENT_ID: 1
-        POLICIES:
-            POLICY_ID: 0
-            POLICY_DESCRIPTION: pstate_default
-            POLICY_ID: 1
-            POLICY_DESCRIPTION: soc_pstate_0
-            POLICY_ID: 2
-            POLICY_DESCRIPTION: soc_pstate_1
-            POLICY_ID: 3
-            POLICY_DESCRIPTION: soc_pstate_2
-    XGMI_PLPD:
-        NUM_SUPPORTED: 3
-        CURRENT_ID: 1
-        PLPDS:
-            POLICY_ID: 0
-            POLICY_DESCRIPTION: plpd_disallow
-            POLICY_ID: 1
-            POLICY_DESCRIPTION: plpd_default
-            POLICY_ID: 2
-            POLICY_DESCRIPTION: plpd_optimized
-    PROCESS_ISOLATION: N/A
-    NUMA:
-        NODE: 2
-        AFFINITY: 2
-    VRAM:
-        TYPE: HBM
-        VENDOR: N/A
-        SIZE: 64289 MB
-    CACHE_INFO:
-        CACHE_0:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 32 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 348
-        CACHE_1:
-            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-            CACHE_SIZE: 64 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 120
-        CACHE_2:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 4096 KB
-            CACHE_LEVEL: 2
-            MAX_NUM_CU_SHARED: 228
-            NUM_CACHE_INSTANCE: 1
-        CACHE_3:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 262144 KB
-            CACHE_LEVEL: 3
-            MAX_NUM_CU_SHARED: 228
-            NUM_CACHE_INSTANCE: 1
-
-GPU: 3
-    ASIC:
-        MARKET_NAME: MI300A
-        VENDOR_ID: 0x1002
-        VENDOR_NAME: Advanced Micro Devices Inc. [AMD/ATI]
-        SUBVENDOR_ID: 0x1002
-        DEVICE_ID: 0x74a0
-        REV_ID: 0x00
-        ASIC_SERIAL: 0xF4C44C2BE5E66537
-        OAM_ID: 3
-    BUS:
-        BDF: 0003:01:00.0
-        MAX_PCIE_WIDTH: 16
-        MAX_PCIE_SPEED: 32 GT/s
-        PCIE_INTERFACE_VERSION: Gen 5
-        SLOT_TYPE: PCIE
-    VBIOS:
-        NAME: N/A
-        BUILD_DATE: N/A
-        PART_NUMBER: N/A
-        VERSION: N/A
-    LIMIT:
-        MAX_POWER: 550 W
-        MIN_POWER: 0 W
-        SOCKET_POWER: 550 W
-        SLOWDOWN_EDGE_TEMPERATURE: N/A
-        SLOWDOWN_HOTSPOT_TEMPERATURE: 100 °C
-        SLOWDOWN_VRAM_TEMPERATURE: 105 °C
-        SHUTDOWN_EDGE_TEMPERATURE: N/A
-        SHUTDOWN_HOTSPOT_TEMPERATURE: 110 °C
-        SHUTDOWN_VRAM_TEMPERATURE: 115 °C
-    DRIVER:
-        NAME: amdgpu
-        VERSION: 6.9.0-rc5+
-    BOARD:
-        MODEL_NUMBER: N/A
-        PRODUCT_SERIAL: N/A
-        FRU_ID: N/A
-        PRODUCT_NAME: Aqua Vanjaram [Instinct MI300A]
-        MANUFACTURER_NAME: Advanced Micro Devices, Inc. [AMD/ATI]
-    RAS:
-        EEPROM_VERSION: 0x0
-        PARITY_SCHEMA: DISABLED
-        SINGLE_BIT_SCHEMA: DISABLED
-        DOUBLE_BIT_SCHEMA: DISABLED
-        POISON_SCHEMA: ENABLED
-        ECC_BLOCK_STATE:
-            UMC: DISABLED
-            SDMA: ENABLED
-            GFX: ENABLED
-            MMHUB: ENABLED
-            ATHUB: DISABLED
-            PCIE_BIF: DISABLED
-            HDP: DISABLED
-            XGMI_WAFL: DISABLED
-            DF: DISABLED
-            SMN: DISABLED
-            SEM: DISABLED
-            MP0: DISABLED
-            MP1: DISABLED
-            FUSE: DISABLED
-            MCA: DISABLED
-            VCN: DISABLED
-            JPEG: DISABLED
-            IH: DISABLED
-            MPIO: DISABLED
-    PARTITION:
-        COMPUTE_PARTITION: SPX
-        MEMORY_PARTITION: NPS1
-    SOC_PSTATE:
-        NUM_SUPPORTED: 4
-        CURRENT_ID: 1
-        POLICIES:
-            POLICY_ID: 0
-            POLICY_DESCRIPTION: pstate_default
-            POLICY_ID: 1
-            POLICY_DESCRIPTION: soc_pstate_0
-            POLICY_ID: 2
-            POLICY_DESCRIPTION: soc_pstate_1
-            POLICY_ID: 3
-            POLICY_DESCRIPTION: soc_pstate_2
-    XGMI_PLPD:
-        NUM_SUPPORTED: 3
-        CURRENT_ID: 1
-        PLPDS:
-            POLICY_ID: 0
-            POLICY_DESCRIPTION: plpd_disallow
-            POLICY_ID: 1
-            POLICY_DESCRIPTION: plpd_default
-            POLICY_ID: 2
-            POLICY_DESCRIPTION: plpd_optimized
-    PROCESS_ISOLATION: N/A
-    NUMA:
-        NODE: 3
-        AFFINITY: 3
-    VRAM:
-        TYPE: HBM
-        VENDOR: N/A
-        SIZE: 64289 MB
-    CACHE_INFO:
-        CACHE_0:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 32 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 348
-        CACHE_1:
-            CACHE_PROPERTIES: INST_CACHE, SIMD_CACHE
-            CACHE_SIZE: 64 KB
-            CACHE_LEVEL: 1
-            MAX_NUM_CU_SHARED: 2
-            NUM_CACHE_INSTANCE: 120
-        CACHE_2:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 4096 KB
-            CACHE_LEVEL: 2
-            MAX_NUM_CU_SHARED: 228
-            NUM_CACHE_INSTANCE: 1
-        CACHE_3:
-            CACHE_PROPERTIES: DATA_CACHE, SIMD_CACHE
-            CACHE_SIZE: 262144 KB
-            CACHE_LEVEL: 3
-            MAX_NUM_CU_SHARED: 228
-            NUM_CACHE_INSTANCE: 1
-
+...
 ```

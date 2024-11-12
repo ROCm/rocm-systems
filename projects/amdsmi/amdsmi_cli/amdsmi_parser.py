@@ -187,11 +187,19 @@ class AMDSMIParser(argparse.ArgumentParser):
                 valid_clk_types = ('sclk', 'mclk')
                 valid_lim_types = ('min', 'max')
                 clk_type, lim_type, val = values
+
+                # Check if the sclk and mclk parameters are valid
                 if clk_type not in valid_clk_types:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(clk_type, output_format)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(clk_type, output_format)
                 if lim_type not in valid_lim_types:
-                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(lim_type, output_format)
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterException(lim_type, output_format)
+
+                # Check if the val is a valid integer value
+                if not val.isdigit():
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(val, output_format)
                 val = int(val)
+                if val < 0:
+                    raise amdsmi_cli_exceptions.AmdSmiInvalidParameterValueException(val, output_format)
                 clk_limit_args = collections.namedtuple('clk_limit_args', ['clk_type', 'lim_type', 'val'])
                 setattr(namespace, self.dest, clk_limit_args(clk_type, lim_type, val))
         return AMDSMILimitArgs
@@ -567,8 +575,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         # Subparser help text
         list_help = "List GPU information"
-        list_subcommand_help = "Lists all detected devices on the system\
-                            \nLists the BDF, UUID, KFD_ID, and NODE_ID for each GPU and/or CPUs\
+        list_subcommand_help = "Lists all detected devices on the system.\
+                            \nLists the BDF, UUID, KFD_ID, and NODE_ID for each GPU and/or CPUs.\
                             \nIn virtualization environments, it can also list VFs associated to each\
                             \nGPU with some basic information for each VF."
 
@@ -635,10 +643,10 @@ class AMDSMIParser(argparse.ArgumentParser):
             static_parser.add_argument('-c', '--cache', action='store_true', required=False, help=cache_help)
             static_parser.add_argument('-B', '--board', action='store_true', required=False, help=board_help)
             static_parser.add_argument('-R', '--process-isolation', action='store_true', required=False, help=process_isolation_help)
+            static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
 
             # Options to display on Hypervisors and Baremetal
             if self.helpers.is_hypervisor() or self.helpers.is_baremetal():
-                static_parser.add_argument('-r', '--ras', action='store_true', required=False, help=ras_help)
                 static_parser.add_argument('-p', '--partition', action='store_true', required=False, help=partition_help)
                 static_parser.add_argument('-l', '--limit', action='store_true', required=False, help=limit_help)
                 static_parser.add_argument('-P', '--soc-pstate', action='store_true', required=False, help=soc_pstate_help)
@@ -735,7 +743,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         metric_help = "Gets metric/performance information about the specified GPU"
         metric_subcommand_help = "If no GPU is specified, returns metric information for all GPUs on the system.\
-                                \nIf no metric argument is provided all metric information will be displayed."
+                                \nIf no metric argument is provided, all metric information will be displayed."
         metric_optionals_title = "Metric arguments"
 
         # Optional arguments help text
@@ -820,11 +828,12 @@ class AMDSMIParser(argparse.ArgumentParser):
                 metric_parser.add_argument('-c', '--clock', action='store_true', required=False, help=clock_help)
                 metric_parser.add_argument('-t', '--temperature', action='store_true', required=False, help=temperature_help)
                 metric_parser.add_argument('-P', '--pcie', action='store_true', required=False, help=pcie_help)
+                metric_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
+                metric_parser.add_argument('-k', '--ecc-blocks', action='store_true', required=False, help=ecc_blocks_help)
 
             # Options that only apply to Hypervisors and Baremetal Linux
             if self.helpers.is_hypervisor() or (self.helpers.is_baremetal() and self.helpers.is_linux()):
-                metric_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
-                metric_parser.add_argument('-k', '--ecc-blocks', action='store_true', required=False, help=ecc_blocks_help)
+                pass
 
             # Optional Args for Linux Baremetal Systems
             if self.helpers.is_baremetal() and self.helpers.is_linux():
@@ -895,7 +904,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         process_help = "Lists general process information running on the specified GPU"
         process_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
-                                \nIf no process argument is provided all process information will be displayed."
+                                \nIf no process argument is provided, all process information will be displayed."
         process_optionals_title = "Process arguments"
 
         # Optional Arguments help text
@@ -903,7 +912,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         engine_help = "All engine usages"
         pid_help = "Gets all process information about the specified process based on Process ID"
         name_help = "Gets all process information about the specified process based on Process Name.\
-                    \nIf multiple processes have the same name information is returned for all of them."
+                    \nIf multiple processes have the same name, information is returned for all of them."
 
 
         # Create process subparser
@@ -980,7 +989,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         topology_help = "Displays topology information of the devices"
         topology_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
-                                \nIf no topology argument is provided all topology information will be displayed."
+                                \nIf no topology argument is provided, all topology information will be displayed."
         topology_optionals_title = "Topology arguments"
 
         # Help text for Arguments only on Guest and BM platforms
@@ -1031,7 +1040,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_fan_help = "Set GPU fan speed (0-255 or 0-100%%)"
         set_perf_level_help = "Set performance level"
         set_profile_help = "Set power profile level (#) or a quoted string of custom profile attributes"
-        set_perf_det_help = "Set GPU clock frequency limit and performance level to determinism to get minimal performance variation"
+        set_perf_det_help = "Set GPU clock frequency limit and performance level to determinism\n to get minimal performance variation"
         compute_partition_choices_str = ", ".join(self.helpers.get_compute_partition_types())
         memory_partition_choices_str = ", ".join(self.helpers.get_memory_partition_types())
         set_compute_partition_help = f"Set one of the following the compute partition modes:\n\t{compute_partition_choices_str}"
@@ -1039,8 +1048,8 @@ class AMDSMIParser(argparse.ArgumentParser):
         set_power_cap_help = "Set power capacity limit"
         set_soc_pstate_help = "Set the GPU soc pstate policy using policy id\n"
         set_xgmi_plpd_help = "Set the GPU XGMI per-link power down policy using policy id\n"
-        set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies. \nOf form: amd-smi set -L (sclk | mclk) (min | max) value"
-        set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis: 0 for disable and 1 for enable.\n"
+        set_clk_limit_help = "Sets the sclk (aka gfxclk) or mclk minimum and maximum frequencies:\n\tamd-smi set -L (sclk | mclk) (min | max) value"
+        set_process_isolation_help = "Enable or disable the GPU process isolation on a per partition basis:\n\t0 for disable and 1 for enable.\n"
 
         # Help text for CPU set options
         set_cpu_pwr_limit_help = "Set power limit for the given socket. Input parameter is power limit value."
@@ -1169,7 +1178,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_help = "Monitor metrics for target devices"
         monitor_subcommand_help = "Monitor a target device for the specified arguments.\
                                   \nIf no arguments are provided, all arguments will be enabled.\
-                                  \nUse the watch arguments to run continuously"
+                                  \nUse the watch arguments to run continuously."
         monitor_optionals_title = "Monitor Arguments"
 
         # Help text for Arguments only on Guest and BM platforms
@@ -1203,10 +1212,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         monitor_parser.add_argument('-m', '--mem', action='store_true', required=False, help=mem_util_help)
         monitor_parser.add_argument('-n', '--encoder', action='store_true', required=False, help=encoder_util_help)
         monitor_parser.add_argument('-d', '--decoder', action='store_true', required=False, help=decoder_util_help)
-
-        if not self.helpers.is_virtual_os():
-            monitor_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
-
+        monitor_parser.add_argument('-e', '--ecc', action='store_true', required=False, help=ecc_help)
         monitor_parser.add_argument('-v', '--vram-usage', action='store_true', required=False, help=mem_usage_help)
         monitor_parser.add_argument('-r', '--pcie', action='store_true', required=False, help=pcie_bandwidth_help)
         monitor_parser.add_argument('-q', '--process', action='store_true', required=False, help=process_help)
@@ -1266,7 +1272,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         xgmi_help = "Displays xgmi information of the devices"
         xgmi_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
-                                \nIf no xgmi argument is provided all xgmi information will be displayed."
+                                \nIf no xgmi argument is provided, all xgmi information will be displayed."
         xgmi_optionals_title = "XGMI arguments"
 
         # Help text for Arguments only on Guest and BM platforms
@@ -1294,7 +1300,7 @@ class AMDSMIParser(argparse.ArgumentParser):
         # Subparser help text
         partition_help = "Displays partition information of the devices"
         partition_subcommand_help = "If no GPU is specified, returns information for all GPUs on the system.\
-                                \nIf no partition argument is provided all partition information will be displayed."
+                                \nIf no partition argument is provided, all partition information will be displayed."
         partition_optionals_title = "partition arguments"
 
         # Options help text

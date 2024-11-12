@@ -311,6 +311,8 @@ class AMDSMICommands():
             args.board = board
         if driver:
             args.driver = driver
+        if ras:
+            args.ras = ras
         if vram:
             args.vram = vram
         if cache:
@@ -319,14 +321,12 @@ class AMDSMICommands():
             args.process_isolation = process_isolation
 
         # Store args that are applicable to the current platform
-        current_platform_args = ["asic", "bus", "vbios", "driver",
+        current_platform_args = ["asic", "bus", "vbios", "driver", "ras",
                                  "vram", "cache", "board", "process_isolation"]
-        current_platform_values = [args.asic, args.bus, args.vbios, args.driver,
+        current_platform_values = [args.asic, args.bus, args.vbios, args.driver, args.ras,
                                    args.vram, args.cache, args.board, args.process_isolation]
 
         if self.helpers.is_linux() and self.helpers.is_baremetal():
-            if ras:
-                args.ras = ras
             if partition:
                 args.partition = partition
             if limit:
@@ -336,8 +336,7 @@ class AMDSMICommands():
             if xgmi_plpd:
                 args.xgmi_plpd = xgmi_plpd
             current_platform_args += ["ras", "limit", "partition", "soc_pstate", "xgmi_plpd"]
-            current_platform_values += [args.ras, args.limit, args.partition,
-                                        args.soc_pstate, args.xgmi_plpd]
+            current_platform_values += [args.ras, args.limit, args.partition, args.soc_pstate, args.xgmi_plpd]
 
         if self.helpers.is_linux() and not self.helpers.is_virtual_os():
             if numa:
@@ -1250,17 +1249,13 @@ class AMDSMICommands():
                 args.temperature = temperature
             if pcie:
                 args.pcie = pcie
-            current_platform_args += ["usage", "power", "clock", "temperature", "pcie"]
-            current_platform_values += [args.usage, args.power, args.clock,
-                                        args.temperature, args.pcie]
-
-        # Only args that are applicable to Hypervisors and BM Linux
-        if self.helpers.is_hypervisor() or (self.helpers.is_baremetal() and self.helpers.is_linux()):
             if ecc:
                 args.ecc = ecc
             if ecc_blocks:
                 args.ecc_blocks = ecc_blocks
-            current_platform_args += ["ecc", "ecc_blocks"]
+            current_platform_args += ["usage", "power", "clock", "temperature", "pcie", "ecc", "ecc_blocks"]
+            current_platform_values += [args.usage, args.power, args.clock,
+                                        args.temperature, args.pcie]
             current_platform_values += [args.ecc, args.ecc_blocks]
 
         if self.helpers.is_baremetal() and self.helpers.is_linux():
@@ -4035,16 +4030,47 @@ class AMDSMICommands():
                     raise ValueError(f"Unable to set XGMI policy to {args.xgmi_plpd} on {gpu_string}") from e
                 self.logger.store_output(args.gpu, 'xgmiplpd', f"Successfully set per-link power down policy to id {args.xgmi_plpd}")
             if isinstance(args.clk_limit, tuple):
+                clk_type = args.clk_limit.clk_type
+                lim_type = args.clk_limit.lim_type
+                val = args.clk_limit.val
+                val_changed = True # Assume Clock limit value is changed
+
+                # Validate the value against the extremum
                 try:
-                    clk_type = args.clk_limit.clk_type
-                    lim_type = args.clk_limit.lim_type
-                    val = args.clk_limit.val
-                    amdsmi_interface.amdsmi_set_gpu_clk_limit(args.gpu, clk_type, lim_type, val)
+                    # Parser only allows two options sclk or mclk
+                    if clk_type == "sclk":
+                        amdsmi_clk_type =  amdsmi_interface.AmdSmiClkType.GFX
+                    elif clk_type == "mclk":
+                        amdsmi_clk_type =  amdsmi_interface.AmdSmiClkType.MEM
+                    clk_tuple = amdsmi_interface.amdsmi_get_clock_info(args.gpu, amdsmi_clk_type)
+
+                    if lim_type == "min":
+                        if val > clk_tuple['max_clk']:
+                            raise IndexError("cannot set min value greater than max")
+                        if val == clk_tuple['min_clk']:
+                            val_changed = False # Clock limit value did not changed
+
+                    if lim_type == "max":
+                        if val < clk_tuple['min_clk']:
+                            raise IndexError("cannot set max value less than min")
+                        if val == clk_tuple['max_clk']:
+                            val_changed = False # Clock limit value did not changed
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("Failed to get clock extremum info for gpu %s | %s", gpu_id, e.get_error_info())
+
+                # Set the value
+                try:
+                    if val_changed:
+                        amdsmi_interface.amdsmi_set_gpu_clk_limit(args.gpu, clk_type, lim_type, val)
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     if e.get_error_code() == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM:
                         raise PermissionError('Command requires elevation') from e
                     raise ValueError(f"Unable to set {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val} on {gpu_string}") from e
-                self.logger.store_output(args.gpu, 'clk_limit', f"Successfully changed {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}")
+
+                if val_changed:
+                    self.logger.store_output(args.gpu, 'clk_limit', f"Successfully changed {args.clk_limit.lim_type} of {args.clk_limit.clk_type} to {args.clk_limit.val}")
+                else:
+                    self.logger.store_output(args.gpu, 'clk_limit', f"Clock limit is already set to {args.clk_limit.val}")
 
         if isinstance(args.process_isolation, int):
             status_string = "Enabled" if args.process_isolation else "Disabled"
@@ -4492,22 +4518,6 @@ class AMDSMICommands():
         # Handle No GPU passed
         if args.gpu == None:
             args.gpu = self.device_handles
-
-        # handle platform for ecc
-        if self.helpers.is_virtual_os():
-            args.ecc = False
-            if not any([args.power_usage, args.temperature, args.gfx, args.mem,
-                    args.encoder, args.decoder, args.vram_usage, args.pcie, args.violation]):
-                args.power_usage = args.temperature = args.gfx = args.mem = \
-                args.encoder = args.decoder = \
-                args.vram_usage = args.pcie = args.violation = True
-        else:
-            if not any([args.power_usage, args.temperature, args.gfx, args.mem,
-                    args.encoder, args.decoder, args.ecc,
-                    args.vram_usage, args.pcie, args.violation]):
-                args.power_usage = args.temperature = args.gfx = args.mem = \
-                args.encoder = args.decoder = args.ecc = \
-                args.vram_usage = args.pcie = args.violation = True
 
         # If all arguments are False, the print all values
         # Don't include process in this logic as it's an optional edge case

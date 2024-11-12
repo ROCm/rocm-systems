@@ -4,29 +4,57 @@
 # list see the documentation:
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
-import subprocess
+import re
+import shutil
 
-from rocm_docs import ROCmDocs
+# get version number to print in docs
+def get_version_info(filepath):
+    with open(filepath, 'r') as f:
+        content = f.read()
 
-get_version_year = r'sed -n -e "s/^#define\ AMDSMI_LIB_VERSION_YEAR\ //p" ../include/amd_smi/amdsmi.h'
-get_version_major = r'sed -n -e "s/^#define\ AMDSMI_LIB_VERSION_MAJOR\ //p" ../include/amd_smi/amdsmi.h'
-get_version_minor = r'sed -n -e "s/^#define\ AMDSMI_LIB_VERSION_MINOR\ //p" ../include/amd_smi/amdsmi.h'
-get_version_release = r'sed -n -e "s/^#define\ AMDSMI_LIB_VERSION_RELEASE\ //p" ../include/amd_smi/amdsmi.h'
-version_year = subprocess.getoutput(get_version_year)
-version_major = subprocess.getoutput(get_version_major)
-version_minor = subprocess.getoutput(get_version_minor)
-version_release = subprocess.getoutput(get_version_release)
-name = f"AMD SMI {version_year}.{version_major}.{version_minor}.{version_release}"
+    version_pattern = (
+        r'^#define\s+AMDSMI_LIB_VERSION_YEAR\s+(\d+)\s*$|'
+        r'^#define\s+AMDSMI_LIB_VERSION_MAJOR\s+(\d+)\s*$|'
+        r'^#define\s+AMDSMI_LIB_VERSION_MINOR\s+(\d+)\s*$|'
+        r'^#define\s+AMDSMI_LIB_VERSION_RELEASE\s+(\d+)\s*$'
+    )
 
+    matches = re.findall(version_pattern, content, re.MULTILINE)
+
+    if len(matches) == 4:
+        version_year, version_major, version_minor, version_release = [
+            match for match in matches if any(match)
+        ]
+        return version_year[0], version_major[1], version_minor[2], version_release[3]
+    else:
+        raise ValueError("Couldn't find all VERSION numbers.")
+
+# copy changelog to docs/
+shutil.copy2("../CHANGELOG.md", "./reference/changelog.md")
+
+version_year, version_major, version_minor, version_release = get_version_info('../include/amd_smi/amdsmi.h')
+version_number = f"{version_year}.{version_major}.{version_minor}.{version_release}"
+
+# project info
+project = "AMD SMI"
+author = "Advanced Micro Devices, Inc."
+copyright = "Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved."
+version = version_number
+release = version_number
+
+html_theme = "rocm_docs_theme"
+html_theme_options = {"flavor": "rocm"}
+html_title = f"AMD SMI {version_number} documentation"
+exclude_patterns = ["rocm-smi-lib"]
+suppress_warnings = ["etoc.toctree"]
 external_toc_path = "./sphinx/_toc.yml"
 
-docs_core = ROCmDocs(f"{name} Documentation")
-docs_core.run_doxygen(doxygen_root="doxygen", doxygen_path="doxygen/docBin/xml")
-docs_core.enable_api_reference()
-docs_core.setup()
-docs_core.html_theme_options = {
-    "repository_url": "https://github.com/RadeonOpenCompute/amdsmi"
-}
+external_projects_current_project = "amdsmi"
+extensions = ["rocm_docs", "rocm_docs.doxygen"]
 
-for sphinx_var in ROCmDocs.SPHINX_VARS:
-    globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+doxygen_root = "doxygen"
+doxysphinx_enabled = True
+doxygen_project = {
+    "name": "AMD SMI C++ API reference",
+    "path": "doxygen/docBin/xml",
+}

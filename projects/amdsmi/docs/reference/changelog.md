@@ -6,10 +6,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 6.3.0
 
-### Added
-
-- **Added support for `amd-smi metric --ecc` & `amd-smi metric --ecc-blocks` on Guest VMs**.
-Guest VMs now support getting current ECC counts and ras information from the Host cards.
+### Changes
 
 - **Added support for GPU metrics 1.6 to `amdsmi_get_gpu_metrics_info()`**.  
 Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to include new fields for PVIOL / TVIOL,  XCP (Graphics Compute Partitions) stats, and pcie_lc_perf_other_end_recovery:  
@@ -37,44 +34,41 @@ Updated `amdsmi_get_gpu_metrics_info()` and structure `amdsmi_gpu_metrics_t` to 
 $ amd-smi metric --throttle
 GPU: 0
     THROTTLE:
-        ACCUMULATION_COUNTER: 3808991
+        ACCUMULATION_COUNTER: 1226415116
         PROCHOT_ACCUMULATED: 0
-        PPT_ACCUMULATED: 585613
-        SOCKET_THERMAL_ACCUMULATED: 2190
+        PPT_ACCUMULATED: 12
+        SOCKET_THERMAL_ACCUMULATED: 0
         VR_THERMAL_ACCUMULATED: 0
         HBM_THERMAL_ACCUMULATED: 0
-        PROCHOT_VIOLATION_STATUS: NOT ACTIVE
-        PPT_VIOLATION_STATUS: NOT ACTIVE
-        SOCKET_THERMAL_VIOLATION_STATUS: NOT ACTIVE
-        VR_THERMAL_VIOLATION_STATUS: NOT ACTIVE
-        HBM_THERMAL_VIOLATION_STATUS: NOT ACTIVE
-        PROCHOT_VIOLATION_ACTIVITY: 0 %
-        PPT_VIOLATION_ACTIVITY: 0 %
-        SOCKET_THERMAL_VIOLATION_ACTIVITY: 0 %
-        VR_THERMAL_VIOLATION_ACTIVITY: 0 %
-        HBM_THERMAL_VIOLATION_ACTIVITY: 0 %
-
-
+        PROCHOT_VIOLATION_ACTIVE: NOT ACTIVE
+        PPT_VIOLATION_ACTIVE: NOT ACTIVE
+        SOCKET_THERMAL_VIOLATION_ACTIVE: NOT ACTIVE
+        VR_THERMAL_VIOLATION_ACTIVE: NOT ACTIVE
+        HBM_THERMAL_VIOLATION_ACTIVE: NOT ACTIVE
+        PROCHOT_VIOLATION_PERCENT: 0 %
+        PPT_VIOLATION_PERCENT: 0 %
+        SOCKET_THERMAL_VIOLATION_PERCENT: 0 %
+        VR_THERMAL_VIOLATION_PERCENT: 0 %
+        HBM_THERMAL_VIOLATION_PERCENT: 0 %
 
 GPU: 1
     THROTTLE:
-        ACCUMULATION_COUNTER: 3806335
+        ACCUMULATION_COUNTER: 1226415121
         PROCHOT_ACCUMULATED: 0
-        PPT_ACCUMULATED: 586332
-        SOCKET_THERMAL_ACCUMULATED: 18010
+        PPT_ACCUMULATED: 12
+        SOCKET_THERMAL_ACCUMULATED: 0
         VR_THERMAL_ACCUMULATED: 0
         HBM_THERMAL_ACCUMULATED: 0
-        PROCHOT_VIOLATION_STATUS: NOT ACTIVE
-        PPT_VIOLATION_STATUS: NOT ACTIVE
-        SOCKET_THERMAL_VIOLATION_STATUS: NOT ACTIVE
-        VR_THERMAL_VIOLATION_STATUS: NOT ACTIVE
-        HBM_THERMAL_VIOLATION_STATUS: NOT ACTIVE
-        PROCHOT_VIOLATION_ACTIVITY: 0 %
-        PPT_VIOLATION_ACTIVITY: 0 %
-        SOCKET_THERMAL_VIOLATION_ACTIVITY: 0 %
-        VR_THERMAL_VIOLATION_ACTIVITY: 0 %
-        HBM_THERMAL_VIOLATION_ACTIVITY: 0 %
-
+        PROCHOT_VIOLATION_ACTIVE: NOT ACTIVE
+        PPT_VIOLATION_ACTIVE: NOT ACTIVE
+        SOCKET_THERMAL_VIOLATION_ACTIVE: NOT ACTIVE
+        VR_THERMAL_VIOLATION_ACTIVE: NOT ACTIVE
+        HBM_THERMAL_VIOLATION_ACTIVE: NOT ACTIVE
+        PROCHOT_VIOLATION_PERCENT: 0 %
+        PPT_VIOLATION_PERCENT: 0 %
+        SOCKET_THERMAL_VIOLATION_PERCENT: 0 %
+        VR_THERMAL_VIOLATION_PERCENT: 0 %
+        HBM_THERMAL_VIOLATION_PERCENT: 0 %
 ...
 ```
 
@@ -294,6 +288,19 @@ GPU: 1
 ...
 ```
 
+- **Updated BDF commands to look use KFD SYSFS for BDF: `amdsmi_get_gpu_device_bdf()`**.  
+This aligns BDF output with ROCm SMI.
+See below for overview as seen from `rsmi_dev_pci_id_get()` now provides partition ID. See API for better detail. Previously these bits were reserved bits (right before domain) and partition id was within function.
+  - bits [63:32] = domain
+  - bits [31:28] = partition id
+  - bits [27:16] = reserved
+  - bits [15: 0] = pci bus/device/function
+
+- **Moved python tests directory path install location**.  
+  - `/opt/<rocm-path>/share/amd_smi/pytest/..` to `/opt/<rocm-path>/share/amd_smi/tests/python_unittest/..`
+  - On amd-smi-lib-tests uninstall, the amd_smi tests folder is removed.
+  - Removed pytest dependency, our python testing now only depends on the unittest framework.
+
 - **Added retrieving a set of GPUs that are nearest to a given device at a specific link type level**.  
   - Added `amdsmi_get_link_topology_nearest()` function to amd-smi C and Python Libraries.
 
@@ -495,22 +502,7 @@ GPU: 0
         TARGET_GRAPHICS_VERSION: gfx942
 ```
 
-### Changed
-
-- **Updated BDF commands to look use KFD SYSFS for BDF: `amdsmi_get_gpu_device_bdf()`**.  
-This aligns BDF output with ROCm SMI.
-See below for overview as seen from `rsmi_dev_pci_id_get()` now provides partition ID. See API for better detail. Previously these bits were reserved bits (right before domain) and partition id was within function.
-  - bits [63:32] = domain
-  - bits [31:28] = partition id
-  - bits [27:16] = reserved
-  - bits [15: 0] = pci bus/device/function
-
-- **Moved python tests directory path install location**.  
-  - `/opt/<rocm-path>/share/amd_smi/pytest/..` to `/opt/<rocm-path>/share/amd_smi/tests/python_unittest/..`
-  - On amd-smi-lib-tests uninstall, the amd_smi tests folder is removed
-  - Removed pytest dependency, our python testing now only depends on the unittest framework.
-
-- **Updated Partition APIs and struct information and added and partition_id to `amd-smi static --partition`**.
+- **Udpated Partition APIs and struct information and added and partition_id to `amd-smi static --partition`**.  
   - As part of an overhaul to partition information, some partition information will be made available in the `amdsmi_accelerator_partition_profile_t`.
   - This struct will be filled out by a new API, `amdsmi_get_gpu_accelerator_partition_profile()`.
   - Future data from these APIs wil will eventually get added to `amd-smi partition`.
@@ -574,23 +566,17 @@ GPU: 0
         PARTITION_ID: 0
 ```
 
-### Removed
-
-- **Removed `amd-smi reset --compute-partition` and `... --memory-partition` and associated APIs**.  
-  - This change is part of the partition redesign. Reset functionality will be reintroduced in a later update.
-  - associated APIs include `amdsmi_reset_gpu_compute_partition()` and `amdsmi_reset_gpu_memory_partition()`
+### Removals
 
 - **Removed usage of _validate_positive in Parser and replaced with _positive_int and _not_negative_int as appropriate**.  
   - This will allow 0 to be a valid input for several options in setting CPUs where appropriate (for example, as a mode or NBIOID)
 
-### Optimized
+### Optimizations
 
 - **Adjusted ordering of gpu_metrics calls to ensure that pcie_bw values remain stable in `amd-smi metric` & `amd-smi monitor`**.  
   - With this change additional padding was added to PCIE_BW `amd-smi monitor --pcie`
 
 ### Resolved issues
-
-- **Fixed `amd-smi reset` commands showing an AttributeError**.  
 
 - **Improved Offline install process & lowered dependency for PyYAML**.  
 
@@ -649,36 +635,13 @@ GPU  POWER  GPU_TEMP  MEM_TEMP  VRAM_USED  VRAM_TOTAL
 
 - **`amdsmitst` TestGpuMetricsRead now prints metric in correct units**.  
 
+### Known issues
+
+- N/A
+
 ### Upcoming changes
 
 - **Python API for `amdsmi_get_energy_count()` will deprecate the `power` field in ROCm 6.4 and use `energy_accumulator` field instead**.  
-
-- **New memory and compute partition APIs incoming for ROCm 6.4**.  
-  - These APIs will be updated to fully populate the CLI and allowing compute (accelerator) partitions to be set by profile ID.
-  - One API will be provided, to reset both memory and compute (accelerator).
-    - There are dependencies regarding available compute partitions when in other memory modes.
-    - Driver will be providing these default modes
-    - Memory partition resets (for BM) require driver reloads - this will allow us to notify users before taking this action, then change to the default compute partition modes.
-  - The following APIs will remain:
-
-```C
-amdsmi_status_t
-amdsmi_set_gpu_compute_partition(amdsmi_processor_handle processor_handle,
-                                  amdsmi_compute_partition_type_t compute_partition);
-amdsmi_status_t
-amdsmi_get_gpu_compute_partition(amdsmi_processor_handle processor_handle,
-                                  char *compute_partition, uint32_t len);
-amdsmi_status_t
-amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processor_handle,
-
-                                  char *memory_partition, uint32_t len);
-amdsmi_status_t
-amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
-                                  amdsmi_memory_partition_type_t memory_partition);
-```
-
-- **amd-smi set --compute-partition "SPX/DPX/CPX..." will no longer be supported for ROCm 6.4**.  
-  - This is due to aligning with Host setups and providing more robust partition information through the APIs outlined above. Furthermore, new APIs which will be available on both BM/Host can set by profile ID. (functionality coming soon!)
 
 - **Added preliminary `amd-smi partition` command**.  
   - The new partition command can be used to display GPU information, including memory and accelerator partition information.
@@ -686,7 +649,7 @@ amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
 
 ## amd_smi_lib for ROCm 6.2.1
 
-### Added
+### Additions
 
 - **Removed `amd-smi metric --ecc` & `amd-smi metric --ecc-blocks` on Guest VMs**.
 Guest VMs do not support getting current ECC counts from the Host cards.
@@ -694,7 +657,11 @@ Guest VMs do not support getting current ECC counts from the Host cards.
 - **Added `amd-smi static --ras`on Guest VMs**.
 Guest VMs can view enabled/disabled ras features that are on Host cards.
 
-### Resolved issues
+### Optimizations
+
+- N/A
+
+### Fixes
 
 - **Fixed TypeError in `amd-smi process -G`**.  
 
@@ -704,9 +671,13 @@ Guest VMs can view enabled/disabled ras features that are on Host cards.
 
 - **Fixed firmware formatting where leading 0s were missing**.
 
+### Known Issues
+
+- N/A
+
 ## amd_smi_lib for ROCm 6.2.0
 
-### Added
+### Additions
 
 - **`amd-smi dmon` is now available as an alias to `amd-smi monitor`**.  
 
@@ -740,7 +711,7 @@ Added macros to reference max size limitations for certain amdsmi functions such
 - **Added Ring Hang event**.  
 Added `AMDSMI_EVT_NOTIF_RING_HANG` to the possible events in the `amdsmi_evt_notification_type_t` enum.
 
-### Optimized
+### Optimizations
 
 - **Updated CLI error strings to specify invalid device type queried**
 
@@ -843,7 +814,7 @@ GPU: 0
 Updated sizes that work for retreiving relavant board information across AMD's
 ASIC products. This requires users to update any ABIs using this structure.
 
-### Resolved issues
+### Fixes
 
 - **Fixed Leftover Mutex deadlock when running multiple instances of the CLI tool**.  
 When running `amd-smi reset --gpureset --gpu all` and then running an instance of `amd-smi static` (or any other subcommand that access the GPUs) a mutex would lock and not return requiring either a clear of the mutex in /dev/shm or rebooting the machine.
@@ -893,13 +864,13 @@ structures data members which cannot be populated. Ensuring empty char string va
 - **Fixed parsing of `pp_od_clk_voltage` within `amdsmi_get_gpu_od_volt_info`**.  
 The parsing of `pp_od_clk_voltage` was not dynamic enough to work with the dropping of voltage curve support on MI series cards. This propagates down to correcting the CLI's output `amd-smi metric --voltage-curve` to N/A if voltage curve is not enabled.
 
-### Known issues
+### Known Issues
 
 - **`amdsmi_get_gpu_process_isolation` and `amdsmi_clean_gpu_local_data` commands do no currently work and will be supported in a future release**.  
 
 ## amd_smi_lib for ROCm 6.1.2
 
-### Added
+### Additions
 
 - **Added process isolation and clean shader APIs and CLI commands**.  
 Added APIs CLI and APIs to address LeftoverLocals security issues. Allowing clearing the sram data and setting process isolation on a per GPU basis. New APIs:
@@ -937,7 +908,7 @@ GPU: 1
         SHUTDOWN_VRAM_TEMPERATURE: 105 °C
 ```
 
-### Optimized
+### Optimizations
 
 - **Updated `amd-smi monitor --pcie` output**.  
 The source for pcie bandwidth monitor output was a legacy file we no longer support and was causing delays within the monitor command. The output is no longer using TX/RX but instantaneous bandwidth from gpu_metrics instead; updated output:
@@ -994,7 +965,7 @@ GPU: 0
 - **Removed `amdsmi_get_gpu_process_info` from Python library**.  
 amdsmi_get_gpu_process_info was removed from the C library in an earlier build, but the API was still in the Python interface.
 
-### Resolved issues
+### Fixes
 
 - **Fixed `amd-smi metric --power` now provides power output for Navi2x/Navi3x/MI1x**.  
 These systems use an older version of gpu_metrics in amdgpu. This fix only updates what CLI outputs.
@@ -1027,9 +998,13 @@ Updates required `amdsmi_get_power_cap_info` to return in uW as originally refle
 - **Fixed Python interface call amdsmi_get_gpu_memory_reserved_pages & amdsmi_get_gpu_bad_page_info**.  
 Previously Python interface calls to populated bad pages resulted in a `ValueError: NULL pointer access`. This fixes the bad-pages subcommand CLI  subcommand as well.
 
+### Known Issues
+
+- N/A
+
 ## amd_smi_lib for ROCm 6.1.1
 
-### Changed
+### Changes
 
 - **Updated metrics --clocks**.  
 Output for `amd-smi metric --clock` is updated to reflect each engine and bug fixes for the clock lock status and deep sleep status.
@@ -1299,7 +1274,7 @@ $ /opt/rocm/bin/amd-smi topology -a -t --json
 ]
 ```
 
-### Resolved issues
+### Fixes
 
 - **Fix for GPU reset error on non-amdgpu cards**.  
 Previously our reset could attempting to reset non-amd GPUS- resuting in "Unable to reset non-amd GPU" error. Fix
@@ -1321,7 +1296,7 @@ Fixed Attribute Error when getting process in csv format
 
 ## amd_smi_lib for ROCm 6.1.0
 
-### Added
+### Additions
 
 - **Added Monitor Command**.  
 Provides users the ability to customize GPU metrics to capture, collect, and observe. Output is provided in a table view. This aligns closer to ROCm SMI `rocm-smi` (no argument), additionally allows uers to customize what data is helpful for their use-case.
@@ -1645,7 +1620,7 @@ amd-smi metric -p --json
 ]
 ```
 
-### Changed
+### Changes
 
 - **Topology is now left-aligned with BDF of each device listed individual table's row/coloumns**.  
 We provided each device's BDF for every table's row/columns, then left aligned data. We want AMD SMI Tool output to be easy to understand and digest for our users. Having users scroll up to find this information made it difficult to follow, especially for devices which have many devices associated with one ASIC.
@@ -1708,7 +1683,7 @@ NUMA BW TABLE:
 0000:df:00.0 50000-50000  50000-50000  50000-50000  50000-50000  50000-50000  50000-50000  50000-50000  N/A
 ```
 
-### Resolved issues
+### Fixes
 
 - **Fix for Navi3X/Navi2X/MI100 `amdsmi_get_gpu_pci_bandwidth()` in frequencies_read tests**.  
 Devices which do not report (eg. Navi3X/Navi2X/MI100) we have added checks to confirm these devices return AMDSMI_STATUS_NOT_SUPPORTED. Otherwise, tests now display a return string.
@@ -1729,7 +1704,7 @@ AMD SMI now uses same mutex handler for devices as rocm-smi. This helps avoid cr
 
 ## amd_smi_lib for ROCm 6.0.0
 
-### Added
+### Additions
 
 - **Integrated the E-SMI (EPYC-SMI) library**.  
 You can now query CPU-related information directly through AMD SMI. Metrics include power, energy, performance, and other system details.
@@ -1740,7 +1715,11 @@ You can now query MI300 device metrics to get real-time information. Metrics inc
 - **Compute and memory partition support**.  
 Users can now view, set, and reset partitions. The topology display can provide a more in-depth look at the device's current configuration.
 
-### Changed
+### Optimizations
+
+- Updated to C++17, gtest-1.14, and cmake 3.14
+
+### Changes
 
 - **GPU index sorting made consistent with other tools**.  
 To ensure alignment with other ROCm software tools, GPU index sorting is optimized to use Bus:Device.Function (BDF) rather than the card number.
@@ -1748,11 +1727,7 @@ To ensure alignment with other ROCm software tools, GPU index sorting is optimiz
 Earlier versions of the topology output were difficult to read since each GPU was displayed linearly.
 Now the information is displayed as a table by each GPU's BDF, which closer resembles rocm-smi output.
 
-### Optimized
-
-- Updated to C++17, gtest-1.14, and cmake 3.14
-
-### Resolved issues
+### Fixes
 
 - **Fix for driver not initialized**.  
 If driver module is not loaded, user retrieve error reponse indicating amdgpu module is not loaded.

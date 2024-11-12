@@ -1,73 +1,20 @@
-# AMD SMI Python Library
+---
+myst:
+  html_meta:
+    "description lang=en": "Explore the AMD SMI Python API."
+    "keywords": "api, smi, lib, py, system, management, interface, ROCm"
+---
 
-## Requirements
+# AMD SMI Python API reference
 
-* Python 3.6+ 64-bit
-* Driver must be loaded for amdsmi_init() to pass
+The AMD SMI Python interface provides a convenient way to interact with AMD
+hardware through a simple and accessible API. Compatible with Python 3.6 and
+higher, this library requires the AMD driver to be loaded for initialization --
+review the [prerequisites](#install_reqs).
 
-## Overview
-
-### Folder structure
-
-File Name | Note
----|---
-`__init__.py` | Python package initialization file
-`amdsmi_interface.py` | Amdsmi library python interface
-`amdsmi_wrapper.py` | Python wrapper around amdsmi binary
-`amdsmi_exception.py` | Amdsmi exceptions python file
-`README.md` | Documentation
-
-### Usage
-
-`amdsmi` folder should be copied and placed next to importing script. It should be imported as:
-
-```python
-from amdsmi import *
-
-try:
-    amdsmi_init()
-
-    # amdsmi calls ...
-
-except AmdSmiException as e:
-    print(e)
-finally:
-    try:
-        amdsmi_shut_down()
-    except AmdSmiException as e:
-        print(e)
-```
-
-To initialize amdsmi lib, amdsmi_init() must be called before all other calls to amdsmi lib.
-
-To close connection to driver, amdsmi_shut_down() must be the last call.
-
-### Exceptions
-
-All exceptions are in `amdsmi_exception.py` file.
-Exceptions that can be thrown are:
-
-* `AmdSmiException`: base amdsmi exception class
-* `AmdSmiLibraryException`: derives base `AmdSmiException` class and represents errors that can occur in amdsmi-lib.
-When this exception is thrown, `err_code` and `err_info` are set. `err_code` is an integer that corresponds to errors that can occur
-in amdsmi-lib and `err_info` is a string that explains the error that occurred.
-Example:
-
-```python
-try:
-    num_of_GPUs = len(amdsmi_get_processor_handles())
-    if num_of_GPUs == 0:
-        print("No GPUs on machine")
-except AmdSmiException as e:
-    print("Error code: {}".format(e.err_code))
-    if e.err_code == amdsmi_wrapper.AMDSMI_STATUS_RETRY:
-        print("Error info: {}".format(e.err_info))
-```
-
-* `AmdSmiRetryException` : Derives `AmdSmiLibraryException` class and signals device is busy and call should be retried.
-* `AmdSmiTimeoutException` : Derives `AmdSmiLibraryException` class and represents that call had timed out.
-* `AmdSmiParameterException`: Derives base `AmdSmiException` class and represents errors related to invaild parameters passed to functions. When this exception is thrown, err_msg is set and it explains what is the actual and expected type of the parameters.
-* `AmdSmiBdfFormatException`: Derives base `AmdSmiException` class and represents invalid bdf format.
+This section provides comprehensive documentation for the AMD SMI Python API.
+Explore these sections to understand the full scope of available functionalities
+and how to implement them in your applications.
 
 ## API
 
@@ -497,6 +444,7 @@ Field | Description
 `vram_type` |  vram type
 `vram_vendor` |  vram vendor
 `vram_size` |  vram size in mb
+`vram_bit_width` | vram bit width
 
 Exceptions that can be thrown by `amdsmi_get_gpu_vram_info` function:
 
@@ -517,6 +465,7 @@ try:
             print(vram_info['vram_type'])
             print(vram_info['vram_vendor'])
             print(vram_info['vram_size'])
+            print(vram_info['vram_bit_width'])
 except AmdSmiException as e:
     print(e)
 ```
@@ -532,17 +481,17 @@ Input parameters:
 Output: List of Dictionaries containing cache information following the schema below:
 Schema:
 
-```JSON
+```json
 {
-    cache_properties:
+    "cache_properties":
         {
             "type" : "array",
             "items" : {"type" : "string"}
         },
-    cache_size: {"type" : "number"},
-    cache_level: {"type" : "number"},
-    max_num_cu_shared: {"type" : "number"},
-    num_cache_instance: {"type" : "number"}
+    "cache_size": {"type" : "number"},
+    "cache_level": {"type" : "number"},
+    "max_num_cu_shared": {"type" : "number"},
+    "num_cache_instance": {"type" : "number"}
 }
 ```
 
@@ -2102,6 +2051,7 @@ except AmdSmiException as e:
 ```
 
 ### amdsmi_set_gpu_process_isolation
+
 Description: Enable/disable the system Process Isolation for the given device handle.
 
 Input parameters:
@@ -2132,6 +2082,7 @@ except AmdSmiException as e:
 ```
 
 ### amdsmi_clean_gpu_local_data
+
 Description: Clear the SRAM data of the given device. This can be called between user logins to prevent information leak.
 
 Input parameters:
@@ -2159,7 +2110,6 @@ try:
 except AmdSmiException as e:
     print(e)
 ```
-
 
 ### amdsmi_get_gpu_overdrive_level
 
@@ -2392,6 +2342,78 @@ try:
     else:
         for device in devices:
             amdsmi_get_gpu_metrics_info(dev)
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_gpu_pm_metrics_info
+
+Description: This function will retreive the name and value for each
+item in the pm metrics table with the given processor handle.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+
+Output: List containing dictionaries of pm metrics and their values
+
+Field | Description
+---|---
+`name` | name of PM metric
+`value` | value of pm metric
+
+Exceptions that can be thrown by `amdsmi_get_gpu_pm_metrics_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print(amdsmi_get_gpu_pm_metrics_info(device))
+except AmdSmiException as e:
+    print(e)
+```
+
+### amdsmi_get_gpu_reg_table_info
+
+Description: This function will retrieve register metrics table with provided device index and register type.
+
+Input parameters:
+
+* `processor_handle` handle for the given device
+* `reg_type` register type
+
+Output: List containing dictionaries of register metrics and their values
+
+Field | Description
+---|---
+`name` | name of register metric
+`value` | value of register metric
+
+Exceptions that can be thrown by `amdsmi_get_gpu_reg_table_info` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            print(amdsmi_get_gpu_reg_table_info(device, AmdSmiRegType.PCIE))
 except AmdSmiException as e:
     print(e)
 ```
@@ -3607,6 +3629,45 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_P2P_status
+
+Description: Retrieve the connection type and P2P capabilities between 2 GPUs
+
+Input parameters:
+
+* `processor_handle_src` the source device handle
+* `processor_handle_dest` the destination device handle
+
+Output:  Dictionary with fields:
+
+Fields | Description
+---|---
+`type` | AmdSmiIoLinkType
+`cap` | <table><thead><tr> <th> Subfield </th> <th> Description</th> </tr></thead><tbody><tr><td>`is_iolink_coherent`</td><td>1 == True; 0 == False; Uint_max = Undefined</td></tr><tr><td>`is_iolink_atomics_32bit`</td><td>Supports 32bit atomics</td></tr><tr><td>`is_iolink_atomics_64bit`</td><td>Supports 64bit atomics</td></tr><tr><td>`is_iolink_dma`</td><td>Supports DMA</td></tr><tr><td>`is_iolink_bi_directional`</td><td>Is the IOLink Bidirectional</td></tr></tbody></table>
+
+Exceptions that can be thrown by `amdsmi_get_P2P_status` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        processor_handle_src = devices[0]
+        processor_handle_dest = devices[1]
+        link_type = amdsmi_get_P2P_status(processor_handle_src, processor_handle_dest)
+        print(link_type['type'])
+        print(link_type['caps'])
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_is_P2P_accessible
 
 Description: Return P2P availability status between 2 GPUs
@@ -3767,6 +3828,44 @@ except AmdSmiException as e:
     print(e)
 ```
 
+### amdsmi_get_gpu_accelerator_partition_profile
+
+**Note: CURRENTLY HARDCODED TO RETURN EMPTY VALUES**
+
+Description: Get partition information for target device
+
+Input parameters:
+
+* `processor_handle` the device handle
+
+Output:  Dictionary with fields:
+
+Field | Description
+---|---
+`partition_id` | ID of the partition on the GPU provided
+`partition_profile` | Dict containing partition data (TBD)
+
+Exceptions that can be thrown by `amdsmi_get_gpu_accelerator_partition_profile` function:
+
+* `AmdSmiLibraryException`
+* `AmdSmiRetryException`
+* `AmdSmiParameterException`
+
+Example:
+
+```python
+try:
+    devices = amdsmi_get_processor_handles()
+    if len(devices) == 0:
+        print("No GPUs on machine")
+    else:
+        for device in devices:
+            partition_id = amdsmi_get_gpu_accelerator_partition_profile(device)["partition_id"]
+            print(partition_id)
+except AmdSmiException as e:
+    print(e)
+```
+
 ### amdsmi_get_xgmi_info
 
 Description: Returns XGMI information for the GPU.
@@ -3839,8 +3938,7 @@ try:
     else:
         print(amdsmi_get_gpu_device_uuid(devices[0]))
 
-    nearest_gpus = amdsmi_topology_nearest_t()
-    nearest_gpus = amdsmi_get_link_topology_nearest(devices[0], AmdSmiLinkType(2))
+    nearest_gpus = amdsmi_get_link_topology_nearest(devices[0], AmdSmiLinkType.AMDSMI_LINK_TYPE_PCIE)
     if (nearest_gpus['count']) == 0:
         print("No nearest GPUs found on machine")
     else:
