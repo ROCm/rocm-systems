@@ -153,9 +153,10 @@ data::sample(uint32_t _dev_id)
     ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).busy, rsmi_dev_busy_percent_get, _dev_id,
                         &m_busy_perc);
     ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).temp, rsmi_dev_temp_metric_get, _dev_id,
-                        RSMI_TEMP_TYPE_EDGE, RSMI_TEMP_CURRENT, &m_temp);
-    ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).power, rsmi_dev_power_ave_get, _dev_id, 0,
-                        &m_power);
+                        RSMI_TEMP_TYPE_JUNCTION, RSMI_TEMP_CURRENT, &m_temp);
+    RSMI_POWER_TYPE power_type = RSMI_CURRENT_POWER;
+    ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).power, rsmi_dev_power_get, _dev_id,
+                        &m_power, &power_type)
     ROCPROFSYS_RSMI_GET(get_settings(m_dev_id).mem_usage, rsmi_dev_memory_usage_get,
                         _dev_id, RSMI_MEM_TYPE_VRAM, &m_mem_usage);
 
