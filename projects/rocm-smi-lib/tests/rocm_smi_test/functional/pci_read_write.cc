@@ -122,9 +122,8 @@ void TestPciReadWrite::Run(void) {
 
     ret = rsmi_dev_pci_throughput_get(dv_ind, &sent, &received, &max_pkt_sz);
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "TEST FAILURE: Current PCIe throughput is not detected. "
-        "This is likely because it is not indicated in the pcie_bw sysfs "
-         "file. Aborting test." << std::endl;
+      std::cout << "WARNING: Current PCIe throughput is not detected. "
+        "pcie_bw sysfs file is no longer supported on this device. Aborting test." << std::endl;
 
       // We don't need to verify api support checking functionality is working
       // as the user may choose to have any of the input parameters as 0.
@@ -144,9 +143,8 @@ void TestPciReadWrite::Run(void) {
     ret = rsmi_dev_pci_bandwidth_get(dv_ind, &bw);
 
     if (ret == RSMI_STATUS_NOT_SUPPORTED) {
-      std::cout << "TEST FAILURE: Current PCIe bandwidth is not detected. "
-        "This is likely because it is not indicated in the pp_dpm_pcie sysfs "
-         "file. Aborting test." << std::endl;
+      std::cout << "WARNING: Current PCIe bandwidth is not detected. "
+        "pp_dpm_pcie sysfs file is no longer supported on this device. Aborting test." << std::endl;
       // Verify api support checking functionality is working
       ret = rsmi_dev_pci_bandwidth_get(dv_ind, nullptr);
       ASSERT_EQ(ret, RSMI_STATUS_NOT_SUPPORTED);
