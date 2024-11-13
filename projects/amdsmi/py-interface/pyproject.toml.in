@@ -18,14 +18,17 @@ requires-python = ">=3.6"
 dependencies = [
     "PyYAML >= 3.0",
 ]
-
+classifiers = [
+    "Programming Language :: Python :: 3"
+]
 [project.urls]
 "Homepage" = "https://github.com/RadeonOpenCompute/amdsmi"
 
 [tool.setuptools]
 packages = ["amdsmi"]
+zip-safe = false
+include-package-data = true
 
-# install libamd_smi.so
 [tool.setuptools.package-data]
 amdsmi = ["*.so"]
 

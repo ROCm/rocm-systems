@@ -5,18 +5,18 @@
 # https://www.sphinx-doc.org/en/master/usage/configuration.html
 
 import re
-import shutil
+
 
 # get version number to print in docs
 def get_version_info(filepath):
-    with open(filepath, 'r') as f:
+    with open(filepath, "r") as f:
         content = f.read()
 
     version_pattern = (
-        r'^#define\s+AMDSMI_LIB_VERSION_YEAR\s+(\d+)\s*$|'
-        r'^#define\s+AMDSMI_LIB_VERSION_MAJOR\s+(\d+)\s*$|'
-        r'^#define\s+AMDSMI_LIB_VERSION_MINOR\s+(\d+)\s*$|'
-        r'^#define\s+AMDSMI_LIB_VERSION_RELEASE\s+(\d+)\s*$'
+        r"^#define\s+AMDSMI_LIB_VERSION_YEAR\s+(\d+)\s*$|"
+        r"^#define\s+AMDSMI_LIB_VERSION_MAJOR\s+(\d+)\s*$|"
+        r"^#define\s+AMDSMI_LIB_VERSION_MINOR\s+(\d+)\s*$|"
+        r"^#define\s+AMDSMI_LIB_VERSION_RELEASE\s+(\d+)\s*$"
     )
 
     matches = re.findall(version_pattern, content, re.MULTILINE)
@@ -29,10 +29,10 @@ def get_version_info(filepath):
     else:
         raise ValueError("Couldn't find all VERSION numbers.")
 
-# copy changelog to docs/
-shutil.copy2("../CHANGELOG.md", "./reference/changelog.md")
 
-version_year, version_major, version_minor, version_release = get_version_info('../include/amd_smi/amdsmi.h')
+version_year, version_major, version_minor, version_release = get_version_info(
+    "../include/amd_smi/amdsmi.h"
+)
 version_number = f"{version_year}.{version_major}.{version_minor}.{version_release}"
 
 # project info

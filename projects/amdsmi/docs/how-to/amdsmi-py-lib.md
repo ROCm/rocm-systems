@@ -12,6 +12,10 @@ hardware through a simple and accessible [API](../reference/amdsmi-py-api.md).
 Compatible with Python 3.6 and higher, this library requires the AMD driver to
 be loaded for initialization -- review the [prerequisites](#install_reqs).
 
+```{seealso}
+Refer to the [Python library API reference](../reference/amdsmi-py-api.md).
+```
+
 ## Get started
 
 To get started, the `amdsmi` folder should be copied and placed next to
