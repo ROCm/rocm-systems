@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi200', 'mi300']
+        runner: ['mi200-emu', 'mi300-emu']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -156,8 +156,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi300']
-        os: ['rhel', 'sles']
+        runner: ['mi300-emu']
+        os: ['rhel-emu', 'sles-emu']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
 
@@ -275,9 +275,9 @@ jobs:
 
   code-coverage:
     strategy:
-      fail-fast: false
+      # fail-fast: false
       matrix:
-        runner: ['mi200']
+        runner: ['mi300-emu']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
@@ -412,7 +412,8 @@ jobs:
         path: |
           .codecov/*.xml
 
-    - name: Generate Code Coverage Comment
+    - id: generatereport
+      name: Generate Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 5
       shell: bash
@@ -427,7 +428,7 @@ jobs:
         which -a git
         git --version
 
-        ./source/scripts/upload-image-to-github.py --bot --token ${{ github.token }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
+        ./source/scripts/upload-image-to-github.py --bot --token ${{ secrets.TOKEN }} --files .codecov/{all,tests,samples}.png --output-dir .codecov --name pr-${{ github.event.pull_request.number }}
 
         echo -e "\n${PWD}:"
         ls -la .
@@ -451,13 +452,26 @@ jobs:
 
         EOF
 
+        echo 'CODECOVERAGE_REPORT<<EOF' > $GITHUB_OUTPUT
+        cat .codecov/report.md >> $GITHUB_OUTPUT
+        echo 'EOF' >> $GITHUB_OUTPUT
+
     - name: Write Code Coverage Comment
       if: github.event_name == 'pull_request'
       timeout-minutes: 5
-      uses: thollander/actions-comment-pull-request@v2.5.0
+      uses: actions/github-script@v6
+      env:
+        COMMENT_BODY: ${{ steps.generatereport.outputs.CODECOVERAGE_REPORT }}
       with:
-        comment_tag: codecov-report
-        filePath: .codecov/report.md
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     - name: Archive Code Coverage Data
       uses: actions/upload-artifact@v4
@@ -504,20 +518,20 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi200', 'mi300']
+        runner: ['mi200-emu', 'mi300-emu']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         exclude:
-        #   - { runner: 'navi3',  sanitizer: 'ThreadSanitizer' }
-        #   - { runner: 'navi3',  sanitizer: 'LeakSanitizer' }
-        #   - { runner: 'vega20', sanitizer: 'AddressSanitizer' }
-        #   - { runner: 'vega20', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi200', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi200', sanitizer: 'AddressSanitizer' }
-        #   - { runner: 'mi300',  sanitizer: 'AddressSanitizer' }
-          - { runner: 'mi300', sanitizer: 'ThreadSanitizer' }
-          - { runner: 'mi300', sanitizer: 'UndefinedBehaviorSanitizer' }
+        #   - { runner: 'navi3-emu',  sanitizer: 'ThreadSanitizer' }
+        #   - { runner: 'navi3-emu',  sanitizer: 'LeakSanitizer' }
+        #   - { runner: 'vega20-emu', sanitizer: 'AddressSanitizer' }
+        #   - { runner: 'vega20-emu', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi200-emu', sanitizer: 'LeakSanitizer' }
+          - { runner: 'mi200-emu', sanitizer: 'AddressSanitizer' }
+        #   - { runner: 'mi300-emu',  sanitizer: 'AddressSanitizer' }
+          - { runner: 'mi300-emu', sanitizer: 'ThreadSanitizer' }
+          - { runner: 'mi300-emu', sanitizer: 'UndefinedBehaviorSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-runner-set
