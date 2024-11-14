@@ -14,4 +14,4 @@ run-script()
     eval $@
 }
 
-run-script ${PYTHON_EXECUTABLE} -m @SCRIPT_SUBMODULE@ $@
+run-script ${PYTHON_EXECUTABLE} -m @SCRIPT_SUBMODULE@ "$(printf ' %q' "$@")"
