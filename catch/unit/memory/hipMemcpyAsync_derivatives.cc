@@ -133,14 +133,14 @@ TEST_CASE("Unit_hipMemcpyDtoDAsync_Positive_Basic") {
           [stream = stream_guard.stream()](void* dst, void* src, size_t count) {
             return hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst),
                                       reinterpret_cast<hipDeviceptr_t>(src), count, stream);
-          });
+          }, stream_guard.stream());
     }
     SECTION("Peer access disabled") {
       MemcpyDeviceToDeviceShell<true, false>(
           [stream = stream_guard.stream()](void* dst, void* src, size_t count) {
             return hipMemcpyDtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst),
                                       reinterpret_cast<hipDeviceptr_t>(src), count, stream);
-          });
+          }, stream_guard.stream());
     }
   }
 }
