@@ -25,3 +25,7 @@ docs/_doxygen/
 # misc
 __pycache__/
 authentication/CA/
+
+# act
+act.variables
+act.secrets
