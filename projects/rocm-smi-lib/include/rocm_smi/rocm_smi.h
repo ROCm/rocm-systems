@@ -3726,8 +3726,10 @@ rsmi_counter_available_counters_get(uint32_t dv_ind,
  *  @details Given a non-NULL pointer to an array @p procs of
  *  ::rsmi_process_info_t's, of length *@p num_items, this function will write
  *  up to *@p num_items instances of ::rsmi_process_info_t to the memory pointed
- *  to by @p procs. These instances contain information about each process
- *  utilizing a GPU. If @p procs is not NULL, @p num_items will be updated with
+ *  to by @p procs. These instances contain information about each GPU compute
+ *  process and their PASID for further analysis or monitoring via
+ *  ::rsmi_compute_process_info_by_pid_get().
+ *  If @p procs is not NULL, @p num_items will be updated with
  *  the number of processes actually written. If @p procs is NULL, @p num_items
  *  will be updated with the number of processes for which there is current
  *  process information. Calling this function with @p procs being NULL is a way
