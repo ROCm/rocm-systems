@@ -55,7 +55,20 @@ AMDSMI_ERROR_MESSAGES = {
     41: "Insufficient size for operation",
     42: "Unexpected size of data was read",
     43: "The data read or provided was unexpected",
+    44: "System has different cpu than AMD",
+    45: "Energy driver not found",
+    46: "MSR driver not found",
+    47: "HSMP driver not found",
+    48: "HSMP not supported",
+    49: "HSMP message/feature not supported",
+    50: "HSMP message timed out",
+    51: "No Energy and HSMP driver present",
+    52: "File or directory not found",
+    53: "Parsed argument is invalid",
     54: "AMDGPU restart error",
+    55: "Setting is not available",
+    0xFFFFFFFE: "AMD-SMI Library error did not map to a status code",
+    0xFFFFFFFF: "Unknown error"
 }
 
 def _get_error_message(error_code):

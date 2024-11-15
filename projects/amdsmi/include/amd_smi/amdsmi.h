@@ -269,7 +269,7 @@ typedef enum {
     AMDSMI_STATUS_NO_HSMP_DRV = 47, //!< HSMP driver not found
     AMDSMI_STATUS_NO_HSMP_SUP = 48, //!< HSMP not supported
     AMDSMI_STATUS_NO_HSMP_MSG_SUP = 49, //!< HSMP message/feature not supported
-    AMDSMI_STATUS_HSMP_TIMEOUT = 50,  //!< HSMP message is timedout
+    AMDSMI_STATUS_HSMP_TIMEOUT = 50,  //!< HSMP message timed out
     AMDSMI_STATUS_NO_DRV = 51,  //!< No Energy and HSMP driver present
     AMDSMI_STATUS_FILE_NOT_FOUND = 52, //!< file or directory not found
     AMDSMI_STATUS_ARG_PTR_NULL = 53,   //!< Parsed argument is invalid
