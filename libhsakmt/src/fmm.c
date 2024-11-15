@@ -2550,11 +2550,21 @@ HSAKMT_STATUS hsakmt_fmm_init_process_apertures(unsigned int NumNodes)
 		guardPages = 1;
 
 	/* Sets the max VA alignment order size during mapping. By default the order
-	 * size is set to 9(2MB)
+	 * size is set to 18(1G) for GFX950 to reduce TLB hits. If any non-gfx950
+	 * ASIC is found in the system, set back to 9(2MB).
 	 */
 	maxVaAlignStr = getenv("HSA_MAX_VA_ALIGN");
-	if (!maxVaAlignStr || sscanf(maxVaAlignStr, "%u", &svm.alignment_order) != 1)
-		svm.alignment_order = 9;
+	if (!maxVaAlignStr || sscanf(maxVaAlignStr, "%u", &svm.alignment_order) != 1) {
+		svm.alignment_order = 18;
+
+		for (i = 0; i < NumNodes; i++) {
+			if (hsakmt_get_gfxv_by_node_id(i) != GFX_VERSION_GFX950) {
+				svm.alignment_order = 9;
+				break;
+			}
+		}
+	}
+	pr_info("SVM alignment default order is %d.", svm.alignment_order);
 
 	gpu_mem_count = 0;
 	g_first_gpu_mem = NULL;
