@@ -153,7 +153,7 @@ uint16_t get_device_id_by_node_id(HSAuint32 node_id);
 uint16_t get_device_id_by_gpu_id(HSAuint32 gpu_id);
 uint32_t get_direct_link_cpu(uint32_t gpu_node);
 
-HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties *props);
+HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props);
 HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
 				      HsaNodeProperties *NodeProperties);
 HSAKMT_STATUS topology_get_iolink_props(HSAuint32 NodeId,

@@ -28,6 +28,7 @@
 #include <cstdio>
 #include <cstring>
 #include <cctype>
+#include <cmath>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -53,19 +54,20 @@
 
 typedef struct {
   HsaNodeProperties node;
-  HsaMemoryProperties *mem; /* node->NumBanks elements */
-  HsaCacheProperties *cache;
-  HsaIoLinkProperties *link;
+  std::vector<HsaMemoryProperties> mem; /* node->NumBanks elements */
+  std::vector<HsaCacheProperties> cache;
+  std::vector<HsaIoLinkProperties> link;
 } node_props_t;
 
 static HsaSystemProperties *g_system;
-static node_props_t *g_props;
+static std::vector<node_props_t> g_props;
 
 static std::vector<wsl::thunk::WDDMDevice *> wdevices_;
 static uint32_t wdevice_num_;
 static uint32_t num_sysfs_nodes;
 
 static int processor_vendor = -1;
+static double freq_max_ = 0;
 /* Supported System Vendors */
 enum SUPPORTED_PROCESSOR_VENDORS {
   GENUINE_INTEL = 0,
@@ -74,9 +76,9 @@ enum SUPPORTED_PROCESSOR_VENDORS {
 };
 /* Adding newline to make the search easier */
 static const char *supported_processor_vendor_name[] = {
-  "GenuineIntel\n",
-  "AuthenticAMD\n",
-  "\n" // POWER requires a different search method
+  "GenuineIntel",
+  "AuthenticAMD",
+  "" // POWER requires a different search method
 };
 
 static HSAKMT_STATUS topology_take_snapshot(void);
@@ -93,24 +95,9 @@ struct proc_cpuinfo {
  * info and caches connected to that CPU.
  */
 typedef struct cpu_cacheinfo {
-  uint32_t len;        /* length of the table = number of online procs */
   int32_t proc_num;    /* this cpu's processor number */
   uint32_t num_caches; /* number of caches reported by this cpu */
-  HsaCacheProperties *cache_prop; /* a list of cache properties */
 } cpu_cacheinfo_t;
-
-static void free_properties(node_props_t *props, int size) {
-  if (props) {
-    int i;
-    for (i = 0; i < size; i++) {
-      free(props[i].mem);
-      free(props[i].cache);
-      free(props[i].link);
-    }
-
-    free(props);
-  }
-}
 
 /* num_subdirs - find the number of sub-directories in the specified path
  *	@dirpath - directory path to find sub-directories underneath
@@ -232,7 +219,8 @@ static HSAKMT_STATUS fscanf_size(char *file, uint32_t *bytes) {
  *	@cpuinfo [IN ] cpuinfo to get apicid
  *	@this_cache [OUT] CPU cache to fill in SiblingMap
  */
-static void cpumap_to_cpu_ci(char *shared_cpu_map, struct proc_cpuinfo *cpuinfo,
+static void cpumap_to_cpu_ci(char *shared_cpu_map,
+                             const std::vector<struct proc_cpuinfo>& cpuinfo,
                              HsaCacheProperties *this_cache) {
   int num_hexs, bit;
   uint32_t proc, apicid, mask;
@@ -271,10 +259,11 @@ static void cpumap_to_cpu_ci(char *shared_cpu_map, struct proc_cpuinfo *cpuinfo,
  *             [OUT] cpu_ci->num_caches: reduces when shared with other cpu(s)
  * Return: number of cache reported from this cpu
  */
-static int get_cpu_cache_info(const char *prefix, struct proc_cpuinfo *cpuinfo,
-                              cpu_cacheinfo_t *cpu_ci) {
-  int idx, num_idx, n;
-  HsaCacheProperties *this_cache;
+static int get_cpu_cache_info(const char *prefix,
+                              const std::vector<struct proc_cpuinfo>& cpuinfo,
+                              std::vector<HsaCacheProperties>& cache,
+                              cpu_cacheinfo_t& cpu_ci) {
+  int n;
   char path[256], str[256];
   bool is_power9 = false;
 
@@ -284,17 +273,18 @@ static int get_cpu_cache_info(const char *prefix, struct proc_cpuinfo *cpuinfo,
     }
   }
 
-  this_cache = cpu_ci->cache_prop;
-  num_idx = cpu_ci->num_caches;
-  for (idx = 0; idx < num_idx; idx++) {
+  HsaCacheProperties this_cache;
+  int num_idx = cpu_ci.num_caches;
+  for (int idx = 0; idx < num_idx; idx++) {
+    memset(&this_cache, 0, sizeof(this_cache));
     /* If this cache is shared by multiple CPUs, we only need
      * to list it in the first CPU.
      */
     if (is_power9) {
       // POWER9 has SMT4
-      if (cpu_ci->proc_num & 0x3) {
+      if (cpu_ci.proc_num & 0x3) {
         /* proc is not 0,4,8,etc.  Skip and reduce the cache count. */
-        --cpu_ci->num_caches;
+        --cpu_ci.num_caches;
         continue;
       }
     } else {
@@ -303,71 +293,72 @@ static int get_cpu_cache_info(const char *prefix, struct proc_cpuinfo *cpuinfo,
        * For both cases, this cache is listed to proc n1 only.
        */
       fscanf_dec(path, (uint32_t *)&n);
-      if (cpu_ci->proc_num != n) {
+      if (cpu_ci.proc_num != n) {
         /* proc is not n1. Skip and reduce the cache count. */
-        --cpu_ci->num_caches;
+        --cpu_ci.num_caches;
         continue;
       }
-      this_cache->ProcessorIdLow = cpuinfo[cpu_ci->proc_num].apicid;
+      this_cache.ProcessorIdLow = cpuinfo[cpu_ci.proc_num].apicid;
     }
 
     /* CacheLevel */
     snprintf(path, 256, "%s/index%d/level", prefix, idx);
-    fscanf_dec(path, &this_cache->CacheLevel);
+    fscanf_dec(path, &this_cache.CacheLevel);
     /* CacheType */
     snprintf(path, 256, "%s/index%d/type", prefix, idx);
 
     memset(str, 0, sizeof(str));
     fscanf_str(path, str);
     if (!strcmp(str, "Data"))
-      this_cache->CacheType.ui32.Data = 1;
+      this_cache.CacheType.ui32.Data = 1;
     if (!strcmp(str, "Instruction"))
-      this_cache->CacheType.ui32.Instruction = 1;
+      this_cache.CacheType.ui32.Instruction = 1;
     if (!strcmp(str, "Unified")) {
-      this_cache->CacheType.ui32.Data = 1;
-      this_cache->CacheType.ui32.Instruction = 1;
+      this_cache.CacheType.ui32.Data = 1;
+      this_cache.CacheType.ui32.Instruction = 1;
     }
-    this_cache->CacheType.ui32.CPU = 1;
+    this_cache.CacheType.ui32.CPU = 1;
     /* CacheSize */
     snprintf(path, 256, "%s/index%d/size", prefix, idx);
-    fscanf_size(path, &this_cache->CacheSize);
+    fscanf_size(path, &this_cache.CacheSize);
     /* CacheLineSize */
     snprintf(path, 256, "%s/index%d/coherency_line_size", prefix, idx);
-    fscanf_dec(path, &this_cache->CacheLineSize);
+    fscanf_dec(path, &this_cache.CacheLineSize);
     /* CacheAssociativity */
     snprintf(path, 256, "%s/index%d/ways_of_associativity", prefix, idx);
-    fscanf_dec(path, &this_cache->CacheAssociativity);
+    fscanf_dec(path, &this_cache.CacheAssociativity);
     /* CacheLinesPerTag */
     snprintf(path, 256, "%s/index%d/physical_line_partition", prefix, idx);
-    fscanf_dec(path, &this_cache->CacheLinesPerTag);
+    fscanf_dec(path, &this_cache.CacheLinesPerTag);
     /* CacheSiblings */
     snprintf(path, 256, "%s/index%d/shared_cpu_map", prefix, idx);
     fscanf_str(path, str);
-    cpumap_to_cpu_ci(str, cpuinfo, this_cache);
+    cpumap_to_cpu_ci(str, cpuinfo, &this_cache);
 
-    ++this_cache;
+    cache.push_back(this_cache);
   }
 
-  return cpu_ci->num_caches;
+  return cpu_ci.num_caches;
 }
 
 static HSAKMT_STATUS topology_map_node_id(uint32_t node_id,
                                           wsl::thunk::WDDMDevice *&device) {
   uint32_t idx = node_id;
-  if ((!wdevices_.size()) || (!node_id) || (node_id >= num_sysfs_nodes))
-    return HSAKMT_STATUS_NOT_SUPPORTED;
+  if ((!wdevices_.size()) || (!node_id) || (node_id >= num_sysfs_nodes)) {
+    device = nullptr;
+    return HSAKMT_STATUS_ERROR;
+  }
 
   device = wdevices_[node_id - 1];
   return HSAKMT_STATUS_SUCCESS;
 }
 
-HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties *props) {
+HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties& props) {
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
   bool is_node_supported = true;
   uint32_t num_supported_nodes = 0;
 
-  assert(props);
-  std::memset(props, 0, sizeof(*props));
+  std::memset(&props, 0, sizeof(props));
 
   D3DKMT_ADAPTERINFO *adapters;
   int num_adapters;
@@ -389,7 +380,7 @@ HSAKMT_STATUS topology_sysfs_get_system_props(HsaSystemProperties *props) {
     assert(device && "Create WDDM Device fail");
     wdevices_.push_back(device);
   }
-  props->NumNodes = num_sysfs_nodes;
+  props.NumNodes = num_sysfs_nodes;
 
   delete[] adapters;
   return ret;
@@ -403,26 +394,19 @@ void topology_setup_is_dgpu_param(HsaNodeProperties *props) {
     is_dgpu = true;
 }
 
-static HSAKMT_STATUS topology_get_cpu_model_name(HsaNodeProperties *props,
-                                                 struct proc_cpuinfo *cpuinfo,
-                                                 int num_procs) {
-  int i, j;
-
-  if (!props) {
-    pr_err("Invalid props to get cpu model name\n");
-    return HSAKMT_STATUS_INVALID_PARAMETER;
-  }
-
-  for (i = 0; i < num_procs; i++, cpuinfo++) {
-    if (props->CComputeIdLo == cpuinfo->apicid) {
-      if (!props->DeviceId) /* CPU-only node */
-        strncpy((char *)props->AMDName, cpuinfo->model_name,
-                sizeof(props->AMDName));
+static HSAKMT_STATUS topology_get_cpu_model_name(HsaNodeProperties& props,
+                                                 const std::vector<proc_cpuinfo>& cpuinfo) {
+  for (int i = 0; i < cpuinfo.size(); i++) {
+    if (props.CComputeIdLo == cpuinfo[i].apicid) {
+      if (!props.DeviceId) /* CPU-only node */
+        strncpy((char *)props.AMDName, cpuinfo[i].model_name,
+                sizeof(props.AMDName));
       /* Convert from UTF8 to UTF16 */
+      int j;
       for (j = 0;
-           cpuinfo->model_name[j] != '\0' && j < HSA_PUBLIC_NAME_SIZE - 1; j++)
-        props->MarketingName[j] = cpuinfo->model_name[j];
-      props->MarketingName[j] = '\0';
+           cpuinfo[i].model_name[j] != '\0' && j < HSA_PUBLIC_NAME_SIZE - 1; j++)
+        props.MarketingName[j] = cpuinfo[i].model_name[j];
+      props.MarketingName[j] = '\0';
       return HSAKMT_STATUS_SUCCESS;
     }
   }
@@ -430,13 +414,11 @@ static HSAKMT_STATUS topology_get_cpu_model_name(HsaNodeProperties *props,
   return HSAKMT_STATUS_ERROR;
 }
 
-static int topology_search_processor_vendor(const char *processor_name) {
-  unsigned int i;
-
-  for (i = 0; i < ARRAY_LEN(supported_processor_vendor_name); i++) {
-    if (!strcmp(processor_name, supported_processor_vendor_name[i]))
+static int topology_search_processor_vendor(const std::string& processor_name) {
+  for (unsigned int i = 0; i < ARRAY_LEN(supported_processor_vendor_name); i++) {
+    if (processor_name == supported_processor_vendor_name[i])
       return i;
-    if (!strcmp(processor_name, "POWER9, altivec supported\n"))
+    if (processor_name == "POWER9, altivec supported")
       return IBM_POWER;
   }
   return -1;
@@ -447,196 +429,91 @@ static int topology_search_processor_vendor(const char *processor_name) {
  * cpuinfo [OUT]: output buffer to hold cpu information
  * num_procs: number of processors the output buffer can hold
  */
-static HSAKMT_STATUS topology_parse_cpuinfo(struct proc_cpuinfo *cpuinfo,
-                                            uint32_t num_procs) {
+static HSAKMT_STATUS topology_parse_cpuinfo(std::vector<proc_cpuinfo>& cpuinfo) {
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-  FILE *fd;
-  char read_buf[256];
-  char *p;
-  uint32_t proc = 0;
-  size_t p_len;
-  const char *proc_cpuinfo_path = "/proc/cpuinfo";
-
-  if (!cpuinfo) {
-    pr_err("CPU information will be missing\n");
-    return HSAKMT_STATUS_INVALID_PARAMETER;
-  }
-
-  fd = fopen(proc_cpuinfo_path, "r");
-  if (!fd) {
-    pr_err("Failed to open [%s]. Unable to get CPU information",
-           proc_cpuinfo_path);
-    return HSAKMT_STATUS_ERROR;
-  }
-
-#ifdef __PPC64__
-  char *p2;
-
-  /* Each line in /proc/cpuinfo that read_buf is constructed, the format
-   * is like this:
-   * "token       : value\n"
-   * where token is our target like vendor_id, model name, apicid ...
-   * and value is the answer
-   */
-  while (fgets(read_buf, sizeof(read_buf), fd)) {
-    /* processor number */
-    if (!strncmp("processor	", read_buf, sizeof("processor	") - 1)) {
-      p = strchr(read_buf, ':');
-      p += 2; /* remove ": " */
-      proc = atoi(p);
-      if (proc >= num_procs) {
-        pr_err("cpuinfo contains processor %d larger than %u\n", proc,
-                num_procs);
-        ret = HSAKMT_STATUS_NO_MEMORY;
-        goto exit;
-      }
-      continue;
-    }
-
-    /* vendor name / model name */
-    if (!strncmp("cpu	", read_buf, sizeof("cpu	") - 1) &&
-        (processor_vendor == -1)) {
-      p = strchr(read_buf, ':');
-      p += 2; /* remove ": " */
-      processor_vendor = topology_search_processor_vendor(p);
-
-      p2 = strchr(p, ',');
-      if (p2 != NULL) {
-        p2++;
-        *p2 = 0;
-      }
-      if (strlen(p) < HSA_PUBLIC_NAME_SIZE) {
-        /* -1 to remove \n from p */
-        strncpy(cpuinfo[proc].model_name, p, strlen(p) - 1);
-        cpuinfo[proc].model_name[strlen(p) - 1] = '\0';
-      } else
-        strncpy(cpuinfo[proc].model_name, p, HSA_PUBLIC_NAME_SIZE);
-      continue;
-    }
-  }
-#else
-  /* Each line in /proc/cpuinfo that read_buf is constructed, the format
-   * is like this:
-   * "token       : value\n"
-   * where token is our target like vendor_id, model name, apicid ...
-   * and value is the answer
-   */
-  while (fgets(read_buf, sizeof(read_buf), fd)) {
-    /* processor number */
-    if (!strncmp("processor", read_buf, sizeof("processor") - 1)) {
-      p = strchr(read_buf, ':');
-      p += 2; /* remove ": " */
-      proc = atoi(p);
-      if (proc >= num_procs) {
-        pr_err("cpuinfo contains processor %d larger than %u\n", proc,
-                num_procs);
-        ret = HSAKMT_STATUS_NO_MEMORY;
-        goto exit;
-      }
-      continue;
-    }
-
-    /* vendor name */
-    if (!strncmp("vendor_id", read_buf, sizeof("vendor_id") - 1) &&
-        (processor_vendor == -1)) {
-      p = strchr(read_buf, ':');
-      p += 2; /* remove ": " */
-      processor_vendor = topology_search_processor_vendor(p);
-      continue;
-    }
-
-    /* model name */
-    if (!strncmp("model name", read_buf, sizeof("model name") - 1)) {
-      p = strchr(read_buf, ':');
-      p += 2; /* remove ": " */
-      p_len = strlen(p);
-      if (p_len > HSA_PUBLIC_NAME_SIZE)
-        p_len = HSA_PUBLIC_NAME_SIZE;
-      memcpy(cpuinfo[proc].model_name, p, p_len);
-      cpuinfo[proc].model_name[p_len - 1] = '\0';
-      continue;
-    }
-
-    /* apicid */
-    if (!strncmp("apicid", read_buf, sizeof("apicid") - 1)) {
-      p = strchr(read_buf, ':');
-      p += 2; /* remove ": " */
-      cpuinfo[proc].apicid = atoi(p);
-    }
-  }
-#endif
-
-  if (processor_vendor < 0) {
-    pr_err("Failed to get Processor Vendor. Setting to %s",
-           supported_processor_vendor_name[GENUINE_INTEL]);
-    processor_vendor = GENUINE_INTEL;
-  }
-
-exit:
-  fclose(fd);
-  return ret;
-}
-
-static HSAKMT_STATUS topology_get_cpu_maxfreq(uint32_t *max_freq) {
-  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+  uint32_t num_procs = cpuinfo.size();
 
   std::ifstream cpuinfo_max_freq(
       "/sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq");
-  if (!cpuinfo_max_freq) {
-    std::ifstream cpuinfo("/proc/cpuinfo");
-    if (!cpuinfo) {
-      pr_err("Failed to open /proc/cpuinfo\n");
-      return HSAKMT_STATUS_ERROR;
+  if (cpuinfo_max_freq) {
+    std::string line;
+    std::getline(cpuinfo_max_freq, line);
+    freq_max_ = static_cast<uint32_t>(std::stod(line) / 1000);
+  }
+
+  std::ifstream cpuinfo_file("/proc/cpuinfo");
+  if (!cpuinfo_file) {
+    pr_err("Failed to open /proc/cpuinfo. Unable to get CPU information");
+    return HSAKMT_STATUS_ERROR;
+  }
+
+  std::string line;
+  uint32_t proc = 0;
+  while (std::getline(cpuinfo_file, line)) {
+    if (line.substr(0, 9) == "processor") {
+      proc = std::stoi(line.substr(line.find(':') + 2));
+      if (proc >= num_procs) {
+        pr_err("cpuinfo contains processor %d larger than %u\n", proc, num_procs);
+        return HSAKMT_STATUS_NO_MEMORY;
+      }
+      continue;
     }
 
-    std::string line;
-    double freq_max_ = 0;
-    while (std::getline(cpuinfo, line)) {
+    if (line.substr(0, 9) == "vendor_id" && processor_vendor == -1) {
+      std::string vendor = line.substr(line.find(':') + 2);
+      processor_vendor = topology_search_processor_vendor(vendor.c_str());
+      continue;
+    }
+
+    if (line.substr(0, 10) == "model name") {
+      std::string model_name = line.substr(line.find(':') + 2);
+      if (model_name.size() > HSA_PUBLIC_NAME_SIZE)
+      model_name.resize(HSA_PUBLIC_NAME_SIZE);
+      std::strncpy(cpuinfo[proc].model_name, model_name.c_str(), HSA_PUBLIC_NAME_SIZE);
+      continue;
+    }
+
+    if (line.substr(0, 6) == "apicid") {
+      cpuinfo[proc].apicid = std::stoi(line.substr(line.find(':') + 2));
+      continue;
+    }
+
+    if (!cpuinfo_max_freq) {
       if (line.substr(0, 7) == "cpu MHz") {
         double freq = std::stod(line.substr(line.find(':') + 2));
         if (freq > freq_max_) {
           freq_max_ = freq;
         }
+        continue;
       }
     }
-    *max_freq = static_cast<uint32_t>(freq_max_);
-  } else {
-    std::string line;
-    std::getline(cpuinfo_max_freq, line);
-    *max_freq = static_cast<uint32_t>(std::stod(line) / 1000);
+  }
+
+  if (processor_vendor < 0) {
+    pr_err("Failed to get Processor Vendor. Setting to %s", supported_processor_vendor_name[GENUINE_INTEL]);
+    processor_vendor = GENUINE_INTEL;
   }
 
   return ret;
 }
 
-static int log2_int(int x) {
-  int result = 0;
-  while (x >>= 1) {
-    result++;
-  }
-  return result;
-}
-
 static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
-                                                   HsaNodeProperties *props,
-                                                   bool *p2p_links,
-                                                   uint32_t *num_p2pLinks) {
+                                                   HsaNodeProperties& props,
+                                                   bool& p2p_links,
+                                                   uint32_t& num_p2pLinks) {
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
-  assert(props);
-  memset(props, 0, sizeof(*props));
-  if (p2p_links)
-    *p2p_links = false;
-  if (num_p2pLinks)
-    *num_p2pLinks = 0;
+  memset(&props, 0, sizeof(props));
+  p2p_links = false;
+  num_p2pLinks = 0;
 
-  topology_get_cpu_maxfreq(&props->MaxEngineClockMhzCCompute);
+  props.MaxEngineClockMhzCCompute = freq_max_;
 
   if (node_id == 0) {
     /* CPU node */
-    props->NumCPUCores = sysconf(_SC_NPROCESSORS_ONLN);
-    props->NumMemoryBanks = 1;
-    props->KFDGpuID = 0;
+    props.NumCPUCores = sysconf(_SC_NPROCESSORS_ONLN);
+    props.NumMemoryBanks = 1;
+    props.KFDGpuID = 0;
     return HSAKMT_STATUS_SUCCESS;
   }
 
@@ -646,55 +523,55 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
   if (ret != HSAKMT_STATUS_SUCCESS)
     return ret;
 
-  props->NumCPUCores = 0;
-  props->NumFComputeCores = device->SimdPerCu() * device->ComputeUnitCount();
-  props->NumMemoryBanks = 1;
-  props->NumCaches = 3;
-  props->NumIOLinks = 1;
-  props->CComputeIdLo = 0;
-  props->FComputeIdLo = 0;
-  props->Capability.ui32.ASICRevision = device->AsicRevision();
-  props->Capability.ui32.WatchPointsTotalBits =
-      log2_int(device->WatchPointsNum());
-  props->MaxWavesPerSIMD = device->WavePerCu() / device->SimdPerCu();
-  props->LDSSizeInKB = device->LdsSize() / 1024;
-  props->GDSSizeInKB = 0;
-  props->WaveFrontSize = device->WavefrontSize();
-  props->NumShaderBanks = device->NumShaderEngine();
-  props->NumArrays = device->ShaderArrayPerShaderEngine();
-  props->NumCUPerArray = device->ComputeUnitCount() / props->NumArrays;
-  props->NumSIMDPerCU = device->SimdPerCu();
-  props->MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
-  props->VendorId = 0x1002;
-  props->DeviceId = device->DeviceId();
-  props->LocationId = device->PciBusAddr();
-  props->LocalMemSize = 0;
-  props->MaxEngineClockMhzFCompute = device->MaxEngineClockMhz();
-  props->DrmRenderMinor = node_id;
+  props.NumCPUCores = 0;
+  props.NumFComputeCores = device->SimdPerCu() * device->ComputeUnitCount();
+  props.NumMemoryBanks = 1;
+  props.NumCaches = 3;
+  props.NumIOLinks = 1;
+  props.CComputeIdLo = 0;
+  props.FComputeIdLo = 0;
+  props.Capability.ui32.ASICRevision = device->AsicRevision();
+  props.Capability.ui32.WatchPointsTotalBits =
+      std::log2(device->WatchPointsNum());
+  props.MaxWavesPerSIMD = device->WavePerCu() / device->SimdPerCu();
+  props.LDSSizeInKB = device->LdsSize() / 1024;
+  props.GDSSizeInKB = 0;
+  props.WaveFrontSize = device->WavefrontSize();
+  props.NumShaderBanks = device->NumShaderEngine();
+  props.NumArrays = device->ShaderArrayPerShaderEngine();
+  props.NumCUPerArray = device->ComputeUnitCount() / props.NumArrays;
+  props.NumSIMDPerCU = device->SimdPerCu();
+  props.MaxSlotsScratchCU = device->MaxScratchSlotsPerCu();
+  props.VendorId = 0x1002;
+  props.DeviceId = device->DeviceId();
+  props.LocationId = device->PciBusAddr();
+  props.LocalMemSize = 0;
+  props.MaxEngineClockMhzFCompute = device->MaxEngineClockMhz();
+  props.DrmRenderMinor = node_id;
 
   {
     int i;
     const char *name = device->ProductName();
     for (i = 0; name[i] != 0 && i < HSA_PUBLIC_NAME_SIZE - 1; i++)
-      props->MarketingName[i] = name[i];
-    props->MarketingName[i] = '\0';
+      props.MarketingName[i] = name[i];
+    props.MarketingName[i] = '\0';
   }
-  props->uCodeEngineVersions.uCodeSDMA = device->GetSdmaFwVersion();
-  props->DebugProperties.Value = 0;
-  props->HiveID = 0;
-  props->NumSdmaEngines = device->NumSdmaEngine();
-  props->NumSdmaXgmiEngines = 0;
-  props->NumSdmaQueuesPerEngine = 6; // TODO
-  props->NumCpQueues = device->GetNumCpQueues();
-  props->NumGws = 0;
-  props->Integrated = !(device->IsDgpu());
-  props->Domain = device->Domain();
-  props->UniqueID = atol(device->Uuid()); // TODO
-  props->NumXcc = 1;
-  props->KFDGpuID = device->DeviceId(); // TODO
-  props->FamilyID = device->GfxFamily();
+  props.uCodeEngineVersions.uCodeSDMA = device->GetSdmaFwVersion();
+  props.DebugProperties.Value = 0;
+  props.HiveID = 0;
+  props.NumSdmaEngines = device->NumSdmaEngine();
+  props.NumSdmaXgmiEngines = 0;
+  props.NumSdmaQueuesPerEngine = 6; // TODO
+  props.NumCpQueues = device->GetNumCpQueues();
+  props.NumGws = 0;
+  props.Integrated = !(device->IsDgpu());
+  props.Domain = device->Domain();
+  props.UniqueID = atol(device->Uuid()); // TODO
+  props.NumXcc = 1;
+  props.KFDGpuID = device->DeviceId(); // TODO
+  props.FamilyID = device->GfxFamily();
 
-  props->EngineId.ui32.uCode = device->GetMecFwVersion();
+  props.EngineId.ui32.uCode = device->GetMecFwVersion();
   char *envvar = getenv("HSA_OVERRIDE_GFX_VERSION");
   if (envvar) {
     char dummy = '\0';
@@ -705,28 +582,28 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
       pr_err("HSA_OVERRIDE_GFX_VERSION %s is invalid\n", envvar);
       return HSAKMT_STATUS_ERROR;
     }
-    props->OverrideEngineId.ui32.Major = major & 0x3f;
-    props->OverrideEngineId.ui32.Minor = minor & 0xff;
-    props->OverrideEngineId.ui32.Stepping = step & 0xff;
+    props.OverrideEngineId.ui32.Major = major & 0x3f;
+    props.OverrideEngineId.ui32.Minor = minor & 0xff;
+    props.OverrideEngineId.ui32.Stepping = step & 0xff;
   } else {
-    props->EngineId.ui32.Major = device->Major();
-    props->EngineId.ui32.Minor = device->Minor();
-    props->EngineId.ui32.Stepping = device->Stepping();
+    props.EngineId.ui32.Major = device->Major();
+    props.EngineId.ui32.Minor = device->Minor();
+    props.EngineId.ui32.Stepping = device->Stepping();
   }
 
-  snprintf((char *)props->AMDName, sizeof(props->AMDName) - 1, "GFX%06x",
-           HSA_GET_GFX_VERSION_FULL(props->EngineId.ui32));
+  snprintf((char *)props.AMDName, sizeof(props.AMDName) - 1, "GFX%06x",
+           HSA_GET_GFX_VERSION_FULL(props.EngineId.ui32));
 
   if (!is_svm_api_supported)
-    props->Capability.ui32.SVMAPISupported = 0;
-  props->Capability.ui32.DoorbellType = 2;
+    props.Capability.ui32.SVMAPISupported = 0;
+  props.Capability.ui32.DoorbellType = 2;
 
   /* Get VGPR/SGPR size in byte per CU */
-  props->SGPRSizePerCU = SGPR_SIZE_PER_CU;
-  props->VGPRSizePerCU = get_vgpr_size_per_cu(props->EngineId);
+  props.SGPRSizePerCU = SGPR_SIZE_PER_CU;
+  props.VGPRSizePerCU = get_vgpr_size_per_cu(props.EngineId);
 
-  if (props->NumFComputeCores)
-    assert(props->EngineId.ui32.Major &&
+  if (props.NumFComputeCores)
+    assert(props.EngineId.ui32.Major &&
            "HSA_OVERRIDE_GFX_VERSION may be needed");
 
   return ret;
@@ -734,27 +611,27 @@ static HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id,
 
 static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
                                                   uint32_t mem_id,
-                                                  HsaMemoryProperties *props) {
+                                                  HsaMemoryProperties& props) {
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
 
-  assert(props);
-  std::memset(props, 0, sizeof(*props));
+  std::memset(&props, 0, sizeof(props));
   if (node_id == 0) {
     /* CPU node */
-    props->HeapType = HSA_HEAPTYPE_SYSTEM;
+    props.HeapType = HSA_HEAPTYPE_SYSTEM;
 
     struct sysinfo info;
     sysinfo(&info);
-    props->SizeInBytes = info.totalram;
+    props.SizeInBytes = info.totalram;
 
-    /* props->SizeInBytes is the actual physical system
+    /* props.SizeInBytes is the actual physical system
      * memory size. Reserve 1/16th for WSL system usage.
      */
     max_single_alloc_size = info.totalram - (info.totalram >> 4);
 
-    props->Flags.MemoryProperty = 0;
-    props->Width = 64;
-    props->MemoryClockMax = 2133;
+    props.Flags.MemoryProperty = 0;
+    /* TODO: sudo dmidecode --type memory doesn't work on wsl */
+    props.Width = 64;
+    props.MemoryClockMax = 2133;
     return HSAKMT_STATUS_SUCCESS;
   }
 
@@ -763,46 +640,25 @@ static HSAKMT_STATUS topology_sysfs_get_mem_props(uint32_t node_id,
   if (ret != HSAKMT_STATUS_SUCCESS)
     return ret;
 
-  props->HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
-  props->SizeInBytes = device->LocalHeapSize();
-  props->Width = device->MemoryBusWidth();
-  props->MemoryClockMax = device->MaxMemoryClockMhz();
+  props.HeapType = HSA_HEAPTYPE_FRAME_BUFFER_PRIVATE;
+  props.SizeInBytes = device->LocalHeapSize();
+  props.Width = device->MemoryBusWidth();
+  props.MemoryClockMax = device->MaxMemoryClockMhz();
 
   return ret;
 }
 
-/* topology_destroy_temp_cpu_cache_list -
- *	Free the memory allocated in topology_create_temp_cpu_cache_list().
- */
-static void
-topology_destroy_temp_cpu_cache_list(cpu_cacheinfo_t *temp_cpu_ci_list) {
-  uint32_t n;
-  cpu_cacheinfo_t *p_temp_cpu_ci_list = temp_cpu_ci_list;
-  cpu_cacheinfo_t *cpu_ci = p_temp_cpu_ci_list;
-
-  if (p_temp_cpu_ci_list) {
-    for (n = 0; n < p_temp_cpu_ci_list->len; n++, cpu_ci++)
-      free(cpu_ci->cache_prop);
-    free(p_temp_cpu_ci_list);
-  }
-
-  p_temp_cpu_ci_list = NULL;
-}
-
-/* topology_create_temp_cpu_cache_list - Create a temporary cpu-cache list to
- *		store cpu cache information. This list will be used to copy
- *		HsaCacheProperties in the CPU node. Two buffers are allocated
- *		inside this function: cpu_ci list and cache_prop under each
- *		cpu_ci. Must call topology_destroy_temp_cpu_cache_list to free
- *		the memory after the information is copied.
+/* topology_get_cpu_cache_props - Read CPU cache information from sysfs
  *	@node [IN] CPU node number
  *	@cpuinfo [IN] /proc/cpuinfo data
- *	@temp_cpu_ci_list [OUT] cpu-cache-info list with data filled
- * Return: total number of caches under this CPU node
+ *	@tbl [OUT] the node table to fill up
+ * Return: HSAKMT_STATUS_SUCCESS in success or error number in failure
  */
-static int
-topology_create_temp_cpu_cache_list(int node, struct proc_cpuinfo *cpuinfo,
-                                    cpu_cacheinfo_t **temp_cpu_ci_list) {
+static HSAKMT_STATUS topology_get_cpu_cache_props(int node,
+                                                  const std::vector<proc_cpuinfo>& cpuinfo,
+                                                  node_props_t& tbl) {
+  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
+
   /* Get max path size from /sys/devices/system/node/node%d/%s/cache
    * below, which will max out according to the largest filename,
    * which can be present twice in the string above. 29 is for the prefix
@@ -814,20 +670,12 @@ topology_create_temp_cpu_cache_list(int node, struct proc_cpuinfo *cpuinfo,
 #define MAXNAMLEN NAME_MAX
 #endif
   constexpr uint32_t MAXPATHSIZE = 29 + MAXNAMLEN + (MAXNAMLEN + 6);
-  cpu_cacheinfo_t *p_temp_cpu_ci_list; /* a list of cpu_ci */
   char path[MAXPATHSIZE], node_dir[MAXPATHSIZE];
   int max_cpus;
-  cpu_cacheinfo_t *this_cpu; /* one cpu_ci in cpu_ci_list */
   int cache_cnt = 0;
   DIR *dirp = NULL;
   struct dirent *dir;
   char *p;
-
-  if (!temp_cpu_ci_list) {
-    pr_err("Invalid temp_cpu_ci_list\n");
-    return cache_cnt;
-  }
-  *temp_cpu_ci_list = NULL;
 
   /* Get info from /sys/devices/system/node/nodeX/cpuY/cache */
   int node_real = node;
@@ -845,6 +693,7 @@ topology_create_temp_cpu_cache_list(int node, struct proc_cpuinfo *cpuinfo,
      */
     if (node) { /* CPU node must be 0 or something is wrong */
       pr_err("Fail to get cpu* dirs under %s.", node_dir);
+      ret = HSAKMT_STATUS_ERROR;
       goto exit;
     }
     /* Fall back to use /sys/devices/system/cpu */
@@ -852,19 +701,11 @@ topology_create_temp_cpu_cache_list(int node, struct proc_cpuinfo *cpuinfo,
     max_cpus = num_subdirs(node_dir, "cpu");
     if (max_cpus <= 0) {
       pr_err("Fail to get cpu* dirs under %s\n", node_dir);
+      ret = HSAKMT_STATUS_ERROR;
       goto exit;
     }
   }
 
-  p_temp_cpu_ci_list =
-      (cpu_cacheinfo_t *)calloc(max_cpus, sizeof(cpu_cacheinfo_t));
-  if (!p_temp_cpu_ci_list) {
-    pr_err("Fail to allocate p_temp_cpu_ci_list\n");
-    goto exit;
-  }
-  p_temp_cpu_ci_list->len = 0;
-
-  this_cpu = p_temp_cpu_ci_list;
   dirp = opendir(node_dir);
   while ((dir = readdir(dirp)) != 0) {
     if (strncmp(dir->d_name, "cpu", 3))
@@ -879,75 +720,19 @@ topology_create_temp_cpu_cache_list(int node, struct proc_cpuinfo *cpuinfo,
       pr_err("Path is too long and was truncated.\n");
       goto exit;
     }
-    this_cpu->num_caches = num_subdirs(path, "index");
-    this_cpu->cache_prop = (HsaCacheProperties *)calloc(
-        this_cpu->num_caches, sizeof(HsaCacheProperties));
-    if (!this_cpu->cache_prop) {
-      pr_err("Fail to allocate cache_info\n");
-      goto exit;
-    }
-    p = &dir->d_name[3];
-    this_cpu->proc_num = atoi(p);
-    cache_cnt += get_cpu_cache_info(path, cpuinfo, this_cpu);
-    ++p_temp_cpu_ci_list->len;
-    ++this_cpu;
+
+    cpu_cacheinfo_t cpu_ci;
+    cpu_ci.num_caches = num_subdirs(path, "index");
+    cpu_ci.proc_num= atoi(dir->d_name+3);
+
+    cache_cnt += get_cpu_cache_info(path, cpuinfo, tbl.cache, cpu_ci);
   }
-  *temp_cpu_ci_list = p_temp_cpu_ci_list;
+  assert(cache_cnt == tbl.cache.size());
+  tbl.node.NumCaches = cache_cnt;
 
 exit:
   if (dirp)
     closedir(dirp);
-  return cache_cnt;
-}
-
-/* topology_get_cpu_cache_props - Read CPU cache information from sysfs
- *	@node [IN] CPU node number
- *	@cpuinfo [IN] /proc/cpuinfo data
- *	@tbl [OUT] the node table to fill up
- * Return: HSAKMT_STATUS_SUCCESS in success or error number in failure
- */
-static HSAKMT_STATUS topology_get_cpu_cache_props(int node,
-                                                  struct proc_cpuinfo *cpuinfo,
-                                                  node_props_t *tbl) {
-  HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-  cpu_cacheinfo_t *cpu_ci_list = NULL;
-  uint32_t n, cache_cnt, i;
-  cpu_cacheinfo_t *cpu_ci;
-  HsaCacheProperties *this_cache;
-
-  tbl->node.NumCaches =
-      topology_create_temp_cpu_cache_list(node, cpuinfo, &cpu_ci_list);
-  if (!tbl->node.NumCaches) {
-    /* For "Intel Meteor lake Mobile", the cache info is not in sysfs,
-     * That means /sys/devices/system/node/node%d/%s/cache is not exist.
-     * here AMD will not black this issue.
-     */
-    pr_debug("CPU cache info is not available for node %d \n", node);
-    goto exit;
-  }
-
-  tbl->cache = (HsaCacheProperties *)calloc(tbl->node.NumCaches,
-                                            sizeof(HsaCacheProperties));
-  if (!tbl->cache) {
-    ret = HSAKMT_STATUS_NO_MEMORY;
-    goto exit;
-  }
-
-  /* Now fill in the information to cache properties. */
-  cache_cnt = 0;
-  cpu_ci = cpu_ci_list;
-  for (n = 0; n < cpu_ci_list->len; n++, cpu_ci++) {
-    this_cache = cpu_ci->cache_prop;
-    for (i = 0; i < cpu_ci->num_caches; i++, this_cache++) {
-      memcpy(&tbl->cache[cache_cnt++], this_cache, sizeof(HsaCacheProperties));
-      if (cache_cnt >= tbl->node.NumCaches)
-        goto exit;
-    }
-  }
-
-exit:
-  topology_destroy_temp_cpu_cache_list(cpu_ci_list);
-
   return ret;
 }
 
@@ -962,22 +747,22 @@ exit:
  */
 static HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
                                                      uint32_t iolink_id,
-                                                     HsaIoLinkProperties *props,
+                                                     HsaIoLinkProperties& props,
                                                      bool p2pLink) {
   wsl::thunk::WDDMDevice *device;
   topology_map_node_id(node_id, device);
 
-  std::memset(props, 0, sizeof(*props));
-  props->IoLinkType = HSA_IOLINKTYPE_PCIEXPRESS;
-  props->VersionMajor = props->VersionMinor = 0;
-  props->NodeFrom = node_id;
-  props->NodeTo = 0;
-  props->Weight = 20;
-  props->Flags.ui32.Override = 1;
-  props->Flags.ui32.NonCoherent = 1;
-  props->Flags.ui32.NoAtomics32bit = !(device->SupportPlatformAtomic());
-  props->Flags.ui32.NoAtomics64bit = !(device->SupportPlatformAtomic());
-  props->RecSdmaEngIdMask = 0;
+  std::memset(&props, 0, sizeof(props));
+  props.IoLinkType = HSA_IOLINKTYPE_PCIEXPRESS;
+  props.VersionMajor = props.VersionMinor = 0;
+  props.NodeFrom = node_id;
+  props.NodeTo = 0;
+  props.Weight = 20;
+  props.Flags.ui32.Override = 1;
+  props.Flags.ui32.NonCoherent = 1;
+  props.Flags.ui32.NoAtomics32bit = !(device->SupportPlatformAtomic());
+  props.Flags.ui32.NoAtomics64bit = !(device->SupportPlatformAtomic());
+  props.RecSdmaEngIdMask = 0;
 
   return HSAKMT_STATUS_SUCCESS;
 }
@@ -987,22 +772,21 @@ static HSAKMT_STATUS topology_sysfs_get_iolink_props(uint32_t node_id,
  */
 static HsaIoLinkProperties *
 topology_get_free_io_link_slot_for_node(uint32_t node_id,
-                                        const HsaSystemProperties *sys_props,
-                                        node_props_t *node_props) {
-  HsaIoLinkProperties *props;
+                                        const HsaSystemProperties& sys_props,
+                                        std::vector<node_props_t>& node_props) {
+  std::vector<HsaIoLinkProperties>& props = node_props[node_id].link;
 
-  if (node_id >= sys_props->NumNodes) {
+  if (node_id >= sys_props.NumNodes) {
     pr_err("Invalid node [%d]\n", node_id);
     return NULL;
   }
 
-  props = node_props[node_id].link;
-  if (!props) {
+  if (!props.size()) {
     pr_err("No io_link reported for Node [%d]\n", node_id);
     return NULL;
   }
 
-  if (node_props[node_id].node.NumIOLinks >= sys_props->NumNodes - 1) {
+  if (node_props[node_id].node.NumIOLinks >= sys_props.NumNodes - 1) {
     pr_err("No more space for io_link for Node [%d]\n", node_id);
     return NULL;
   }
@@ -1015,8 +799,8 @@ topology_get_free_io_link_slot_for_node(uint32_t node_id,
  * TODO: Add other members of HsaIoLinkProperties
  */
 static HSAKMT_STATUS topology_add_io_link_for_node(
-    uint32_t node_from, const HsaSystemProperties *sys_props,
-    node_props_t *node_props, HSA_IOLINKTYPE IoLinkType, uint32_t node_to,
+    uint32_t node_from, const HsaSystemProperties& sys_props,
+    std::vector<node_props_t>& node_props, HSA_IOLINKTYPE IoLinkType, uint32_t node_to,
     uint32_t Weight) {
   HsaIoLinkProperties *props;
 
@@ -1036,11 +820,11 @@ static HSAKMT_STATUS topology_add_io_link_for_node(
 
 /* Find the CPU that this GPU (gpu_node) directly connects to */
 static int32_t gpu_get_direct_link_cpu(uint32_t gpu_node,
-                                       node_props_t *node_props) {
-  HsaIoLinkProperties *props = node_props[gpu_node].link;
+                                       const std::vector<node_props_t>& node_props) {
+  const std::vector<HsaIoLinkProperties>& props = node_props[gpu_node].link;
   uint32_t i;
 
-  if (!node_props[gpu_node].node.KFDGpuID || !props ||
+  if (!node_props[gpu_node].node.KFDGpuID || props.empty() ||
       node_props[gpu_node].node.NumIOLinks == 0)
     return -1;
 
@@ -1056,13 +840,13 @@ static int32_t gpu_get_direct_link_cpu(uint32_t gpu_node,
  * been created in the kernel.
  */
 static HSAKMT_STATUS get_direct_iolink_info(uint32_t node1, uint32_t node2,
-                                            node_props_t *node_props,
+                                            const std::vector<node_props_t>& node_props,
                                             HSAuint32 *weight,
                                             HSA_IOLINKTYPE *type) {
-  HsaIoLinkProperties *props = node_props[node1].link;
+  const std::vector<HsaIoLinkProperties>& props = node_props[node1].link;
   uint32_t i;
 
-  if (!props)
+  if (!props.size())
     return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
   for (i = 0; i < node_props[node1].node.NumIOLinks; i++)
@@ -1078,11 +862,10 @@ static HSAKMT_STATUS get_direct_iolink_info(uint32_t node1, uint32_t node2,
 }
 
 static HSAKMT_STATUS get_indirect_iolink_info(uint32_t node1, uint32_t node2,
-                                              node_props_t *node_props,
+                                              const std::vector<node_props_t>& node_props,
                                               HSAuint32 *weight,
                                               HSA_IOLINKTYPE *type) {
   int32_t dir_cpu1 = -1, dir_cpu2 = -1;
-  HSAuint32 weight1 = 0, weight2 = 0, weight3 = 0;
   HSAKMT_STATUS ret;
   uint32_t i;
 
@@ -1122,6 +905,7 @@ static HSAKMT_STATUS get_indirect_iolink_info(uint32_t node1, uint32_t node2,
    *   GPU --(weight1) -- CPU -- (weight2) -- CPU
    *   CPU -- (weight2) -- CPU -- (weight3) -- GPU
    */
+  HSAuint32 weight1 = 0, weight2 = 0, weight3 = 0;
   if (dir_cpu1 >= 0) { /* GPU->CPU ... */
     if (dir_cpu2 >= 0) {
       if (dir_cpu1 == dir_cpu2) /* GPU->CPU->GPU*/ {
@@ -1171,15 +955,15 @@ static HSAKMT_STATUS get_indirect_iolink_info(uint32_t node1, uint32_t node2,
 }
 
 static void
-topology_create_indirect_gpu_links(const HsaSystemProperties *sys_props,
-                                   node_props_t *node_props) {
+topology_create_indirect_gpu_links(const HsaSystemProperties& sys_props,
+                                   std::vector<node_props_t>& node_props) {
 
   uint32_t i, j;
   HSAuint32 weight;
   HSA_IOLINKTYPE type;
 
-  for (i = 0; i < sys_props->NumNodes - 1; i++) {
-    for (j = i + 1; j < sys_props->NumNodes; j++) {
+  for (i = 0; i < sys_props.NumNodes - 1; i++) {
+    for (j = i + 1; j < sys_props.NumNodes; j++) {
       get_indirect_iolink_info(i, j, node_props, &weight, &type);
       if (!weight)
         goto try_alt_dir;
@@ -1200,71 +984,49 @@ topology_create_indirect_gpu_links(const HsaSystemProperties *sys_props,
 HSAKMT_STATUS topology_take_snapshot(void) {
   uint32_t i, mem_id, cache_id;
   HsaSystemProperties sys_props;
-  node_props_t *temp_props = 0;
+  std::vector<node_props_t>& temp_props = g_props;
   HSAKMT_STATUS ret = HSAKMT_STATUS_SUCCESS;
-  struct proc_cpuinfo *cpuinfo;
   const uint32_t num_procs = sysconf(_SC_NPROCESSORS_ONLN);
+  std::vector<proc_cpuinfo> cpuinfo(num_procs);
   uint32_t num_ioLinks;
   bool p2p_links = false;
   uint32_t num_p2pLinks = 0;
 
-  cpuinfo = (proc_cpuinfo *)calloc(num_procs, sizeof(struct proc_cpuinfo));
-  if (!cpuinfo) {
-    pr_err("Fail to allocate memory for CPU info\n");
-    return HSAKMT_STATUS_NO_MEMORY;
-  }
-  topology_parse_cpuinfo(cpuinfo, num_procs);
+  topology_parse_cpuinfo(cpuinfo);
 
-  ret = topology_sysfs_get_system_props(&sys_props);
+  ret = topology_sysfs_get_system_props(sys_props);
   if (ret != HSAKMT_STATUS_SUCCESS)
     goto err;
   if (sys_props.NumNodes > 0) {
-    temp_props =
-        (node_props_t *)calloc(sys_props.NumNodes * sizeof(node_props_t), 1);
-    if (!temp_props) {
-      ret = HSAKMT_STATUS_NO_MEMORY;
-      goto err;
-    }
+    temp_props.resize(sys_props.NumNodes);
+
     for (i = 0; i < sys_props.NumNodes; i++) {
       wsl::thunk::WDDMDevice *device_;
       topology_map_node_id(i, device_);
 
-      ret = topology_sysfs_get_node_props(i, &temp_props[i].node, &p2p_links,
-                                          &num_p2pLinks);
+      ret = topology_sysfs_get_node_props(i, temp_props[i].node, p2p_links,
+                                          num_p2pLinks);
       if (ret != HSAKMT_STATUS_SUCCESS) {
-        free_properties(temp_props, i);
         goto err;
       }
 
       if (temp_props[i].node.NumCPUCores)
-        topology_get_cpu_model_name(&temp_props[i].node, cpuinfo, num_procs);
+        topology_get_cpu_model_name(temp_props[i].node, cpuinfo);
 
       if (temp_props[i].node.NumMemoryBanks) {
-        temp_props[i].mem = (HsaMemoryProperties *)calloc(
-            temp_props[i].node.NumMemoryBanks * sizeof(HsaMemoryProperties), 1);
-        if (!temp_props[i].mem) {
-          ret = HSAKMT_STATUS_NO_MEMORY;
-          free_properties(temp_props, i + 1);
-          goto err;
-        }
+        temp_props[i].mem.resize(temp_props[i].node.NumMemoryBanks);
+
         for (mem_id = 0; mem_id < temp_props[i].node.NumMemoryBanks; mem_id++) {
           ret = topology_sysfs_get_mem_props(i, mem_id,
-                                             &temp_props[i].mem[mem_id]);
+                                             temp_props[i].mem[mem_id]);
           if (ret != HSAKMT_STATUS_SUCCESS) {
-            free_properties(temp_props, i + 1);
             goto err;
           }
         }
       }
 
       if (temp_props[i].node.NumCaches) {
-        temp_props[i].cache = (HsaCacheProperties *)calloc(
-            temp_props[i].node.NumCaches * sizeof(HsaCacheProperties), 1);
-        if (!temp_props[i].cache) {
-          ret = HSAKMT_STATUS_NO_MEMORY;
-          free_properties(temp_props, i + 1);
-          goto err;
-        }
+        temp_props[i].cache.resize(temp_props[i].node.NumCaches);
         for (int j = 0; j < 3; j++) {
           temp_props[i].cache[j].CacheType.ui32.Data = 1;
           temp_props[i].cache[j].CacheType.ui32.HSACU = 1;
@@ -1274,9 +1036,8 @@ HSAKMT_STATUS topology_take_snapshot(void) {
         temp_props[i].cache[1].CacheSize = device_->GetL2CacheSize() / 1024;
         temp_props[i].cache[2].CacheSize = device_->GetL3CacheSize() / 1024;
       } else if (!temp_props[i].node.KFDGpuID) { /* a CPU node */
-        ret = topology_get_cpu_cache_props(i, cpuinfo, &temp_props[i]);
+        ret = topology_get_cpu_cache_props(i, cpuinfo, temp_props[i]);
         if (ret != HSAKMT_STATUS_SUCCESS) {
-          free_properties(temp_props, i + 1);
           goto err;
         }
       }
@@ -1285,13 +1046,7 @@ HSAKMT_STATUS topology_take_snapshot(void) {
        * This removes the need for realloc when indirect and QPI links are added
        * later
        */
-      temp_props[i].link = (HsaIoLinkProperties *)calloc(
-          sys_props.NumNodes - 1, sizeof(HsaIoLinkProperties));
-      if (!temp_props[i].link) {
-        ret = HSAKMT_STATUS_NO_MEMORY;
-        free_properties(temp_props, i + 1);
-        goto err;
-      }
+      temp_props[i].link.resize(sys_props.NumNodes - 1);
       num_ioLinks = temp_props[i].node.NumIOLinks - num_p2pLinks;
       uint32_t link_id = 0;
 
@@ -1303,12 +1058,11 @@ HSAKMT_STATUS topology_take_snapshot(void) {
          */
         while (sys_link_id < num_ioLinks && link_id < sys_props.NumNodes - 1) {
           ret = topology_sysfs_get_iolink_props(
-              i, sys_link_id++, &temp_props[i].link[link_id], false);
+              i, sys_link_id++, temp_props[i].link[link_id], false);
           if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
             ret = HSAKMT_STATUS_SUCCESS;
             continue;
           } else if (ret != HSAKMT_STATUS_SUCCESS) {
-            free_properties(temp_props, i + 1);
             goto err;
           }
           link_id++;
@@ -1324,12 +1078,11 @@ HSAKMT_STATUS topology_take_snapshot(void) {
          */
         while (sys_link_id < num_p2pLinks && link_id < sys_props.NumNodes - 1) {
           ret = topology_sysfs_get_iolink_props(
-              i, sys_link_id++, &temp_props[i].link[link_id], true);
+              i, sys_link_id++, temp_props[i].link[link_id], true);
           if (ret == HSAKMT_STATUS_NOT_SUPPORTED) {
             ret = HSAKMT_STATUS_SUCCESS;
             continue;
           } else if (ret != HSAKMT_STATUS_SUCCESS) {
-            free_properties(temp_props, i + 1);
             goto err;
           }
           link_id++;
@@ -1343,37 +1096,28 @@ HSAKMT_STATUS topology_take_snapshot(void) {
     /* All direct IO links are created in the kernel. Here we need to
      * connect GPU<->GPU or GPU<->CPU indirect IO links.
      */
-    topology_create_indirect_gpu_links(&sys_props, temp_props);
+    topology_create_indirect_gpu_links(sys_props, temp_props);
   }
 
   if (!g_system) {
     g_system = (HsaSystemProperties *)malloc(sizeof(HsaSystemProperties));
     if (!g_system) {
-      free_properties(temp_props, sys_props.NumNodes);
       ret = HSAKMT_STATUS_NO_MEMORY;
       goto err;
     }
   }
 
   *g_system = sys_props;
-  if (g_props)
-    free(g_props);
-  g_props = temp_props;
 err:
-  free(cpuinfo);
   return ret;
 }
 
 /* Drop the Snashot of the HSA topology information. Assume lock is held. */
 void topology_drop_snapshot(void) {
-  if (!!g_system != !!g_props)
+  if (!!g_system != !!g_props.size())
     pr_warn("Probably inconsistency?\n");
 
-  if (g_props) {
-    /* Remove state */
-    free_properties(g_props, g_system->NumNodes);
-    g_props = NULL;
-  }
+  g_props.clear();
 
   free(g_system);
   g_system = NULL;
@@ -1385,7 +1129,7 @@ void topology_drop_snapshot(void) {
 }
 
 HSAKMT_STATUS validate_nodeid(uint32_t nodeid, uint32_t *gpu_id) {
-  if (!g_props || !g_system || g_system->NumNodes <= nodeid)
+  if (g_props.empty() || !g_system || g_system->NumNodes <= nodeid)
     return HSAKMT_STATUS_INVALID_NODE_UNIT;
   if (gpu_id)
     *gpu_id = g_props[nodeid].node.KFDGpuID;
@@ -1467,7 +1211,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtReleaseSystemProperties(void) {
 
 HSAKMT_STATUS topology_get_node_props(HSAuint32 NodeId,
                                       HsaNodeProperties *NodeProperties) {
-  if (!g_system || !g_props || NodeId >= g_system->NumNodes)
+  if (!g_system || g_props.empty() || NodeId >= g_system->NumNodes)
     return HSAKMT_STATUS_ERROR;
 
   *NodeProperties = g_props[NodeId].node;
@@ -1524,7 +1268,7 @@ hsaKmtGetNodeMemoryProperties(HSAuint32 NodeId, HSAuint32 NumBanks,
 
   memset(MemoryProperties, 0, NumBanks * sizeof(HsaMemoryProperties));
   for (i = 0; i < wsl::Min(g_props[NodeId].node.NumMemoryBanks, NumBanks); i++) {
-    assert(g_props[NodeId].mem);
+    assert(g_props[NodeId].mem.size());
     MemoryProperties[i] = g_props[NodeId].mem[i];
   }
 
@@ -1578,7 +1322,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtGetNodeCacheProperties(
   }
 
   for (i = 0; i < wsl::Min(g_props[NodeId].node.NumCaches, NumCaches); i++) {
-    assert(g_props[NodeId].cache);
+    assert(g_props[NodeId].cache.size());
     CacheProperties[i] = g_props[NodeId].cache[i];
   }
 
@@ -1591,10 +1335,10 @@ out:
 
 HSAKMT_STATUS topology_get_iolink_props(HSAuint32 NodeId, HSAuint32 NumIoLinks,
                                         HsaIoLinkProperties *IoLinkProperties) {
-  if (!g_system || !g_props || NodeId >= g_system->NumNodes)
+  if (!g_system || g_props.empty() || NodeId >= g_system->NumNodes)
     return HSAKMT_STATUS_ERROR;
 
-  memcpy(IoLinkProperties, g_props[NodeId].link,
+  memcpy(IoLinkProperties, g_props[NodeId].link.data(),
          NumIoLinks * sizeof(*IoLinkProperties));
 
   return HSAKMT_STATUS_SUCCESS;
@@ -1623,7 +1367,7 @@ hsaKmtGetNodeIoLinkProperties(HSAuint32 NodeId, HSAuint32 NumIoLinks,
     goto out;
   }
 
-  assert(g_props[NodeId].link);
+  assert(g_props[NodeId].link.size());
   err = topology_get_iolink_props(NodeId, NumIoLinks, IoLinkProperties);
 
 out:
@@ -1632,7 +1376,7 @@ out:
 }
 
 uint16_t get_device_id_by_node_id(HSAuint32 node_id) {
-  if (!g_props || !g_system || g_system->NumNodes <= node_id)
+  if (g_props.empty() || !g_system || g_system->NumNodes <= node_id)
     return 0;
 
   return g_props[node_id].node.DeviceId;
@@ -1647,7 +1391,7 @@ bool prefer_ats(HSAuint32 node_id) {
 uint16_t get_device_id_by_gpu_id(HSAuint32 gpu_id) {
   unsigned int i;
 
-  if (!g_props || !g_system)
+  if (g_props.empty() || !g_system)
     return 0;
 
   for (i = 0; i < g_system->NumNodes; i++) {
@@ -1667,7 +1411,7 @@ uint32_t get_direct_link_cpu(uint32_t gpu_node) {
   if (cpu_id == -1)
     return INVALID_NODEID;
 
-  assert(g_props[cpu_id].mem);
+  assert(g_props[cpu_id].mem.size());
 
   for (i = 0; i < g_props[cpu_id].node.NumMemoryBanks; i++)
     size += g_props[cpu_id].mem[i].SizeInBytes;
