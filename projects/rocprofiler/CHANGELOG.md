@@ -335,9 +335,49 @@ Example for file plugin output:
 
 - pcsampler sample code has been removed due to deprecation from v2.
 
-## ROCprofiler for rocm 6.3
+## ROCProfiler for ROCm 6.3
 
 ### Added
 
-- JSON output plugin for rocprofv2, the JSON file matches Google Trace Format, so it should be easily loaded to perfetto, chrome tracing or speedscope. For Speedscope, `--disable-json-data-flows` option will be needed as speedscope doesn't work with data flows.
-- Added `--no-serialization` flag to disable kernel serialization when rocprofv2 is in counter-collection mode. This change was added to allow rocprofv2 to avoid deadlock when profiling certain programs in counter-collection mode.
+- JSON output plugin for `rocprofv2`. The JSON file matches Google Trace Format making it easy to load on Perfetto, Chrome tracing, or Speedscope. For Speedscope, use `--disable-json-data-flows` option as speedscope doesn't work with data flows.
+- `--no-serialization` flag to disable kernel serialization when `rocprofv2` is in counter collection mode. This allows `rocprofv2` to avoid deadlock when profiling certain programs in counter collection mode.
+- `FP64_ACTIVE` and `ENGINE_ACTIVE` metrics to AMD Instinct MI300 accelerator
+- New HIP APIs with struct defined inside union.
+- Early checks to confirm the eligibility of ELF file in ATT plugin
+- Support for kernel name filtering in `rocprofv2`
+- Barrier bit to read and stop packets
+- ROCProfiler support for gfx1150 and gfx1151
+- ATT support for gfx12
+- gfx12 support
+
+### Changed
+
+- Extended lifetime for proxy queues
+- Setting the `trace-start` option for `rocprof` to `off` now disables kernel tracing
+- `libpciaccess-dev` functions now load with `dlopen`
+-	`PcieAccessApi*` api and `void* libpciaccess_handle` are now initialized to `nullptr`
+
+### Removed
+
+- Obsolete BSD and GPL licenses
+- `libsystemd-dev` from `CMakeLists.txt`
+
+### Optimized
+
+- ROCProfiler Performance improved to reduce profiling time for large workloads of counter collection
+
+### Resolved issues
+
+- Fixed bandwidth measurement in MI300
+- Fixed Perfetto plugin issue of `roctx` trace not getting displayed
+- Fixed `--help` for counter collection
+- Fixed signal management issues in `queue.cpp`
+- Fixed Perfetto tracks for multi-GPU
+- Fixed Perfetto plugin usage with `rocsys`
+- Fixed incorrect number of columns in the output CSV files for counter collection and kernel tracing
+- Fixed the ROCProfiler hang issue when running kernel trace, thread trace, or counter collection on Iree benchmark for AMD Instinct MI300 accelerator
+- Fixed build errors thrown during parsing of unions
+- Fixed the system hang caused while running `--kernel-trace` with Perfetto for certain applications
+- Fixed missing profiler records issue caused while running `--trace-period`
+- Fixed the hang issue of `ProfilerAPITest` of `runFeatureTests` on AMD Instinct MI300 accelerator
+- Fixed segment fault on Navi32
