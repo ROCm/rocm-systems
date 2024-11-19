@@ -31,6 +31,16 @@ def fatal_error(msg, exit_code=1):
     sys.exit(exit_code)
 
 
+def format_help(formatter, w=120, h=40):
+    """Return a wider HelpFormatter, if possible."""
+    try:
+        kwargs = {"width": w, "max_help_position": h}
+        formatter(None, **kwargs)
+        return lambda prog: formatter(prog, **kwargs)
+    except TypeError:
+        return formatter
+
+
 def strtobool(val):
     """Convert a string representation of truth to true or false.
     True values are 'y', 'yes', 't', 'true', 'on', and '1'; false values
@@ -80,7 +90,7 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         description="ROCProfilerV3 Run Script",
         usage="%(prog)s [options] -- <application> [application options]",
         epilog=usage_examples,
-        formatter_class=argparse.RawTextHelpFormatter,
+        formatter_class=format_help(argparse.RawTextHelpFormatter),
     )
 
     def add_parser_bool_argument(gparser, *args, **kwargs):
