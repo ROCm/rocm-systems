@@ -10,7 +10,7 @@ jobs:
       - name: Mirror the repository      
         env:       
           SOURCE_REPO: 'https://github.com/ROCm/rocprofiler-sdk-internal.git'    
-          TARGET_REPO: 'https://github.com/AMD-ROCm-Internal/ameya-sdk-test'        
+          TARGET_REPO: 'https://github.com/AMD-ROCm-Internal/rocprofiler-sdk-internal'        
           SOURCE_ACCESS_TOKEN: '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'   
           TARGET_ACCESS_TOKEN: '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' 
         run: |      
@@ -23,7 +23,7 @@ jobs:
           cd source-repo      
     
           # Set the push URL to the target repository with the PAT in the URL  
-          TARGET_REPO_WITH_CREDENTIALS="https://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@github.com/AMD-ROCm-Internal/ameya-sdk-test.git"  
+          TARGET_REPO_WITH_CREDENTIALS="https://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@github.com/AMD-ROCm-Internal/rocprofiler-sdk-internal.git"  
           git remote set-url --push origin "$TARGET_REPO_WITH_CREDENTIALS"      
     
           # Push the changes using --mirror      
