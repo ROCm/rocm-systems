@@ -173,6 +173,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_OPENMP,             ///< @see ::rocprofiler_ompt_operation_t
     ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,  ///< @see
                                                      ///< ::rocprofiler_memory_allocation_operation_t
+    ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,  ///< Callback notifying that a runtime
+                                                          ///< library has been initialized
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -201,11 +203,14 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_OPENMP,                     ///< @see ::rocprofiler_ompt_operation_t
     ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,          ///< @see
                                                    ///< ::rocprofiler_memory_allocation_operation_t
+    ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION,  ///< Record indicating a runtime library has
+                                                        ///< been initialized. @see
+                                                        ///< ::rocprofiler_runtime_initialization_operation_t
     ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_buffer_tracing_kind_t;
 
 /**
- * @brief ROCProfiler Code Object Tracer Operation.
+ * @brief ROCProfiler Code Object Tracer Operations.
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
@@ -216,7 +221,7 @@ typedef enum  // NOLINT(performance-enum-size)
 } rocprofiler_code_object_operation_t;
 
 /**
- * @brief Memory Copy Operation.
+ * @brief Memory Copy Operations.
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
@@ -377,6 +382,19 @@ typedef enum
     ROCPROFILER_RCCL_TABLE           = (1 << 6),
     ROCPROFILER_TABLE_LAST           = ROCPROFILER_RCCL_TABLE,
 } rocprofiler_intercept_table_t;
+
+/**
+ * @brief ROCProfiler Runtime Initialization Tracer Operations.
+ */
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_RUNTIME_INITIALIZATION_NONE = 0,  ///< Unknown runtime initialization
+    ROCPROFILER_RUNTIME_INITIALIZATION_HSA,       ///< Application loaded HSA runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_HIP,       ///< Application loaded HIP runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_MARKER,    ///< Application loaded Marker (ROCTx) runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_RCCL,      ///< Application loaded RCCL runtime
+    ROCPROFILER_RUNTIME_INITIALIZATION_LAST,
+} rocprofiler_runtime_initialization_operation_t;
 
 /**
  * @brief Enumeration for specifying the counter info struct version you want.

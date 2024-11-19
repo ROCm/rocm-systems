@@ -318,12 +318,12 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
     if(existing.count(val) == 0)
     {
         auto agents = rocprofiler::agent::get_agents();
-        for(auto itr : agents)
+        for(const auto* itr : agents)
         {
             auto hsa_agent = rocprofiler::agent::get_hsa_agent(itr);
             if(hsa_agent)
             {
-                auto rocprof_agent = rocprofiler::agent::get_rocprofiler_agent(*hsa_agent);
+                const auto* rocprof_agent = rocprofiler::agent::get_rocprofiler_agent(*hsa_agent);
                 if(rocprof_agent)
                 {
                     auto data = typename memory_allocation_info<OpIdx>::pairtype{&existing,

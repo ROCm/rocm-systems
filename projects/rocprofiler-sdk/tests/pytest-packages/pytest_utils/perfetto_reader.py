@@ -159,11 +159,15 @@ class PerfettoReader:
 
         _new_filenames = [x for x in self.filename if x not in _filenames]
 
-        def construct_trace_processor(trace_v):
+        _timeout = kwargs.get("timeout", 3)
+
+        def construct_trace_processor(trace_v, timeout_v):
             for i in range(4):
                 try:
                     verbosity = True if i > 0 else False
                     cfg = TraceProcessorConfig(verbose=verbosity)
+                    if hasattr(cfg, "load_timeout"):
+                        cfg.load_timeout = timeout_v + i
                     return TraceProcessor(trace=(trace_v), config=cfg)
                 except Exception as e:
                     nwait = i + 1
@@ -176,9 +180,13 @@ class PerfettoReader:
             raise RuntimeError(f"Failed to construct trace processor for '{trace_v}'")
 
         if len(self.filename) + len(_new_filenames) != len(self.trace_processor):
-            self.trace_processor = [construct_trace_processor(f) for f in self.filename]
+            self.trace_processor = [
+                construct_trace_processor(f, _timeout) for f in self.filename
+            ]
         elif _new_filenames:
-            self.trace_processor += [construct_trace_processor(f) for f in _new_filenames]
+            self.trace_processor += [
+                construct_trace_processor(f, _timeout) for f in _new_filenames
+            ]
 
         self.max_depth = kwargs.get("max_depth", None)
 

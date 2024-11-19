@@ -157,6 +157,7 @@ typedef struct
     /// @brief ::ROCPROFILER_CALLBACK_TRACING_MARKER_CORE_API,
     /// ::ROCPROFILER_CALLBACK_TRACING_MARKER_CONTROL_API, or
     /// ::ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API
+    /// @var operation
     /// @brief Specification of the API function, e.g., ::rocprofiler_marker_core_api_id_t,
     /// ::rocprofiler_marker_control_api_id_t, or
     /// ::rocprofiler_marker_name_api_id_t
@@ -176,8 +177,9 @@ typedef struct
     rocprofiler_thread_id_t           thread_id;        ///< id for thread generating this record
 
     /// @var kind
-    /// @brief ::ROCPROFILER_CALLBACK_TRACING_RCCL_API,
-    /// @brief Specification of the API function, e.g., ::rocprofiler_rccl_api_id_t,
+    /// @brief ::ROCPROFILER_CALLBACK_TRACING_RCCL_API
+    /// @var operation
+    /// @brief Specification of the API function, e.g., ::rocprofiler_rccl_api_id_t
 } rocprofiler_buffer_tracing_rccl_api_record_t;
 
 /**
@@ -265,13 +267,13 @@ typedef struct
 {
     uint64_t                               size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t      kind;  ///< ::ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY
-    rocprofiler_scratch_memory_operation_t operation;  ///< specification of the kind
-    rocprofiler_agent_id_t                 agent_id;   ///< agent kernel was dispatched on
-    rocprofiler_queue_id_t                 queue_id;   ///< queue kernel was dispatched on
+    rocprofiler_scratch_memory_operation_t operation;       ///< specification of the kind
+    rocprofiler_correlation_id_t           correlation_id;  ///< correlation ids for record
+    rocprofiler_agent_id_t                 agent_id;        ///< agent kernel was dispatched on
+    rocprofiler_queue_id_t                 queue_id;        ///< queue kernel was dispatched on
     rocprofiler_thread_id_t                thread_id;  ///< id for thread generating this record
     rocprofiler_timestamp_t                start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t                end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_correlation_id_t           correlation_id;   ///< correlation ids for record
     rocprofiler_scratch_alloc_flag_t       flags;
 } rocprofiler_buffer_tracing_scratch_memory_record_t;
 
@@ -295,6 +297,38 @@ typedef struct
     /// @var internal_correlation_id
     /// @brief Only internal correlation ID is provided
 } rocprofiler_buffer_tracing_correlation_id_retirement_record_t;
+
+/**
+ * @brief ROCProfiler Buffer Runtime Initialization Tracer Record.
+ */
+typedef struct rocprofiler_buffer_tracing_runtime_initialization_record_t
+{
+    uint64_t                                       size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t              kind;
+    rocprofiler_runtime_initialization_operation_t operation;
+    rocprofiler_correlation_id_t                   correlation_id;
+    rocprofiler_thread_id_t                        thread_id;
+    rocprofiler_timestamp_t                        timestamp;
+    uint64_t                                       version;
+    uint64_t                                       instance;
+
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION
+    /// @var operation
+    /// @brief Indicates which runtime was initialized/loaded
+    /// @var correlation_id
+    /// @brief Correlation ID for these records are always zero
+    /// @var thread_id
+    /// @brief ID for thread which loaded this runtime
+    /// @var timestamp
+    /// @brief Timestamp (in nanosec) of when runtime was initialized/loaded
+    /// @var version
+    /// @brief The version number of the runtime
+    ///
+    /// Version number is encoded as: (10000 * MAJOR) + (100 * MINOR) + PATCH
+    /// @var instance
+    /// @brief Number of times this runtime had been loaded previously
+} rocprofiler_buffer_tracing_runtime_initialization_record_t;
 
 /**
  * @brief Callback function for mapping @ref rocprofiler_buffer_tracing_kind_t ids to

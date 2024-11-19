@@ -237,6 +237,21 @@ typedef struct rocprofiler_callback_tracing_scratch_memory_data_t
 } rocprofiler_callback_tracing_scratch_memory_data_t;
 
 /**
+ * @brief ROCProfiler Runtime Initialization Data.
+ */
+typedef struct rocprofiler_callback_tracing_runtime_initialization_data_t
+{
+    uint64_t size;  ///< size of this struct
+    uint64_t version;
+    uint64_t instance;  ///< Number of times this runtime had been loaded previously
+
+    /// @var version
+    /// @brief The version number of the library
+    ///
+    /// Version number is encoded as: (10000 * MAJOR) + (100 * MINOR) + PATCH
+} rocprofiler_callback_tracing_runtime_initialization_data_t;
+
+/**
  * @brief API Tracing callback function. This function is invoked twice per API function: once
  * before the function is invoked and once after the function is invoked.  The external correlation
  * id value within the record is assigned the value at the top of the external correlation id stack.

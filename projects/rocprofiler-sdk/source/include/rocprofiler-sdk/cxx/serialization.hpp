@@ -871,6 +871,29 @@ save(ArchiveT& ar, rocprofiler_record_dimension_info_t data)
     ROCP_SDK_SAVE_DATA_CSTR(name);
 }
 
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_runtime_initialization_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(version);
+    ROCP_SDK_SAVE_DATA_FIELD(instance);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_runtime_initialization_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
+    ROCP_SDK_SAVE_DATA_FIELD(operation);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(thread_id);
+    ROCP_SDK_SAVE_DATA_FIELD(version);
+    ROCP_SDK_SAVE_DATA_FIELD(instance);
+}
+
 template <typename ArchiveT, typename EnumT, typename ValueT>
 void
 save(ArchiveT& ar, const rocprofiler::sdk::utility::name_info<EnumT, ValueT>& data)

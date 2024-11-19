@@ -20,13 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hip/table_id.h>
-#include <rocprofiler-sdk/hsa/table_id.h>
-#include <rocprofiler-sdk/marker/table_id.h>
-#include <rocprofiler-sdk/rccl/table_id.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
@@ -40,6 +33,14 @@
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/runtime_initialization.hpp"
+
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/marker/table_id.h>
+#include <rocprofiler-sdk/rccl/table_id.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
 #include <limits>
@@ -88,6 +89,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(CORRELATION_ID_RETIREMENT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RCCL_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(OPENMP)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -271,6 +273,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::page_migration::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION:
+        {
+            val = rocprofiler::runtime_init::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
@@ -394,6 +401,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_PAGE_MIGRATION:
         {
             ops = rocprofiler::page_migration::get_ids();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION:
+        {
+            ops = rocprofiler::runtime_init::get_ids();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:

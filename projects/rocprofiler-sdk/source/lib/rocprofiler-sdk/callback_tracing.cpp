@@ -20,14 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include <rocprofiler-sdk/callback_tracing.h>
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/hip/table_id.h>
-#include <rocprofiler-sdk/hsa/table_id.h>
-#include <rocprofiler-sdk/marker/table_id.h>
-#include <rocprofiler-sdk/rccl/table_id.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-
 #include "lib/rocprofiler-sdk/code_object/code_object.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
 #include "lib/rocprofiler-sdk/context/domain.hpp"
@@ -40,6 +32,15 @@
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
+#include "lib/rocprofiler-sdk/runtime_initialization.hpp"
+
+#include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hip/table_id.h>
+#include <rocprofiler-sdk/hsa/table_id.h>
+#include <rocprofiler-sdk/marker/table_id.h>
+#include <rocprofiler-sdk/rccl/table_id.h>
+#include <rocprofiler-sdk/rocprofiler.h>
 
 #include <atomic>
 #include <cstdint>
@@ -85,6 +86,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_COPY)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_ALLOCATION)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RCCL_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OPENMP)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 
 template <size_t Idx, size_t... Tail>
 std::pair<const char*, size_t>
@@ -263,6 +265,10 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::hsa::memory_allocation::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+        {
+            val = rocprofiler::runtime_init::name_by_id(operation);
+        }
     };
 
     if(!val)
@@ -386,6 +392,10 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         {
             ops = rocprofiler::hsa::memory_allocation::get_ids();
             break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
+        {
+            ops = rocprofiler::runtime_init::get_ids();
         }
     };
 
@@ -519,6 +529,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
         case ROCPROFILER_CALLBACK_TRACING_OPENMP:
+        case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

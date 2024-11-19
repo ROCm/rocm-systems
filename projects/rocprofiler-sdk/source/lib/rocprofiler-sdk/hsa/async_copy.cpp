@@ -105,7 +105,7 @@ id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
     if constexpr(sizeof...(IdxTail) > 0)
         return id_by_name(name, std::index_sequence<IdxTail...>{});
     else
-        return ROCPROFILER_HSA_AMD_EXT_API_ID_NONE;
+        return ROCPROFILER_MEMORY_COPY_LAST;
 }
 
 template <size_t... Idx>
@@ -113,7 +113,7 @@ void
 get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
 {
     auto _emplace = [](auto& _vec, uint32_t _v) {
-        if(_v < static_cast<uint32_t>(ROCPROFILER_HSA_AMD_EXT_API_ID_LAST)) _vec.emplace_back(_v);
+        if(_v < static_cast<uint32_t>(ROCPROFILER_MEMORY_COPY_LAST)) _vec.emplace_back(_v);
     };
 
     (_emplace(_id_list, async_copy_info<Idx>::operation_idx), ...);

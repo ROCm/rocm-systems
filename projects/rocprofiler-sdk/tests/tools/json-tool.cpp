@@ -293,6 +293,23 @@ struct kernel_symbol_callback_record_t
     }
 };
 
+struct runtime_init_callback_record_t
+{
+    uint64_t                                                   timestamp = 0;
+    rocprofiler_callback_tracing_record_t                      record    = {};
+    rocprofiler_callback_tracing_runtime_initialization_data_t payload   = {};
+    callback_arg_array_t                                       args      = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("timestamp", timestamp));
+        cereal::save(ar, record);
+        ar(cereal::make_nvp("payload", payload));
+        serialize_args(ar, args);
+    }
+};
+
 struct hsa_api_callback_record_t
 {
     uint64_t                                    timestamp = 0;
@@ -489,6 +506,7 @@ struct profile_counting_record
 };
 
 auto counter_info                  = std::deque<rocprofiler_counter_info_v0_t>{};
+auto runtime_init_cb_records       = std::deque<runtime_init_callback_record_t>{};
 auto code_object_records           = std::deque<code_object_callback_record_t>{};
 auto kernel_symbol_records         = std::deque<kernel_symbol_callback_record_t>{};
 auto hsa_api_cb_records            = std::deque<hsa_api_callback_record_t>{};
@@ -735,12 +753,28 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         rccl_api_cb_records.emplace_back(
             rccl_api_callback_record_t{ts, record, *data, std::move(args)});
     }
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION)
+    {
+        auto* data = static_cast<rocprofiler_callback_tracing_runtime_initialization_data_t*>(
+            record.payload);
+        auto args = callback_arg_array_t{};
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_EXIT)
+            rocprofiler_iterate_callback_tracing_kind_operation_args(
+                record, save_args, record.phase, &args);
+
+        static auto _mutex = std::mutex{};
+        auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+        runtime_init_cb_records.emplace_back(
+            runtime_init_callback_record_t{ts, record, *data, std::move(args)});
+    }
     else
     {
         throw std::runtime_error{"unsupported callback kind"};
     }
 }
 
+auto runtime_init_bf_records =
+    std::deque<rocprofiler_buffer_tracing_runtime_initialization_record_t>{};
 auto hsa_api_bf_records         = std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>{};
 auto marker_api_bf_records      = std::deque<rocprofiler_buffer_tracing_marker_api_record_t>{};
 auto hip_api_bf_records         = std::deque<rocprofiler_buffer_tracing_hip_api_record_t>{};
@@ -864,6 +898,14 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
 
                 rccl_api_bf_records.emplace_back(*record);
             }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION)
+            {
+                auto* record =
+                    static_cast<rocprofiler_buffer_tracing_runtime_initialization_record_t*>(
+                        header->payload);
+
+                runtime_init_bf_records.emplace_back(*record);
+            }
             else
             {
                 throw std::runtime_error{
@@ -958,20 +1000,24 @@ rocprofiler_context_id_t corr_id_retire_ctx             = {0};
 rocprofiler_context_id_t kernel_dispatch_callback_ctx   = {0};
 rocprofiler_context_id_t kernel_dispatch_buffered_ctx   = {0};
 rocprofiler_context_id_t page_migration_ctx             = {0};
+rocprofiler_context_id_t runtime_init_callback_ctx      = {};
+rocprofiler_context_id_t runtime_init_buffered_ctx      = {};
 // buffers
-rocprofiler_buffer_id_t hsa_api_buffered_buffer    = {};
-rocprofiler_buffer_id_t hip_api_buffered_buffer    = {};
-rocprofiler_buffer_id_t marker_api_buffered_buffer = {};
-rocprofiler_buffer_id_t kernel_dispatch_buffer     = {};
-rocprofiler_buffer_id_t memory_copy_buffer         = {};
-rocprofiler_buffer_id_t memory_allocation_buffer   = {};
-rocprofiler_buffer_id_t page_migration_buffer      = {};
-rocprofiler_buffer_id_t counter_collection_buffer  = {};
-rocprofiler_buffer_id_t scratch_memory_buffer      = {};
-rocprofiler_buffer_id_t corr_id_retire_buffer      = {};
-rocprofiler_buffer_id_t rccl_api_buffered_buffer   = {};
+rocprofiler_buffer_id_t runtime_init_buffered_buffer = {};
+rocprofiler_buffer_id_t hsa_api_buffered_buffer      = {};
+rocprofiler_buffer_id_t hip_api_buffered_buffer      = {};
+rocprofiler_buffer_id_t marker_api_buffered_buffer   = {};
+rocprofiler_buffer_id_t kernel_dispatch_buffer       = {};
+rocprofiler_buffer_id_t memory_copy_buffer           = {};
+rocprofiler_buffer_id_t memory_allocation_buffer     = {};
+rocprofiler_buffer_id_t page_migration_buffer        = {};
+rocprofiler_buffer_id_t counter_collection_buffer    = {};
+rocprofiler_buffer_id_t scratch_memory_buffer        = {};
+rocprofiler_buffer_id_t corr_id_retire_buffer        = {};
+rocprofiler_buffer_id_t rccl_api_buffered_buffer     = {};
 
 auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
+    {"RUNTIME_INIT_CALLBACK", &runtime_init_callback_ctx},
     {"HSA_API_CALLBACK", &hsa_api_callback_ctx},
     {"HIP_API_CALLBACK", &hip_api_callback_ctx},
     {"MARKER_API_CALLBACK", &marker_api_callback_ctx},
@@ -980,6 +1026,7 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"MEMORY_COPY_CALLBACK", &memory_copy_callback_ctx},
     {"MEMORY_ALLOCATION_CALLBACK", &memory_allocation_callback_ctx},
     {"RCCL_API_CALLBACK", &rccl_api_callback_ctx},
+    {"RUNTIME_INIT_BUFFERED", &runtime_init_buffered_ctx},
     {"HSA_API_BUFFERED", &hsa_api_buffered_ctx},
     {"HIP_API_BUFFERED", &hip_api_buffered_ctx},
     {"MARKER_API_BUFFERED", &marker_api_buffered_ctx},
@@ -993,7 +1040,8 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"RCCL_API_BUFFERED", &rccl_api_buffered_ctx},
 };
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 11>{&hsa_api_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 12>{&runtime_init_buffered_buffer,
+                                                        &hsa_api_buffered_buffer,
                                                         &hip_api_buffered_buffer,
                                                         &marker_api_buffered_buffer,
                                                         &kernel_dispatch_buffer,
@@ -1056,6 +1104,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                              *itr.second, nullptr, 0, set_external_correlation_id, nullptr),
                          "external correlation id request service configure");
     }
+
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         runtime_init_callback_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,
+                         nullptr,
+                         0,
+                         tool_tracing_callback,
+                         nullptr),
+                     "runtime init callback tracing service configure");
 
     for(auto itr : {ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API,
                     ROCPROFILER_CALLBACK_TRACING_HSA_AMD_EXT_API,
@@ -1163,6 +1220,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     constexpr auto buffer_size = 8192;
     constexpr auto watermark   = 7936;
 
+    ROCPROFILER_CALL(rocprofiler_create_buffer(runtime_init_buffered_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &runtime_init_buffered_buffer),
+                     "buffer creation");
+
     ROCPROFILER_CALL(rocprofiler_create_buffer(hsa_api_buffered_ctx,
                                                buffer_size,
                                                watermark,
@@ -1261,6 +1327,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                tool_data,
                                                &rccl_api_buffered_buffer),
                      "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                         runtime_init_buffered_ctx,
+                         ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION,
+                         nullptr,
+                         0,
+                         runtime_init_buffered_buffer),
+                     "buffer tracing service configure");
 
     for(auto itr : {ROCPROFILER_BUFFER_TRACING_HSA_CORE_API,
                     ROCPROFILER_BUFFER_TRACING_HSA_AMD_EXT_API,
@@ -1507,6 +1581,7 @@ tool_fini(void* tool_data)
 
     std::cerr << "[" << getpid() << "][" << __FUNCTION__
               << "] Finalizing... agents=" << agents.size()
+              << ", runtime_init_callback_records=" << runtime_init_cb_records.size()
               << ", code_object_callback_records=" << code_object_records.size()
               << ", kernel_symbol_callback_records=" << kernel_symbol_records.size()
               << ", hsa_api_callback_records=" << hsa_api_cb_records.size()
@@ -1522,6 +1597,7 @@ tool_fini(void* tool_data)
               << ", memory_allocation_bf_records=" << memory_allocation_bf_records.size()
               << ", scratch_memory_records=" << scratch_memory_records.size()
               << ", page_migration=" << page_migration_records.size()
+              << ", runtime_init_bf_records=" << runtime_init_bf_records.size()
               << ", hsa_api_bf_records=" << hsa_api_bf_records.size()
               << ", hip_api_bf_records=" << hip_api_bf_records.size()
               << ", marker_api_bf_records=" << marker_api_bf_records.size()
@@ -1611,6 +1687,7 @@ write_json(call_stack_t* _call_stack)
         try
         {
             json_ar(cereal::make_nvp("names", callbk_names));
+            json_ar(cereal::make_nvp("runtime_init", runtime_init_cb_records));
             json_ar(cereal::make_nvp("code_objects", code_object_records));
             json_ar(cereal::make_nvp("kernel_symbols", kernel_symbol_records));
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_cb_records));
@@ -1634,6 +1711,7 @@ write_json(call_stack_t* _call_stack)
         try
         {
             json_ar(cereal::make_nvp("names", buffer_names));
+            json_ar(cereal::make_nvp("runtime_init", runtime_init_bf_records));
             json_ar(cereal::make_nvp("kernel_dispatch", kernel_dispatch_bf_records));
             json_ar(cereal::make_nvp("memory_copies", memory_copy_bf_records));
             json_ar(cereal::make_nvp("memory_allocations", memory_allocation_bf_records));
