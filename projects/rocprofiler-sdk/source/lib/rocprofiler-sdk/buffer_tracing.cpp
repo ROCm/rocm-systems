@@ -33,6 +33,7 @@
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
@@ -80,6 +81,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CORE_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_CONTROL_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MARKER_NAME_API)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(MEMORY_COPY)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(MEMORY_ALLOCATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(KERNEL_DISPATCH)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(PAGE_MIGRATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(SCRATCH_MEMORY)
@@ -218,6 +220,11 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::hsa::async_copy::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION:
+        {
+            val = rocprofiler::hsa::memory_allocation::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:
         {
             val = rocprofiler::hsa::scratch_memory::name_by_id(operation);
@@ -337,6 +344,11 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
         case ROCPROFILER_BUFFER_TRACING_MEMORY_COPY:
         {
             ops = rocprofiler::hsa::async_copy::get_ids();
+            break;
+        }
+        case ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION:
+        {
+            ops = rocprofiler::hsa::memory_allocation::get_ids();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY:

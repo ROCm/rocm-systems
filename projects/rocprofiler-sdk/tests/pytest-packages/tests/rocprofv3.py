@@ -24,7 +24,9 @@ from __future__ import absolute_import
 
 
 def test_perfetto_data(
-    pftrace_data, json_data, categories=("hip", "hsa", "marker", "kernel", "memory_copy")
+    pftrace_data,
+    json_data,
+    categories=("hip", "hsa", "marker", "kernel", "memory_copy", "memory_allocation"),
 ):
 
     mapping = {
@@ -33,6 +35,7 @@ def test_perfetto_data(
         "marker": ("marker_api", "marker_api"),
         "kernel": ("kernel_dispatch", "kernel_dispatch"),
         "memory_copy": ("memory_copy", "memory_copy"),
+        "memory_allocation": ("memory_allocation", "memory_allocation"),
     }
 
     # make sure they specified valid categories
@@ -70,6 +73,7 @@ def test_otf2_data(
         "marker": ("marker_api", "marker_api"),
         "kernel": ("kernel_dispatch", "kernel_dispatch"),
         "memory_copy": ("memory_copy", "memory_copy"),
+        "memory_allocation": ("memory_allocation", "memory_allocation"),
     }
 
     # make sure they specified valid categories

@@ -55,11 +55,11 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Output control
 
   * - ``-r`` \| ``--runtime-trace``
-    - Collects HIP (runtime), memory copy, marker, scratch memory, and kernel dispatch traces.
+    - Collects HIP (runtime), memory copy, memory allocation, marker, scratch memory, and kernel dispatch traces.
     - Application Tracing
 
   * - ``-s`` \| ``--sys-trace``
-    - Collects HIP, HSA, memory copy, marker, scratch memory, and kernel dispatch traces.
+    - Collects HIP, HSA, memory copy, memory allocation, marker, scratch memory, and kernel dispatch traces.
     - Application Tracing
 
   * - ``--hip-trace``
@@ -76,6 +76,10 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
 
   * - ``--memory-copy-trace``
     - Collects memory copy traces.
+    - Application tracing
+
+  * - ``--memory-allocation-trace``
+    - Collects memory allocation traces.
     - Application tracing
 
   * - ``--scratch-memory-trace``
@@ -356,6 +360,30 @@ Here are the contents of ``memory_copy_trace.csv`` file:
 
 For the description of the fields in the output file, see :ref:`output-file-fields`.
 
+Memory allocation trace
++++++++++++++++++++++++++
+
+To trace memory allocations during the application run, use:
+
+.. code-block:: shell
+
+    rocprofv3 –-memory-allocation-trace -- < app_path >
+
+The above command generates a ``memory_allocation_trace.csv`` file prefixed with the process ID.
+
+.. code-block:: shell
+
+    $ cat 6489_memory_allocation_trace.csv
+
+Here are the contents of ``memory_allocation_trace.csv`` file:
+
+.. csv-table:: Memory allocation trace
+   :file: /data/memory_allocation_trace.csv
+   :widths: 10,10,10,10,10,10,20,20
+   :header-rows: 1
+
+For the description of the fields in the output file, see :ref:`output-file-fields`.
+
 Runtime trace
 +++++++++++++++
 
@@ -374,7 +402,7 @@ memory operations (copies and scratch).
 
     rocprofv3 –-runtime-trace -- < app_relative_path >
 
-Running the above command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``,and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
+Running the above command generates ``hip_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``scratch_memory_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 System trace
 ++++++++++++++
@@ -385,7 +413,7 @@ This is an all-inclusive option to collect all the above-mentioned traces.
 
     rocprofv3 –-sys-trace -- < app_relative_path >
 
-Running the above command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
+Running the above command generates ``hip_api_trace.csv``, ``hsa_api_trace.csv``, ``kernel_trace.csv``, ``memory_copy_trace.csv``, ``memory_allocation_trace.csv``, and ``marker_api_trace.csv`` (if ``ROCTx`` APIs are specified in the application) files prefixed with the process ID.
 
 Scratch memory trace
 ++++++++++++++++++++++
@@ -464,6 +492,8 @@ Properties
          Dispatch Traces.
       -  **``memory_copy_trace``** *(boolean)*: For Collecting Memory
          Copy Traces.
+      -  **``memory_allocation_trace``** *(boolean)*: For Collecting Memory
+         Allocation Traces.
       -  **``scratch_memory_trace``** *(boolean)*: For Collecting
          Scratch Memory operations Traces.
       -  **``stats``** *(boolean)*: For Collecting statistics of enabled
@@ -479,8 +509,8 @@ Properties
       -  **``hsa_image_trace``** *(boolean)*: For Collecting HSA API
          Traces (Image-extension API).
       -  **``sys_trace``** *(boolean)*: For Collecting HIP, HSA, Marker
-         (ROCTx), Memory copy, Scratch memory, and Kernel dispatch
-         traces.
+         (ROCTx), Memory copy, Memory allocation, Scratch memory, and
+         Kernel dispatch traces.
       -  **``mangled_kernels``** *(boolean)*: Do not demangle the kernel
          names.
       -  **``truncate_kernels``** *(boolean)*: Truncate the demangled
@@ -990,3 +1020,18 @@ Properties
                - **`src_agent_id`** *(object, required)*: Source Agent ID.
                   - **`handle`** *(integer, required)*: Handle of the agent.
                - **`bytes`** *(integer, required)*: Bytes copied.
+         - **`memory_allocation`** *(array)*: Memory allocation records.
+            - **Items** *(object)*
+               - **`size`** *(integer, required)*: Size of the Marker API record.
+               - **`kind`** *(integer, required)*: Kind of the Marker API.
+               - **`operation`** *(integer, required)*: Operation of the Marker API.
+               - **`correlation_id`** *(object, required)*: Correlation ID information.
+                  - **`internal`** *(integer, required)*: Internal correlation ID.
+                  - **`external`** *(integer, required)*: External correlation ID.
+               - **`start_timestamp`** *(integer, required)*: Start timestamp.
+               - **`end_timestamp`** *(integer, required)*: End timestamp.
+               - **`thread_id`** *(integer, required)*: Thread ID.
+               - **`agent_id`** *(object, required)*: Agent ID.
+                  - **`handle`** *(integer, required)*: Handle of the agent.
+               - **`starting_address`** *(string, required)*: Starting address of allocation.
+               - **`allocation_size`** *(integer, required)*: Size of allocation.

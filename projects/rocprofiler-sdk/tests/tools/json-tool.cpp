@@ -391,6 +391,21 @@ struct memory_copy_callback_record_t
     }
 };
 
+struct memory_allocation_callback_record_t
+{
+    uint64_t                                              timestamp = 0;
+    rocprofiler_callback_tracing_record_t                 record    = {};
+    rocprofiler_callback_tracing_memory_allocation_data_t payload   = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("timestamp", timestamp));
+        cereal::save(ar, record);
+        ar(cereal::make_nvp("payload", payload));
+    }
+};
+
 struct scratch_memory_callback_record_t
 {
     uint64_t                                           timestamp = 0;
@@ -483,6 +498,7 @@ auto hip_api_cb_records            = std::deque<hip_api_callback_record_t>{};
 auto scratch_memory_cb_records     = std::deque<scratch_memory_callback_record_t>{};
 auto kernel_dispatch_cb_records    = std::deque<kernel_dispatch_callback_record_t>{};
 auto memory_copy_cb_records        = std::deque<memory_copy_callback_record_t>{};
+auto memory_allocation_cb_records  = std::deque<memory_allocation_callback_record_t>{};
 auto rccl_api_cb_records           = std::deque<rccl_api_callback_record_t>{};
 
 int
@@ -696,6 +712,16 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
         auto        _lk    = std::unique_lock<std::mutex>{_mutex};
         memory_copy_cb_records.emplace_back(memory_copy_callback_record_t{ts, record, *data});
     }
+    else if(record.kind == ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION)
+    {
+        auto* data =
+            static_cast<rocprofiler_callback_tracing_memory_allocation_data_t*>(record.payload);
+
+        static auto _mutex = std::mutex{};
+        auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+        memory_allocation_cb_records.emplace_back(
+            memory_allocation_callback_record_t{ts, record, *data});
+    }
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_RCCL_API)
     {
         auto* data = static_cast<rocprofiler_callback_tracing_rccl_api_data_t*>(record.payload);
@@ -720,8 +746,10 @@ auto marker_api_bf_records      = std::deque<rocprofiler_buffer_tracing_marker_a
 auto hip_api_bf_records         = std::deque<rocprofiler_buffer_tracing_hip_api_record_t>{};
 auto kernel_dispatch_bf_records = std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>{};
 auto memory_copy_bf_records     = std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>{};
-auto scratch_memory_records     = std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>{};
-auto page_migration_records     = std::deque<rocprofiler_buffer_tracing_page_migration_record_t>{};
+auto memory_allocation_bf_records =
+    std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>{};
+auto scratch_memory_records = std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>{};
+auto page_migration_records = std::deque<rocprofiler_buffer_tracing_page_migration_record_t>{};
 auto corr_id_retire_records =
     std::deque<rocprofiler_buffer_tracing_correlation_id_retirement_record_t>{};
 auto rccl_api_bf_records = std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>{};
@@ -799,6 +827,13 @@ tool_tracing_buffered(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
 
                 memory_copy_bf_records.emplace_back(*record);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
+                    header->payload);
+
+                memory_allocation_bf_records.emplace_back(*record);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
             {
@@ -904,29 +939,32 @@ void
 pop_external_correlation();
 
 // contexts
-rocprofiler_context_id_t hsa_api_callback_ctx         = {0};
-rocprofiler_context_id_t hip_api_callback_ctx         = {0};
-rocprofiler_context_id_t marker_api_callback_ctx      = {0};
-rocprofiler_context_id_t code_object_ctx              = {0};
-rocprofiler_context_id_t rccl_api_callback_ctx        = {0};
-rocprofiler_context_id_t hsa_api_buffered_ctx         = {0};
-rocprofiler_context_id_t hip_api_buffered_ctx         = {0};
-rocprofiler_context_id_t marker_api_buffered_ctx      = {0};
-rocprofiler_context_id_t memory_copy_callback_ctx     = {0};
-rocprofiler_context_id_t memory_copy_buffered_ctx     = {0};
-rocprofiler_context_id_t rccl_api_buffered_ctx        = {0};
-rocprofiler_context_id_t counter_collection_ctx       = {0};
-rocprofiler_context_id_t scratch_memory_ctx           = {0};
-rocprofiler_context_id_t corr_id_retire_ctx           = {0};
-rocprofiler_context_id_t kernel_dispatch_callback_ctx = {0};
-rocprofiler_context_id_t kernel_dispatch_buffered_ctx = {0};
-rocprofiler_context_id_t page_migration_ctx           = {0};
+rocprofiler_context_id_t hsa_api_callback_ctx           = {0};
+rocprofiler_context_id_t hip_api_callback_ctx           = {0};
+rocprofiler_context_id_t marker_api_callback_ctx        = {0};
+rocprofiler_context_id_t code_object_ctx                = {0};
+rocprofiler_context_id_t rccl_api_callback_ctx          = {0};
+rocprofiler_context_id_t hsa_api_buffered_ctx           = {0};
+rocprofiler_context_id_t hip_api_buffered_ctx           = {0};
+rocprofiler_context_id_t marker_api_buffered_ctx        = {0};
+rocprofiler_context_id_t memory_copy_callback_ctx       = {0};
+rocprofiler_context_id_t memory_copy_buffered_ctx       = {0};
+rocprofiler_context_id_t memory_allocation_callback_ctx = {0};
+rocprofiler_context_id_t memory_allocation_buffered_ctx = {0};
+rocprofiler_context_id_t rccl_api_buffered_ctx          = {0};
+rocprofiler_context_id_t counter_collection_ctx         = {0};
+rocprofiler_context_id_t scratch_memory_ctx             = {0};
+rocprofiler_context_id_t corr_id_retire_ctx             = {0};
+rocprofiler_context_id_t kernel_dispatch_callback_ctx   = {0};
+rocprofiler_context_id_t kernel_dispatch_buffered_ctx   = {0};
+rocprofiler_context_id_t page_migration_ctx             = {0};
 // buffers
 rocprofiler_buffer_id_t hsa_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t hip_api_buffered_buffer    = {};
 rocprofiler_buffer_id_t marker_api_buffered_buffer = {};
 rocprofiler_buffer_id_t kernel_dispatch_buffer     = {};
 rocprofiler_buffer_id_t memory_copy_buffer         = {};
+rocprofiler_buffer_id_t memory_allocation_buffer   = {};
 rocprofiler_buffer_id_t page_migration_buffer      = {};
 rocprofiler_buffer_id_t counter_collection_buffer  = {};
 rocprofiler_buffer_id_t scratch_memory_buffer      = {};
@@ -940,12 +978,14 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"CODE_OBJECT", &code_object_ctx},
     {"KERNEL_DISPATCH_CALLBACK", &kernel_dispatch_callback_ctx},
     {"MEMORY_COPY_CALLBACK", &memory_copy_callback_ctx},
+    {"MEMORY_ALLOCATION_CALLBACK", &memory_allocation_callback_ctx},
     {"RCCL_API_CALLBACK", &rccl_api_callback_ctx},
     {"HSA_API_BUFFERED", &hsa_api_buffered_ctx},
     {"HIP_API_BUFFERED", &hip_api_buffered_ctx},
     {"MARKER_API_BUFFERED", &marker_api_buffered_ctx},
     {"KERNEL_DISPATCH_BUFFERED", &kernel_dispatch_buffered_ctx},
     {"MEMORY_COPY_BUFFERED", &memory_copy_buffered_ctx},
+    {"MEMORY_ALLOCATION_BUFFERED", &memory_allocation_buffered_ctx},
     {"PAGE_MIGRATION", &page_migration_ctx},
     {"COUNTER_COLLECTION", &counter_collection_ctx},
     {"SCRATCH_MEMORY", &scratch_memory_ctx},
@@ -953,11 +993,12 @@ auto contexts = std::unordered_map<std::string_view, rocprofiler_context_id_t*>{
     {"RCCL_API_BUFFERED", &rccl_api_buffered_ctx},
 };
 
-auto buffers = std::array<rocprofiler_buffer_id_t*, 10>{&hsa_api_buffered_buffer,
+auto buffers = std::array<rocprofiler_buffer_id_t*, 11>{&hsa_api_buffered_buffer,
                                                         &hip_api_buffered_buffer,
                                                         &marker_api_buffered_buffer,
                                                         &kernel_dispatch_buffer,
                                                         &memory_copy_buffer,
+                                                        &memory_allocation_buffer,
                                                         &scratch_memory_buffer,
                                                         &page_migration_buffer,
                                                         &counter_collection_buffer,
@@ -1092,6 +1133,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                        nullptr),
         "memory copy callback tracing service configure");
 
+    ROCPROFILER_CALL(rocprofiler_configure_callback_tracing_service(
+                         memory_allocation_callback_ctx,
+                         ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
+                         nullptr,
+                         0,
+                         tool_tracing_callback,
+                         nullptr),
+                     "memory allocation callback tracing service configure");
+
     ROCPROFILER_CALL(
         rocprofiler_configure_callback_tracing_service(scratch_memory_ctx,
                                                        ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,
@@ -1156,6 +1206,15 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                tool_tracing_buffered,
                                                tool_data,
                                                &memory_copy_buffer),
+                     "buffer creation");
+
+    ROCPROFILER_CALL(rocprofiler_create_buffer(memory_allocation_buffered_ctx,
+                                               buffer_size,
+                                               watermark,
+                                               ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                               tool_tracing_buffered,
+                                               tool_data,
+                                               &memory_allocation_buffer),
                      "buffer creation");
 
     ROCPROFILER_CALL(rocprofiler_create_buffer(scratch_memory_ctx,
@@ -1260,6 +1319,14 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                                                      0,
                                                      memory_copy_buffer),
         "buffer tracing service for memory copy configure");
+
+    ROCPROFILER_CALL(
+        rocprofiler_configure_buffer_tracing_service(memory_allocation_buffered_ctx,
+                                                     ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                                                     nullptr,
+                                                     0,
+                                                     memory_allocation_buffer),
+        "buffer tracing service for memory allocation configure");
 
     ROCPROFILER_CALL(
         rocprofiler_configure_buffer_tracing_service(scratch_memory_ctx,
@@ -1448,9 +1515,11 @@ tool_fini(void* tool_data)
               << ", scratch_memory_callback_records=" << scratch_memory_cb_records.size()
               << ", kernel_dispatch_callback_records=" << kernel_dispatch_cb_records.size()
               << ", memory_copy_callback_records=" << memory_copy_cb_records.size()
+              << ", memory_allocation_callback_records=" << memory_allocation_cb_records.size()
               << ", rccl_api_callback_records=" << rccl_api_cb_records.size()
               << ", kernel_dispatch_bf_records=" << kernel_dispatch_bf_records.size()
               << ", memory_copy_bf_records=" << memory_copy_bf_records.size()
+              << ", memory_allocation_bf_records=" << memory_allocation_bf_records.size()
               << ", scratch_memory_records=" << scratch_memory_records.size()
               << ", page_migration=" << page_migration_records.size()
               << ", hsa_api_bf_records=" << hsa_api_bf_records.size()
@@ -1551,6 +1620,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("scratch_memory_traces", scratch_memory_cb_records));
             json_ar(cereal::make_nvp("kernel_dispatch", kernel_dispatch_cb_records));
             json_ar(cereal::make_nvp("memory_copies", memory_copy_cb_records));
+            json_ar(cereal::make_nvp("memory_allocations", memory_allocation_cb_records));
         } catch(std::exception& e)
         {
             std::cerr << "[" << getpid() << "][" << __FUNCTION__
@@ -1566,6 +1636,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("names", buffer_names));
             json_ar(cereal::make_nvp("kernel_dispatch", kernel_dispatch_bf_records));
             json_ar(cereal::make_nvp("memory_copies", memory_copy_bf_records));
+            json_ar(cereal::make_nvp("memory_allocations", memory_allocation_bf_records));
             json_ar(cereal::make_nvp("scratch_memory_traces", scratch_memory_records));
             json_ar(cereal::make_nvp("page_migration", page_migration_records));
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_bf_records));
@@ -1648,6 +1719,12 @@ write_perfetto()
             tids.emplace(itr.thread_id);
             agent_ids.emplace(itr.dst_agent_id.handle);
             agent_ids.emplace(itr.src_agent_id.handle);
+        }
+
+        for(auto itr : memory_allocation_bf_records)
+        {
+            tids.emplace(itr.thread_id);
+            agent_ids.emplace(itr.agent_id.handle);
         }
 
         for(auto itr : kernel_dispatch_bf_records)
@@ -1882,6 +1959,35 @@ write_perfetto()
                               "copy_bytes",
                               itr.bytes);
             TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
+                            track,
+                            itr.end_timestamp,
+                            "end_ns",
+                            itr.end_timestamp);
+        }
+
+        for(auto itr : memory_allocation_bf_records)
+        {
+            auto  name  = buffer_names.at(itr.kind, itr.operation);
+            auto& track = agent_tracks.at(itr.agent_id.handle);
+
+            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_allocation>::name,
+                              ::perfetto::StaticString(name.data()),
+                              track,
+                              itr.start_timestamp,
+                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
+                              "begin_ns",
+                              itr.start_timestamp,
+                              "kind",
+                              itr.kind,
+                              "operation",
+                              itr.operation,
+                              "agent",
+                              agents_map.at(itr.agent_id).logical_node_id,
+                              "Allocation_size",
+                              itr.allocation_size,
+                              "Starting_address",
+                              itr.starting_address);
+            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_allocation>::name,
                             track,
                             itr.end_timestamp,
                             "end_ns",

@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
@@ -81,6 +82,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(CODE_OBJECT)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_DISPATCH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_COPY)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_ALLOCATION)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RCCL_API)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OPENMP)
 
@@ -256,6 +258,11 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
             break;
         }
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
+        {
+            val = rocprofiler::hsa::memory_allocation::name_by_id(operation);
+            break;
+        }
     };
 
     if(!val)
@@ -373,6 +380,11 @@ rocprofiler_iterate_callback_tracing_kind_operations(
         case ROCPROFILER_CALLBACK_TRACING_OPENMP:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+            break;
+        }
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
+        {
+            ops = rocprofiler::hsa::memory_allocation::get_ids();
             break;
         }
     };
@@ -504,6 +516,7 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
+        case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
         case ROCPROFILER_CALLBACK_TRACING_OPENMP:
         {

@@ -26,6 +26,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
+#include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/internal_threading.h>
 
 #include <tuple>
@@ -104,6 +105,8 @@ ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_signal_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_executable_t)
 ROCPROFILER_CXX_DECLARE_OPERATORS(const rocprofiler_agent_v0_t&)
 ROCPROFILER_CXX_DECLARE_OPERATORS(rocprofiler_dim3_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_region_t)
+ROCPROFILER_CXX_DECLARE_OPERATORS(hsa_amd_memory_pool_t)
 
 // definitions of operator==
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_context_id_t)
@@ -116,6 +119,8 @@ ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(rocprofiler_callback_thread_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_agent_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_executable_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_region_t)
+ROCPROFILER_CXX_DEFINE_EQ_HANDLE_OPERATOR(hsa_amd_memory_pool_t)
 
 inline bool
 operator==(const rocprofiler_agent_v0_t& lhs, const rocprofiler_agent_v0_t& rhs)
@@ -142,6 +147,8 @@ ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_executable_t)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(const rocprofiler_agent_v0_t&)
 ROCPROFILER_CXX_DEFINE_NE_OPERATOR(rocprofiler_dim3_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_region_t)
+ROCPROFILER_CXX_DEFINE_NE_OPERATOR(hsa_amd_memory_pool_t)
 
 // definitions of operator<
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_context_id_t)
@@ -154,6 +161,8 @@ ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(rocprofiler_callback_thread_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_agent_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_executable_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_region_t)
+ROCPROFILER_CXX_DEFINE_LT_HANDLE_OPERATOR(hsa_amd_memory_pool_t)
 
 inline bool
 operator<(const rocprofiler_agent_v0_t& lhs, const rocprofiler_agent_v0_t& rhs)
@@ -185,6 +194,8 @@ ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_signal_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_executable_t)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(const rocprofiler_agent_v0_t&)
 ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(rocprofiler_dim3_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_region_t)
+ROCPROFILER_CXX_DEFINE_COMPARE_OPERATORS(hsa_amd_memory_pool_t)
 
 // cleanup defines
 #undef ROCPROFILER_CXX_DECLARE_OPERATORS

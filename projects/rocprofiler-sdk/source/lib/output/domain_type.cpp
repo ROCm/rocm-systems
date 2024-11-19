@@ -52,6 +52,10 @@ DEFINE_BUFFER_TYPE_NAME(COUNTER_COLLECTION,
                         "counter_collection",
                         "counter_collection_stats")
 DEFINE_BUFFER_TYPE_NAME(RCCL, "RCCL_API", "rccl_api_trace", "rccl_api_stats")
+DEFINE_BUFFER_TYPE_NAME(MEMORY_ALLOCATION,
+                        "MEMORY_ALLOCATION",
+                        "memory_allocation",
+                        "memory_allocation_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

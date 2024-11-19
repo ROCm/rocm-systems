@@ -188,6 +188,8 @@ def test_summary_data(json_data):
             assert itr.stats.count >= 2130 and itr.stats.count <= 2150
         elif itr.domain == "MEMORY_COPY":
             assert itr.stats.count == 12
+        elif itr.domain == "MEMORY_ALLOCATION":
+            assert itr.stats.count >= 10 and itr.stats.count <= 30
         elif itr.domain == "MARKER_API":
             assert itr.stats.count == 1106
             expected = dict(
@@ -231,6 +233,7 @@ def test_summary_display_data(json_data, summary_data):
     marker = get_df("MARKER_API")
     dispatch = get_df("KERNEL_DISPATCH")
     memcpy = get_df("MEMORY_COPY")
+    memalloc = get_df("MEMORY_ALLOCATION")
     dispatch_and_copy = get_df("KERNEL_DISPATCH + MEMORY_COPY")
     hip_and_marker = get_df("HIP_API + MARKER_API") if num_summary_grps > 1 else None
     total = get_df("SUMMARY")
@@ -239,18 +242,21 @@ def test_summary_display_data(json_data, summary_data):
 
     assert get_dims(marker) == [7, 9], f"{marker}"
     assert get_dims(memcpy) == [2, 9], f"{memcpy}"
+    assert get_dims(memalloc) == [1, 9], f"{memalloc}"
     assert get_dims(dispatch) == [3, 9], f"{dispatch}"
     assert get_dims(dispatch_and_copy) == [5, 9], f"{dispatch_and_copy}"
     assert get_dims(hip) == [14, 9], f"{hip}"
     assert get_dims(hip_and_marker) == expected_hip_and_marker_dims, f"{hip_and_marker}"
-    assert get_dims(total) == [23, 9], f"{total}"
+    assert get_dims(total) == [24, 9], f"{total}"
 
 
 def test_perfetto_data(pftrace_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
     rocprofv3.test_perfetto_data(
-        pftrace_data, json_data, ("hip", "marker", "kernel", "memory_copy")
+        pftrace_data,
+        json_data,
+        ("hip", "marker", "kernel", "memory_copy", "memory_allocation"),
     )
 
 
@@ -258,7 +264,9 @@ def test_otf2_data(otf2_data, json_data):
     import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
 
     rocprofv3.test_otf2_data(
-        otf2_data, json_data, ("hip", "marker", "kernel", "memory_copy")
+        otf2_data,
+        json_data,
+        ("hip", "marker", "kernel", "memory_copy", "memory_allocation"),
     )
 
 

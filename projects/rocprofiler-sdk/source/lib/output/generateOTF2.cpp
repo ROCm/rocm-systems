@@ -127,43 +127,55 @@ auto       main_tid        = common::get_tid();
 archive_t* archive         = nullptr;
 auto       flush_callbacks = OTF2_FlushCallbacks{pre_flush, post_flush};
 
+enum rocprofiler_location_type_t
+{
+    ROCPROFILER_AGENT_NO_TYPE = 0,
+    ROCPROFILER_AGENT_MEMORY_COPY_TYPE,
+    ROCPROFILER_AGENT_DISPATCH_TYPE,
+    ROCPROFILER_AGENT_MEMORY_ALLOC_TYPE
+};
+
 struct location_base
 {
-    uint64_t                pid   = 0;
-    rocprofiler_thread_id_t tid   = 0;
-    rocprofiler_agent_id_t  agent = {.handle = 0};
-    rocprofiler_queue_id_t  queue = {.handle = 0};
+    uint64_t                    pid   = 0;
+    rocprofiler_thread_id_t     tid   = 0;
+    rocprofiler_agent_id_t      agent = {.handle = 0};
+    rocprofiler_queue_id_t      queue = {.handle = 0};
+    rocprofiler_location_type_t type  = ROCPROFILER_AGENT_NO_TYPE;
 
-    location_base(uint64_t                _pid,
-                  rocprofiler_thread_id_t _tid,
-                  rocprofiler_agent_id_t  _agent = {.handle = 0},
-                  rocprofiler_queue_id_t  _queue = {.handle = 0})
+    location_base(uint64_t                    _pid,
+                  rocprofiler_thread_id_t     _tid,
+                  rocprofiler_agent_id_t      _agent = {.handle = 0},
+                  rocprofiler_location_type_t _type  = ROCPROFILER_AGENT_NO_TYPE,
+                  rocprofiler_queue_id_t      _queue = {.handle = 0})
     : pid{_pid}
     , tid{_tid}
     , agent{_agent}
     , queue{_queue}
+    , type{_type}
     {}
 
     auto hash() const
     {
-        return array_hash<uint64_t, 4>{}(pid, tid, agent.handle + 1, queue.handle + 1);
+        return array_hash<uint64_t, 5>{}(pid, tid, agent.handle + 1, queue.handle + 1, type);
     }
 };
 
 bool
 operator<(const location_base& lhs, const location_base& rhs)
 {
-    return std::tie(lhs.pid, lhs.tid, lhs.agent.handle, lhs.queue.handle) <
-           std::tie(rhs.pid, rhs.tid, rhs.agent.handle, rhs.queue.handle);
+    return std::tie(lhs.pid, lhs.tid, lhs.agent.handle, lhs.queue.handle, lhs.type) <
+           std::tie(rhs.pid, rhs.tid, rhs.agent.handle, rhs.queue.handle, rhs.type);
 }
 
 struct location_data : location_base
 {
-    location_data(uint64_t                _pid,
-                  rocprofiler_thread_id_t _tid,
-                  rocprofiler_agent_id_t  _agent = {.handle = 0},
-                  rocprofiler_queue_id_t  _queue = {.handle = 0})
-    : location_base{_pid, _tid, _agent, _queue}
+    location_data(uint64_t                    _pid,
+                  rocprofiler_thread_id_t     _tid,
+                  rocprofiler_agent_id_t      _agent = {.handle = 0},
+                  rocprofiler_location_type_t _type  = ROCPROFILER_AGENT_NO_TYPE,
+                  rocprofiler_queue_id_t      _queue = {.handle = 0})
+    : location_base{_pid, _tid, _agent, _type, _queue}
     , index{++index_counter}
     , event_writer{OTF2_Archive_GetEvtWriter(CHECK_NOTNULL(archive), index)}
     {
@@ -206,7 +218,7 @@ get_location(const location_base& _location, bool _init = false)
     if(_init)
         return get_locations()
             .emplace_back(std::make_unique<location_data>(
-                _location.pid, _location.tid, _location.agent, _location.queue))
+                _location.pid, _location.tid, _location.agent, _location.type, _location.queue))
             .get();
 
     return nullptr;
@@ -299,7 +311,7 @@ setup(const output_config& cfg)
     OTF2_CHECK(OTF2_Pthread_Archive_SetLockingCallbacks(archive, nullptr));
     OTF2_CHECK(OTF2_Archive_OpenEvtFiles(archive));
 
-    ROCP_ERROR << "Opened result file: " << _filename << ".oft2";
+    ROCP_ERROR << "Opened result file: " << _filename << ".otf2";
 }
 
 void
@@ -343,17 +355,19 @@ create_attribute_list()
 }  // namespace
 
 void
-write_otf2(const output_config&                                             cfg,
-           const metadata&                                                  tool_metadata,
-           uint64_t                                                         pid,
-           const std::vector<agent_info>&                                   agent_data,
-           std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_data,
-           std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_data,
-           std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
-           std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_data,
-           std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*      marker_api_data,
-           std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* /*scratch_memory_data*/,
-           std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>* rccl_api_data)
+write_otf2(
+    const output_config&                                             cfg,
+    const metadata&                                                  tool_metadata,
+    uint64_t                                                         pid,
+    const std::vector<agent_info>&                                   agent_data,
+    std::deque<rocprofiler_buffer_tracing_hip_api_record_t>*         hip_api_data,
+    std::deque<rocprofiler_buffer_tracing_hsa_api_record_t>*         hsa_api_data,
+    std::deque<rocprofiler_buffer_tracing_kernel_dispatch_record_t>* kernel_dispatch_data,
+    std::deque<rocprofiler_buffer_tracing_memory_copy_record_t>*     memory_copy_data,
+    std::deque<rocprofiler_buffer_tracing_marker_api_record_t>*      marker_api_data,
+    std::deque<rocprofiler_buffer_tracing_scratch_memory_record_t>* /*scratch_memory_data*/,
+    std::deque<rocprofiler_buffer_tracing_rccl_api_record_t>*          rccl_api_data,
+    std::deque<rocprofiler_buffer_tracing_memory_allocation_record_t>* memory_allocation_data)
 {
     namespace sdk = ::rocprofiler::sdk;
 
@@ -366,12 +380,16 @@ write_otf2(const output_config&                                             cfg,
     const auto& buffer_names    = tool_metadata.buffer_names;
     auto        tids            = std::set<rocprofiler_thread_id_t>{};
     auto agent_thread_ids = std::map<rocprofiler_thread_id_t, std::set<rocprofiler_agent_id_t>>{};
+    auto agent_thread_ids_alloc =
+        std::map<rocprofiler_thread_id_t, std::set<rocprofiler_agent_id_t>>{};
     auto agent_queue_ids =
         std::map<rocprofiler_thread_id_t,
                  std::map<rocprofiler_agent_id_t, std::unordered_set<rocprofiler_queue_id_t>>>{};
 
     auto thread_event_info = std::map<rocprofiler_thread_id_t, event_info>{};
     auto agent_memcpy_info =
+        std::map<rocprofiler_thread_id_t, std::map<rocprofiler_agent_id_t, event_info>>{};
+    auto agent_memalloc_info =
         std::map<rocprofiler_thread_id_t, std::map<rocprofiler_agent_id_t, event_info>>{};
     auto agent_dispatch_info =
         std::map<rocprofiler_thread_id_t,
@@ -407,6 +425,12 @@ write_otf2(const output_config&                                             cfg,
             agent_thread_ids[itr.thread_id].emplace(itr.dst_agent_id);
         }
 
+        for(auto itr : *memory_allocation_data)
+        {
+            tids.emplace(itr.thread_id);
+            agent_thread_ids_alloc[itr.thread_id].emplace(itr.agent_id);
+        }
+
         for(auto itr : *kernel_dispatch_data)
         {
             tids.emplace(itr.thread_id);
@@ -421,13 +445,20 @@ write_otf2(const output_config&                                             cfg,
 
         for(const auto& [tid, itr] : agent_thread_ids)
             for(auto agent : itr)
-                agent_memcpy_info[tid].emplace(agent, location_base{pid, tid, agent});
+                agent_memcpy_info[tid].emplace(
+                    agent, location_base{pid, tid, agent, ROCPROFILER_AGENT_MEMORY_COPY_TYPE});
+
+        for(const auto& [tid, itr] : agent_thread_ids_alloc)
+            for(auto agent : itr)
+                agent_memalloc_info[tid].emplace(
+                    agent, location_base{pid, tid, agent, ROCPROFILER_AGENT_MEMORY_ALLOC_TYPE});
 
         for(const auto& [tid, itr] : agent_queue_ids)
             for(const auto& [agent, qitr] : itr)
                 for(auto queue : qitr)
-                    agent_dispatch_info[tid][agent].emplace(queue,
-                                                            location_base{pid, tid, agent, queue});
+                    agent_dispatch_info[tid][agent].emplace(
+                        queue,
+                        location_base{pid, tid, agent, ROCPROFILER_AGENT_DISPATCH_TYPE, queue});
     }
 
     for(auto& [tid, evt] : thread_event_info)
@@ -448,6 +479,24 @@ write_otf2(const output_config&                                             cfg,
 
             evt.name = fmt::format(
                 "Thread {}, Copy to {} {}", tid, _type_name, _agent->logical_node_type_id);
+        }
+    }
+
+    for(auto& [tid, itr] : agent_memalloc_info)
+    {
+        for(auto& [agent, evt] : itr)
+        {
+            const auto* _agent     = _get_agent(agent);
+            auto        _type_name = std::string_view{"UNK"};
+            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                _type_name = "CPU";
+            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                _type_name = "GPU";
+
+            evt.name = fmt::format("Thread {}, Memory Allocation at {} {}",
+                                   tid,
+                                   _type_name,
+                                   _agent->logical_node_type_id);
         }
     }
 
@@ -576,6 +625,30 @@ write_otf2(const output_config&                                             cfg,
                                     _evt_info.get_location(),
                                     itr.start_timestamp,
                                     get_attr(sdk::category::memory_copy{})});
+        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
+                                    name,
+                                    _evt_info.get_location(),
+                                    itr.end_timestamp,
+                                    nullptr});
+    }
+
+    for(auto itr : *memory_allocation_data)
+    {
+        auto name = buffer_names.at(itr.kind, itr.operation);
+        _hash_data.emplace(
+            get_hash_id(name),
+            region_info{std::string{name}, OTF2_REGION_ROLE_ALLOCATE, OTF2_PARADIGM_HIP});
+
+        // TODO: add attributes for memory allocation parameters
+
+        auto& _evt_info = agent_memalloc_info.at(itr.thread_id).at(itr.agent_id);
+        _evt_info.event_count += 1;
+
+        _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_ENTER,
+                                    name,
+                                    _evt_info.get_location(),
+                                    itr.start_timestamp,
+                                    get_attr(sdk::category::memory_allocation{})});
         _data.emplace_back(evt_data{ROCPROFILER_CALLBACK_PHASE_EXIT,
                                     name,
                                     _evt_info.get_location(),
@@ -765,6 +838,24 @@ write_otf2(const output_config&                                             cfg,
 
     // Memcpy Events
     for(auto& [tid, itr] : agent_memcpy_info)
+    {
+        for(auto& [agent, evt] : itr)
+        {
+            auto _hash = get_hash_id(evt.name);
+
+            add_write_string(_hash, evt.name);
+            OTF2_CHECK(OTF2_GlobalDefWriter_WriteLocation(global_def_writer,
+                                                          evt.id(),  // id
+                                                          _hash,
+                                                          OTF2_LOCATION_TYPE_ACCELERATOR_STREAM,
+                                                          2 * evt.event_count,  // # events
+                                                          agent.handle          // location group
+                                                          ));
+        }
+    }
+
+    // Memalloc Events
+    for(auto& [tid, itr] : agent_memalloc_info)
     {
         for(auto& [agent, evt] : itr)
         {

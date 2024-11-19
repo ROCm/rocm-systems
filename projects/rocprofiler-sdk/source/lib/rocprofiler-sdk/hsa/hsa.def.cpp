@@ -474,6 +474,15 @@ HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT
 HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect, hsa_amd_memory_async_copy_rect_fn)
 // clang-format on
 
+#elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_MEMORY_ALLOCATION_CPP_IMPL) &&                       \
+    ROCPROFILER_LIB_ROCPROFILER_HSA_MEMORY_ALLOCATION_CPP_IMPL == 1
+
+// clang-format off
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_Core, ROCPROFILER_HSA_CORE_API_ID_hsa_memory_allocate, hsa_memory_allocate, hsa_memory_allocate_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_allocate, hsa_amd_memory_pool_allocate, hsa_amd_memory_pool_allocate_fn)
+HSA_API_META_DEFINITION(ROCPROFILER_HSA_TABLE_ID_AmdExt, ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_create, hsa_amd_vmem_handle_create, hsa_amd_vmem_handle_create_fn)
+// clang-format on
+
 #else
 #    error "Do not compile this file directly. It is included by lib/rocprofiler/hsa/hsa.cpp"
 #endif

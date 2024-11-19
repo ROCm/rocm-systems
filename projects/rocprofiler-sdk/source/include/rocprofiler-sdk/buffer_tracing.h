@@ -204,6 +204,28 @@ typedef struct
 } rocprofiler_buffer_tracing_memory_copy_record_t;
 
 /**
+ * @brief ROCProfiler Buffer Memory Allocation Tracer Record.
+ */
+typedef struct
+{
+    uint64_t                                  size;  ///< size of this struct
+    rocprofiler_buffer_tracing_kind_t         kind;
+    rocprofiler_memory_allocation_operation_t operation;
+    rocprofiler_correlation_id_t              correlation_id;  ///< correlation ids for record
+    rocprofiler_thread_id_t                   thread_id;  ///< id for thread that triggered copy
+    rocprofiler_timestamp_t                   start_timestamp;  ///< start time in nanoseconds
+    rocprofiler_timestamp_t                   end_timestamp;    ///< end time in nanoseconds
+    rocprofiler_agent_id_t agent_id;          ///< agent information for memory allocation
+    uint64_t               starting_address;  ///< starting address for memory allocation
+    uint64_t               allocation_size;   ///< size for memory allocation
+    /// @var kind
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION
+    /// @var operation
+    /// @brief Specification of the memory allocation function (@see
+    /// ::rocprofiler_memory_allocation_operation_t
+} rocprofiler_buffer_tracing_memory_allocation_record_t;
+
+/**
  * @brief ROCProfiler Buffer Kernel Dispatch Tracer Record.
  */
 typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t

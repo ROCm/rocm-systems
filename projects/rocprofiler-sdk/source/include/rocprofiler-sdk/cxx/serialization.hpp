@@ -332,6 +332,18 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_memory_copy_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_callback_tracing_memory_allocation_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(starting_address);
+    ROCP_SDK_SAVE_DATA_FIELD(allocation_size);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_rccl_api_retval_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(ncclResult_t_retval);
@@ -459,6 +471,22 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_copy_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(dst_agent_id);
     ROCP_SDK_SAVE_DATA_FIELD(src_agent_id);
     ROCP_SDK_SAVE_DATA_FIELD(bytes);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_allocation_record_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(kind);
+    ROCP_SDK_SAVE_DATA_FIELD(operation);
+    ROCP_SDK_SAVE_DATA_FIELD(thread_id);
+    ROCP_SDK_SAVE_DATA_FIELD(correlation_id);
+    ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(agent_id);
+    ROCP_SDK_SAVE_DATA_FIELD(starting_address);
+    ROCP_SDK_SAVE_DATA_FIELD(allocation_size);
 }
 
 template <typename ArchiveT>

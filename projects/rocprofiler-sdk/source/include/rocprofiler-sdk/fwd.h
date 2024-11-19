@@ -167,10 +167,12 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_MARKER_NAME_API,     ///< @see ::rocprofiler_marker_name_api_id_t
     ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT,     ///< @see ::rocprofiler_code_object_operation_t
     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,  ///< @see ::rocprofiler_scratch_memory_operation_t
-    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,  ///< Callbacks for kernel dispatches
-    ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,      ///< @see ::rocprofiler_memory_copy_operation_t
-    ROCPROFILER_CALLBACK_TRACING_RCCL_API,         ///< @RCCL tracing
-    ROCPROFILER_CALLBACK_TRACING_OPENMP,           ///< @see ::rocprofiler_ompt_operation_t
+    ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,    ///< Callbacks for kernel dispatches
+    ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,        ///< @see ::rocprofiler_memory_copy_operation_t
+    ROCPROFILER_CALLBACK_TRACING_RCCL_API,           ///< @RCCL tracing
+    ROCPROFILER_CALLBACK_TRACING_OPENMP,             ///< @see ::rocprofiler_ompt_operation_t
+    ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,  ///< @see
+                                                     ///< ::rocprofiler_memory_allocation_operation_t
     ROCPROFILER_CALLBACK_TRACING_LAST,
 } rocprofiler_callback_tracing_kind_t;
 
@@ -197,6 +199,8 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
     ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
     ROCPROFILER_BUFFER_TRACING_OPENMP,                     ///< @see ::rocprofiler_ompt_operation_t
+    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,          ///< @see
+                                                   ///< ::rocprofiler_memory_allocation_operation_t
     ROCPROFILER_BUFFER_TRACING_LAST,
 } rocprofiler_buffer_tracing_kind_t;
 
@@ -223,6 +227,18 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_MEMORY_COPY_DEVICE_TO_DEVICE,  ///< Memory copy from device to device
     ROCPROFILER_MEMORY_COPY_LAST,
 } rocprofiler_memory_copy_operation_t;
+
+/**
+ * @brief Memory Allocation Operation.
+ */
+typedef enum  // NOLINT(performance-enum-size)
+{
+    ROCPROFILER_MEMORY_ALLOCATION_NONE = 0,              ///< Unknown memory allocation function
+    ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE,              ///< Allocate memory function
+    ROCPROFILER_MEMORY_ALLOCATION_MEMORY_POOL_ALLOCATE,  ///< Allocate memory pool
+    ROCPROFILER_MEMORY_ALLOCATION_VMEM_HANDLE_CREATE,    ///< Allocate vmem memory handle
+    ROCPROFILER_MEMORY_ALLOCATION_LAST,
+} rocprofiler_memory_allocation_operation_t;
 
 /**
  * @brief ROCProfiler Kernel Dispatch Tracing Operation Types.

@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/hip/hip.hpp"
 #include "lib/rocprofiler-sdk/hsa/async_copy.hpp"
 #include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+#include "lib/rocprofiler-sdk/hsa/memory_allocation.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
@@ -790,6 +791,8 @@ rocprofiler_set_api_table(const char* name,
         rocprofiler::counters::device_counting_service_hsa_registration();
 
         rocprofiler::hsa::async_copy_init(hsa_api_table, lib_instance);
+        rocprofiler::hsa::memory_allocation_init(hsa_api_table->core_, lib_instance);
+        rocprofiler::hsa::memory_allocation_init(hsa_api_table->amd_ext_, lib_instance);
         rocprofiler::code_object::initialize(hsa_api_table);
         rocprofiler::thread_trace::initialize(hsa_api_table);
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0

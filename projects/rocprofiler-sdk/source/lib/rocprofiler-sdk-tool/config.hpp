@@ -84,6 +84,7 @@ struct config : output_config
     bool hsa_finalizer_ext_api_trace = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
     bool marker_api_trace            = get_env("ROCPROF_MARKER_API_TRACE", false);
     bool memory_copy_trace           = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
+    bool memory_allocation_trace     = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
     bool scratch_memory_trace        = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
     bool counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
     bool hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
@@ -123,6 +124,7 @@ config::save(ArchiveT& ar) const
     CFG_SERIALIZE_MEMBER(hsa_finalizer_ext_api_trace);
     CFG_SERIALIZE_MEMBER(marker_api_trace);
     CFG_SERIALIZE_MEMBER(memory_copy_trace);
+    CFG_SERIALIZE_MEMBER(memory_allocation_trace);
     CFG_SERIALIZE_MEMBER(scratch_memory_trace);
     CFG_SERIALIZE_MEMBER(counter_collection);
     CFG_SERIALIZE_MEMBER(hip_runtime_api_trace);

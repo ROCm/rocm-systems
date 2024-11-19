@@ -211,6 +211,19 @@ typedef struct
 } rocprofiler_callback_tracing_memory_copy_data_t;
 
 /**
+ * @brief ROCProfiler Memory Copy Allocation Tracer Record.
+ */
+typedef struct
+{
+    uint64_t                size;              ///< size of this struct
+    rocprofiler_timestamp_t start_timestamp;   ///< start time in nanoseconds
+    rocprofiler_timestamp_t end_timestamp;     ///< end time in nanoseconds
+    rocprofiler_agent_id_t  agent_id;          ///< agent id for memory allocation
+    uint64_t                starting_address;  ///< starting address for memory allocation
+    uint64_t                allocation_size;   ///< size of memory allocation
+} rocprofiler_callback_tracing_memory_allocation_data_t;
+
+/**
  * @brief ROCProfiler Scratch Memory Callback Data.
  */
 typedef struct rocprofiler_callback_tracing_scratch_memory_data_t

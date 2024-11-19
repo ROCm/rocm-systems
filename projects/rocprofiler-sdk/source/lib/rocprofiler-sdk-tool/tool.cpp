@@ -148,20 +148,22 @@ get_list_derived_metrics_file()
 
 struct buffer_ids
 {
-    rocprofiler_buffer_id_t hsa_api_trace      = {};
-    rocprofiler_buffer_id_t hip_api_trace      = {};
-    rocprofiler_buffer_id_t kernel_trace       = {};
-    rocprofiler_buffer_id_t memory_copy_trace  = {};
-    rocprofiler_buffer_id_t counter_collection = {};
-    rocprofiler_buffer_id_t scratch_memory     = {};
-    rocprofiler_buffer_id_t rccl_api_trace     = {};
+    rocprofiler_buffer_id_t hsa_api_trace           = {};
+    rocprofiler_buffer_id_t hip_api_trace           = {};
+    rocprofiler_buffer_id_t kernel_trace            = {};
+    rocprofiler_buffer_id_t memory_copy_trace       = {};
+    rocprofiler_buffer_id_t memory_allocation_trace = {};
+    rocprofiler_buffer_id_t counter_collection      = {};
+    rocprofiler_buffer_id_t scratch_memory          = {};
+    rocprofiler_buffer_id_t rccl_api_trace          = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 7>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 8>{hsa_api_trace,
                                                       hip_api_trace,
                                                       kernel_trace,
                                                       memory_copy_trace,
+                                                      memory_allocation_trace,
                                                       counter_collection,
                                                       scratch_memory,
                                                       rccl_api_trace};
@@ -634,6 +636,13 @@ buffered_tracing_callback(rocprofiler_context_id_t /*context*/,
                     static_cast<rocprofiler_buffer_tracing_memory_copy_record_t*>(header->payload);
 
                 tool::write_ring_buffer(*record, domain_type::MEMORY_COPY);
+            }
+            else if(header->kind == ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION)
+            {
+                auto* record = static_cast<rocprofiler_buffer_tracing_memory_allocation_record_t*>(
+                    header->payload);
+
+                tool::write_ring_buffer(*record, domain_type::MEMORY_ALLOCATION);
             }
             else if(header->kind == ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY)
             {
@@ -1110,6 +1119,26 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             "buffer tracing service for memory copy configure");
     }
 
+    if(tool::get_config().memory_allocation_trace)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                                   buffer_size,
+                                                   buffer_watermark,
+                                                   ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                   buffered_tracing_callback,
+                                                   nullptr,
+                                                   &get_buffers().memory_allocation_trace),
+                         "create memory allocation buffer");
+
+        ROCPROFILER_CALL(rocprofiler_configure_buffer_tracing_service(
+                             get_client_ctx(),
+                             ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                             nullptr,
+                             0,
+                             get_buffers().memory_allocation_trace),
+                         "buffer tracing service for memory allocation configure");
+    }
+
     if(tool::get_config().scratch_memory_trace)
     {
         ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
@@ -1357,6 +1386,8 @@ tool_fini(void* /*tool_data*/)
     auto scratch_memory_output =
         tool::scratch_memory_buffered_output_t{tool::get_config().scratch_memory_trace};
     auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
+    auto memory_allocation_output =
+        tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
 
     auto node_id_sort = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
 
@@ -1374,6 +1405,7 @@ tool_fini(void* /*tool_data*/)
     generate_output(hsa_output, contributions);
     generate_output(hip_output, contributions);
     generate_output(memory_copy_output, contributions);
+    generate_output(memory_allocation_output, contributions);
     generate_output(marker_output, contributions);
     generate_output(rccl_output, contributions);
     generate_output(counters_output, contributions);
@@ -1401,7 +1433,8 @@ tool_fini(void* /*tool_data*/)
                          counters_output.get_generator(),
                          marker_output.get_generator(),
                          scratch_memory_output.get_generator(),
-                         rccl_output.get_generator());
+                         rccl_output.get_generator(),
+                         memory_allocation_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -1418,18 +1451,20 @@ tool_fini(void* /*tool_data*/)
                              memory_copy_output.get_generator(),
                              marker_output.get_generator(),
                              scratch_memory_output.get_generator(),
-                             rccl_output.get_generator());
+                             rccl_output.get_generator(),
+                             memory_allocation_output.get_generator());
     }
 
     if(tool::get_config().otf2_output)
     {
-        auto hip_elem_data             = hip_output.load_all();
-        auto hsa_elem_data             = hsa_output.load_all();
-        auto kernel_dispatch_elem_data = kernel_dispatch_output.load_all();
-        auto memory_copy_elem_data     = memory_copy_output.load_all();
-        auto marker_elem_data          = marker_output.load_all();
-        auto scratch_memory_elem_data  = scratch_memory_output.load_all();
-        auto rccl_elem_data            = rccl_output.load_all();
+        auto hip_elem_data               = hip_output.load_all();
+        auto hsa_elem_data               = hsa_output.load_all();
+        auto kernel_dispatch_elem_data   = kernel_dispatch_output.load_all();
+        auto memory_copy_elem_data       = memory_copy_output.load_all();
+        auto marker_elem_data            = marker_output.load_all();
+        auto scratch_memory_elem_data    = scratch_memory_output.load_all();
+        auto rccl_elem_data              = rccl_output.load_all();
+        auto memory_allocation_elem_data = memory_allocation_output.load_all();
 
         tool::write_otf2(tool::get_config(),
                          *tool_metadata,
@@ -1441,7 +1476,8 @@ tool_fini(void* /*tool_data*/)
                          &memory_copy_elem_data,
                          &marker_elem_data,
                          &scratch_memory_elem_data,
-                         &rccl_elem_data);
+                         &rccl_elem_data,
+                         &memory_allocation_elem_data);
     }
 
     if(tool::get_config().summary_output)
@@ -1455,6 +1491,7 @@ tool_fini(void* /*tool_data*/)
     destroy_output(hsa_output);
     destroy_output(hip_output);
     destroy_output(memory_copy_output);
+    destroy_output(memory_allocation_output);
     destroy_output(marker_output);
     destroy_output(counters_output);
     destroy_output(scratch_memory_output);

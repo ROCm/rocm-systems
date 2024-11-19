@@ -9,40 +9,45 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+// FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
 // AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-// SOFTWARE.
+// OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+// THE SOFTWARE.
 
 #pragma once
 
-#include <string_view>
+#include <rocprofiler-sdk/rocprofiler.h>
 
-enum class domain_type
+#include "lib/rocprofiler-sdk/hsa/hsa.hpp"
+
+namespace rocprofiler
 {
-    HSA = 0,
-    HIP,
-    MARKER,
-    KERNEL_DISPATCH,
-    MEMORY_COPY,
-    SCRATCH_MEMORY,
-    COUNTER_COLLECTION,
-    RCCL,
-    MEMORY_ALLOCATION,
-    LAST,
-};
+namespace hsa
+{
+namespace memory_allocation
+{
+const char*
+name_by_id(uint32_t id);
 
-std::string_view
-get_domain_trace_file_name(domain_type val);
+uint32_t
+id_by_name(const char* name);
 
-std::string_view
-get_domain_stats_file_name(domain_type val);
+std::vector<const char*>
+get_names();
 
-std::string_view
-get_domain_column_name(domain_type _buffer_type);
+std::vector<uint32_t>
+get_ids();
+}  // namespace memory_allocation
+
+template <typename TableT>
+void
+memory_allocation_init(TableT* _orig, uint64_t _tbl_instance);
+
+}  // namespace hsa
+}  // namespace rocprofiler

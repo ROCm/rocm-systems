@@ -36,15 +36,16 @@ namespace tool
 {
 void
 write_perfetto(
-    const output_config&                                                  cfg,
-    const metadata&                                                       tool_metadata,
-    std::vector<agent_info>                                               agent_data,
-    const generator<rocprofiler_buffer_tracing_hip_api_record_t>&         hip_api_gen,
-    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&         hsa_api_gen,
-    const generator<rocprofiler_buffer_tracing_kernel_dispatch_record_t>& kernel_dispatch_gen,
-    const generator<rocprofiler_buffer_tracing_memory_copy_record_t>&     memory_copy_gen,
-    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&      marker_api_gen,
-    const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&  scratch_memory_gen,
-    const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&        rccl_api_gen);
+    const output_config&                                                    cfg,
+    const metadata&                                                         tool_metadata,
+    std::vector<agent_info>                                                 agent_data,
+    const generator<rocprofiler_buffer_tracing_hip_api_record_t>&           hip_api_gen,
+    const generator<rocprofiler_buffer_tracing_hsa_api_record_t>&           hsa_api_gen,
+    const generator<rocprofiler_buffer_tracing_kernel_dispatch_record_t>&   kernel_dispatch_gen,
+    const generator<rocprofiler_buffer_tracing_memory_copy_record_t>&       memory_copy_gen,
+    const generator<rocprofiler_buffer_tracing_marker_api_record_t>&        marker_api_gen,
+    const generator<rocprofiler_buffer_tracing_scratch_memory_record_t>&    scratch_memory_gen,
+    const generator<rocprofiler_buffer_tracing_rccl_api_record_t>&          rccl_api_gen,
+    const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& memory_allocation_gen);
 }  // namespace tool
 }  // namespace rocprofiler
