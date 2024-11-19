@@ -56,10 +56,7 @@ TEMPLATE_TEST_CASE("Unit_tex2Dgather_Positive_ReadModeElementType", "", char, un
   params.extent = make_hipExtent(16, 4, 0);
   params.num_subdivisions = 4;
   params.GenerateTextureDesc();
-  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1]) {
-    INFO("Different address modes on X, Y aren't supported. Skipped.");
-    return;
-  }
+
   if (params.tex_desc.filterMode == hipFilterModeLinear) return;
   TextureTestFixture<TestType> fixture{params};
 

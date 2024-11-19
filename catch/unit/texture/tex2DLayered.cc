@@ -57,10 +57,7 @@ TEMPLATE_TEST_CASE("Unit_tex2DLayered_Positive_ReadModeElementType", "", char, u
   params.layers = 2;
   params.num_subdivisions = 4;
   params.GenerateTextureDesc();
-  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1]) {
-    INFO("Different address modes on X, Y aren't supported. Skipped.");
-    return;
-  }
+
   TextureTestFixture<TestType> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(32, params.NumItersX());
@@ -132,10 +129,7 @@ TEMPLATE_TEST_CASE("Unit_tex2DLayered_Positive_ReadModeNormalizedFloat", "", cha
   params.layers = 2;
   params.num_subdivisions = 4;
   params.GenerateTextureDesc(hipReadModeNormalizedFloat);
-  if (params.tex_desc.addressMode[0] != params.tex_desc.addressMode[1]) {
-    INFO("Different address modes on X, Y aren't supported. Skipped.");
-    return;
-  }
+
   TextureTestFixture<TestType, true> fixture{params};
 
   const auto [num_threads_x, num_blocks_x] = GetLaunchConfig(32, params.NumItersX());
