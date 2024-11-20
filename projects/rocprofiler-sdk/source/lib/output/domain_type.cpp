@@ -56,6 +56,7 @@ DEFINE_BUFFER_TYPE_NAME(MEMORY_ALLOCATION,
                         "MEMORY_ALLOCATION",
                         "memory_allocation",
                         "memory_allocation_stats")
+DEFINE_BUFFER_TYPE_NAME(COUNTER_VALUES, "COUNTER_VALUES", "counter_values", "no_filename")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

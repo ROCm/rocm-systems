@@ -156,5 +156,8 @@ using scratch_memory_buffered_output_t =
 using memory_allocation_buffered_output_t =
     buffered_output<rocprofiler_buffer_tracing_memory_allocation_record_t,
                     domain_type::MEMORY_ALLOCATION>;
+using counter_records_buffered_output_t =
+    ::rocprofiler::tool::buffered_output<rocprofiler::tool::serialized_counter_record_t,
+                                         domain_type::COUNTER_COLLECTION>;
 }  // namespace tool
 }  // namespace rocprofiler

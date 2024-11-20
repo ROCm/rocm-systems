@@ -356,7 +356,7 @@ WriteInterceptor(const void* packets,
         if(get_balanced_signal_slots().fetch_sub(1) <= 0)
         {
             sched_yield();
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
+            std::this_thread::sleep_for(std::chrono::nanoseconds(100));
         }
 
         // Stores the instrumentation pkt (i.e. AQL packets for counter collection)

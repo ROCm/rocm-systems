@@ -22,11 +22,13 @@
 
 #pragma once
 
+#include <atomic>
 #include <fstream>
 #include <ios>
 #include <mutex>
 #include <set>
 #include <string>
+#include <vector>
 
 struct tmp_file
 {
@@ -40,6 +42,39 @@ struct tmp_file
     bool remove();
 
     explicit operator bool() const;
+
+    template <typename Type>
+    size_t write(const Type* data, size_t num_records)
+    {
+        // Assert we are not mixing types with tool_counter_value_t
+        static_assert(sizeof(Type) == 16);
+        size_t allocated = offset.fetch_add(num_records);
+
+        std::unique_lock<std::mutex> lk(file_mutex);
+        if(!stream.is_open()) open();
+        stream.seekp(allocated * sizeof(Type));
+        stream.write((char*) data, num_records * sizeof(Type));
+        return allocated;
+    };
+
+    template <typename Type>
+    std::vector<Type> read(size_t seekpos, size_t num_elements)
+    {
+        // Assert we are not mixing types with tool_counter_value_t
+        static_assert(sizeof(Type) == 16);
+
+        std::vector<Type> ret;
+        ret.resize(num_elements);
+
+        std::unique_lock<std::mutex> lk(file_mutex);
+        if(!stream.is_open()) open();
+
+        stream.seekg(seekpos * sizeof(Type));
+        stream.read((char*) ret.data(), num_elements * sizeof(Type));
+        return ret;
+    }
+
+    std::atomic<size_t> offset{0};
 
     std::string              filename     = {};
     std::string              subdirectory = {};

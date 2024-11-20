@@ -20,30 +20,41 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#pragma once
+#include "counter_info.hpp"
+#include "buffered_output.hpp"
+#include "tmp_file_buffer.hpp"
+
+#include "lib/common/container/ring_buffer.hpp"
+#include "lib/common/filesystem.hpp"
+#include "lib/common/logging.hpp"
+
+#include <fmt/core.h>
+#include <fmt/format.h>
 
 #include <string_view>
+#include <unordered_set>
 
-enum class domain_type
+namespace rocprofiler
 {
-    HSA = 0,
-    HIP,
-    MARKER,
-    KERNEL_DISPATCH,
-    MEMORY_COPY,
-    SCRATCH_MEMORY,
-    COUNTER_COLLECTION,
-    RCCL,
-    MEMORY_ALLOCATION,
-    COUNTER_VALUES,
-    LAST,
-};
+namespace tool
+{
+constexpr auto type = domain_type::COUNTER_VALUES;
 
-std::string_view
-get_domain_trace_file_name(domain_type val);
+std::vector<tool_counter_value_t>
+tool_counter_record_t::getRecords() const
+{
+    auto& _tmp_file = get_tmp_file_buffer<tool_counter_value_t>(type)->file;
 
-std::string_view
-get_domain_stats_file_name(domain_type val);
+    return _tmp_file.read<tool_counter_value_t>(records.offset, records.count);
+}
 
-std::string_view
-get_domain_column_name(domain_type _buffer_type);
+void
+tool_counter_record_t::writeRecord(const tool_counter_value_t* ptr, size_t num_records)
+{
+    auto& _tmp_file = get_tmp_file_buffer<tool_counter_value_t>(type)->file;
+
+    records.offset = _tmp_file.write<tool_counter_value_t>(ptr, num_records);
+    records.count  = num_records;
+}
+}  // namespace tool
+}  // namespace rocprofiler

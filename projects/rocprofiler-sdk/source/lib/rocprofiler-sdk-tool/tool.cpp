@@ -843,33 +843,22 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     static const auto gpu_agents_counter_info = get_agent_counter_info();
 
     auto counter_record = tool::tool_counter_record_t{};
-    auto kernel_id      = dispatch_data.dispatch_info.kernel_id;
 
     counter_record.dispatch_data = dispatch_data;
     counter_record.thread_id     = user_data.value;
 
-    const kernel_symbol_info* kernel_info =
-        CHECK_NOTNULL(tool_metadata)->get_kernel_symbol(kernel_id);
-    ROCP_ERROR_IF(record_count == 0) << "zero record count for kernel_id=" << kernel_id
-                                     << " (name=" << kernel_info->kernel_name << ")";
+    std::vector<rocprofiler::tool::tool_counter_value_t> serialized_records;
+    serialized_records.resize(record_count);
 
     for(size_t count = 0; count < record_count; count++)
     {
-        // Unlikely to trigger, temporary until we move to buffered callbacks
-        if(count >= counter_record.records.size())
-        {
-            ROCP_WARNING << "Exceeded maximum counter capacity, skipping remaining";
-            break;
-        }
-
         auto _counter_id = rocprofiler_counter_id_t{};
         ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[count].id, &_counter_id),
                          "query record counter id");
-        counter_record.records[count] =
-            tool::tool_counter_value_t{_counter_id, record_data[count].counter_value};
-        counter_record.counter_count++;
+        serialized_records[count] = {_counter_id, record_data[count].counter_value};
     }
 
+    counter_record.writeRecord(serialized_records.data(), serialized_records.size());
     tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
 }
 
@@ -1388,6 +1377,8 @@ tool_fini(void* /*tool_data*/)
     auto rccl_output = tool::rccl_buffered_output_t{tool::get_config().rccl_api_trace};
     auto memory_allocation_output =
         tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
+    auto counters_records_output =
+        tool::counter_records_buffered_output_t{tool::get_config().counter_collection};
 
     auto node_id_sort = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
 
@@ -1496,6 +1487,7 @@ tool_fini(void* /*tool_data*/)
     destroy_output(counters_output);
     destroy_output(scratch_memory_output);
     destroy_output(rccl_output);
+    destroy_output(counters_records_output);
 
     if(destructors)
     {

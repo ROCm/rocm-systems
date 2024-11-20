@@ -84,26 +84,31 @@ struct tool_counter_value_t
     }
 };
 
+struct serialized_counter_record_t
+{
+    size_t offset = 0;
+    size_t count  = 0;
+};
+
 struct tool_counter_record_t
 {
-    static constexpr size_t max_capacity = 512;
-
-    uint64_t                                       thread_id     = 0;
-    rocprofiler_dispatch_counting_service_data_t   dispatch_data = {};
-    std::array<tool_counter_value_t, max_capacity> records       = {};
-    uint64_t                                       counter_count = 0;
+    uint64_t                                     thread_id     = 0;
+    rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
+    serialized_counter_record_t                  records       = {};
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
         // should be removed when moving to buffered tracing
-        auto tmp =
-            std::vector<tool_counter_value_t>{records.begin(), records.begin() + counter_count};
+        auto tmp = getRecords();
 
         ar(cereal::make_nvp("thread_id", thread_id));
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
     }
+
+    std::vector<tool_counter_value_t> getRecords() const;
+    void writeRecord(const tool_counter_value_t* ptr, size_t num_records);
 };
 }  // namespace tool
 }  // namespace rocprofiler

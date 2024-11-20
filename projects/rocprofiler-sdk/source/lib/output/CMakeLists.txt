@@ -30,6 +30,7 @@ set(TOOL_OUTPUT_HEADERS
 
 set(TOOL_OUTPUT_SOURCES
     csv_output_file.cpp
+    counter_info.cpp
     domain_type.cpp
     format_path.cpp
     generateCSV.cpp
