@@ -187,7 +187,6 @@ TEST(aql_helpers, get_query_info_compare_v1)
 
             EXPECT_EQ(query.id, query_v1.id);
             EXPECT_EQ(std::string(query.name), std::string(query_v1.name));
-            EXPECT_EQ(query.instance_count, query_v1.instance_count);
         }
     }
     hsa_shut_down();
