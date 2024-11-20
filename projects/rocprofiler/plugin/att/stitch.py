@@ -146,7 +146,10 @@ class RegisterWatchList:
 
     # Matches tokens in reverse order
     def try_match_swapped(self, i, line, increment):
-        return self.insts[i + 1].type == self.code[line][1] and self.insts[i].type == self.code[line + 1][1]
+        try:
+            return self.insts[i + 1].type == self.code[line][1] and self.insts[i].type == self.code[line + 1][1]
+        except:
+            return False
 
 # Translates PC values to instructions, for auto captured ISA
 class PCTranslator:
