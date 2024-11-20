@@ -46,6 +46,7 @@
 /**
  * Mimics the rocprofiler buffer sent to the parser.
  */
+template <typename PcSamplingRecordT>
 class MockRuntimeBuffer
 {
 public:
@@ -59,18 +60,21 @@ public:
     void submit(const packet_union_t& packet) { packets.push_back(packet); };
 
     //! Submits a "upcoming_samples_t" packet signaling the next num_samples packets are PC samples
-    void genUpcomingSamples(int num_samples)
+    void genUpcomingSamples(int num_samples, upcoming_sample_t sample_type)
     {
         packet_union_t uni;
         ::memset(&uni, 0, sizeof(uni));
         uni.upcoming.type              = AMD_UPCOMING_SAMPLES;
-        uni.upcoming.which_sample_type = AMD_SNAPSHOT_V1;
+        uni.upcoming.which_sample_type = sample_type;
         uni.upcoming.num_samples       = num_samples;
         uni.upcoming.device.handle     = device;
         submit(uni);
     }
 
-    std::vector<std::vector<rocprofiler_pc_sampling_record_t>> get_parsed_buffer(int GFXIP_MAJOR)
+    //! Submits a "upcoming_samples_t" packet signaling the next num_samples packets are PC samples
+    void genUpcomingSamples(int num_samples);
+
+    std::vector<std::vector<PcSamplingRecordT>> get_parsed_buffer(int GFXIP_MAJOR)
     {
         parsed_data = {};
 
@@ -83,21 +87,37 @@ public:
         return parsed_data;
     }
 
-    static uint64_t alloc_parse_memory(rocprofiler_pc_sampling_record_t** sample,
-                                       uint64_t                           req_size,
-                                       void*                              userdata)
+    static uint64_t alloc_parse_memory(PcSamplingRecordT** sample,
+                                       uint64_t            req_size,
+                                       void*               userdata)
     {
         auto* buffer = reinterpret_cast<MockRuntimeBuffer*>(userdata);
-        buffer->parsed_data.push_back(std::vector<rocprofiler_pc_sampling_record_t>(req_size));
+        buffer->parsed_data.push_back(std::vector<PcSamplingRecordT>(req_size));
         *sample = buffer->parsed_data.back().data();
         return req_size;
     }
 
-    std::vector<packet_union_t>                                packets;
-    std::vector<std::vector<rocprofiler_pc_sampling_record_t>> parsed_data;
+    std::vector<packet_union_t>                 packets;
+    std::vector<std::vector<PcSamplingRecordT>> parsed_data;
 
     const uint32_t device;
 };
+
+template <>
+void
+MockRuntimeBuffer<rocprofiler_pc_sampling_record_host_trap_v0_t>::genUpcomingSamples(
+    int num_samples)
+{
+    genUpcomingSamples(num_samples, AMD_HOST_TRAP_V1);
+}
+
+template <>
+void
+MockRuntimeBuffer<rocprofiler_pc_sampling_record_stochastic_v0_t>::genUpcomingSamples(
+    int num_samples)
+{
+    this->genUpcomingSamples(num_samples, AMD_SNAPSHOT_V1);
+}
 
 /**
  * Mimics a HSA doorbell. Every live instance of this class has an unique ID (handler).
@@ -149,10 +169,11 @@ private:
  * read and write pointers.
  * Creating an instance of this class automatically adds a queue creation packet to the buffer.
  */
+template <typename PcSamplingRecordT>
 class MockQueue
 {
 public:
-    MockQueue(int size_, std::shared_ptr<MockRuntimeBuffer>& buffer_)
+    MockQueue(int size_, std::shared_ptr<MockRuntimeBuffer<PcSamplingRecordT>>& buffer_)
     : id(getUniqueId())
     , size(size_)
     , doorbell()
@@ -184,7 +205,7 @@ public:
     const MockDoorBell doorbell;
     const uint32_t     device;
 
-    std::shared_ptr<MockRuntimeBuffer> const buffer;
+    std::shared_ptr<MockRuntimeBuffer<PcSamplingRecordT>> const buffer;
 
 private:
     static size_t getUniqueId()
@@ -198,10 +219,11 @@ private:
  * Mimics a kernel dispatch.
  * Creating an instance of this class automatically adds a dispatch creation packet to the buffer.
  */
+template <typename PcSamplingRecordT>
 class MockDispatch
 {
 public:
-    MockDispatch(std::shared_ptr<MockQueue>& queue_)
+    MockDispatch(std::shared_ptr<MockQueue<PcSamplingRecordT>>& queue_)
     : queue(queue_)
     , dispatch_id(queue->write_index)
     , doorbell_id(queue->doorbell.handler)
@@ -251,7 +273,7 @@ public:
                   << " ds_id:" << dispatch_id << std::endl;
     }
 
-    std::shared_ptr<MockQueue> const queue;
+    std::shared_ptr<MockQueue<PcSamplingRecordT>> const queue;
 
     const size_t dispatch_id;
     const size_t doorbell_id;
@@ -273,10 +295,11 @@ private:
  * Instead of generating a valid program counter, this class uses the snapshot.pc field to
  * store the original dispatch's unique_id for later correctness verification.
  */
+template <typename PcSamplingRecordT>
 class MockWave
 {
 public:
-    MockWave(const std::shared_ptr<MockDispatch>& dispatch_)
+    MockWave(const std::shared_ptr<MockDispatch<PcSamplingRecordT>>& dispatch_)
     : dispatch(dispatch_)
     {}
 
@@ -295,5 +318,5 @@ public:
                   << dispatch->unique_id << std::endl;
     }
 
-    std::shared_ptr<MockDispatch> const dispatch;
+    std::shared_ptr<MockDispatch<PcSamplingRecordT>> const dispatch;
 };

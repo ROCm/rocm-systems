@@ -31,6 +31,7 @@
  * Benchmarks how fast the parser can process samples on a single threaded case
  * Current: 5600X with -Ofast, up to >140 million samples/s or ~9GB/s R/W (18GB/s bidirectional)
  */
+template <typename PcSamplingRecordT>
 static bool
 Benchmark(bool bWarmup)
 {
@@ -38,14 +39,16 @@ Benchmark(bool bWarmup)
     constexpr size_t DISP_PER_QUEUE      = 8;
     constexpr size_t NUM_QUEUES          = 4;
 
-    std::shared_ptr<MockRuntimeBuffer> buffer = std::make_shared<MockRuntimeBuffer>();
-    std::array<std::vector<std::shared_ptr<MockDispatch>>, NUM_QUEUES> active_dispatches;
+    auto buffer = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    std::array<std::vector<std::shared_ptr<MockDispatch<PcSamplingRecordT>>>, NUM_QUEUES>
+        active_dispatches;
 
     for(size_t q = 0; q < NUM_QUEUES; q++)
     {
-        std::shared_ptr<MockQueue> queue = std::make_shared<MockQueue>(DISP_PER_QUEUE * 2, buffer);
+        auto queue = std::make_shared<MockQueue<PcSamplingRecordT>>(DISP_PER_QUEUE * 2, buffer);
         for(size_t d = 0; d < DISP_PER_QUEUE; d++)
-            active_dispatches[q].push_back(std::make_shared<MockDispatch>(queue));
+            active_dispatches[q].push_back(
+                std::make_shared<MockDispatch<PcSamplingRecordT>>(queue));
     }
 
     constexpr size_t TOTAL_NUM_SAMPLES = NUM_QUEUES * DISP_PER_QUEUE * SAMPLE_PER_DISPATCH;
@@ -56,23 +59,24 @@ Benchmark(bool bWarmup)
             for(size_t i = 0; i < SAMPLE_PER_DISPATCH; i++)
                 MockWave(dispatch).genPCSample();
 
-    std::pair<rocprofiler_pc_sampling_record_t*, size_t> userdata;
-    userdata.first  = new rocprofiler_pc_sampling_record_t[TOTAL_NUM_SAMPLES];
+    std::pair<PcSamplingRecordT*, size_t> userdata;
+    userdata.first  = new PcSamplingRecordT[TOTAL_NUM_SAMPLES];
     userdata.second = TOTAL_NUM_SAMPLES;
 
-    auto t0 = std::chrono::system_clock::now();
-    CHECK_PARSER(parse_buffer(
-        (generic_sample_t*) buffer->packets.data(),
-        buffer->packets.size(),
-        GFXIP_MAJOR,
-        [](rocprofiler_pc_sampling_record_t** sample, uint64_t size, void* userdata_) {
-            auto* pair =
-                reinterpret_cast<std::pair<rocprofiler_pc_sampling_record_t*, size_t>*>(userdata_);
+    user_callback_t<PcSamplingRecordT> user_cb =
+        [](PcSamplingRecordT** sample, uint64_t size, void* userdata_) {
+            auto* pair = reinterpret_cast<std::pair<PcSamplingRecordT*, size_t>*>(userdata_);
             assert(TOTAL_NUM_SAMPLES == pair->second);
             *sample = pair->first;
             return size;
-        },
-        &userdata));
+        };
+
+    auto t0 = std::chrono::system_clock::now();
+    CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
+                              buffer->packets.size(),
+                              GFXIP_MAJOR,
+                              user_cb,
+                              &userdata));
     auto  t1             = std::chrono::system_clock::now();
     float samples_per_us = float(TOTAL_NUM_SAMPLES) / (t1 - t0).count() * 1E3f;
 
@@ -80,8 +84,7 @@ Benchmark(bool bWarmup)
     {
         std::cout << "Benchmark: Parsed " << int(samples_per_us * 1E3f + 0.5f) * 1E-3f
                   << " Msample/s (";
-        std::cout << int(sizeof(rocprofiler_pc_sampling_record_t) * samples_per_us) << " MB/s)"
-                  << std::endl;
+        std::cout << int(sizeof(PcSamplingRecordT) * samples_per_us) << " MB/s)" << std::endl;
     }
 
     delete[] userdata.first;
@@ -90,7 +93,12 @@ Benchmark(bool bWarmup)
 
 TEST(pcs_parser, benchmark_test)
 {
-    EXPECT_EQ(Benchmark(true), true);
-    EXPECT_EQ(Benchmark(false), true);
-    EXPECT_EQ(Benchmark(false), true);
+    // Tests for host trap v0 records
+    EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_host_trap_v0_t>(true), true);
+    EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_host_trap_v0_t>(false), true);
+    EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_host_trap_v0_t>(false), true);
+    // tests for stochastic v0 records
+    EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_stochastic_v0_t>(true), true);
+    EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_stochastic_v0_t>(false), true);
+    EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_stochastic_v0_t>(false), true);
 }

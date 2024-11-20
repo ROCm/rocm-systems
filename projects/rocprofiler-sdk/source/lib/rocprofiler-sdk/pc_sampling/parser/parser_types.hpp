@@ -81,13 +81,8 @@ enum pcsample_arb_issue_state
 };
 }  // namespace PCSAMPLE
 
-union pcsample_header_v1_t
-{
-    rocprofiler_pc_sampling_header_v1_t flags;
-    uint8_t                             raw;
-};
-
-typedef uint64_t (*user_callback_t)(rocprofiler_pc_sampling_record_t**, uint64_t, void*);
+template <typename PcSamplingRecordT>
+using user_callback_t = uint64_t (*)(PcSamplingRecordT**, uint64_t, void*);
 
 /**
  * The types of errors to be returned by parse_buffer.

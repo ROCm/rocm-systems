@@ -33,15 +33,15 @@ std::mt19937 rdgen(1);
 /**
  * Sample user memory allocation callback.
  * It expects userdata to be cast-able to a pointer to
- * std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>>
+ * std::vector<std::pair<PcSamplingRecordT*, uint64_t>>
  */
+template <typename PcSamplingRecordT>
 static uint64_t
-alloc_callback(rocprofiler_pc_sampling_record_t** buffer, uint64_t size, void* userdata)
+alloc_callback(PcSamplingRecordT** buffer, uint64_t size, void* userdata)
 {
-    *buffer = new rocprofiler_pc_sampling_record_t[size];
+    *buffer = new PcSamplingRecordT[size];
     auto& vector =
-        *reinterpret_cast<std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>>*>(
-            userdata);
+        *reinterpret_cast<std::vector<std::pair<PcSamplingRecordT*, uint64_t>>*>(userdata);
     vector.push_back({*buffer, size});
     return size;
 }
@@ -50,35 +50,34 @@ alloc_callback(rocprofiler_pc_sampling_record_t** buffer, uint64_t size, void* u
  * Uses the MockWave dispatch's unique_id store in the pc field to verify
  * the reconstructed correlation_id.
  */
+template <typename PcSamplingRecordT>
 static bool
-check_samples(rocprofiler_pc_sampling_record_t* samples, uint64_t size)
+check_samples(PcSamplingRecordT* samples, uint64_t size)
 {
     // TODO: replace with (code_obj_id, pc)
     for(size_t i = 0; i < size; i++)
-        if(samples[i].correlation_id.internal != samples[i].pc.loaded_code_object_offset)
-            return false;
+        if(samples[i].correlation_id.internal != samples[i].pc.code_object_offset) return false;
     return true;
 }
 
-/**
- * Simplest mock classes use, generates a single queue+dispatch with 2 PC samples.
- */
-TEST(pcs_parser, hello_world)
+template <typename PcSamplingRecordT>
+void
+pcs_parser_hello_world()
 {
-    std::shared_ptr<MockRuntimeBuffer> buffer   = std::make_shared<MockRuntimeBuffer>();
-    std::shared_ptr<MockQueue>         queue    = std::make_shared<MockQueue>(16, buffer);
-    std::shared_ptr<MockDispatch>      dispatch = std::make_shared<MockDispatch>(queue);
+    auto buffer   = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    auto queue    = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
+    auto dispatch = std::make_shared<MockDispatch<PcSamplingRecordT>>(queue);
 
     buffer->genUpcomingSamples(2);
     MockWave(dispatch).genPCSample();
     MockWave(dispatch).genPCSample();
 
-    std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<PcSamplingRecordT*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
-                              alloc_callback,
+                              alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
     EXPECT_EQ(all_allocations.size(), 1);  // HelloWorld: Incorrect number of callbacks
@@ -92,22 +91,33 @@ TEST(pcs_parser, hello_world)
 }
 
 /**
+ * Simplest mock classes use, generates a single queue+dispatch with 2 PC samples.
+ */
+TEST(pcs_parser, hello_world)
+{
+    pcs_parser_hello_world<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+    pcs_parser_hello_world<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}
+
+/**
  * A little more complicated.
  * Generates a few dispatches for 2 different queues and samples in forward and reverse order.
  * Checks if the reconstructed correlation_id is correct.
  */
-TEST(pcs_parser, reverse_wave_order)
+template <typename PcSamplingRecordT>
+void
+pcs_parser_reverse_wave_order()
 {
-    std::shared_ptr<MockRuntimeBuffer> buffer = std::make_shared<MockRuntimeBuffer>();
-    std::shared_ptr<MockQueue>         queue1 = std::make_shared<MockQueue>(16, buffer);
-    std::shared_ptr<MockQueue>         queue2 = std::make_shared<MockQueue>(16, buffer);
+    auto buffer = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    auto queue1 = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
+    auto queue2 = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
 
-    std::vector<std::shared_ptr<MockDispatch>> dispatches;
-    dispatches.push_back(std::make_shared<MockDispatch>(queue1));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue1));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue2));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue2));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue1));
+    std::vector<std::shared_ptr<MockDispatch<PcSamplingRecordT>>> dispatches;
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue1));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue1));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue2));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue2));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue1));
 
     buffer->genUpcomingSamples(dispatches.size());
     for(auto it = dispatches.rbegin(); it != dispatches.rend(); it++)
@@ -116,12 +126,12 @@ TEST(pcs_parser, reverse_wave_order)
     for(auto it = dispatches.begin(); it != dispatches.end(); it++)
         MockWave(*it).genPCSample();
 
-    std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<PcSamplingRecordT*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
-                              alloc_callback,
+                              alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
     EXPECT_EQ(all_allocations.size(), 2);  // ReverseWaveOrder test: Incorrect number of callbacks
@@ -135,29 +145,33 @@ TEST(pcs_parser, reverse_wave_order)
     }
 }
 
-/**
- * Creates a small queue and causes the dispatch_ids to wrap around a few times, and generates
- * a single sample per dispatch. Checks the parser is properly handling the wrapping of queues.
- */
-TEST(pcs_parser, dispatch_wrapping)
+TEST(pcs_parser, reverse_wave_order)
 {
-    const int                          num_samples = 32;
-    std::shared_ptr<MockRuntimeBuffer> buffer      = std::make_shared<MockRuntimeBuffer>();
-    std::shared_ptr<MockQueue>         queue       = std::make_shared<MockQueue>(5, buffer);
+    pcs_parser_reverse_wave_order<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+    pcs_parser_reverse_wave_order<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}
+
+template <typename PcSamplingRecordT>
+void
+pcs_parser_dispatch_wrapping()
+{
+    const int num_samples = 32;
+    auto      buffer      = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    auto      queue       = std::make_shared<MockQueue<PcSamplingRecordT>>(5, buffer);
 
     for(int i = 0; i < num_samples; i++)
     {
-        auto dispatch = std::make_shared<MockDispatch>(queue);
+        auto dispatch = std::make_shared<MockDispatch<PcSamplingRecordT>>(queue);
         buffer->genUpcomingSamples(1);
         MockWave(dispatch).genPCSample();
     }
 
-    std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<PcSamplingRecordT*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
-                              alloc_callback,
+                              alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
     EXPECT_EQ(all_allocations.size(),
@@ -172,39 +186,47 @@ TEST(pcs_parser, dispatch_wrapping)
 }
 
 /**
- * Creates a few queues with a few dispatchs per queue.
- * Adds random samples per dispatch, and checks the result.
+ * Creates a small queue and causes the dispatch_ids to wrap around a few times, and generates
+ * a single sample per dispatch. Checks the parser is properly handling the wrapping of queues.
  */
-TEST(pcs_parser, random_samples)
+TEST(pcs_parser, dispatch_wrapping)
 {
-    const int                          num_samples = 1024;
-    std::shared_ptr<MockRuntimeBuffer> buffer      = std::make_shared<MockRuntimeBuffer>();
-    std::shared_ptr<MockQueue>         queue1      = std::make_shared<MockQueue>(16, buffer);
-    std::shared_ptr<MockQueue>         queue2      = std::make_shared<MockQueue>(16, buffer);
-    std::shared_ptr<MockQueue>         queue3      = std::make_shared<MockQueue>(16, buffer);
-    std::shared_ptr<MockQueue>         queue4      = std::make_shared<MockQueue>(16, buffer);
+    pcs_parser_dispatch_wrapping<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+    pcs_parser_dispatch_wrapping<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}
 
-    std::vector<std::shared_ptr<MockDispatch>> dispatches;
-    dispatches.push_back(std::make_shared<MockDispatch>(queue1));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue1));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue2));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue3));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue1));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue3));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue3));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue2));
-    dispatches.push_back(std::make_shared<MockDispatch>(queue1));
+template <typename PcSamplingRecordT>
+void
+pcs_parser_random_samples()
+{
+    const int num_samples = 1024;
+    auto      buffer      = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    auto      queue1      = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
+    auto      queue2      = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
+    auto      queue3      = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
+    auto      queue4      = std::make_shared<MockQueue<PcSamplingRecordT>>(16, buffer);
+
+    std::vector<std::shared_ptr<MockDispatch<PcSamplingRecordT>>> dispatches;
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue1));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue1));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue2));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue3));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue1));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue3));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue3));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue2));
+    dispatches.push_back(std::make_shared<MockDispatch<PcSamplingRecordT>>(queue1));
 
     buffer->genUpcomingSamples(num_samples);
     for(int i = 0; i < num_samples; i++)
         MockWave(dispatches[rdgen() % dispatches.size()]).genPCSample();
 
-    std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<PcSamplingRecordT*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
-                              alloc_callback,
+                              alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
     EXPECT_EQ(all_allocations.size(), 1);  // RandomSamples test: Incorrect number of callbacks
@@ -218,21 +240,29 @@ TEST(pcs_parser, random_samples)
 }
 
 /**
- * Hammers the parser by creating and destrying queues at random, adding dispatches at random
- * and generating PC samples at random. By default we use all 4 unique doorbells,
- * queue size is 16 and we generate 10k samples dispatch.
+ * Creates a few queues with a few dispatchs per queue.
+ * Adds random samples per dispatch, and checks the result.
  */
-TEST(pcs_parser, queue_hammer)
+TEST(pcs_parser, random_samples)
+{
+    pcs_parser_random_samples<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+    pcs_parser_random_samples<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}
+
+template <typename PcSamplingRecordT>
+void
+pcs_parser_queue_hammer()
 {
     constexpr int NUM_ACTIONS = 10000;
     constexpr int QSIZE       = 16;
     constexpr int NUM_QUEUES  = MockDoorBell::num_unique_bells;
     constexpr int ACTION_MAX  = QSIZE * NUM_QUEUES / 2;
 
-    std::shared_ptr<MockRuntimeBuffer> buffer = std::make_shared<MockRuntimeBuffer>();
+    auto buffer = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
 
-    std::array<std::shared_ptr<MockQueue>, NUM_QUEUES>                 queues;
-    std::array<std::vector<std::shared_ptr<MockDispatch>>, NUM_QUEUES> active_dispatches;
+    std::array<std::shared_ptr<MockQueue<PcSamplingRecordT>>, NUM_QUEUES> queues;
+    std::array<std::vector<std::shared_ptr<MockDispatch<PcSamplingRecordT>>>, NUM_QUEUES>
+        active_dispatches;
 
     int    num_reset_queues         = 0;
     int    num_samples_generated    = 0;
@@ -241,9 +271,10 @@ TEST(pcs_parser, queue_hammer)
     size_t max_q_occupancy          = 0;
 
     for(int i = 0; i < NUM_QUEUES; i++)
-        queues[i] = std::make_shared<MockQueue>(QSIZE, buffer);
+        queues[i] = std::make_shared<MockQueue<PcSamplingRecordT>>(QSIZE, buffer);
     for(int i = 0; i < NUM_QUEUES; i++)
-        active_dispatches[i].push_back(std::make_shared<MockDispatch>(queues[i]));
+        active_dispatches[i].push_back(
+            std::make_shared<MockDispatch<PcSamplingRecordT>>(queues[i]));
 
     for(int i = 0; i < NUM_ACTIONS; i++)
     {
@@ -254,7 +285,7 @@ TEST(pcs_parser, queue_hammer)
             // Delete queue and create new one
             active_dispatches[q] = {};
             queues[q].reset();
-            queues[q] = std::make_shared<MockQueue>(QSIZE, buffer);
+            queues[q] = std::make_shared<MockQueue<PcSamplingRecordT>>(QSIZE, buffer);
             num_reset_queues++;
         }
         else if(action > ACTION_MAX / 2 && active_dispatches[q].size() > 1)
@@ -267,7 +298,8 @@ TEST(pcs_parser, queue_hammer)
         // Add new dispatch
         if(active_dispatches[q].size() < QSIZE)
         {
-            active_dispatches[q].push_back(std::make_shared<MockDispatch>(queues[q]));
+            active_dispatches[q].push_back(
+                std::make_shared<MockDispatch<PcSamplingRecordT>>(queues[q]));
             num_dispatches_generated += 1;
         }
 
@@ -276,7 +308,8 @@ TEST(pcs_parser, queue_hammer)
         for(auto& queue : active_dispatches)
         {
             EXPECT_NE(queue.size(), 0);
-            std::shared_ptr<MockDispatch> rand_dispatch = queue[rdgen() % queue.size()];
+            std::shared_ptr<MockDispatch<PcSamplingRecordT>> rand_dispatch =
+                queue[rdgen() % queue.size()];
             MockWave(rand_dispatch).genPCSample();
             num_samples_generated += 1;
             avg_q_occupancy += queue.size();
@@ -292,20 +325,20 @@ TEST(pcs_parser, queue_hammer)
               << std::endl;
     std::cout << "Max queue occupancy: " << max_q_occupancy << "\n\n" << std::endl;
 
-    std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<PcSamplingRecordT*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) buffer->packets.data(),
                               buffer->packets.size(),
                               GFXIP_MAJOR,
-                              alloc_callback,
+                              alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
     EXPECT_EQ(all_allocations.size(),
               NUM_ACTIONS);  // QueueHammer test: Incorrect number of callbacks
     for(auto sb = 0ul; sb < all_allocations.size(); sb++)
     {
-        rocprofiler_pc_sampling_record_t* samples     = all_allocations[sb].first;
-        size_t                            num_samples = all_allocations[sb].second;
+        PcSamplingRecordT* samples     = all_allocations[sb].first;
+        size_t             num_samples = all_allocations[sb].second;
 
         EXPECT_EQ(num_samples, NUM_QUEUES);  // QueueHammer: Incorrect number of samples
         EXPECT_EQ(check_samples(samples, num_samples),
@@ -314,12 +347,25 @@ TEST(pcs_parser, queue_hammer)
     }
 }
 
-TEST(pcs_parser, multi_buffer)
+/**
+ * Hammers the parser by creating and destrying queues at random, adding dispatches at random
+ * and generating PC samples at random. By default we use all 4 unique doorbells,
+ * queue size is 16 and we generate 10k samples dispatch.
+ */
+TEST(pcs_parser, queue_hammer)
 {
-    std::shared_ptr<MockRuntimeBuffer> firstBuffer = std::make_shared<MockRuntimeBuffer>();
-    std::shared_ptr<MockQueue>         queue       = std::make_shared<MockQueue>(16, firstBuffer);
-    std::shared_ptr<MockDispatch>      dispatch1   = std::make_shared<MockDispatch>(queue);
-    std::shared_ptr<MockDispatch>      dispatch2   = std::make_shared<MockDispatch>(queue);
+    pcs_parser_queue_hammer<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+    pcs_parser_queue_hammer<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}
+
+template <typename PcSamplingRecordT>
+void
+pcs_parser_multi_buffer()
+{
+    auto firstBuffer = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    auto queue       = std::make_shared<MockQueue<PcSamplingRecordT>>(16, firstBuffer);
+    auto dispatch1   = std::make_shared<MockDispatch<PcSamplingRecordT>>(queue);
+    auto dispatch2   = std::make_shared<MockDispatch<PcSamplingRecordT>>(queue);
 
     firstBuffer->genUpcomingSamples(4);
     MockWave(dispatch1).genPCSample();
@@ -327,21 +373,21 @@ TEST(pcs_parser, multi_buffer)
     MockWave(dispatch1).genPCSample();
     MockWave(dispatch2).genPCSample();
 
-    std::shared_ptr<MockRuntimeBuffer> secondBuffer = std::make_shared<MockRuntimeBuffer>();
-    const auto&                        packets      = firstBuffer->packets;
-    secondBuffer->packets = std::vector<packet_union_t>(packets.begin() + 2, packets.end());
+    auto        secondBuffer = std::make_shared<MockRuntimeBuffer<PcSamplingRecordT>>();
+    const auto& packets      = firstBuffer->packets;
+    secondBuffer->packets    = std::vector<packet_union_t>(packets.begin() + 2, packets.end());
 
-    std::vector<std::pair<rocprofiler_pc_sampling_record_t*, uint64_t>> all_allocations;
+    std::vector<std::pair<PcSamplingRecordT*, uint64_t>> all_allocations;
 
     CHECK_PARSER(parse_buffer((generic_sample_t*) firstBuffer->packets.data(),
                               firstBuffer->packets.size(),
                               GFXIP_MAJOR,
-                              alloc_callback,
+                              alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
     CHECK_PARSER(parse_buffer((generic_sample_t*) secondBuffer->packets.data(),
                               secondBuffer->packets.size(),
                               GFXIP_MAJOR,
-                              alloc_callback,
+                              alloc_callback<PcSamplingRecordT>,
                               (void*) &all_allocations));
 
     EXPECT_EQ(all_allocations.size(), 2);  // MultiBuffer: Incorrect number of callbacks
@@ -352,4 +398,10 @@ TEST(pcs_parser, multi_buffer)
 
     delete[] all_allocations[0].first;
     delete[] all_allocations[1].first;
-};
+}
+
+TEST(pcs_parser, multi_buffer)
+{
+    pcs_parser_multi_buffer<rocprofiler_pc_sampling_record_host_trap_v0_t>();
+    pcs_parser_multi_buffer<rocprofiler_pc_sampling_record_stochastic_v0_t>();
+}

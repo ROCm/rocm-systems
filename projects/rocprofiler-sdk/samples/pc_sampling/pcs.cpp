@@ -245,7 +245,8 @@ configure_pc_sampling_prefer_stochastic(tool_agent_info*         agent_info,
                                                                 picked_cfg->method,
                                                                 picked_cfg->unit,
                                                                 interval,
-                                                                buffer_id);
+                                                                buffer_id,
+                                                                0);
         if(status == ROCPROFILER_STATUS_SUCCESS)
         {
             *utils::get_output_stream()
@@ -305,24 +306,25 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
         }
         else if(cur_header->category == ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING)
         {
-            if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_SAMPLE)
+            if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE)
             {
-                auto* pc_sample =
-                    static_cast<rocprofiler_pc_sampling_record_t*>(cur_header->payload);
+                auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_host_trap_v0_t*>(
+                    cur_header->payload);
 
-                ss << "(code_obj_id, offset): (" << pc_sample->pc.loaded_code_object_id << ", 0x"
-                   << std::hex << pc_sample->pc.loaded_code_object_offset << "), "
+                ss << "(code_obj_id, offset): (" << pc_sample->pc.code_object_id << ", 0x"
+                   << std::hex << pc_sample->pc.code_object_offset << "), "
                    << "timestamp: " << std::dec << pc_sample->timestamp << ", "
                    << "exec: " << std::hex << std::setw(16) << pc_sample->exec_mask << ", "
                    << "workgroup_id_(x=" << std::dec << std::setw(5) << pc_sample->workgroup_id.x
                    << ", "
                    << "y=" << std::setw(5) << pc_sample->workgroup_id.y << ", "
                    << "z=" << std::setw(5) << pc_sample->workgroup_id.z << "), "
-                   << "wave_id: " << std::setw(2) << static_cast<unsigned int>(pc_sample->wave_id)
+                   << "wave_in_group: " << std::setw(2)
+                   << static_cast<unsigned int>(pc_sample->wave_in_group) << ", "
+                   << "chiplet: " << std::setw(2)
+                   << static_cast<unsigned int>(pc_sample->hw_id.chiplet)
                    << ", "
-                   << "chiplet: " << std::setw(2) << static_cast<unsigned int>(pc_sample->chiplet)
-                   << ", "
-                   << "cu_id: " << pc_sample->hw_id << ", "
+                   // << "cu_id: " << pc_sample->hw_id << ", "
                    << "correlation: {internal=" << std::setw(7)
                    << pc_sample->correlation_id.internal << ", "
                    << "external=" << std::setw(5) << pc_sample->correlation_id.external.value << "}"

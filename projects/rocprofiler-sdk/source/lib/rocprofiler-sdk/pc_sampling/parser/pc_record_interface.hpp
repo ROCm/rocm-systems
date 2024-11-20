@@ -24,7 +24,8 @@
 
 #include "lib/rocprofiler-sdk/buffer.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/parser/correlation.hpp"
-#include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.h"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/parser_types.hpp"
+#include "lib/rocprofiler-sdk/pc_sampling/parser/stochastic_records.h"
 
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/cxx/hash.hpp>
@@ -41,13 +42,14 @@
 #include <thread>
 #include <unordered_set>
 
+template <typename PcSamplingRecordT>
 struct PCSamplingData
 {
     PCSamplingData(size_t size)
     : samples(size){};
     PCSamplingData& operator=(PCSamplingData&) = delete;
 
-    std::vector<rocprofiler_pc_sampling_record_t> samples;
+    std::vector<PcSamplingRecordT> samples;
 };
 
 class PCSamplingParserContext
@@ -55,13 +57,16 @@ class PCSamplingParserContext
 public:
     PCSamplingParserContext()
     : corr_map(std::make_unique<Parser::CorrelationMap>()){};
+
     /**
-     * @brief Allocates some memory. TODO: Translate to Jonathan's buffer implementation.
+     * @brief Allocates some memory for samples.
+     * TODO: Translate to Jonathan's buffer implementation.
      * @param[out] buffer Pointer where samples are to be written to.
      * @param[in] size Number of samples requested.
      * @returns Number of samples actually allocated on *buffer.
      */
-    uint64_t alloc(rocprofiler_pc_sampling_record_t** buffer, uint64_t size);
+    template <typename PcSamplingRecordT>
+    uint64_t alloc(PcSamplingRecordT** buffer, uint64_t size);
 
     /**
      * @brief Parses a chunk of samples.
@@ -127,7 +132,7 @@ protected:
      * @brief Parses the given input data and generates pc sampling records.
      * Calls generate_upcoming_pc_record().
      */
-    template <typename GFX>
+    template <typename GFX, typename PcSamplingRecordT>
     pcsample_status_t _parse(const upcoming_samples_t& upcoming, const generic_sample_t* data_)
     {
         // std::shared_lock<std::shared_mutex> lock(mut);
@@ -139,16 +144,16 @@ protected:
 
         while(pkt_counter > 0)
         {
-            rocprofiler_pc_sampling_record_t* samples = nullptr;
-            uint64_t                          memsize = alloc(&samples, pkt_counter);
+            PcSamplingRecordT* samples = nullptr;
+            uint64_t           memsize = alloc(&samples, pkt_counter);
 
             if(memsize == 0 || memsize > pkt_counter) return PCSAMPLE_STATUS_CALLBACK_ERROR;
 
             auto* map = corr_map.get();
             if(bIsHostTrap)
-                status |= add_upcoming_samples<true, GFX>(dev, data_, memsize, map, samples);
+                status |= add_upcoming_samples<GFX>(dev, data_, memsize, map, samples);
             else
-                status |= add_upcoming_samples<false, GFX>(dev, data_, memsize, map, samples);
+                status |= add_upcoming_samples<GFX>(dev, data_, memsize, map, samples);
 
             data_ += memsize;
             pkt_counter -= memsize;
@@ -164,14 +169,26 @@ protected:
      */
     pcsample_status_t flushForgetList();
     static void       generate_id_completion_record(const dispatch_pkt_id_t& pkt) { (void) pkt; };
-    void              generate_upcoming_pc_record(uint64_t                                agent_id_handle,
-                                                  const rocprofiler_pc_sampling_record_t* samples,
-                                                  size_t                                  num_samples);
+
+    template <typename PcSamplingRecordT>
+    void generate_upcoming_pc_record(uint64_t                 agent_id_handle,
+                                     const PcSamplingRecordT* samples,
+                                     size_t                   num_samples);
+
+    template <typename PcSamplingRecordT>
+    void generate_upcoming_pc_record(uint64_t                              agent_id_handle,
+                                     const PcSamplingRecordT*              samples,
+                                     size_t                                num_samples,
+                                     rocprofiler_pc_sampling_record_kind_t record_kind);
 
     //! Maps doorbells and dispatch_index to correlation_id
     std::unique_ptr<Parser::CorrelationMap> corr_map;
-    //! Data allocated to store samples. Temporary.
-    std::vector<std::unique_ptr<PCSamplingData>> data;
+    //! Data allocated to store host trap and stochastic samples, respectively.
+    //! Temporary solution until we figured out a smooth way to copy data directly to SDK's buffers.
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_host_trap_v0_t>>>
+        host_trap_data;
+    std::vector<std::unique_ptr<PCSamplingData<rocprofiler_pc_sampling_record_stochastic_v0_t>>>
+        stochastic_data;
     //! Dispatches not yet completed.
     // Uses only the internal correlation_id.
     std::unordered_map<uint64_t, dispatch_pkt_id_t> active_dispatches;

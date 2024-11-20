@@ -63,7 +63,8 @@ rocprofiler_configure_pc_sampling_service(rocprofiler_context_id_t         conte
                                           rocprofiler_pc_sampling_method_t method,
                                           rocprofiler_pc_sampling_unit_t   unit,
                                           uint64_t                         interval,
-                                          rocprofiler_buffer_id_t          buffer_id)
+                                          rocprofiler_buffer_id_t          buffer_id,
+                                          int /*flags*/)
 {
     if(!is_pc_sampling_explicitly_enabled()) return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
 

@@ -251,7 +251,8 @@ TEST(pc_sampling, processing_pc_samples)
                                                                    pcs_config.method,
                                                                    pcs_config.unit,
                                                                    interval,
-                                                                   cb_data->client_buffer),
+                                                                   cb_data->client_buffer,
+                                                                   0),
                          "Failed to configure PC sampling service");
 
         ROCPROFILER_CALL(rocprofiler_create_callback_thread(&cb_data->client_thread),

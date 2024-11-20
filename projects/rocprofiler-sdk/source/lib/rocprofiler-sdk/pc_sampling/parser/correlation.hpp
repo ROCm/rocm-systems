@@ -205,13 +205,13 @@ private:
 
 using address_range_t = rocprofiler::sdk::codeobj::segment::address_range_t;
 
-template <bool bHostTrap, typename GFXIP>
+template <typename GFXIP, typename PcSamplingRecordT>
 inline pcsample_status_t
-add_upcoming_samples(const device_handle               device,
-                     const generic_sample_t*           buffer,
-                     const size_t                      available_samples,
-                     Parser::CorrelationMap*           corr_map,
-                     rocprofiler_pc_sampling_record_t* samples)
+add_upcoming_samples(const device_handle     device,
+                     const generic_sample_t* buffer,
+                     const size_t            available_samples,
+                     Parser::CorrelationMap* corr_map,
+                     PcSamplingRecordT*      samples)
 {
     pcsample_status_t status           = PCSAMPLE_STATUS_SUCCESS;
     auto              cache_addr_range = address_range_t{0, 0, ROCPROFILER_CODE_OBJECT_ID_NONE};
@@ -226,15 +226,14 @@ add_upcoming_samples(const device_handle               device,
         const auto* snap = reinterpret_cast<const perf_sample_snapshot_v1*>(buffer + p);
 
         auto& pc_sample = samples[p];
-        pc_sample       = copySample<bHostTrap, GFXIP>((const void*) (buffer + p));
-        pc_sample.size  = sizeof(rocprofiler_pc_sampling_record_t);
+        pc_sample       = copySample<GFXIP, PcSamplingRecordT>((const void*) (buffer + p));
 
         // Convert PC -> (loaded code object id containing PC, offset within code object)
         if(!cache_addr_range.inrange(snap->pc))
             cache_addr_range = table->find_codeobj_in_range(snap->pc);
 
-        pc_sample.pc.loaded_code_object_id     = cache_addr_range.id;
-        pc_sample.pc.loaded_code_object_offset = snap->pc - cache_addr_range.addr;
+        pc_sample.pc.code_object_id     = cache_addr_range.id;
+        pc_sample.pc.code_object_offset = snap->pc - cache_addr_range.addr;
 
         try
         {
@@ -251,13 +250,13 @@ add_upcoming_samples(const device_handle               device,
     return status;
 }
 
-template <typename GFXIP>
+template <typename GFXIP, typename PcSamplingRecordT>
 inline pcsample_status_t
-_parse_buffer(generic_sample_t*       buffer,
-              uint64_t                buffer_size,
-              user_callback_t         callback,
-              void*                   userdata,
-              Parser::CorrelationMap* corr_map)
+_parse_buffer(generic_sample_t*                  buffer,
+              uint64_t                           buffer_size,
+              user_callback_t<PcSamplingRecordT> callback,
+              void*                              userdata,
+              Parser::CorrelationMap*            corr_map)
 {
     // Maximum size
     uint64_t          index  = 0;
@@ -283,26 +282,31 @@ _parse_buffer(generic_sample_t*       buffer,
                 uint64_t pkt_counter = pkt.num_samples;
                 if(index + pkt_counter > buffer_size) return PCSAMPLE_STATUS_OUT_OF_BOUNDS_ERROR;
 
-                bool bIsHostTrap = pkt.which_sample_type == AMD_HOST_TRAP_V1;
+                // I don't think we need this.
+                // bool bIsHostTrap = pkt.which_sample_type == AMD_HOST_TRAP_V1;
 
                 while(pkt_counter > 0)
                 {
-                    rocprofiler_pc_sampling_record_t* samples = nullptr;
+                    PcSamplingRecordT* samples = nullptr;
                     uint64_t available_samples = callback(&samples, pkt_counter, userdata);
 
                     if(available_samples == 0 || available_samples > pkt_counter)
                         return PCSAMPLE_STATUS_CALLBACK_ERROR;
 
-                    if(bIsHostTrap)
-                    {
-                        status |= add_upcoming_samples<true, GFXIP>(
-                            pkt.device, buffer + index, available_samples, corr_map, samples);
-                    }
-                    else
-                    {
-                        status |= add_upcoming_samples<false, GFXIP>(
-                            pkt.device, buffer + index, available_samples, corr_map, samples);
-                    }
+                    // I don't think we need if-else here
+                    // if(bIsHostTrap)
+                    // {
+                    //     status |= add_upcoming_samples<GFXIP>(
+                    //         pkt.device, buffer + index, available_samples, corr_map, samples);
+                    // }
+                    // else
+                    // {
+                    //     status |= add_upcoming_samples<GFXIP>(
+                    //         pkt.device, buffer + index, available_samples, corr_map, samples);
+                    // }
+
+                    status |= add_upcoming_samples<GFXIP>(
+                        pkt.device, buffer + index, available_samples, corr_map, samples);
 
                     index += available_samples;
                     pkt_counter -= available_samples;
@@ -329,19 +333,20 @@ _parse_buffer(generic_sample_t*       buffer,
  * a size smaller than requested, then it may be called again requesting more memory.
  * @param[in] userdata parameter forwarded to the user callback.
  */
-pcsample_status_t inline parse_buffer(generic_sample_t* buffer,
-                                      uint64_t          buffer_size,
-                                      int               gfxip_major,
-                                      user_callback_t   callback,
-                                      void*             userdata)
+template <typename PcSamplingRecordT>
+pcsample_status_t inline parse_buffer(generic_sample_t*                  buffer,
+                                      uint64_t                           buffer_size,
+                                      int                                gfxip_major,
+                                      user_callback_t<PcSamplingRecordT> callback,
+                                      void*                              userdata)
 {
     static auto corr_map = std::make_unique<Parser::CorrelationMap>();
 
-    auto parseSample_func = _parse_buffer<GFX9>;
+    auto parseSample_func = _parse_buffer<GFX9, PcSamplingRecordT>;
     if(gfxip_major == 9)
-        parseSample_func = _parse_buffer<GFX9>;
+        parseSample_func = _parse_buffer<GFX9, PcSamplingRecordT>;
     else if(gfxip_major == 11)
-        parseSample_func = _parse_buffer<GFX11>;
+        parseSample_func = _parse_buffer<GFX11, PcSamplingRecordT>;
     else
         return PCSAMPLE_STATUS_INVALID_GFXIP;
 

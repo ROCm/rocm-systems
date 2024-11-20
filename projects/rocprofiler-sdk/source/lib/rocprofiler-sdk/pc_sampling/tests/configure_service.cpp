@@ -202,7 +202,8 @@ test_fail_because_of_wrong_agent(const callback_data*                           
                                                         pcs_config->method,
                                                         pcs_config->unit,
                                                         pcs_config->min_interval,
-                                                        cb_data->client_buffer),
+                                                        cb_data->client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_ERROR_AGENT_NOT_FOUND);
 }
 
@@ -218,7 +219,8 @@ test_fail_because_of_wrong_context(const callback_data*                         
                                                         pcs_config->method,
                                                         pcs_config->unit,
                                                         pcs_config->min_interval,
-                                                        cb_data->client_buffer),
+                                                        cb_data->client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_ERROR_CONTEXT_NOT_FOUND);
 }
 
@@ -234,7 +236,8 @@ test_fail_because_of_wrong_buffer(const callback_data*                          
                                                         pcs_config->method,
                                                         pcs_config->unit,
                                                         pcs_config->min_interval,
-                                                        not_existing_buffer_id),
+                                                        not_existing_buffer_id,
+                                                        0),
               ROCPROFILER_STATUS_ERROR_BUFFER_NOT_FOUND);
 }
 
@@ -254,7 +257,8 @@ test_fail_because_of_unsupported_configuration(
                                                         pcs_config->method,
                                                         pcs_config->unit,
                                                         less_than_min_interval,
-                                                        cb_data->client_buffer),
+                                                        cb_data->client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_SUCCESS);
 
     EXPECT_NE(rocprofiler_configure_pc_sampling_service(cb_data->client_ctx,
@@ -262,7 +266,8 @@ test_fail_because_of_unsupported_configuration(
                                                         pcs_config->method,
                                                         pcs_config->unit,
                                                         greater_than_max_interval,
-                                                        cb_data->client_buffer),
+                                                        cb_data->client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_SUCCESS);
 
     EXPECT_NE(rocprofiler_configure_pc_sampling_service(cb_data->client_ctx,
@@ -270,7 +275,8 @@ test_fail_because_of_unsupported_configuration(
                                                         wrong_method,
                                                         pcs_config->unit,
                                                         pcs_config->max_interval,
-                                                        cb_data->client_buffer),
+                                                        cb_data->client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_SUCCESS);
 
     EXPECT_NE(rocprofiler_configure_pc_sampling_service(cb_data->client_ctx,
@@ -278,7 +284,8 @@ test_fail_because_of_unsupported_configuration(
                                                         pcs_config->method,
                                                         wrong_unit,
                                                         pcs_config->max_interval,
-                                                        cb_data->client_buffer),
+                                                        cb_data->client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_SUCCESS);
 }
 
@@ -293,7 +300,8 @@ test_fail_because_service_is_already_configured(
                                                         pcs_config->method,
                                                         pcs_config->unit,
                                                         pcs_config->min_interval,
-                                                        cb_data->client_buffer),
+                                                        cb_data->client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_ERROR_SERVICE_ALREADY_CONFIGURED);
 }
 
@@ -374,7 +382,8 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
                                                                        pcs_config.method,
                                                                        pcs_config.unit,
                                                                        interval,
-                                                                       cb_data->client_buffer),
+                                                                       cb_data->client_buffer,
+                                                                       0),
                              "Failed to configure PC sampling service");
 
             test_fail_because_service_is_already_configured(cb_data, agent_id, &pcs_config);
@@ -385,7 +394,8 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
                                                                 pcs_config.method,
                                                                 pcs_config.unit,
                                                                 interval,
-                                                                another_buff),
+                                                                another_buff,
+                                                                0),
                       ROCPROFILER_STATUS_ERROR);
         }
 
@@ -452,6 +462,7 @@ TEST(pc_sampling, rocprofiler_configure_pc_sampling_service)
                                                         ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP,
                                                         ROCPROFILER_PC_SAMPLING_UNIT_TIME,
                                                         1,
-                                                        cb_data.client_buffer),
+                                                        cb_data.client_buffer,
+                                                        0),
               ROCPROFILER_STATUS_ERROR_CONFIGURATION_LOCKED);
 }

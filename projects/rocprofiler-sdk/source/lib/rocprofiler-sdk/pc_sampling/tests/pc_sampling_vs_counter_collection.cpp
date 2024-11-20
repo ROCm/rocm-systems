@@ -292,7 +292,8 @@ pc_sampling_vs_counter_collection(cc_setup_fn_t cc_setup_fn)
                                                                 pcs_config.method,
                                                                 pcs_config.unit,
                                                                 interval,
-                                                                cb_data->client_buffer),
+                                                                cb_data->client_buffer,
+                                                                0),
                       ROCPROFILER_STATUS_ERROR_CONTEXT_CONFLICT);
         }
 
@@ -393,7 +394,8 @@ counter_collection_vs_pc_sampling(cc_setup_fn_t cc_setup_fn)
                                                                 pcs_config.method,
                                                                 pcs_config.unit,
                                                                 interval,
-                                                                cb_data->client_buffer),
+                                                                cb_data->client_buffer,
+                                                                0),
                       ROCPROFILER_STATUS_SUCCESS);
         }
 

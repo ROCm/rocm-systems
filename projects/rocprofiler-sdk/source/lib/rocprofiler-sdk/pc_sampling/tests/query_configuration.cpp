@@ -285,7 +285,8 @@ TEST(pc_sampling, query_configs_after_service_setup)
                                                                    pcs_config.method,
                                                                    pcs_config.unit,
                                                                    interval,
-                                                                   cb_data->client_buffer),
+                                                                   cb_data->client_buffer,
+                                                                   0),
                          "Failed to configure PC sampling service");
 
         // query configuration and expect to see `pcs_config->max_interval` as the `interval`

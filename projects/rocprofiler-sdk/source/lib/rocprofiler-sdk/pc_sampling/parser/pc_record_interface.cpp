@@ -22,13 +22,31 @@
 
 #include "lib/rocprofiler-sdk/pc_sampling/parser/pc_record_interface.hpp"
 
+template <>
 uint64_t
-PCSamplingParserContext::alloc(rocprofiler_pc_sampling_record_t** buffer, uint64_t size)
+PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_host_trap_v0_t>(
+    rocprofiler_pc_sampling_record_host_trap_v0_t** buffer,
+    uint64_t                                        size)
 {
     std::unique_lock<std::shared_mutex> lock(mut);
     assert(buffer != nullptr);
-    data.emplace_back(std::make_unique<PCSamplingData>(size));
-    *buffer = data.back()->samples.data();
+    host_trap_data.emplace_back(
+        std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_host_trap_v0_t>>(size));
+    *buffer = host_trap_data.back()->samples.data();
+    return size;
+}
+
+template <>
+uint64_t
+PCSamplingParserContext::alloc<rocprofiler_pc_sampling_record_stochastic_v0_t>(
+    rocprofiler_pc_sampling_record_stochastic_v0_t** buffer,
+    uint64_t                                         size)
+{
+    std::unique_lock<std::shared_mutex> lock(mut);
+    assert(buffer != nullptr);
+    stochastic_data.emplace_back(
+        std::make_unique<PCSamplingData<rocprofiler_pc_sampling_record_stochastic_v0_t>>(size));
+    *buffer = stochastic_data.back()->samples.data();
     return size;
 }
 
@@ -39,10 +57,21 @@ PCSamplingParserContext::parse(const upcoming_samples_t& upcoming,
                                std::condition_variable&  midway_signal,
                                bool                      bRocrBufferFlip)
 {
+    bool bIsHostTrap = upcoming.which_sample_type == AMD_HOST_TRAP_V1;
+
     // Template instantiation is faster!
-    auto parseSample_func = &PCSamplingParserContext::_parse<GFX9>;
+    auto parseSample_func =
+        bIsHostTrap
+            ? &PCSamplingParserContext::_parse<GFX9, rocprofiler_pc_sampling_record_host_trap_v0_t>
+            : &PCSamplingParserContext::_parse<GFX9,
+                                               rocprofiler_pc_sampling_record_stochastic_v0_t>;
     if(gfxip_major == 11)
-        parseSample_func = &PCSamplingParserContext::_parse<GFX11>;
+        parseSample_func =
+            bIsHostTrap
+                ? &PCSamplingParserContext::_parse<GFX11,
+                                                   rocprofiler_pc_sampling_record_host_trap_v0_t>
+                : &PCSamplingParserContext::_parse<GFX11,
+                                                   rocprofiler_pc_sampling_record_stochastic_v0_t>;
     else if(gfxip_major != 9)
         return PCSAMPLE_STATUS_INVALID_GFXIP;
 
@@ -98,11 +127,13 @@ PCSamplingParserContext::shouldFlipRocrBuffer(const dispatch_pkt_id_t& pkt) cons
     return corr_map->checkDispatch(pkt);
 }
 
+template <typename PcSamplingRecordKindT>
 void
 PCSamplingParserContext::generate_upcoming_pc_record(
-    uint64_t                                agent_id_handle,
-    const rocprofiler_pc_sampling_record_t* samples,
-    size_t                                  num_samples)
+    uint64_t                              agent_id_handle,
+    const PcSamplingRecordKindT*          samples,
+    size_t                                num_samples,
+    rocprofiler_pc_sampling_record_kind_t record_kind)
 {
     auto buff_id = _agent_buffers.at(rocprofiler_agent_id_t{agent_id_handle});
     rocprofiler::buffer::instance* buff = rocprofiler::buffer::get_buffer(buff_id);
@@ -111,7 +142,28 @@ PCSamplingParserContext::generate_upcoming_pc_record(
         throw std::runtime_error(fmt::format("Buffer with id: {} does not exists", buff_id.handle));
 
     for(size_t i = 0; i < num_samples; i++)
-        buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING,
-                      ROCPROFILER_PC_SAMPLING_RECORD_SAMPLE,
-                      samples[i]);
+        buff->emplace(ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING, record_kind, samples[i]);
+}
+
+template <>
+void
+PCSamplingParserContext::generate_upcoming_pc_record<rocprofiler_pc_sampling_record_host_trap_v0_t>(
+    uint64_t                                             agent_id_handle,
+    const rocprofiler_pc_sampling_record_host_trap_v0_t* samples,
+    size_t                                               num_samples)
+{
+    this->generate_upcoming_pc_record(
+        agent_id_handle, samples, num_samples, ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE);
+}
+
+template <>
+void
+PCSamplingParserContext::generate_upcoming_pc_record<
+    rocprofiler_pc_sampling_record_stochastic_v0_t>(
+    uint64_t                                              agent_id_handle,
+    const rocprofiler_pc_sampling_record_stochastic_v0_t* samples,
+    size_t                                                num_samples)
+{
+    this->generate_upcoming_pc_record(
+        agent_id_handle, samples, num_samples, ROCPROFILER_PC_SAMPLING_RECORD_STOCHASTIC_V0_SAMPLE);
 }
