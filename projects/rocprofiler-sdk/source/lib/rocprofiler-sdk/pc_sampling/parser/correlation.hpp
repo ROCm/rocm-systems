@@ -47,6 +47,12 @@ operator==(device_handle a, device_handle b)
 
 namespace Parser
 {
+struct dispatch_correlation_ids_t
+{
+    rocprofiler_dispatch_id_t    dispatch_id;
+    rocprofiler_correlation_id_t correlation_id;
+};
+
 /**
  * @brief Struct immitating the correlation_id returned by the trap handler in raw PC samples.
  */
@@ -70,11 +76,11 @@ struct DispatchPkt
 
 struct cache_type_t
 {
-    trap_correlation_id_t        id_in{.raw = ~0ul};
-    rocprofiler_correlation_id_t id_out{};
-    uint64_t                     dev_id    = ~0ul;
-    size_t                       increment = 0;
-    size_t                       object_id = 0;
+    trap_correlation_id_t      id_in{.raw = ~0ul};
+    dispatch_correlation_ids_t id_out{};
+    uint64_t                   dev_id    = ~0ul;
+    size_t                     increment = 0;
+    size_t                     object_id = 0;
 };
 
 inline bool
@@ -131,7 +137,7 @@ public:
     {
         std::unique_lock<std::mutex> lk(mut);
         auto trap_id = trap_correlation_id(pkt.doorbell_id, pkt.write_index, pkt.queue_size);
-        dispatch_to_correlation[{trap_id, pkt.device}] = pkt.correlation_id;
+        dispatch_to_correlation[{trap_id, pkt.device}] = {pkt.dispatch_id, pkt.correlation_id};
         cache_reset_count.fetch_add(1);
     }
 
@@ -150,7 +156,7 @@ public:
      * Given a device dev, doorbell and and wrapped dispatch_id,
      * @returns the correlation_id set by dispatch_pkt_id_t
      */
-    rocprofiler_correlation_id_t get(device_handle dev, trap_correlation_id_t correlation_in)
+    dispatch_correlation_ids_t get(device_handle dev, trap_correlation_id_t correlation_in)
     {
 #ifndef _PARSER_CORRELATION_DISABLE_CACHE
         static thread_local cache_type_t cache{};
@@ -195,9 +201,9 @@ public:
     }
 
 private:
-    std::unordered_map<DispatchPkt, rocprofiler_correlation_id_t> dispatch_to_correlation{};
-    std::atomic<size_t>                                           cache_reset_count{1};
-    size_t                                                        object_id = 0;
+    std::unordered_map<DispatchPkt, dispatch_correlation_ids_t> dispatch_to_correlation{};
+    std::atomic<size_t>                                         cache_reset_count{1};
+    size_t                                                      object_id = 0;
 
     std::mutex mut;
 };
@@ -238,9 +244,13 @@ add_upcoming_samples(const device_handle     device,
         try
         {
             Parser::trap_correlation_id_t trap{.raw = snap->correlation_id};
-            pc_sample.correlation_id = corr_map->get(device, trap);
+            auto                          dispatch_correlation_ids = corr_map->get(device, trap);
+            pc_sample.dispatch_id    = dispatch_correlation_ids.dispatch_id;
+            pc_sample.correlation_id = dispatch_correlation_ids.correlation_id;
         } catch(std::exception& e)
         {
+            // TODO: introduce ROCPROFILER_DISPATCH_ID_INTERNAL_NONE
+            pc_sample.dispatch_id    = 0;
             pc_sample.correlation_id = {.internal = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE,
                                         .external = rocprofiler_user_data_t{
                                             .value = ROCPROFILER_CORRELATION_ID_INTERNAL_NONE}};

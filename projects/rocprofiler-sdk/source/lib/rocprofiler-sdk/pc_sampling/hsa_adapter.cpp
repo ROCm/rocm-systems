@@ -105,6 +105,7 @@ amd_intercept_marker_handler_callback(const struct amd_aql_intercept_marker_s* p
     dispatch_pkt.write_index = packet_id;
     dispatch_pkt.correlation_id = {.internal = internal_correlation,
                                    .external = external_correlation};
+    dispatch_pkt.dispatch_id    = packet->user_data[2];
 
     auto* parser = pcs_session->parser.get();
     if(parser->shouldFlipRocrBuffer(dispatch_pkt))
@@ -187,7 +188,8 @@ data_ready_callback(void*                                client_callback_data,
 rocprofiler::hsa::rocprofiler_packet
 generate_marker_packet_for_kernel(
     context::correlation_id*                      correlation_id,
-    const tracing::external_correlation_id_map_t& external_correlation_ids)
+    const tracing::external_correlation_id_map_t& external_correlation_ids,
+    const rocprofiler_dispatch_id_t               dispatch_id)
 {
     // This function executes for each kernel dispatched to the agent on which
     // the PC sampling service is configured.
@@ -230,6 +232,9 @@ generate_marker_packet_for_kernel(
         // No external correlation ID
         marker_pkt.user_data[1] = 0;
     }
+
+    // dispatch_id should always be present
+    marker_pkt.user_data[2] = dispatch_id;
 
     return rocprofiler::hsa::rocprofiler_packet(marker_pkt);
 }

@@ -395,7 +395,7 @@ WriteInterceptor(const void* packets,
         if(pc_sampling::is_pc_sample_service_configured(queue.get_agent().get_rocp_agent()->id))
         {
             transformed_packets.emplace_back(pc_sampling::hsa::generate_marker_packet_for_kernel(
-                corr_id, tracing_data_v.external_correlation_ids));
+                corr_id, tracing_data_v.external_correlation_ids, dispatch_id));
         }
 #endif
 

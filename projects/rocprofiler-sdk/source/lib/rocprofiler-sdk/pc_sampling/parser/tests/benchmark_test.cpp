@@ -94,6 +94,7 @@ Benchmark(bool bWarmup)
 TEST(pcs_parser, benchmark_test)
 {
     // Tests for host trap v0 records
+    std::cout << "Parsing rocprofiler_pc_sampling_record_host_trap_v0_t records!" << std::endl;
     EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_host_trap_v0_t>(true), true);
     EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_host_trap_v0_t>(false), true);
     EXPECT_EQ(Benchmark<rocprofiler_pc_sampling_record_host_trap_v0_t>(false), true);

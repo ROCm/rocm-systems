@@ -351,9 +351,8 @@ rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /*context_id*/,
                        << "wave_in_group: " << std::setw(2)
                        << static_cast<unsigned int>(pc_sample->wave_in_group) << ", "
                        << "chiplet: " << std::setw(2)
-                       << static_cast<unsigned int>(pc_sample->hw_id.chiplet)
-                       << ", "
-                       // << "cu_id: " << pc_sample->hw_id << ", "
+                       << static_cast<unsigned int>(pc_sample->hw_id.chiplet) << ", "
+                       << "dispatch_id: " << std::setw(7) << pc_sample->dispatch_id << ","
                        << "correlation: {internal=" << std::setw(7)
                        << pc_sample->correlation_id.internal << ", "
                        << "external=" << std::setw(5) << pc_sample->correlation_id.external.value
