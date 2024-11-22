@@ -30,7 +30,7 @@ ROCPROFILER_EXTERN_C_INIT
 /**
  * @defgroup REGISTRATION_GROUP Tool registration
  *
- * Data types and functions for tool registration with rocprofiler
+ * @brief Data types and functions for tool registration with rocprofiler
  * @{
  */
 

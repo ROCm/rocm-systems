@@ -139,7 +139,8 @@ FILE_PATTERNS          = *.h \
                          *.tcc \
                          conf.py
 RECURSIVE              = YES
-EXCLUDE                =
+EXCLUDE                = @SOURCE_DIR@/README.md \
+                         @SOURCE_DIR@/include/rocprofiler-sdk/rccl/details/rccl.h
 EXCLUDE_SYMLINKS       = YES
 EXCLUDE_PATTERNS       = */.git/* \
                          @SOURCE_DIR@/**/tests/* \
@@ -266,7 +267,7 @@ LATEX_CMD_NAME         = latex
 MAKEINDEX_CMD_NAME     = makeindex
 LATEX_MAKEINDEX_CMD    = makeindex
 COMPACT_LATEX          = NO
-PAPER_TYPE             =
+PAPER_TYPE             = a4
 EXTRA_PACKAGES         = float
 LATEX_HEADER           =
 LATEX_FOOTER           =
@@ -332,7 +333,8 @@ MACRO_EXPANSION        = YES
 EXPAND_ONLY_PREDEF     = NO
 SEARCH_INCLUDES        = NO
 INCLUDE_PATH           = @SOURCE_DIR@/source/include
-INCLUDE_FILE_PATTERNS  = *.h
+INCLUDE_FILE_PATTERNS  = *.h \
+                         *.hpp 
 PREDEFINED             = "ROCPROFILER_API=" \
                          "ROCPROFILER_EXPORT=" \
                          "ROCPROFILER_IMPORT=" \

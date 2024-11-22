@@ -86,7 +86,7 @@ ROCPROFILER_EXTERN_C_INIT
 
 /**
  * @defgroup MISCELLANEOUS_GROUP Miscellaneous Utility Functions
- *
+ * @brief utility functions for library
  * @{
  */
 

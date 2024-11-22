@@ -73,13 +73,24 @@ Please report in the Github Issues.
     - **Need for Cold Restart**: In the event of a hardware freeze, you may need to perform a cold restart (turning the hardware off and on) to restore normal operations.
     Please use this beta feature cautiously. It may affect your system's stability and performance. Proceed at your own risk.
 
-- At this point, We do not recommend stress-testing the beta implementation.
+  - At this point, We do not recommend stress-testing the beta implementation.
 
-- Correlation IDs provided by the PC sampling service are verified only for HIP API calls.
+  - Correlation IDs provided by the PC sampling service are verified only for HIP API calls.
 
-- Timestamps in PC sampling records might not be 100% accurate.
+  - Timestamps in PC sampling records might not be 100% accurate.
 
-- Using PC sampling on multi-threaded applications might fail with `HSA_STATUS_ERROR_EXCEPTION`.Furthermore, if three or more threads launch operations to the same agent, and if PC sampling is enabled, the `HSA_STATUS_ERROR_EXCEPTION` might appear.
+  - Using PC sampling on multi-threaded applications might fail with `HSA_STATUS_ERROR_EXCEPTION`.Furthermore, if three or more threads launch operations to the same agent, and if PC sampling is enabled, the `HSA_STATUS_ERROR_EXCEPTION` might appear.
+
+- Navi3x requires a stable power state for counter collection.
+  Currently, this state needs to be set by the user.
+  To do so, set "power_dpm_force_performance_level" to be writeable for non-root users, then set performance level to profile_standard:
+
+  ```bash
+  sudo chmod 777 /sys/class/drm/card0/device/power_dpm_force_performance_level
+  echo profile_standard >> /sys/class/drm/card0/device/power_dpm_force_performance_level
+  ```
+
+  Recommended: "profile_standard" for counter collection and "auto" for all other profiling. Use rocm-smi to verify the current power state. For multiGPU systems (includes integrated graphics), replace "card0" by the desired card.
 
 > [!WARNING]
 > The latest mainline version of AQLprofile can be found at [https://repo.radeon.com/rocm/misc/aqlprofile/](https://repo.radeon.com/rocm/misc/aqlprofile/). However, it's important to note that updates to the public AQLProfile may not occur as frequently as updates to the rocprofiler-sdk. This discrepancy could lead to a potential mismatch between the AQLprofile binary and the rocprofiler-sdk source.

@@ -47,7 +47,7 @@ typedef struct
 } ncclUniqueId;
 
 /*! @defgroup   rccl_result_code Result Codes
-    @details    The various result codes that RCCL API calls may return
+    @brief    The various result codes that RCCL API calls may return
     @{ */
 
 /*! @brief      Result type
@@ -71,12 +71,14 @@ typedef enum
 #define NCCL_SPLIT_NOCOLOR    -1
 
 /*! @defgroup   rccl_config_type Communicator Configuration
-    @details    Structure that allows for customizing Communicator behavior via
+    @brief   Structure that allows for customizing Communicator behavior via
    ncclCommInitRankConfig
     @{ */
 
-/*! @brief      Communicator configuration
-    @details    Users can assign value to attributes to specify the behavior of a communicator */
+/**
+ * @defgroup Communicator configuration
+ * @brief Users can assign value to attributes to specify the behavior of a communicator.
+ */
 typedef struct ncclConfig_v21700
 {
     /* attributes that users should never touch. */
@@ -122,7 +124,7 @@ ncclResult_t
 pncclMemFree(void* ptr);
 
 /*! @defgroup   rccl_api_version Version Information
-    @details    API call that returns RCCL version
+    @brief    API call that returns RCCL version
     @{ */
 
 /*! @brief      Return the RCCL_VERSION_CODE of RCCL in the supplied integer.
@@ -140,7 +142,7 @@ pncclGetVersion(int* version);
 /*! @} */
 
 /*! @defgroup   rccl_api_communicator Communicator Initialization/Destruction
-    @details    API calls that operate on communicators.
+    @brief      API calls that operate on communicators.
                 Communicators objects are used to launch collective communication
                 operations.  Unique ranks between 0 and N-1 must be assigned to
                 each HIP device participating in the same Communicator.
@@ -292,7 +294,7 @@ pncclCommSplit(ncclComm_t comm, int color, int key, ncclComm_t* newcomm, ncclCon
 /*! @} */
 
 /*! @defgroup   rccl_api_errcheck Error Checking Calls
-    @details    API calls that check for errors
+    @brief    API calls that check for errors
     @{ */
 
 /*! @brief      Returns a string for each result code.
@@ -330,7 +332,7 @@ pncclCommGetAsyncError(ncclComm_t comm, ncclResult_t* asyncError);
 /*! @} */
 
 /*! @defgroup   rccl_api_comminfo Communicator Information
-    @details    API calls that query communicator information
+    @brief   API calls that query communicator information
     @{ */
 
 /*! @brief      Gets the number of ranks in the communicator clique.
@@ -391,7 +393,7 @@ pncclCommDeregister(const ncclComm_t comm, void* handle);
 /*! @endcond */
 
 /*! @defgroup   rccl_api_enumerations API Enumerations
-    @details    Enumerations used by collective communication calls
+    @brief    Enumerations used by collective communication calls
     @{ */
 
 /*! @brief      Dummy reduction enumeration
@@ -454,7 +456,7 @@ typedef enum
 /*! @} */
 
 /*! @defgroup   rccl_api_custom_redop Custom Reduction Operator
-    @details    API calls relating to creation/destroying custom reduction operator
+    @brief    API calls relating to creation/destroying custom reduction operator
                 that pre-multiplies local source arrays prior to reduction
     @{ */
 
@@ -516,7 +518,7 @@ pncclRedOpDestroy(ncclRedOp_t op, ncclComm_t comm);
 /*! @} */
 
 /*! @defgroup   rccl_collective_api Collective Communication Operations
-    @details    Collective communication operations must be called separately for each
+    @brief    Collective communication operations must be called separately for each
                 communicator in a communicator clique.
 
                 They return when operations have been enqueued on the HIP stream.
@@ -935,7 +937,7 @@ pncclAllToAllv(const void*    sendbuff,
 /*! @} */
 
 /*! @defgroup   msccl_api MSCCL Algorithm
-    @details    API calls relating to the optional MSCCL algorithm datapath
+    @brief    API calls relating to the optional MSCCL algorithm datapath
     @{ */
 
 /*! @brief      Opaque handle to MSCCL algorithm */
@@ -1030,7 +1032,7 @@ pmscclUnloadAlgo(mscclAlgoHandle_t mscclAlgoHandle);
 /*! @} */
 
 /*! @defgroup   rccl_group_api Group semantics
-    @details    When managing multiple GPUs from a single thread, and since RCCL collective
+    @brief    When managing multiple GPUs from a single thread, and since RCCL collective
                 calls may perform inter-CPU synchronization, we need to "group" calls for
                 different ranks/devices into a single call.
 
