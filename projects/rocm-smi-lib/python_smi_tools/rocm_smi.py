@@ -1867,7 +1867,7 @@ def setMemoryPartition(deviceList, memoryPartition, autoRespond):
                         (', '.join(map(str, memory_partition_type_l))) ))
             return (None, None)
 
-        kTimeWait = 40
+        kTimeWait = 140
         t1 = multiprocessing.Process(target=showProgressbar,
                             args=("Updating memory partition",kTimeWait,))
         t1.start()
@@ -3889,7 +3889,7 @@ def confirmChangingMemoryPartitionAndReloadingAMDGPU(autoRespond):
           ******WARNING******\n
           Setting Dynamic Memory (NPS) partition modes require users to quit all GPU workloads.
           ROCm SMI will then attempt to change memory (NPS) partition mode.
-          Upon a successful set, ROCm SMI will then initiate an action to restart amdgpu driver.
+          Upon a successful set, ROCm SMI will then initiate an action to restart AMD GPU driver.
           This action will change all GPU's in the hive to the requested memory (NPS) partition mode.
 
           Please use this utility with caution.
