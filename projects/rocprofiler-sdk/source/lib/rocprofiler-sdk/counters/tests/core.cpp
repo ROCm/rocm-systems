@@ -34,6 +34,7 @@
 #include "lib/rocprofiler-sdk/registration.hpp"
 
 #include <rocprofiler-sdk/dispatch_counting_service.h>
+#include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
@@ -744,5 +745,67 @@ TEST(core, public_api_iterate_agents)
             from_api.erase(x.id());
         }
         EXPECT_TRUE(from_api.empty());
+    }
+}
+
+TEST(core, check_load_counter_def_append)
+{
+    const std::string test_yaml = R"(
+TEST_YAML_LOAD:
+  architectures:
+    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(GRBM_GUI_ACTIVE,max)*CU_NUM
+  description: 'Unit: cycles'
+    )";
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    ROCPROFILER_CALL(
+        rocprofiler_load_counter_definition(
+            test_yaml.c_str(), test_yaml.size(), ROCPROFILER_COUNTER_FLAG_APPEND_DEFINITION),
+        "Could not load counter definition");
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, agent] : agents)
+    {
+        EXPECT_EQ(findDeviceMetrics(agent, {"TEST_YAML_LOAD"}).size(), 1);
+    }
+}
+
+TEST(core, check_load_counter_def)
+{
+    const std::string test_yaml = R"(
+GRBM_GUI_ACTIVE:
+  architectures:
+    gfx942/gfx941/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx940/gfx908/gfx900/gfx90a/gfx9:
+      block: GRBM
+      event: 2
+  description: The GUI is Active
+TEST_YAML_LOAD:
+  architectures:
+    gfx942/gfx10/gfx1010/gfx1030/gfx1031/gfx11/gfx1032/gfx1102/gfx906/gfx1100/gfx1101/gfx908/gfx90a/gfx9:
+      expression: reduce(GRBM_GUI_ACTIVE,max)
+  description: cycles
+    )";
+    ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
+    test_init();
+
+    registration::init_logging();
+    registration::set_init_status(-1);
+    context::push_client(1);
+
+    ROCPROFILER_CALL(rocprofiler_load_counter_definition(
+                         test_yaml.c_str(), test_yaml.size(), ROCPROFILER_COUNTER_FLAG_NONE),
+                     "Could not load counter definition");
+    auto agents = hsa::get_queue_controller()->get_supported_agents();
+    for(const auto& [_, agent] : agents)
+    {
+        // MAX_WAVE_SIZE should not be present
+        EXPECT_EQ(
+            findDeviceMetrics(agent, {"TEST_YAML_LOAD", "GRBM_GUI_ACTIVE", "MAX_WAVE_SIZE"}).size(),
+            2);
     }
 }

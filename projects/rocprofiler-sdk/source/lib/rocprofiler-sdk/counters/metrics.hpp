@@ -26,6 +26,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "rocprofiler-sdk/fwd.h"
 
 #include <fmt/core.h>
 #include <fmt/ranges.h>
@@ -84,6 +85,13 @@ private:
     uint32_t    flags_       = 0;
 };
 
+struct CustomCounterDefinition
+{
+    std::string data   = {};
+    bool        append = {false};
+    bool        loaded = {false};
+};
+
 using MetricMap   = std::unordered_map<std::string, std::vector<Metric>>;
 using MetricIdMap = std::unordered_map<uint64_t, Metric>;
 
@@ -130,6 +138,12 @@ getPerfCountersIdMap();
  **/
 bool
 checkValidMetric(const std::string& agent, const Metric& metric);
+
+/**
+ * Set a custom counter definition
+ */
+rocprofiler_status_t
+setCustomCounterDefinition(const CustomCounterDefinition& def);
 }  // namespace counters
 }  // namespace rocprofiler
 

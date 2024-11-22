@@ -20,6 +20,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+#include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -190,5 +191,16 @@ rocprofiler_iterate_counter_dimensions(rocprofiler_counter_id_t              id,
     info_cb(id, user_dims.data(), user_dims.size(), user_data);
 
     return ROCPROFILER_STATUS_SUCCESS;
+}
+
+rocprofiler_status_t
+rocprofiler_load_counter_definition(const char* yaml, size_t size, rocprofiler_counter_flag_t flags)
+{
+    rocprofiler::counters::CustomCounterDefinition def;
+    if(yaml == nullptr && size != 0) return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+    def.data   = std::string(yaml, size);
+    def.append = (flags == ROCPROFILER_COUNTER_FLAG_APPEND_DEFINITION ? true : false);
+    def.loaded = false;
+    return rocprofiler::counters::setCustomCounterDefinition(def);
 }
 }

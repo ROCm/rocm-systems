@@ -428,7 +428,9 @@ typedef enum
 typedef enum
 {
     ROCPROFILER_COUNTER_FLAG_NONE = 0,
-    ROCPROFILER_COUNTER_FLAG_ASYNC,  ///< Do not wait for completion before returning.
+    ROCPROFILER_COUNTER_FLAG_ASYNC,              ///< Do not wait for completion before returning.
+    ROCPROFILER_COUNTER_FLAG_APPEND_DEFINITION,  ///< Append the counter definition to the system
+                                                 ///< provided counter definition file.
     ROCPROFILER_COUNTER_FLAG_LAST,
 } rocprofiler_counter_flag_t;
 

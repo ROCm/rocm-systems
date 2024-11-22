@@ -56,9 +56,9 @@ struct json_output
         return (*archive)(std::forward<Args>(args)...);
     }
 
-    decltype(auto) startNode() { return archive->startNode(); }
-    decltype(auto) finishNode() { return archive->finishNode(); }
-    decltype(auto) makeArray() { return archive->makeArray(); }
+    void           startNode() { archive->startNode(); }
+    void           finishNode() { archive->finishNode(); }
+    void           makeArray() { archive->makeArray(); }
     decltype(auto) setNextName(const char* name) { archive->setNextName(name); }
 
     void start_process();

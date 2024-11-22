@@ -144,6 +144,13 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         choices=("fatal", "error", "warning", "info", "trace", "env"),
         type=str.lower,
     )
+    io_options.add_argument(
+        "-E",
+        "--extra-counters",
+        help="Path to YAML file containing extra counter definitions",
+        type=str,
+        required=False,
+    )
 
     aggregate_tracing_options = parser.add_argument_group("Aggregate tracing options")
 
@@ -880,6 +887,11 @@ def run(app_args, args, **kwargs):
 
     if args.kernel_iteration_range:
         update_env("ROCPROF_KERNEL_FILTER_RANGE", ", ".join(args.kernel_iteration_range))
+
+    if args.extra_counters is not None:
+        with open(args.extra_counters, "r") as e_file:
+            e_file_contents = e_file.read()
+            update_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", e_file_contents, overwrite=True)
 
     if args.pmc:
         update_env("ROCPROF_COUNTER_COLLECTION", True, overwrite=True)

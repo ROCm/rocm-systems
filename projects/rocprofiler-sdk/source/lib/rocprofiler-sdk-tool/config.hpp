@@ -96,8 +96,9 @@ struct config : output_config
     int mpi_size = get_mpi_size();
     int mpi_rank = get_mpi_rank();
 
-    std::string kernel_filter_include = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
-    std::string kernel_filter_exclude = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
+    std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
+    std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
+    std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
 
     std::unordered_set<uint32_t> kernel_filter_range = {};
     std::set<std::string>        counters            = {};

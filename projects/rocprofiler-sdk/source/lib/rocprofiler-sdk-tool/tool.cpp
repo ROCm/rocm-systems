@@ -49,6 +49,7 @@
 #include <rocprofiler-sdk/agent.h>
 #include <rocprofiler-sdk/buffer_tracing.h>
 #include <rocprofiler-sdk/callback_tracing.h>
+#include <rocprofiler-sdk/experimental/counters.h>
 #include <rocprofiler-sdk/external_correlation.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/internal_threading.h>
@@ -1596,6 +1597,15 @@ rocprofiler_configure(uint32_t                 version,
     tool::get_tmp_file_name_callback() = [](domain_type type) -> std::string {
         return compose_tmp_file_name(tool::get_config(), type);
     };
+
+    if(!tool::get_config().extra_counters_contents.empty())
+    {
+        std::string contents(tool::get_config().extra_counters_contents);
+        size_t      length = contents.size();
+        ROCPROFILER_CALL(rocprofiler_load_counter_definition(
+                             contents.c_str(), length, ROCPROFILER_COUNTER_FLAG_APPEND_DEFINITION),
+                         "Loading extra counters");
+    }
 
     if(tool::get_config().list_metrics)
     {

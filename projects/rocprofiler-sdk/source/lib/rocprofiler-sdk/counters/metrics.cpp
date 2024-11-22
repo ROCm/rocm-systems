@@ -26,11 +26,13 @@
 
 #include "lib/common/filesystem.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 
 #include "glog/logging.h"
 
+#include "rocprofiler-sdk/fwd.h"
 #include "yaml-cpp/exceptions.h"
 #include "yaml-cpp/node/convert.h"
 #include "yaml-cpp/node/detail/impl.h"
@@ -50,6 +52,13 @@ namespace counters
 {
 namespace
 {
+common::Synchronized<CustomCounterDefinition>&
+getCustomCounterDefinition()
+{
+    static common::Synchronized<CustomCounterDefinition> def = {};
+    return def;
+}
+
 uint64_t&
 current_id()
 {
@@ -104,12 +113,31 @@ MetricMap
 loadYAML(const std::string& filename, bool load_constants = false, bool load_derived = false)
 {
     MetricMap ret;
-    ROCP_INFO << "Loading Counter Config: " << filename;
-    auto yaml = YAML::LoadFile(filename);
+    auto      override = getCustomCounterDefinition().wlock([&](auto& data) {
+        data.loaded = true;
+        return data;
+    });
+
+    std::stringstream counter_data;
+    if(override.data.empty() || override.append)
+    {
+        ROCP_INFO << "Loading Counter Config: " << filename;
+        std::ifstream file(filename);
+        counter_data << file.rdbuf();
+    }
+
+    if(!override.data.empty())
+    {
+        ROCP_INFO << "Adding Override Config Data: " << override.data;
+        counter_data << override.data;
+    }
+
+    auto yaml = YAML::Load(counter_data.str());
 
     for(auto it = yaml.begin(); it != yaml.end(); ++it)
     {
         auto counter_name = it->first.as<std::string>();
+        if(counter_name == "schema-version") continue;
         auto counter_def  = it->second;
         auto def_iterator = counter_def["architectures"];
 
@@ -188,6 +216,18 @@ findViaEnvironment(const std::string& filename)
 }
 
 }  // namespace
+
+rocprofiler_status_t
+setCustomCounterDefinition(const CustomCounterDefinition& def)
+{
+    return getCustomCounterDefinition().wlock([&](auto& data) {
+        // Counter definition already loaded, cannot override anymore
+        if(data.loaded) return ROCPROFILER_STATUS_ERROR;
+        data.data   = def.data;
+        data.append = def.append;
+        return ROCPROFILER_STATUS_SUCCESS;
+    });
+}
 
 MetricMap
 getDerivedHardwareMetrics()

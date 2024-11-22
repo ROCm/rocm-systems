@@ -126,6 +126,10 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - List metrics for counter collection.
     - Kernel Dispatch Counter Collection
 
+  * - ``-E`` \| ``--extra_counters``
+    - Specifies the path to a YAML file containing extra counter definitions.
+    - Kernel Dispatch Counter Collection
+
   * - ``-M`` \| ``--mangled-kernels``
     - Overrides the default demangling of kernel names.
     - Output control
@@ -732,6 +736,18 @@ To supply the counters via ``command-line`` options, use:
 .. note::
    1. Please note that more than 1 counters should be separated by a space or a comma.
    2. Job will fail if entire set of counters cannot be collected in single pass
+
+Extra-counters
+++++++++++++++++
+
+Counters with custom definitions can be defined through an extra_counters.yaml 
+file using the ``command-line`` option.
+
+To supply the extra counters via ``command-line`` options, use:
+
+.. code-block:: shell
+
+   rocprofv3 -E <path-to-extra_counters.yaml> --pmc <custom_metric> -- <app_relative_path>
 
 Kernel profiling output
 +++++++++++++++++++++++++
