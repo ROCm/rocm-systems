@@ -59,7 +59,15 @@ TEST_CASE("Unit_hipDeviceEnableDisablePeerAccess_positive") {
 
   if (dev != peerDev) {
     HIP_CHECK(hipSetDevice(dev));
+
+    GENERATE_CAPTURE();
+    hipStream_t stream;
+    HIP_CHECK(hipStreamCreate(&stream));
+    BEGIN_CAPTURE(stream);
     HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, dev, peerDev));
+    END_CAPTURE(stream);
+    HIP_CHECK(hipStreamDestroy(stream));
+
     if (canAccessPeer == 0) {
       HipTest::HIP_SKIP_TEST("Skipping because no P2P support");
       return;
