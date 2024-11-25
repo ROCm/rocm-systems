@@ -1,44 +1,23 @@
 /*
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
- *
- * Copyright (c) 2017-2024, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
 
 #include <pthread.h>
@@ -1498,38 +1477,56 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   bool restartInProgress = true;
   bool isRestartInProgress = true;
   bool isAMDGPUModuleLive = false;
+  bool restartGDM = false;
   std::string captureRestartErr;
+  const int kTimeToWaitForDriverMSec = 1000;
 
   // sudo systemctl is-active gdm
   // we do not care about the success of checking if gdm is active
-  std::tie(success, out) = executeCommand("systemctl is-active gdm");
-  (out == "active") ? (restartSuccessful &= success) :
-                         (restartSuccessful = true);
+  std::tie(success, out) = executeCommand("systemctl is-active gdm", true);
+  (out == "active") ? (restartGDM = true) : (restartGDM = false);
+  ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = "
+     << out << "; success = " << (success ? "True" : "False");
+  LOG_INFO(ss);
 
   // if gdm is active -> sudo systemctl stop gdm
   // TODO(AMD_SMI_team): are are there other display manager's we need to take into account?
   // see https://help.gnome.org/admin/gdm/stable/overview.html.en_GB
-  if (success && (out == "active")) {
+  if (success && (out == "active") && (restartGDM)) {
     wasGdmServiceActive = true;
-    std::tie(success, out) = executeCommand("systemctl stop gdm&", false);
-    restartSuccessful &= success;
+    std::tie(success, out) = executeCommand("systemctl stop gdm&", true);
+    ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = "
+    << out << "; success = " << (success ? "True" : "False");
+    LOG_INFO(ss);
+  } else {
+    success = true;  // ignore failures to restart gdm
   }
+
+  ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = "
+     << out << "; success = " << (success ? "True" : "False")
+     << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
+     << "; captureRestartErr = " << captureRestartErr;
+  LOG_INFO(ss);
 
   // sudo modprobe -r amdgpu
   // sudo modprobe amdgpu
-  std::tie(success, out) =
-    executeCommand("modprobe -r amdgpu && modprobe amdgpu&", true);
+  std::tie(success, out) = executeCommand(
+    "modprobe -r -v amdgpu >/dev/null 2>&1 && modprobe -v amdgpu >/dev/null 2>&1", true);
   restartSuccessful &= success;
   captureRestartErr = out;
-
-  if (success) {
-    restartSuccessful = false;
-  }
+  ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = "
+     << out << "; success = " << (success ? "True" : "False")
+     << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
+     << "; captureRestartErr = " << captureRestartErr;
+  LOG_INFO(ss);
 
   // if gdm was active -> sudo systemctl start gdm
-  if (wasGdmServiceActive) {
-    std::tie(success, out) = executeCommand("systemctl start gdm&", false);
-    restartSuccessful &= success;
+  // We don't care if successful or not, just try to restart as a courtesy
+  if (wasGdmServiceActive && restartGDM) {
+    std::tie(success, out) = executeCommand("systemctl start gdm&", true);
+    ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = "
+    << out << "; success = " << (success ? "True" : "False");
+    LOG_INFO(ss);
   }
 
   // Return early if there was an issue restarting amdgpu
@@ -1543,7 +1540,6 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   // wait for amdgpu module to come back up
   rsmi_status_t status = Device::isRestartInProgress(&isRestartInProgress,
                                                     &isAMDGPUModuleLive);
-  const int kTimeToWaitForDriverMSec = 1000;
   int maxLoops = 10;  // wait a max of 10 sec
   while (status != RSMI_STATUS_SUCCESS) {
     maxLoops -= 1;
@@ -1574,7 +1570,7 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   // wait for amdgpu module to come back up
   std::tie(success, out) = executeCommand("cat /sys/module/amdgpu/initstate", true);
   ss << __PRETTY_FUNCTION__
-     << " | success = " << success
+     << " | success = " << (success ? "True" : "False")
      << " | out = " << out;
   LOG_DEBUG(ss);
   if ((success == true) && (!out.empty())) {
@@ -1585,6 +1581,11 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   }
   *isRestartInProgress = deviceRestartInProgress;
   *isAMDGPUModuleLive = isSystemAMDGPUModuleLive;
+  ss << __PRETTY_FUNCTION__
+     << " | *isRestartInProgress = " << (*isRestartInProgress ? "True":"False")
+     << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True":"False")
+     << " | out = " << out;
+  LOG_DEBUG(ss);
 
   return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS :
           RSMI_STATUS_AMDGPU_RESTART_ERR);

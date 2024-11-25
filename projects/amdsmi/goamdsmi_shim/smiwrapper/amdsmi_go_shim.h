@@ -1,25 +1,16 @@
 // SPDX-License-Identifier: MIT
 /*
- * Copyright (c) 2024, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sellcopies of the Software, and to permit persons to whom the Software is
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- *  - The above copyright notice and this permission notice shall be included in
- *    all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -28,12 +19,6 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
- *
- * Except as contained in this notice, the name of the Advanced Micro Devices,
- * Inc. shall not be used in advertising or otherwise to promote the sale, use
- * or other dealings in this Software without prior written authorization from
- * the Advanced Micro Devices, Inc.
- *
  */
 
 #include "goamdsmi.h"
@@ -67,7 +52,7 @@ uint64_t goamdsmi_cpu_core_energy_get(uint32_t num);
  *
  *  @details Given a socket index @p socket_idx, this function will call the
  *  esmi_socket_energy_get() function to get the socket energy counter of an
- *  online cpu in that socket. This value is then passed as a uint64_t val to 
+ *  online cpu in that socket. This value is then passed as a uint64_t val to
  *  the Go routine that called it.
  *
  *  @param[in] socket_idx is the socket index
@@ -79,7 +64,7 @@ uint64_t goamdsmi_cpu_core_energy_get(uint32_t num);
 uint64_t goamdsmi_cpu_socket_energy_get(uint32_t socket_idx);
 
 /**
- *  @brief Go language stub to get normalized status of 
+ *  @brief Go language stub to get normalized status of
  *  the processor's PROCHOT status.
  *  1 - PROCHOT active, 0 - PROCHOT inactive
  *
@@ -95,10 +80,10 @@ uint64_t goamdsmi_cpu_socket_energy_get(uint32_t socket_idx);
 uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_idx);
 
 /**
- *  @brief Go language stub to get the instantaneous power 
+ *  @brief Go language stub to get the instantaneous power
  *  consumption of the provided socket.
  *
- *  @details Given a socket index @p sock_ind this function will 
+ *  @details Given a socket index @p sock_ind this function will
  *  get the current power consumption (in milliwatts).
  *
  *  @param[in] sock_ind a socket index
@@ -110,8 +95,8 @@ uint32_t goamdsmi_cpu_prochot_status_get(uint32_t socket_idx);
 uint32_t goamdsmi_cpu_socket_power_get(uint32_t sock_ind);
 
 /**
- *  @brief Go language stub to get the current power cap value 
- *  for a given socket. 
+ *  @brief Go language stub to get the current power cap value
+ *  for a given socket.
  *
  *  @details This function will return the valid power cap @p pcap for a given
  *  socket @p sock_ind, this value will be used by the system to limit
@@ -156,7 +141,7 @@ uint32_t goamdsmi_cpu_threads_per_core_get();
 uint32_t goamdsmi_cpu_number_of_threads_get();
 
 /**
- *  @brief Go stub to get the total number of processor sockets 
+ *  @brief Go stub to get the total number of processor sockets
  *  available in the system
  *
  *  @retval ::Number of threads per core
@@ -173,7 +158,7 @@ uint32_t goamdsmi_cpu_threads_per_core_get();
 uint32_t goamdsmi_cpu_number_of_threads_get();
 
 /**
- *  @brief Go stub to get the total number of processor sockets 
+ *  @brief Go stub to get the total number of processor sockets
  *  available in the system
  *
  *  @retval ::uint32_t value of the socket number

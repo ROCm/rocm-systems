@@ -1,44 +1,23 @@
 /*
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
- *
- * Copyright (c) 2017-2024, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
 
 #include <fcntl.h>
@@ -1250,11 +1229,6 @@ rsmi_dev_perf_level_set_v1(uint32_t dv_ind, rsmi_dev_perf_level_t perf_level) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  // Bare Metal only feature
-  if (amd::smi::is_vm_guest()) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
   DEVICE_MUTEX
   return set_dev_value(amd::smi::kDevPerfLevel, dv_ind, perf_level);
   CATCH
@@ -2077,7 +2051,7 @@ rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind,
   }
 
   return status;
-  
+
   CATCH
 }
 
@@ -3003,7 +2977,7 @@ rsmi_dev_pci_bandwidth_get(uint32_t dv_ind, rsmi_pcie_bandwidth_t *b) {
     return ret;
   }
 
-  // Hardcode based on PCIe specification: https://en.wikipedia.org/wiki/PCI_Express
+  // Hardcode based on PCIe specification: Search PCI_Express on wikipedia
   const uint32_t link_width[] = {1, 2, 4, 8, 12, 16};
   const uint32_t link_speed[] = {25, 50, 80, 160};  // 0.1 Ghz
   const uint32_t WIDTH_DATA_LENGTH = sizeof(link_width)/sizeof(uint32_t);
@@ -5729,6 +5703,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
+  const int k1000_MS_WAIT = 1000;
   const uint32_t kMaxBoardLength = 128;
   bool isCorrectDevice = false;
   char boardName[kMaxBoardLength];
@@ -5742,32 +5717,6 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   char current_memory_mode[kMaxCurrentMemoryMode];
   current_memory_mode[0] = '\0';
 
-  // rsmi_dev_memory_partition_set is only available for for discrete variant,
-  // others are required to update through bios settings
-  rsmi_dev_name_get(dv_ind, boardName, static_cast<size_t>(kMaxBoardLength));
-  std::string myBoardName = boardName;
-  if (!myBoardName.empty()) {
-    std::transform(myBoardName.begin(), myBoardName.end(), myBoardName.begin(),
-                   ::tolower);
-    if (myBoardName.find("mi") != std::string::npos &&
-        myBoardName.find("00x") != std::string::npos) {
-      isCorrectDevice = true;
-    }
-  }
-
-  if (!isCorrectDevice) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: device board name does not support this action"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED, false);
-      LOG_ERROR(ss);
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
 
   // Is the current mode already what user requested?
   switch (memory_partition) {
@@ -5903,6 +5852,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
      << " | Returning = "
      << getRSMIStatusString(restartRet, false);
   LOG_TRACE(ss);
+
   if (restartRet != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "
@@ -5920,10 +5870,10 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   std::string current_memory_mode_str = "unknown";
   rsmi_status_t can_read_sysfs_again = RSMI_STATUS_AMDGPU_RESTART_ERR;
   int maxWaitSeconds = 10;
-  const int k1000_MS_WAIT = 1000;
   // wait until we can read SYSFS again
   if (restartRet == RSMI_STATUS_SUCCESS) {
-    while (current_memory_mode_str != user_requested_memory_partition) {
+    while ((current_memory_mode_str != user_requested_memory_partition)
+          && maxWaitSeconds > 0) {
       maxWaitSeconds -= 1;
       can_read_sysfs_again =
         rsmi_dev_memory_partition_get(dv_ind, current_memory_mode, kMaxCurrentMemoryMode);
@@ -5939,6 +5889,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
            << " | Data (user requested mode): " << user_requested_memory_partition
            << " | Current Memory Partition Mode: " << current_memory_mode_str
            << " | Available Memory Partition Modes: " << memory_capabilities_str
+           << " | maxWaitSeconds: " << maxWaitSeconds
            << " | total wait time (sec): " << (10 - maxWaitSeconds)
            << " | Returning = "
            << getRSMIStatusString(can_read_sysfs_again, false);

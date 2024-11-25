@@ -1,45 +1,25 @@
 /*
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
- *
- * Copyright (c) 2024, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
+
 #ifndef INCLUDE_AMDSMI_H_
 #define INCLUDE_AMDSMI_H_
 
@@ -78,12 +58,12 @@ typedef enum {
 /* Maximum size definitions AMDSMI */
 #define AMDSMI_MAX_MM_IP_COUNT        8
 #define AMDSMI_MAX_DATE_LENGTH        32 /**< YYYY-MM-DD:HH:MM:SS.MSC */
-#define AMDSMI_MAX_STRING_LENGTH      64
-#define AMDSMI_NORMAL_STRING_LENGTH   32
+#define AMDSMI_MAX_STRING_LENGTH      256
+#define AMDSMI_NORMAL_STRING_LENGTH   AMDSMI_MAX_STRING_LENGTH  // Deprecated
+#define AMDSMI_256_LENGTH             AMDSMI_MAX_STRING_LENGTH  // Deprecated
 #define AMDSMI_MAX_DEVICES            32
 #define AMDSMI_MAX_NAME               32
 #define AMDSMI_MAX_DRIVER_VERSION_LENGTH 80
-#define AMDSMI_256_LENGTH 256
 #define AMDSMI_MAX_CONTAINER_TYPE    2
 #define AMDSMI_MAX_CACHE_TYPES 10
 #define AMDSMI_MAX_NUM_XGMI_PHYSICAL_LINK 64
@@ -609,8 +589,8 @@ typedef struct {
   char    name[AMDSMI_MAX_STRING_LENGTH];
   char    build_date[AMDSMI_MAX_DATE_LENGTH];
   char    part_number[AMDSMI_MAX_STRING_LENGTH];
-  char    version[AMDSMI_NORMAL_STRING_LENGTH];
-  uint32_t reserved[16];
+  char    version[AMDSMI_MAX_STRING_LENGTH];
+  uint64_t reserved[32];
 } amdsmi_vbios_info_t;
 
 /**
@@ -648,17 +628,17 @@ typedef struct {
 } amdsmi_fw_info_t;
 
 typedef struct {
-  char  market_name[AMDSMI_256_LENGTH];
+  char  market_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t vendor_id;   //< Use 32 bit to be compatible with other platform.
   char vendor_name[AMDSMI_MAX_STRING_LENGTH];
   uint32_t subvendor_id;   //< The subsystem vendor id
   uint64_t device_id;   //< The device id of a GPU
   uint32_t rev_id;
-  char asic_serial[AMDSMI_NORMAL_STRING_LENGTH];
+  char asic_serial[AMDSMI_MAX_STRING_LENGTH];
   uint32_t oam_id;   //< 0xFFFF if not supported
   uint32_t num_of_compute_units;   //< 0xFFFFFFFF if not supported
   uint64_t target_graphics_version;  //< 0xFFFFFFFFFFFFFFFF if not supported
-  uint32_t reserved[15];
+  uint32_t reserved[22];
 } amdsmi_asic_info_t;
 
 typedef struct {
@@ -736,12 +716,12 @@ typedef struct {
 } amdsmi_driver_info_t;
 
 typedef struct {
-  char  model_number[AMDSMI_256_LENGTH];
-  char  product_serial[AMDSMI_NORMAL_STRING_LENGTH];
-  char  fru_id[AMDSMI_NORMAL_STRING_LENGTH];
-  char  product_name[AMDSMI_256_LENGTH];
+  char  model_number[AMDSMI_MAX_STRING_LENGTH];
+  char  product_serial[AMDSMI_MAX_STRING_LENGTH];
+  char  fru_id[AMDSMI_MAX_STRING_LENGTH];
+  char  product_name[AMDSMI_MAX_STRING_LENGTH];
   char  manufacturer_name[AMDSMI_MAX_STRING_LENGTH];
-  uint32_t reserved[32];
+  uint64_t reserved[32];
 } amdsmi_board_info_t;
 
 typedef struct {
@@ -779,7 +759,7 @@ typedef uint32_t amdsmi_process_handle_t;
 
 
 typedef struct {
-  char name[AMDSMI_NORMAL_STRING_LENGTH];
+  char name[AMDSMI_MAX_STRING_LENGTH];
   amdsmi_process_handle_t pid;
   uint64_t mem; /** in bytes */
   struct engine_usage_ {
@@ -793,8 +773,8 @@ typedef struct {
     uint64_t vram_mem;
     uint32_t reserved[10];
   } memory_usage; /** in bytes */
-  char container_name[AMDSMI_NORMAL_STRING_LENGTH];
-  uint32_t reserved[4];
+  char container_name[AMDSMI_MAX_STRING_LENGTH];
+  uint32_t reserved[12];
 } amdsmi_proc_info_t;
 
 /**

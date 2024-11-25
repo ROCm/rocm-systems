@@ -1,45 +1,25 @@
 /*
- * =============================================================================
- * The University of Illinois/NCSA
- * Open Source License (NCSA)
- *
- * Copyright (c) 2024, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD ROC Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to
- * deal with the Software without restriction, including without limitation
- * the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the
- * Software is furnished to do so, subject to the following conditions:
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
  *
- *  - Redistributions of source code must retain the above copyright notice,
- *    this list of conditions and the following disclaimers.
- *  - Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimers in
- *    the documentation and/or other materials provided with the distribution.
- *  - Neither the names of <Name of Development Group, Name of Institution>,
- *    nor the names of its contributors may be used to endorse or promote
- *    products derived from this Software without specific prior written
- *    permission.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * THE CONTRIBUTORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
- * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
- * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS WITH THE SOFTWARE.
- *
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+ * THE SOFTWARE.
  */
+
 #include <assert.h>
 #include <errno.h>
 #include <sys/utsname.h>
@@ -73,6 +53,8 @@
 #include "amd_smi/impl/amd_smi_processor.h"
 #include "rocm_smi/rocm_smi_logger.h"
 
+// a global instance of std::mutex to protect data passed during threads
+std::mutex myMutex;
 static bool initialized_lib = false;
 
 #define	SIZE	10
@@ -1446,8 +1428,63 @@ amdsmi_status_t
 amdsmi_set_gpu_memory_partition(amdsmi_processor_handle processor_handle,
                                   amdsmi_memory_partition_type_t memory_partition) {
     AMDSMI_CHECK_INIT();
-    return rsmi_wrapper(rsmi_dev_memory_partition_set, processor_handle,
+    std::ostringstream ss;
+    std::lock_guard<std::mutex> g(myMutex);
+    // open libdrm connections prevents the ability to unload driver
+    amd::smi::AMDSmiSystem::getInstance().clean_up_drm();
+    ss << __PRETTY_FUNCTION__ << " |       \n"
+    << "***********************************\n"
+    << "* Cleaned up - clean_up_drm()     *\n"
+    << "***********************************\n";
+    LOG_INFO(ss);
+    amdsmi_status_t ret = rsmi_wrapper(rsmi_dev_memory_partition_set, processor_handle,
                           static_cast<rsmi_memory_partition_type_t>(memory_partition));
+    if (ret == AMDSMI_STATUS_SUCCESS) {
+      const uint32_t k256 = 256;
+      char current_partition[k256];
+      std::string current_partition_str = "UNKNOWN";
+      std::string req_user_partition;
+      amdsmi_status_t ret_get = rsmi_wrapper(rsmi_dev_memory_partition_get, processor_handle,
+                                             current_partition, k256);
+      if (ret_get == AMDSMI_STATUS_SUCCESS) {
+        current_partition_str.clear();
+        current_partition_str = current_partition;
+      }
+      switch (memory_partition) {
+        case AMDSMI_MEMORY_PARTITION_NPS1:
+          req_user_partition = "NPS1";
+          break;
+        case AMDSMI_MEMORY_PARTITION_NPS2:
+          req_user_partition = "NPS2";
+          break;
+        case AMDSMI_MEMORY_PARTITION_NPS4:
+          req_user_partition = "NPS4";
+          break;
+        case AMDSMI_MEMORY_PARTITION_NPS8:
+          req_user_partition = "NPS8";
+          break;
+        default:
+          req_user_partition = "UNKNOWN";
+          break;
+      }
+      if (req_user_partition == current_partition_str) {
+        amd::smi::AMDSmiSystem::getInstance().init_drm();
+        ss << __PRETTY_FUNCTION__ << " |       \n"
+        << "***********************************\n"
+        << "* Initialized libdrm - init_drm() *\n"
+        << "***********************************\n";
+        LOG_INFO(ss);
+      }
+    }
+
+    // TODO(amdsmi_team): issue completely closing -> reopening libdrm on 1st try (workaround above)
+    // amd::smi::AMDSmiSystem::getInstance().init_drm();
+    // ss << __PRETTY_FUNCTION__ << " |       \n"
+    // << "***********************************\n"
+    // << "* Initialized libdrm - init_drm() *\n"
+    // << "***********************************\n";
+    // LOG_INFO(ss);
+    return ret;
 }
 
 amdsmi_status_t

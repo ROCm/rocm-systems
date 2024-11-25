@@ -1,6 +1,4 @@
-
-#
-# Copyright (C) 2024 Advanced Micro Devices. All rights reserved.
+# Copyright (C) Advanced Micro Devices. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -18,7 +16,6 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
 
 import os
 # -*- coding: utf-8 -*-
@@ -854,11 +851,11 @@ class struct_amdsmi_vbios_info_t(Structure):
 
 struct_amdsmi_vbios_info_t._pack_ = 1 # source:False
 struct_amdsmi_vbios_info_t._fields_ = [
-    ('name', ctypes.c_char * 64),
+    ('name', ctypes.c_char * 256),
     ('build_date', ctypes.c_char * 32),
-    ('part_number', ctypes.c_char * 64),
-    ('version', ctypes.c_char * 32),
-    ('reserved', ctypes.c_uint32 * 16),
+    ('part_number', ctypes.c_char * 256),
+    ('version', ctypes.c_char * 256),
+    ('reserved', ctypes.c_uint64 * 32),
 ]
 
 amdsmi_vbios_info_t = struct_amdsmi_vbios_info_t
@@ -932,17 +929,16 @@ struct_amdsmi_asic_info_t._pack_ = 1 # source:False
 struct_amdsmi_asic_info_t._fields_ = [
     ('market_name', ctypes.c_char * 256),
     ('vendor_id', ctypes.c_uint32),
-    ('vendor_name', ctypes.c_char * 64),
+    ('vendor_name', ctypes.c_char * 256),
     ('subvendor_id', ctypes.c_uint32),
     ('device_id', ctypes.c_uint64),
     ('rev_id', ctypes.c_uint32),
-    ('asic_serial', ctypes.c_char * 32),
+    ('asic_serial', ctypes.c_char * 256),
     ('oam_id', ctypes.c_uint32),
     ('num_of_compute_units', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('target_graphics_version', ctypes.c_uint64),
-    ('reserved', ctypes.c_uint32 * 15),
-    ('PADDING_1', ctypes.c_ubyte * 4),
+    ('reserved', ctypes.c_uint32 * 22),
 ]
 
 amdsmi_asic_info_t = struct_amdsmi_asic_info_t
@@ -1057,9 +1053,9 @@ class struct_amdsmi_driver_info_t(Structure):
 
 struct_amdsmi_driver_info_t._pack_ = 1 # source:False
 struct_amdsmi_driver_info_t._fields_ = [
-    ('driver_version', ctypes.c_char * 64),
-    ('driver_date', ctypes.c_char * 64),
-    ('driver_name', ctypes.c_char * 64),
+    ('driver_version', ctypes.c_char * 256),
+    ('driver_date', ctypes.c_char * 256),
+    ('driver_name', ctypes.c_char * 256),
 ]
 
 amdsmi_driver_info_t = struct_amdsmi_driver_info_t
@@ -1069,11 +1065,11 @@ class struct_amdsmi_board_info_t(Structure):
 struct_amdsmi_board_info_t._pack_ = 1 # source:False
 struct_amdsmi_board_info_t._fields_ = [
     ('model_number', ctypes.c_char * 256),
-    ('product_serial', ctypes.c_char * 32),
-    ('fru_id', ctypes.c_char * 32),
+    ('product_serial', ctypes.c_char * 256),
+    ('fru_id', ctypes.c_char * 256),
     ('product_name', ctypes.c_char * 256),
-    ('manufacturer_name', ctypes.c_char * 64),
-    ('reserved', ctypes.c_uint32 * 32),
+    ('manufacturer_name', ctypes.c_char * 256),
+    ('reserved', ctypes.c_uint64 * 32),
 ]
 
 amdsmi_board_info_t = struct_amdsmi_board_info_t
@@ -1146,14 +1142,14 @@ struct_engine_usage_._fields_ = [
 
 struct_amdsmi_proc_info_t._pack_ = 1 # source:False
 struct_amdsmi_proc_info_t._fields_ = [
-    ('name', ctypes.c_char * 32),
+    ('name', ctypes.c_char * 256),
     ('pid', ctypes.c_uint32),
     ('PADDING_0', ctypes.c_ubyte * 4),
     ('mem', ctypes.c_uint64),
     ('engine_usage', struct_engine_usage_),
     ('memory_usage', struct_memory_usage_),
-    ('container_name', ctypes.c_char * 32),
-    ('reserved', ctypes.c_uint32 * 4),
+    ('container_name', ctypes.c_char * 256),
+    ('reserved', ctypes.c_uint32 * 12),
 ]
 
 amdsmi_proc_info_t = struct_amdsmi_proc_info_t

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #
-# Copyright (C) 2024 Advanced Micro Devices. All rights reserved.
+# Copyright (C) Advanced Micro Devices. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy of
 # this software and associated documentation files (the "Software"), to deal in
@@ -18,7 +18,6 @@
 # COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
 
 import logging
 import math
@@ -756,7 +755,7 @@ class AMDSMIHelpers():
           ****** WARNING ******\n
           Setting Dynamic Memory (NPS) partition modes require users to quit all GPU workloads.
           AMD SMI will then attempt to change memory (NPS) partition mode.
-          Upon a successful set, AMD SMI will then initiate an action to restart amdgpu driver.
+          Upon a successful set, AMD SMI will then initiate an action to restart AMD GPU driver.
           This action will change all GPU's in the hive to the requested memory (NPS) partition mode.
 
           Please use this utility with caution.

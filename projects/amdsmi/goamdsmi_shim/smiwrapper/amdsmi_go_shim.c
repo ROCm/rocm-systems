@@ -1,25 +1,16 @@
 // SPDX-License-Identifier: MIT
 /*
- * Copyright (c) 2024, Advanced Micro Devices, Inc.
- * All rights reserved.
- *
- * Developed by:
- *
- *                 AMD Research and AMD Software Development
- *
- *                 Advanced Micro Devices, Inc.
- *
- *                 www.amd.com
+ * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
  * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or
- * sellcopies of the Software, and to permit persons to whom the Software is
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- *  - The above copyright notice and this permission notice shall be included in
- *    all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -28,12 +19,6 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
- *
- * Except as contained in this notice, the name of the Advanced Micro Devices,
- * Inc. shall not be used in advertising or otherwise to promote the sale, use
- * or other dealings in this Software without prior written authorization from
- * the Advanced Micro Devices, Inc.
- *
  */
 
 #include <stdint.h>
@@ -82,7 +67,7 @@ static amdsmi_processor_handle  amdsmi_processor_handle_all_gpu_device_across_so
 
 goamdsmi_status_t is_file_present(const char* driver_name, const char* file_name)
 {
-    if(0 == access(file_name, F_OK)) 
+    if(0 == access(file_name, F_OK))
     {
         if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, Success, %s found \"%s\" and returns:%d\n", driver_name, file_name, GOAMDSMI_STATUS_SUCCESS);}
         return GOAMDSMI_STATUS_SUCCESS;
@@ -110,13 +95,13 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
             if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, Failed, Returns previous enumurated AMDSMICPUInit:%d, CpuSocketCount:%d, CpuCount:%d, CpuPhysicalCoreCount:%d\n", GOAMDSMI_STATUS_FAILURE, num_cpuSockets, num_cpu_inAllSocket, num_cpu_physicalCore_inAllSocket);}
             return GOAMDSMI_STATUS_FAILURE;
         }
-        else 
+        else
         {
             if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, Success, Returns previous enumurated AMDSMICPUInit:%d, CpuSocketCount:%d, CpuCount:%d, CpuPhysicalCoreCount:%d\n", GOAMDSMI_STATUS_SUCCESS, num_cpuSockets, num_cpu_inAllSocket, num_cpu_physicalCore_inAllSocket);}
             return GOAMDSMI_STATUS_SUCCESS;
         }
     }
-    
+
     if((GOAMDSMI_GPU_INIT == goamdsmi_Init) && (true == gpuInitCompleted))
     {
         if((GOAMDSMI_VALUE_0 == num_gpuSockets)||(GOAMDSMI_VALUE_0 == num_gpu_devices_inAllSocket))
@@ -132,7 +117,7 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
     }
 
 
-    if ((GOAMDSMI_STATUS_SUCCESS == check_amdgpu_driver()) && (GOAMDSMI_STATUS_SUCCESS == check_hsmp_driver())) 
+    if ((GOAMDSMI_STATUS_SUCCESS == check_amdgpu_driver()) && (GOAMDSMI_STATUS_SUCCESS == check_hsmp_driver()))
     {
         if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_2)) {printf("AMDSMI, Status, Identified APU machine and going to enumurate APU\n");}
 
@@ -184,19 +169,19 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
     {
         if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_2)) {printf("AMDSMI, Status, Going to enumurate only CPU\n");}
         cpuInitCompleted = true;
-        
-        if (GOAMDSMI_STATUS_SUCCESS == check_hsmp_driver()) 
+
+        if (GOAMDSMI_STATUS_SUCCESS == check_hsmp_driver())
         {
             if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_2)) {printf("AMDSMI, Status, Identified CPU Driver and going to enumurate only CPU\n");}
 
             if( (AMDSMI_STATUS_SUCCESS != amdsmi_init(AMDSMI_INIT_AMD_CPUS)) ||
-                (AMDSMI_STATUS_SUCCESS != amdsmi_get_socket_handles(&num_cpuSockets, nullptr)) || 
+                (AMDSMI_STATUS_SUCCESS != amdsmi_get_socket_handles(&num_cpuSockets, nullptr)) ||
                 (AMDSMI_STATUS_SUCCESS != amdsmi_get_socket_handles(&num_cpuSockets, &amdsmi_cpusocket_handle_all_socket[0])) ||
                 (GOAMDSMI_VALUE_0 == num_cpuSockets))
             {
                 if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, Failed, AMDSMICPUInit:0, CpuNumSockets=0\n");}
                 return GOAMDSMI_STATUS_FAILURE;
-            }        
+            }
         }
         else
         {
@@ -224,17 +209,17 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
             }
         }
     }
-    else if(GOAMDSMI_GPU_INIT == goamdsmi_Init)    
+    else if(GOAMDSMI_GPU_INIT == goamdsmi_Init)
     {
         if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_2)) {printf("AMDSMI, Status, Going to enumurate only GPU\n");}
         gpuInitCompleted = true;
-        
-        if (GOAMDSMI_STATUS_SUCCESS == check_amdgpu_driver()) 
+
+        if (GOAMDSMI_STATUS_SUCCESS == check_amdgpu_driver())
         {
             if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_2)) {printf("AMDSMI, Status, Identified GPU Driver and going to enumurate only GPU\n");}
 
             if( (AMDSMI_STATUS_SUCCESS != amdsmi_init(AMDSMI_INIT_AMD_GPUS)) ||
-                (AMDSMI_STATUS_SUCCESS != amdsmi_get_socket_handles(&num_gpuSockets, nullptr)) || 
+                (AMDSMI_STATUS_SUCCESS != amdsmi_get_socket_handles(&num_gpuSockets, nullptr)) ||
                 (AMDSMI_STATUS_SUCCESS != amdsmi_get_socket_handles(&num_gpuSockets, &amdsmi_gpusocket_handle_all_socket[0])) ||
                 (GOAMDSMI_VALUE_0 == num_gpuSockets))
             {
@@ -246,12 +231,12 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
         {
             if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_3)) {printf("AMDSMI, Status, Missing GPU Driver and not going to enumurate only GPU\n");}
         }
-        
+
         //GPU
         for(uint32_t gpu_socket_counter = 0; gpu_socket_counter < num_gpuSockets; gpu_socket_counter++)
         {
             uint32_t num_gpu_devices       = GOAMDSMI_VALUE_0;
-            
+
             processor_type_t gpu_device_processor_type    = AMDSMI_PROCESSOR_TYPE_AMD_GPU;
             if( (AMDSMI_STATUS_SUCCESS == amdsmi_get_processor_handles_by_type(amdsmi_gpusocket_handle_all_socket[gpu_socket_counter], gpu_device_processor_type, nullptr, &num_gpu_devices)) &&
                 (GOAMDSMI_VALUE_0 != num_gpu_devices) &&
@@ -261,14 +246,14 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
             }
         }
     }
-    
+
     //CPU
     if((GOAMDSMI_CPU_INIT == goamdsmi_Init) && ((GOAMDSMI_VALUE_0 == num_cpuSockets)||(GOAMDSMI_VALUE_0 == num_cpu_inAllSocket)||(GOAMDSMI_VALUE_0 == num_cpu_physicalCore_inAllSocket)))
     {
         if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, Failed, CPU Enumuration Failed AMDSMICPUInit:%d, CpuSocketCount:%d, CpuCount:%d, CpuPhysicalCoreCount:%d,\n", GOAMDSMI_STATUS_FAILURE, num_cpuSockets, num_cpu_inAllSocket, num_cpu_physicalCore_inAllSocket);}
         return GOAMDSMI_STATUS_FAILURE;
     }
-    
+
     //GPU
     if((GOAMDSMI_GPU_INIT == goamdsmi_Init) && ((GOAMDSMI_VALUE_0 == num_gpuSockets)||(GOAMDSMI_VALUE_0 == num_gpu_devices_inAllSocket)))
     {
@@ -276,16 +261,16 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init)
         return GOAMDSMI_STATUS_FAILURE;
     }
 
-    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) 
+    if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1))
     {
         if((GOAMDSMI_CPU_INIT == goamdsmi_Init) || apuInitCompleted)    printf("AMDSMI, Status, AMDSMICPUInit:%d, CpuSocketCount:%d, CpuCount:%d, CpuPhysicalCoreCount:%d,\n", GOAMDSMI_STATUS_SUCCESS, num_cpuSockets, num_cpu_inAllSocket, num_cpu_physicalCore_inAllSocket);
         if((GOAMDSMI_GPU_INIT == goamdsmi_Init) || apuInitCompleted)    printf("AMDSMI, Status, AMDSMIGPUInit:%d, GpuSocketCount:%d, GpuCount:%d\n", GOAMDSMI_STATUS_SUCCESS, num_gpuSockets, num_gpu_devices_inAllSocket);
     }
-    
+
     return GOAMDSMI_STATUS_SUCCESS;
 }
 ////////////////////////////////////////////////------------CPU------------////////////////////////////////////////////////
-bool goamdsmi_cpu_init()    
+bool goamdsmi_cpu_init()
 {
 	bool cpu_init_success = false;
     if(GOAMDSMI_STATUS_SUCCESS == go_shim_amdsmiapu_init(GOAMDSMI_CPU_INIT))
@@ -430,7 +415,7 @@ uint16_t goamdsmi_gpu_dev_id_get(uint32_t dv_ind)
 {
     bool readSuccess         = false;
     uint16_t gpu_dev_id_temp = GOAMDSMI_UINT16_MAX;
-    
+
     if((dv_ind < num_gpu_devices_inAllSocket) && (AMDSMI_STATUS_SUCCESS == amdsmi_get_gpu_id(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind], &gpu_dev_id_temp))) readSuccess = true;
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Gpu:%d, GpuDevId:%d\n", readSuccess?"Success":"Failed", dv_ind, gpu_dev_id_temp);}
 
@@ -448,7 +433,7 @@ char* goamdsmi_gpu_dev_vendor_name_get(uint32_t dv_ind)
     uint32_t len = 256;
     char* gpu_vendor_name = (char*)malloc(sizeof(char)*len);gpu_vendor_name[0] = '\0';
     strcpy(gpu_vendor_name, GOAMDSMI_STRING_NA);
-    
+
     return gpu_vendor_name;
 }
 
@@ -457,7 +442,7 @@ char* goamdsmi_gpu_dev_vbios_version_get(uint32_t dv_ind)
     uint32_t len = 256;
     char* vbios_version = (char*)malloc(sizeof(char)*len);vbios_version[0] = '\0';
     strcpy(vbios_version, GOAMDSMI_STRING_NA);
-    
+
     return vbios_version;
 }
 
@@ -655,7 +640,7 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_usage_get(uint32_t dv_ind)
         gpu_memory_usage = (uint64_t)gpu_memory_usage_temp;
     }
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Gpu:%d, GpuMemoryUsage:%llu\n", readSuccess?"Success":"Failed", dv_ind, (unsigned long long)(gpu_memory_usage));}
-        
+
     return gpu_memory_usage;
 }
 
@@ -671,6 +656,6 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind)
         gpu_memory_total = (uint64_t)gpu_memory_total_temp;
     }
     if (enable_debug_level(GOAMDSMI_DEBUG_LEVEL_1)) {printf("AMDSMI, %s for Gpu:%d, GpuMemoryTotal:%llu\n", readSuccess?"Success":"Failed", dv_ind, (unsigned long long)(gpu_memory_total));}
-        
+
     return gpu_memory_total;
 }
