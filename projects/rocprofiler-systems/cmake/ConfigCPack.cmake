@@ -45,6 +45,10 @@ set(CPACK_PACKAGE_VERSION_PATCH "${PROJECT_VERSION_PATCH}")
 set(CPACK_PACKAGE_CONTACT "https://github.com/ROCm/rocprofiler-systems")
 set(CPACK_RESOURCE_FILE_LICENSE "${PROJECT_SOURCE_DIR}/LICENSE")
 set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
+
+# For handling the project rebranding from "omnitrace" to "rocprofiler-systems"
+set(OMNITRACE_PACKAGE_NAME "omnitrace")
+
 set(ROCPROFSYS_CPACK_SYSTEM_NAME
     "${_SYSTEM_NAME}"
     CACHE STRING "System name, e.g. Linux or Ubuntu-20.04")
@@ -184,6 +188,11 @@ set(CPACK_DEBIAN_PACKAGE_DEPENDS
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
 set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
 
+# Handle the project rebranding from "omnitrace" to "rocprofiler-systems"
+set(CPACK_DEBIAN_PACKAGE_PROVIDES ${OMNITRACE_PACKAGE_NAME})
+set(CPACK_DEBIAN_PACKAGE_REPLACES ${OMNITRACE_PACKAGE_NAME})
+set(CPACK_DEBIAN_PACKAGE_BREAKS ${OMNITRACE_PACKAGE_NAME})
+
 # -------------------------------------------------------------------------------------- #
 #
 # RPM package specific variables
@@ -200,7 +209,10 @@ string(REGEX REPLACE "([a-zA-Z])-([0-9])" "\\1\\2" CPACK_RPM_PACKAGE_RELEASE
                      "${CPACK_RPM_PACKAGE_RELEASE}")
 string(REPLACE "-" "~" CPACK_RPM_PACKAGE_RELEASE "${CPACK_RPM_PACKAGE_RELEASE}")
 
-set(_RPM_PACKAGE_PROVIDES "")
+# Handle the project rebranding from "omnitrace" to "rocprofiler-systems"
+set(CPACK_RPM_PACKAGE_OBSOLETES ${OMNITRACE_PACKAGE_NAME})
+set(CPACK_RPM_PACKAGE_CONFLICTS ${OMNITRACE_PACKAGE_NAME})
+set(_RPM_PACKAGE_PROVIDES ${OMNITRACE_PACKAGE_NAME})
 
 if(ROCPROFSYS_BUILD_LIBUNWIND)
     list(APPEND _RPM_PACKAGE_PROVIDES "libunwind.so.99()(64bit)")
