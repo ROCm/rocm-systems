@@ -1391,38 +1391,56 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   bool restartInProgress = true;
   bool isRestartInProgress = true;
   bool isAMDGPUModuleLive = false;
+  bool restartGDM = false;
   std::string captureRestartErr;
+  const int kTimeToWaitForDriverMSec = 1000;
 
   // sudo systemctl is-active gdm
   // we do not care about the success of checking if gdm is active
-  std::tie(success, out) = executeCommand("systemctl is-active gdm");
-  (out == "active") ? (restartSuccessful &= success) :
-                         (restartSuccessful = true);
+  std::tie(success, out) = executeCommand("systemctl is-active gdm", true);
+  (out == "active") ? (restartGDM = true) : (restartGDM = false);
+  ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = "
+     << out << "; success = " << (success ? "True" : "False");
+  LOG_INFO(ss);
 
   // if gdm is active -> sudo systemctl stop gdm
   // TODO(AMD_SMI_team): are are there other display manager's we need to take into account?
   // see https://help.gnome.org/admin/gdm/stable/overview.html.en_GB
-  if (success && (out == "active")) {
+  if (success && (out == "active") && (restartGDM)) {
     wasGdmServiceActive = true;
-    std::tie(success, out) = executeCommand("systemctl stop gdm&", false);
-    restartSuccessful &= success;
+    std::tie(success, out) = executeCommand("systemctl stop gdm&", true);
+    ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = "
+    << out << "; success = " << (success ? "True" : "False");
+    LOG_INFO(ss);
+  } else {
+    success = true;  // ignore failures to restart gdm
   }
+
+  ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = "
+     << out << "; success = " << (success ? "True" : "False")
+     << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
+     << "; captureRestartErr = " << captureRestartErr;
+  LOG_INFO(ss);
 
   // sudo modprobe -r amdgpu
   // sudo modprobe amdgpu
-  std::tie(success, out) =
-    executeCommand("modprobe -r amdgpu && modprobe amdgpu&", true);
+  std::tie(success, out) = executeCommand(
+    "modprobe -r -v amdgpu >/dev/null 2>&1 && modprobe -v amdgpu >/dev/null 2>&1", true);
   restartSuccessful &= success;
   captureRestartErr = out;
-
-  if (success) {
-    restartSuccessful = false;
-  }
+  ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = "
+     << out << "; success = " << (success ? "True" : "False")
+     << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
+     << "; captureRestartErr = " << captureRestartErr;
+  LOG_INFO(ss);
 
   // if gdm was active -> sudo systemctl start gdm
-  if (wasGdmServiceActive) {
-    std::tie(success, out) = executeCommand("systemctl start gdm&", false);
-    restartSuccessful &= success;
+  // We don't care if successful or not, just try to restart as a courtesy
+  if (wasGdmServiceActive && restartGDM) {
+    std::tie(success, out) = executeCommand("systemctl start gdm&", true);
+    ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = "
+    << out << "; success = " << (success ? "True" : "False");
+    LOG_INFO(ss);
   }
 
   // Return early if there was an issue restarting amdgpu
@@ -1436,7 +1454,6 @@ rsmi_status_t Device::restartAMDGpuDriver(void) {
   // wait for amdgpu module to come back up
   rsmi_status_t status = Device::isRestartInProgress(&isRestartInProgress,
                                                     &isAMDGPUModuleLive);
-  const int kTimeToWaitForDriverMSec = 1000;
   int maxLoops = 10;  // wait a max of 10 sec
   while (status != RSMI_STATUS_SUCCESS) {
     maxLoops -= 1;
@@ -1467,7 +1484,7 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   // wait for amdgpu module to come back up
   std::tie(success, out) = executeCommand("cat /sys/module/amdgpu/initstate", true);
   ss << __PRETTY_FUNCTION__
-     << " | success = " << success
+     << " | success = " << (success ? "True" : "False")
      << " | out = " << out;
   LOG_DEBUG(ss);
   if ((success == true) && (!out.empty())) {
@@ -1478,6 +1495,11 @@ rsmi_status_t Device::isRestartInProgress(bool *isRestartInProgress,
   }
   *isRestartInProgress = deviceRestartInProgress;
   *isAMDGPUModuleLive = isSystemAMDGPUModuleLive;
+  ss << __PRETTY_FUNCTION__
+     << " | *isRestartInProgress = " << (*isRestartInProgress ? "True":"False")
+     << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True":"False")
+     << " | out = " << out;
+  LOG_DEBUG(ss);
 
   return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS :
           RSMI_STATUS_AMDGPU_RESTART_ERR);

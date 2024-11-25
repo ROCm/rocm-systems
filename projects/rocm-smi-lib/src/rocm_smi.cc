@@ -4912,6 +4912,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   LOG_TRACE(ss);
   REQUIRE_ROOT_ACCESS
   DEVICE_MUTEX
+  const int k1000_MS_WAIT = 1000;
   const uint32_t kMaxBoardLength = 128;
   bool isCorrectDevice = false;
   char boardName[kMaxBoardLength];
@@ -4925,32 +4926,6 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   char current_memory_mode[kMaxCurrentMemoryMode];
   current_memory_mode[0] = '\0';
 
-  // rsmi_dev_memory_partition_set is only available for for discrete variant,
-  // others are required to update through bios settings
-  rsmi_dev_name_get(dv_ind, boardName, static_cast<size_t>(kMaxBoardLength));
-  std::string myBoardName = boardName;
-  if (!myBoardName.empty()) {
-    std::transform(myBoardName.begin(), myBoardName.end(), myBoardName.begin(),
-                   ::tolower);
-    if (myBoardName.find("mi") != std::string::npos &&
-        myBoardName.find("00x") != std::string::npos) {
-      isCorrectDevice = true;
-    }
-  }
-
-  if (!isCorrectDevice) {
-    ss << __PRETTY_FUNCTION__
-       << " | ======= end ======= "
-       << " | Fail "
-       << " | Device #: " << dv_ind
-       << " | Type: "
-       << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Cause: device board name does not support this action"
-       << " | Returning = "
-       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED, false);
-      LOG_ERROR(ss);
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
 
   // Is the current mode already what user requested?
   switch (memory_partition) {
@@ -5086,6 +5061,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
      << " | Returning = "
      << getRSMIStatusString(restartRet, false);
   LOG_TRACE(ss);
+
   if (restartRet != RSMI_STATUS_SUCCESS) {
     ss << __PRETTY_FUNCTION__
        << " | ======= end ======= "
@@ -5103,10 +5079,10 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
   std::string current_memory_mode_str = "unknown";
   rsmi_status_t can_read_sysfs_again = RSMI_STATUS_AMDGPU_RESTART_ERR;
   int maxWaitSeconds = 10;
-  const int k1000_MS_WAIT = 1000;
   // wait until we can read SYSFS again
   if (restartRet == RSMI_STATUS_SUCCESS) {
-    while (current_memory_mode_str != user_requested_memory_partition) {
+    while ((current_memory_mode_str != user_requested_memory_partition)
+          && maxWaitSeconds > 0) {
       maxWaitSeconds -= 1;
       can_read_sysfs_again =
         rsmi_dev_memory_partition_get(dv_ind, current_memory_mode, kMaxCurrentMemoryMode);
@@ -5122,6 +5098,7 @@ rsmi_dev_memory_partition_set(uint32_t dv_ind,
            << " | Data (user requested mode): " << user_requested_memory_partition
            << " | Current Memory Partition Mode: " << current_memory_mode_str
            << " | Available Memory Partition Modes: " << memory_capabilities_str
+           << " | maxWaitSeconds: " << maxWaitSeconds
            << " | total wait time (sec): " << (10 - maxWaitSeconds)
            << " | Returning = "
            << getRSMIStatusString(can_read_sysfs_again, false);
