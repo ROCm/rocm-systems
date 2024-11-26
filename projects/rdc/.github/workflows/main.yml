@@ -11,11 +11,11 @@ env:
   # Customize the CMake build type here (Release, Debug, RelWithDebInfo, etc.)
   BUILD_TYPE: RelWithDebInfo
   ROCM_DIR: /opt/rocm
-  # Use secrets for internal URLs
-  JOB_NAME: ${{ secrets.JOB_NAME }}
-  AMDGPU_REPO_DEB: ${{ secrets.AMDGPU_REPO_DEB }}
-  AMDGPU_REPO_URL: ${{ secrets.AMDGPU_REPO_URL }}
-  ROCM_CI_URL: ${{ secrets.ROCM_CI_URL }}
+  # Use vars for internal URLs
+  JOB_NAME: ${{ vars.JOB_NAME }}
+  AMDGPU_REPO_DEB: ${{ vars.AMDGPU_REPO_DEB }}
+  AMDGPU_REPO_URL: ${{ vars.AMDGPU_REPO_URL }}
+  ROCM_CI_URL: ${{ vars.ROCM_CI_URL }}
   # Set env vars to values of config vars
   env_var: ${{ vars.ENV_CONTEXT_VAR }}
 
@@ -32,6 +32,7 @@ jobs:
 
     - name: Set up apt repos
       run: |
+        test "$AMDGPU_REPO_URL" == "" && echo "Error! AMDGPU_REPO_URL is EMPTY!" && exit 1
         cat /etc/os-release
         apt update -y
         # provides add-apt-repository and support for caching actions

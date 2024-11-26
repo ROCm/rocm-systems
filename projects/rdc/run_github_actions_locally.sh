@@ -9,8 +9,8 @@ set -o pipefail
 REMOTE_NAME="${REMOTE_NAME:-origin}"
 CONTAINER="${CONTAINER:-ubuntu}"
 
-# act will use this file if it exists for secrets
-SECRETS_FILE="${SECRETS_FILE:-act.secrets}"
+# act will use this file if it exists for vars
+VARS_FILE="${VARS_FILE:-act.secrets}"
 
 if ! git remote | grep -q "$REMOTE_NAME"; then
     echo "ERROR: Remote '$REMOTE_NAME' does not exist!"
@@ -34,8 +34,8 @@ args=(
     -P "self-hosted=$CONTAINER"
 )
 
-if test -e "${SECRETS_FILE}"; then
-    args+=(--secret-file "${SECRETS_FILE}")
+if test -e "${VARS_FILE}"; then
+    args+=(--var-file "${VARS_FILE}")
 fi
 
 # trace
