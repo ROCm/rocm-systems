@@ -4530,6 +4530,14 @@ inline static hipError_t hipDeviceGetGraphMemAttribute(int device, hipGraphMemAt
     return hipCUDAErrorTohipError(cudaDeviceGetGraphMemAttribute(device, attr, value));
 }
 
+inline static hipError_t hipDeviceGetTexture1DLinearMaxWidth(size_t* maxWidthInElements,
+                                                             const hipChannelFormatDesc* fmtDesc,
+                                                             int device) {
+    return hipCUDAErrorTohipError(cudaDeviceGetTexture1DLinearMaxWidth(maxWidthInElements,
+                                                                       fmtDesc,
+                                                                       device));
+}
+
 inline static hipError_t hipDeviceSetGraphMemAttribute(int device, hipGraphMemAttributeType attr, void* value) {
     return hipCUDAErrorTohipError(cudaDeviceSetGraphMemAttribute(device, attr, value));
 }
