@@ -83,7 +83,8 @@ set(TEST_SRC
   hipStreamIsCapturing_old.cc
   hipGraphMemFreeNodeGetParams.cc
   hipGraphAsyncUserObj.cc
-  hipGraphExecBatchMemOpNodeSetParams.cc)
+  hipGraphExecBatchMemOpNodeSetParams.cc
+  hipGraphAddBatchMemOpNode.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(AMD_SRC
