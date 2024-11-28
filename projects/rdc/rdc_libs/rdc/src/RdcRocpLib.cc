@@ -154,7 +154,7 @@ rdc_status_t RdcRocpLib::rdc_telemetry_fields_unwatch(rdc_gpu_field_t* fields,
 
 std::string RdcRocpLib::get_rocm_path() {
   // set default rocm path in case lookup fails
-  std::string rocm_path("/opt/rocm");
+  std::string rocm_path(ROCM_DIR);
   const char* rocm_path_env = getenv("ROCM_PATH");
   if (rocm_path_env != nullptr) {
     rocm_path = rocm_path_env;
