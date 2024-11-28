@@ -83,3 +83,6 @@ if("${CMAKE_BUILD_TYPE}" STREQUAL Release)
         TARGET ${RDC_LIB}
         POST_BUILD COMMAND ${CMAKE_STRIP} ${RDC_LIB_COMPONENT}.so)
 endif()
+
+# pass ROCM_DIR to compiler
+target_compile_definitions(${RDC_LIB} PRIVATE ROCM_DIR="${ROCM_DIR}")
