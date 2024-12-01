@@ -165,9 +165,9 @@ __global__ void test_coop_kernel_gfx11(unsigned int loops, long long* array, int
 
   for (int i = 0; i < loops; i++) {
     long long time_diff = 0;
-    long long last_clock = wall_clock64();
+    long long last_clock = clock_function();
     do {
-      long long cur_clock = wall_clock64();
+      long long cur_clock = clock_function();
       if (cur_clock > last_clock) {
         time_diff += (cur_clock - last_clock);
       }
@@ -175,7 +175,7 @@ __global__ void test_coop_kernel_gfx11(unsigned int loops, long long* array, int
       // So just ignore those slipped cycles.
       last_clock = cur_clock;
     } while (time_diff < 1000000);
-    array[rank] += wall_clock64();
+    array[rank] += clock_function();
   }
 #endif
 }
@@ -205,9 +205,9 @@ __global__ void test_kernel_gfx11(uint32_t loops, unsigned long long* array) {
 
   for (int i = 0; i < loops; i++) {
     long long time_diff = 0;
-    long long last_clock = wall_clock64();
+    long long last_clock = clock_function();
     do {
-      long long cur_clock = wall_clock64();
+      long long cur_clock = clock_function();
       if (cur_clock > last_clock) {
         time_diff += (cur_clock - last_clock);
       }
@@ -215,7 +215,7 @@ __global__ void test_kernel_gfx11(uint32_t loops, unsigned long long* array) {
       // So just ignore those slipped cycles.
       last_clock = cur_clock;
     } while (time_diff < 1000000);
-    array[rank] += wall_clock64();
+    array[rank] += clock_function();
   }
 #endif
 }

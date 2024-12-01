@@ -30,14 +30,14 @@ THE SOFTWARE.
 #include <resource_guards.hh>
 #include <hip/driver_types.h>
 
-template <bool should_synchronize, typename F>
+template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind = GENERATE(hipMemcpyDeviceToHost, hipMemcpyDefault);
 
   constexpr size_t cols = 127;
   constexpr size_t rows = 128;
 
-  LinearAllocGuard2D<int> device_alloc(cols, rows);
+  LinearAllocGuard2D<int, unaligned> device_alloc(cols, rows);
 
   const size_t host_pitch = GENERATE_REF(device_alloc.width(), device_alloc.width() + 64);
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, host_pitch * rows);
@@ -47,6 +47,7 @@ void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
   Iota<<<blocks, threads_per_block>>>(device_alloc.ptr(), device_alloc.pitch(),
                                       device_alloc.width_logical(), device_alloc.height(), 1);
   HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(memcpy_func(host_alloc.ptr(), host_pitch, device_alloc.ptr(), device_alloc.pitch(),
                         device_alloc.width(), device_alloc.height(), kind));
@@ -59,7 +60,7 @@ void Memcpy2DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
                       device_alloc.height(), 1, f);
 }
 
-template <bool should_synchronize, bool enable_peer_access, typename F>
+template <bool should_synchronize, bool enable_peer_access, bool unaligned = false, typename F>
 void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind = GENERATE(hipMemcpyDeviceToDevice, hipMemcpyDefault);
 
@@ -72,12 +73,7 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   const size_t src_cols_mult = GENERATE(1, 2);
 
   INFO("Src device: " << src_device << ", Dst device: " << dst_device);
-
-  HIP_CHECK(hipSetDevice(src_device));
-  if constexpr (enable_peer_access) {
-    if (src_device == dst_device) {
-      return;
-    }
+  if (device_count > 1) {
     int can_access_peer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, src_device, dst_device));
     if (!can_access_peer) {
@@ -86,12 +82,19 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
       HipTest::HIP_SKIP_TEST(msg.c_str());
       return;
     }
+  }
+
+  HIP_CHECK(hipSetDevice(src_device));
+  if constexpr (enable_peer_access) {
+    if (src_device == dst_device) {
+      return;
+    }
     HIP_CHECK(hipDeviceEnablePeerAccess(dst_device, 0));
   }
 
-  LinearAllocGuard2D<int> src_alloc(cols * src_cols_mult, rows);
+  LinearAllocGuard2D<int, unaligned> src_alloc(cols * src_cols_mult, rows);
   HIP_CHECK(hipSetDevice(dst_device));
-  LinearAllocGuard2D<int> dst_alloc(cols, rows);
+  LinearAllocGuard2D<int, unaligned> dst_alloc(cols, rows);
   HIP_CHECK(hipSetDevice(src_device));
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, dst_alloc.width() * rows);
 
@@ -102,6 +105,7 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
   Iota<<<blocks, threads_per_block>>>(src_alloc.ptr(), src_alloc.pitch(), dst_alloc.width_logical(),
                                       dst_alloc.height(), 1);
   HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(memcpy_func(dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(), src_alloc.pitch(),
                         dst_alloc.width(), dst_alloc.height(), kind));
@@ -116,14 +120,14 @@ void Memcpy2DDeviceToDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
                       dst_alloc.height(), 1, f);
 }
 
-template <bool should_synchronize, typename F>
+template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DHostToDeviceShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
   const auto kind = GENERATE(hipMemcpyHostToDevice, hipMemcpyDefault);
 
   constexpr size_t cols = 127;
   constexpr size_t rows = 128;
 
-  LinearAllocGuard2D<int> device_alloc(cols, rows);
+  LinearAllocGuard2D<int, unaligned> device_alloc(cols, rows);
 
   const size_t host_pitch = GENERATE_REF(device_alloc.pitch(), 2 * device_alloc.pitch());
 
@@ -188,46 +192,46 @@ void MemcpySyncBehaviorCheck(F memcpy_func, const bool should_sync,
   }
 }
 
-template <typename F>
+template <bool unaligned = false, typename F>
 void Memcpy2DHtoDSyncBehavior(F memcpy_func, const bool should_sync,
                               const hipStream_t kernel_stream = nullptr) {
   using LA = LinearAllocs;
   const auto host_alloc_type = GENERATE(LA::malloc, LA::hipHostMalloc);
   LinearAllocGuard<int> host_alloc(host_alloc_type, 32 * sizeof(int) * 32);
-  LinearAllocGuard2D<int> device_alloc(32, 32);
+  LinearAllocGuard2D<int, unaligned> device_alloc(32, 32);
   MemcpySyncBehaviorCheck(std::bind(memcpy_func, device_alloc.ptr(), device_alloc.pitch(),
                                     host_alloc.ptr(), device_alloc.width(), device_alloc.width(),
                                     device_alloc.height(), hipMemcpyHostToDevice),
                           should_sync, kernel_stream);
 }
 
-template <typename F>
+template <bool unaligned = false, typename F>
 void Memcpy2DDtoHPageableSyncBehavior(F memcpy_func, const bool should_sync,
                                       const hipStream_t kernel_stream = nullptr) {
   LinearAllocGuard<int> host_alloc(LinearAllocs::malloc, 32 * sizeof(int) * 32);
-  LinearAllocGuard2D<int> device_alloc(32, 32);
+  LinearAllocGuard2D<int, unaligned> device_alloc(32, 32);
   MemcpySyncBehaviorCheck(std::bind(memcpy_func, host_alloc.ptr(), device_alloc.width(),
                                     device_alloc.ptr(), device_alloc.pitch(), device_alloc.width(),
                                     device_alloc.height(), hipMemcpyDeviceToHost),
                           should_sync, kernel_stream);
 }
 
-template <typename F>
+template <bool unaligned = false, typename F>
 void Memcpy2DDtoHPinnedSyncBehavior(F memcpy_func, const bool should_sync,
                                     const hipStream_t kernel_stream = nullptr) {
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc, 32 * sizeof(int) * 32);
-  LinearAllocGuard2D<int> device_alloc(32, 32);
+  LinearAllocGuard2D<int, unaligned> device_alloc(32, 32);
   MemcpySyncBehaviorCheck(std::bind(memcpy_func, host_alloc.ptr(), device_alloc.width(),
                                     device_alloc.ptr(), device_alloc.pitch(), device_alloc.width(),
                                     device_alloc.height(), hipMemcpyDeviceToHost),
                           should_sync, kernel_stream);
 }
 
-template <typename F>
+template <bool unaligned = false, typename F>
 void Memcpy2DDtoDSyncBehavior(F memcpy_func, const bool should_sync,
                               const hipStream_t kernel_stream = nullptr) {
-  LinearAllocGuard2D<int> src_alloc(32, 32);
-  LinearAllocGuard2D<int> dst_alloc(32, 32);
+  LinearAllocGuard2D<int, unaligned> src_alloc(32, 32);
+  LinearAllocGuard2D<int, unaligned> dst_alloc(32, 32);
   MemcpySyncBehaviorCheck(
       std::bind(memcpy_func, dst_alloc.ptr(), dst_alloc.pitch(), src_alloc.ptr(), src_alloc.pitch(),
                 dst_alloc.width(), dst_alloc.height(), hipMemcpyDeviceToDevice),
@@ -248,7 +252,7 @@ void Memcpy2DHtoHSyncBehavior(F memcpy_func, const bool should_sync,
                           should_sync, kernel_stream);
 }
 
-template <bool should_synchronize, typename F>
+template <bool should_synchronize, bool unaligned = false, typename F>
 void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) {
   constexpr size_t cols = 63;
   constexpr size_t rows = 64;
@@ -257,7 +261,7 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
       GENERATE(std::make_pair(0, 1), std::make_pair(1, 0), std::make_pair(0, 0));
 
   SECTION("Device to Host") {
-    LinearAllocGuard2D<uint8_t> device_alloc(cols, rows);
+    LinearAllocGuard2D<uint8_t, unaligned> device_alloc(cols, rows);
     LinearAllocGuard<uint8_t> host_alloc(LinearAllocs::hipHostMalloc, device_alloc.width() * rows);
     std::fill_n(host_alloc.ptr(), device_alloc.width_logical() * device_alloc.height(), 42);
     HIP_CHECK(hipMemset2D(device_alloc.ptr(), device_alloc.pitch(), 1, device_alloc.width(),
@@ -274,8 +278,8 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
   }
 
   SECTION("Device to Device") {
-    LinearAllocGuard2D<uint8_t> src_alloc(cols, rows);
-    LinearAllocGuard2D<uint8_t> dst_alloc(cols, rows);
+    LinearAllocGuard2D<uint8_t, unaligned> src_alloc(cols, rows);
+    LinearAllocGuard2D<uint8_t, unaligned> dst_alloc(cols, rows);
     LinearAllocGuard<uint8_t> host_alloc(LinearAllocs::hipHostMalloc, dst_alloc.width() * rows);
     HIP_CHECK(
         hipMemset2D(src_alloc.ptr(), src_alloc.pitch(), 1, src_alloc.width(), src_alloc.height()));
@@ -294,7 +298,7 @@ void Memcpy2DZeroWidthHeight(F memcpy_func, const hipStream_t stream = nullptr) 
   }
 
   SECTION("Host to Device") {
-    LinearAllocGuard2D<uint8_t> device_alloc(cols, rows);
+    LinearAllocGuard2D<uint8_t, unaligned> device_alloc(cols, rows);
     LinearAllocGuard<uint8_t> src_host_alloc(LinearAllocs::hipHostMalloc,
                                              device_alloc.width() * rows);
     LinearAllocGuard<uint8_t> dst_host_alloc(LinearAllocs::hipHostMalloc,
@@ -348,6 +352,70 @@ constexpr auto MemTypeUnified() {
 
 using PtrVariant = std::variant<void*, hipArray_t>;
 
+constexpr void InitializeMemcpy2DParams(hip_Memcpy2D* parms, PtrVariant dst, size_t dpitch,
+                                        PtrVariant src, size_t spitch, size_t width, size_t height,
+                                        hipMemcpyKind kind, hipExtent src_offset = {0, 0, 0},
+                                        hipExtent dst_offset = {0, 0, 0}) {
+  if (std::holds_alternative<hipArray_t>(dst)) {
+    parms->dstMemoryType = MemTypeArray();
+    parms->dstArray = std::get<hipArray_t>(dst);
+  } else {
+    parms->dstPitch = dpitch;
+    auto ptr = std::get<void*>(dst);
+    switch (kind) {
+      case hipMemcpyDeviceToHost:
+      case hipMemcpyHostToHost:
+        parms->dstMemoryType = MemTypeHost();
+        parms->dstHost = ptr;
+        break;
+      case hipMemcpyDeviceToDevice:
+      case hipMemcpyHostToDevice:
+        parms->dstMemoryType = MemTypeDevice();
+        parms->dstDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
+        break;
+      case hipMemcpyDefault:
+        parms->dstMemoryType = MemTypeUnified();
+        parms->dstDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
+        break;
+      default:
+        assert(false);
+    }
+  }
+
+  if (std::holds_alternative<hipArray_t>(src)) {
+    parms->srcMemoryType = MemTypeArray();
+    parms->srcArray = std::get<hipArray_t>(src);
+  } else {
+    parms->srcPitch = spitch;
+    auto ptr = std::get<void*>(src);
+    switch (kind) {
+      case hipMemcpyDeviceToHost:
+      case hipMemcpyDeviceToDevice:
+        parms->srcMemoryType = MemTypeDevice();
+        parms->srcDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
+        break;
+      case hipMemcpyHostToDevice:
+      case hipMemcpyHostToHost:
+        parms->srcMemoryType = MemTypeHost();
+        parms->srcHost = ptr;
+        break;
+      case hipMemcpyDefault:
+        parms->srcMemoryType = MemTypeUnified();
+        parms->srcDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
+        break;
+      default:
+        assert(false);
+    }
+  }
+
+  parms->WidthInBytes = width;
+  parms->Height = height;
+  parms->srcXInBytes = src_offset.width;
+  parms->srcY = src_offset.height;
+  parms->dstXInBytes = dst_offset.width;
+  parms->dstY = dst_offset.height;
+}
+
 template <bool async = false>
 constexpr auto MemcpyParam2DAdapter(const hipExtent src_offset = {0, 0, 0},
                                     const hipExtent dst_offset = {0, 0, 0}) {
@@ -356,64 +424,8 @@ constexpr auto MemcpyParam2DAdapter(const hipExtent src_offset = {0, 0, 0},
     hip_Memcpy2D parms = {};
     memset(&parms, 0x0, sizeof(hip_Memcpy2D));
 
-    if (std::holds_alternative<hipArray_t>(dst)) {
-      parms.dstMemoryType = MemTypeArray();
-      parms.dstArray = std::get<hipArray_t>(dst);
-    } else {
-      parms.dstPitch = dpitch;
-      auto ptr = std::get<void*>(dst);
-      switch (kind) {
-        case hipMemcpyDeviceToHost:
-        case hipMemcpyHostToHost:
-          parms.dstMemoryType = MemTypeHost();
-          parms.dstHost = ptr;
-          break;
-        case hipMemcpyDeviceToDevice:
-        case hipMemcpyHostToDevice:
-          parms.dstMemoryType = MemTypeDevice();
-          parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
-          break;
-        case hipMemcpyDefault:
-          parms.dstMemoryType = MemTypeUnified();
-          parms.dstDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
-          break;
-        default:
-          assert(false);
-      }
-    }
-
-    if (std::holds_alternative<hipArray_t>(src)) {
-      parms.srcMemoryType = MemTypeArray();
-      parms.srcArray = std::get<hipArray_t>(src);
-    } else {
-      parms.srcPitch = spitch;
-      auto ptr = std::get<void*>(src);
-      switch (kind) {
-        case hipMemcpyDeviceToHost:
-        case hipMemcpyDeviceToDevice:
-          parms.srcMemoryType = MemTypeDevice();
-          parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
-          break;
-        case hipMemcpyHostToDevice:
-        case hipMemcpyHostToHost:
-          parms.srcMemoryType = MemTypeHost();
-          parms.srcHost = ptr;
-          break;
-        case hipMemcpyDefault:
-          parms.srcMemoryType = MemTypeUnified();
-          parms.srcDevice = reinterpret_cast<hipDeviceptr_t>(ptr);
-          break;
-        default:
-          assert(false);
-      }
-    }
-
-    parms.WidthInBytes = width;
-    parms.Height = height;
-    parms.srcXInBytes = src_offset.width;
-    parms.srcY = src_offset.height;
-    parms.dstXInBytes = dst_offset.width;
-    parms.dstY = dst_offset.height;
+    InitializeMemcpy2DParams(&parms, dst, dpitch, src, spitch, width, height, kind, src_offset,
+                             dst_offset);
 
     if constexpr (async) {
       return hipMemcpyParam2DAsync(&parms, stream);
@@ -422,6 +434,20 @@ constexpr auto MemcpyParam2DAdapter(const hipExtent src_offset = {0, 0, 0},
     }
   };
 }
+
+#if HT_AMD
+constexpr auto DrvMemcpy2DUnalignedAdapter() {
+  return [=](PtrVariant dst, size_t dpitch, PtrVariant src, size_t spitch, size_t width,
+             size_t height, hipMemcpyKind kind, hipStream_t stream = nullptr) {
+    (void)stream;
+    hip_Memcpy2D parms = {};
+    memset(&parms, 0x0, sizeof(hip_Memcpy2D));
+
+    InitializeMemcpy2DParams(&parms, dst, dpitch, src, spitch, width, height, kind);
+    return hipDrvMemcpy2DUnaligned(&parms);
+  };
+}
+#endif
 
 template <bool should_synchronize, typename F>
 void MemcpyParam2DArrayHostShell(F memcpy_func, const hipStream_t kernel_stream = nullptr) {
@@ -487,6 +513,7 @@ void MemcpyParam2DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_strea
                                       src_device.width_logical(), src_device.height(),
                                       src_device.depth());
   HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
 
   // Device -> Array
   HIP_CHECK(memcpy_func(src_array.ptr(), 0, src_device.ptr(), src_device.pitch(), extent.width,

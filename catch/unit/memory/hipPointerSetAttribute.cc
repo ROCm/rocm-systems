@@ -52,7 +52,7 @@ TEST_CASE("Unit_hipPointerSetAttribute_Positive_SyncMemops") {
   HIP_CHECK(hipMemcpy(dst.ptr(), src.ptr(), 1024, hipMemcpyDeviceToDevice));
   HIP_CHECK_ERROR(hipStreamQuery(stream.stream()), hipErrorNotReady);
 
-  bool value = true;
+  int value = 1;
   HIP_CHECK(hipPointerSetAttribute(&value, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS,
                                    reinterpret_cast<hipDeviceptr_t>(src.ptr())));
   HIP_CHECK(hipPointerSetAttribute(&value, HIP_POINTER_ATTRIBUTE_SYNC_MEMOPS,

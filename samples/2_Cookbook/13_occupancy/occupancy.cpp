@@ -80,6 +80,9 @@ void launchKernel(float* C, float* A, float* B, bool manual){
      checkHipErrors(hipEventElapsedTime(&eventMs, start, stop));
      printf("kernel Execution time = %6.3fms\n", eventMs);
 
+     checkHipErrors(hipEventDestroy(start));
+     checkHipErrors(hipEventDestroy(stop));
+
      //Calculate Occupancy
      int numBlock = 0;
      checkHipErrors(hipOccupancyMaxActiveBlocksPerMultiprocessor(&numBlock, multiply, blockSize, 0));

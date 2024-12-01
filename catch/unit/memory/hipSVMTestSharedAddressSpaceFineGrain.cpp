@@ -119,7 +119,7 @@ void verify_linked_lists_on_device(hipStream_t stream, Node* pNodes,
                                           unsigned int* pNumCorrect, unsigned int numLists,
                                           unsigned int ListLength) {
   *pNumCorrect = 0;     // reset numCorrect to zero
- 
+
   verify_linked_lists_on_device<<<(numLists + 255) / 256, 256, 0, stream>>>(pNodes, pNumCorrect,
                                                                      ListLength);
 

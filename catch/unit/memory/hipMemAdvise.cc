@@ -261,14 +261,16 @@ TEST_CASE("Unit_hipMemAdvise_AccessedBy_All_Devices") {
     HipTest::HIP_SKIP_TEST("Test needs at least 1 device that supports managed memory");
     return;
   }
-  supported_devices.push_back(hipCpuDeviceId);
+  // Disabling this hipCpuDeviceId scenario as it fails due to ROCr issue
+  // Enable it once SWDEV-36994, SWDEV-392002 are fixed
+  // supported_devices.push_back(hipCpuDeviceId);
 
   LinearAllocGuard<void> alloc(LinearAllocs::hipMallocManaged, kPageSize);
   for (const auto device : supported_devices) {
     HIP_CHECK(hipMemAdvise(alloc.ptr(), kPageSize, hipMemAdviseSetAccessedBy, device));
   }
   std::vector<int> accessed_by(supported_devices.size(), hipInvalidDeviceId);
-  HIP_CHECK(hipMemRangeGetAttribute(accessed_by.data(), sizeof(accessed_by.data()),
+  HIP_CHECK(hipMemRangeGetAttribute(accessed_by.data(), sizeof(int) * accessed_by.size(),
                                     hipMemRangeAttributeAccessedBy, alloc.ptr(), kPageSize));
   REQUIRE_THAT(accessed_by, Catch::Matchers::Equals(supported_devices));
 }

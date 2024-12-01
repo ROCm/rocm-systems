@@ -44,6 +44,8 @@ set(TEST_SRC
     hipTextureObj2DCheckSRGBModes.cc
     hipTexObjectTests.cc
     hipTextureObjectTests.cc
+    hipTexRefSetAddress2D.cc
+    hipTexRefSetMaxAnisotropy.cc
 )
 
 # tests not for gfx90a+
@@ -89,6 +91,14 @@ function(CheckRejectedArchs OFFLOAD_ARCH_STR_LOCAL)
   endforeach()   # OFFLOAD_ARCH_LIST
 endfunction()  # CheckAcceptedArchs
 
+add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code
+                   COMMAND ${CMAKE_CXX_COMPILER} --genco ${OFFLOAD_ARCH_STR} --std=c++17 ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc
+                   -o tex_ref_get_module.code
+                   -I${HIP_PATH}/include/ --rocm-path=${ROCM_PATH}
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/tex_ref_get_module.cc)
+add_custom_target(tex_ref_get_module ALL DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/tex_ref_get_module.code)
+
 if(HIP_PLATFORM MATCHES "amd")
   if (DEFINED OFFLOAD_ARCH_STR)
     CheckRejectedArchs(${OFFLOAD_ARCH_STR})
@@ -127,3 +137,5 @@ endif()
 hip_add_exe_to_target(NAME TextureTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests)
+
+add_dependencies(TextureTest tex_ref_get_module)

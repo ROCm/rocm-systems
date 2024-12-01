@@ -104,10 +104,10 @@ __global__ void StreamPerThrd_gfx11(int *Ad, int *Ad1, size_t n, int Pk_Clk,
   }
   if (Wait) {
     int64_t GpuFrq = (Pk_Clk * 1000);
-    int64_t StrtTck = wall_clock64();
+    int64_t StrtTck = clock_function();
     if (index == 0) {
       // The following while loop checks the value in ptr for around 4 seconds
-      while ((wall_clock64() - StrtTck) <= (6 * GpuFrq)) {
+      while ((clock_function() - StrtTck) <= (6 * GpuFrq)) {
       }
       if (WaitEvnt == 1) {
         *Ad1 = 1;
@@ -120,9 +120,9 @@ __global__ void StreamPerThrd_gfx11(int *Ad, int *Ad1, size_t n, int Pk_Clk,
 __global__ void StreamPerThrd1_gfx11(int *A, int Pk_Clk) {
 #if HT_AMD
   int64_t GpuFrq = (Pk_Clk * 1000);
-  int64_t StrtTck = wall_clock64();
+  int64_t StrtTck = clock_function();
   // The following while loop checks the value in ptr for around 3-4 seconds
-  while ((wall_clock64() - StrtTck) <= (3 * GpuFrq)) {
+  while ((clock_function() - StrtTck) <= (3 * GpuFrq)) {
   }
   *A = 1;
 #endif

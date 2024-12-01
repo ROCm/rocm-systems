@@ -271,7 +271,7 @@ void testInvalidDescriptionMipmapped(hipChannelFormatDesc desc) {
   hipMipmappedArray_t array;
 
 #if HT_NVIDIA
-  hipError_t expectedError = hipErrorUnknown;
+  hipError_t expectedError = hipErrorInvalidChannelDescriptor;
 #else
   hipError_t expectedError = hipErrorInvalidValue;
 #endif

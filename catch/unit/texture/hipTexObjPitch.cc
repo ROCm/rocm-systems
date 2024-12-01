@@ -37,7 +37,7 @@ THE SOFTWARE.
 template <typename TYPE_t>
 static __global__ void texture2dCopyKernel(hipTextureObject_t texObj,
                                                    TYPE_t* dst) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   for (int i = 0; i < SIZE_H; i++)
       for (int j = 0; j < SIZE_W; j++)
           dst[SIZE_W*i+j] = tex2D<TYPE_t>(texObj, j, i);
@@ -60,6 +60,11 @@ static __global__ void texture2dCopyKernel(hipTextureObject_t texObj,
 TEMPLATE_TEST_CASE("Unit_hipTexObjPitch_texture2D", "", float, int,
                     unsigned char, int16_t, char, unsigned int) {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   TestType* B;
   TestType* A;

@@ -34,7 +34,9 @@ TEST_CASE("Unit___hip_atomic_load_store_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kLoadStore, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kLoadStore>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kLoadStore>();
+  }
 }
 
 TEST_CASE("Unit___hip_atomic_exchange_Positive_Sequential_Consistency") {
@@ -47,7 +49,9 @@ TEST_CASE("Unit___hip_atomic_exchange_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kExchange, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kExchange>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kExchange>();
+  }
 }
 
 TEST_CASE("Unit___hip_atomic_compare_exchange_strong_Positive_Sequential_Consistency") {
@@ -96,7 +100,9 @@ TEST_CASE("Unit___hip_atomic_fetch_add_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kAdd, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kAdd>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kAdd>();
+  }
 }
 
 TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Sequential_Consistency") {
@@ -109,7 +115,9 @@ TEST_CASE("Unit___hip_atomic_fetch_and_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kAnd, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kAnd>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kAnd>();
+  }
 }
 
 TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Sequential_Consistency") {
@@ -122,7 +130,9 @@ TEST_CASE("Unit___hip_atomic_fetch_or_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kOr, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kOr>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kOr>();
+  }
 }
 
 TEST_CASE("Unit___hip_atomic_fetch_xor_Positive_Sequential_Consistency") {
@@ -135,7 +145,9 @@ TEST_CASE("Unit___hip_atomic_fetch_xor_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kXor, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kXor>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kXor>();
+  }
 }
 
 TEST_CASE("Unit___hip_atomic_fetch_min_Positive_Sequential_Consistency") {
@@ -148,7 +160,9 @@ TEST_CASE("Unit___hip_atomic_fetch_min_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kMin, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kMin>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kMin>();
+  }
 }
 
 TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Sequential_Consistency") {
@@ -161,5 +175,7 @@ TEST_CASE("Unit___hip_atomic_fetch_max_Positive_Sequential_Consistency") {
   SECTION("AGENT") {
     SequentialConsistency::Test<BuiltinAtomicOperation::kMax, __HIP_MEMORY_SCOPE_AGENT>();
   }
-  SECTION("SYSTEM") { SequentialConsistency::SystemTest<BuiltinAtomicOperation::kMax>(); }
+  SECTION("SYSTEM") {
+    SequentialConsistency::SystemTest<BuiltinAtomicOperation::kMax>();
+  }
 }

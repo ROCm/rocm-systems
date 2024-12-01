@@ -55,6 +55,7 @@ if(HIP_PLATFORM MATCHES "amd")
          "negative_macros_common.hh" )
 
     file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
     #add_test(NAME Unit_NegateUnsigned_Negative_Parameters
     #        COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py

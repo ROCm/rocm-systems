@@ -142,8 +142,7 @@ static __global__ void kerTestAccessInAllThreadsInBlock(T *outputBuf,
  * access/modifies it in all threads of block and copies
  * data to host and frees the memory in another thread.
  */
-static __global__ void kerTestAccessInAllThreads_CmplxStr(int test_type,
-                                                          int *result) {
+static __global__ void kerTestAccessInAllThreads_CmplxStr(int test_type, int* result) {
   int myThreadId = threadIdx.x;
   int lastThreadId = (blockDim.x - 1);
   int myBlockId = blockIdx.x;
@@ -151,14 +150,12 @@ static __global__ void kerTestAccessInAllThreads_CmplxStr(int test_type,
   // Allocate memory in thread 0
   if (0 == myThreadId) {
     if (test_type == TEST_MALLOC_FREE) {
-      dev_ptr[0][blockIdx.x] =
-      reinterpret_cast<void*> (malloc(sizeof(struct complexStructure)));
+      dev_ptr[0][blockIdx.x] = reinterpret_cast<void*>(malloc(sizeof(struct complexStructure)));
     } else {
-      dev_ptr[0][blockIdx.x] =
-      reinterpret_cast<void*> (new struct complexStructure);
+      dev_ptr[0][blockIdx.x] = reinterpret_cast<void*>(new struct complexStructure);
     }
-    struct complexStructure *ptr =
-    reinterpret_cast<struct complexStructure*> (dev_ptr[0][blockIdx.x]);
+    struct complexStructure* ptr =
+        reinterpret_cast<struct complexStructure*>(dev_ptr[0][blockIdx.x]);
     ptr->alloc_internal_members(test_type, BLOCKSIZE);
   }
   // All threads wait at this barrier
@@ -168,8 +165,7 @@ static __global__ void kerTestAccessInAllThreads_CmplxStr(int test_type,
     printf("Device Allocation Failed in thread = %d \n", myGid);
     return;
   }
-  struct complexStructure *ptr =
-  reinterpret_cast<struct complexStructure*> (dev_ptr[0][blockIdx.x]);
+  struct complexStructure* ptr = reinterpret_cast<struct complexStructure*>(dev_ptr[0][blockIdx.x]);
   if (ptr->sthreadInfo == nullptr) {
     printf("Structure Allocation Failed in thread = %d \n", myGid);
     return;
@@ -188,12 +184,9 @@ static __global__ void kerTestAccessInAllThreads_CmplxStr(int test_type,
   if (lastThreadId == myThreadId) {
     int match = 1;
     for (int idx = 0; idx < BLOCKSIZE; idx++) {
-      if ((ptr->sthreadInfo[idx].threadid != idx) ||
-          (ptr->sthreadInfo[idx].blockid != myBlockId) ||
-          (ptr->sthreadInfo[idx].ival != INT_MAX) ||
-          (ptr->sthreadInfo[idx].dval != DBL_MAX) ||
-          (ptr->sthreadInfo[idx].fval != FLT_MAX) ||
-          (ptr->sthreadInfo[idx].sval != SHRT_MAX) ||
+      if ((ptr->sthreadInfo[idx].threadid != idx) || (ptr->sthreadInfo[idx].blockid != myBlockId) ||
+          (ptr->sthreadInfo[idx].ival != INT_MAX) || (ptr->sthreadInfo[idx].dval != DBL_MAX) ||
+          (ptr->sthreadInfo[idx].fval != FLT_MAX) || (ptr->sthreadInfo[idx].sval != SHRT_MAX) ||
           (ptr->sthreadInfo[idx].cval != SCHAR_MAX)) {
         match = 0;
         break;
@@ -573,18 +566,16 @@ static bool TestDevMemAllocMulKerMulThrd(int test_type) {
  */
 static bool TestMemoryAccessInAllThread_CmplxStr(int test_type) {
   int *result_d{nullptr}, *result_h{nullptr};
-  size_t arraysize = BLOCKSIZE;
-  result_h = reinterpret_cast<int*> (malloc(sizeof(int) * arraysize));
+  size_t arraysize = GRIDSIZE;
+  result_h = reinterpret_cast<int*>(malloc(sizeof(int) * arraysize));
   REQUIRE(result_h != nullptr);
   HIP_CHECK(hipMalloc(&result_d, (sizeof(int) * arraysize)));
   HIP_CHECK(hipMemset(result_d, 0, (sizeof(int) * arraysize)));
   // Launch Test Kernel
-  kerTestAccessInAllThreads_CmplxStr<<<GRIDSIZE, BLOCKSIZE>>>(
-                                        test_type, result_d);
+  kerTestAccessInAllThreads_CmplxStr<<<GRIDSIZE, BLOCKSIZE>>>(test_type, result_d);
   HIP_CHECK(hipDeviceSynchronize());
   // Copy to host buffer
-  HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int) * arraysize,
-                    hipMemcpyDefault));
+  HIP_CHECK(hipMemcpy(result_h, result_d, sizeof(int) * arraysize, hipMemcpyDefault));
   bool bPassed = true;
   for (size_t idx = 0; idx < GRIDSIZE; idx++) {
     if (result_h[idx] != 1) {

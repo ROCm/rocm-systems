@@ -32,7 +32,7 @@ texture<TYPE_t, 2, hipReadModeElementType> tex;
 
 // texture object is a kernel argument
 static __global__ void texture2dCopyKernel(TYPE_t* dst) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = threadIdx.x + blockIdx.x * blockDim.x;
   int y = threadIdx.y + blockIdx.y * blockDim.y;
   if ( (x < SIZE_W) && (y < SIZE_H) ) {
@@ -44,6 +44,11 @@ static __global__ void texture2dCopyKernel(TYPE_t* dst) {
 
 TEST_CASE("Unit_hipBindTexture2D_Pitch") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   TYPE_t* B;
   TYPE_t* A;

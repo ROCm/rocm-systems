@@ -26,7 +26,7 @@ template<bool normalizedCoords>
 __global__ void tex2DRGBAKernel(float4 *outputData, hipTextureObject_t textureObject,
                             int width, int height, float offsetX,
                             float offsetY) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   outputData[y * width + x] = tex2D<float4>(textureObject,
@@ -157,6 +157,11 @@ line1:
 TEST_CASE("Unit_hipTextureObj2DCheckRGBAModes") {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   SECTION("RGBA 2D hipAddressModeClamp, hipFilterModePoint, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, false>(256, 256, -3.9, 6.1);
     runTest<hipAddressModeClamp, hipFilterModePoint, false>(256, 256, 4.4, -7.0);
@@ -201,6 +206,11 @@ TEST_CASE("Unit_hipTextureObj2DCheckRGBAModes") {
 
 TEST_CASE("Unit_hipTextureObj2DCheckSRGBAModes") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   SECTION("SRGBA 2D hipAddressModeClamp, hipFilterModePoint, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, false, true>(256, 256, -3.9, 6.1);

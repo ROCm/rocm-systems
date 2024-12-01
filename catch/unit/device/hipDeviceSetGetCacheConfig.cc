@@ -75,11 +75,7 @@ TEST_CASE("Unit_hipDeviceSetCacheConfig_Positive_Basic") {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipDeviceSetCacheConfig_Negative_Parameters") {
-#if HT_AMD
-  HIP_CHECK_ERROR(hipDeviceSetCacheConfig(static_cast<hipFuncCache_t>(-1)), hipSuccess);
-#elif HT_NVIDIA
   HIP_CHECK_ERROR(hipDeviceSetCacheConfig(static_cast<hipFuncCache_t>(-1)), hipErrorInvalidValue);
-#endif
 }
 
 /**

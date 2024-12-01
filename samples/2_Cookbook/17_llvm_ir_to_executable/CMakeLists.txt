@@ -40,8 +40,38 @@ set(SQ_IR_EXE ${CMAKE_CURRENT_BINARY_DIR}/square_ir.out)
 
 set(MCIN_OBJ_GEN ${CMAKE_CURRENT_SOURCE_DIR}/hip_obj_gen.mcin)
 
-if(NOT DEFINED GPU_ARCH)
-  set(GPU_ARCH  gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1010 gfx1030 gfx1100 gfx1101 gfx1102 gfx1103)
+# Append Current device arch from rocm_agent_enumerator
+# if rocm_agent_enumerator is not found, support --offload-arch
+# to pass arch use format like -DOFFLOAD_ARCH_STR="--offload-arch=gfx1032  --offload-arch=gfx1031"
+
+if(UNIX)
+set(ARCH_PATH "${ROCM_PATH}/llvm/bin/amdgpu-arch")
+else()
+set(ARCH_PATH "${ROCM_PATH}/bin/amdgpu-arch")
+endif()
+
+if(NOT DEFINED OFFLOAD_ARCH_STR
+   AND EXISTS "${ARCH_PATH}"
+   AND HIP_PLATFORM STREQUAL "amd")
+    execute_process(COMMAND "${ARCH_PATH}"
+         OUTPUT_VARIABLE HIP_GPU_ARCH
+         RESULT_VARIABLE ROCM_AGENT_ENUM_RESULT
+         OUTPUT_STRIP_TRAILING_WHITESPACE)
+    if (NOT HIP_GPU_ARCH STREQUAL "")
+          string(REGEX REPLACE "\n" ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH}")
+          list(REMOVE_DUPLICATES  HIP_GPU_ARCH_LIST)
+          foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
+              list(APPEND GPU_ARCH ${_hip_gpu_arch})
+          endforeach()
+    else()
+          message(STATUS "ROCm Agent Enumerator found no valid architectures")
+    endif()
+elseif(DEFINED OFFLOAD_ARCH_STR)
+    string(REPLACE "--offload-arch=" ""  HIP_GPU_ARCH_LIST ${OFFLOAD_ARCH_STR})
+    string(REGEX REPLACE " " ";" HIP_GPU_ARCH_LIST "${HIP_GPU_ARCH_LIST}")
+    foreach(_hip_gpu_arch ${HIP_GPU_ARCH_LIST})
+          list(APPEND GPU_ARCH ${_hip_gpu_arch})
+    endforeach()
 endif()
 
 if(TARGET build_cookbook)

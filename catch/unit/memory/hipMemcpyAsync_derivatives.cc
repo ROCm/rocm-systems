@@ -98,7 +98,7 @@ TEST_CASE("Unit_hipMemcpyHtoDAsync_Positive_Synchronization_Behavior") {
       "Nvidia");
   return;
 #endif
-  MemcpyHtoDSyncBehavior(
+  MemcpyHPinnedtoDSyncBehavior(
       [](void* dst, void* src, size_t count) {
         return hipMemcpyHtoDAsync(reinterpret_cast<hipDeviceptr_t>(dst), src, count, nullptr);
       },

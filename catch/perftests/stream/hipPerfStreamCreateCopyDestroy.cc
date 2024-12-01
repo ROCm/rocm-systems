@@ -59,7 +59,7 @@ bool hipPerfStreamCreateCopyDestroy::open(int deviceId) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
   }
   HIP_CHECK(hipSetDevice(deviceId));
-  hipDeviceProp_t props = {0};
+  hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
   std::cout << "info: running on bus " << "0x" << props.pciBusID
   << " " << props.name << " with " << props.multiProcessorCount << " CUs"
@@ -71,10 +71,10 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
   numStreams_ = totalStreams_[testNumber % TotalStreams];
   size_t iter = Iterations / (numStreams_ * (static_cast<size_t>(1)
                  << (testNumber / TotalBufs + 1)));
-  hipStream_t streams[numStreams_];
+  hipStream_t *streams = new hipStream_t[numStreams_];
 
   numBuffers_ = totalBuffers_[testNumber / TotalBufs];
-  float* dSrc[numBuffers_];
+  float ** dSrc = new float*[numBuffers_];
   size_t nBytes = BufSize * sizeof(float);
 
   for (size_t b = 0; b < numBuffers_; ++b) {
@@ -120,6 +120,9 @@ bool hipPerfStreamCreateCopyDestroy::run(unsigned int testNumber) {
   for (size_t b = 0; b < numBuffers_; ++b) {
     HIP_CHECK(hipFree(dSrc[b]));
   }
+
+  delete [] streams;
+  delete [] dSrc;
   return true;
 }
 

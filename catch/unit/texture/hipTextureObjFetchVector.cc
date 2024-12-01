@@ -27,7 +27,7 @@ THE SOFTWARE.
 
 template <typename T>
 __global__ void tex1dKernelFetch(T *val, hipTextureObject_t obj, int N) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int k = blockIdx.x * blockDim.x + threadIdx.x;
   if (k < N) {
     val[k] = tex1Dfetch<T>(obj, k);
@@ -142,6 +142,11 @@ bool runTest() {
 
 TEST_CASE("Unit_hipTextureFetch_vector") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   // test for char
   runTest<char1>();

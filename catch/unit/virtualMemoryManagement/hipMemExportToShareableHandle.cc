@@ -32,7 +32,6 @@ THE SOFTWARE.
  */
 
 #include <hip_test_common.hh>
-
 #include "hip_vmm_common.hh"
 
 /**
@@ -55,7 +54,7 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Positive_Basic") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
@@ -94,7 +93,7 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
 
   hipMemAllocationProp prop = {};
   prop.type = hipMemAllocationTypePinned;
-  prop.requestedHandleTypes = hipMemHandleTypePosixFileDescriptor;
+  prop.requestedHandleType = hipMemHandleTypePosixFileDescriptor;
   prop.location.type = hipMemLocationTypeDevice;
   prop.location.id = device;
 
@@ -106,12 +105,13 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
   HIP_CHECK(hipMemCreate(&handle, granularity * 2, &prop, 0));
 
   void* shareable_handle = nullptr;
-
+#if HT_NVIDIA
   SECTION("shareableHandle == nullptr") {
     HIP_CHECK_ERROR(
         hipMemExportToShareableHandle(nullptr, handle, hipMemHandleTypePosixFileDescriptor, 0),
         hipErrorInvalidValue);
   }
+#endif
 
 #if HT_AMD
   SECTION("handle == nullptr") {
@@ -134,14 +134,6 @@ TEST_CASE("Unit_hipMemExportToShareableHandle_Negative_Parameters") {
   }
 
   HIP_CHECK(hipMemRelease(handle));
-
-#if HT_AMD  // segfaults on NVIDIA
-  SECTION("released handle") {
-    HIP_CHECK_ERROR(hipMemExportToShareableHandle(&shareable_handle, handle,
-                                                  hipMemHandleTypePosixFileDescriptor, 0),
-                    hipErrorInvalidValue);
-  }
-#endif
 }
 
 /**

@@ -75,6 +75,11 @@ static void ArrayCreate_DiffSizes(int gpu) {
 TEST_CASE("Unit_hipArrayCreate_DiffSizes") {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   ArrayCreate_DiffSizes(0);
   HIP_CHECK_THREAD_FINALIZE();
 }
@@ -86,6 +91,11 @@ and verifies the hipArrayCreate API with small and big chunks data
 */
 TEST_CASE("Unit_hipArrayCreate_MultiThread") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   std::vector<std::thread> threadlist;
   int devCnt = 0;
@@ -188,7 +198,7 @@ void testArrayAsTexture(hipArray_t array, const size_t width, const size_t heigh
   std::fill(std::begin(hostData), std::end(hostData), 0);
   HIP_CHECK(hipMemcpy(hostData.data(), device_data, size, hipMemcpyDeviceToHost));
 
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   checkDataIsAscending(hostData);
 #endif
 
@@ -202,6 +212,11 @@ void testArrayAsTexture(hipArray_t array, const size_t width, const size_t heigh
 TEMPLATE_TEST_CASE("Unit_hipArrayCreate_happy", "", uint, int, int4, ushort, short2, char, uchar2,
                    char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   using vec_info = vector_info<TestType>;
   DriverContext ctx;
@@ -227,6 +242,11 @@ TEMPLATE_TEST_CASE("Unit_hipArrayCreate_happy", "", uint, int, int4, ushort, sho
 TEMPLATE_TEST_CASE("Unit_hipArrayCreate_maxTexture", "", uint, int, int4, ushort, short2, char,
                    uchar2, char4, float, float2, float4) {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   using vec_info = vector_info<TestType>;
   DriverContext ctx;
@@ -288,6 +308,11 @@ TEMPLATE_TEST_CASE("Unit_hipArrayCreate_maxTexture", "", uint, int, int4, ushort
 TEST_CASE("Unit_hipArrayCreate_ZeroWidth") {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   DriverContext ctx;
   HIP_ARRAY_DESCRIPTOR desc;
   desc.Format = driverFormats[0];
@@ -303,6 +328,11 @@ TEST_CASE("Unit_hipArrayCreate_ZeroWidth") {
 // HipArrayCreate will return an error when nullptr is used as the array argument
 TEST_CASE("Unit_hipArrayCreate_Nullptr") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   DriverContext ctx;
   SECTION("Null array") {
@@ -324,6 +354,11 @@ TEST_CASE("Unit_hipArrayCreate_Nullptr") {
 TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   DriverContext ctx;
   HIP_ARRAY_DESCRIPTOR desc;
   desc.Format = GENERATE(from_range(std::begin(driverFormats), std::end(driverFormats)));
@@ -341,6 +376,11 @@ TEST_CASE("Unit_hipArrayCreate_BadNumberChannelElement") {
 // Only certain channel formats are acceptable.
 TEST_CASE("Unit_hipArrayCreate_BadChannelFormat") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   DriverContext ctx;
   HIP_ARRAY_DESCRIPTOR desc;

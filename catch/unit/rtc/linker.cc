@@ -43,9 +43,22 @@ TEST_CASE("Unit_RTC_LinkerAPI_Negative") {
                               nullptr) == HIPRTC_ERROR_INVALID_INPUT);
   }
 
-  SECTION("link complete - ") {
+  SECTION("link complete - nullptr output and size") {
     hiprtcLinkState linkstate;
     REQUIRE(hiprtcLinkComplete(linkstate, nullptr, nullptr) == HIPRTC_ERROR_INVALID_INPUT);
+  }
+}
+
+TEST_CASE("Unit_RTC_LinkDestroy_Negative") {
+  SECTION("link destroy - incorrect hiprtcLinkState") {
+    hiprtcLinkState linkstate;
+    REQUIRE(hiprtcLinkDestroy(linkstate) == HIPRTC_ERROR_INVALID_INPUT);
+  }
+}
+
+TEST_CASE("Unit_RTC_LinkDestroy_Default") {
+  SECTION("link destroy - nullptr") {
+    REQUIRE(hiprtcLinkDestroy(nullptr) == HIPRTC_ERROR_INVALID_INPUT);
   }
 }
 
@@ -189,8 +202,8 @@ TEST_CASE("Unit_RTC_LinkAddFile_Default") {
   const void* lopts[] = {(void*)isaopts, (void*)(isaoptssize)};
   hiprtcLinkState linkstate;
   HIPRTC_CHECK(hiprtcLinkCreate(jit_options.size(), jit_options.data(), (void**)lopts, &linkstate));
-  REQUIRE(hiprtcLinkAddFile(linkstate, HIPRTC_JIT_INPUT_LLVM_BITCODE, file_name, 0, nullptr, nullptr) ==
-                            HIPRTC_SUCCESS);
+  REQUIRE(hiprtcLinkAddFile(linkstate, HIPRTC_JIT_INPUT_LLVM_BITCODE, file_name, 0, nullptr,
+                            nullptr) == HIPRTC_SUCCESS);
 
   // Cleanup
   HIPRTC_CHECK(hiprtcLinkDestroy(linkstate));

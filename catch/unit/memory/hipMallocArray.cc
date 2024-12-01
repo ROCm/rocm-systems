@@ -523,7 +523,8 @@ TEST_CASE("Unit_hipMallocArray_Negative_DifferentChannelSizes") {
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, width, height, flag), hipErrorInvalidValue);
 #else
   unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore, hipArrayTextureGather);
-  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, width, height, flag), hipErrorUnknown);
+  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, width, height, flag),
+                  hipErrorInvalidChannelDescriptor);
 #endif
 }
 
@@ -605,7 +606,8 @@ TEMPLATE_TEST_CASE("Unit_hipMallocArray_Negative_8bitFloat", "", float, float2, 
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flags), hipErrorInvalidValue);
 #else
   unsigned int flags = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore, hipArrayTextureGather);
-  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flags), hipErrorUnknown);
+  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flags),
+                  hipErrorInvalidChannelDescriptor);
 #endif
 }
 
@@ -633,7 +635,8 @@ TEST_CASE("Unit_hipMallocArray_Negative_BadNumberOfBits") {
 #else
   unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore, hipArrayTextureGather);
   INFO("flag: " << flag);
-  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorUnknown);
+  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag),
+                  hipErrorInvalidChannelDescriptor);
 #endif
 }
 
@@ -661,7 +664,8 @@ TEST_CASE("Unit_hipMallocArray_Negative_3ChannelElement") {
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorInvalidValue);
 #else
   unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore, hipArrayTextureGather);
-  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorUnknown);
+  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag),
+                  hipErrorInvalidChannelDescriptor);
 #endif
 }
 
@@ -690,7 +694,8 @@ TEST_CASE("Unit_hipMallocArray_Negative_ChannelAfterZeroChannel") {
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorInvalidValue);
 #else
   unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore, hipArrayTextureGather);
-  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorUnknown);
+  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag),
+                  hipErrorInvalidChannelDescriptor);
 #endif
 }
 
@@ -715,7 +720,8 @@ TEST_CASE("Unit_hipMallocArray_Negative_InvalidChannelFormat") {
   HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorInvalidValue);
 #else
   unsigned int flag = GENERATE(hipArrayDefault, hipArraySurfaceLoadStore);
-  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag), hipErrorUnknown);
+  HIP_CHECK_ERROR(hipMallocArray(&arrayPtr, &desc, 1024, 1024, flag),
+                  hipErrorInvalidChannelDescriptor);
 #endif
 }
 

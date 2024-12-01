@@ -53,6 +53,15 @@ TEST_CASE("Unit_hipExtGetLinkTypeAndHopCount_Positive_Basic") {
     return;
   }
 
+  int can_access_peer = 0;
+  HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, device1, device2));
+  if (!can_access_peer) {
+    std::string msg = "Skipped as peer access is not supported between devices : " +
+        std::to_string(device1) + " " + std::to_string(device2);
+    HipTest::HIP_SKIP_TEST(msg.c_str());
+    return;
+  }
+
   uint32_t link_type1 = -1, hop_count1 = -1;
   uint32_t link_type2 = -1, hop_count2 = -1;
 

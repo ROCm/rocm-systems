@@ -1,8 +1,5 @@
 set(TEST_SRC
     execution_control_common.cc
-    hipFuncSetCacheConfig.cc
-    hipFuncSetSharedMemConfig.cc
-    hipFuncSetAttribute.cc
     hipFuncGetAttributes.cc
     hipLaunchKernel.cc
     hipLaunchCooperativeKernel.cc
@@ -14,6 +11,13 @@ if(HIP_PLATFORM MATCHES "amd")
         hipExtLaunchKernel.cc
         hipExtLaunchMultiKernelMultiDevice.cc
         launch_api.cc
+    )
+else()
+    # These functions are currently unimplemented on AMD
+    set(TEST_SRC ${TEST_SRC}
+        hipFuncSetCacheConfig.cc
+        hipFuncSetSharedMemConfig.cc
+        hipFuncSetAttribute.cc
     )
 endif()
 

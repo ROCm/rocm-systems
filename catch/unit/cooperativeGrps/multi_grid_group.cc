@@ -17,6 +17,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "cooperative_groups_common.hh"
+#include "cg_common_kernels.hh"
 
 #include <cpu_grid.h>
 #include <resource_guards.hh>
@@ -114,6 +115,7 @@ static void get_multi_grid_dims(dim3& grid_dim, dim3& block_dim, unsigned int de
   HIP_CHECK(hipSetDevice(device))
   HIP_CHECK(hipGetDeviceProperties(&props, 0));
   int sm = props.multiProcessorCount;
+  auto warp_size = getWarpSize();
   std::vector<dim3> block_dim_values = {dim3(1, 1, 1),
                                         dim3(props.maxThreadsDim[0], 1, 1),
                                         dim3(1, props.maxThreadsDim[1], 1),
@@ -122,8 +124,8 @@ static void get_multi_grid_dims(dim3& grid_dim, dim3& block_dim, unsigned int de
                                         dim3(32, 32, 1),
                                         dim3(64, 8, 2),
                                         dim3(16, 16, 3),
-                                        dim3(kWarpSize - 1, 3, 3),
-                                        dim3(kWarpSize + 1, 3, 3)};
+                                        dim3(warp_size - 1, 3, 3),
+                                        dim3(warp_size + 1, 3, 3)};
   std::vector<dim3> grid_dim_values = {dim3(1, 1, 1),
                                        dim3(static_cast<int>(0.5 * sm), 1, 3),
                                        dim3(4, static_cast<int>(0.5 * sm), 1),

@@ -436,6 +436,7 @@ TEST_CASE("Unit_hipLaunchHostFunc_Diffpriority") {
   for (priority = priority_high; priority < priority_low; priority++) {
     HIP_CHECK(hipStreamDestroy(stream[count++]));
   }
+  free(stream);
   free(usrDataptr->A_h);
   free(usrDataptr->C_h);
   free(usrDataptr);

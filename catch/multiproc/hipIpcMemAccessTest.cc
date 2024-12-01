@@ -178,6 +178,8 @@ TEST_CASE("Unit_hipIpcMemAccess_Semaphores") {
   int rFlag = 0;
   waitpid(pid, &rFlag, 0);
   REQUIRE(shrd_mem->IfTestPassed == true);
+  HipTest::freeArrays<int>(nullptr, nullptr, nullptr,
+                           A_h, nullptr, C_h, false);
 }
 
 /**

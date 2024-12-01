@@ -51,26 +51,45 @@ static __global__ void grid_group_non_member_thread_rank_getter(unsigned int* th
   thread_ranks[thread_rank_in_grid()] = cg::thread_rank(cg::this_grid());
 }
 
-static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int* array,
-                                   unsigned int loops) {
+static __global__ void sync_kernel(unsigned int* atomic_val, unsigned int *per_loop_atomic,
+                                   unsigned int* array, unsigned int loops) {
   cg::grid_group grid = cg::this_grid();
   unsigned rank = grid.thread_rank();
 
-  int offset = (blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x;
-  for (int i = 0; i < loops; i++) {
+  int blocks_seen = 0;
+  int grid_blocks = gridDim.x * gridDim.y * gridDim.z;
+
+  for (int iter = 0; iter < loops; iter++) {
     // Make the last thread run way behind everyone else.
     // If the sync below fails, then the other threads may hit the
     // atomicInc instruction many times before the last thread ever gets to it.
-    // If the sync works, then it will likely contain "total number of blocks"*i
+    // If the sync works, then it will likely contain "total number of blocks"*iter
     if (rank == (grid.size() - 1)) {
-      busy_wait(100000);
+      // The last wavefront should spin on this loop's atomic value
+      // until all of the other wavefronts have incremented the
+      // per-loop atomic and hit the grid.sync()
+#if HT_AMD
+      while(__hip_atomic_load(&per_loop_atomic[iter], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT) <
+            (grid_blocks - 1)) {
+        __builtin_amdgcn_s_sleep(127);
+      }
+
+      // Give the other waves time to maybe go around the loop again
+      // if the barrier has failed
+      __builtin_amdgcn_s_sleep(127);
+#else // CUDA does not seem to need an ordered atomic load
+      while(per_loop_atomic[iter] < (grid_blocks - 1)) {
+      }
+#endif
     }
     if (threadIdx.x == blockDim.x - 1 && threadIdx.y == blockDim.y - 1 &&
         threadIdx.z == blockDim.z - 1) {
-      array[offset] = atomicInc(&atomic_val[0], UINT_MAX);
+      atomicInc(&per_loop_atomic[iter], UINT_MAX);
+      array[((blockIdx.z * gridDim.y + blockIdx.y) * gridDim.x + blockIdx.x) + blocks_seen] =
+            atomicInc(&atomic_val[0], UINT_MAX);
     }
     grid.sync();
-    offset += gridDim.x * gridDim.y * gridDim.z;
+    blocks_seen += grid_blocks;
   }
 }
 
@@ -259,15 +278,19 @@ TEST_CASE("Unit_Grid_Group_Sync_Positive_Basic") {
   LinearAllocGuard<unsigned int> uint_arr(LinearAllocs::hipHostMalloc,
                                           array_len * sizeof(unsigned int));
   LinearAllocGuard<unsigned int> atomic_val(LinearAllocs::hipMalloc, sizeof(unsigned int));
+  LinearAllocGuard<unsigned int> per_loop_atomic_val(LinearAllocs::hipMalloc, loops * sizeof(unsigned int));
   HIP_CHECK(hipMemset(atomic_val.ptr(), 0, sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(per_loop_atomic_val.ptr(), 0, loops * sizeof(unsigned int)));
 
   // Launch Kernel
   unsigned int* uint_arr_dev_ptr = uint_arr_dev.ptr();
   unsigned int* atomic_val_ptr = atomic_val.ptr();
-  void* params[3];
+  unsigned int* per_loop_atomic_val_ptr = per_loop_atomic_val.ptr();
+  void* params[4];
   params[0] = reinterpret_cast<void*>(&atomic_val_ptr);
-  params[1] = reinterpret_cast<void*>(&uint_arr_dev_ptr);
-  params[2] = reinterpret_cast<void*>(&loops);
+  params[1] = reinterpret_cast<void*>(&per_loop_atomic_val_ptr);
+  params[2] = reinterpret_cast<void*>(&uint_arr_dev_ptr);
+  params[3] = reinterpret_cast<void*>(&loops);
 
   HIP_CHECK(hipLaunchCooperativeKernel(sync_kernel, blocks, threads, params, 0, 0));
 

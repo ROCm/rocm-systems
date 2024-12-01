@@ -333,7 +333,7 @@ void testInvalidDescription(hipChannelFormatDesc desc) {
   hipArray_t array;
 
 #if HT_NVIDIA
-  hipError_t expectedError = hipErrorUnknown;
+  hipError_t expectedError = hipErrorInvalidChannelDescriptor;
 #else
   hipError_t expectedError = hipErrorInvalidValue;
 #endif

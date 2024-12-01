@@ -46,6 +46,7 @@ file(GLOB NEGATIVE_TEST_SRC
     )
 
 file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
 #add_test(NAME Unit___syncthreads_count_Negative_Parameters
 #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py

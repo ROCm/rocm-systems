@@ -115,7 +115,7 @@ if(UNIX)
         "atomicExch_system_negative_kernels.cc")
 
   file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
-
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
  # add_test(NAME Unit_atomicAnd_Negative_Parameters
  #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
  #         ./src ${HIP_PLATFORM} ${HIP_PATH}

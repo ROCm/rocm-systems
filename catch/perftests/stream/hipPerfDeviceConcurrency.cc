@@ -105,12 +105,12 @@ void hipPerfDeviceConcurrency::close() {
 
 bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
   static int deviceId;
-  uint * hPtr[numGpus];
-  uint * dPtr[numGpus];
-  hipStream_t streams[numGpus];
-  int numCUs[numGpus];
-  unsigned int maxIter[numGpus];
-  unsigned long long expectedIters[numGpus];
+  uint ** hPtr = new uint*[numGpus];
+  uint ** dPtr = new uint*[numGpus];
+  hipStream_t * streams = new hipStream_t[numGpus];
+  int *numCUs = new int[numGpus];
+  unsigned int *maxIter = new unsigned int[numGpus];
+  unsigned long long *expectedIters = new unsigned long long[numGpus];
 
   int threads, threads_per_block, blocks;
   float xStep, yStep, xPos, yPos;
@@ -121,7 +121,7 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
     }
 
     HIP_CHECK(hipSetDevice(deviceId));
-    hipDeviceProp_t props = {0};
+    hipDeviceProp_t props;
     HIP_CHECK(hipGetDeviceProperties(&props, i));
     if (testCase != 0) {
     std::cout << "info: running on bus " << "0x" << props.pciBusID
@@ -220,6 +220,12 @@ bool hipPerfDeviceConcurrency::run(unsigned int testCase, int numGpus) {
   if (testCase == 0) {
     deviceId++;
   }
+  delete [] hPtr;
+  delete [] dPtr;
+  delete [] streams;
+  delete [] numCUs;
+  delete [] maxIter;
+  delete [] expectedIters;
   return true;
 }
 

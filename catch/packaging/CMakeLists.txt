@@ -30,7 +30,6 @@ include(GNUInstallDirs)
 #############################
 # Packaging steps
 #############################
-set(CPACK_SET_DESTDIR TRUE)
 if(NOT DEFINED CPACK_INSTALL_PREFIX)
   set(CPACK_INSTALL_PREFIX "/opt/rocm/")
 endif()
@@ -61,12 +60,24 @@ else()
   set (CPACK_RPM_PACKAGE_REQUIRES "rocm-core, hip-static-devel")
 endif()
 
-if(NOT WIN32)
-install(DIRECTORY ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/hip
-        USE_SOURCE_PERMISSIONS)
-install(FILES ${PROJECT_BINARY_DIR}/CTestTestfile.cmake DESTINATION ${CMAKE_INSTALL_DATADIR}/hip)
+# Get all the files that needs to be installed in the global property
+get_property(INSTALL_CTEST_INCLUDE_FILES GLOBAL PROPERTY G_INSTALL_CTEST_INCLUDE_FILES)
+get_property(INSTALL_EXE_TARGETS GLOBAL PROPERTY G_INSTALL_EXE_TARGETS)
+get_property(INSTALL_CUSTOM_TARGETS GLOBAL PROPERTY G_INSTALL_CUSTOM_TARGETS)
+get_property(INSTALL_SRC_FILES GLOBAL PROPERTY G_INSTALL_SRC_FILES)
+get_property(INSTALL_HEADER_FILES GLOBAL PROPERTY G_INSTALL_HEADER_FILES)
+# Create top level CTestTestfile.cmake
+file(WRITE ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/CTestTestfile.cmake ${_autogen})
+foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
+  get_filename_component(INCLUDE_FILE_NAME ${CTEST_INCLUDE_FILE} NAME)
+  file(APPEND ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/CTestTestfile.cmake
+       "include(script/${INCLUDE_FILE_NAME})\n")
+endforeach()
+file(WRITE ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/windows/CTestTestfile.cmake
+     "${_autogen}\nsubdirs(${CATCH_BUILD_DIR})")
 
+if(NOT WIN32)
+set(INSTALL_DIR ${CMAKE_INSTALL_DATADIR}/hip)
 set(CPACK_GENERATOR "TGZ;DEB;RPM" CACHE STRING "Linux package types for catch tests")
 set(CPACK_BINARY_DEB "ON")
 set(CPACK_DEBIAN_FILE_NAME "DEB-DEFAULT")
@@ -105,20 +116,60 @@ set(CPACK_SOURCE_GENERATOR "TGZ")
 # Install license file
 
 set ( CPACK_RESOURCE_FILE_LICENSE "${CMAKE_SOURCE_DIR}/../LICENSE.txt" )
-install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${CMAKE_INSTALL_DATADIR}/hip)
+install(FILES ${CPACK_RESOURCE_FILE_LICENSE} DESTINATION ${INSTALL_DIR})
 set(CPACK_RPM_PACKAGE_LICENSE "MIT")
 
 else()
 # windows packaging
+set(INSTALL_DIR .)
 set(CPACK_INSTALL_PREFIX "")
-install(DIRECTORY ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}
-        DESTINATION .
-        USE_SOURCE_PERMISSIONS)
-install(FILES ${PROJECT_BINARY_DIR}/CTestTestfile.cmake DESTINATION .)
 set(CPACK_SYSTEM_NAME "")
 set(CPACK_GENERATOR "ZIP" CACHE STRING "Windows package types for catch tests")
 set(CPACK_TEST_ZIP "ON")
 set(CPACK_ZIP_TEST_PACKAGE_NAME "catch")
 endif()
 
+set(INSTALL_DIR_TESTS ${INSTALL_DIR}/${CATCH_BUILD_DIR})
+set(INSTALL_DIR_SCRIPT ${INSTALL_DIR}/${CATCH_BUILD_DIR}/script)
+set(INSTALL_DIR_SRC ${INSTALL_DIR}/${CATCH_BUILD_DIR}/src)
+set(INSTALL_DIR_HEADERS ${INSTALL_DIR}/${CATCH_BUILD_DIR}/headers)
+# install catch scripts
+install(FILES
+        ${ADD_SCRIPT_PATH}
+        ${CATCH_INCLUDE_PATH}
+        DESTINATION ${INSTALL_DIR_SCRIPT})
+# install cmake include files
+foreach(CTEST_INCLUDE_FILE ${INSTALL_CTEST_INCLUDE_FILES})
+  install(FILES ${CTEST_INCLUDE_FILE} DESTINATION ${INSTALL_DIR_SCRIPT})
+endforeach()
+# install source files
+foreach(SRC_FILE ${INSTALL_SRC_FILES})
+  install(FILES ${SRC_FILE} DESTINATION ${INSTALL_DIR_SRC})
+endforeach()
+# install header files
+foreach(HEADER_FILES ${INSTALL_HEADER_FILES})
+  install(FILES ${HEADER_FILES} DESTINATION ${INSTALL_DIR_HEADERS})
+endforeach()
+# install executables
+foreach(EXE_TARGET ${INSTALL_EXE_TARGETS})
+  install(TARGETS ${EXE_TARGET}
+          RUNTIME DESTINATION ${INSTALL_DIR_TESTS} OPTIONAL)
+endforeach()
+# install custom targets
+foreach(CUSTOM_TARGET ${INSTALL_CUSTOM_TARGETS})
+  install(FILES ${CUSTOM_TARGET} DESTINATION ${INSTALL_DIR_TESTS})
+endforeach()
+# install ctest file
+install(FILES
+        ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/CTestTestfile.cmake
+        DESTINATION ${INSTALL_DIR_TESTS})
+install(FILES
+        ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/script/windows/CTestTestfile.cmake
+        DESTINATION ${INSTALL_DIR})
+# install catchinfo
+install(FILES ${PROJECT_BINARY_DIR}/${CATCH_BUILD_DIR}/catchInfo.txt DESTINATION ${INSTALL_DIR})
+# install hip test config
+install(DIRECTORY
+        ${HIP_TEST_CONFIG_BINARY_DIR}
+        DESTINATION ${INSTALL_DIR_TESTS})
 include(CPack)

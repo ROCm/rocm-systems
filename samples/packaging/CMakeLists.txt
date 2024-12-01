@@ -32,7 +32,6 @@ include(GNUInstallDirs)
 #############################
 # Packaging steps
 #############################
-set(CPACK_SET_DESTDIR TRUE)
 if(NOT DEFINED CPACK_INSTALL_PREFIX)
   set(CPACK_INSTALL_PREFIX "/opt/rocm/")
 endif()
@@ -66,8 +65,7 @@ endif()
 
 if(NOT WIN32)
 install(DIRECTORY ${SAMPLES_SRC}
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/hip
-        USE_SOURCE_PERMISSIONS)
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/hip)
 
 set(CPACK_GENERATOR "TGZ;DEB;RPM" CACHE STRING "Linux package types for hip samples")
 set(CPACK_BINARY_DEB "ON")

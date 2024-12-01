@@ -100,6 +100,11 @@ TEST_CASE("Unit_hipFuncSetSharedMemConfig_Negative_Parameters") {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported") {
+#if HT_NVIDIA
+  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
+  return;
+#endif
+
   HIP_CHECK_ERROR(
       hipFuncSetSharedMemConfig(reinterpret_cast<void*>(kernel), hipSharedMemBankSizeDefault),
       hipErrorNotSupported);

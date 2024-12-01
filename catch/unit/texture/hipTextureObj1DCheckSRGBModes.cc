@@ -25,7 +25,7 @@ THE SOFTWARE.
 template<bool normalizedCoords>
 __global__ void tex1DRGBAKernel(float4 *outputData, hipTextureObject_t textureObject,
                             int width, float offsetX) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   outputData[x] = tex1D<float4>(textureObject,
                                 normalizedCoords ? (x + offsetX) / width : x + offsetX);
@@ -33,7 +33,7 @@ __global__ void tex1DRGBAKernel(float4 *outputData, hipTextureObject_t textureOb
 }
 
 __global__ void tex1DRGBAKernelFetch(float4 *outputData, hipTextureObject_t textureObject, float offsetX) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   outputData[x] = tex1Dfetch<float4>(textureObject, int(x + offsetX));
 #endif
@@ -177,6 +177,11 @@ line1:
 TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - array") {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   SECTION("RGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, false>(255, -3.9);
     runTest<hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, false>(255, 4.4);
@@ -228,6 +233,11 @@ TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - array") {
 TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - array") {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   SECTION("SRGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, false, true>(255, -3.9);
     runTest<hipAddressModeClamp, hipFilterModePoint, hipResourceTypeArray, false, true>(255, 4.4);
@@ -277,6 +287,11 @@ TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - array") {
 TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - buffer") {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   SECTION("RGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeLinear, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, hipResourceTypeLinear, false, false>(255);
  }
@@ -288,6 +303,11 @@ TEST_CASE("Unit_hipTextureObj1DCheckRGBAModes - buffer") {
 
 TEST_CASE("Unit_hipTextureObj1DCheckSRGBAModes - buffer") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   SECTION("SRGBA 1D hipAddressModeClamp, hipFilterModePoint, hipResourceTypeLinear, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, hipResourceTypeLinear, false, true>(255);

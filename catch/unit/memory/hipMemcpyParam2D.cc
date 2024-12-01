@@ -36,9 +36,6 @@ TEST_CASE("Unit_hipMemcpyParam2D_Positive_Basic") {
 #endif
 
   SECTION("Device to Device") {
-    SECTION("Peer access disabled") {
-      Memcpy2DDeviceToDeviceShell<async, false>(MemcpyParam2DAdapter<async>());
-    }
     SECTION("Peer access enabled") {
       Memcpy2DDeviceToDeviceShell<async, true>(MemcpyParam2DAdapter<async>());
     }

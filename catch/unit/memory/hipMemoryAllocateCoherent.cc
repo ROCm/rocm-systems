@@ -47,11 +47,11 @@ __global__ void Kernel_gfx11(float* hostRes, int clkRate) {
   hostRes[tid] = tid + 1;
   __threadfence_system();
   // expecting that the data is getting flushed to host here!
-  uint64_t start = wall_clock64()/clkRate, cur;
+  uint64_t start = clock_function()/clkRate, cur;
   if (clkRate > 1) {
-    do { cur = wall_clock64()/clkRate-start;}while (cur < wait_sec);
+    do { cur = clock_function()/clkRate-start;}while (cur < wait_sec);
   } else {
-    do { cur = wall_clock64()/start;}while (cur < wait_sec);
+    do { cur = clock_function()/start;}while (cur < wait_sec);
   }
 #endif
 }

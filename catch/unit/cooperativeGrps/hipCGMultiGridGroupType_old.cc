@@ -158,148 +158,58 @@ static __global__ void kernel_cg_multi_grid_group_type_via_public_api(
   }
 }
 
-static __global__ void test_kernel(unsigned int* atomic_val, unsigned int* global_array,
-                                   unsigned int* array, uint32_t loops) {
+__global__ void test_kernel(unsigned int* atomic_val, unsigned int* array, uint32_t loops,
+                            unsigned int* per_loop_atomic, unsigned int* grid_counters,
+                            unsigned int* recorded_values, unsigned int* grid_values) {
   cg::grid_group grid = cg::this_grid();
   cg::multi_grid_group mgrid = cg::this_multi_grid();
   unsigned rank = grid.thread_rank();
-  unsigned global_rank = mgrid.thread_rank();
-
+  int grid_id = mgrid.grid_rank();
+  int num_grids = mgrid.num_grids();
+  int blocks_seen = 0;
+  int grid_blocks = gridDim.x * gridDim.y * gridDim.z;
   int offset = blockIdx.x;
   for (int i = 0; i < loops; i++) {
     // Make the last thread run way behind everyone else.
-    // If the grid barrier below fails, then the other threads may hit the
-    // atomicInc instruction many times before the last thread ever gets
-    // to it.
-    // As such, without the barrier, the last array entry will eventually
-    // contain a very large value, defined by however many times the other
-    // wavefronts make it through this loop.
-    // If the barrier works, then it will likely contain some number
-    // near "total number of blocks". It will be the last wavefront to
-    // reach the atomicInc, but everyone will have only hit the atomic once.
+    // If the grid sync below fails, then the other threads may hit the
+    // atomicInc instruction many times before the last thread ever gets to it.
+    // If the sync works, then it will likely contain "total number of blocks"*iter
     if (rank == (grid.size() - 1)) {
-      long long time_diff = 0;
-      long long last_clock = clock64();
-      do {
-        long long cur_clock = clock64();
-        if (cur_clock > last_clock) {
-          time_diff += (cur_clock - last_clock);
-        }
-        // If it rolls over, we don't know how much to add to catch up.
-        // So just ignore those slipped cycles.
-        last_clock = cur_clock;
-      } while (time_diff < 1000000);
-    }
-    if (threadIdx.x == 0) {
-      array[offset] = atomicInc(atomic_val, UINT_MAX);
-    }
-    grid.sync();
-
-    // Make the last thread in the entire multi-grid run way behind
-    // everyone else.
-    // If the mgrid barrier below fails, then the two global_array entries
-    // will end up being out of sync, because the intermingling of adds
-    // and multiplies will not be aligned between to the two GPUs.
-    if (global_rank == (mgrid.size() - 1)) {
-      long long time_diff = 0;
-      long long last_clock = clock64();
-      do {
-        long long cur_clock = clock64();
-        if (cur_clock > last_clock) {
-          time_diff += (cur_clock - last_clock);
-        }
-        // If it rolls over, we don't know how much to add to catch up.
-        // So just ignore those slipped cycles.
-        last_clock = cur_clock;
-      } while (time_diff < 1000000);
-    }
-    // During even iterations, add into your own array entry
-    // During odd iterations, add into your partner's array entry
-    unsigned grid_rank = mgrid.grid_rank();
-    unsigned inter_gpu_offset = (grid_rank + i) % mgrid.num_grids();
-    if (rank == (grid.size() - 1)) {
-      if (i % 2 == 0) {
-        global_array[grid_rank] += 2;
-      } else {
-        global_array[inter_gpu_offset] *= 2;
-      }
-    }
-    mgrid.sync();
-    offset += gridDim.x;
-  }
-}
-
-__global__ void test_kernel_gfx11(unsigned int* atomic_val, unsigned int* global_array,
-                                  unsigned int* array, uint32_t loops) {
+      // The last wavefront should spin on this loop's atomic value
+      // until all of the other wavefronts have incremented the
+      // per-loop atomic and hit the grid.sync()
 #if HT_AMD
-  cg::grid_group grid = cg::this_grid();
-  cg::multi_grid_group mgrid = cg::this_multi_grid();
-  unsigned rank = grid.thread_rank();
-  unsigned global_rank = mgrid.thread_rank();
+      while (__hip_atomic_load(&per_loop_atomic[i], __ATOMIC_RELAXED,
+            __HIP_MEMORY_SCOPE_AGENT) < (grid_blocks - 1)) {
+        __builtin_amdgcn_s_sleep(127);
+      }
 
-  int offset = blockIdx.x;
-  for (int i = 0; i < loops; i++) {
-    // Make the last thread run way behind everyone else.
-    // If the grid barrier below fails, then the other threads may hit the
-    // atomicInc instruction many times before the last thread ever gets
-    // to it.
-    // As such, without the barrier, the last array entry will eventually
-    // contain a very large value, defined by however many times the other
-    // wavefronts make it through this loop.
-    // If the barrier works, then it will likely contain some number
-    // near "total number of blocks". It will be the last wavefront to
-    // reach the atomicInc, but everyone will have only hit the atomic once.
-    if (rank == (grid.size() - 1)) {
-      long long time_diff = 0;
-      long long last_clock = wall_clock64();
-      do {
-        long long cur_clock = wall_clock64();
-        if (cur_clock > last_clock) {
-          time_diff += (cur_clock - last_clock);
-        }
-        // If it rolls over, we don't know how much to add to catch up.
-        // So just ignore those slipped cycles.
-        last_clock = cur_clock;
-      } while (time_diff < 1000000);
+      // Give the other waves time to maybe go around the loop again
+      // if the barrier has failed
+      __builtin_amdgcn_s_sleep(127);
+#else // CUDA does not seem to need an ordered atomic load
+      while(per_loop_atomic[i] < (grid_blocks - 1)) {
+      }
+#endif
     }
+
     if (threadIdx.x == 0) {
-      array[offset] = atomicInc(atomic_val, UINT_MAX);
+      atomicInc(&per_loop_atomic[i], UINT_MAX);
+      array[offset + blocks_seen] = atomicInc(atomic_val, UINT_MAX);
     }
     grid.sync();
+    blocks_seen += grid_blocks;
 
-    // Make the last thread in the entire multi-grid run way behind
-    // everyone else.
-    // If the mgrid barrier below fails, then the two global_array entries
-    // will end up being out of sync, because the intermingling of adds
-    // and multiplies will not be aligned between to the two GPUs.
-    if (global_rank == (mgrid.size() - 1)) {
-      long long time_diff = 0;
-      long long last_clock = wall_clock64();
-      do {
-        long long cur_clock = wall_clock64();
-        if (cur_clock > last_clock) {
-          time_diff += (cur_clock - last_clock);
-        }
-        // If it rolls over, we don't know how much to add to catch up.
-        // So just ignore those slipped cycles.
-        last_clock = cur_clock;
-      } while (time_diff < 1000000);
-    }
-    // During even iterations, add into your own array entry
-    // During odd iterations, add into your partner's array entry
-    unsigned grid_rank = mgrid.grid_rank();
-    unsigned inter_gpu_offset = (grid_rank + i) % mgrid.num_grids();
+    // Each grid updates its own counter
     if (rank == (grid.size() - 1)) {
-      if (i % mgrid.num_grids() == 0) {
-        global_array[grid_rank] += 2;
-      } else {
-        global_array[inter_gpu_offset] *= 2;
-      }
+      grid_values[grid_id] = atomicAdd(&grid_counters[grid_id], grid_id + 1);
     }
     mgrid.sync();
-    offset += gridDim.x;
+
+    // After mgrid sync, read the next grid's counter
+    recorded_values[(grid_id * loops + i)] = grid_values[(grid_id + 1) % num_grids];
+    mgrid.sync();
   }
-#endif
 }
 
 static void verify_barrier_buffer(unsigned int loops, unsigned int warps, unsigned int* host_buffer,
@@ -313,17 +223,21 @@ static void verify_barrier_buffer(unsigned int loops, unsigned int warps, unsign
   }
 }
 
-static void verify_multi_gpu_buffer(unsigned int loops, unsigned int array_val) {
-  unsigned int desired_val = 0;
-  for (int i = 0; i < loops; i++) {
-    if (i % 2 == 0) {
-      desired_val += 2;
-    } else {
-      desired_val *= 2;
+// Function to verify recorded readings
+static void verify_recorded_values(unsigned int* recorded_values, uint32_t loops, int num_devices) {
+  for (uint32_t i = 0; i < loops; i++) {
+    for (int grid_id = 0; grid_id < num_devices; grid_id++) {
+      // Determine the expected value from the next grid's counter
+      int next_grid_id = (grid_id + 1) % num_devices;
+      // The expected value should be the sum of the increments from previous loops
+      unsigned int expected_value = i * (next_grid_id + 1);
+      // Check the recorded value
+      unsigned int recorded_value = recorded_values[grid_id * loops + i];
+      REQUIRE(recorded_value == expected_value);
+      INFO("Mismatch at loop " << i << " for grid " << grid_id << ": expected "
+           << expected_value << ", got " << recorded_value);
     }
   }
-
-  REQUIRE(array_val == desired_val);
 }
 
 template <typename F>
@@ -554,9 +468,8 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
   int max_blocks_per_sm = INT_MAX;
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipSetDevice(i));
-    auto test_kernel_used = IsGfx11() ? test_kernel_gfx11 : test_kernel;
     HIP_CHECK(hipOccupancyMaxActiveBlocksPerMultiprocessor(
-        &max_blocks_per_sm_arr[i], test_kernel_used, num_threads_in_block, 0));
+        &max_blocks_per_sm_arr[i], test_kernel, num_threads_in_block, 0));
     if (max_blocks_per_sm_arr[i] < max_blocks_per_sm) {
       max_blocks_per_sm = max_blocks_per_sm_arr[i];
     }
@@ -573,6 +486,16 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
   std::vector<unsigned int*> kernel_buffer(num_devices);
   std::vector<unsigned int*> kernel_atomic(num_devices);
   std::vector<hipStream_t> streams(num_devices);
+  std::vector<unsigned int*> per_loop_atomic(num_devices);
+  // Allocate and initialize grid-specific counters and values using hipHostMalloc
+  unsigned int* grid_counters, *recorded_values, *grid_values;
+  HIP_CHECK(hipHostMalloc(&grid_counters, sizeof(unsigned int) * num_devices));
+  HIP_CHECK(hipHostMalloc(&recorded_values, sizeof(unsigned int) * num_devices * loops));
+  HIP_CHECK(hipHostMalloc(&grid_values, sizeof(unsigned int) * num_devices));
+  HIP_CHECK(hipMemset(grid_counters, 0, num_devices * sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(recorded_values, 0, num_devices * loops * sizeof(unsigned int)));
+  HIP_CHECK(hipMemset(grid_values, 0, num_devices * sizeof(unsigned int)));
+
   for (int i = 0; i < num_devices; i++) {
     host_buffer[i] =
         reinterpret_cast<unsigned int*>(calloc(total_buffer_len, sizeof(unsigned int)));
@@ -582,28 +505,27 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
                         hipMemcpyHostToDevice));
     HIP_CHECK(hipMalloc(&kernel_atomic[i], sizeof(unsigned int)));
     HIP_CHECK(hipMemset(kernel_atomic[i], 0, sizeof(unsigned int)));
+    HIP_CHECK(hipMalloc(&per_loop_atomic[i], loops * sizeof(unsigned int)));
+    HIP_CHECK(hipMemset(per_loop_atomic[i], 0, loops * sizeof(unsigned int)));
     HIP_CHECK(hipStreamCreate(&streams[i]));
   }
-
-  // Single kernel atomic shared between both devices; put it on the host
-  unsigned int* global_array;
-  HIP_CHECK(hipHostMalloc(&global_array, sizeof(unsigned int) * num_devices));
-  HIP_CHECK(hipMemset(global_array, 0, num_devices * sizeof(unsigned int)));
 
   // Launch the kernels
   INFO("Launching a cooperative kernel with " << warps << " warps in " << requested_blocks
                                               << " thread blocks");
 
-  std::vector<std::vector<void*>> dev_params(num_devices, std::vector<void*>(4, nullptr));
+  std::vector<std::vector<void*>> dev_params(num_devices, std::vector<void*>(7, nullptr));
   std::vector<hipLaunchParams> md_params(num_devices);
   for (int i = 0; i < num_devices; i++) {
     HIP_CHECK(hipSetDevice(i));
-    auto test_kernel_used = IsGfx11() ? test_kernel_gfx11 : test_kernel;
     dev_params[i][0] = reinterpret_cast<void*>(&kernel_atomic[i]);
-    dev_params[i][1] = reinterpret_cast<void*>(&global_array);
-    dev_params[i][2] = reinterpret_cast<void*>(&kernel_buffer[i]);
-    dev_params[i][3] = reinterpret_cast<void*>(&loops);
-    md_params[i].func = reinterpret_cast<void*>(test_kernel_used);
+    dev_params[i][1] = reinterpret_cast<void*>(&kernel_buffer[i]);
+    dev_params[i][2] = reinterpret_cast<void*>(&loops);
+    dev_params[i][3] = reinterpret_cast<void*>(&per_loop_atomic[i]);
+    dev_params[i][4] = reinterpret_cast<void*>(&grid_counters);
+    dev_params[i][5] = reinterpret_cast<void*>(&recorded_values);
+    dev_params[i][6] = reinterpret_cast<void*>(&grid_values);
+    md_params[i].func = reinterpret_cast<void*>(test_kernel);
     md_params[i].gridDim = requested_blocks;
     md_params[i].blockDim = num_threads_in_block;
     md_params[i].sharedMem = 0;
@@ -624,14 +546,16 @@ TEST_CASE("Unit_hipCGMultiGridGroupType_Barrier") {
     verify_barrier_buffer(loops, requested_blocks, host_buffer[dev], num_devices);
   }
 
-  for (int dev = 0; dev < num_devices; dev++) {
-    verify_multi_gpu_buffer(loops, global_array[dev]);
-  }
+  // Verify the recorded values
+  verify_recorded_values(recorded_values, loops, num_devices);
 
-  HIP_CHECK(hipHostFree(global_array));
+  HIP_CHECK(hipHostFree(grid_counters));
+  HIP_CHECK(hipHostFree(recorded_values));
+  HIP_CHECK(hipHostFree(grid_values));
   for (int k = 0; k < num_devices; ++k) {
     HIP_CHECK(hipFree(kernel_buffer[k]));
     HIP_CHECK(hipFree(kernel_atomic[k]));
+    HIP_CHECK(hipFree(per_loop_atomic[k]));
     HIP_CHECK(hipStreamDestroy(streams[k]));
     free(host_buffer[k]);
   }

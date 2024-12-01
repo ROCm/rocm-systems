@@ -176,6 +176,65 @@ TEST_CASE("Unit_hipShflTests") {
   SECTION("run test for uint64_t") { runTest<uint64_t>(); }
 }
 
+
+/**
+ * Test Description
+ * ------------------------
+ * - Test case to verify __shfl broadcast vals with undef args.
+
+ * Test source
+ * ------------------------
+ *    - catch/unit/kernel/hipShflTests.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+
+__global__ void testShflWithUndefArgs(unsigned long total_out_strings, unsigned long* str_counter, uint32_t* out) {
+  constexpr auto BLOCK_SIZE = warpSize;
+  unsigned long lane = threadIdx.x % BLOCK_SIZE;
+
+  auto get_next_string = [&]() {
+    unsigned long istring;
+    #pragma clang diagnostic push
+    #pragma clang diagnostic ignored "-Wuninitialized"
+    if (lane == 0) { istring = atomicAdd(str_counter, 1); }
+    #pragma clang diagnostic pop
+    return __shfl(istring, 0, warpSize);
+  };
+
+  for (unsigned long istring = get_next_string(); istring < total_out_strings;
+       istring           = get_next_string()) {
+    out[lane]++;
+  }
+}
+TEST_CASE("Unit_hipShflUndefArgs") {
+  hipDeviceProp_t prop;
+  int device;
+  HIP_CHECK(hipGetDevice(&device));
+  HIP_CHECK(hipGetDeviceProperties(&prop, device));
+  size_t count = prop.warpSize;
+  unsigned long *str_ctr;
+  uint32_t *str_ctr1;
+  HIP_CHECK(hipMalloc(&str_ctr, sizeof(unsigned long)));
+  HIP_CHECK(hipMemset(str_ctr, 0, sizeof(unsigned long)));
+  HIP_CHECK(hipMalloc(&str_ctr1, sizeof(uint32_t) * count));
+  HIP_CHECK(hipMemset(str_ctr1, 0, sizeof(uint32_t) * count));
+  testShflWithUndefArgs<<<1, count>>>(12, str_ctr, str_ctr1);
+  uint32_t* out = new uint32_t[count];
+  for (int i = 0 ; i < count; i++) {
+    out[i] = 0;
+  }
+  HIP_CHECK(hipMemcpy(out, str_ctr1, count * sizeof(uint32_t), hipMemcpyDeviceToHost));
+  HIP_CHECK(hipDeviceSynchronize());
+  for (int i = 0 ; i < count; i++) {
+    REQUIRE(out[i] == 12);
+  }
+  HIP_CHECK(hipFree(str_ctr));
+  HIP_CHECK(hipFree(str_ctr1));
+  delete [] out;
+}
+
 /**
 * End doxygen group ShflTest.
 * @}

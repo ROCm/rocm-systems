@@ -31,7 +31,7 @@ texture<char, hipTextureType3D, hipReadModeElementType>  texc;
 template <typename T>
 __global__ void simpleKernel3DArray(T* outputData, int width,
                                     int height, int depth) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   for (int i = 0; i < depth; i++) {
     for (int j = 0; j < height; j++) {
       for (int k = 0; k < width; k++) {
@@ -115,6 +115,11 @@ static void runSimpleTexture3D_Check(int width, int height, int depth,
 
 TEST_CASE("Unit_hipSimpleTexture3D_Check_DataTypes") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   for ( int i = 1; i < 25; i++ ) {
     runSimpleTexture3D_Check<float>(i, i, i, &texf);

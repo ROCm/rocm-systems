@@ -209,7 +209,7 @@ endfunction()
 
 #------------------------------------------------------------------------------
 # current staging
-function(catch_discover_tests TARGET_LIST TEST_SET)
+function(catch_discover_tests TARGET)
   cmake_parse_arguments(
     ""
     ""
@@ -217,29 +217,53 @@ function(catch_discover_tests TARGET_LIST TEST_SET)
     "TEST_SPEC;EXTRA_ARGS;PROPERTIES"
     ${ARGN}
   )
+
+  if(NOT _WORKING_DIRECTORY)
+    set(_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")
+  endif()
+  get_property(crosscompiling_emulator
+    TARGET ${TARGET}
+    PROPERTY CROSSCOMPILING_EMULATOR
+  )
   ## Generate a unique name based on the extra arguments
   string(SHA1 args_hash "${_TEST_SPEC} ${_EXTRA_ARGS} ${_REPORTER} ${_OUTPUT_DIR} ${_OUTPUT_PREFIX} ${_OUTPUT_SUFFIX}")
   string(SUBSTRING ${args_hash} 0 7 args_hash)
   # Define rule to generate test list for aforementioned test executable
-  set(ctest_include_file "${CMAKE_CURRENT_BINARY_DIR}/${TEST_SET}_include-${args_hash}.cmake")
-  set(ctest_tests_file "${CMAKE_CURRENT_BINARY_DIR}/${TEST_SET}_tests-${args_hash}.cmake")
-  file(RELATIVE_PATH ctestincludepath ${CMAKE_CURRENT_BINARY_DIR} ${ctest_include_file})
-  file(RELATIVE_PATH ctestfilepath ${CMAKE_CURRENT_BINARY_DIR} ${ctest_tests_file})
+  set(ctest_include_file_build "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_include_build-${args_hash}.cmake")
+  set(ctest_include_file_install "${CMAKE_CURRENT_BINARY_DIR}/${TARGET}_include_install-${args_hash}.cmake")
+  set(ctest_tests_file_name "${TARGET}_tests-${args_hash}.cmake")
+  set(ctest_tests_file "${CMAKE_CURRENT_BINARY_DIR}/${ctest_tests_file_name}")
+  file(RELATIVE_PATH ctest_include_rel_path ${CMAKE_CURRENT_BINARY_DIR} ${ctest_include_file_build})
+  file(RELATIVE_PATH ctest_file_rel_path ${CMAKE_CURRENT_BINARY_DIR} ${ctest_tests_file})
   file(RELATIVE_PATH _CATCH_ADD_TEST_SCRIPT ${CMAKE_CURRENT_BINARY_DIR} ${ADD_SCRIPT_PATH})
   file(RELATIVE_PATH CATCH_INCLUDE_PATH ${CMAKE_CURRENT_BINARY_DIR} ${CATCH_INCLUDE_PATH})
   if(NOT ${CMAKE_VERSION} VERSION_LESS "3.10.0")
-      file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/${ctestfilepath} "")
-      file(WRITE ${ctest_include_file} "set(exc_names ${TARGET_LIST})\n")
-      file(APPEND ${ctest_include_file} "set(TARGET ${TEST_SET})\n")
-      file(APPEND ${ctest_include_file} "set(_TEST_LIST ${TEST_SET}_TESTS)\n")
-      file(APPEND ${ctest_include_file} "set(ctestfilepath ${ctestfilepath})\n")
-      file(APPEND ${ctest_include_file} "set(_CATCH_ADD_TEST_SCRIPT ${_CATCH_ADD_TEST_SCRIPT})\n")
-      file(APPEND ${ctest_include_file} "set(crosscompiling_emulator ${crosscompiling_emulator})\n")
-      file(APPEND ${ctest_include_file} "set(_PROPERTIES ${_PROPERTIES})\n")
-      file(APPEND ${ctest_include_file} "include(${CATCH_INCLUDE_PATH})\n")
+      # write build time include file
+      file(WRITE ${ctest_include_file_build} "set(_TARGET_EXECUTABLE ${TARGET})\n")
+      file(APPEND ${ctest_include_file_build} "set(TARGET ${TARGET})\n")
+      file(APPEND ${ctest_include_file_build} "set(_TEST_LIST ${TARGET}_TESTS)\n")
+      file(APPEND ${ctest_include_file_build} "set(ctestfilepath ${ctest_file_rel_path})\n")
+      file(APPEND ${ctest_include_file_build} "set(_CATCH_ADD_TEST_SCRIPT ${_CATCH_ADD_TEST_SCRIPT})\n")
+      file(APPEND ${ctest_include_file_build} "set(crosscompiling_emulator ${crosscompiling_emulator})\n")
+      file(APPEND ${ctest_include_file_build} "set(_PROPERTIES ${_PROPERTIES})\n")
+      file(APPEND ${ctest_include_file_build} "include(${CATCH_INCLUDE_PATH})\n")
       # Add discovered tests to directory TEST_INCLUDE_FILES      
       set_property(DIRECTORY
-        APPEND PROPERTY TEST_INCLUDE_FILES "${ctestincludepath}"
+        APPEND PROPERTY TEST_INCLUDE_FILES "${ctest_include_rel_path}"
+      )
+      
+      # write install time include file
+      file(WRITE ${ctest_include_file_install} "set(_TARGET_EXECUTABLE ${TARGET})\n")
+      file(APPEND ${ctest_include_file_install} "set(TARGET ${TARGET})\n")
+      file(APPEND ${ctest_include_file_install} "set(_TEST_LIST ${TARGET}_TESTS)\n")
+      file(APPEND ${ctest_include_file_install} "set(ctestfilepath script/${ctest_tests_file_name})\n")
+      file(APPEND ${ctest_include_file_install} "set(_CATCH_ADD_TEST_SCRIPT script/CatchAddTests.cmake)\n")
+      file(APPEND ${ctest_include_file_install} "set(crosscompiling_emulator ${crosscompiling_emulator})\n")
+      file(APPEND ${ctest_include_file_install} "set(_PROPERTIES ${_PROPERTIES})\n")
+      file(APPEND ${ctest_include_file_install} "include(script/catch_include.cmake)\n")
+
+      set_property(GLOBAL
+        APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES "${ctest_include_file_install}"
       )
   endif()
 
@@ -400,17 +424,15 @@ function(hip_add_exe_to_target)
     foreach(arg IN LISTS _UNPARSED_ARGUMENTS)
         message(WARNING "Unparsed arguments: ${arg}")
     endforeach()
-    get_property(crosscompiling_emulator
-    TARGET ${_EXE_NAME}
-    PROPERTY CROSSCOMPILING_EMULATOR
-    )
-    set(_EXE_NAME_LIST ${_EXE_NAME_LIST} ${_EXE_NAME})
+    # add binary to global list of binaries to install
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ${_EXE_NAME})
+    catch_discover_tests("${_EXE_NAME}" PROPERTIES SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST")
+
     if(NOT STANDALONE_TESTS EQUAL "1")
       break()
     endif()
 
   endforeach()
 
-  catch_discover_tests("${_EXE_NAME_LIST}" "${_NAME}" PROPERTIES  SKIP_REGULAR_EXPRESSION "HIP_SKIP_THIS_TEST")
 endfunction()
 

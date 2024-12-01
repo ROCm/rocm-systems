@@ -165,12 +165,18 @@ template <typename T> class LinearAllocGuardMultiDim {
   const hipExtent extent_;
 };
 
-template <typename T> class LinearAllocGuard2D : public LinearAllocGuardMultiDim<T> {
+template <typename T, bool unaligned = false>
+class LinearAllocGuard2D : public LinearAllocGuardMultiDim<T> {
  public:
   LinearAllocGuard2D(const size_t width_logical, const size_t height)
       : LinearAllocGuardMultiDim<T>{make_hipExtent(width_logical * sizeof(T), height, 1)} {
-    HIP_CHECK(hipMallocPitch(&this->pitched_ptr_.ptr, &this->pitched_ptr_.pitch,
-                             this->extent_.width, this->extent_.height));
+    if (unaligned) {
+      this->pitched_ptr_.pitch = width_logical * sizeof(T);
+      HIP_CHECK(hipMalloc(&this->pitched_ptr_.ptr, this->pitched_ptr_.pitch * height));
+    } else {
+      HIP_CHECK(hipMallocPitch(&this->pitched_ptr_.ptr, &this->pitched_ptr_.pitch,
+                               this->extent_.width, this->extent_.height));
+    }
   }
 
   LinearAllocGuard2D(const LinearAllocGuard2D&) = delete;

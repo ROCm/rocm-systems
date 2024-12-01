@@ -29,6 +29,7 @@ if(HIP_PLATFORM MATCHES "nvidia")
 elseif(HIP_PLATFORM MATCHES "amd")
   set(LINKER_LIBS hiprtc)
 endif()
+add_definitions(-DHIP_PATH="${HIP_PATH}")
 
 hip_add_exe_to_target(NAME ComplexTest
                       TEST_SRC ${TEST_SRC}
@@ -46,6 +47,7 @@ file(GLOB NEGATIVE_TEST_SRC
        )
 
 file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
 #add_test(NAME Unit_Device_Complex_make_Negative
 #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py

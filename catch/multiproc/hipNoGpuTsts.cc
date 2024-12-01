@@ -525,6 +525,7 @@ static bool NoGpuTst_hipHostRegister() {
   } else {
     WARN("Error Code Returned by hipHostRegister: " <<hipGetErrorName(err));
   }
+  free(hostPtr);
   return passed;
 }
 
@@ -541,6 +542,8 @@ static bool NoGpuTst_hipMemcpy() {
   } else {
     WARN("Error Code Returned by hipMemcpy: " <<hipGetErrorName(err));
   }
+  free(dst);
+  free(src);
   return passed;
 }
 

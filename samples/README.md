@@ -41,4 +41,4 @@ cmake ../samples
 
 make package_samples
 
-## Note: sample 2_Cookbook/22_cmake_hip_lang is current not included in toplevel cmake. To build this sample from toplevel cmake, uncomment Line 43 inside samples/2_Cookbook/CMakeLists.txt. 
+## Note: sample 2_Cookbook/22_cmake_hip_lang is current not included in toplevel cmake. To build this sample from toplevel cmake, uncomment Line 43 inside samples/2_Cookbook/CMakeLists.txt.

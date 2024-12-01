@@ -373,6 +373,7 @@ TEST_CASE("Unit_hipIpcEventHandle_ParameterValidation") {
       INFO("Error returned : " << ret);
       REQUIRE(false);
     }
+    HIP_CHECK(hipEventDestroy(eventNoIpc));
   }
 
   SECTION("Open event handle with event(nullptr)") {

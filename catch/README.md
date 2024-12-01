@@ -180,7 +180,7 @@ hipcc <path_to_test.cpp> -I<HIP_SRC_DIR>/tests/catch/include <HIP_SRC_DIR>/tests
 ## Debugging support
 Catch2 allows multiple ways in which you can debug the test case.
 - `-b` options breaks into a debugger as soon as there is a failure encountered [Catch2 Options Reference](https://github.com/catchorg/Catch2/blob/devel/docs/command-line.md#breaking-into-the-debugger)
-- Catch2 provided [logging macro](https://github.com/catchorg/Catch2/blob/v2.13.6/docs/logging.md#top) that print useful information on test case failure 
+- Catch2 provided [logging macro](https://github.com/catchorg/Catch2/blob/v2.13.6/docs/logging.md#top) that print useful information on test case failure
 - User can also call [CATCH_BREAK_INTO_DEBUGGER](https://github.com/catchorg/Catch2/blob/devel/docs/configuration.md#overriding-catchs-debug-break--b) macro to break at a certain point in a test case.
 - User can also mention filename.cc:__LineNumber__ to break into a test case via gdb.
 

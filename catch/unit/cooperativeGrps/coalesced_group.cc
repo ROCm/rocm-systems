@@ -17,6 +17,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 #include "cooperative_groups_common.hh"
+#include "cg_common_kernels.hh"
 
 #include <cmd_options.hh>
 #include <cpu_grid.h>
@@ -49,7 +50,7 @@ static __global__ void coalesced_group_size_getter(unsigned int* sizes, uint64_t
 template <typename BaseType = cg::coalesced_group>
 static __global__ void coalesced_group_thread_rank_getter(unsigned int* thread_ranks,
                                                           uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__) 
+  #if (__GFX8__ || __GFX9__)
     constexpr unsigned int ksize = 64;
   #else
     constexpr unsigned int ksize = 32;
@@ -64,11 +65,11 @@ static __global__ void coalesced_group_thread_rank_getter(unsigned int* thread_r
 
 static __global__ void coalesced_group_non_member_size_getter(unsigned int* sizes,
                                                               uint64_t active_mask) {
-  #if (__GFX8__ || __GFX9__) 
+  #if (__GFX8__ || __GFX9__)
     constexpr unsigned int ksize = 64;
   #else
     constexpr unsigned int ksize = 32;
-  #endif                                                              
+  #endif
   const cg::thread_block_tile<ksize> tile =
       cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
@@ -79,7 +80,7 @@ static __global__ void coalesced_group_non_member_size_getter(unsigned int* size
 
 static __global__ void coalesced_group_non_member_thread_rank_getter(unsigned int* thread_ranks,
                                                                      uint64_t active_mask) {
-  #if (__GFX8__ || _GFX9__) 
+  #if (__GFX8__ || _GFX9__)
     constexpr unsigned int ksize = 64;
   #else
     constexpr unsigned int ksize = 32;
@@ -426,7 +427,7 @@ template <typename T> void CoalescedGroupShflUpTestImpl() {
   INFO("Coalesced group mask: " << active_mask);
   unsigned int active_thread_count = get_active_thread_count(active_mask, warp_size);
 
-  auto delta = GENERATE(range(static_cast<size_t>(0), kWarpSize));
+  auto delta = GENERATE(range(static_cast<size_t>(0), static_cast<size_t>(getWarpSize())));
   delta = delta % active_thread_count;
   INFO("Delta: " << delta);
   CPUGrid grid(blocks, threads);
@@ -480,7 +481,7 @@ __global__ void coalesced_group_shfl_down(T* const out, const unsigned int delta
     constexpr unsigned int ksize = 64;
   #else
     constexpr unsigned int ksize = 32;
-  #endif                                         
+  #endif
   const cg::thread_block_tile<ksize> tile =
       cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {
@@ -508,7 +509,7 @@ template <typename T> void CoalescedGroupShflDownTest() {
   INFO("Coalesced group mask: " << active_mask);
   unsigned int active_thread_count = get_active_thread_count(active_mask, warp_size);
 
-  auto delta = GENERATE(range(static_cast<size_t>(0), kWarpSize));
+  auto delta = GENERATE(range(static_cast<size_t>(0), static_cast<size_t>(getWarpSize())));
   delta = delta % active_thread_count;
   INFO("Delta: " << delta);
   CPUGrid grid(blocks, threads);
@@ -572,7 +573,7 @@ __global__ void coalesced_group_shfl(T* const out, uint8_t* target_lanes,
     constexpr unsigned int ksize = 64;
   #else
     constexpr unsigned int ksize = 32;
-  #endif                                          
+  #endif
   const cg::thread_block_tile<ksize> tile =
       cg::tiled_partition<ksize>(cg::this_thread_block());
   if (active_mask & (static_cast<uint64_t>(1) << tile.thread_rank())) {

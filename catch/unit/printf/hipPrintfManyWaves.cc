@@ -272,6 +272,7 @@ TEST_CASE("Unit_Printf_PrintfManyWaves") {
   test_mixed2(retval, num_blocks, threads_per_block);
   test_mixed3(retval, num_blocks, threads_per_block);
   test_numbers(num_blocks, threads_per_block);
+  HIP_CHECK(hipFree(retval_void));
 }
 /**
 * End doxygen group PrintfTest.

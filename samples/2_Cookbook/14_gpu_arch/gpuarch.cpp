@@ -86,5 +86,9 @@ int main() {
   } else {
     std::cout << "success\n";
   }
+  free(hInput);
+  free(hOutput);
+  checkHipErrors(hipFree(dInput));
+  checkHipErrors(hipFree(dOutput));
   return 0;
 }

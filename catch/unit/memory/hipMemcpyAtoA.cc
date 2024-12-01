@@ -50,6 +50,7 @@ TEST_CASE("Unit_hipMemcpyAtoA_Basic") {
   return;
 #else
   HIP_CHECK(hipSetDevice(0));
+  CHECK_IMAGE_SUPPORT
   int row, col;
   row = 1;
   col = GENERATE(3, 4, 100);

@@ -140,8 +140,8 @@ template <typename T> __global__ void VectorSet(T* const vec, const T value, siz
 static __global__ void Delay(uint32_t interval, const uint32_t ticks_per_ms) {
   while (interval--) {
     #if HT_AMD
-    uint64_t start = wall_clock64();
-    while (wall_clock64() - start < ticks_per_ms) {
+    uint64_t start = clock_function();
+    while (clock_function() - start < ticks_per_ms) {
       __builtin_amdgcn_s_sleep(10);
     }
     #endif

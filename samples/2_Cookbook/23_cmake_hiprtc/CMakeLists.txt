@@ -18,7 +18,7 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 # THE SOFTWARE.
 
-project(cmake_hiprtc_test)
+project(cmake_hiprtc_test CXX)
 
 cmake_minimum_required(VERSION 3.10.2)
 
@@ -46,9 +46,13 @@ endif()
 add_executable(test ${EXCLUDE_OPTION} saxpy.cpp)
 
 # Link with HIPRTC
-target_link_libraries(test hiprtc::hiprtc)
+target_link_libraries(test hiprtc)
 # Link with HIP
 target_link_libraries(test hip::device)
+
+if(NOT BUILD_SHARED_LIBS)
+  target_link_libraries(test hiprtc-builtins)
+endif()
 
 target_include_directories(test PRIVATE ../../common)
 

@@ -92,5 +92,11 @@ int main(int argc, char* argv[]) {
             CHECK(hipErrorUnknown);
         }
     }
+
+    CHECK(hipFree(A_d));
+    CHECK(hipFree(C_d));
+    free(A_h);
+    free(C_h);
+
     printf("PASSED!\n");
 }

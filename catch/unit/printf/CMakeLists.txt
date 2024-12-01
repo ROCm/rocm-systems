@@ -53,6 +53,7 @@ file(GLOB NEGATIVE_TEST_SRC
       printf_negative_kernels.cc)
 
 file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
 #add_test(NAME Unit_Printf_Negative
 #         COMMAND ${Python3_EXECUTABLE} ../compileAndCaptureOutput.py
@@ -66,6 +67,12 @@ add_executable(printfLength_exe EXCLUDE_FROM_ALL printfLength_exe.cc)
 add_executable(printfSpecifiers_exe EXCLUDE_FROM_ALL printfSpecifiers_exe.cc)
 add_executable(printfFlagsNonHost_exe EXCLUDE_FROM_ALL printfFlagsNonHost_exe.cc)
 add_executable(printfSpecifiersNonHost_exe EXCLUDE_FROM_ALL printfSpecifiersNonHost_exe.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+             printfFlags_exe
+             printfLength_exe
+             printfSpecifiers_exe
+             printfFlagsNonHost_exe
+             printfSpecifiersNonHost_exe)
 
 add_dependencies(build_tests printfFlags_exe)
 add_dependencies(build_tests printfLength_exe)

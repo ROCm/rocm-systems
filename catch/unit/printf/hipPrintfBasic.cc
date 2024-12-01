@@ -218,6 +218,7 @@ TEST_CASE("Unit_Printf_PrintfBasicTsts") {
   test_divergent0(retval, num_blocks, threads_per_block);
   test_divergent1(retval, num_blocks, threads_per_block);
   test_series(retval, num_blocks, threads_per_block);
+  HIP_CHECK(hipFree(retval_void));
 }
 /**
 * End doxygen group PrintfTest.

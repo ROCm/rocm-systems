@@ -141,38 +141,41 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
                                     hipPos src_pos, hipExtent extent, hipMemcpyKind kind) {
     hipGraph_t graph = nullptr;
     HIP_CHECK(hipGraphCreate(&graph, 0));
+
     hipGraphNode_t node = nullptr;
+    auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
+    HIP_CHECK(hipGraphAddMemcpyNode(&node, graph, nullptr, 0, &params));
 
     SECTION("node == nullptr") {
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(nullptr, &params), hipErrorInvalidValue);
     }
 
     SECTION("dst_ptr.ptr == nullptr") {
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.ptr = nullptr;
-      auto params = GetMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("src_ptr.ptr == nullptr") {
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.ptr = nullptr;
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("dst_ptr.pitch < width") {
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = extent.width - 1;
-      auto params = GetMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidPitchValue);
     }
 
     SECTION("src_ptr.pitch < width") {
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.pitch = extent.width - 1;
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidPitchValue);
     }
 
@@ -181,7 +184,7 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
       hipPitchedPtr invalid_ptr = dst_ptr;
       invalid_ptr.pitch = attr;
-      auto params = GetMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
@@ -190,54 +193,54 @@ TEST_CASE("Unit_hipGraphMemcpyNodeSetParams_Negative_Parameters") {
       HIP_CHECK(hipDeviceGetAttribute(&attr, hipDeviceAttributeMaxPitch, 0));
       hipPitchedPtr invalid_ptr = src_ptr;
       invalid_ptr.pitch = attr;
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("extent.width + dst_pos.x > dst_ptr.pitch") {
       hipPos invalid_pos = dst_pos;
       invalid_pos.x = dst_ptr.pitch - extent.width + 1;
-      auto params = GetMemcpy3DParms(dst_ptr, invalid_pos, src_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, invalid_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("extent.width + src_pos.x > src_ptr.pitch") {
       hipPos invalid_pos = src_pos;
       invalid_pos.x = src_ptr.pitch - extent.width + 1;
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, invalid_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, invalid_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("dst_pos.y out of bounds") {
       hipPos invalid_pos = dst_pos;
       invalid_pos.y = 1;
-      auto params = GetMemcpy3DParms(dst_ptr, invalid_pos, src_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, invalid_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("src_pos.y out of bounds") {
       hipPos invalid_pos = src_pos;
       invalid_pos.y = 1;
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, invalid_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, invalid_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("dst_pos.z out of bounds") {
       hipPos invalid_pos = dst_pos;
       invalid_pos.z = 1;
-      auto params = GetMemcpy3DParms(dst_ptr, invalid_pos, src_ptr, src_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, invalid_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("src_pos.z out of bounds") {
       hipPos invalid_pos = src_pos;
       invalid_pos.z = 1;
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, invalid_pos, extent, kind);
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, invalid_pos, extent, kind);
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidValue);
     }
 
     SECTION("Invalid MemcpyKind") {
-      auto params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent,
+      params = GetMemcpy3DParms(dst_ptr, dst_pos, src_ptr, src_pos, extent,
                                      static_cast<hipMemcpyKind>(-1));
       HIP_CHECK_ERROR(hipGraphMemcpyNodeSetParams(node, &params), hipErrorInvalidMemcpyDirection);
     }

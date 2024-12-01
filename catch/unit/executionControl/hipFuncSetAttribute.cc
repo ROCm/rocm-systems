@@ -219,6 +219,11 @@ TEST_CASE("Unit_hipFuncSetAttribute_Negative_Parameters") {
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported") {
+#if HT_NVIDIA
+  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
+  return;
+#endif
+
   hipFuncAttributes old_attributes;
   HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)));
 
@@ -246,6 +251,11 @@ TEST_CASE("Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supp
  *  - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported") {
+#if HT_NVIDIA
+  HipTest::HIP_SKIP_TEST("This is an AMD specific test");
+  return;
+#endif
+
   hipFuncAttributes old_attributes;
   HIP_CHECK(hipFuncGetAttributes(&old_attributes, reinterpret_cast<void*>(kernel)));
 

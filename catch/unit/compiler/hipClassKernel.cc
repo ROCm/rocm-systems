@@ -164,13 +164,13 @@ TEST_CASE("Unit_hipClassKernel_Size") {
 }
 
 __global__ void
- sizeVirtualClassKernel(bool* result_ecd) {
+ sizeVirtualClassKernel(bool* result_ecd, refStructSizes structSizes) {
    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-   result_ecd[tid] = (sizeof(testSizeDV) == 16)
-                      && (sizeof(testSizeDerivedDV) == 16)
-                      && (sizeof(testSizeVirtDerPack) == 24)
-                      && (sizeof(testSizeVirtDer) == 24)
-                      && (sizeof(testSizeDerMulti) == 48) ;
+   result_ecd[tid] = (structSizes.sizeOftestSizeDV == sizeof(testSizeDV))
+                     && (structSizes.sizeOftestSizeDerivedDV == sizeof(testSizeDerivedDV))
+                     && (structSizes.sizeOftestSizeVirtDer = sizeof(testSizeVirtDer))
+                     && (structSizes.sizeOftestSizeVirtDerPack = sizeof(testSizeVirtDerPack))
+                     && (structSizes.sizeOftestSizeDerMulti = sizeof(testSizeDerMulti));
  }
 
 TEST_CASE("Unit_hipClassKernel_Virtual") {
@@ -178,12 +178,20 @@ TEST_CASE("Unit_hipClassKernel_Virtual") {
   result_ech = AllocateHostMemory();
   result_ecd = AllocateDeviceMemory();
 
+  struct refStructSizes structSizes;
+  structSizes.sizeOftestSizeDV = sizeof(testSizeDV);
+  structSizes.sizeOftestSizeDerivedDV = sizeof(testSizeDerivedDV);
+  structSizes.sizeOftestSizeVirtDer = sizeof(testSizeVirtDer);
+  structSizes.sizeOftestSizeVirtDerPack = sizeof(testSizeVirtDerPack);
+  structSizes.sizeOftestSizeDerMulti = sizeof(testSizeDerMulti);
+
   hipLaunchKernelGGL(sizeVirtualClassKernel,
                       dim3(BLOCKS),
                       dim3(THREADS_PER_BLOCK),
                       0,
                       0,
-                      result_ecd);
+                      result_ecd,
+                      structSizes);
 
   VerifyResult(result_ech,result_ecd);
   FreeMem(result_ech,result_ecd);

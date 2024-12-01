@@ -23,29 +23,27 @@
 #include <resource_guards.hh>
 #include <utils.hh>
 
+#ifdef __linux__
+#include <unistd.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <errno.h>
+#include <sys/socket.h>
+#include <memory.h>
+#include <sys/un.h>
+#endif
+
 namespace {
 constexpr auto wait_ms = 500;
 }  // anonymous namespace
 
-/**
- * Local Function to test if Hip Stream Ordered Memory allocator
- * functionality is supoorted.
- */
-static bool isStrmOrdMemAllocSupported(int dev) {
-  int deviceSupportsMemoryPools = 0;
-  bool supported = false;
-  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,
-        hipDeviceAttributeMemoryPoolsSupported, dev));
-  if (deviceSupportsMemoryPools != 0) {
-    supported = true;
-  } else {
-    supported = false;
-  }
-  return supported;
-}
-
 #define checkMempoolSupported(device) {\
-  if (false == isStrmOrdMemAllocSupported(device)) {\
+  int deviceSupportsMemoryPools = 0;\
+  HIP_CHECK(hipDeviceGetAttribute(&deviceSupportsMemoryPools,\
+        hipDeviceAttributeMemoryPoolsSupported, device));\
+  if (0 == deviceSupportsMemoryPools) {\
     HipTest::HIP_SKIP_TEST("Memory Pool not supported. Skipping Test..");\
     return;\
   }\
@@ -81,14 +79,14 @@ template <typename T> __global__ void kernel_500ms_gfx11(T* host_res, int clk_ra
   host_res[tid] = tid + 1;
   __threadfence_system();
   // expecting that the data is getting flushed to host here!
-  uint64_t start = wall_clock64() / clk_rate, cur;
+  uint64_t start = clock_function() / clk_rate, cur;
   if (clk_rate > 1) {
     do {
-      cur = wall_clock64() / clk_rate - start;
+      cur = clock_function() / clk_rate - start;
     } while (cur < wait_ms);
   } else {
     do {
-      cur = wall_clock64() / start;
+      cur = clock_function() / start;
     } while (cur < wait_ms);
   }
 #endif
@@ -450,3 +448,232 @@ class streamMemAllocTest {
     free(C_h);
   }
 };
+
+#ifdef __linux__
+
+#define checkSysCallErrors(result)                                                                 \
+  if (result == -1) {                                                                              \
+    fprintf(stderr, "Failure at %u %s\n", __LINE__, __FILE__); exit(EXIT_FAILURE);                 \
+  }
+
+#ifdef HT_AMD
+typedef int64_t hipShareableHdl;
+#else
+typedef int hipShareableHdl;
+#endif
+
+typedef pid_t Process;
+
+struct ipcHdl {
+    int socket;
+    char *name;
+};
+
+class ipcSocketCom {
+  ipcHdl *handle;
+  // method to create socket from server
+  int createSocket() {
+    int server_fd;
+    struct sockaddr_un servaddr;
+
+    char name[16];
+    // Create a unique socket name based on current pid
+    sprintf(name, "%u", getpid());
+
+    // Create the socket handle
+    handle = new ipcHdl;
+    if (nullptr == handle) {
+      perror("Socket failure: Handle memory allocation failed");
+      return -1;
+    }
+
+    memset(handle, 0, sizeof(*handle));
+    handle->socket = -1;
+    handle->name = NULL;
+
+    // Creating socket
+    if ((server_fd = socket(AF_UNIX, SOCK_DGRAM, 0)) == 0) {
+      perror("Socket failure: Socket creation failed");
+      return -1;
+    }
+
+    unlink(name);
+    bzero(&servaddr, sizeof(servaddr));
+    servaddr.sun_family = AF_UNIX;
+
+    size_t len = strlen(name);
+    if (len > (sizeof(servaddr.sun_path) - 1)) {
+      perror("Socket failure: Cannot bind provided name to socket. Name too large");
+      return -1;
+    }
+
+    strncpy(servaddr.sun_path, name, len);
+
+    if (bind(server_fd, (struct sockaddr *)&servaddr, SUN_LEN(&servaddr)) < 0) {
+      perror("Socket failure: Binding socket failed");
+      return -1;
+    }
+
+    handle->name = new char[strlen(name) + 1];
+    strcpy(handle->name, name);
+    handle->socket = server_fd;
+    return 0;
+  }
+  // method to create socket from client
+  int openSocket() {
+    int sock = 0;
+    struct sockaddr_un cliaddr;
+
+    handle = new ipcHdl;
+    if (nullptr == handle) {
+      perror("Socket failure: Handle memory allocation failed");
+      return -1;
+    }
+    memset(handle, 0, sizeof(*handle));
+
+    if ((sock = socket(AF_UNIX, SOCK_DGRAM, 0)) < 0) {
+      perror("IPC failure:Socket creation error");
+      return -1;
+    }
+
+    bzero(&cliaddr, sizeof(cliaddr));
+    cliaddr.sun_family = AF_UNIX;
+    char name[16];
+
+    // Create a unique socket name based on current process id.
+    sprintf(name, "%u", getpid());
+
+    strcpy(cliaddr.sun_path, name);
+    if (bind(sock, (struct sockaddr *)&cliaddr, sizeof(cliaddr)) < 0) {
+      perror("Socket failure: Binding socket failed");
+      return -1;
+    }
+
+    handle->socket = sock;
+    handle->name = new char[strlen(name) + 1];
+    strcpy(handle->name, name);
+
+    return 0;
+  }
+  // method to close socket
+  int closeSocket() {
+    if (!handle) {
+      return -1;
+    }
+
+    if (handle->name) {
+      unlink(handle->name);
+      delete[] handle->name;
+    }
+    close(handle->socket);
+    delete handle;
+    return 0;
+  }
+public:
+  ipcSocketCom() = default;
+  ipcSocketCom(bool isServer) {
+    if (isServer) {
+      checkSysCallErrors(createSocket());
+    } else {
+      checkSysCallErrors(openSocket());
+    }
+  }
+  ~ipcSocketCom() {
+  }
+  int closeThisSock() {
+    return closeSocket();
+  }
+  // method to receive shareable handle via socket
+  int recvShareableHdl(hipShareableHdl *shHandle) {
+    struct msghdr msg;
+    struct iovec iov[1];
+
+    // Union to guarantee alignment requirements for control array
+    union {
+      struct cmsghdr cm;
+      char control[CMSG_SPACE(sizeof(int))];
+    } control_un;
+
+    struct cmsghdr *cmptr;
+    ssize_t n;
+    int receivedfd;
+    int dummy_data;
+
+    msg.msg_name = NULL;
+    msg.msg_namelen = 0;
+    msg.msg_control = control_un.control;
+    msg.msg_controllen = sizeof(control_un.control);
+    iov[0].iov_base = &dummy_data;
+    iov[0].iov_len = sizeof(dummy_data);
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+
+    if ((n = recvmsg(handle->socket, &msg, 0)) <= 0) {
+      perror("Socket failure: Receiving data over socket failed");
+      return -1;
+    }
+
+    if (((cmptr = CMSG_FIRSTHDR(&msg)) != NULL) &&
+       (cmptr->cmsg_len == CMSG_LEN(sizeof(int)))) {
+      if ((cmptr->cmsg_level != SOL_SOCKET) || (cmptr->cmsg_type != SCM_RIGHTS)) {
+        return -1;
+      }
+
+      memmove(&receivedfd, CMSG_DATA(cmptr), sizeof(receivedfd));
+      *(int *)shHandle = receivedfd;
+    } else {
+      return -1;
+    }
+
+    return 0;
+  }
+  // method to send shareable handle via sockets
+  int sendShareableHdl(hipShareableHdl shareableHdl, Process process) {
+    struct msghdr msg;
+    struct iovec iov[1];
+    int dummy_data = 0;
+
+    union {
+      struct cmsghdr cm;
+      char control[CMSG_SPACE(sizeof(int))];
+    } control_un;
+
+    struct cmsghdr *cmptr;
+    struct sockaddr_un cliaddr;
+
+    // Construct client address to send this SHareable handle to
+    bzero(&cliaddr, sizeof(cliaddr));
+    cliaddr.sun_family = AF_UNIX;
+    char temp[10];
+    sprintf(temp, "%u", process);
+    strcpy(cliaddr.sun_path, temp);
+
+    // Send corresponding shareable handle to the client
+    int sendfd = (int)shareableHdl;
+
+    msg.msg_control = control_un.control;
+    msg.msg_controllen = sizeof(control_un.control);
+
+    cmptr = CMSG_FIRSTHDR(&msg);
+    cmptr->cmsg_len = CMSG_LEN(sizeof(int));
+    cmptr->cmsg_level = SOL_SOCKET;
+    cmptr->cmsg_type = SCM_RIGHTS;
+
+    memmove(CMSG_DATA(cmptr), &sendfd, sizeof(sendfd));
+
+    msg.msg_name = (void *)&cliaddr;
+    msg.msg_namelen = sizeof(struct sockaddr_un);
+    iov[0].iov_base = &dummy_data;
+    iov[0].iov_len = sizeof(dummy_data);
+    msg.msg_iov = iov;
+    msg.msg_iovlen = 1;
+
+    ssize_t sendResult = sendmsg(handle->socket, &msg, 0);
+    if (sendResult <= 0) {
+      perror("Socket failure: Sending data over socket failed");
+      return -1;
+    }
+    return 0;
+  }
+};
+#endif

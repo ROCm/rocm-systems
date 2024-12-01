@@ -47,7 +47,6 @@ static unsigned int numCoords = sizeof(coords) / sizeof(coordRec);
 template <typename T>
 __global__ void float_mad_kernel(uint *out, uint width, T xPos, T yPos,
                                    T xStep, T yStep, uint maxIter) {
-#pragma FP_CONTRACT ON
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -71,7 +70,6 @@ template <typename T>
 __global__ void float_mandel_unroll_kernel(uint *out, uint width, T xPos,
     T yPos, T xStep, T yStep, uint maxIter) {
 
-#pragma FP_CONTRACT ON
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -176,7 +174,6 @@ __global__ void float_mandel_unroll_kernel(uint *out, uint width, T xPos,
 template <typename T>
 __global__ void double_mad_kernel(uint *out, uint width, T xPos,  T yPos, T xStep, T yStep,
                                    uint maxIter) {
-#pragma FP_CONTRACT ON
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
   int i = tid % width;
   int j = tid / width;
@@ -199,7 +196,6 @@ __global__ void double_mad_kernel(uint *out, uint width, T xPos,  T yPos, T xSte
 template <typename T>
 __global__ void double_mandel_unroll_kernel(uint *out, uint width, T xPos,
                   T yPos, T xStep, T yStep, uint maxIter) {
-#pragma FP_CONTRACT ON
   int tid = (blockIdx.x * blockDim.x + threadIdx.x);
 
   int i = tid % width;
@@ -304,8 +300,6 @@ __global__ void double_mandel_unroll_kernel(uint *out, uint width, T xPos,
     out[tid] = (uint)ccount;
 };
 
-static const unsigned int FMA_EXPECTEDVALUES_INDEX = 15;
-
 // Expected results for each kernel run at each coord
 unsigned long long expectedIters[] = {
     203277748ull,  2147483648ull, 120254651ull,  203277748ull,  2147483648ull,
@@ -336,7 +330,7 @@ class hipPerfMandelBrot {
   }
 
   void open(int deviceID);
-  bool run(unsigned int testCase, unsigned int deviceId);
+  bool run(unsigned int testCase);
   void printResults(void);
 
   // array of funtion pointers
@@ -391,7 +385,7 @@ void hipPerfMandelBrot::open(int deviceId) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
   }
   HIP_CHECK(hipSetDevice(deviceId));
-  hipDeviceProp_t props = {0};
+  hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
   std::cout << "info: running on bus " << "0x" << props.pciBusID << " " << props.name
     << " with " << props.multiProcessorCount << " CUs" << " and device id: " << deviceId
@@ -401,7 +395,6 @@ void hipPerfMandelBrot::open(int deviceId) {
 }
 
 void hipPerfMandelBrot::printResults() {
-  int numkernels = getNumKernels();
   int numStreams = getNumStreams();
 
   std::cout << "\n" <<"Measured perf for kernels in GFLOPS on "
@@ -424,7 +417,7 @@ void hipPerfMandelBrot::float_mad(uint *out, uint width, float xPos,  float yPos
                                    int blocks, int threads_per_block, int kernelCnt) {
   int streamCnt = getNumStreams();
   hipLaunchKernelGGL(float_mad_kernel<float>, dim3(blocks), dim3(threads_per_block), 0,
-                      streams[kernelCnt % streamCnt], out, width_, xPos, yPos, xStep, yStep,
+                      streams[kernelCnt % streamCnt], out, width, xPos, yPos, xStep, yStep,
                       maxIter);
 }
 
@@ -433,7 +426,7 @@ void hipPerfMandelBrot::float_mandel_unroll(uint *out, uint width, float xPos,  
                              int blocks, int threads_per_block, int kernelCnt) {
   int streamCnt = getNumStreams();
   hipLaunchKernelGGL(float_mandel_unroll_kernel<float>, dim3(blocks), dim3(threads_per_block), 0,
-                  streams[kernelCnt % streamCnt], out, width_, xPos, yPos, xStep, yStep, maxIter);
+                  streams[kernelCnt % streamCnt], out, width, xPos, yPos, xStep, yStep, maxIter);
 }
 
 void hipPerfMandelBrot::double_mad(uint *out, uint width, float xPos,  float yPos,
@@ -441,7 +434,7 @@ void hipPerfMandelBrot::double_mad(uint *out, uint width, float xPos,  float yPo
                                int blocks, int threads_per_block, int kernelCnt) {
   int streamCnt = getNumStreams();
   hipLaunchKernelGGL(double_mad_kernel<double>, dim3(blocks), dim3(threads_per_block), 0,
-                  streams[kernelCnt % streamCnt], out, width_, xPos, yPos, xStep, yStep, maxIter);
+                  streams[kernelCnt % streamCnt], out, width, xPos, yPos, xStep, yStep, maxIter);
 }
 
 void hipPerfMandelBrot::double_mandel_unroll(uint *out, uint width, float xPos,  float yPos,
@@ -449,10 +442,10 @@ void hipPerfMandelBrot::double_mandel_unroll(uint *out, uint width, float xPos, 
                               int blocks, int threads_per_block, int kernelCnt) {
   int streamCnt = getNumStreams();
   hipLaunchKernelGGL(float_mandel_unroll_kernel<double>, dim3(blocks), dim3(threads_per_block), 0,
-                  streams[kernelCnt % streamCnt], out, width_, xPos, yPos, xStep, yStep, maxIter);
+                  streams[kernelCnt % streamCnt], out, width, xPos, yPos, xStep, yStep, maxIter);
 }
 
-bool hipPerfMandelBrot::run(unsigned int testCase,unsigned int deviceId) {
+bool hipPerfMandelBrot::run(unsigned int testCase) {
   unsigned int numStreams = getNumStreams();
   coordIdx = testCase % numCoords;
 
@@ -462,8 +455,8 @@ bool hipPerfMandelBrot::run(unsigned int testCase,unsigned int deviceId) {
   // Maximum iteration count
   maxIter = 32768;
 
-  uint * hPtr[numKernels];
-  uint * dPtr[numKernels];
+  uint ** hPtr = new uint *[numKernels];
+  uint ** dPtr = new uint *[numKernels];
 
   // Width is divisible by 4 because the mandelbrot kernel processes 4 pixels at once.
   width_ = 256;
@@ -486,11 +479,6 @@ bool hipPerfMandelBrot::run(unsigned int testCase,unsigned int deviceId) {
   int threads = (bufSize/sizeof(uint));
   int threads_per_block  = 64;
   int blocks = (threads/threads_per_block) + (threads % threads_per_block);
-
-  float xStep = static_cast<float>(coords[coordIdx].width / (double)width_);
-  float yStep = static_cast<float>(-coords[coordIdx].width / (double)width_);
-  float xPos = static_cast<float>(coords[coordIdx].x - 0.5 * coords[coordIdx].width);
-  float yPos = static_cast<float>(coords[coordIdx].y + 0.5 * coords[coordIdx].width);
 
   // Copy memory asynchronously and concurrently from host to device
   for (uint i = 0; i < numKernels; i++) {
@@ -593,6 +581,8 @@ bool hipPerfMandelBrot::run(unsigned int testCase,unsigned int deviceId) {
     HIP_CHECK(hipHostFree(hPtr[i]));
     HIP_CHECK(hipFree(dPtr[i]));
   }
+  delete [] hPtr;
+  delete [] dPtr;
   return true;
 }
 
@@ -632,7 +622,7 @@ TEST_CASE("Perf_hipPerfMandelbrot") {
   SECTION("warm-up kernel default stream executes serially") {
     mandelbrotCompute.setNumStreams(1);
     mandelbrotCompute.setNumKernels(1);
-    REQUIRE(true == mandelbrotCompute.run(100/*Random number*/, deviceId));
+    REQUIRE(true == mandelbrotCompute.run(100/*Random number*/));
   }
   #endif
   SECTION("run all - sync") {
@@ -640,7 +630,7 @@ TEST_CASE("Perf_hipPerfMandelbrot") {
     do {
       mandelbrotCompute.setNumStreams(1);
       mandelbrotCompute.setNumKernels(1);
-      REQUIRE(true == mandelbrotCompute.run(i, deviceId));
+      REQUIRE(true == mandelbrotCompute.run(i));
       i++;
     }while(i < 12);
     mandelbrotCompute.printResults();
@@ -651,7 +641,7 @@ TEST_CASE("Perf_hipPerfMandelbrot") {
     do {
       mandelbrotCompute.setNumStreams(2);
       mandelbrotCompute.setNumKernels(2);
-      REQUIRE(true == mandelbrotCompute.run(i, deviceId));
+      REQUIRE(true == mandelbrotCompute.run(i));
       i++;
     }while(i < 12);
     mandelbrotCompute.printResults();

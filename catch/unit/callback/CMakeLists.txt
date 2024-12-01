@@ -33,6 +33,7 @@ if(UNIX)
                       ${CMAKE_CURRENT_SOURCE_DIR}/SimpleKernel.cc
                       -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/callback/SimpleKernel.code
                       -I${HIP_PATH}/include -I${CMAKE_CURRENT_SOURCE_DIR}/../../include)
+    set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/SimpleKernel.code)
 endif()
 
 hip_add_exe_to_target(NAME CallbackTest

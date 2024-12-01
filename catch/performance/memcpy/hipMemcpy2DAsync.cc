@@ -68,6 +68,7 @@ static void RunBenchmark(size_t width, size_t height, hipMemcpyKind kind, bool e
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
+    if (src_device == -1 && dst_device == -1) { return; }
 
     LinearAllocGuard2D<int> src_allocation(width, height);
     HIP_CHECK(hipSetDevice(dst_device));

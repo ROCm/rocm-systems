@@ -306,3 +306,29 @@ template <typename T> inline bool constexpr isFloat() {
   }
   return false;
 }
+
+template <typename T>
+void getStatics(T* data, size_t N, double& mean, double* deviation = nullptr) {
+  double t = 0;
+  for (size_t i = 0; i < N; i++)
+    t += static_cast<double>(data[i]);
+  mean = t / N;
+  if (!deviation) return;
+  double d = 0;
+  for (size_t i = 0; i < N; i++) {
+    double delta = data[i] - mean;
+    d += delta * delta;
+  }
+  *deviation = sqrt(d / (N - 1));
+}
+
+template <typename T> bool verify(T* data, T* data1, size_t N) {
+  for (size_t i = 0; i < N; i++) {
+    if (!isEqual(data[i], data1[i])) {
+      printf("Difference [ %zu ]:%s ----%s\n", i, getString(data[i]).c_str(),
+        getString(data1[i]).c_str());
+      return false;
+    }
+  }
+  return true;
+}

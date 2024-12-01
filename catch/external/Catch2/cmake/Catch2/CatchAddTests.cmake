@@ -30,115 +30,105 @@ function(add_command NAME)
 endfunction()
 
 
-foreach(TEST_EXECUTABLE ${TEST_EXE_LIST})
-  if(WIN32)
-    set(TEST_EXECUTABLE ${TEST_EXECUTABLE}.exe)
-  endif()
-  get_filename_component(TEST_EXECUTABLE ${TEST_EXECUTABLE} ABSOLUTE)
+if(WIN32)
+  set(TEST_EXECUTABLE ${TEST_EXECUTABLE}.exe)
+endif()
+get_filename_component(TEST_EXECUTABLE ${TEST_EXECUTABLE} ABSOLUTE)
 
-  # Run test executable to get list of available tests
-  if(NOT EXISTS "${TEST_EXECUTABLE}")
-    # exe does not exist moving to the next executable
-    continue()
-  endif()
-  execute_process(
-    COMMAND ${TEST_EXECUTOR} "${TEST_EXECUTABLE}" ${spec} --list-test-names-only
-    OUTPUT_VARIABLE output
-    RESULT_VARIABLE result
-    WORKING_DIRECTORY "${TEST_WORKING_DIR}"
+execute_process(
+  COMMAND ${TEST_EXECUTOR} "${TEST_EXECUTABLE}" ${spec} --list-test-names-only
+  OUTPUT_VARIABLE output
+  RESULT_VARIABLE result
+  WORKING_DIRECTORY "${TEST_WORKING_DIR}"
+)
+# Catch --list-test-names-only reports the number of tests, so 0 is... surprising
+if(${result} EQUAL 0)
+  message(WARNING
+    "Test executable '${TEST_EXECUTABLE}' contains no tests!\n"
   )
-  # Catch --list-test-names-only reports the number of tests, so 0 is... surprising
-  if(${result} EQUAL 0)
-    message(WARNING
-      "Test executable '${TEST_EXECUTABLE}' contains no tests!\n"
-    )
-  elseif(${result} LESS 0)
-    message(FATAL_ERROR
-      "Error running test executable '${TEST_EXECUTABLE}':\n"
-      "  Result: ${result}\n"
-      "  Output: ${output}\n"
-    )
-  endif()
-
-  string(REPLACE "\n" ";" output "${output}")
-
-  # Run test executable to get list of available reporters
-  execute_process(
-    COMMAND ${TEST_EXECUTOR} "${TEST_EXECUTABLE}" ${spec} --list-reporters
-    OUTPUT_VARIABLE reporters_output
-    RESULT_VARIABLE reporters_result
-    WORKING_DIRECTORY "${TEST_WORKING_DIR}"
+elseif(${result} LESS 0)
+  message(FATAL_ERROR
+    "Error running test executable '${TEST_EXECUTABLE}':\n"
+    "  Result: ${result}\n"
+    "  Output: ${output}\n"
   )
-  if(${reporters_result} EQUAL 0)
-    message(WARNING
-      "Test executable '${TEST_EXECUTABLE}' contains no reporters!\n"
-    )
-  elseif(${reporters_result} LESS 0)
-    message(FATAL_ERROR
-      "Error running test executable '${TEST_EXECUTABLE}':\n"
-      "  Result: ${reporters_result}\n"
-      "  Output: ${reporters_output}\n"
-    )
+endif()
+
+string(REPLACE "\n" ";" output "${output}")
+
+# Run test executable to get list of available reporters
+execute_process(
+  COMMAND ${TEST_EXECUTOR} "${TEST_EXECUTABLE}" ${spec} --list-reporters
+  OUTPUT_VARIABLE reporters_output
+  RESULT_VARIABLE reporters_result
+  WORKING_DIRECTORY "${TEST_WORKING_DIR}"
+)
+if(${reporters_result} EQUAL 0)
+  message(WARNING
+    "Test executable '${TEST_EXECUTABLE}' contains no reporters!\n"
+  )
+elseif(${reporters_result} LESS 0)
+  message(FATAL_ERROR
+    "Error running test executable '${TEST_EXECUTABLE}':\n"
+    "  Result: ${reporters_result}\n"
+    "  Output: ${reporters_output}\n"
+  )
+endif()
+string(FIND "${reporters_output}" "${reporter}" reporter_is_valid)
+if(reporter AND ${reporter_is_valid} EQUAL -1)
+  message(FATAL_ERROR
+    "\"${reporter}\" is not a valid reporter!\n"
+  )
+endif()
+
+# Prepare reporter
+if(reporter)
+  set(reporter_arg "--reporter ${reporter}")
+endif()
+
+# Prepare output dir
+if(output_dir AND NOT IS_ABSOLUTE ${output_dir})
+  set(output_dir "${TEST_WORKING_DIR}/${output_dir}")
+  if(NOT EXISTS ${output_dir})
+    file(MAKE_DIRECTORY ${output_dir})
   endif()
-  string(FIND "${reporters_output}" "${reporter}" reporter_is_valid)
-  if(reporter AND ${reporter_is_valid} EQUAL -1)
-    message(FATAL_ERROR
-      "\"${reporter}\" is not a valid reporter!\n"
-    )
+endif()
+
+# Parse output
+foreach(line ${output})
+  set(test ${line})
+  # Escape characters in test case names that would be parsed by Catch2
+  set(test_name ${test})
+  foreach(char , [ ])
+    string(REPLACE ${char} "\\${char}" test_name ${test_name})
+  endforeach(char)
+  # ...add output dir
+  if(output_dir)
+    string(REGEX REPLACE "[^A-Za-z0-9_]" "_" test_name_clean ${test_name})
+    set(output_dir_arg "--out ${output_dir}/${output_prefix}${test_name_clean}${output_suffix}")
   endif()
 
-  # Prepare reporter
-  if(reporter)
-    set(reporter_arg "--reporter ${reporter}")
-  endif()
-
-  # Prepare output dir
-  if(output_dir AND NOT IS_ABSOLUTE ${output_dir})
-    set(output_dir "${TEST_WORKING_DIR}/${output_dir}")
-    if(NOT EXISTS ${output_dir})
-      file(MAKE_DIRECTORY ${output_dir})
-    endif()
-  endif()
-
-  # Parse output
-  foreach(line ${output})
-    set(test ${line})
-    # Escape characters in test case names that would be parsed by Catch2
-    set(test_name ${test})
-    foreach(char , [ ])
-      string(REPLACE ${char} "\\${char}" test_name ${test_name})
-    endforeach(char)
-    # ...add output dir
-    if(output_dir)
-      string(REGEX REPLACE "[^A-Za-z0-9_]" "_" test_name_clean ${test_name})
-      set(output_dir_arg "--out ${output_dir}/${output_prefix}${test_name_clean}${output_suffix}")
-    endif()
-
-    file(RELATIVE_PATH exe_path ${CMAKE_CURRENT_BINARY_DIR} ${TEST_EXECUTABLE})
-
-    # ...and add to script
-    add_command(add_test
-      "${prefix}${test}${suffix}"
-      ${TEST_EXECUTOR}
-      "${exe_path}"
-      "${test_name}"
-      ${extra_args}
-      "${reporter_arg}"
-      "${output_dir_arg}"
-    )
-    add_command(set_tests_properties
-      "${prefix}${test}${suffix}"
-      PROPERTIES
-      ${properties}
-    )
-    list(APPEND tests "${prefix}${test}${suffix}")
-  endforeach()
-
-  # Create a list of all discovered tests, which users may use to e.g. set
-  # properties on the tests
-  add_command(set ${TEST_LIST} ${tests})
-
+  # ...and add to script
+  add_command(add_test
+    "${prefix}${test}${suffix}"
+    ${TEST_EXECUTOR}
+    "${TEST_EXECUTABLE}"
+    "${test_name}"
+    ${extra_args}
+    "${reporter_arg}"
+    "${output_dir_arg}"
+  )
+  add_command(set_tests_properties
+    "${prefix}${test}${suffix}"
+    PROPERTIES
+    ${properties}
+  )
+  list(APPEND tests "${prefix}${test}${suffix}")
 endforeach()
+
+# Create a list of all discovered tests, which users may use to e.g. set
+# properties on the tests
+add_command(set ${TEST_LIST} ${tests})
 
 # Write CTest script
 file(WRITE "${CTEST_FILE}" "${script}")

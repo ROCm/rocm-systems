@@ -30,7 +30,7 @@ set(TEST_SRC
     hipDriverGetVersion.cc
 )
 
-if(HIP_PLATFORM MATCHES "amd")
+if(HIP_PLATFORM MATCHES "amd" AND BUILD_SHARED_LIBS)
   set(AMD_SRC
       hipGetProcAddressDevMgmt.cc)
   set(TEST_SRC ${TEST_SRC} ${AMD_SRC})
@@ -48,10 +48,29 @@ set_source_files_properties(hipGetDeviceCount.cc PROPERTIES COMPILE_FLAGS -std=c
 set_source_files_properties(hipDeviceGetUuid.cc PROPERTIES COMPILE_FLAGS -std=c++17)
 
 add_executable(getDeviceCount EXCLUDE_FROM_ALL getDeviceCount_exe.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS getDeviceCount)
 
+add_executable(chkUUIDFrmChildProc_Exe EXCLUDE_FROM_ALL chkUUIDFrmChildProc_Exe.cc)
+add_executable(chkUUIDInGrandChild_Exe EXCLUDE_FROM_ALL chkUUIDInGrandChild_Exe.cc)
+add_executable(setuuidGetDevCount EXCLUDE_FROM_ALL setuuidGetDevCount_Exe.cc)
+if(UNIX)
+add_executable(getUUIDfrmRocinfo EXCLUDE_FROM_ALL getUUIDfrmRocinfo_Exe.cc)
+add_dependencies(build_tests getUUIDfrmRocinfo)
+endif()
+add_executable(multipleUUID EXCLUDE_FROM_ALL multipleUUID_Exe.cc)
+add_executable(setEnvInChildProc EXCLUDE_FROM_ALL setEnvInChildProc_Exe.cc)
+add_executable(uuidList EXCLUDE_FROM_ALL uuidList.cc)
+#Disabled below two executable due to the defect ticket SWDEV-467665
+if(0)
+add_executable(passUUIDToGrandChild_Exe EXCLUDE_FROM_ALL passUUIDToGrandChild_Exe.cc)
+add_executable(ResetUUIDInChild_Exe EXCLUDE_FROM_ALL ResetUUIDInChild_Exe.cc)
+endif()
 hip_add_exe_to_target(NAME DeviceTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME build_tests
                       COMPILE_OPTIONS -std=c++17)
-
-add_dependencies(build_tests getDeviceCount)
+add_dependencies(build_tests getDeviceCount chkUUIDFrmChildProc_Exe chkUUIDInGrandChild_Exe setuuidGetDevCount multipleUUID setEnvInChildProc uuidList)
+#Disabled below two executable due to the defect ticket SWDEV-467665
+if(0)
+add_dependencies(build_tests passUUIDToGrandChild_Exe ResetUUIDInChild_Exe)
+endif()

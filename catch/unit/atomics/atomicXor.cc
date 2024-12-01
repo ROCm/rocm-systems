@@ -144,11 +144,10 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Adjacent_Addresses", ""
                    unsigned long, unsigned long long) {
   int warp_size = 0;
   HIP_CHECK(hipDeviceGetAttribute(&warp_size, hipDeviceAttributeWarpSize, 0));
-
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Adjacent address " << current) {
       Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          2, warp_size - 1, sizeof(TestType));
+          2, warp_size, sizeof(TestType));
     }
   }
 }
@@ -174,7 +173,7 @@ TEMPLATE_TEST_CASE("Unit_atomicXor_Positive_Multi_Kernel_Scattered_Addresses", "
   for (auto current = 0; current < cmd_options.iterations; ++current) {
     DYNAMIC_SECTION("Scattered address " << current) {
       Bitwise::SingleDeviceMultipleKernelTest<TestType, Bitwise::AtomicOperation::kXor>(
-          2, warp_size - 1, cache_line_size);
+          2, warp_size, cache_line_size);
     }
   }
 }

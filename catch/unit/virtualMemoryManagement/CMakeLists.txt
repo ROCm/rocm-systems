@@ -26,14 +26,15 @@ if(HIP_PLATFORM MATCHES "nvidia")
 set(TEST_SRC
     ${TEST_SRC}
     hipMemMapArrayAsync.cc)
+endif()
 
-if(UNIX) # Disabled on AMD due to defect EXSWHTEC-375
+if(UNIX)
+if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
       ${TEST_SRC}
       hipMemExportToShareableHandle.cc
       hipMemImportFromShareableHandle.cc)
 endif()
-
 endif()
 
 if(HIP_PLATFORM MATCHES "amd")

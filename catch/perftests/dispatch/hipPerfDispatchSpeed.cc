@@ -89,7 +89,7 @@ TEST_CASE("Perf_hipPerfDispatchSpeed") {
   int p_gpuDevice = 0;
   int p_tests = -1;
   hipError_t err = hipSuccess;
-  hipDeviceProp_t props = {0};
+  hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, p_gpuDevice));
 
   unsigned int testListSize = sizeof(testList) / sizeof(testStruct);
@@ -128,69 +128,74 @@ TEST_CASE("Perf_hipPerfDispatchSpeed") {
                           0, hipStream_t(0), srcBuffer);
       err = hipDeviceSynchronize();
       REQUIRE(err == hipSuccess);
-      }
-      auto Start = std::chrono::high_resolution_clock::now();
-      for (unsigned int i = 0; i < testList[openTest].iterations; i++) {
-        HIP_CHECK(hipEventRecord(start, NULL));
-        hipLaunchKernelGGL(_dispatchSpeed, dim3(blocks),
-                        dim3(threads_per_block), 0, hipStream_t(0), srcBuffer);
-        HIP_CHECK(hipEventRecord(stop, NULL));
-        if ((testList[openTest].flushEvery > 0) &&
-          (((i + 1) % testList[openTest].flushEvery) == 0)) {
-            if (sleep) {
-              err = hipDeviceSynchronize();
-              REQUIRE(err == hipSuccess);
-            } else {
-              do {
-                err = hipEventQuery(stop);
-            } while (err == hipErrorNotReady);
-          }
+    }
+
+    // Do a warm up event record and sync
+    HIP_CHECK(hipEventRecord(start, NULL));
+    HIP_CHECK(hipStreamSynchronize(0));
+
+    auto Start = std::chrono::high_resolution_clock::now();
+    for (unsigned int i = 0; i < testList[openTest].iterations; i++) {
+      HIP_CHECK(hipEventRecord(start, NULL));
+      hipLaunchKernelGGL(_dispatchSpeed, dim3(blocks),
+                      dim3(threads_per_block), 0, hipStream_t(0), srcBuffer);
+      HIP_CHECK(hipEventRecord(stop, NULL));
+      if ((testList[openTest].flushEvery > 0) &&
+        (((i + 1) % testList[openTest].flushEvery) == 0)) {
+          if (sleep) {
+            err = hipDeviceSynchronize();
+            REQUIRE(err == hipSuccess);
+          } else {
+            do {
+              err = hipEventQuery(stop);
+          } while (err == hipErrorNotReady);
         }
       }
-      if (sleep) {
-        err = hipDeviceSynchronize();
-        REQUIRE(err == hipSuccess);
-      } else {
-        do {
-          err = hipEventQuery(stop);
-        } while (err == hipErrorNotReady);
-      }
-      auto Stop = std::chrono::high_resolution_clock::now();
-      HIP_CHECK(hipEventDestroy(start));
-      HIP_CHECK(hipEventDestroy(stop));
-      double sec = std::chrono::duration<double, std::milli>(Stop - Start).count();
+    }
+    if (sleep) {
+      err = hipDeviceSynchronize();
+      REQUIRE(err == hipSuccess);
+    } else {
+      do {
+        err = hipEventQuery(stop);
+      } while (err == hipErrorNotReady);
+    }
+    auto Stop = std::chrono::high_resolution_clock::now();
+    HIP_CHECK(hipEventDestroy(start));
+    HIP_CHECK(hipEventDestroy(stop));
+    double sec = std::chrono::duration<double, std::milli>(Stop - Start).count();
 
-      // microseconds per launch
-      double perf = (1000000.f*sec/testList[openTest].iterations);
-      const char *waitType;
-      const char *extraChar;
-      const char *n;
-      const char *warmup;
-      if (sleep) {
-        waitType = "sleep";
-        extraChar = "";
-        n = "";
-      } else {
-        waitType = "spin";
-        n = "n";
-        extraChar = " ";
-      }
-      if (doWarmup) {
-        warmup = "warmup";
-      } else {
-        warmup = "";
-      }
-      char buf[256];
-      if (testList[openTest].flushEvery > 0) {
-        SNPRINTF(buf, sizeof(buf), "HIPPerfDispatchSpeed[%3d] %7d dispatches %s%sing every %5d %6s (us/disp) %3f",
-                 test, testList[openTest].iterations,
-                 waitType, n, testList[openTest].flushEvery, warmup, (float)perf);
-      } else {
-        SNPRINTF(buf, sizeof(buf), "HIPPerfDispatchSpeed[%3d] %7d dispatches (%s%s)              %6s (us/disp) %3f",
-                 test, testList[openTest].iterations,
-                 waitType, extraChar, warmup, (float)perf);
-      }
-      printf("%s\n", buf);
+    // microseconds per launch
+    double perf = (1000000.f*sec/testList[openTest].iterations);
+    const char *waitType;
+    const char *extraChar;
+    const char *n;
+    const char *warmup;
+    if (sleep) {
+      waitType = "sleep";
+      extraChar = "";
+      n = "";
+    } else {
+      waitType = "spin";
+      n = "n";
+      extraChar = " ";
+    }
+    if (doWarmup) {
+      warmup = "warmup";
+    } else {
+      warmup = "";
+    }
+    char buf[256];
+    if (testList[openTest].flushEvery > 0) {
+      SNPRINTF(buf, sizeof(buf), "HIPPerfDispatchSpeed[%3d] %7d dispatches %s%sing every %5d %6s (us/disp) %3f",
+                test, testList[openTest].iterations,
+                waitType, n, testList[openTest].flushEvery, warmup, (float)perf);
+    } else {
+      SNPRINTF(buf, sizeof(buf), "HIPPerfDispatchSpeed[%3d] %7d dispatches (%s%s)              %6s (us/disp) %3f",
+                test, testList[openTest].iterations,
+                waitType, extraChar, warmup, (float)perf);
+    }
+    printf("%s\n", buf);
   }
   HIP_CHECK(hipFree(srcBuffer));
 }

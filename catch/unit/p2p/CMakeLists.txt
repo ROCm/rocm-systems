@@ -16,6 +16,7 @@ endif()
 set_source_files_properties(hipDeviceGetP2PAttribute.cc PROPERTIES COMPILE_FLAGS -std=c++17)
 
 add_executable(hipDeviceGetP2PAttribute_exe EXCLUDE_FROM_ALL hipDeviceGetP2PAttribute_exe.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipDeviceGetP2PAttribute_exe)
 
 hip_add_exe_to_target(NAME p2pTests
                       TEST_SRC ${TEST_SRC}

@@ -230,3 +230,10 @@ THE SOFTWARE.
  * This section describes the virtual memory management types & functions of HIP runtime API.
  * @}
  */
+
+/**
+ * @defgroup ModuleTest Module Functions Management
+ * @{
+ * This section describes the loading of modules from code object files and invocation of different kernels.
+ * @}
+ */

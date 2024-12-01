@@ -252,6 +252,11 @@ bool testhipLinkTypeHopcountDevice(int numDevices) {
   }
   for (auto pos=devicePairList.begin();
        pos != devicePairList.end(); pos++) {
+    int can_access_peer = 0;
+    HIP_CHECK(hipDeviceCanAccessPeer(&can_access_peer, (*pos).device1, (*pos).device2));
+    if (!can_access_peer) {
+      continue;
+    }
     uint32_t linktype1 = 0;
     uint32_t hopcount1 = 0;
     RSMI_IO_LINK_TYPE linktype2 = RSMI_IOLINK_TYPE_UNDEFINED;

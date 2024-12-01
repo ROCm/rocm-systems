@@ -60,7 +60,7 @@ TEST_CASE("Unit_hipMemcpyHtoD_Positive_Basic") {
 }
 
 TEST_CASE("Unit_hipMemcpyHtoD_Positive_Synchronization_Behavior") {
-  MemcpyHtoDSyncBehavior(
+  MemcpyHPageabletoDSyncBehavior(
       [](void* dst, void* src, size_t count) {
         return hipMemcpyHtoD(reinterpret_cast<hipDeviceptr_t>(dst), src, count);
       },

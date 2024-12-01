@@ -152,6 +152,14 @@ class testSizeDerivedDV : testSizeDV {
     int iDDV;
 };
 
+struct refStructSizes {
+  size_t sizeOftestSizeDV;
+  size_t sizeOftestSizeDerivedDV;
+  size_t sizeOftestSizeVirtDer;
+  size_t sizeOftestSizeVirtDerPack;
+  size_t sizeOftestSizeDerMulti;
+};
+
 #pragma pack(push, 1)
 class testSizeP1 {
  public:

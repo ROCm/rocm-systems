@@ -806,6 +806,14 @@ TEST_CASE("Unit_hipMemSetAccess_Vmm2PeerPeerMemCpy") {
       WARN("Machine does not support Peer Access\n");
       break;
     }
+
+    hipMemAccessDesc accessDesc = {};
+    accessDesc.location.type = hipMemLocationTypeDevice;
+    accessDesc.location.id = deviceId;
+    accessDesc.flags = hipMemAccessFlagsProtRead;
+    // Make the address accessible to the rest of the GPUs
+    HIP_CHECK(hipMemSetAccess(ptrA, size_mem, &accessDesc, 1));
+
     HIP_CHECK(hipDeviceGet(&device_other, deviceId));
     HIP_CHECK(hipDeviceGetAttribute(&value, hipDeviceAttributeVirtualMemoryManagementSupported,
                                     device_other));

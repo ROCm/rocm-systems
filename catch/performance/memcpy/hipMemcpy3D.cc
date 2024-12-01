@@ -71,7 +71,8 @@ static void RunBenchmark(const hipExtent extent, hipMemcpyKind kind, bool enable
     // hipMemcpyDeviceToDevice
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-  
+    if (src_device == -1 && dst_device == -1) { return; }
+
     LinearAllocGuard3D<int> src_allocation(extent);
     HIP_CHECK(hipSetDevice(dst_device));
     LinearAllocGuard3D<int> dst_allocation(extent);

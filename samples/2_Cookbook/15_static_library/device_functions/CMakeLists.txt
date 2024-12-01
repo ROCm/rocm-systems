@@ -61,7 +61,7 @@ else()
   target_link_libraries(test_device_static PRIVATE HipDevice)
 endif()
 
-target_link_libraries(test_device_static PRIVATE -fgpu-rdc amdhip64 amd_comgr)
+target_link_libraries(test_device_static PRIVATE -fgpu-rdc hip::amdhip64 amd_comgr)
 
 if(TARGET build_cookbook)
 add_dependencies(build_cookbook HipDevice test_device_static)

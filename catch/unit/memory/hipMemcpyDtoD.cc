@@ -50,48 +50,50 @@ TEMPLATE_TEST_CASE("Unit_hipMemcpyDtoD_Basic", "",
   if (numDevices > 1) {
     int canAccessPeer = 0;
     HIP_CHECK(hipDeviceCanAccessPeer(&canAccessPeer, 0, 1));
+    HIP_CHECK(hipSetDevice(0));
     if (canAccessPeer) {
-      HIP_CHECK(hipSetDevice(0));
-      HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h,
-                                    NUM_ELM, false);
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipMalloc(&X_d, Nbytes));
-      HIP_CHECK(hipMalloc(&Y_d, Nbytes));
-      HIP_CHECK(hipMalloc(&Z_d, Nbytes));
-
-      HIP_CHECK(hipSetDevice(0));
-      HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
-      HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
-                         dim3(1), 0, 0,
-                         static_cast<const TestType *>(A_d),
-                         static_cast<const TestType *>(B_d), C_d, NUM_ELM);
-      HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
-      HIP_CHECK(hipDeviceSynchronize());
-      HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
-
-      HIP_CHECK(hipSetDevice(1));
-      HIP_CHECK(hipMemcpyDtoD((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d,
-                              Nbytes));
-      HIP_CHECK(hipMemcpyDtoD((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d,
-                              Nbytes));
-
-      hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
-                         dim3(1), 0, 0,
-                         static_cast<const TestType*>(X_d),
-                         static_cast<const TestType*>(Y_d), Z_d, NUM_ELM);
-      HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)Z_d, Nbytes));
-      HIP_CHECK(hipDeviceSynchronize());
-      HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
-
-      HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
-      HIP_CHECK(hipFree(X_d));
-      HIP_CHECK(hipFree(Y_d));
-      HIP_CHECK(hipFree(Z_d));
-    } else {
-      SUCCEED("Machine does not seem to have P2P Capabilities");
+      HIP_CHECK(hipDeviceEnablePeerAccess(1, 0));
     }
+    else {
+      INFO("Machine does not have P2P Capabilities");
+    }
+    HipTest::initArrays<TestType>(&A_d, &B_d, &C_d, &A_h, &B_h, &C_h,
+                                  NUM_ELM, false);
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMalloc(&X_d, Nbytes));
+    HIP_CHECK(hipMalloc(&Y_d, Nbytes));
+    HIP_CHECK(hipMalloc(&Z_d, Nbytes));
+
+    HIP_CHECK(hipSetDevice(0));
+    HIP_CHECK(hipMemcpy(A_d, A_h, Nbytes, hipMemcpyHostToDevice));
+    HIP_CHECK(hipMemcpy(B_d, B_h, Nbytes, hipMemcpyHostToDevice));
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
+                        dim3(1), 0, 0,
+                        static_cast<const TestType *>(A_d),
+                        static_cast<const TestType *>(B_d), C_d, NUM_ELM);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpy(C_h, C_d, Nbytes, hipMemcpyDeviceToHost));
+    HIP_CHECK(hipDeviceSynchronize());
+    HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
+
+    HIP_CHECK(hipSetDevice(1));
+    HIP_CHECK(hipMemcpyDtoD((hipDeviceptr_t)X_d, (hipDeviceptr_t)A_d,
+                            Nbytes));
+    HIP_CHECK(hipMemcpyDtoD((hipDeviceptr_t)Y_d, (hipDeviceptr_t)B_d,
+                            Nbytes));
+
+    hipLaunchKernelGGL(HipTest::vectorADD, dim3(1),
+                        dim3(1), 0, 0,
+                        static_cast<const TestType*>(X_d),
+                        static_cast<const TestType*>(Y_d), Z_d, NUM_ELM);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipMemcpyDtoH(C_h, (hipDeviceptr_t)Z_d, Nbytes));
+    HIP_CHECK(hipDeviceSynchronize());
+    HipTest::checkVectorADD<TestType>(A_h, B_h, C_h, NUM_ELM);
+
+    HipTest::freeArrays<TestType>(A_d, B_d, C_d, A_h, B_h, C_h, false);
+    HIP_CHECK(hipFree(X_d));
+    HIP_CHECK(hipFree(Y_d));
+    HIP_CHECK(hipFree(Z_d));
   }
 }

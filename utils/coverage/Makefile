@@ -20,6 +20,7 @@
 
 CC=g++
 CPPFLAGS=-std=c++17
+LDFLAGS=-lstdc++fs
 SRC=mainCoverage.cpp hipAPI.cpp hipAPIGroup.cpp reportGenerators.cpp hipAPICoverageUtils.cpp
 OBJ=generateHipAPICoverage
 
@@ -29,7 +30,7 @@ default_target: all
 all: ${OBJ}
 
 ${OBJ}: ${SRC}
-	@${CC} ${CPPFLAGS} $^ -o ${OBJ}
+	@${CC} ${CPPFLAGS} $^ -o ${OBJ} ${LDFLAGS}
 
 clean:
 	rm -f ${OBJ}

@@ -100,5 +100,11 @@ int main(int argc, char* argv[]) {
             checkHipErrors(hipErrorUnknown);
         }
     }
+
+    checkHipErrors(hipFree(A_d));
+    checkHipErrors(hipFree(C_d));
+    free(A_h);
+    free(C_h);
+
     printf("PASSED!\n");
 }

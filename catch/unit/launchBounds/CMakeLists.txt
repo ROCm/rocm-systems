@@ -36,10 +36,11 @@ endif()
 
 if(UNIX)
 file(GLOB NEGATIVE_TEST_SRC
-     "launch_bounds_compiler_error_kernels.cc"
-      "launch_bounds_parse_error_kernels.cc")
+    "launch_bounds_compiler_error_kernels.cc"
+    "launch_bounds_parse_error_kernels.cc")
 
 file(COPY ${NEGATIVE_TEST_SRC} DESTINATION ${CMAKE_CURRENT_BINARY_DIR}/src)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_SRC_FILES ${NEGATIVE_TEST_SRC})
 
 #if(HIP_PLATFORM MATCHES "nvidia")
 # set(EXPECTED_ERRORS 2)

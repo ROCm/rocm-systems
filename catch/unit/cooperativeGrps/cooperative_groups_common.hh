@@ -23,7 +23,6 @@ THE SOFTWARE.
 #include <hip/hip_cooperative_groups.h>
 
 namespace {
-constexpr size_t kWarpSize = 32;
 constexpr int kMaxGPUs = 8;
 }  // namespace
 
@@ -42,19 +41,6 @@ __device__ inline unsigned int thread_rank_in_grid() {
       (threadIdx.z * blockDim.y + threadIdx.y) * blockDim.x + threadIdx.x;
   return block_rank_in_grid * block_size + thread_rank_in_block;
 }
-
-static __device__ void busy_wait(unsigned long long wait_period) {
-  unsigned long long time_diff = 0;
-  unsigned long long last_clock = clock64();
-  while (time_diff < wait_period) {
-    unsigned long long cur_clock = clock64();
-    if (cur_clock > last_clock) {
-      time_diff += (cur_clock - last_clock);
-    }
-    last_clock = cur_clock;
-  }
-}
-
 
 template <class T> bool CheckDimensions(unsigned int device, T kernel, dim3 blocks, dim3 threads) {
   hipDeviceProp_t props;
@@ -75,4 +61,3 @@ template <class T> bool CheckDimensions(unsigned int device, T kernel, dim3 bloc
 
   return true;
 }
-

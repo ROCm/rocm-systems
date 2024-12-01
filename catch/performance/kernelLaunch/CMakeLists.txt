@@ -28,6 +28,7 @@ set(TEST_SRC
 if(HIP_PLATFORM MATCHES "amd")
     set(TEST_SRC ${TEST_SRC}
         hipExtLaunchKernel.cc
+        hipExtLaunchKernelGGL.cc
     )
 endif()
 

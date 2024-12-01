@@ -31,7 +31,7 @@ THE SOFTWARE.
 template<bool normalizedCoords>
 __global__ void tex1DKernel(float *outputData, hipTextureObject_t textureObject,
                             int width, float offsetX) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   outputData[x] = tex1D<float>(textureObject, normalizedCoords ? (x + offsetX) / width : x + offsetX);
 #endif
@@ -121,6 +121,11 @@ static void runTest(const int width, const float offsetX) {
  */
 TEST_CASE("Unit_hipTextureObj1DCheckModes") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   SECTION("hipAddressModeClamp, hipFilterModePoint, regularCoords") {
     runTest<hipAddressModeClamp, hipFilterModePoint, false>(256, -3);

@@ -187,9 +187,9 @@ __global__ void test_kernel_gfx11(unsigned int* atomic_val, unsigned int* array,
     // reach the atomicInc, but everyone will have only hit the atomic once.
     if (rank == (grid.size() - 1)) {
       long long time_diff = 0;
-      long long last_clock = wall_clock64();
+      long long last_clock = clock_function();
       do {
-        long long cur_clock = wall_clock64();
+        long long cur_clock = clock_function();
         if (cur_clock > last_clock) {
           time_diff += (cur_clock - last_clock);
         }

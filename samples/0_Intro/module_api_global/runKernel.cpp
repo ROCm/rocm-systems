@@ -80,8 +80,8 @@ int main() {
     checkHipErrors(hipModuleGetGlobal((void**)&myDeviceGlobalArray, &myDeviceGlobalArraySize, Module, "myDeviceGlobalArray"));
     for (int i = 0; i < ARRAY_SIZE; i++) {
         myDeviceGlobalArray_h[i] = i * 1000.0f;
-        checkHipErrors(hipMemcpyHtoD(hipDeviceptr_t(myDeviceGlobalArray), &myDeviceGlobalArray_h, myDeviceGlobalArraySize));
     }
+    checkHipErrors(hipMemcpyHtoD(hipDeviceptr_t(myDeviceGlobalArray), &myDeviceGlobalArray_h, myDeviceGlobalArraySize));
 
     struct {
         void* _Ad;

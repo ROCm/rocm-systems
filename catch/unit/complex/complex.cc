@@ -111,11 +111,11 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Unary_Host_Sanity_Positive", "", hipFloa
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Device_Complex_Unary_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<28>(kComplexConj);
-  ComplexTypeRTCWrapper<24>(kComplexReal);
-  ComplexTypeRTCWrapper<24>(kComplexImag);
-  ComplexTypeRTCWrapper<24>(kComplexAbs);
-  ComplexTypeRTCWrapper<24>(kComplexSqabs);
+  ComplexTypeRTCWrapper<42>(kComplexConj);
+  ComplexTypeRTCWrapper<28>(kComplexReal);
+  ComplexTypeRTCWrapper<28>(kComplexImag);
+  ComplexTypeRTCWrapper<28>(kComplexAbs);
+  ComplexTypeRTCWrapper<29>(kComplexSqabs);
 }
 
 /**
@@ -199,10 +199,10 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Binary_Host_Sanity_Positive", "", hipFlo
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Device_Complex_Binary_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<44>(kComplexAdd);
-  ComplexTypeRTCWrapper<44>(kComplexSub);
-  ComplexTypeRTCWrapper<44>(kComplexMul);
-  ComplexTypeRTCWrapper<44>(kComplexDiv);
+  ComplexTypeRTCWrapper<66>(kComplexAdd);
+  ComplexTypeRTCWrapper<66>(kComplexSub);
+  ComplexTypeRTCWrapper<66>(kComplexMul);
+  ComplexTypeRTCWrapper<66>(kComplexDiv);
 }
 
 /**
@@ -276,7 +276,7 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_hipCfma_Host_Sanity_Positive", "", hipFl
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Device_Complex_hipCfma_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<60>(kComplexFma);
+  ComplexTypeRTCWrapper<90>(kComplexFma);
 }
 
 /**
@@ -398,9 +398,9 @@ TEST_CASE("Unit_Device_make_hipComplex_Host_Positive") {
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Device_make_Complex_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<18>(kMakeHipComplex);
-  ComplexTypeRTCWrapper<18>(kMakeHipFloatComplex);
-  ComplexTypeRTCWrapper<18>(kMakeHipDoubleComplex);
+  ComplexTypeRTCWrapper<27>(kMakeHipComplex);
+  ComplexTypeRTCWrapper<27>(kMakeHipFloatComplex);
+  ComplexTypeRTCWrapper<27>(kMakeHipDoubleComplex);
 }
 
 /**
@@ -474,8 +474,8 @@ TEMPLATE_TEST_CASE("Unit_Device_Complex_Cast_Host_Sanity_Positive", "", hipFloat
  *    - HIP_VERSION >= 5.2
  */
 TEST_CASE("Unit_Device_Complex_Cast_Negative_Parameters_RTC") {
-  ComplexTypeRTCWrapper<14>(kComplexDoubleToFloat);
-  ComplexTypeRTCWrapper<14>(kComplexFloatToDouble);
+  ComplexTypeRTCWrapper<21>(kComplexDoubleToFloat);
+  ComplexTypeRTCWrapper<21>(kComplexFloatToDouble);
 }
 
 /**

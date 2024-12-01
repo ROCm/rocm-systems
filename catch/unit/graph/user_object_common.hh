@@ -34,6 +34,7 @@ struct BoxStruct {
 
 class BoxClass {
  public:
+  int count;
   BoxClass() { INFO("Constructor called for Class!\n"); }
   ~BoxClass() { INFO("Destructor called for Class!\n"); }
 };

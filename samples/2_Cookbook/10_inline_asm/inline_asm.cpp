@@ -127,6 +127,9 @@ int main() {
 
     checkHipErrors(hipEventElapsedTime(&eventMs, start, stop));
 
+    checkHipErrors(hipEventDestroy(start));
+    checkHipErrors(hipEventDestroy(stop));
+
     printf("hipMemcpyDeviceToHost time taken  = %6.3fms\n", eventMs);
 
     // CPU MatrixTranspose computation

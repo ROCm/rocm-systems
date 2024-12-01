@@ -16,8 +16,12 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
+
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+
+#include "memcpy2d_tests_common.hh"
+
 /**
  * @addtogroup hipDrvMemcpy2DUnaligned hipDrvMemcpy2DUnaligned
  * @{
@@ -251,4 +255,76 @@ TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_FuncTst") {
     free(srcH);
     free(dstH);
   }
+}
+
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Basic test that copies and verifies copied data
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipDrvMemcpy2DUnaligned.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Basic") {
+  CHECK_IMAGE_SUPPORT
+
+  SECTION("Device to Device") {
+    SECTION("Peer access enabled") {
+      Memcpy2DDeviceToDeviceShell<false, true, true>(DrvMemcpy2DUnalignedAdapter());
+    }
+  }
+
+  SECTION("Host to Device") {
+    Memcpy2DHostToDeviceShell<false, true>(DrvMemcpy2DUnalignedAdapter());
+  }
+
+  SECTION("Device to Host") {
+    Memcpy2DDeviceToHostShell<false, true>(DrvMemcpy2DUnalignedAdapter());
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Basic test that verifies synchronization behaviour
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipDrvMemcpy2DUnaligned.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Synchronization_Behavior") {
+  CHECK_IMAGE_SUPPORT
+
+  HIP_CHECK(hipDeviceSynchronize());
+
+  SECTION("Host to Device") { Memcpy2DHtoDSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true); }
+
+  SECTION("Device to Pinned Host") {
+    Memcpy2DDtoHPinnedSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true);
+  }
+
+  SECTION("Device to Pageable Host") {
+    Memcpy2DDtoHPageableSyncBehavior<true>(DrvMemcpy2DUnalignedAdapter(), true);
+  }
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *  - Basic test that copies and verifies copied data with zero width or height.
+ * Test source
+ * ------------------------
+ *  - unit/memory/hipDrvMemcpy2DUnaligned.cc
+ * Test requirements
+ * ------------------------
+ *  - HIP_VERSION >= 6.0
+ */
+TEST_CASE("Unit_hipDrvMemcpy2DUnaligned_Positive_Parameters") {
+  Memcpy2DZeroWidthHeight<false, true>(DrvMemcpy2DUnalignedAdapter());
 }

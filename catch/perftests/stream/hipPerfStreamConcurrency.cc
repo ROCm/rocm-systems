@@ -225,7 +225,7 @@ bool hipPerfStreamConcurrency::open(int deviceId) {
   }
 
   HIP_CHECK(hipSetDevice(deviceId));
-  hipDeviceProp_t props = {0};
+  hipDeviceProp_t props;
   HIP_CHECK(hipGetDeviceProperties(&props, deviceId));
   std::cout << "info: running on bus " << "0x" << props.pciBusID
     << " " << props.name << " with " << props.multiProcessorCount << " CUs"
@@ -250,12 +250,12 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase,
 
   // Maximum iteration count
   // maxIter = 8388608 * (engine_clock / 1000).serial execution
-  maxIter = (unsigned int)(((8388608 * (static_cast<float>clkFrequency / 1000))
+  maxIter = (unsigned int)(((8388608 * (static_cast<float>(clkFrequency) / 1000))
                                                         * numCUs) / 128);
   maxIter = (maxIter + 15) & ~15;
-  hipStream_t streams[numStreams];
-  uint * hPtr[numKernels];
-  uint * dPtr[numKernels];
+  hipStream_t *streams = new hipStream_t[numStreams];
+  uint ** hPtr = new uint*[numKernels];
+  uint ** dPtr = new uint*[numKernels];
 
   // Width is divisible by 4 because the mandelbrot kernel
   // processes 4 pixels at once.
@@ -327,9 +327,6 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase,
   << numStreams <<" stream (s): " << all_kernel_time.count() << std::endl;
   }
 
-  unsigned long long expected =
-    (unsigned long long)width_ * (unsigned long long)maxIter;
-
   for (uint i = 0 ; i < numStreams; i++) {
     HIP_CHECK(hipStreamDestroy(streams[i]));
   }
@@ -339,6 +336,10 @@ bool hipPerfStreamConcurrency::run(unsigned int testCase,
     HIP_CHECK(hipHostFree(hPtr[i]));
     HIP_CHECK(hipFree(dPtr[i]));
   }
+
+  delete [] streams;
+  delete [] hPtr;
+  delete [] dPtr;
   return true;
 }
 

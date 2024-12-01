@@ -244,8 +244,7 @@ TEST_CASE("Perf_hipPerfDotProduct") {
   if (nGpu < 1) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
   }
-  hipDeviceProp_t props = {0};
-  props = {0};
+  hipDeviceProp_t props;
   HIP_CHECK(hipSetDevice(p_gpuDevice));
   HIP_CHECK(hipGetDeviceProperties(&props, p_gpuDevice));
   int nx, ny, nz;
@@ -286,8 +285,8 @@ TEST_CASE("Perf_hipPerfDotProduct") {
   srand(time(NULL));
 
   for (int i = 0; i < size; ++i) {
-    hx[i] = 2.0 * static_cast<double>rand() / static_cast<double>RAND_MAX - 1.0;
-    hy[i] = 2.0 * static_cast<double>rand() / static_cast<double>RAND_MAX - 1.0;
+    hx[i] = 2.0 * static_cast<double>(rand()) / static_cast<double>(RAND_MAX) - 1.0;
+    hy[i] = 2.0 * static_cast<double>(rand()) / static_cast<double>(RAND_MAX) - 1.0;
 
     hresult_xy += hx[i] * hy[i];
     hresult_xx += hx[i] * hx[i];

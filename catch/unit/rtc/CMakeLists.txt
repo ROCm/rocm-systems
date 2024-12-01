@@ -36,6 +36,10 @@ add_custom_target(copyRtcHeaders ALL
   ${CMAKE_CURRENT_SOURCE_DIR}/headers
   ${CMAKE_CURRENT_BINARY_DIR}/headers)
 
+file(GLOB INSTALL_HEADER_FILES "./headers/*")
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_HEADER_FILES ${INSTALL_HEADER_FILES})
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS ${CMAKE_CURRENT_BINARY_DIR}/saxpy.h)
+
 if(UNIX)
    set(AMD_TEST_SRC ${AMD_TEST_SRC}
        RtcFunctions.cpp
@@ -57,6 +61,8 @@ elseif(HIP_PLATFORM MATCHES "amd")
 endif()
 
 add_executable(ChkPtrdiff_t_Exe EXCLUDE_FROM_ALL ChkPtrdiff_t_Exe.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS ChkPtrdiff_t_Exe)
+
 if(HIP_PLATFORM MATCHES "nvidia")
   target_link_libraries(ChkPtrdiff_t_Exe nvrtc)
 elseif(HIP_PLATFORM MATCHES "amd")

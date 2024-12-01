@@ -145,6 +145,7 @@ void Memcpy3DDeviceToHostShell(F memcpy_func, const hipStream_t kernel_stream = 
                                       device_alloc.width_logical(), device_alloc.height(),
                                       device_alloc.depth());
   HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(memcpy_func(
       make_hipPitchedPtr(host_alloc.ptr(), host_pitch, device_alloc.width(), device_alloc.height()),
@@ -194,7 +195,7 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
   }
 
   LinearAllocGuard3D<int> src_alloc(extent);
-  HIP_CHECK(hipSetDevice(src_device));
+  HIP_CHECK(hipSetDevice(dst_device));
   LinearAllocGuard3D<int> dst_alloc(extent);
   HIP_CHECK(hipSetDevice(src_device));
   LinearAllocGuard<int> host_alloc(LinearAllocs::hipHostMalloc,
@@ -205,10 +206,11 @@ void Memcpy3DDeviceToDeviceShell(F memcpy_func, hipStream_t kernel_stream = null
                     dst_alloc.height() / threads_per_block.y + 1, dst_alloc.depth());
   // Using dst_alloc width and height to set only the elements that will be copied over to
   // dst_alloc
-  Iota<<<blocks, threads_per_block, 0, kernel_stream>>>(src_alloc.ptr(), src_alloc.pitch(),
-                                                        dst_alloc.width_logical(),
-                                                        dst_alloc.height(), dst_alloc.depth());
+  Iota<<<blocks, threads_per_block>>>(src_alloc.ptr(), src_alloc.pitch(),
+                                      dst_alloc.width_logical(),
+                                      dst_alloc.height(), dst_alloc.depth());
   HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
 
   HIP_CHECK(memcpy_func(dst_alloc.pitched_ptr(), make_hipPos(0, 0, 0), src_alloc.pitched_ptr(),
                         make_hipPos(0, 0, 0), dst_alloc.extent(), kind, kernel_stream));
@@ -375,6 +377,7 @@ void Memcpy3DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_stream = n
                                       src_device.width_logical(), src_device.height(),
                                       src_device.depth());
   HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
 
   // Device -> Array
   HIP_CHECK(memcpy_func(src_array.ptr(), make_hipPos(0, 0, 0), src_device.pitched_ptr(),
@@ -848,6 +851,7 @@ void DrvMemcpy3DArrayDeviceShell(F memcpy_func, const hipStream_t kernel_stream 
                                       src_device.width_logical(), src_device.height(),
                                       src_device.depth());
   HIP_CHECK(hipGetLastError());
+  HIP_CHECK(hipDeviceSynchronize());
 
   // Device -> Array
   HIP_CHECK(memcpy_func(src_array.ptr(), make_hipPos(0, 0, 0), src_device.pitched_ptr(),

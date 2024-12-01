@@ -5,9 +5,9 @@ get_filename_component(_cmake_path cmake ABSOLUTE)
 execute_process(
 COMMAND "${_cmake_path}"
         -D "TEST_TARGET=${TARGET}"
-        -D "TEST_EXE_LIST=${exc_names}"
+        -D "TEST_EXECUTABLE=${_TARGET_EXECUTABLE}"
         -D "TEST_EXECUTOR=${crosscompiling_emulator}"
-        -D "TEST_WORKING_DIR=${_workdir}"
+        -D "TEST_WORKING_DIR=${_WORKING_DIRECTORY}"
         -D "TEST_SPEC=${_TEST_SPEC}"
         -D "TEST_EXTRA_ARGS=${_EXTRA_ARGS}"
         -D "TEST_PROPERTIES=${_PROPERTIES}"

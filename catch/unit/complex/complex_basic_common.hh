@@ -83,7 +83,13 @@ template <int expected_errors_num> void ComplexTypeRTCWrapper(const char* progra
   const char* options[] = {args.c_str()};
   hiprtcResult result{hiprtcCompileProgram(program, 1, options)};
 #else
-  hiprtcResult result{hiprtcCompileProgram(program, 0, nullptr)};
+  // read from CMakeLists.txt file add_definitions
+  std::string hip_path = HIP_PATH;
+  // nvcc errors if headers with relative paths are included
+  std::string opts_pre = "--pre-include="+ hip_path + "/include/hip/nvidia_detail/nvidia_hip_complex.h";
+  std::string opts_pos = "--include-path=/usr/local/cuda/include";
+  const char* options[] = {"-default-device" , opts_pre.c_str(), opts_pos.c_str()};
+  hiprtcResult result{hiprtcCompileProgram(program, 3, options)};
 #endif
 
   size_t log_size{};

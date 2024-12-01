@@ -24,7 +24,7 @@ THE SOFTWARE.
 #define offset 3
 
 static __global__ void tex1dKernel(float *val, hipTextureObject_t obj) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int k = blockIdx.x * blockDim.x + threadIdx.x;
   if (k < (N - offset))
       val[k] = tex1Dfetch<float>(obj, k+offset);
@@ -109,6 +109,11 @@ static void runTest(hipTextureAddressMode addressMode,
 
 TEST_CASE("Unit_tex1Dfetch_CheckModes") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   SECTION("hipAddressModeClamp AND hipFilterModePoint") {
     runTest(hipAddressModeClamp, hipFilterModePoint);

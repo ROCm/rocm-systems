@@ -18,6 +18,7 @@ THE SOFTWARE.
 */
 
 #include "cooperative_groups_common.hh"
+#include "cg_common_kernels.hh"
 
 #include <bitset>
 #include <array>

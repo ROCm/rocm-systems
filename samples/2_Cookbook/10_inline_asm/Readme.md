@@ -43,6 +43,8 @@ Index for the respective operand in the ordered fashion is provided by `%` follo
 `"v"` is the constraint code (for target-specific AMDGPU) for 32-bit VGPR register, for more info please refer - [Supported Constraint Code List for AMDGPU](https://llvm.org/docs/LangRef.html#supported-constraint-code-list)
 Output Constraints are specified by an `"="` prefix as shown above ("=v"). This indicate that assemby will write to this operand, and the operand will then be made available as a return value of the asm expression. Input constraints do not have a prefix - just the constraint code. The constraint string of `"0"` says to use the assigned register for output as an input as well (it being the 0'th constraint).
 
+Please note, there are usage limitations in ROCm compiler for inline asm support, please refer to [Inline ASM statements](https://rocm.docs.amd.com/projects/llvm-project/en/latest/reference/rocmcc.html#inline-asm-statements) for details.
+
 ## How to build and run:
 - Build the sample using cmake
 ```

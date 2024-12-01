@@ -185,8 +185,8 @@ void hipPerfSampleRate::run(unsigned int test) {
   void ** dPtr;
   void *  hOutPtr;
   void *  dOutPtr;
-  void *  hInPtr[numBufs_];
-  void *  dInPtr[numBufs_];
+  void ** hInPtr = new void *[numBufs_];
+  void ** dInPtr = new void *[numBufs_];
 
   outBufSize_ =
       sizes[NUM_SIZES - 1] * sizes[NUM_SIZES - 1] * typeSizes[NUM_TYPES - 1];
@@ -265,6 +265,8 @@ void hipPerfSampleRate::run(unsigned int test) {
   }
   HIP_CHECK(hipHostFree(hOutPtr));
   HIP_CHECK(hipFree(dPtr));
+  delete [] hInPtr;
+  delete [] dInPtr;
 }
 
 

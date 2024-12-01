@@ -380,8 +380,9 @@ TEST_CASE("Unit_hipGraphAddKernelNode_moduleLoadKernelFn_childGraph") {
   nodeDependencies.push_back(memcpyh2d2);
   // Add child graph node
   HIP_CHECK(hipGraphAddChildGraphNode(&childGraphNode, graph,
-                                      nullptr,
-                                      0, childgraph));
+                                      nodeDependencies.data(),
+                                      nodeDependencies.size(), childgraph));
+  nodeDependencies.clear();
   nodeDependencies.push_back(childGraphNode);
 
   // Add MemCpy nodes D2H

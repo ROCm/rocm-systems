@@ -51,7 +51,8 @@ static void RunBenchmark(LinearAllocs dst_allocation_type, LinearAllocs src_allo
   } else {
     int src_device = std::get<0>(GetDeviceIds(enable_peer_access));
     int dst_device = std::get<1>(GetDeviceIds(enable_peer_access));
-  
+    if (src_device == -1 && dst_device == -1) { return; }
+
     LinearAllocGuard<int> src_allocation(src_allocation_type, size);
     HIP_CHECK(hipSetDevice(dst_device));
     LinearAllocGuard<int> dst_allocation(dst_allocation_type, size);

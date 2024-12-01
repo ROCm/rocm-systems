@@ -38,13 +38,13 @@ THE SOFTWARE.
 #define SNPRINTF snprintf
 #endif
 
-#define NUM_SIZES 9
+#define NUM_SIZES 11
 //4KB, 8KB, 64KB, 256KB, 1 MB, 4MB, 16 MB, 16MB+10
-static const unsigned int Sizes[NUM_SIZES] = {4096, 8192, 65536, 262144, 524288, 1048576, 4194304, 16777216, 16777216+10};
+static const unsigned int Sizes[NUM_SIZES] = {8, 64, 1024, 8192, 65536, 262144, 524288, 1048576, 4194304, 16777216, 16777216+10};
 
 static const unsigned int Iterations[2] = {1, 1000};
 
-#define BUF_TYPES 4
+#define BUF_TYPES 5
 //  16 ways to combine 4 different buffer types
 #define NUM_SUBTESTS (BUF_TYPES*BUF_TYPES)
 
@@ -90,6 +90,7 @@ int main(int argc, char* argv[]) {
     printf("Set device to %d : %s\n", p_gpuDevice, props.name);
     printf("Legend: unp - unpinned(malloc), hM - hipMalloc(device)\n");
     printf("        hHR - hipHostRegister(pinned), hHM - hipHostMalloc(prePinned)\n");
+    printf("        hMUC - hipMallocUncached\n");
     err = hipSetDevice(p_gpuDevice);
     CHECK_RESULT(err != hipSuccess, "hipSetDevice failed" );
 
@@ -97,6 +98,7 @@ int main(int argc, char* argv[]) {
     bool hostMalloc[2] = {false};
     bool hostRegister[2] = {false};
     bool unpinnedMalloc[2] = {false};
+    bool deviceMallocUncached[2] = {false};
     unsigned int numIter;
     void *memptr[2] = {NULL};
     void *alignedmemptr[2] = {NULL};
@@ -114,89 +116,79 @@ int main(int argc, char* argv[]) {
         hostMalloc[0] = hostMalloc[1] = false;
         hostRegister[0] = hostRegister[1] = false;
         unpinnedMalloc[0] = unpinnedMalloc[1] = false;
+        deviceMallocUncached[0] = deviceMallocUncached[1] = false;
         srcBuffer = dstBuffer = 0;
         memptr[0] = memptr[1] = NULL;
         alignedmemptr[0] = alignedmemptr[1] = NULL;
 
-        if (srcTest == 3)
-        {
+        if (srcTest == 4) {
+            deviceMallocUncached[0] = true;
+        } else if (srcTest == 3) {
             hostRegister[0] = true;
-        }
-        else if (srcTest == 2)
-        {
+        } else if (srcTest == 2) {
             hostMalloc[0] = true;
-        }
-        else if (srcTest == 1)
-        {
+        } else if (srcTest == 1) {
             unpinnedMalloc[0] = true;
         }
 
-        if (dstTest == 1)
-        {
+
+        if (dstTest == 1) {
             unpinnedMalloc[1] = true;
-        }
-        else if (dstTest == 2)
-        {
+        } else if (dstTest == 2) {
             hostMalloc[1] = true;
-        }
-        else if (dstTest == 3)
-        {
+        } else if (dstTest == 3) {
             hostRegister[1] = true;
+        } else if (dstTest == 4) {
+            deviceMallocUncached[1] = true;
         }
 
         numIter = Iterations[test / (NUM_SIZES * NUM_SUBTESTS)];
 
-        if (hostMalloc[0])
-        {
+        if (hostMalloc[0]) {
             err = hipHostMalloc((void**)&srcBuffer, bufSize_, 0);
             setData(srcBuffer, bufSize_, 0xd0);
             CHECK_RESULT(err != hipSuccess, "hipHostMalloc failed");
-        }
-        else if (hostRegister[0])
-        {
+        } else if (hostRegister[0]) {
             memptr[0] = malloc(bufSize_ + 4096);
             alignedmemptr[0] = (void*)(((size_t)memptr[0] + 4095) & ~4095);
             srcBuffer = alignedmemptr[0];
             setData(srcBuffer, bufSize_, 0xd0);
             err = hipHostRegister(srcBuffer, bufSize_, 0);
             CHECK_RESULT(err != hipSuccess, "hipHostRegister failed");
-        }
-        else if (unpinnedMalloc[0])
-        {
+        } else if (unpinnedMalloc[0]) {
             memptr[0] = malloc(bufSize_ + 4096);
             alignedmemptr[0] = (void*)(((size_t)memptr[0] + 4095) & ~4095);
             srcBuffer = alignedmemptr[0];
             setData(srcBuffer, bufSize_, 0xd0);
-        }
-        else
-        {
+        } else if (deviceMallocUncached[0]) {
+            err = hipExtMallocWithFlags(&srcBuffer, bufSize_, hipDeviceMallocUncached);
+            CHECK_RESULT(err != hipSuccess, "hipExtMallocWithFlags failed");
+            err = hipMemset(srcBuffer, 0xd0, bufSize_);
+            CHECK_RESULT(err != hipSuccess, "hipMemset failed")
+        } else {
             err = hipMalloc(&srcBuffer, bufSize_);
             CHECK_RESULT(err != hipSuccess, "hipMalloc failed");
             err = hipMemset(srcBuffer, 0xd0, bufSize_);
             CHECK_RESULT(err != hipSuccess, "hipMemset failed");
         }
 
-        if (hostMalloc[1])
-        {
+        if (hostMalloc[1]) {
             err = hipHostMalloc((void**)&dstBuffer, bufSize_, 0);
             CHECK_RESULT(err != hipSuccess, "hipHostMalloc failed");
-        }
-        else if (hostRegister[1])
-        {
+        } else if (hostRegister[1]) {
             memptr[1] = malloc(bufSize_ + 4096);
             alignedmemptr[1] = (void*)(((size_t)memptr[1] + 4095) & ~4095);
             dstBuffer = alignedmemptr[1];
             err = hipHostRegister(dstBuffer, bufSize_, 0);
             CHECK_RESULT(err != hipSuccess, "hipHostRegister failed");
-        }
-        else if (unpinnedMalloc[1])
-        {
+        } else if (unpinnedMalloc[1]) {
             memptr[1] = malloc(bufSize_ + 4096);
             alignedmemptr[1] = (void*)(((size_t)memptr[1] + 4095) & ~4095);
             dstBuffer = alignedmemptr[1];
-        }
-        else
-        {
+        } else if (deviceMallocUncached[1]) {
+            err = hipExtMallocWithFlags(&dstBuffer, bufSize_, hipDeviceMallocUncached);
+            CHECK_RESULT(err != hipSuccess, "hipExtMallocWithFlags failed");
+        } else {
             err = hipMalloc(&dstBuffer, bufSize_);
             CHECK_RESULT(err != hipSuccess, "hipMalloc failed");
         }
@@ -230,6 +222,8 @@ int main(int argc, char* argv[]) {
             strSrc = "hHR";
         else if (unpinnedMalloc[0])
             strSrc = "unp";
+        else if (deviceMallocUncached[0])
+            strSrc = "hMUC";
         else
             strSrc = "hM";
 
@@ -239,6 +233,8 @@ int main(int argc, char* argv[]) {
             strDst = "hHR";
         else if (unpinnedMalloc[1])
             strDst = "unp";
+        else if (deviceMallocUncached[1])
+            strDst = "hMUC";
         else
             strDst = "hM";
         // Double results when src and dst are both on device
@@ -264,40 +260,26 @@ int main(int argc, char* argv[]) {
         free(temp);
 
         //Free src
-        if (hostMalloc[0])
-        {
+        if (hostMalloc[0]) {
             hipHostFree(srcBuffer);
-        }
-        else if (hostRegister[0])
-        {
+        } else if (hostRegister[0]) {
             hipHostUnregister(srcBuffer);
             free(memptr[0]);
-        }
-        else if (unpinnedMalloc[0])
-        {
+        } else if (unpinnedMalloc[0]) {
             free(memptr[0]);
-        }
-        else
-        {
+        } else {
             hipFree(srcBuffer);
         }
 
         //Free dst
-        if (hostMalloc[1])
-        {
+        if (hostMalloc[1]) {
             hipHostFree(dstBuffer);
-        }
-        else if (hostRegister[1])
-        {
+        } else if (hostRegister[1]) {
             hipHostUnregister(dstBuffer);
             free(memptr[1]);
-        }
-        else if (unpinnedMalloc[1])
-        {
+        } else if (unpinnedMalloc[1]) {
             free(memptr[1]);
-        }
-        else
-        {
+        } else {
             hipFree(dstBuffer);
         }
     }

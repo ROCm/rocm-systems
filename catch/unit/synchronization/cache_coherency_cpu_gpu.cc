@@ -21,8 +21,6 @@ THE SOFTWARE.
 #include <hip_test_kernels.hh>
 #include <hip_test_common.hh>
 
-typedef _Atomic(unsigned int) atomic_uint;
-
 // Helper function to spin on address until address equals value.
 // If the address holds the value of -1, abort because the other thread failed.
 __device__ int
@@ -32,10 +30,10 @@ gpu_spin_loop_or_abort_on_negative_one(unsigned int* address,
   bool check = false;
   do {
     compare = value;
-    check = __opencl_atomic_compare_exchange_strong(
-      reinterpret_cast<atomic_uint*>(address), /*expected=*/ &compare,
+    check = __hip_atomic_compare_exchange_strong(
+       address, /*expected=*/ &compare,
        /*desired=*/ value, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE,
-      /*scope=*/ __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES);
+       /*scope=*/ __HIP_MEMORY_SCOPE_SYSTEM);
     if (compare == -1)
       return -1;
   } while (!check);
@@ -51,8 +49,8 @@ gpu_kernel(int *A, int *B, int *X, int *Y, size_t N,
     // Store data into A, system fence, and atomically mark flag.
     // This guarantees this global write is visible by device 1.
     A[i] = X[i];
-    __opencl_atomic_fetch_add(reinterpret_cast<atomic_uint*>(AA1), 1,
-                      __ATOMIC_RELEASE, __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES);
+    __hip_atomic_fetch_add(AA1, 1,
+                      __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
     // Wait on device 1's global write to B.
     if (gpu_spin_loop_or_abort_on_negative_one(BA1, i+1) == -1) {
       *dresult = -1;
@@ -65,13 +63,13 @@ gpu_kernel(int *A, int *B, int *X, int *Y, size_t N,
       // If the data does not match, alert other thread and abort.
       printf("FAIL: at i=%zu, B[i]=%d, which does not match Y[i]=%d.\n",
              i, B[i], Y[i]);
-      __opencl_atomic_exchange(reinterpret_cast<atomic_uint*>(AA2), -1,
-                    __ATOMIC_RELEASE, __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES);
+      __hip_atomic_exchange(AA2, -1,
+                    __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
       *dresult = -1;
     }
     // Otherwise tell the other thread to continue.
-    __opencl_atomic_fetch_add(reinterpret_cast<atomic_uint*>(AA2), 1,
-                    __ATOMIC_RELEASE, __OPENCL_MEMORY_SCOPE_ALL_SVM_DEVICES);
+    __hip_atomic_fetch_add(AA2, 1,
+                    __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_SYSTEM);
     // Wait on kernel gpu_cache1 to finish checking X is stored in A.
     if (gpu_spin_loop_or_abort_on_negative_one(BA2, i+1) == -1) {
       *dresult = -1;
@@ -130,29 +128,38 @@ cpu_thread(int *A, int *B, int *X, int *Y, size_t N,
 static bool cpu_to_gpu_coherency() {
   int *A_d, *B_d, *X_d, *Y_d;
   int *A_res, *A_h, *B_h, *X_h, *Y_h;
-  unsigned int hresult, dresult;
+  unsigned int hresult = 0;
+  unsigned int *dresult = nullptr;
   size_t N = 1024;
   size_t Nbytes = N * sizeof(int);
   int numDevices = 0;
+  int deviceFineGrain = 0;
 
   HIP_CHECK(hipGetDeviceCount(&numDevices));
   if (numDevices < 1) {
     HipTest::HIP_SKIP_TEST("Skipping because devices < 1");
-    return 0;
-  }
-
-  // Skip this test if feature is not supported.
-  static int device0 = 0;
-  hipDeviceProp_t props;
-  HIP_CHECK(hipGetDeviceProperties(&props, device0));
-  if (strncmp(props.gcnArchName, "gfx90a", 6) != 0 &&
-      strncmp(props.gcnArchName, "gfx940", 6) != 0) {
-    printf("info: skipping test on devices other than gfx90a and gfx940.\n");
     return true;
   }
 
+  SECTION("With device fine grained buffer") {
+    HIP_CHECK(hipDeviceGetAttribute(&deviceFineGrain, hipDeviceAttributeFineGrainSupport, 0));
+    if (deviceFineGrain == 0) {
+      HipTest::HIP_SKIP_TEST("The test skipped due to deviceFineGrain = 0");
+      return true;
+    }
+    fprintf(stderr, "info: allocate device mem (%zu bytes) on device 0\n", Nbytes);
+    HIP_CHECK(hipExtMallocWithFlags(reinterpret_cast<void**>(&A_d),
+                                              Nbytes, hipDeviceMallocFinegrained));
+  }
+  SECTION("With host(SVM) fine grained buffer") {
+    HIP_CHECK(hipHostMalloc(&A_d, Nbytes));
+  }
+  A_h = A_d;
+
+  HIP_CHECK(hipHostMalloc(&dresult, sizeof(unsigned int)));
+  *dresult = 0;
   // Allocate Host Side Memory. Coherent Fine-grained Memory for array B.
-  printf("info: allocate host mem (%6.2f MB)\n", 2*Nbytes/1024.0/1024.0);
+  fprintf(stderr, "info: allocate host mem (%zu bytes)\n", Nbytes);
   HIP_CHECK(hipHostMalloc(&B_h, Nbytes,
                          (hipHostMallocCoherent | hipHostMallocMapped)));
   HIP_CHECK(hipHostGetDevicePointer(reinterpret_cast<void**>(&B_d), B_h, 0));
@@ -188,18 +195,10 @@ static bool cpu_to_gpu_coherency() {
   *BA2_h = 0;
 
   // Skip the first stream, ensure stream is non-blocking.
-  hipStream_t stream[2];
-  HIP_CHECK(hipStreamCreate(&stream[0]));
+  hipStream_t stream;
   HIP_CHECK(hipSetDevice(0));
-  HIP_CHECK(hipStreamCreateWithFlags(&stream[1], hipStreamNonBlocking));
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
 
-  // Allocate Device Side Memory. Coherent Fine-grained Memory for array A.
-  printf("info: allocate device 0 mem (%6.2f MB)\n", 2*Nbytes/1024.0/1024.0);
-  hipError_t status = hipExtMallocWithFlags(reinterpret_cast<void**>(&A_d),
-                                           Nbytes, hipDeviceMallocFinegrained);
-  REQUIRE(status == hipSuccess);
-  // SVM memory - host pointer is the same as device pointer to array A.
-  A_h = A_d;
   HIP_CHECK(hipMalloc(&X_d, Nbytes));
   HIP_CHECK(hipMalloc(&Y_d, Nbytes));
 
@@ -210,21 +209,21 @@ static bool cpu_to_gpu_coherency() {
   const unsigned blocks = 1;
   const unsigned threadsPerBlock = 1;
   hipLaunchKernelGGL(gpu_kernel, dim3(blocks), dim3(threadsPerBlock),
-                     0, stream[1],
+                     0, stream,
                      A_d, B_d, X_d, Y_d, N,
-                     AA1_d, AA2_d, BA1_d, BA2_d, &dresult);
+                     AA1_d, AA2_d, BA1_d, BA2_d, dresult);
   // Check if launch failed.
   HIP_CHECK(hipGetLastError());
-  REQUIRE(dresult == 0);
 
   // Do not sync the launched stream, instead run the cpu_thread.
   std::thread host_thread(cpu_thread,
                           A_h, B_h, X_h, Y_h, N,
                           AA1_h, AA2_h, BA1_h, BA2_h, &hresult);
-  host_thread.detach();
-  REQUIRE(hresult == 0);
   // Wait for Device side to finish.
-  HIP_CHECK(hipStreamSynchronize(stream[1]));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  host_thread.join();
+  REQUIRE(*dresult == 0);
+  REQUIRE(hresult == 0);
 
   // Evaluate the resultant arrays A and B.
   A_res = reinterpret_cast<int*>(malloc(Nbytes));
@@ -237,7 +236,11 @@ static bool cpu_to_gpu_coherency() {
   }
 
   // Free all the device and host memory allocated.
-  HIP_CHECK(hipFree(A_d));
+  if (deviceFineGrain) {
+    HIP_CHECK(hipFree(A_d));
+  } else {
+    HIP_CHECK(hipHostFree(A_d));
+  }
   HIP_CHECK(hipFree(X_d));
   HIP_CHECK(hipFree(Y_d));
   HIP_CHECK(hipHostFree(AA1_h));
@@ -245,10 +248,11 @@ static bool cpu_to_gpu_coherency() {
   HIP_CHECK(hipHostFree(BA1_h));
   HIP_CHECK(hipHostFree(BA2_h));
   HIP_CHECK(hipHostFree(B_h));
+  HIP_CHECK(hipHostFree(dresult));
   free(X_h);
   free(Y_h);
   free(A_res);
-
+  HIP_CHECK(hipStreamDestroy(stream));
   return true;
 }
 

@@ -33,7 +33,7 @@ constexpr size_t ChannelToRead = 1;
 template <typename T>
 __global__ void readFromTexture(T* output, hipTextureObject_t texObj, size_t width, size_t height,
                                 bool textureGather) {
-  #if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   // Calculate normalized texture coordinates
   const unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   const unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -50,7 +50,7 @@ __global__ void readFromTexture(T* output, hipTextureObject_t texObj, size_t wid
       output[y * width + x] = tex2D<T>(texObj, u, v);
     }
   }
-  #endif
+#endif
 }
 
 template <typename T> void checkDataIsAscending(const std::vector<T>& hostData) {

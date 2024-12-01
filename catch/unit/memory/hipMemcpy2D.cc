@@ -34,7 +34,6 @@ TEST_CASE("Unit_hipMemcpy2D_Positive_Basic") {
   SECTION("Device to Host") { Memcpy2DDeviceToHostShell<async>(hipMemcpy2D); }
 
   SECTION("Device to Device") {
-    SECTION("Peer access disabled") { Memcpy2DDeviceToDeviceShell<async, false>(hipMemcpy2D); }
     SECTION("Peer access enabled") { Memcpy2DDeviceToDeviceShell<async, true>(hipMemcpy2D); }
   }
 

@@ -34,7 +34,7 @@ bool LinearFilter3D = false;
 template <bool normalizedCoords>
 __global__ void tex3DKernel(float* outputData, hipTextureObject_t textureObject, int width,
                             int height, int depth, float offsetX, float offsetY, float offsetZ) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   int z = blockIdx.z * blockDim.z + threadIdx.z;
@@ -172,6 +172,11 @@ line1:
  */
 TEST_CASE("Unit_hipTextureObj3DCheckModes") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   int device = 0;
   hipDeviceProp_t props;

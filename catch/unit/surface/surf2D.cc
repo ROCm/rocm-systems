@@ -38,7 +38,7 @@ THE SOFTWARE.
 template <typename T>
 __global__ void surf2DKernelR(hipSurfaceObject_t surfaceObject, T* outputData, int width,
                               int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -50,7 +50,7 @@ __global__ void surf2DKernelR(hipSurfaceObject_t surfaceObject, T* outputData, i
 template <typename T>
 __global__ void surf2DKernelW(hipSurfaceObject_t surfaceObject, T* inputData, int width,
                               int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -62,7 +62,7 @@ __global__ void surf2DKernelW(hipSurfaceObject_t surfaceObject, T* inputData, in
 template <typename T>
 __global__ void surf2DKernelRW(hipSurfaceObject_t surfaceObject, hipSurfaceObject_t outputSurfObj,
                                int width, int height) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   int y = blockIdx.y * blockDim.y + threadIdx.y;
   if (x < width && y < height) {
@@ -288,6 +288,11 @@ TEMPLATE_TEST_CASE("Unit_surf2Dread_Positive_Basic", "", char, uchar, short, ush
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
   runTestR<TestType>(width, height);
@@ -310,6 +315,11 @@ TEMPLATE_TEST_CASE("Unit_surf2Dwrite_Positive_Basic", "", char, uchar, short, us
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);
   runTestW<TestType>(width, height);
@@ -331,6 +341,11 @@ TEMPLATE_TEST_CASE("Unit_surf2D_Positive_ReadWrite", "", char, uchar, short, ush
                    short2, ushort2, int2, uint2, float2, char4, uchar4, short4, ushort4, int4,
                    uint4, float4) {
   CHECK_IMAGE_SUPPORT;
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
   const int width = GENERATE(31, 67);
   const int height = GENERATE(131, 263);

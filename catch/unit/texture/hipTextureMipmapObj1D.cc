@@ -33,7 +33,7 @@ static constexpr bool printLog = false; // Print log for debugging
 template <typename T, hipTextureReadMode readMode>
 static __global__ void populateMipmapNextLevelArray(hipSurfaceObject_t surfOut,
                hipTextureObject_t texIn, unsigned int width, T* data = nullptr) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   float px = 1.0 / float(width);
 
@@ -61,7 +61,7 @@ static __global__ void populateMipmapNextLevelArray(hipSurfaceObject_t surfOut,
 template <typename T>
 __global__ void getMipmap(hipTextureObject_t texMipmap, unsigned int width,
                                 float offsetX, float lod, T* data = nullptr) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   int x = blockIdx.x * blockDim.x + threadIdx.x;
   float px = 1.0 / float(width);
 
@@ -316,6 +316,11 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType", 
                    char4, uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
 
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType, hipFilterModePoint, "
       "hipAddressModeClamp 23") {
@@ -366,6 +371,12 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloa
                    char2, uchar2, short2, ushort2,
                    char4, uchar4, short4, ushort4) {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloat, hipFilterModePoint, "
       "hipAddressModeClamp 23") {
@@ -438,6 +449,12 @@ TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeNormalizedFloa
 TEMPLATE_TEST_CASE("Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType float only", "",
                    float, float1, float2, float4) {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   SECTION(
       "Unit_hipTextureMipmapObj1D_Check - hipReadModeElementType, hipFilterModeLinear, "
       "hipAddressModeClamp 23, 0.") {

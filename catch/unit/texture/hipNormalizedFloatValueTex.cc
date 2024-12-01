@@ -46,7 +46,7 @@ texture<unsigned char, hipTextureType1D, hipReadModeNormalizedFloat>   texuc;
 template<typename T>
 __global__ void normalizedValTextureTest(unsigned int numElements,
                                          float* pDst) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   unsigned int elementID = threadIdx.x;
   if (elementID >= numElements)
     return;
@@ -148,6 +148,11 @@ static void runTest_hipTextureFilterMode() {
 
 TEST_CASE("Unit_hipNormalizedFloatValueTex_CheckModes") {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
 
 #if HT_AMD
   hipDeviceProp_t props;

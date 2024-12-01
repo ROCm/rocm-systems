@@ -52,8 +52,10 @@ set(TEST_SRC
     hipMemcpyAtoD.cc
     hipMemcpyAtoH.cc
     hipMemcpyAtoHAsync.cc
+    hipMemcpyDtoA.cc
     hipMemcpyAtoH_old.cc
     hipMemcpyHtoA.cc
+    hipMemcpyHtoAAsync.cc
     hipMemcpyAtoA.cc
     hipMemcpyHtoA_old.cc
     hipMemcpyAllApiNegative.cc
@@ -62,6 +64,8 @@ set(TEST_SRC
     hipHostUnregister.cc
     hipHostGetFlags.cc
     hipHostGetDevicePointer.cc
+    hipMallocHost.cc
+    hipMemAllocHost.cc
     hipMallocManaged_MultiScenario.cc
     hipMemsetNegative.cc
     hipMemset.cc
@@ -78,7 +82,19 @@ set(TEST_SRC
     hipMemRangeGetAttribute_old.cc
     hipMemCoherencyTst.cc
     hipMemsetD32.cc
-    hipMemsetD16.cc)
+    hipMemsetD16.cc
+    hipMemsetD16Async.cc
+    hipMemsetD32Async.cc
+    hipMemsetD8Async.cc
+    hipMemcpy2DArrayToArray.cc
+    )
+
+if(UNIX)
+  set(TEST_SRC ${TEST_SRC} hipMemPoolExportPointer.cc
+  hipMemPoolExportToShareableHandle.cc
+  hipMemPoolImportFromShareableHandle.cc
+  hipMemPoolImportPointer.cc)
+endif()
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC
@@ -89,7 +105,8 @@ if(HIP_PLATFORM MATCHES "amd")
       hipMallocMngdMultiThread.cc
       hipMemVmm.cc
       hipArray.cc
-      hipMemcpyDeviceToDeviceNoCU.cc)
+      hipMemcpyDeviceToDeviceNoCU.cc
+      hipGetProcAddress_Memory_APIs.cc)
   if(UNIX)
     # Should be compiled for NVIDIA as well after EXSWHTEC-346 is addressed
     # For windows build error occurs undefined symbol: hipPointerSetAttribute
@@ -107,9 +124,11 @@ if(HIP_PLATFORM MATCHES "amd")
   set_source_files_properties(hipHostRegister.cc PROPERTIES COMPILE_FLAGS -std=c++17)
   add_executable(hipHostRegisterPerf EXCLUDE_FROM_ALL hipHostRegister_exe.cc)
   add_dependencies(build_tests hipHostRegisterPerf)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipHostRegisterPerf)
 if(UNIX)
   add_executable(hipMemAdviseTstAlignedAllocMem EXCLUDE_FROM_ALL hipMemAdvise_AlignedAllocMem_Exe.cc)
   add_dependencies(MemoryTest1 hipMemAdviseTstAlignedAllocMem)
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS hipMemAdviseTstAlignedAllocMem)
 endif()
 endif()
 
@@ -138,7 +157,7 @@ set(TEST_SRC
     hipMemcpyDtoD.cc
     hipMemcpyDtoDAsync.cc
     hipHostMalloc.cc
-    hipMemcpy_old.cc
+    hipMemcpy_EdgeCases.cc
     hipMemcpy_derivatives.cc
     hipMemcpyAsync.cc
     hipMemcpyAsync_old.cc
@@ -159,6 +178,7 @@ set(TEST_SRC
     hipMemGetInfo.cc
     hipFree.cc
     hipFreeArray.cc
+    hipHostFree.cc
     hipMemcpySync.cc
     hipMemsetSync.cc
     hipMemsetAsync.cc
@@ -171,7 +191,8 @@ set(TEST_SRC
     hipMemRangeGetAttributes_old.cc
     hipMemGetAddressRange.cc
     hipMallocMipmappedArray.cc
-    hipFreeMipmappedArray.cc)
+    hipFreeMipmappedArray.cc
+    hipHostAlloc.cc)
 
 if(HIP_PLATFORM MATCHES "amd")
   set(TEST_SRC

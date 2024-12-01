@@ -20,6 +20,12 @@ THE SOFTWARE.
 #pragma once
 
 static constexpr auto kComplexConj{R"(
+  class Dummy {
+   public:
+    __device__ Dummy() {}
+    __device__ ~Dummy() {}
+  };
+
   __global__ void hipConjf_kernel_v1(hipFloatComplex* result, hipFloatComplex* x) {
     *result = hipConjf(x);
   }

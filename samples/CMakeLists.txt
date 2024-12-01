@@ -24,6 +24,9 @@ project(hip-samples)
 option(ENABLE_ADDRESS_SANITIZER "Option to enable ASAN build" OFF)
 option(BUILD_SHARED_LIBS "Use this option to link with shared hip runtime libraries" ON)
 
+if(NOT WIN32)
+    set(CPACK_SET_DESTDIR ON CACHE BOOL "Installer package will install hip-samples to CMAKE_INSTALL_PREFIX instead of CPACK_PACKAGING_INSTALL_PREFIX")
+endif()
 # Read -DROCM_Path and env{ROCM_PATH}
 if(NOT DEFINED ROCM_PATH)
     if(DEFINED ENV{ROCM_PATH})

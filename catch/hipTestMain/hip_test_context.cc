@@ -139,7 +139,6 @@ std::string& TestContext::getCommonJsonFile() {
   // check a max of 5 levels down the executable path
   while (levels < 5) {
     fs::path temp_path = config_dir;
-    temp_path /= "hipTestMain";
     temp_path /= "config";
     if (fs::exists(temp_path)) {
       config_dir = fs::absolute(temp_path);

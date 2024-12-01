@@ -132,6 +132,10 @@ int main(int argc, char* argv[]) {
 
         CHECK_RESULT(err != hipSuccess, "hipEventCreate failed");
 
+        // Do a warm up event record and sync
+        hipEventRecord(start, NULL);
+        hipStreamSynchronize(0);
+
         if (doWarmup)
         {
             hipLaunchKernelGGL(_dispatchSpeed, dim3(blocks), dim3(threads_per_block), 0, hipStream_t(0), srcBuffer);

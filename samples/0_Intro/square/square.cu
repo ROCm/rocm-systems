@@ -94,5 +94,10 @@ int main(int argc, char *argv[])
             CHECK(cudaErrorUnknown);
         }
     }
+
+    CHECK ( cudaFree(A_d));
+    CHECK ( cudaFree(C_d));
+    free(A_h);
+    free(C_h);
     printf ("PASSED!\n");
 }

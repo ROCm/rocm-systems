@@ -1,9 +1,5 @@
 {
     "DisabledTests": [
-        "Unit_hipFuncSetCacheConfig_Negative_Not_Supported",
-        "Unit_hipFuncSetSharedMemConfig_Negative_Not_Supported",
-        "Unit_hipFuncSetAttribute_Positive_MaxDynamicSharedMemorySize_Not_Supported",
-        "Unit_hipFuncSetAttribute_Positive_PreferredSharedMemoryCarveout_Not_Supported",
         "=== Below test fails in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/215 ===",
         "Unit_ChannelDescriptor_Positive_Basic_1D - long",
         "Unit_ChannelDescriptor_Positive_Basic_1D - unsigned long",
@@ -29,7 +25,6 @@
         "=== Below tests tests fail in PSDB ===",
         "Unit_hipMemcpy3D_Positive_Synchronization_Behavior",
         "Unit_hipMemcpy2D_Positive_Synchronization_Behavior",
-        "Unit_hipMemcpyAsync_Positive_Synchronization_Behavior",
         "Unit_hipDrvMemcpy3D_Positive_Synchronization_Behavior",
         "Unit_hipFreeMipmappedArray_Negative_DoubleFree",
         "Unit_hipModuleLoad_Positive_Basic",
@@ -38,7 +33,6 @@
         "Unit_hipModuleLoadData_Negative_Parameters",
         "Unit_hipModuleLoadDataEx_Positive_Basic",
         "Unit_hipModuleLoadDataEx_Negative_Parameters",
-        "Unit_hipModuleGetTexRef_Positive_Basic",
         "Performance_hipMemsetD16",
         "Performance_hipMemsetD16Async",
         "Performance_hipMemsetD32",

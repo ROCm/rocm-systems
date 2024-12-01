@@ -28,7 +28,7 @@ template <typename TestType>
 __global__ void simpleKernelLayered2DArray(hipTextureObject_t tex, TestType* outputData,
                                            unsigned int width, unsigned int height,
                                            unsigned int layer) {
-#if !defined(__HIP_NO_IMAGE_SUPPORT) || !__HIP_NO_IMAGE_SUPPORT
+#if !__HIP_NO_IMAGE_SUPPORT
   unsigned int x = blockIdx.x * blockDim.x + threadIdx.x;
   unsigned int y = blockIdx.y * blockDim.y + threadIdx.y;
   outputData[layer * width * height + y * width + x] = tex2DLayered<TestType>(tex, x, y, layer);
@@ -64,6 +64,12 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_HostBufferToFromLayered2DArray",
     char2, uchar2, short2, ushort2, int2, uint2, float2,
     char4, uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   constexpr int SIZE = 512;
   constexpr int num_layers = 5;
   constexpr unsigned int width = SIZE;
@@ -210,6 +216,12 @@ TEMPLATE_TEST_CASE("Unit_Layered2DTexture_Check_DeviceBufferToFromLayered2DArray
     char2, uchar2, short2, ushort2, int2, uint2, float2,
     char4, uchar4, short4, ushort4, int4, uint4, float4) {
   CHECK_IMAGE_SUPPORT
+
+#if __HIP_NO_IMAGE_SUPPORT
+  HipTest::HIP_SKIP_TEST("__HIP_NO_IMAGE_SUPPORT is set");
+  return;
+#endif
+
   constexpr int SIZE = 512;
   constexpr int num_layers = 5;
   constexpr unsigned int width = SIZE;
