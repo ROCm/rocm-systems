@@ -129,7 +129,7 @@ if(ENABLE_ESMI_LIB)
     endif()
     if(NOT EXISTS ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm/amd_hsmp.h)
         file(DOWNLOAD
-            https://git.kernel.org/pub/scm/linux/kernel/git/pdx86/platform-drivers-x86.git/plain/arch/x86/include/uapi/asm/amd_hsmp.h?h=review-ilpo
+            https://git.kernel.org/pub/scm/linux/kernel/git/pdx86/platform-drivers-x86.git/plain/arch/x86/include/uapi/asm/amd_hsmp.h
             ${PROJECT_SOURCE_DIR}/esmi_ib_library/include/asm/amd_hsmp.h)
     endif()
     add_definitions("-DENABLE_ESMI_LIB=1")
