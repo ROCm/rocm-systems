@@ -459,10 +459,12 @@ void ChkUUID() {
   #else
     uuid_map = getUUIDlistWithoutRocmInfo();
   #endif
-  std::string uuid = uuid_map[0].data();
-  std::string t_uuid = uuid.substr(4, 19);
-  if (memcmp(d_uuid.bytes, t_uuid.c_str(), 16) == 0) {
-    REQUIRE(true);
+  if (!uuid_map.empty()) {
+    std::string uuid = uuid_map[0].data();
+    std::string t_uuid = uuid.substr(4, 19);
+    if (memcmp(d_uuid.bytes, t_uuid.c_str(), 16) == 0) {
+      REQUIRE(true);
+    }
   }
 }
 
