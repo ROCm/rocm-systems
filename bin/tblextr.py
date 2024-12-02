@@ -129,7 +129,7 @@ def parse_res(infile):
     global max_gpu_id
     if not os.path.isfile(infile):
         return
-    inp = open(infile, "r")
+    inp = open(infile, "r", errors="replace")
 
     beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
     prop_pattern = re.compile("([\w-]+)\((\w+)\)")
@@ -338,7 +338,7 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
 
     record_id = 0
     table_handle = db.add_table(table_name, ext_table_descr)
-    with open(file_name, mode="r") as fd:
+    with open(file_name, mode="r", errors="replace") as fd:
         for line in fd.readlines():
             record = line[:-1]
             m = ptrn_val.match(record)
@@ -522,7 +522,7 @@ def fill_api_db(
     # parsing an input trace file and creating a DB table
     record_id_dict = {}
     table_handle = db.add_table(table_name, api_table_descr)
-    with open(file_name, mode="r") as fd:
+    with open(file_name, mode="r", errors="replace") as fd:
         file_lines = fd.readlines()
         total_lines = len(file_lines)
         line_index = 0
@@ -837,7 +837,7 @@ def fill_copy_db(table_name, db, indir):
         return 0
 
     table_handle = db.add_table(table_name, copy_table_descr)
-    with open(file_name, mode="r") as fd:
+    with open(file_name, mode="r", errors="replace") as fd:
         for line in fd.readlines():
             record = line[:-1]
             m = ptrn_val.match(record)
@@ -942,7 +942,7 @@ def fill_ops_db(kernel_table_name, mcopy_table_name, db, indir):
 
     kernel_table_handle = db.add_table(kernel_table_name, ops_table_descr)
     mcopy_table_handle = db.add_table(mcopy_table_name, ops_table_descr)
-    with open(file_name, mode="r") as fd:
+    with open(file_name, mode="r", errors="replace") as fd:
         file_lines = fd.readlines()
         total_lines = len(file_lines)
         line_index = 0
@@ -1091,7 +1091,7 @@ csvfile = ""
 if "ROCP_JSON_REBASE" in os.environ and os.environ["ROCP_JSON_REBASE"] == 0:
     begin_ts_file = indir + "/begin_ts_file.txt"
     if os.path.isfile(begin_ts_file):
-        with open(begin_ts_file, mode="r") as fd:
+        with open(begin_ts_file, mode="r", errors="replace") as fd:
             ind = 0
             for line in fd.readlines():
                 val = int(line)
