@@ -134,10 +134,10 @@ void ApplicationParser::SetApplicationEnv(const char* app_name) {
 void ApplicationParser::GetKernelInfoForRunningApplication(
     std::vector<profiler_kernel_info_t>* kernel_info_output) {
   profiler_kernel_info_t kinfo;
-  for (std::string line : output_lines) {
+  for (const auto &line : output_lines) {
     // Skip all the lines until  "Dispatch_ID" is found
-    if (line.empty() || line.find("Dispatch_ID") == std::string::npos) {
-      continue;  // Skip to the next line if "Dispatch_ID" is found
+    if (line.empty() || line.find("Dispatch_ID") == std::string::npos || line.find("Kernel_Name(\"__amd_") != std::string::npos) {
+        continue;  // Skip to the next line if "Dispatch_ID" is not found or "Kernel_Name("__amd_" is found
     }
 
     // Parse individual values and store them in the dispatch struct
@@ -236,7 +236,7 @@ class HelloWorldTest : public ProfilerTest {
 
 // Test:1 Compares total num of kernel-names in golden output against current
 // profiler output
-TEST_F(HelloWorldTest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
+TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
   // kernel info in current profiler run
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
@@ -248,7 +248,7 @@ TEST_F(HelloWorldTest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersMatch
 
 // Test:2 Compares order of kernel-names in golden output against current
 // profiler output
-TEST_F(HelloWorldTest, DISABLED_WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
+TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
   // kernel info in current profiler run
   std::vector<profiler_kernel_info_t> current_kernel_info;
   GetKernelInfoForRunningApplication(&current_kernel_info);
@@ -304,7 +304,7 @@ class VectorAddTest : public ProfilerTest {
 
 // Test:1 Compares total num of kernel-names in golden output against current
 // profiler output
-TEST_F(VectorAddTest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
+TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
@@ -315,7 +315,7 @@ TEST_F(VectorAddTest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersMatchW
 
 // Test:2 Compares order of kernel-names in golden output against current
 // profiler output
-TEST_F(VectorAddTest, DISABLED_WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
+TEST_F(VectorAddTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
@@ -371,7 +371,7 @@ class HSATest : public ProfilerTest {
 // Test:1 Given profiler don't intercept any hsa calls in this app
 // we dont collect any counters by default. Expectation is, both vectors are
 // empty
-TEST_F(HSATest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
+TEST_F(HSATest, WhenRunningProfilerWithAppThenKernelNumbersMatchWithGoldenOutput) {
   std::vector<profiler_kernel_info_t> current_kernel_info;
 
   GetKernelInfoForRunningApplication(&current_kernel_info);
