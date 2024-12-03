@@ -158,6 +158,6 @@ using memory_allocation_buffered_output_t =
                     domain_type::MEMORY_ALLOCATION>;
 using counter_records_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler::tool::serialized_counter_record_t,
-                                         domain_type::COUNTER_COLLECTION>;
+                                         domain_type::COUNTER_VALUES>;
 }  // namespace tool
 }  // namespace rocprofiler
