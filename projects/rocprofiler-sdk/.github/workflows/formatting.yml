@@ -47,14 +47,6 @@ jobs:
           exit 1
         fi
 
-    - name: Create pull request
-      if: failure()
-      uses: googleapis/code-suggester@v4
-      with:
-        command: review
-        pull_number: ${{ github.event.pull_request.number }}
-        git_dir: '.'
-
   source:
     runs-on: ubuntu-22.04
     env:
@@ -88,14 +80,6 @@ jobs:
           git diff
           exit 1
         fi
-
-    - name: Create pull request
-      if: failure()
-      uses: googleapis/code-suggester@v4
-      with:
-        command: review
-        pull_number: ${{ github.event.pull_request.number }}
-        git_dir: '.'
 
   python:
     runs-on: ubuntu-22.04
@@ -135,14 +119,6 @@ jobs:
           git diff
           exit 1
         fi
-
-    - name: Create pull request
-      if: failure()
-      uses: googleapis/code-suggester@v4
-      with:
-        command: review
-        pull_number: ${{ github.event.pull_request.number }}
-        git_dir: '.'
 
   missing-new-line:
     runs-on: ubuntu-22.04

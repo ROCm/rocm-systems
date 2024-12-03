@@ -40,7 +40,7 @@ jobs:
     # define this for containers
     env:
       GIT_DISCOVERY_ACROSS_FILESYSTEM: 1
-      CORE_EXT_RUNNER: mi200
+      CORE_EXT_RUNNER: mi300
 
     steps:
     - uses: actions/checkout@v4
@@ -277,7 +277,7 @@ jobs:
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['mi300-emu']
+        runner: ['vega20-emu']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
@@ -465,13 +465,40 @@ jobs:
       with:
         github-token: ${{ secrets.TOKEN }}
         script: |
-          const comment_body = process.env.COMMENT_BODY;
-          github.rest.issues.createComment({
-            issue_number: context.issue.number,
-            owner: context.repo.owner,
-            repo: context.repo.repo,
-            body: comment_body
-          })
+          const commentIdentifier = '<!-- unique-comment-identifier -->'; // Use this to identify your comment
+            const commentBody = `
+              ${commentIdentifier}
+              ` + process.env.COMMENT_BODY;
+
+            // Fetch existing comments
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+            });
+
+            // Check for an existing comment
+            const existingComment = comments.find(comment => comment.body.includes(commentIdentifier));
+
+            if (existingComment) {
+              // Update the existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body: commentBody,
+              });
+              core.info(`Updated comment with ID: ${existingComment.id}`);
+            } else {
+              // Create a new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: commentBody,
+              });
+              core.info('Created a new comment.');
+            }
 
     - name: Archive Code Coverage Data
       uses: actions/upload-artifact@v4
@@ -518,20 +545,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi200-emu', 'mi300-emu']
+        runner: ['vega20-emu', 'navi3-emu', mi300-emu]
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         exclude:
-        #   - { runner: 'navi3-emu',  sanitizer: 'ThreadSanitizer' }
-        #   - { runner: 'navi3-emu',  sanitizer: 'LeakSanitizer' }
-        #   - { runner: 'vega20-emu', sanitizer: 'AddressSanitizer' }
-        #   - { runner: 'vega20-emu', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi200-emu', sanitizer: 'LeakSanitizer' }
-          - { runner: 'mi200-emu', sanitizer: 'AddressSanitizer' }
-        #   - { runner: 'mi300-emu',  sanitizer: 'AddressSanitizer' }
-          - { runner: 'mi300-emu', sanitizer: 'ThreadSanitizer' }
-          - { runner: 'mi300-emu', sanitizer: 'UndefinedBehaviorSanitizer' }
+          - { runner: 'vega20-emu', sanitizer: 'ThreadSanitizer' }
+          - { runner: 'vega20-emu', sanitizer: 'AddressSanitizer' }
+          - { runner: 'vega20-emu', sanitizer: 'UndefinedBehaviorSanitizer' }
+          - { runner: 'mi300-emu', sanitizer: 'AddressSanitizer' }
+          - { runner: 'mi300-emu', sanitizer: 'LeakSanitizer' }
+          - { runner: 'navi3-emu', sanitizer: 'LeakSanitizer' }
+          - { runner: 'navi3-emu', sanitizer: 'ThreadSanitizer' }
+          - { runner: 'navi3-emu', sanitizer: 'UndefinedBehaviorSanitizer' }
 
     if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-runner-set

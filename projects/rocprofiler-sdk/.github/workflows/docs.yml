@@ -40,25 +40,23 @@ jobs:
         with:
             submodules: true
       - name: Install Conda
-        uses: conda-incubator/setup-miniconda@v3
-        with:
-            miniconda-version: "latest"
-            auto-activate-base: true
-            activate-environment: ""
+        shell: bash -el {0}
+        run: |
+          curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh
+          bash ./Miniconda3-latest-Linux-x86_64.sh -b
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Create Docs Directory
         run:
           mkdir -p docs
-      - name: Install Conda environment
-        shell: bash -el {0}
-        working-directory: source/docs
-        run: |
-          conda env create -n rocprofiler-docs -f environment.yml
       - name: Build Docs
         shell: bash -el {0}
         working-directory: source/docs
         run: |
+          source /home/runner/.bashrc
+          export PATH=/home/runner/miniconda3/bin:$PATH
+          conda init
+          conda env create -n rocprofiler-docs -f environment.yml
           source activate
           conda activate rocprofiler-docs
           ../scripts/update-docs.sh
@@ -84,7 +82,7 @@ jobs:
         uses: actions/deploy-pages@v4
 
   build-docs-from-source:
-    runs-on: gpuless-runner-set
+    runs-on: gpuless-emu-runner-set
     steps:
       - name: Checkout
         uses: actions/checkout@v4

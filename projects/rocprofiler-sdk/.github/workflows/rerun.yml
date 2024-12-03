@@ -40,14 +40,19 @@ jobs:
     steps:
     # Post a start comment to the PR.
     - name: Add comment to PR
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     - uses: actions/checkout@v4
 
@@ -94,26 +99,36 @@ jobs:
     # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun finished successfully!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     # Post a failure message when any of the previous steps fail.
     - name: Add failure comment to PR
       if: ${{ failure() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Failed!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
   rerun-mi300:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
@@ -139,14 +154,19 @@ jobs:
     steps:
     # Post a start comment to the PR.
     - name: Add comment to PR
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     - uses: actions/checkout@v4
 
@@ -193,26 +213,36 @@ jobs:
     # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun finished successfully!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     # Post a failure message when any of the previous steps fail.
     - name: Add failure comment to PR
       if: ${{ failure() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Failed!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
   rerun-vega20:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
@@ -238,14 +268,19 @@ jobs:
     steps:
     # Post a start comment to the PR.
     - name: Add comment to PR
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     - uses: actions/checkout@v4
 
@@ -292,26 +327,36 @@ jobs:
     # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun finished successfully!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     # Post a failure message when any of the previous steps fail.
     - name: Add failure comment to PR
       if: ${{ failure() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Failed!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
   rerun-navi3:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
@@ -337,14 +382,19 @@ jobs:
     steps:
     # Post a start comment to the PR.
     - name: Add comment to PR
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     - uses: actions/checkout@v4
 
@@ -391,26 +441,36 @@ jobs:
     # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun finished successfully!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     # Post a failure message when any of the previous steps fail.
     - name: Add failure comment to PR
       if: ${{ failure() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Failed!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
   rerun-pc-sampling:
     # See: https://docs.github.com/en/free-pro-team@latest/actions/learn-github-actions/managing-complex-workflows#using-a-build-matrix
@@ -436,14 +496,19 @@ jobs:
     steps:
     # Post a start comment to the PR.
     - name: Add comment to PR
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Started!, Please check https://github.com/${{github.repository}}/commit/${{github.sha}}/checks/${{github.run_id}} for more details."
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     - uses: actions/checkout@v4
 
@@ -490,23 +555,33 @@ jobs:
     # Post a success comment to the PR.
     - name: Add comment to PR
       if: ${{ success() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun finished successfully!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun finished successfully!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
 
     # Post a failure message when any of the previous steps fail.
     - name: Add failure comment to PR
       if: ${{ failure() }}
-      uses: octokit/request-action@v2.x
-      with:
-        route: POST /repos/{repository}/issues/{issue_number}/comments
-        repository: ${{ github.repository }}
-        issue_number: ${{ github.event.issue.number }}
-        body: "Rerun Failed!"
+      uses: actions/github-script@v6
       env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        COMMENT_BODY: "Rerun Failed!"
+      with:
+        github-token: ${{ secrets.TOKEN }}
+        script: |
+          const comment_body = process.env.COMMENT_BODY;
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: comment_body
+          })
