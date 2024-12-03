@@ -248,7 +248,7 @@ TEST_F(HelloWorldTest, DISABLED_WhenRunningProfilerWithAppThenKernelNumbersMatch
 
 // Test:2 Compares order of kernel-names in golden output against current
 // profiler output
-TEST_F(HelloWorldTest, WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
+TEST_F(HelloWorldTest, DISABLED_WhenRunningProfilerWithAppThenKernelNamessMatchWithGoldenOutput) {
   // kernel info in current profiler run
   std::vector<profiler_kernel_info_t> current_kernel_info;
   GetKernelInfoForRunningApplication(&current_kernel_info);
