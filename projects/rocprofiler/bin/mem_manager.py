@@ -121,7 +121,6 @@ class MemManager:
         event = rec_vals[2]  # 'Name'
         procid = rec_vals[3]  # 'pid'
         recordid = rec_vals[5]  # 'Index'
-        size_ptrn = re.compile(DELIM + "Size=(\d+)" + DELIM)
         # query syncronous memcopy API record
         key = (recordid, procid, 0)
         if key in self.memcopies:
