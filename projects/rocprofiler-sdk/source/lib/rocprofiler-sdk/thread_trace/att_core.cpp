@@ -565,6 +565,8 @@ finalize()
     {
         if(ctx->agent_thread_trace) ctx->agent_thread_trace->resource_deinit();
     }
+
+    code_object::finalize();
 }
 
 }  // namespace thread_trace

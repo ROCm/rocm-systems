@@ -43,6 +43,7 @@
 #include <vector>
 
 constexpr double WAVE_RATIO_TOLERANCE = 0.05;
+constexpr size_t NUM_KERNELS          = 5;
 
 namespace ATTTest
 {
@@ -59,12 +60,12 @@ dispatch_callback(rocprofiler_queue_id_t /* queue_id  */,
                   rocprofiler_user_data_t* dispatch_userdata,
                   void*                    userdata)
 {
-    C_API_BEGIN
+    static std::atomic<size_t> count{0};
+    if(count.fetch_add(1) > NUM_KERNELS) return ROCPROFILER_ATT_CONTROL_NONE;
 
     assert(userdata && "Dispatch callback passed null!");
     dispatch_userdata->ptr = userdata;
 
-    C_API_END
     return ROCPROFILER_ATT_CONTROL_START_AND_STOP;
 }
 

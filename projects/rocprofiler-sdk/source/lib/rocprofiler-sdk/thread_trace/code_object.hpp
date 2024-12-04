@@ -27,8 +27,6 @@
 #include <hsa/hsa_api_trace.h>
 
 #include <functional>
-#include <mutex>
-#include <set>
 
 namespace rocprofiler
 {
@@ -44,20 +42,18 @@ struct CodeobjCallbackRegistry
     CodeobjCallbackRegistry(LoadCallback ld, UnloadCallback unld);
     virtual ~CodeobjCallbackRegistry();
 
-    void        IterateLoaded() const;
-    static void Load(rocprofiler_agent_id_t agent, uint64_t id, uint64_t addr, uint64_t size);
-    static void Unload(uint64_t id);
+    void IterateLoaded() const;
 
-private:
     LoadCallback   ld_fn;
     UnloadCallback unld_fn;
-
-    static std::mutex                         mut;
-    static std::set<CodeobjCallbackRegistry*> all_registries;
 };
 
 void
 initialize(HsaApiTable* table);
+
+void
+finalize();
+
 }  // namespace code_object
 }  // namespace thread_trace
 }  // namespace rocprofiler
