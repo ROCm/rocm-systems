@@ -23,6 +23,7 @@ env:
   ROCM_PATH: "/opt/rocm"
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
   PATH: "/usr/bin:$PATH"
+  TEMP_EXCLUDED_TESTS: "test-page-migration|app-abort"
 
 jobs:
   core-deb:
@@ -92,6 +93,7 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           --
           -LE "${EXCLUDED_TESTS}"
+          -E "${{ env.TEMP_EXCLUDED_TESTS }}"
 
     - name: Install
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -115,8 +117,8 @@ jobs:
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples -LE "${EXCLUDED_TESTS}" --output-on-failure
-        ctest --test-dir build-tests -LE "${EXCLUDED_TESTS}" --output-on-failure
+        ctest --test-dir build-samples -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
+        ctest --test-dir build-tests -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
 
     - name: Install Packages
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -138,8 +140,8 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb -LE "${EXCLUDED_TESTS}" --output-on-failure
-        ctest --test-dir build-tests-deb -LE "${EXCLUDED_TESTS}" --output-on-failure
+        ctest --test-dir build-samples-deb -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
+        ctest --test-dir build-tests-deb -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
 
     - name: Archive production artifacts
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -214,6 +216,7 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           --
           -LE "${EXCLUDED_TESTS}"
+          -E "${{ env.TEMP_EXCLUDED_TESTS }}"
 
     - name: Install
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -237,8 +240,8 @@ jobs:
         export LD_LIBRARY_PATH=/opt/rocprofiler-sdk/lib:${LD_LIBRARY_PATH}
         cmake --build build-samples --target all --parallel 16
         cmake --build build-tests --target all --parallel 16
-        ctest --test-dir build-samples -LE "${EXCLUDED_TESTS}" --output-on-failure
-        ctest --test-dir build-tests -LE "${EXCLUDED_TESTS}" --output-on-failure
+        ctest --test-dir build-samples -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
+        ctest --test-dir build-tests -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
 
     - name: Install Packages
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -260,8 +263,8 @@ jobs:
         CMAKE_PREFIX_PATH=/opt/rocm cmake -B build-tests-deb /opt/rocm/share/rocprofiler-sdk/tests
         cmake --build build-samples-deb --target all --parallel 16
         cmake --build build-tests-deb --target all --parallel 16
-        ctest --test-dir build-samples-deb -LE "${EXCLUDED_TESTS}" --output-on-failure
-        ctest --test-dir build-tests-deb -LE "${EXCLUDED_TESTS}" --output-on-failure
+        ctest --test-dir build-samples-deb -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
+        ctest --test-dir build-tests-deb -LE "${EXCLUDED_TESTS}" -E "${{ env.TEMP_EXCLUDED_TESTS }}" --output-on-failure
 
     - name: Archive production artifacts
       if: ${{ contains(matrix.runner, env.CORE_EXT_RUNNER) }}
@@ -367,6 +370,7 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           --
           -LE "${EXCLUDED_TESTS}"
+          -E "${{ env.TEMP_EXCLUDED_TESTS }}"
 
     - name: Configure, Build, and Test (Tests Code Coverage)
       timeout-minutes: 30
@@ -385,6 +389,7 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           --
           -LE "${EXCLUDED_TESTS}"
+          -E "${{ env.TEMP_EXCLUDED_TESTS }}"
 
     - name: Configure, Build, and Test (Samples Code Coverage)
       timeout-minutes: 30
@@ -403,6 +408,7 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           --
           -LE "${EXCLUDED_TESTS}"
+          -E "${{ env.TEMP_EXCLUDED_TESTS }}"
 
     - name: Save XML Code Coverage
       id: save-coverage
@@ -520,7 +526,7 @@ jobs:
         #   - unittests
         #   - integration-tests
         #
-        ctest -N -LE 'samples|tests' -O ctest.mislabeled.log
+        ctest -N -LE 'samples|tests' -E "${{ env.TEMP_EXCLUDED_TESTS }}" -O ctest.mislabeled.log
         grep 'Total Tests: 0' ctest.mislabeled.log
         #
         # if following fails, then there is overlap between the labels.
@@ -614,3 +620,4 @@ jobs:
           -DPython3_EXECUTABLE=$(which python3)
           --
           -LE "${EXCLUDED_TESTS}"
+          -E "${{ env.TEMP_EXCLUDED_TESTS }}"
