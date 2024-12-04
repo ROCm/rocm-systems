@@ -24,6 +24,7 @@ env:
   GPU_TARGETS: "gfx900 gfx906 gfx908 gfx90a gfx940 gfx941 gfx942 gfx1030 gfx1100 gfx1101 gfx1102"
   PATH: "/usr/bin:$PATH"
   TEMP_EXCLUDED_TESTS: "test-page-migration|app-abort"
+  EXCLUDED_TESTS: ".*pc-sampling.*|.*pc_sampling.*"
 
 jobs:
   core-deb:
@@ -71,6 +72,7 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') }}
       shell: bash
       run: |
+          echo "EXCLUDED_TESTS=''" >> $GITHUB_ENV
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
@@ -194,6 +196,7 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') }}
       shell: bash
       run: |
+          echo "EXCLUDED_TESTS=''" >> $GITHUB_ENV
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
@@ -601,6 +604,7 @@ jobs:
       if: ${{ contains(matrix.runner, 'mi200') }}
       shell: bash
       run: |
+          echo "EXCLUDED_TESTS=''" >> $GITHUB_ENV
           echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test
