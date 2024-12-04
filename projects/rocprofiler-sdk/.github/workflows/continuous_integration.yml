@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['mi200-emu', 'mi300-emu']
+        runner: ['vega20-emu', 'mi300-emu']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
         ci-flags: ['--linter clang-tidy']
@@ -280,14 +280,14 @@ jobs:
           ${{github.workspace}}/build/*.tgz
 
   code-coverage:
+    if: ${{ contains(github.event_name, 'pull_request') }}
     strategy:
       # fail-fast: false
       matrix:
-        runner: ['vega20-emu']
+        runner: ['mi200-emu']
         os: ['ubuntu-22.04']
         build-type: ['Release']
 
-    if: ${{ contains(github.event_name, 'pull_request') }}
     runs-on: ${{ matrix.runner }}-runner-set
 
     # define this for containers
@@ -356,6 +356,13 @@ jobs:
         for i in python3 git cmake ctest gcc g++ gcov; do which-realpath $i; done
         cat /opt/rocm/.info/version
         ls -la
+
+    - name: Enable PC Sampling
+      if: ${{ contains(matrix.runner, 'mi200') }}
+      shell: bash
+      run: |
+          echo "EXCLUDED_TESTS=''" >> $GITHUB_ENV
+          echo 'ROCPROFILER_PC_SAMPLING_BETA_ENABLED=1' >> $GITHUB_ENV
 
     - name: Configure, Build, and Test (Total Code Coverage)
       timeout-minutes: 30
@@ -554,7 +561,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        runner: ['vega20-emu', 'navi3-emu', mi300-emu]
+        runner: ['vega20-emu', 'navi3-emu', 'mi300-emu']
         sanitizer: ['AddressSanitizer', 'ThreadSanitizer', 'LeakSanitizer', 'UndefinedBehaviorSanitizer']
         os: ['ubuntu-22.04']
         build-type: ['RelWithDebInfo']
