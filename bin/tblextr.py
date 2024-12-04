@@ -131,14 +131,14 @@ def parse_res(infile):
         return
     inp = open(infile, "r", errors="replace")
 
-    beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
-    prop_pattern = re.compile("([\w-]+)\((\w+)\)")
-    ts_pattern = re.compile(", time\((\d*),(\d*),(\d*),(\d*)\)")
+    beg_pattern = re.compile(r'^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+    prop_pattern = re.compile(r"([\w-]+)\((\w+)\)")
+    ts_pattern = re.compile(r", time\((\d*),(\d*),(\d*),(\d*)\)")
     # var pattern below matches a variable name and a variable value from a one
     # line text in the format of for example "WRITE_SIZE (0.2500000000)" or
     # "GRBM_GUI_ACTIVE (27867)" or "TA_TA_BUSY[0]"
-    var_pattern = re.compile("^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
-    pid_pattern = re.compile("pid\((\d*)\)")
+    var_pattern = re.compile(r"^\s*([a-zA-Z0-9_]+(?:\[\d+\])?)\s+\((\d+(?:\.\d+)?)\)")
+    pid_pattern = re.compile(r"pid\((\d*)\)")
 
     dispatch_number = 0
     var_table_pid = 0
@@ -418,7 +418,7 @@ def fill_ext_db(table_name, db, indir, trace_name, api_pid):
 def get_field(args, field):
     if args == None:
         return (None, 0)
-    ptrn1_field = re.compile(r"^.* " + field + "\(")
+    ptrn1_field = re.compile(r"^.* " + field + r"\(")
     ptrn2_field = re.compile(r"\) .*$")
     ptrn3_field = re.compile(r"\)\)$")
     (field_name, n) = ptrn1_field.subn("", args, count=1)
@@ -431,7 +431,7 @@ def get_field(args, field):
 
 def set_field(args, field, val):
     return re.subn(
-        field + "\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
+        field + r"\(\w+\)([ \)])", field + "(" + str(val) + ")\\1", args, count=1
     )
 
 
@@ -501,8 +501,8 @@ def fill_api_db(
     hip_stream_wait_write_ptrn = re.compile(
         r"hipStreamWaitValue64|hipStreamWriteValue64|hipStreamWaitValue32|hipStreamWriteValue32"
     )
-    prop_pattern = re.compile("([\w-]+)\((\w+)\)")
-    beg_pattern = re.compile('^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
+    prop_pattern = re.compile(r"([\w-]+)\((\w+)\)")
+    beg_pattern = re.compile(r'^dispatch\[(\d*)\], (.*) kernel-name\("([^"]*)"\)')
     hip_strm_cr_event_ptrn = re.compile(r"hipStreamCreate")
     hsa_mcopy_ptrn = re.compile(r"hsa_amd_memory_async_copy")
     ptrn_fixformat = re.compile(r"(\d+:\d+ \d+:\d+ \w+)\(\s*(.*)\)$")
