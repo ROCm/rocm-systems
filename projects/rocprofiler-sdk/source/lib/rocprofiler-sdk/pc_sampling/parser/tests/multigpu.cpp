@@ -66,7 +66,8 @@ multithread_queue_hammer(size_t tid, Latch* latch)
     static auto  corr_map = Parser::CorrelationMap{};
     std::mt19937 rdgen(tid);
 
-    constexpr int NUM_ACTIONS = 100000;
+    // Reducing by four due to timeout on ThreadSanitizer job
+    constexpr int NUM_ACTIONS = 100000 / 4;
     constexpr int QSIZE       = 16;
     constexpr int NUM_QUEUES  = MockDoorBell::num_unique_bells / NUM_THREADS;
     constexpr int ACTION_MAX  = QSIZE * NUM_QUEUES / 2;
