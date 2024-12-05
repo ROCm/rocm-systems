@@ -27,8 +27,8 @@ def get_operation(record, kind_name, op_name=None):
     return None
 
 
-def test_scratch_memory(input_data):
-    data = input_data["rocprofiler-sdk-tool"]
+def test_scratch_memory(json_input_data, csv_input_data):
+    data = json_input_data["rocprofiler-sdk-tool"]
     buffer_records = data["buffer_records"]
 
     scratch_memory_data = buffer_records["scratch_memory"]
@@ -41,6 +41,9 @@ def test_scratch_memory(input_data):
     detected_agents_ids = set(
         agent["id"]["handle"] for agent in data["agents"] if agent["type"] == 2
     )
+
+    assert len(scratch_memory_data) > 0
+
     # check buffering data
     for node in scratch_memory_data:
         assert "size" in node
@@ -73,6 +76,41 @@ def test_scratch_memory(input_data):
 
     assert 2**64 - 1 not in scratch_reported_agent_ids
     assert scratch_reported_agent_ids == detected_agents_ids
+
+    assert len(csv_input_data) > 0
+
+    for row in csv_input_data:
+        assert "Kind" in row, "Kind header not present in csv for scratch memory trace."
+        assert (
+            "Operation" in row
+        ), "Operation header not present in csv for scratch memory trace."
+        assert (
+            "Agent_Id" in row
+        ), "Agent_Id header not present in csv for scratch memory trace."
+        assert (
+            "Queue_Id" in row
+        ), "Queue_Id header not present in csv for scratch memory trace."
+        assert (
+            "Thread_Id" in row
+        ), "Thread_Id header not present in csv for scratch memory trace."
+        assert (
+            "Alloc_Flags" in row
+        ), "Alloc_Flags header not present in csv for scratch memory trace."
+        assert (
+            "Start_Timestamp" in row
+        ), "Start_Timestamp header not present in csv for scratch memory trace."
+        assert (
+            "End_Timestamp" in row
+        ), "End_Timestamp header not present in csv for scratch memory trace."
+
+        assert row["Kind"] == "SCRATCH_MEMORY"
+        assert row["Operation"] in ["SCRATCH_MEMORY_ALLOC", "SCRATCH_MEMORY_FREE"]
+        assert int(row["Agent_Id"]) > 0
+        assert int(row["Queue_Id"]) > 0
+        assert int(row["Thread_Id"]) > 0
+        assert int(row["Start_Timestamp"]) > 0
+        assert int(row["End_Timestamp"]) > 0
+        assert int(row["Start_Timestamp"]) < int(row["End_Timestamp"])
 
 
 if __name__ == "__main__":

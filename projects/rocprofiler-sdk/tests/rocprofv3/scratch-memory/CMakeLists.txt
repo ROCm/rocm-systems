@@ -1,5 +1,5 @@
 #
-#
+# rocprofv3 tool test
 #
 cmake_minimum_required(VERSION 3.21.0 FATAL_ERROR)
 
@@ -17,25 +17,45 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 
 set(scratch-memory-tracing-env "${PRELOAD_ENV}")
 
+set(VALIDATION_DEPENDS)
+foreach(_OUTPUT_FORMAT csv json)
+    add_test(
+        NAME rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}-execute
+        COMMAND
+            $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --scratch-memory-trace -d
+            ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format
+            ${_OUTPUT_FORMAT} --log-level env -- $<TARGET_FILE:scratch-memory>)
+
+    set_tests_properties(
+        rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}-execute
+        PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
+                   "${scratch-memory-tracing-env}" FAIL_REGULAR_EXPRESSION
+                   "threw an exception")
+
+    list(APPEND VALIDATION_DEPENDS
+         rocprofv3-test-scratch-memory-tracing-${_OUTPUT_FORMAT}-execute)
+endforeach()
+
 add_test(
-    NAME rocprofv3-test-scratch-memory-tracing-execute
+    NAME rocprofv3-test-scratch-memory-tracing-validate
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --scratch-memory-trace -d
-        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format json --log-level
-        env -- $<TARGET_FILE:scratch-memory>)
+        ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --json-input
+        ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_results.json --csv-input
+        ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_scratch_memory_trace.csv)
 
-set_tests_properties(
-    rocprofv3-test-scratch-memory-tracing-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${scratch-memory-tracing-env}" FAIL_REGULAR_EXPRESSION
-               "threw an exception")
-
-add_test(NAME rocprofv3-test-scratch-memory-tracing-validate
-         COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_BINARY_DIR}/validate.py --input
-                 ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_results.json)
+set(VALIDATION_FILES
+    ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_results.json
+    ${CMAKE_CURRENT_BINARY_DIR}/scratch-memory-trace/out_scratch_memory_trace.csv)
 
 set_tests_properties(
     rocprofv3-test-scratch-memory-tracing-validate
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" DEPENDS
-               rocprofv3-test-scratch-memory-tracing-execute FAIL_REGULAR_EXPRESSION
-               "AssertionError")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               DEPENDS
+               "${VALIDATION_DEPENDS}"
+               FAIL_REGULAR_EXPRESSION
+               "AssertionError"
+               ATTACHED_FILES_ON_FAIL
+               "${VALIDATION_FILES}")

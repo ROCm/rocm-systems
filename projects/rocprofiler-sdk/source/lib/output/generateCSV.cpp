@@ -647,7 +647,7 @@ generate_csv(const output_config&                                               
                                          "Agent_Id",
                                          "Queue_Id",
                                          "Thread_Id",
-                                         "Alloc_flags",
+                                         "Alloc_Flags",
                                          "Start_Timestamp",
                                          "End_Timestamp",
                                      }};
