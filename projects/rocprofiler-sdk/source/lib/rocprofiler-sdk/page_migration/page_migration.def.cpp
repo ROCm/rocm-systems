@@ -45,12 +45,13 @@ using trigger_type_list_t = common::mpl::type_list<rocprofiler_page_migration_tr
 // Map ROCPROF UVM enums to KFD enums
 SPECIALIZE_PAGE_MIGRATION_INFO(NONE,                NONE,               "Error: Invalid UVM event from KFD"     );
 SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_MIGRATE_START,  MIGRATE_START,      "%x %ld -%d @%lx(%lx) %x->%x %x:%x %d\n");
-SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_MIGRATE_END,    MIGRATE_END,        "%x %ld -%d @%lx(%lx) %x->%x %d\n"      );
+SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_MIGRATE_END,    MIGRATE_END,        "%x %ld -%d @%lx(%lx) %x->%x %d %d\n"   );
 SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_FAULT_START,    PAGE_FAULT_START,   "%x %ld -%d @%lx(%x) %c\n"              );
 SPECIALIZE_PAGE_MIGRATION_INFO(PAGE_FAULT_END,      PAGE_FAULT_END,     "%x %ld -%d @%lx(%x) %c\n"              );
 SPECIALIZE_PAGE_MIGRATION_INFO(QUEUE_EVICTION,      QUEUE_EVICTION,     "%x %ld -%d %x %d\n"                    );
 SPECIALIZE_PAGE_MIGRATION_INFO(QUEUE_RESTORE,       QUEUE_RESTORE,      "%x %ld -%d %x\n"                       );
 SPECIALIZE_PAGE_MIGRATION_INFO(UNMAP_FROM_GPU,      UNMAP_FROM_GPU,     "%x %ld -%d @%lx(%lx) %x %d\n"          );
+SPECIALIZE_PAGE_MIGRATION_INFO(DROPPED_EVENT,       DROPPED_EVENT,      "%x %ld -%d %d\n"                       );
 #undef SPECIALIZE_PAGE_MIGRATION_INFO
 // clang-format on
 

@@ -260,8 +260,9 @@ parse_event<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END>(std::string_view str)
     auto&    e   = rec.args.page_migrate_end;
     uint32_t kind{};
     uint32_t trigger{};
-    uint32_t _from_node = 0;
-    uint32_t _to_node   = 0;
+    uint32_t _from_node  = 0;
+    uint32_t _to_node    = 0;
+    int32_t  _error_code = 0;
 
     std::sscanf(str.data(),
                 page_migration_info<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END>::format_str.data(),
@@ -272,7 +273,8 @@ parse_event<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END>(std::string_view str)
                 &e.end_addr,
                 &_from_node,
                 &_to_node,
-                &trigger);
+                &trigger,
+                &_error_code);
 
     e.end_addr += e.start_addr;
     e.trigger    = static_cast<migrate_trigger_t>(trigger);
@@ -281,15 +283,20 @@ parse_event<ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END>(std::string_view str)
     e.from_agent = get_node_agent_id(_from_node);
     e.to_agent   = get_node_agent_id(_to_node);
 
+    // For older kernel versions, no event is generated in the error case,
+    // so the default value of 0 is correct for any given end event.
+    e.error_code = _error_code;
+
     ROCP_TRACE << fmt::format("Page migrate end [ ts: {} pid: {} addr s: 0x{:X} addr e: "
-                              "0x{:X} from node: {} to node: {} trigger: {} ] \n",
+                              "0x{:X} from node: {} to node: {} trigger: {} error code: {}] \n",
                               rec.timestamp,
                               rec.pid,
                               e.start_addr,
                               e.end_addr,
                               e.from_agent.handle,
                               e.to_agent.handle,
-                              trigger);
+                              trigger,
+                              _error_code);
 
     return rec;
 }
@@ -387,6 +394,29 @@ parse_event<ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU>(std::string_view str)
         e.end_addr,
         e.agent_id.handle,
         trigger);
+
+    return rec;
+}
+
+template <>
+page_migration_record_t
+parse_event<ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT>(std::string_view str)
+{
+    auto     rec = page_migration_record_t{};
+    auto&    e   = rec.args.dropped_event;
+    uint32_t kind{};
+
+    std::sscanf(str.data(),
+                page_migration_info<ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT>::format_str.data(),
+                &kind,
+                &rec.timestamp,
+                &rec.pid,
+                &e.dropped_events_count);
+
+    ROCP_TRACE << fmt::format("Dropped events [ ts: {} pid: {} dropped count: {} ] \n",
+                              rec.timestamp,
+                              rec.pid,
+                              e.dropped_events_count);
 
     return rec;
 }
@@ -853,13 +883,16 @@ rocprofiler_status_t
 init()
 {
     // Testing page migration
-    return init({ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START,
-                 ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END,
-                 ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START,
-                 ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END,
-                 ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION,
-                 ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE,
-                 ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU});
+    return init({
+        ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START,
+        ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END,
+        ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START,
+        ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END,
+        ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION,
+        ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE,
+        ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU,
+        ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT,
+    });
 }
 
 void

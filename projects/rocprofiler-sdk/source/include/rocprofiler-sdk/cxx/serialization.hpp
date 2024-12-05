@@ -529,6 +529,7 @@ save(ArchiveT& ar, const rocprofiler_page_migration_page_migrate_end_t& data)
     ROCP_SDK_SAVE_DATA_FIELD(from_agent);
     ROCP_SDK_SAVE_DATA_FIELD(to_agent);
     ROCP_SDK_SAVE_DATA_FIELD(trigger);
+    ROCP_SDK_SAVE_DATA_FIELD(error_code);
 }
 
 template <typename ArchiveT>
@@ -557,6 +558,13 @@ save(ArchiveT& ar, const rocprofiler_page_migration_unmap_from_gpu_t& data)
     ROCP_SDK_SAVE_DATA_FIELD(trigger);
 }
 
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, const rocprofiler_page_migration_dropped_event_t& data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(dropped_events_count);
+}
+
 namespace details
 {
 template <size_t Idx>
@@ -582,6 +590,7 @@ ROCP_SDK_SPECIALIZE_PAGE_MIGRATION_ARG(PAGE_FAULT_END, page_fault_end)
 ROCP_SDK_SPECIALIZE_PAGE_MIGRATION_ARG(QUEUE_EVICTION, queue_eviction)
 ROCP_SDK_SPECIALIZE_PAGE_MIGRATION_ARG(QUEUE_RESTORE, queue_restore)
 ROCP_SDK_SPECIALIZE_PAGE_MIGRATION_ARG(UNMAP_FROM_GPU, unmap_from_gpu)
+ROCP_SDK_SPECIALIZE_PAGE_MIGRATION_ARG(DROPPED_EVENT, dropped_event)
 
 #undef ROCP_SDK_SPECIALIZE_PAGE_MIGRATION_ARG
 

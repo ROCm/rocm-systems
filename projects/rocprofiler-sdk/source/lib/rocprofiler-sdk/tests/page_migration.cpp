@@ -71,7 +71,7 @@ TEST(page_migration, readlines)
     parse_lines();
 }
 
-TEST(page_migtation, rocprof_kfd_map)
+TEST(page_migration, rocprof_kfd_map)
 {
     using namespace rocprofiler::page_migration;
     using namespace rocprofiler::common::container;
@@ -101,5 +101,6 @@ TEST(page_migtation, rocprof_kfd_map)
     EXPECT_EQ(to_kfd_str(KFD_SMI_EVENT_QUEUE_EVICTION),   ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION);
     EXPECT_EQ(to_kfd_str(KFD_SMI_EVENT_QUEUE_RESTORE),    ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE);
     EXPECT_EQ(to_kfd_str(KFD_SMI_EVENT_UNMAP_FROM_GPU),   ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU);
+    EXPECT_EQ(to_kfd_str(KFD_SMI_EVENT_DROPPED_EVENT),    ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT);
     // clang-format on
 }

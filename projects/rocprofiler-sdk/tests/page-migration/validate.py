@@ -300,7 +300,7 @@ def test_page_migration_data(input_data):
     for op_name in bf_op_names:
         assert "PAGE_MIGRATION" in op_name
 
-    assert len(bf_op_names) == 8
+    assert len(bf_op_names) == 9
 
     nodes = set(x.id.handle for x in sdk_data.agents)
     allocations = get_allocated_pages(callback_records)
@@ -378,6 +378,11 @@ def test_page_migration_data(input_data):
                     assert arg.end_addr == end_addr
                 validate_node(arg.agent_id, nodes)
                 assert 0 <= arg.trigger < 3
+
+            if "dropped_event" in r:
+                arg = r.dropped_event
+                # We shouldn't get any dropped events. If we do, our test needs to be redesigned.
+                assert arg.dropped_events_count == 0
 
 
 if __name__ == "__main__":

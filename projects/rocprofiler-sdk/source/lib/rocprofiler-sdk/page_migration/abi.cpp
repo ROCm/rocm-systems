@@ -50,11 +50,12 @@ static_assert(KFD_SMI_EVENT_PAGE_FAULT_END == 8);
 static_assert(KFD_SMI_EVENT_QUEUE_EVICTION == 9);
 static_assert(KFD_SMI_EVENT_QUEUE_RESTORE == 10);
 static_assert(KFD_SMI_EVENT_UNMAP_FROM_GPU == 11);
+static_assert(KFD_SMI_EVENT_DROPPED_EVENT == 12);
 static_assert(KFD_SMI_EVENT_ALL_PROCESS == 64);
 
 // Update page_migration.def.cpp with event mappings
 // Update page_migration.cpp to parse and report new event
-static_assert(ROCPROFILER_PAGE_MIGRATION_LAST == 8,
+static_assert(ROCPROFILER_PAGE_MIGRATION_LAST == 9,
               "New event added, update KFD to ROCPROFILER mappings");
 
 // clang-format off

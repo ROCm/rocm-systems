@@ -331,7 +331,8 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                          << ", " << as_hex(arg.page_migrate_end.end_addr) << ", "
                          << arg.page_migrate_end.from_agent.handle << ", "
                          << arg.page_migrate_end.to_agent.handle << ", "
-                         << arg.page_migrate_end.trigger << ")";
+                         << arg.page_migrate_end.trigger << ", " << arg.page_migrate_end.error_code
+                         << ")";
                     break;
                 }
                 case ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START:
@@ -371,6 +372,12 @@ tool_tracing_callback(rocprofiler_context_id_t      context,
                          << as_hex(arg.unmap_from_gpu.end_addr) << ", "
                          << arg.unmap_from_gpu.agent_id.handle << ", " << arg.unmap_from_gpu.trigger
                          << ")";
+                    break;
+                }
+                case ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT:
+                {
+                    const auto& arg = record->args;
+                    info << ", dropped_event=(" << arg.dropped_event.dropped_events_count << ")";
                     break;
                 }
                 case ROCPROFILER_PAGE_MIGRATION_NONE:

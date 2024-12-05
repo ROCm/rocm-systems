@@ -52,6 +52,7 @@ typedef struct rocprofiler_page_migration_page_migrate_end_t
     rocprofiler_agent_id_t               from_agent;
     rocprofiler_agent_id_t               to_agent;
     rocprofiler_page_migration_trigger_t trigger;
+    int32_t                              error_code;
 } rocprofiler_page_migration_page_migrate_end_t;
 
 typedef struct rocprofiler_page_migration_page_fault_start_t
@@ -88,6 +89,11 @@ typedef struct rocprofiler_page_migration_unmap_from_gpu_t
     rocprofiler_page_migration_unmap_from_gpu_trigger_t trigger;
 } rocprofiler_page_migration_unmap_from_gpu_t;
 
+typedef struct rocprofiler_page_migration_dropped_event_t
+{
+    uint32_t dropped_events_count;
+} rocprofiler_page_migration_dropped_event_t;
+
 typedef union
 {
     rocprofiler_page_migration_none_t               none;
@@ -98,6 +104,7 @@ typedef union
     rocprofiler_page_migration_queue_eviction_t     queue_eviction;
     rocprofiler_page_migration_queue_restore_t      queue_restore;
     rocprofiler_page_migration_unmap_from_gpu_t     unmap_from_gpu;
+    rocprofiler_page_migration_dropped_event_t      dropped_event;
     uint64_t                                        reserved[16];
 } rocprofiler_page_migration_args_t;
 
