@@ -100,8 +100,9 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
   - `Dispatch_Id`
 - CSV column for counter collection
 
-
-## ROCprofiler-SDK 0.5.0 for ROCm release 6.3 (AFAR VII)
+### Additions
+   --List supported PC Sampling Configurations
+### Changes
 
 ### Added
 

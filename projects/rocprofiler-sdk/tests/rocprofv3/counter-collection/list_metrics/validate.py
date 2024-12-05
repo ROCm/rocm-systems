@@ -29,6 +29,15 @@ def test_validate_list_derived_metrics(derived_metrics_input_data):
             row["Expression"] == "reduce(TA_TA_BUSY,min)"
 
 
+def test_validate_list_pc_sample_config(pc_sample_config_input_data):
+    for row in pc_sample_config_input_data:
+        assert row["Agent_Id"].isdigit() == True
+        assert row["Method"] != ""
+        assert row["Unit"] != ""
+        assert row["Minimum_Interval"].isdigit() == True
+        assert row["Maximum_Interval"].isdigit() == True
+
+
 if __name__ == "__main__":
     exit_code = pytest.main(["-x", __file__] + sys.argv[1:])
     sys.exit(exit_code)

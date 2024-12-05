@@ -122,9 +122,9 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Iteration range for each kernel that match the filter [start-stop].
     - Kernel Dispatch Counter Collection
 
-  * - ``-L`` \| ``--list-metrics``
-    - List metrics for counter collection.
-    - Kernel Dispatch Counter Collection
+  * - ``-L`` \| ``--list-avail``
+    - List metrics for counter collection 
+    - List supported PC sampling configurations.
 
   * - ``-E`` \| ``--extra_counters``
     - Specifies the path to a YAML file containing extra counter definitions.

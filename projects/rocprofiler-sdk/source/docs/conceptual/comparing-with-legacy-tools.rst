@@ -214,10 +214,10 @@ ROCprofiler-SDK introduces a new command-line tool, `rocprofv3`, which is a more
      - New option to output summary in desired time units {sec,msec,usec,nsec}
      - 
    * - Display options
-     - List Metrics
+     - List available basic and derived metrics and PC sampling configurations
      - `--list-basic`, `--list-derived`
      - `--list-counters`
-     - `-L`, `--list-metrics`
+     - `-L`, `--list-avail`
      - A valid YAML is supported for this option now
      - 
    * - Perfetto-specific options

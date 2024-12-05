@@ -412,8 +412,8 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
     add_parser_bool_argument(
         display_options,
         "-L",
-        "--list-metrics",
-        help="List metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters",
+        "--list-avail",
+        help="List available PC sampling configurations and metrics for counter collection. Backed by a valid YAML file. In earlier rocprof versions, this was known as --list-basic, --list-derived and --list-counters",
     )
 
     advanced_options = parser.add_argument_group("Advanced options")
@@ -678,9 +678,14 @@ def run(app_args, args, **kwargs):
     ROCPROF_KOKKOSP_LIBRARY = (
         f"{ROCM_DIR}/lib/rocprofiler-sdk/librocprofiler-sdk-tool-kokkosp.so"
     )
+    ROCPROF_LIST_AVAIL_TOOL_LIBRARY = f"{ROCM_DIR}/libexec/librocprofv3-list-avail.so"
 
     prepend_preload = [itr for itr in args.preload if itr]
-    append_preload = [ROCPROF_TOOL_LIBRARY, ROCPROF_SDK_LIBRARY]
+    append_preload = [
+        ROCPROF_TOOL_LIBRARY,
+        ROCPROF_LIST_AVAIL_TOOL_LIBRARY,
+        ROCPROF_SDK_LIBRARY,
+    ]
 
     update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
     update_env("LD_PRELOAD", ":".join(append_preload), append=True)
@@ -709,7 +714,7 @@ def run(app_args, args, **kwargs):
         )
 
     if args.output_file is not None or args.output_directory is not None:
-        update_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", True)
+        update_env("ROCPROF_OUTPUT_LIST_AVAIL_FILE", True)
 
     if not args.output_format:
         args.output_format = ["csv"]
@@ -841,8 +846,8 @@ def run(app_args, args, **kwargs):
         overwrite_if_true=True,
     )
     update_env(
-        "ROCPROF_LIST_METRICS",
-        args.list_metrics,
+        "ROCPROF_LIST_AVAIL",
+        args.list_avail,
         overwrite_if_true=True,
     )
 
@@ -891,8 +896,13 @@ def run(app_args, args, **kwargs):
             sys.stderr.write("\n")
         sys.stderr.flush()
 
-    if args.list_metrics:
-        app_args = [f"{ROCM_DIR}/libexec/rocprofv3-trigger-list-metrics"]
+    if args.list_avail:
+        update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "on")
+        path = os.path.join(f"{ROCM_DIR}", "bin/rocprofv3_avail")
+        if app_args:
+            exit_code = subprocess.check_call(["python3", path], env=app_env)
+        else:
+            app_args = ["python3", path]
 
     elif not app_args:
         log_config(app_env)
