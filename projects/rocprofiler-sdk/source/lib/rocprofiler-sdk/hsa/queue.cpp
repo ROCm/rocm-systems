@@ -43,6 +43,7 @@
 #include <hsa/hsa_ext_amd.h>
 
 #include <atomic>
+#include <memory>
 
 // static assert for rocprofiler_packet ABI compatibility
 static_assert(sizeof(hsa_ext_amd_aql_pm4_packet_t) == sizeof(hsa_kernel_dispatch_packet_t),
@@ -116,8 +117,10 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
 
     get_balanced_signal_slots().fetch_add(1);
 
-    auto& queue_info_session = *static_cast<Queue::queue_info_session_t*>(data);
-    auto  dispatch_time      = kernel_dispatch::get_dispatch_time(queue_info_session);
+    auto& shared_ptr_info    = *static_cast<std::shared_ptr<Queue::queue_info_session_t>*>(data);
+    auto& queue_info_session = *shared_ptr_info;
+
+    auto dispatch_time = kernel_dispatch::get_dispatch_time(queue_info_session);
 
     kernel_dispatch::dispatch_complete(queue_info_session, dispatch_time);
 
@@ -128,7 +131,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
         {
             cb_pair.second(queue_info_session.queue,
                            queue_info_session.kernel_pkt,
-                           queue_info_session,
+                           shared_ptr_info,
                            queue_info_session.inst_pkt,
                            dispatch_time);
         }
@@ -164,7 +167,7 @@ AsyncSignalHandler(hsa_signal_value_t /*signal_v*/, void* data)
     }
 
     queue_info_session.queue.async_complete();
-    delete static_cast<Queue::queue_info_session_t*>(data);
+    delete &shared_ptr_info;
 
     return false;
 }
@@ -446,20 +449,24 @@ WriteInterceptor(const void* packets,
 
         // Enqueue the signal into the handler. Will call completed_cb when
         // signal completes.
-        queue.signal_async_handler(
-            completion_signal,
-            new Queue::queue_info_session_t{.queue            = queue,
-                                            .inst_pkt         = std::move(inst_pkt),
-                                            .interrupt_signal = interrupt_signal,
-                                            .tid              = thr_id,
-                                            .enqueue_ts       = common::timestamp_ns(),
-                                            .user_data        = user_data,
-                                            .correlation_id   = corr_id,
-                                            .kernel_pkt       = kernel_pkt,
-                                            .callback_record  = callback_record,
-                                            .tracing_data     = tracing_data_v});
 
         {
+            Queue::queue_info_session_t info_session{.queue            = queue,
+                                                     .inst_pkt         = std::move(inst_pkt),
+                                                     .interrupt_signal = interrupt_signal,
+                                                     .tid              = thr_id,
+                                                     .enqueue_ts       = common::timestamp_ns(),
+                                                     .user_data        = user_data,
+                                                     .correlation_id   = corr_id,
+                                                     .kernel_pkt       = kernel_pkt,
+                                                     .callback_record  = callback_record,
+                                                     .tracing_data     = tracing_data_v};
+
+            auto shared = std::make_shared<Queue::queue_info_session_t>(std::move(info_session));
+
+            queue.signal_async_handler(completion_signal,
+                                       new std::shared_ptr<Queue::queue_info_session_t>(shared));
+
             auto tracer_data = callback_record;
             tracing::execute_phase_exit_callbacks(tracing_data_v.callback_contexts,
                                                   tracing_data_v.external_correlation_ids,
@@ -561,7 +568,7 @@ Queue::~Queue()
 }
 
 void
-Queue::signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const
+Queue::signal_async_handler(const hsa_signal_t& signal, void* data) const
 {
 #if !defined(NDEBUG)
     CHECK_NOTNULL(hsa::get_queue_controller())->_debug_signals.wlock([&](auto& signals) {

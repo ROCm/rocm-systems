@@ -347,12 +347,12 @@ pc_sampling_service_finish_configuration(context::pc_sampling_service* service)
            const rocprofiler::hsa::Queue::queue_info_session_t::external_corr_id_map_t&,
            const context::correlation_id*) { return nullptr; },
         // Completion CB
-        [](const rocprofiler::hsa::Queue&                       q,
-           rocprofiler::hsa::rocprofiler_packet                 kern_pkt,
-           const rocprofiler::hsa::Queue::queue_info_session_t& session,
+        [](const rocprofiler::hsa::Queue&                                  q,
+           rocprofiler::hsa::rocprofiler_packet                            kern_pkt,
+           std::shared_ptr<rocprofiler::hsa::Queue::queue_info_session_t>& session,
            rocprofiler::hsa::inst_pkt_t&,
            kernel_dispatch::profiling_time) {
-            kernel_completion_cb(q.get_agent().get_rocp_agent(), kern_pkt, session);
+            kernel_completion_cb(q.get_agent().get_rocp_agent(), kern_pkt, *session);
         });
 }
 

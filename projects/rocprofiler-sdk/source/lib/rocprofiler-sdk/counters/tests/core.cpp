@@ -459,14 +459,16 @@ TEST(core, check_callbacks)
                                                        &opt_buff_id),
                              "Could not create buffer");
             cb_info->buffer = opt_buff_id;
-            // hsa::Queue::queue_info_session_t sess = {.queue = fq, .correlation_id = &corr_id};
-            hsa::Queue::queue_info_session_t sess = hsa::Queue::queue_info_session_t{.queue = fq};
-            sess.correlation_id                   = &corr_id;
+
+            auto _sess           = hsa::Queue::queue_info_session_t{.queue = fq};
+            _sess.correlation_id = &corr_id;
+
+            auto sess = std::make_shared<hsa::Queue::queue_info_session_t>(std::move(_sess));
 
             counters::inst_pkt_t pkts;
             pkts.emplace_back(
                 std::make_pair(std::move(ret_pkt), static_cast<counters::ClientID>(0)));
-            completed_cb(&ctx, cb_info, fq, pkt, sess, pkts, kernel_dispatch::profiling_time{});
+            completed_cb(&ctx, cb_info, sess, pkts, kernel_dispatch::profiling_time{});
             rocprofiler_flush_buffer(opt_buff_id);
             rocprofiler_destroy_buffer(opt_buff_id);
         }

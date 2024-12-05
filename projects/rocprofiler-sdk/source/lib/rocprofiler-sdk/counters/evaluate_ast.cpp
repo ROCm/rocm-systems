@@ -21,6 +21,8 @@
 // SOFTWARE.
 
 #include "lib/rocprofiler-sdk/counters/evaluate_ast.hpp"
+#include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -569,7 +571,9 @@ using property_function_t = int64_t (*)(const rocprofiler_agent_t&);
 int64_t
 get_agent_property(std::string_view property, const rocprofiler_agent_t& agent)
 {
-    static std::unordered_map<std::string_view, property_function_t> props = {
+    using map_t = std::unordered_map<std::string_view, property_function_t>;
+
+    static auto*& _props = common::static_object<common::Synchronized<map_t>>::construct(map_t{
         GEN_MAP_ENTRY("cpu_cores_count", agent_info.cpu_cores_count),
         GEN_MAP_ENTRY("simd_count", agent_info.simd_count),
         GEN_MAP_ENTRY("mem_banks_count", agent_info.mem_banks_count),
@@ -599,13 +603,15 @@ get_agent_property(std::string_view property, const rocprofiler_agent_t& agent)
         GEN_MAP_ENTRY("num_sdma_queues_per_engine", agent_info.num_sdma_queues_per_engine),
         GEN_MAP_ENTRY("num_cp_queues", agent_info.num_cp_queues),
         GEN_MAP_ENTRY("max_engine_clk_ccompute", agent_info.max_engine_clk_ccompute),
-    };
-    if(const auto* func = rocprofiler::common::get_val(props, property))
-    {
-        return (*func)(agent);
-    }
+    });
 
-    return 0.0;
+    return CHECK_NOTNULL(_props)->wlock([&property, &agent](map_t& props) -> int64_t {
+        if(const auto* func = rocprofiler::common::get_val(props, property))
+        {
+            return (*func)(agent);
+        }
+        return 0;
+    });
 }
 
 void

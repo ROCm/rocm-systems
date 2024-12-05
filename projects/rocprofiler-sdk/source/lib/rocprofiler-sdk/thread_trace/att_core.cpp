@@ -437,9 +437,9 @@ DispatchThreadTracer::start_context()
             },
             [=](const hsa::Queue& /* q */,
                 hsa::rocprofiler_packet /* kern_pkt */,
-                const hsa::Queue::queue_info_session_t& session,
-                inst_pkt_t&                             aql,
-                kernel_dispatch::profiling_time) { this->post_kernel_call(aql, session); });
+                std::shared_ptr<hsa::Queue::queue_info_session_t>& session,
+                inst_pkt_t&                                        aql,
+                kernel_dispatch::profiling_time) { this->post_kernel_call(aql, *session); });
     });
 }
 

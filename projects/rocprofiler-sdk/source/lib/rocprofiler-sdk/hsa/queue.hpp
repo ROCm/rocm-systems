@@ -87,7 +87,7 @@ public:
     // Signals the completion of the kernel packet.
     using completed_cb_t = std::function<void(const Queue&,
                                               const rocprofiler_packet&,
-                                              const Queue::queue_info_session_t&,
+                                              std::shared_ptr<Queue::queue_info_session_t>&,
                                               inst_pkt_t&,
                                               kernel_dispatch::profiling_time)>;
     using callback_map_t = std::unordered_map<ClientID, std::pair<queue_cb_t, completed_cb_t>>;
@@ -109,7 +109,7 @@ public:
     virtual const AgentCache& get_agent() const { return _agent; }
 
     void create_signal(uint32_t attribute, hsa_signal_t* signal) const;
-    void signal_async_handler(const hsa_signal_t& signal, Queue::queue_info_session_t* data) const;
+    void signal_async_handler(const hsa_signal_t& signal, void* data) const;
 
     template <typename FuncT>
     void signal_callback(FuncT&& func) const;
