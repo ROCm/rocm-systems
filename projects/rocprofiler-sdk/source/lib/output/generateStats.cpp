@@ -411,5 +411,13 @@ generate_stats(const output_config& cfg,
 
     if(cfg.stats_summary) generate_stats(cfg, _os, "SUMMARY", data_v, _indent);
 }
+
+stats_entry_t
+generate_stats(const output_config& /* cfg*/,
+               const metadata& /*tool_metadata*/,
+               const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>& /*data*/)
+{
+    return stats_entry_t{};
+}
 }  // namespace tool
 }  // namespace rocprofiler

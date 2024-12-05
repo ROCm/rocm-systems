@@ -4,6 +4,7 @@ import os
 import sys
 import argparse
 import subprocess
+import numpy
 
 
 class dotdict(dict):
@@ -167,6 +168,30 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         help="Collect tracing data for HIP API, HSA API, Marker (ROCTx) API, RCCL API, Memory operations (copies, scratch, and allocations), and Kernel dispatches.",
     )
 
+    pc_sampling_options = parser.add_argument_group("PC sampling options")
+
+    pc_sampling_options.add_argument(
+        "--pc-sampling-unit",
+        help="",
+        default=None,
+        type=str.lower,
+        choices=("instructions", "cycles", "time"),
+    )
+
+    pc_sampling_options.add_argument(
+        "--pc-sampling-method",
+        help="",
+        default=None,
+        type=str.lower,
+        choices=("stochastic", "host_trap"),
+    )
+
+    pc_sampling_options.add_argument(
+        "--pc-sampling-interval",
+        help="",
+        default=None,
+        type=numpy.uint64,
+    )
     basic_tracing_options = parser.add_argument_group("Basic tracing options")
 
     # Add the arguments
@@ -903,6 +928,18 @@ def run(app_args, args, **kwargs):
 
     if args.log_level in ("info", "trace", "env"):
         log_config(app_env)
+
+    if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_method:
+        if not (
+            args.pc_sampling_unit and args.pc_sampling_method and args.pc_sampling_method
+        ):
+            fatal_error("All three PC sampling configurations need to be set")
+
+        update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "ON")
+        update_env("ROCPROF_PC_SAMPLING_UNIT", args.pc_sampling_unit)
+        update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
+        update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
+        update_env("ROCPROF_ENABLE_PC_SAMPLING", args.pc_sampling)
 
     if use_execv:
         # does not return

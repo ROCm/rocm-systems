@@ -47,6 +47,20 @@ dimensions_info_callback(rocprofiler_counter_id_t /*id*/,
         dimensions_info->emplace_back(dim_info[j]);
     return ROCPROFILER_STATUS_SUCCESS;
 }
+
+rocprofiler_status_t
+query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* configs,
+                                long unsigned int                              num_config,
+                                void*                                          user_data)
+{
+    auto* avail_configs =
+        static_cast<std::vector<rocprofiler_pc_sampling_configuration_t>*>(user_data);
+    for(size_t i = 0; i < num_config; i++)
+    {
+        avail_configs->emplace_back(configs[i]);
+    }
+    return ROCPROFILER_STATUS_SUCCESS;
+}
 }  // namespace
 
 kernel_symbol_info::kernel_symbol_info()
@@ -78,7 +92,14 @@ metadata::metadata(inprocess)
         _gpu_agents.reserve(agents.size());
         for(auto& itr : agents)
         {
-            if(itr.type == ROCPROFILER_AGENT_TYPE_GPU) _gpu_agents.emplace_back(&itr);
+            if(itr.type == ROCPROFILER_AGENT_TYPE_GPU)
+            {
+                _gpu_agents.emplace_back(&itr);
+                auto pc_configs = std::vector<rocprofiler_pc_sampling_configuration_t>{};
+                rocprofiler_query_pc_sampling_agent_configurations(
+                    itr.id, query_pc_sampling_configuration, &pc_configs);
+                agent_pc_sample_config_info.emplace(itr.id, pc_configs);
+            }
         }
 
         // make sure they are sorted by node id
@@ -112,6 +133,7 @@ void metadata::init(inprocess)
                void*                     user_data) {
                 auto* data_v = static_cast<agent_counter_info_map_t*>(user_data);
                 data_v->emplace(id, counter_info_vec_t{});
+
                 for(size_t i = 0; i < num_counters; ++i)
                 {
                     auto _info     = rocprofiler_counter_info_v0_t{};
@@ -258,6 +280,17 @@ metadata::get_gpu_agents() const
         if(itr.type == ROCPROFILER_AGENT_TYPE_GPU) _data.emplace_back(&itr);
     }
     return _data;
+}
+
+pc_sample_config_vec_t
+metadata::get_pc_sample_config_info(rocprofiler_agent_id_t _val) const
+{
+    auto _ret             = pc_sample_config_vec_t{};
+    auto pc_sample_config = agent_pc_sample_config_info.at(_val);
+    for(const auto& itr : pc_sample_config)
+        _ret.emplace_back(itr);
+
+    return _ret;
 }
 
 counter_info_vec_t
@@ -417,5 +450,62 @@ metadata::get_string_entry(size_t key) const
 
     return ret;
 }
+
+int64_t
+metadata::get_instruction_index(rocprofiler_pc_t record)
+{
+    inst_t ins;
+    ins.code_object_id     = record.code_object_id;
+    ins.code_object_offset = record.code_object_offset;
+    auto itr               = indexes.find(ins);
+    if(itr != indexes.end()) return itr->second;
+    auto idx            = instruction_decoder.size();
+    auto pc_instruction = decode_instruction(record);
+    instruction_decoder.emplace_back(pc_instruction->inst);
+    instruction_comment.emplace_back(pc_instruction->comment);
+    indexes.emplace(ins, idx);
+    return idx;
+}
+
+void
+metadata::add_decoder(rocprofiler_code_object_info_t* obj_data)
+{
+    if(obj_data->storage_type == ROCPROFILER_CODE_OBJECT_STORAGE_TYPE_FILE)
+    {
+        decoder.wlock(
+            [](auto& _decoder, rocprofiler_code_object_info_t* obj_data_v) {
+                _decoder.addDecoder(obj_data_v->uri,
+                                    obj_data_v->code_object_id,
+                                    obj_data_v->load_delta,
+                                    obj_data_v->load_size);
+            },
+            obj_data);
+    }
+    else
+    {
+        decoder.wlock(
+            [](auto& _decoder, rocprofiler_code_object_info_t* obj_data_v) {
+                _decoder.addDecoder(
+                    // NOLINTBEGIN(performance-no-int-to-ptr)
+                    reinterpret_cast<const void*>(obj_data_v->memory_base),
+                    // NOLINTEND(performance-no-int-to-ptr)
+                    obj_data_v->memory_size,
+                    obj_data_v->code_object_id,
+                    obj_data_v->load_delta,
+                    obj_data_v->load_size);
+            },
+            obj_data);
+    }
+}
+
+std::unique_ptr<instruction_t>
+metadata::decode_instruction(rocprofiler_pc_t pc)
+{
+    return decoder.wlock(
+        [](auto& _decoder, uint64_t id, uint64_t addr) { return _decoder.get(id, addr); },
+        pc.code_object_id,
+        pc.code_object_offset);
+}
+
 }  // namespace tool
 }  // namespace rocprofiler

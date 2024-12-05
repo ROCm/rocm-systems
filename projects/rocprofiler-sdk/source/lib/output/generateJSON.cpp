@@ -124,7 +124,13 @@ write_json(json_output&         json_ar,
         json_ar.startNode();
         json_ar(cereal::make_nvp("callback_records", callback_name_info));
         json_ar(cereal::make_nvp("buffer_records", buffer_name_info));
+        json_ar(
+            cereal::make_nvp("pc_sample_instructions", tool_metadata.get_pc_sample_instructions()));
+        json_ar(cereal::make_nvp("pc_sample_comments", tool_metadata.get_pc_sample_comments()));
         json_ar(cereal::make_nvp("marker_api", marker_msg_data));
+        json_ar(
+            cereal::make_nvp("pc_sample_instructions", tool_metadata.get_pc_sample_instructions()));
+        json_ar(cereal::make_nvp("pc_sample_comments", tool_metadata.get_pc_sample_comments()));
 
         {
             auto _extern_corr_id_strings = std::map<size_t, std::string>{};
@@ -178,7 +184,8 @@ write_json(json_output& json_ar,
            generator<rocprofiler_buffer_tracing_marker_api_record_t>        marker_api_gen,
            generator<rocprofiler_buffer_tracing_scratch_memory_record_t>    scratch_memory_gen,
            generator<rocprofiler_buffer_tracing_rccl_api_record_t>          rccl_api_gen,
-           generator<rocprofiler_buffer_tracing_memory_allocation_record_t> memory_allocation_gen)
+           generator<rocprofiler_buffer_tracing_memory_allocation_record_t> memory_allocation_gen,
+           generator<rocprofiler_tool_pc_sampling_host_trap_record_t>       pc_sampling_gen)
 
 {
     // summary
@@ -219,6 +226,7 @@ write_json(json_output& json_ar,
         json_ar(cereal::make_nvp("memory_copy", memory_copy_gen));
         json_ar(cereal::make_nvp("memory_allocation", memory_allocation_gen));
         json_ar(cereal::make_nvp("scratch_memory", scratch_memory_gen));
+        json_ar(cereal::make_nvp("pc_sample_host_trap", pc_sampling_gen));
         json_ar.finishNode();
     }
 }

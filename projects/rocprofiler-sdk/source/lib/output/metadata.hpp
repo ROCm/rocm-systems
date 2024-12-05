@@ -25,6 +25,7 @@
 #include "agent_info.hpp"
 #include "counter_info.hpp"
 #include "kernel_symbol_info.hpp"
+#include "pc_sample_transform.hpp"
 
 #include "lib/common/container/small_vector.hpp"
 #include "lib/common/demangle.hpp"
@@ -36,6 +37,7 @@
 #include <rocprofiler-sdk/callback_tracing.h>
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/codeobj/code_printing.hpp>
 #include <rocprofiler-sdk/cxx/hash.hpp>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
 #include <rocprofiler-sdk/cxx/operators.hpp>
@@ -71,7 +73,8 @@ using marker_message_ordered_map_t = std::map<uint64_t, std::string>;
 using string_entry_map_t           = std::unordered_map<size_t, std::unique_ptr<std::string>>;
 using counter_dimension_vec_t      = std::vector<rocprofiler_record_dimension_info_t>;
 using external_corr_id_set_t       = std::unordered_set<uint64_t>;
-
+using code_obj_decoder_t = rocprofiler::sdk::codeobj::disassembly::CodeobjAddressTranslate;
+using instruction_t      = rocprofiler::sdk::codeobj::disassembly::Instruction;
 template <typename Tp>
 using synced_map = common::Synchronized<Tp, true>;
 
@@ -82,19 +85,21 @@ struct metadata
     struct inprocess
     {};
 
-    pid_t                                process_id         = 0;
-    uint64_t                             process_start_ns   = 0;
-    uint64_t                             process_end_ns     = 0;
-    agent_info_vec_t                     agents             = {};
-    agent_info_map_t                     agents_map         = {};
-    agent_counter_info_map_t             agent_counter_info = {};
-    sdk::buffer_name_info                buffer_names       = {};
-    sdk::callback_name_info              callback_names     = {};
-    synced_map<code_object_data_map_t>   code_objects       = {};
-    synced_map<kernel_symbol_data_map_t> kernel_symbols     = {};
-    synced_map<marker_message_map_t>     marker_messages    = {};
-    synced_map<string_entry_map_t>       string_entries     = {};
-    synced_map<external_corr_id_set_t>   external_corr_ids  = {};
+    pid_t                             process_id                  = 0;
+    uint64_t                          process_start_ns            = 0;
+    uint64_t                          process_end_ns              = 0;
+    agent_info_vec_t                  agents                      = {};
+    agent_info_map_t                  agents_map                  = {};
+    agent_counter_info_map_t          agent_counter_info          = {};
+    agent_pc_sample_config_info_map_t agent_pc_sample_config_info = {};
+
+    sdk::buffer_name_info                buffer_names      = {};
+    sdk::callback_name_info              callback_names    = {};
+    synced_map<code_object_data_map_t>   code_objects      = {};
+    synced_map<kernel_symbol_data_map_t> kernel_symbols    = {};
+    synced_map<marker_message_map_t>     marker_messages   = {};
+    synced_map<string_entry_map_t>       string_entries    = {};
+    synced_map<external_corr_id_set_t>   external_corr_ids = {};
 
     metadata() = default;
     metadata(inprocess);
@@ -119,6 +124,13 @@ struct metadata
     agent_info_ptr_vec_t     get_gpu_agents() const;
     counter_info_vec_t       get_counter_info() const;
     counter_dimension_vec_t  get_counter_dimension_info() const;
+    pc_sample_config_vec_t   get_pc_sample_config_info(rocprofiler_agent_id_t _val) const;
+    std::vector<std::string> get_pc_sample_instructions() const { return instruction_decoder; }
+    std::vector<std::string> get_pc_sample_comments() const { return instruction_comment; }
+    std::string_view get_instruction(int64_t index) const { return instruction_decoder.at(index); }
+    std::string_view get_comment(int64_t index) const { return instruction_comment.at(index); }
+    int64_t          get_instruction_index(rocprofiler_pc_t record);
+    void             add_decoder(rocprofiler_code_object_info_t* obj_data_v);
 
     template <typename Tp>
     Tp get_marker_messages(Tp&&);
@@ -141,7 +153,13 @@ struct metadata
     const std::string* get_string_entry(size_t key) const;
 
 private:
-    bool inprocess_init = false;
+    bool                           inprocess_init = false;
+    std::unique_ptr<instruction_t> decode_instruction(rocprofiler_pc_t pc);
+    synced_map<code_obj_decoder_t> decoder = {};
+    // TODO: We may have to reserve the vector size based on map size
+    std::vector<std::string> instruction_decoder = {};
+    std::vector<std::string> instruction_comment = {};
+    std::map<inst_t, size_t> indexes             = {};
 };
 
 template <typename Tp>

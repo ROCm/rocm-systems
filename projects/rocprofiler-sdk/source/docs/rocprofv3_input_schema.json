@@ -144,7 +144,19 @@
                      "preload":{
                       "type": "array",
                       "description": "Libraries to prepend to LD_PRELOAD (usually for sanitizers)"
-                     }
+                     },
+                     "pc_sampling_unit": {
+                      "type": "string",
+                      "description": "pc sampling unit"
+                     },
+                     "pc_sampling_method": {
+                         "type": "string",
+                         "description": "pc sampling method"
+                    },
+                    "pc_sampling_interval": {
+                         "type": "integer",
+                         "description": "pc sampling interval"
+                    }
                  }
               }
            }

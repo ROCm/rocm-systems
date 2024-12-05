@@ -93,6 +93,7 @@ write_json(json_output&                                                     json
            generator<rocprofiler_buffer_tracing_marker_api_record_t>        marker_api_gen,
            generator<rocprofiler_buffer_tracing_scratch_memory_record_t>    scratch_memory_gen,
            generator<rocprofiler_buffer_tracing_rccl_api_record_t>          rccl_api_gen,
-           generator<rocprofiler_buffer_tracing_memory_allocation_record_t> memory_allocation_gen);
+           generator<rocprofiler_buffer_tracing_memory_allocation_record_t> memory_allocation_gen,
+           generator<rocprofiler_tool_pc_sampling_host_trap_record_t>       pc_sampling_gen);
 }  // namespace tool
 }  // namespace rocprofiler

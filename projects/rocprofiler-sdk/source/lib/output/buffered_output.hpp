@@ -24,6 +24,7 @@
 
 #include "counter_info.hpp"
 #include "generator.hpp"
+#include "pc_sample_transform.hpp"
 #include "statistics.hpp"
 #include "tmp_file_buffer.hpp"
 
@@ -159,5 +160,8 @@ using memory_allocation_buffered_output_t =
 using counter_records_buffered_output_t =
     ::rocprofiler::tool::buffered_output<rocprofiler::tool::serialized_counter_record_t,
                                          domain_type::COUNTER_VALUES>;
+using pc_sampling_host_trap_buffered_output_t =
+    buffered_output<rocprofiler::tool::rocprofiler_tool_pc_sampling_host_trap_record_t,
+                    domain_type::PC_SAMPLING_HOST_TRAP>;
 }  // namespace tool
 }  // namespace rocprofiler

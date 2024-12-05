@@ -735,6 +735,44 @@ save(ArchiveT& ar, rocprofiler_agent_cache_t data)
     ROCP_SDK_SAVE_DATA_FIELD(latency);
     ROCP_SDK_SAVE_DATA_FIELD(type);
 }
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(code_object_id);
+    ROCP_SDK_SAVE_DATA_FIELD(code_object_offset);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_sampling_hw_id_v0_t data)
+{
+    ROCP_SDK_SAVE_DATA_BITFIELD("chiplet", chiplet);
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_id", wave_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("simd_id", simd_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("pipe_id", pipe_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("cu_or_wgp_id", cu_or_wgp_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("shader_array_id", shader_array_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("shader_engine_id", shader_engine_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("workgroup_id ", workgroup_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("vm_id", vm_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("queue_id", queue_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("microengine_id", microengine_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_pc_sampling_record_host_trap_v0_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(hw_id);
+    ROCP_SDK_SAVE_DATA_FIELD(pc);
+    ROCP_SDK_SAVE_DATA_FIELD(exec_mask);
+    ROCP_SDK_SAVE_DATA_FIELD(timestamp);
+    ROCP_SDK_SAVE_DATA_FIELD(dispatch_id);
+    ROCP_SDK_SAVE_DATA_VALUE("corr_id", correlation_id);
+    ROCP_SDK_SAVE_DATA_VALUE("wrkgrp_id", workgroup_id);
+    ROCP_SDK_SAVE_DATA_BITFIELD("wave_in_grp", wave_in_group);
+}
 
 template <typename ArchiveT>
 void

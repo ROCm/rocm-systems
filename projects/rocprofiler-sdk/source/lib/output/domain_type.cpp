@@ -57,6 +57,10 @@ DEFINE_BUFFER_TYPE_NAME(MEMORY_ALLOCATION,
                         "memory_allocation",
                         "memory_allocation_stats")
 DEFINE_BUFFER_TYPE_NAME(COUNTER_VALUES, "COUNTER_VALUES", "counter_values", "no_filename")
+DEFINE_BUFFER_TYPE_NAME(PC_SAMPLING_HOST_TRAP,
+                        "PC_SAMPLING_HOST_TRAP",
+                        "pc_sampling_host_trap",
+                        "pc_sampling_host_trap_stats")
 
 #undef DEFINE_BUFFER_TYPE_NAME
 

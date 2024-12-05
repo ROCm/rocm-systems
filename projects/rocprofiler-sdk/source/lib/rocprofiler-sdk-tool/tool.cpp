@@ -157,17 +157,19 @@ struct buffer_ids
     rocprofiler_buffer_id_t counter_collection      = {};
     rocprofiler_buffer_id_t scratch_memory          = {};
     rocprofiler_buffer_id_t rccl_api_trace          = {};
+    rocprofiler_buffer_id_t pc_sampling_host_trap   = {};
 
     auto as_array() const
     {
-        return std::array<rocprofiler_buffer_id_t, 8>{hsa_api_trace,
+        return std::array<rocprofiler_buffer_id_t, 9>{hsa_api_trace,
                                                       hip_api_trace,
                                                       kernel_trace,
                                                       memory_copy_trace,
                                                       memory_allocation_trace,
                                                       counter_collection,
                                                       scratch_memory,
-                                                      rccl_api_trace};
+                                                      rccl_api_trace,
+                                                      pc_sampling_host_trap};
     }
 };
 
@@ -547,6 +549,10 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             auto* obj_data = static_cast<tool::rocprofiler_code_object_info_t*>(record.payload);
 
             CHECK_NOTNULL(tool_metadata)->add_code_object(*obj_data);
+            if(tool::get_config().pc_sampling_host_trap)
+            {
+                CHECK_NOTNULL(tool_metadata)->add_decoder(obj_data);
+            }
         }
         else if(record.phase == ROCPROFILER_CALLBACK_PHASE_UNLOAD)
         {
@@ -801,6 +807,58 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
     return profile;
 }
 
+int64_t
+get_instruction_index(rocprofiler_pc_t pc)
+{
+    if(pc.code_object_id == ROCPROFILER_CODE_OBJECT_ID_NONE)
+        return -1;
+    else
+        return CHECK_NOTNULL(tool_metadata)->get_instruction_index(pc);
+}
+
+}  // namespace
+
+void
+rocprofiler_pc_sampling_callback(rocprofiler_context_id_t /* context_id*/,
+                                 rocprofiler_buffer_id_t /* buffer_id*/,
+                                 rocprofiler_record_header_t** headers,
+                                 size_t                        num_headers,
+                                 void* /*data*/,
+                                 uint64_t /* drop_count*/)
+{
+    if(!headers) return;
+
+    for(size_t i = 0; i < num_headers; i++)
+    {
+        auto* cur_header = headers[i];
+
+        if(cur_header == nullptr)
+        {
+            throw std::runtime_error{
+                "rocprofiler provided a null pointer to header. this should never happen"};
+        }
+        else if(cur_header->category == ROCPROFILER_BUFFER_CATEGORY_PC_SAMPLING)
+        {
+            if(cur_header->kind == ROCPROFILER_PC_SAMPLING_RECORD_HOST_TRAP_V0_SAMPLE)
+            {
+                auto* pc_sample = static_cast<rocprofiler_pc_sampling_record_host_trap_v0_t*>(
+                    cur_header->payload);
+
+                auto pc_sample_tool_record =
+                    rocprofiler::tool::rocprofiler_tool_pc_sampling_host_trap_record_t(
+                        *pc_sample, get_instruction_index(pc_sample->pc));
+
+                rocprofiler::tool::write_ring_buffer(pc_sample_tool_record,
+                                                     domain_type::PC_SAMPLING_HOST_TRAP);
+            }
+        }
+        else
+        {
+            ROCP_FATAL << "unexpected rocprofiler_record_header_t category + kind";
+        }
+    }
+}
+
 void
 dispatch_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                   rocprofiler_profile_config_id_t*             config,
@@ -1016,6 +1074,26 @@ finalize_rocprofv3(std::string_view context)
     {
         ROCP_INFO << "finalize_rocprofv3('" << context << "') ignored: already finalized";
     }
+}
+
+bool
+if_pc_sample_config_match(rocprofiler_agent_id_t           agent_id,
+                          rocprofiler_pc_sampling_method_t pc_sampling_method,
+                          rocprofiler_pc_sampling_unit_t   pc_sampling_unit,
+                          uint64_t                         pc_sampling_interval)
+{
+    auto pc_sampling_config = CHECK_NOTNULL(tool_metadata)->get_pc_sample_config_info(agent_id);
+    if(!pc_sampling_config.empty())
+    {
+        for(auto config : pc_sampling_config)
+        {
+            if(config.method == pc_sampling_method && config.unit == pc_sampling_unit &&
+               config.min_interval <= pc_sampling_interval &&
+               config.max_interval >= pc_sampling_interval)
+                return true;
+        }
+    }
+    return false;
 }
 
 int
@@ -1277,6 +1355,44 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                          "Could not configure external correlation id request service");
     }
 
+    if(tool::get_config().pc_sampling_host_trap)
+    {
+        ROCPROFILER_CALL(rocprofiler_create_buffer(get_client_ctx(),
+                                                   buffer_size,
+                                                   buffer_watermark,
+                                                   ROCPROFILER_BUFFER_POLICY_LOSSLESS,
+                                                   rocprofiler_pc_sampling_callback,
+                                                   tool_data,
+                                                   &get_buffers().pc_sampling_host_trap),
+                         "buffer creation");
+        bool config_match_found = false;
+        auto agent_ptr_vec      = get_gpu_agents();
+        for(auto& itr : agent_ptr_vec)
+        {
+            auto method = static_cast<rocprofiler_pc_sampling_method_t>(
+                tool::get_config().pc_sampling_method_value);
+            auto unit = static_cast<rocprofiler_pc_sampling_unit_t>(
+                tool::get_config().pc_sampling_unit_value);
+            if(if_pc_sample_config_match(
+                   itr->id, method, unit, tool::get_config().pc_sampling_interval))
+            {
+                config_match_found = true;
+                int flags          = 0;
+                ROCPROFILER_CALL(rocprofiler_configure_pc_sampling_service(
+                                     get_client_ctx(),
+                                     itr->id,
+                                     method,
+                                     unit,
+                                     tool::get_config().pc_sampling_interval,
+                                     get_buffers().pc_sampling_host_trap,
+                                     flags),
+                                 "configure PC sampling");
+            }
+        }
+        if(!config_match_found)
+            ROCP_ERROR << "Given PC sampling configuration is not supported on any of the agents";
+    }
+
     for(auto itr : get_buffers().as_array())
     {
         if(itr.handle > 0)
@@ -1380,6 +1496,8 @@ tool_fini(void* /*tool_data*/)
         tool::memory_allocation_buffered_output_t{tool::get_config().memory_allocation_trace};
     auto counters_records_output =
         tool::counter_records_buffered_output_t{tool::get_config().counter_collection};
+    auto pc_sampling_host_trap_output =
+        tool::pc_sampling_host_trap_buffered_output_t{tool::get_config().pc_sampling_host_trap};
 
     auto node_id_sort = [](const auto& lhs, const auto& rhs) { return lhs.node_id < rhs.node_id; };
 
@@ -1402,6 +1520,7 @@ tool_fini(void* /*tool_data*/)
     generate_output(rccl_output, contributions);
     generate_output(counters_output, contributions);
     generate_output(scratch_memory_output, contributions);
+    generate_output(pc_sampling_host_trap_output, contributions);
 
     if(tool::get_config().stats && tool::get_config().csv_output)
     {
@@ -1426,7 +1545,8 @@ tool_fini(void* /*tool_data*/)
                          marker_output.get_generator(),
                          scratch_memory_output.get_generator(),
                          rccl_output.get_generator(),
-                         memory_allocation_output.get_generator());
+                         memory_allocation_output.get_generator(),
+                         pc_sampling_host_trap_output.get_generator());
         json_ar.finish_process();
 
         tool::close_json(json_ar);
@@ -1489,6 +1609,7 @@ tool_fini(void* /*tool_data*/)
     destroy_output(scratch_memory_output);
     destroy_output(rccl_output);
     destroy_output(counters_records_output);
+    destroy_output(pc_sampling_host_trap_output);
 
     if(destructors)
     {
@@ -1502,7 +1623,6 @@ tool_fini(void* /*tool_data*/)
     __gcov_dump();
 #endif
 }
-}  // namespace
 
 std::vector<rocprofiler_record_dimension_info_t>
 get_tool_counter_dimension_info()

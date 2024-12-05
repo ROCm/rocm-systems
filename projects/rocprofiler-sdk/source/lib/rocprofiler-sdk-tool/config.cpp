@@ -195,6 +195,22 @@ config::config()
 , counters{parse_counters(get_env("ROCPROF_COUNTERS", std::string{}))}
 {
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
+
+    std::unordered_map<std::string_view, rocprofiler_pc_sampling_unit_t> pc_sampling_unit_map = {
+        {"none", ROCPROFILER_PC_SAMPLING_UNIT_NONE},
+        {"instructions", ROCPROFILER_PC_SAMPLING_UNIT_INSTRUCTIONS},
+        {"cycles", ROCPROFILER_PC_SAMPLING_UNIT_CYCLES},
+        {"time", ROCPROFILER_PC_SAMPLING_UNIT_TIME}};
+
+    std::unordered_map<std::string_view, rocprofiler_pc_sampling_method_t> pc_sampling_method_map =
+        {{"none", ROCPROFILER_PC_SAMPLING_METHOD_NONE},
+         {"stochastic", ROCPROFILER_PC_SAMPLING_METHOD_STOCHASTIC},
+         {"host_trap", ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP}};
+
+    pc_sampling_method_value = pc_sampling_method_map.at(pc_sampling_method);
+    if(pc_sampling_method_value == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
+        pc_sampling_host_trap = true;
+    pc_sampling_unit_value = pc_sampling_unit_map.at(pc_sampling_unit);
 }
 
 std::string

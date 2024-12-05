@@ -92,6 +92,11 @@ generate_csv(const output_config&                                               
              const metadata&                                                         tool_metadata,
              const generator<rocprofiler_buffer_tracing_memory_allocation_record_t>& data,
              const stats_entry_t&                                                    stats);
+void
+generate_csv(const output_config&                                              cfg,
+             const metadata&                                                   tool_metadata,
+             const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>& data,
+             const stats_entry_t&                                              stats);
 
 void
 generate_csv(const output_config&      cfg,

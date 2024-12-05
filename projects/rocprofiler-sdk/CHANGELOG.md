@@ -109,6 +109,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Check to force tools to initialize context id with zero
 - Support to specify hardware counters for collection using rocprofv3 as `rocprofv3 --pmc [COUNTER [COUNTER ...]]`
 - Memory Allocation Tracing
+- PC sampling tool support with CSV and JSON output formats
 
 ### Changed
 

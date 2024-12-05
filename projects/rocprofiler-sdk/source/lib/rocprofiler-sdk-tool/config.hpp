@@ -75,29 +75,36 @@ struct config : output_config
     config& operator=(const config&) = default;
     config& operator=(config&&) noexcept = default;
 
-    bool demangle                    = get_env("ROCPROF_DEMANGLE_KERNELS", true);
-    bool truncate                    = get_env("ROCPROF_TRUNCATE_KERNELS", false);
-    bool kernel_trace                = get_env("ROCPROF_KERNEL_TRACE", false);
-    bool hsa_core_api_trace          = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
-    bool hsa_amd_ext_api_trace       = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
-    bool hsa_image_ext_api_trace     = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
-    bool hsa_finalizer_ext_api_trace = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
-    bool marker_api_trace            = get_env("ROCPROF_MARKER_API_TRACE", false);
-    bool memory_copy_trace           = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
-    bool memory_allocation_trace     = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
-    bool scratch_memory_trace        = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
-    bool counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
-    bool hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
-    bool hip_compiler_api_trace      = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
-    bool rccl_api_trace              = get_env("ROCPROF_RCCL_API_TRACE", false);
-    bool list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
-    bool list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
+    bool   demangle                    = get_env("ROCPROF_DEMANGLE_KERNELS", true);
+    bool   truncate                    = get_env("ROCPROF_TRUNCATE_KERNELS", false);
+    bool   kernel_trace                = get_env("ROCPROF_KERNEL_TRACE", false);
+    bool   hsa_core_api_trace          = get_env("ROCPROF_HSA_CORE_API_TRACE", false);
+    bool   hsa_amd_ext_api_trace       = get_env("ROCPROF_HSA_AMD_EXT_API_TRACE", false);
+    bool   hsa_image_ext_api_trace     = get_env("ROCPROF_HSA_IMAGE_EXT_API_TRACE", false);
+    bool   hsa_finalizer_ext_api_trace = get_env("ROCPROF_HSA_FINALIZER_EXT_API_TRACE", false);
+    bool   marker_api_trace            = get_env("ROCPROF_MARKER_API_TRACE", false);
+    bool   memory_copy_trace           = get_env("ROCPROF_MEMORY_COPY_TRACE", false);
+    bool   memory_allocation_trace     = get_env("ROCPROF_MEMORY_ALLOCATION_TRACE", false);
+    bool   scratch_memory_trace        = get_env("ROCPROF_SCRATCH_MEMORY_TRACE", false);
+    bool   counter_collection          = get_env("ROCPROF_COUNTER_COLLECTION", false);
+    bool   hip_runtime_api_trace       = get_env("ROCPROF_HIP_RUNTIME_API_TRACE", false);
+    bool   hip_compiler_api_trace      = get_env("ROCPROF_HIP_COMPILER_API_TRACE", false);
+    bool   rccl_api_trace              = get_env("ROCPROF_RCCL_API_TRACE", false);
+    bool   list_metrics                = get_env("ROCPROF_LIST_METRICS", false);
+    bool   list_metrics_output_file    = get_env("ROCPROF_OUTPUT_LIST_METRICS_FILE", false);
+    bool   pc_sampling_host_trap       = false;
+    size_t pc_sampling_interval        = get_env("ROCPROF_PC_SAMPLING_INTERVAL", 1);
+    rocprofiler_pc_sampling_method_t pc_sampling_method_value = ROCPROFILER_PC_SAMPLING_METHOD_NONE;
+    rocprofiler_pc_sampling_unit_t   pc_sampling_unit_value   = ROCPROFILER_PC_SAMPLING_UNIT_NONE;
 
-    int mpi_size = get_mpi_size();
-    int mpi_rank = get_mpi_rank();
+    std::string stats_summary_unit = get_env("ROCPROF_STATS_SUMMARY_UNITS", "nsec");
+    int         mpi_size           = get_mpi_size();
+    int         mpi_rank           = get_mpi_rank();
 
     std::string kernel_filter_include   = get_env("ROCPROF_KERNEL_FILTER_INCLUDE_REGEX", ".*");
     std::string kernel_filter_exclude   = get_env("ROCPROF_KERNEL_FILTER_EXCLUDE_REGEX", "");
+    std::string pc_sampling_method      = get_env("ROCPROF_PC_SAMPLING_METHOD", "none");
+    std::string pc_sampling_unit        = get_env("ROCPROF_PC_SAMPLING_UNIT", "none");
     std::string extra_counters_contents = get_env("ROCPROF_EXTRA_COUNTERS_CONTENTS", "");
 
     std::unordered_set<uint32_t> kernel_filter_range = {};

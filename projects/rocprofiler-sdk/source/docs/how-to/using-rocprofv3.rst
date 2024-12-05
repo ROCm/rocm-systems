@@ -162,6 +162,18 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Perfetto shared memory size hint in KB. default: 64 KB
     - Extension
 
+  * - ``--pc-sampling-method``
+    - Type of PC Sampling, currently only host trap method is supported
+    - PC Sampling Configurations
+
+  * - ``--pc-sampling-unit``
+    - The unit appropriate to the PC sampling type/method, currently only time unit is supported
+    - PC Sampling Configurations
+  
+  * - ``--pc-sampling-interval``
+    - Frequency at which PC samples are generated
+    - PC Sampling Configurations
+
 To see exhaustive list of ``rocprofv3`` options, run:
 
 .. code-block:: bash
@@ -675,6 +687,9 @@ Properties
          trace.
       -  **``preload``** *(array)*: Libraries to prepend to LD_PRELOAD
          (usually for sanitizers).
+      -  **``pc_sampling_unit``** *(string)*: pc sampling unit.
+      -  **``pc_sampling_method``** *(string)*: pc sampling method.
+      -  **``pc_sampling_interval``** *(integer)*: pc sampling interval.
 
 .. code-block:: shell
 
@@ -1039,6 +1054,14 @@ Properties
                   - **`id`** *(integer, required)*: Dimension ID.
                   - **`instance_size`** *(integer, required)*: Size of the instance.
                   - **`name`** *(string, required)*: Name of the dimension.
+         -  **``pc_sample_instructions``** *(array)*: Array of decoded
+            instructions matching sampled PCs from pc_sample_host_trap
+            section.
+         -  **``pc_sample_comments``** *(array)*: Comments matching
+            assembly instructions from pc_sample_instructions array. If
+            debug symbols are available, comments provide instructions
+            to source-line mapping. Otherwise, a comment is an empty
+            string.
       - **`code_objects`** *(array, required)*: Code object records.
          - **Items** *(object)*
             - **`size`** *(integer, required)*: Size of the code object.
@@ -1103,6 +1126,37 @@ Properties
                - **`arch_vgpr_count`** *(integer, required)*: Count of VGPRs.
                - **`sgpr_count`** *(integer, required)*: Count of SGPRs.
                - **`lds_block_size_v`** *(integer, required)*: Size of LDS block.
+      -  **``pc_sample_host_trap``** *(array)*: Host Trap PC Sampling records.
+            - **Items** *(object)*
+               - **``hw_id``** *(object)*: Describes hardware part on which sampled wave was running.
+                  -  **``chiplet``** *(integer)*: Chiplet index.
+                  -  **``wave_id``** *(integer)*: Wave slot index.
+                  -  **``simd_id``** *(integer)*: SIMD index.
+                  -  **``pipe_id``** *(integer)*: Pipe index.
+                  -  **``cu_or_wgp_id``** *(integer)*: Index of compute unit or workgroup processer.
+                  -  **``shader_array_id``** *(integer)*: Shader array index.
+                  -  **``shader_engine_id``** *(integer)*: Shader engine
+                     index.
+                  -  **``workgroup_id``** *(integer)*: Workgroup position in the 3D.
+                  -  **``vm_id``** *(integer)*: Virtual memory ID.
+                  -  **``queue_id``** *(integer)*: Queue id.
+                  -  **``microengine_id``** *(integer)*: ACE
+                     (microengine) index.
+               -  **``pc``** *(object)*: Encapsulates information about
+                  sampled PC.
+                  -  **``code_object_id``** *(integer)*: Code object id.
+                  -  **``code_object_offset``** *(integer)*: Offset within the object if the latter is known. Otherwise, virtual address of the PC.
+               -  **``exec_mask``** *(integer)*: Execution mask indicating active SIMD lanes of sampled wave.
+               -  **``timestamp``** *(integer)*: Timestamp.
+               -  **``dispatch_id``** *(integer)*: Dispatch id.
+               -  **``correlation_id``** *(object)*: Correlation ID information.
+                  -  **``internal``** *(integer)*: Internal correlation ID.
+                  -  **``external``** *(integer)*: External correlation ID.
+               - **``rocprofiler_dim3_t``** *(object)*: Position of the workgroup in 3D grid.
+                  -  **``x``** *(integer)*: Dimension x.
+                  -  **``y``** *(integer)*: Dimension y.
+                  -  **``z``** *(integer)*: Dimension z.
+               -  **``wave_in_group``** *(integer)*: Wave position within the workgroup (0-31).
       - **`buffer_records`** *(object, required)*: Buffer record details.
          - **`kernel_dispatch`** *(array)*: Kernel dispatch records.
             - **Items** *(object)*

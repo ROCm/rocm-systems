@@ -36,6 +36,7 @@ enum class domain_type
     RCCL,
     MEMORY_ALLOCATION,
     COUNTER_VALUES,
+    PC_SAMPLING_HOST_TRAP,
     LAST,
 };
 

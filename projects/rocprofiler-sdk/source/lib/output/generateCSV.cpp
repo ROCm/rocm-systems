@@ -718,6 +718,65 @@ generate_csv(const output_config&                                           cfg,
 }
 
 void
+generate_csv(const output_config&                                              cfg,
+             const metadata&                                                   tool_metadata,
+             const generator<rocprofiler_tool_pc_sampling_host_trap_record_t>& data,
+             const stats_entry_t&                                              stats)
+{
+    if(data.empty()) return;
+
+    if(cfg.stats && stats)
+        write_stats(get_stats_output_file(cfg, domain_type::PC_SAMPLING_HOST_TRAP), stats.entries);
+
+    auto ofs = tool::csv_output_file{cfg,
+                                     domain_type::PC_SAMPLING_HOST_TRAP,
+                                     tool::csv::pc_sampling_host_trap_csv_encoder{},
+                                     {"Sample_Timestamp",
+                                      "Exec_Mask",
+                                      "Dispatch_Id",
+                                      "Instruction",
+                                      "Instruction_Comment",
+                                      "Correlation_Id"}};
+    for(auto ditr : data)
+    {
+        for(const auto& record : data.get(ditr))
+        {
+            if(record.inst_index == -1)
+            {
+                auto        row_ss = std::stringstream{};
+                std::string inst_comment =
+                    "Unrecognized code object id, physical virtual address of PC:" +
+                    std::to_string(record.pc_sample_record.pc.code_object_offset);
+                rocprofiler::tool::csv::pc_sampling_host_trap_csv_encoder::write_row(
+                    row_ss,
+                    record.pc_sample_record.timestamp,
+                    record.pc_sample_record.exec_mask,
+                    record.pc_sample_record.dispatch_id,
+                    "",
+                    inst_comment,
+                    record.pc_sample_record.correlation_id.internal);
+
+                ofs << row_ss.str();
+            }
+            else
+            {
+                auto row_ss = std::stringstream{};
+                rocprofiler::tool::csv::pc_sampling_host_trap_csv_encoder::write_row(
+                    row_ss,
+                    record.pc_sample_record.timestamp,
+                    record.pc_sample_record.exec_mask,
+                    record.pc_sample_record.dispatch_id,
+                    tool_metadata.get_instruction(record.inst_index),
+                    tool_metadata.get_comment(record.inst_index),
+                    record.pc_sample_record.correlation_id.internal);
+
+                ofs << row_ss.str();
+            }
+        }
+    }
+}
+
+void
 generate_csv(const output_config& cfg,
              const metadata& /*tool_metadata*/,
              const domain_stats_vec_t& data_v)
