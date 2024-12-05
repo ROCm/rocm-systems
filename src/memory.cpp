@@ -32,7 +32,7 @@
 #include <sys/mman.h>
 #include <sys/sysinfo.h>
 #include <fcntl.h>
-#include "inc/wddm/gpu_memory.h"
+#include "impl/wddm/gpu_memory.h"
 #include "util/simple_heap.h"
 
 struct Allocation {

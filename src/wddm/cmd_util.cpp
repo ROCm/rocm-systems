@@ -1,6 +1,6 @@
 /* Copyright (c) 2023 Advanced Micro Devices, Inc. All rights reserved. */
 
-#include "inc/wddm/cmd_util.h"
+#include "impl/wddm/cmd_util.h"
 
 namespace wsl {
 namespace thunk {

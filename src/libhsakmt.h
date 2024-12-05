@@ -32,8 +32,8 @@
 #include "hsakmt/hsakmt.h"
 #include "hsakmt/hsakmt_drm.h"
 
-#include "inc/wddm/types.h"
-#include "inc/wddm/device.h"
+#include "impl/wddm/types.h"
+#include "impl/wddm/device.h"
 
 wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
 

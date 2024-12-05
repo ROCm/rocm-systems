@@ -1,7 +1,7 @@
 #include <cassert>
 #include <map>
 #include <algorithm>
-#include "inc/wddm/va_mgr.h"
+#include "impl/wddm/va_mgr.h"
 #include "libhsakmt.h"
 
 using namespace std;

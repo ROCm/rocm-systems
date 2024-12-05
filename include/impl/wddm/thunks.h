@@ -43,8 +43,8 @@
 #ifndef _WSL_INC_WDDM_THUNKS_H
 #define _WSL_INC_WDDM_THUNKS_H
 
-#include "inc/wddm/status.h"
-#include "inc/wddm/types.h"
+#include "impl/wddm/status.h"
+#include "impl/wddm/types.h"
 
 namespace wsl {
 namespace thunk {

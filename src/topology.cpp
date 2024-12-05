@@ -39,8 +39,8 @@
 #include <sys/sysinfo.h>
 
 #include "libhsakmt.h"
-#include "inc/wddm/types.h"
-#include "inc/wddm/device.h"
+#include "impl/wddm/types.h"
+#include "impl/wddm/device.h"
 #include "util/utils.h"
 
 /* Number of memory banks added by thunk on top of topology

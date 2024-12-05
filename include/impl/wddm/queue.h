@@ -47,13 +47,13 @@
 #include <iostream>
 #include <queue>
 #include <utility>
-#include "inc/wddm/types.h"
-#include "inc/wddm/device.h"
-#include "inc/wddm/gpu_memory.h"
+#include "impl/wddm/types.h"
+#include "impl/wddm/device.h"
+#include "impl/wddm/gpu_memory.h"
 #include "hsa-runtime/inc/hsa_ext_amd.h"
 #include "hsa-runtime/inc/amd_hsa_queue.h"
 #include "hsa-runtime/inc/amd_hsa_signal.h"
-#include "inc/wddm/cmd_util.h"
+#include "impl/wddm/cmd_util.h"
 
 namespace wsl {
 namespace thunk {

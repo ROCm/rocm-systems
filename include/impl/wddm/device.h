@@ -50,13 +50,13 @@
 #include <memory>
 #include <vector>
 
-#include "inc/wddm/types.h"
-#include "inc/thunk_proxy/thunk_proxy.h"
-#include "inc/wddm/va_mgr.h"
-#include "inc/wddm/status.h"
-#include "inc/wddm/types.h"
-#include "inc/wddm/gpu_memory.h"
-#include "inc/wddm/cmd_util.h"
+#include "impl/wddm/types.h"
+#include "impl/thunk_proxy/thunk_proxy.h"
+#include "impl/wddm/va_mgr.h"
+#include "impl/wddm/status.h"
+#include "impl/wddm/types.h"
+#include "impl/wddm/gpu_memory.h"
+#include "impl/wddm/cmd_util.h"
 
 namespace wsl {
 namespace thunk {

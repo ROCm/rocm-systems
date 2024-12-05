@@ -46,9 +46,9 @@
 #include <cstddef>
 #include <cstdint>
 #include "util/utils.h"
-#include "inc/wddm/types.h"
-#include "inc/wddm/thunks.h"
-#include "inc/thunk_proxy/thunk_proxy.h"
+#include "impl/wddm/types.h"
+#include "impl/wddm/thunks.h"
+#include "impl/thunk_proxy/thunk_proxy.h"
 
 namespace wsl {
 namespace thunk {

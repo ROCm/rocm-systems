@@ -1,7 +1,7 @@
 #include <cinttypes>
 #include <cassert>
-#include "inc/wddm/gpu_memory.h"
-#include "inc/wddm/device.h"
+#include "impl/wddm/gpu_memory.h"
+#include "impl/wddm/device.h"
 #include "util/utils.h"
 
 using namespace std;

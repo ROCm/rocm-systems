@@ -48,10 +48,10 @@
 #include <linux/mman.h>
 #include <fcntl.h>
 #include <unistd.h>
-#include "inc/wddm/status.h"
-#include "inc/wddm/types.h"
-#include "inc/wddm/device.h"
-#include "inc/wddm/queue.h"
+#include "impl/wddm/status.h"
+#include "impl/wddm/types.h"
+#include "impl/wddm/device.h"
+#include "impl/wddm/queue.h"
 
 namespace wsl {
 namespace thunk {

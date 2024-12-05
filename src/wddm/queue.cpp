@@ -44,8 +44,8 @@
 #include <cinttypes>
 #include <cstddef>
 
-#include "inc/wddm/queue.h"
-#include "inc/registers.h"
+#include "impl/wddm/queue.h"
+#include "impl/registers.h"
 #include "libhsakmt.h"
 
 #include "hsa-runtime/inc/hsa.h"
