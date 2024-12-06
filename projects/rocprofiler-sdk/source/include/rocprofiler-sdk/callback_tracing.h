@@ -181,6 +181,27 @@ typedef struct
     uint32_t accum_vgpr_count;      ///< Accum vector general purpose register count
 
 } rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+// rename struct
+
+typedef struct
+{
+    uint64_t              size;              ///< size of this struct
+    uint64_t              host_function_id;  ///< unique host function identifier value
+    uint64_t              kernel_id;         ///< unique symbol identifier value
+    uint64_t              code_object_id;    ///< parent unique code object identifier
+    rocprofiler_address_t host_function;     ///< kernel host function pointer
+    rocprofiler_address_t modules;           ///< reference address where modules will be loaded
+    const char*           device_function;
+    uint32_t              thread_limit;    ///< thread limit
+    rocprofiler_dim3_t    thread_ids;      ///< thread ids address
+    rocprofiler_dim3_t    block_ids;       ///< block ids address
+    rocprofiler_dim3_t    block_dims;      ///< block dimensions address
+    rocprofiler_dim3_t    grid_dims;       ///< grid dimensions address
+    uint64_t              workgroup_size;  ///< workgroup size address
+
+    /// @var device_function
+    /// @brief device function name used to map the metadata during kernel launch
+} rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t;
 
 /**
  * @brief ROCProfiler Kernel Dispatch Callback Tracer Record.

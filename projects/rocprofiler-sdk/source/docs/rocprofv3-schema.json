@@ -725,6 +725,97 @@
                             ]
                         }
                     },
+                    "host_functions": {
+                        "type": "array",
+                        "description": "Host function records.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "size": {
+                                    "type": "integer",
+                                    "description": "Size of the host function record."
+                                },
+                                "host_function_id": {
+                                    "type": "integer",
+                                    "description": "ID of the HIP host function."
+                                },
+                                "kernel_id": {
+                                    "type": "integer",
+                                    "description": "ID of the corressponding kernel."
+                                },
+                                "code_object_id": {
+                                    "type": "integer",
+                                    "description": "ID of the corressponding code object."
+                                },
+                                "host_function_address": {
+                                    "type": "integer",
+                                    "description": "Address of the host function registered."
+                                },
+                                "modules_address": {
+                                    "type": "integer",
+                                    "description": "Address of the hip fat binary registered"
+                                },
+                                "device_function": {
+                                    "type": "string",
+                                    "description": "Device function name registered"
+                                },
+                                "thread_limit": {
+                                    "type": "integer",
+                                    "description": "Size of the thread limit."
+                                },
+                                "thread_id_address": {
+                                    "type": "integer",
+                                    "description": "Address of thread Id."
+                                },
+                                "block_id_address": {
+                                    "type": "string",
+                                    "description": "Address of Block Id."
+                                },
+                                "block_dim_address": {
+                                    "type": "string",
+                                    "description": "Address of Block Dimension"
+                                },
+                                "grid_dim_address": {
+                                    "type": "string",
+                                    "description": "Address of the Grid Dimension."
+                                },
+                                "workgroup_size_address": {
+                                    "type": "string",
+                                    "description": "Address of the work group size."
+                                },
+                                "formatted_host_function_name": {
+                                    "type": "string",
+                                    "description": "Formatted name of the device function."
+                                },
+                                "demangled_host_function_name": {
+                                    "type": "string",
+                                    "description": "Demangled name of device function."
+                                },
+                                "truncated_host_function_name": {
+                                    "type": "string",
+                                    "description": "Truncated name of device function."
+                                }
+                            },
+                            "required": [
+                                "size",
+                                "host_function_id",
+                                "kernel_id",
+                                "code_object_id",
+                                "host_function_address",
+                                "modules_address",
+                                "device_function",
+                                "thread_limit",
+                                "thread_id_address",
+                                "block_id_address",
+                                "block_dim_address",
+                                "grid_dim_address",
+                                "workgroup_size_address",
+                                "formatted_host_function_name",
+                                "demangled_host_function_name",
+                                "truncated_host_function_name"
+                            ]
+                        }
+                    },
                     "callback_records": {
                         "type": "object",
                         "description": "Callback record details.",

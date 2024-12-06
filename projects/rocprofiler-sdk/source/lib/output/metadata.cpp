@@ -24,10 +24,13 @@
 
 #include "lib/common/string_entry.hpp"
 #include "lib/output/agent_info.hpp"
+#include "lib/output/host_symbol_info.hpp"
+#include "lib/output/kernel_symbol_info.hpp"
 
 #include <rocprofiler-sdk/fwd.h>
 
 #include <memory>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -65,6 +68,25 @@ query_pc_sampling_configuration(const rocprofiler_pc_sampling_configuration_t* c
 
 kernel_symbol_info::kernel_symbol_info()
 : base_type{0, 0, 0, "", 0, 0, 0, 0, 0, 0, 0, 0}
+{}
+
+constexpr auto null_address_v = rocprofiler_address_t{.value = 0};
+constexpr auto null_dim3_v    = rocprofiler_dim3_t{.x = 0, .y = 0, .z = 0};
+
+host_function_info::host_function_info()
+: base_type{0,
+            0,
+            0,
+            0,
+            null_address_v,
+            null_address_v,
+            "",
+            0,
+            null_dim3_v,
+            null_dim3_v,
+            null_dim3_v,
+            null_dim3_v,
+            0}
 {}
 
 metadata::metadata(inprocess)
@@ -196,6 +218,14 @@ metadata::get_kernel_symbol(uint64_t kernel_id) const
     });
 }
 
+const host_function_info*
+metadata::get_host_function(uint64_t host_function_id) const
+{
+    return host_functions.rlock([host_function_id](const auto& _data) -> const host_function_info* {
+        return &_data.at(host_function_id);
+    });
+}
+
 const tool_counter_info*
 metadata::get_counter_info(uint64_t instance_id) const
 {
@@ -269,6 +299,18 @@ metadata::get_kernel_symbols() const
         _symbol_data.at(itr.kernel_id) = std::move(itr);
 
     return _symbol_data;
+}
+
+host_function_data_vec_t
+metadata::get_host_symbols() const
+{
+    return host_functions.rlock([](const auto& _data_v) {
+        auto _info = std::vector<host_function_info>{};
+        _info.resize(_data_v.size() + 1, host_function_info{});
+        for(const auto& itr : _data_v)
+            _info.at(itr.first) = itr.second;
+        return _info;
+    });
 }
 
 metadata::agent_info_ptr_vec_t
@@ -360,6 +402,16 @@ metadata::add_kernel_symbol(kernel_symbol_info&& sym)
             return _data_v.emplace(_sym_v.kernel_id, std::move(_sym_v)).second;
         },
         std::move(sym));
+}
+
+bool
+metadata::add_host_function(host_function_info&& func)
+{
+    return host_functions.wlock(
+        [](host_function_info_map_t& _data_v, host_function_info&& _func_v) -> bool {
+            return _data_v.emplace(_func_v.host_function_id, std::move(_func_v)).second;
+        },
+        std::move(func));
 }
 
 bool

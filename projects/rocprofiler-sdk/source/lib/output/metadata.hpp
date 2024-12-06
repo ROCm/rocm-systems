@@ -24,6 +24,7 @@
 
 #include "agent_info.hpp"
 #include "counter_info.hpp"
+#include "host_symbol_info.hpp"
 #include "kernel_symbol_info.hpp"
 #include "pc_sample_transform.hpp"
 
@@ -100,6 +101,7 @@ struct metadata
     synced_map<marker_message_map_t>     marker_messages   = {};
     synced_map<string_entry_map_t>       string_entries    = {};
     synced_map<external_corr_id_set_t>   external_corr_ids = {};
+    synced_map<host_function_info_map_t> host_functions    = {};
 
     metadata() = default;
     metadata(inprocess);
@@ -115,12 +117,14 @@ struct metadata
     const agent_info*                   get_agent(rocprofiler_agent_id_t _val) const;
     const code_object_info*             get_code_object(uint64_t code_obj_id) const;
     const kernel_symbol_info*           get_kernel_symbol(uint64_t kernel_id) const;
+    const host_function_info*           get_host_function(uint64_t host_function_id) const;
     const tool_counter_info*            get_counter_info(uint64_t instance_id) const;
     const tool_counter_info*            get_counter_info(rocprofiler_counter_id_t id) const;
     const counter_dimension_info_vec_t* get_counter_dimension_info(uint64_t instance_id) const;
 
     code_object_data_vec_t   get_code_objects() const;
     kernel_symbol_data_vec_t get_kernel_symbols() const;
+    host_function_data_vec_t get_host_symbols() const;
     agent_info_ptr_vec_t     get_gpu_agents() const;
     counter_info_vec_t       get_counter_info() const;
     counter_dimension_vec_t  get_counter_dimension_info() const;
@@ -138,6 +142,7 @@ struct metadata
     bool add_marker_message(uint64_t corr_id, std::string&& msg);
     bool add_code_object(code_object_info obj);
     bool add_kernel_symbol(kernel_symbol_info&& sym);
+    bool add_host_function(host_function_info&& func);
     bool add_string_entry(size_t key, std::string_view str);
     bool add_external_correlation_id(uint64_t);
 

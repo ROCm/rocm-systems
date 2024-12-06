@@ -19,6 +19,7 @@ set(TOOL_OUTPUT_HEADERS
     generateStats.hpp
     generator.hpp
     kernel_symbol_info.hpp
+    host_symbol_info.hpp
     metadata.hpp
     output_config.hpp
     output_key.hpp

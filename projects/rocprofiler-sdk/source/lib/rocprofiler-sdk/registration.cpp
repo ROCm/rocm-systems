@@ -763,6 +763,8 @@ rocprofiler_set_api_table(const char* name,
         // the HIP API tracing invokes the function pointers from the copy below
         rocprofiler::hip::copy_table(hip_compiler_api_table, lib_instance);
 
+        rocprofiler::code_object::initialize(hip_compiler_api_table);
+
         // install rocprofiler API wrappers
         rocprofiler::hip::update_table(hip_compiler_api_table);
 

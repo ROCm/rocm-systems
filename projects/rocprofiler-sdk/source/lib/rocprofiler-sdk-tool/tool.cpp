@@ -649,6 +649,23 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
         }
     }
 
+    if(record.kind == ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT &&
+       record.operation == ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER)
+    {
+        auto* hst_data = static_cast<rocprofiler_host_kernel_symbol_data_t*>(record.payload);
+        if(record.phase == ROCPROFILER_CALLBACK_PHASE_LOAD)
+        {
+            auto success = CHECK_NOTNULL(tool_metadata)
+                               ->add_host_function(host_function_info{
+                                   get_dereference(hst_data),
+                                   [](const char* val) { return tool::format_name(val); }});
+            ROCP_WARNING_IF(!success)
+                << "duplicate host function found for kernel_id=" << hst_data->kernel_id;
+
+            // TODO : kernel filtering for host functions?!
+        }
+    }
+
     (void) user_data;
     (void) data;
 }

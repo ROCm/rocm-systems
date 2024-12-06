@@ -216,7 +216,8 @@ typedef enum  // NOLINT(performance-enum-size)
 {
     ROCPROFILER_CODE_OBJECT_NONE = 0,  ///< Unknown code object operation
     ROCPROFILER_CODE_OBJECT_LOAD,      ///< Code object containing kernel symbols
-    ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER,  ///< Kernel symbols
+    ROCPROFILER_CODE_OBJECT_DEVICE_KERNEL_SYMBOL_REGISTER,  ///< Kernel symbols - Device
+    ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER,    ///< Kernel symbols - Host
     ROCPROFILER_CODE_OBJECT_LAST,
 } rocprofiler_code_object_operation_t;
 

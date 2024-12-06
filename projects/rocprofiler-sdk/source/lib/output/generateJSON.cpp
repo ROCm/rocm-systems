@@ -164,10 +164,12 @@ write_json(json_output&         json_ar,
 
     {
         auto kern_sym_data = tool_metadata.get_kernel_symbols();
+        auto host_sym_data = tool_metadata.get_host_symbols();
         auto code_obj_data = tool_metadata.get_code_objects();
 
         json_ar(cereal::make_nvp("code_objects", code_obj_data));
         json_ar(cereal::make_nvp("kernel_symbols", kern_sym_data));
+        json_ar(cereal::make_nvp("host_functions", host_sym_data));
     }
 }
 

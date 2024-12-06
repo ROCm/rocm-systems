@@ -60,6 +60,9 @@ void
 initialize(HsaApiTable* table);
 
 void
+initialize(HipCompilerDispatchTable* table);
+
+void
 finalize();
 }  // namespace code_object
 }  // namespace rocprofiler

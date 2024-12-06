@@ -40,6 +40,7 @@ def test_data_structure(input_data):
     node_exists("names", sdk_data["callback_records"])
     node_exists("code_objects", sdk_data["callback_records"])
     node_exists("kernel_symbols", sdk_data["callback_records"])
+    node_exists("host_functions", sdk_data["callback_records"])
     node_exists("hsa_api_traces", sdk_data["callback_records"])
     node_exists("hip_api_traces", sdk_data["callback_records"], 0)
     node_exists("scratch_memory_traces", sdk_data["callback_records"], min_len=8)

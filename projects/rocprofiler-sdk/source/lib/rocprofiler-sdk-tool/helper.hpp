@@ -86,7 +86,10 @@ constexpr size_t WATERMARK         = (BUFFER_SIZE_BYTES / 2);
 using marker_message_map_t             = std::unordered_map<uint64_t, std::string>;
 using tool_counter_info                = ::rocprofiler::tool::tool_counter_info;
 using kernel_symbol_info               = ::rocprofiler::tool::kernel_symbol_info;
+using host_function_info               = ::rocprofiler::tool::host_function_info;
 using rocprofiler_kernel_symbol_info_t = ::rocprofiler::tool::rocprofiler_kernel_symbol_info_t;
+using rocprofiler_host_kernel_symbol_data_t =
+    ::rocprofiler::tool::rocprofiler_host_kernel_symbol_data_t;
 
 enum tracing_marker_kind
 {

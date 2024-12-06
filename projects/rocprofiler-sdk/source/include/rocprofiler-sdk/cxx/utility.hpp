@@ -34,21 +34,12 @@ namespace utility
 {
 template <typename Tp>
 auto
-_as_hex(Tp val, size_t width = 0)
+as_hex(Tp val, size_t width = 0)
 {
     auto ss = std::stringstream{};
-    ss << "0x" << std::hex << std::setw(width) << std::setfill('0') << val;
+    ss << "0x" << std::hex << std::setfill('0') << std::setw(width) << val;
     return ss.str();
 }
-
-#define ROCPROFILER_CXX_DEFINE_AS_HEX(TYPE)                                                        \
-    inline auto as_hex(TYPE val, size_t width = 0)                                                 \
-    {                                                                                              \
-        return ::rocprofiler::sdk::utility::_as_hex(val, width);                                   \
-    }
-
-ROCPROFILER_CXX_DEFINE_AS_HEX(uint64_t)
-#undef ROCPROFILER_CXX_DEFINE_AS_HEX
 }  // namespace utility
 }  // namespace sdk
 }  // namespace rocprofiler

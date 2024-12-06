@@ -202,7 +202,10 @@ make_array(Tp&& arg, Args&&... args)
 using call_stack_t = std::vector<source_location>;
 
 using kernel_symbol_data_t = rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t;
+using host_function_data_t =
+    rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t;
 using kernel_symbol_map_t  = std::unordered_map<rocprofiler_kernel_id_t, kernel_symbol_data_t>;
+using host_functions_map_t = std::unordered_map<uint64_t, host_function_data_t>;
 
 rocprofiler_client_id_t*      client_id        = nullptr;
 rocprofiler_client_finalize_t client_fini_func = nullptr;
@@ -284,6 +287,21 @@ struct kernel_symbol_callback_record_t
     uint64_t                                                               timestamp = 0;
     rocprofiler_callback_tracing_record_t                                  record    = {};
     rocprofiler_callback_tracing_code_object_kernel_symbol_register_data_t payload   = {};
+
+    template <typename ArchiveT>
+    void save(ArchiveT& ar) const
+    {
+        ar(cereal::make_nvp("timestamp", timestamp));
+        cereal::save(ar, record);
+        ar(cereal::make_nvp("payload", payload));
+    }
+};
+
+struct host_function_callback_record_t
+{
+    uint64_t                                                                    timestamp = 0;
+    rocprofiler_callback_tracing_record_t                                       record    = {};
+    rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t payload   = {};
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
@@ -527,6 +545,7 @@ auto counter_info                  = std::deque<rocprofiler_counter_info_v0_t>{}
 auto runtime_init_cb_records       = std::deque<runtime_init_callback_record_t>{};
 auto code_object_records           = std::deque<code_object_callback_record_t>{};
 auto kernel_symbol_records         = std::deque<kernel_symbol_callback_record_t>{};
+auto host_function_records         = std::deque<host_function_callback_record_t>{};
 auto hsa_api_cb_records            = std::deque<hsa_api_callback_record_t>{};
 auto marker_api_cb_records         = std::deque<marker_api_callback_record_t>{};
 auto counter_collection_bf_records = std::deque<profile_counting_record>{};
@@ -675,6 +694,13 @@ tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
             static auto _mutex = std::mutex{};
             auto        _lk    = std::unique_lock<std::mutex>{_mutex};
             kernel_symbol_records.emplace_back(kernel_symbol_callback_record_t{ts, record, data_v});
+        }
+        else if(record.operation == ROCPROFILER_CODE_OBJECT_HOST_KERNEL_SYMBOL_REGISTER)
+        {
+            auto        data_v = *static_cast<host_function_data_t*>(record.payload);
+            static auto _mutex = std::mutex{};
+            auto        _lk    = std::unique_lock<std::mutex>{_mutex};
+            host_function_records.emplace_back(host_function_callback_record_t{ts, record, data_v});
         }
     }
     else if(record.kind == ROCPROFILER_CALLBACK_TRACING_HSA_CORE_API ||
@@ -1652,6 +1678,7 @@ tool_fini(void* tool_data)
               << ", runtime_init_callback_records=" << runtime_init_cb_records.size()
               << ", code_object_callback_records=" << code_object_records.size()
               << ", kernel_symbol_callback_records=" << kernel_symbol_records.size()
+              << ", host_function_callback_records=" << host_function_records.size()
               << ", hsa_api_callback_records=" << hsa_api_cb_records.size()
               << ", hip_api_callback_records=" << hip_api_cb_records.size()
               << ", marker_api_callback_records=" << marker_api_cb_records.size()
@@ -1760,6 +1787,7 @@ write_json(call_stack_t* _call_stack)
             json_ar(cereal::make_nvp("runtime_init", runtime_init_cb_records));
             json_ar(cereal::make_nvp("code_objects", code_object_records));
             json_ar(cereal::make_nvp("kernel_symbols", kernel_symbol_records));
+            json_ar(cereal::make_nvp("host_functions", host_function_records));
             json_ar(cereal::make_nvp("hsa_api_traces", hsa_api_cb_records));
             json_ar(cereal::make_nvp("hip_api_traces", hip_api_cb_records));
             json_ar(cereal::make_nvp("marker_api_traces", marker_api_cb_records));

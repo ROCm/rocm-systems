@@ -141,6 +141,13 @@ save(ArchiveT& ar, rocprofiler_dim3_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_address_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(value);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_callback_tracing_code_object_load_data_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
@@ -179,6 +186,25 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_code_object_kernel_symbol_regist
     ROCP_SDK_SAVE_DATA_FIELD(sgpr_count);
     ROCP_SDK_SAVE_DATA_FIELD(arch_vgpr_count);
     ROCP_SDK_SAVE_DATA_FIELD(accum_vgpr_count);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_callback_tracing_code_object_host_kernel_symbol_register_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    ROCP_SDK_SAVE_DATA_FIELD(host_function_id);
+    ROCP_SDK_SAVE_DATA_FIELD(kernel_id);
+    ROCP_SDK_SAVE_DATA_FIELD(code_object_id);
+    ROCP_SDK_SAVE_DATA_FIELD(host_function);
+    ROCP_SDK_SAVE_DATA_FIELD(modules);
+    ROCP_SDK_SAVE_DATA_CSTR(device_function);
+    ROCP_SDK_SAVE_DATA_FIELD(thread_limit);
+    ROCP_SDK_SAVE_DATA_FIELD(thread_ids);
+    ROCP_SDK_SAVE_DATA_FIELD(block_ids);
+    ROCP_SDK_SAVE_DATA_FIELD(block_dims);
+    ROCP_SDK_SAVE_DATA_FIELD(grid_dims);
+    ROCP_SDK_SAVE_DATA_FIELD(workgroup_size);
 }
 
 template <typename ArchiveT>

@@ -121,6 +121,34 @@ def test_kernel_trace(kernel_input_data):
         assert int(row["End_Timestamp"]) >= int(row["Start_Timestamp"])
 
 
+def test_host_functions_json(json_data):
+    data = json_data["rocprofiler-sdk-tool"]
+
+    def get_kernel_name(kernel_id):
+        return data["kernel_symbols"][kernel_id]["truncated_kernel_name"]
+
+    def get_host_function_name(host_function_id):
+        return data["host_functions"][host_function_id]["truncated_host_function_name"]
+
+    host_function_data = data.host_functions
+    kernel_symbols_data = data.kernel_symbols
+    code_objects_data = data.code_objects
+    assert len(host_function_data) > 0
+    for host_function in host_function_data:
+        if host_function.host_function_id == 0:
+            continue
+        assert host_function.host_function_id > 0
+        assert host_function.kernel_id > 0 and host_function.kernel_id <= len(
+            kernel_symbols_data
+        )
+        assert host_function.code_object_id > 0 and host_function.code_object_id <= len(
+            code_objects_data
+        )
+        assert get_host_function_name(
+            host_function["host_function_id"]
+        ) == get_kernel_name(host_function.kernel_id)
+
+
 def test_kernel_trace_json(json_data):
     data = json_data["rocprofiler-sdk-tool"]
 
