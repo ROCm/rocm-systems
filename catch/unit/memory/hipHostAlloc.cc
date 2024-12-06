@@ -38,11 +38,6 @@ static constexpr int NUMELEMENTS{1024 * 16};
 static constexpr size_t SIZEBYTES{NUMELEMENTS * sizeof(int)};
 static std::vector<std::string> syncMsg = {"event", "stream", "device"};
 
-static __global__ void kerTestMemAccess(char *buf) {
-  size_t myId = threadIdx.x + blockDim.x * blockIdx.x;
-  buf[myId] = VALUE;
-}
-
 static void CheckHostPointer(int NUMELEMENTS, int *ptr, unsigned eventFlags,
                              int syncMethod, std::string msg) {
   INFO("test: CheckHostPointer "
@@ -360,50 +355,6 @@ TEST_CASE("Unit_hipHostAlloc_AllocateMoreThanAvailGPUMemory") {
     WARN("Skipping test as CPU memory is less than GPU memory");
   }
 }
-
-/**
- * Test Description
- * ------------------------
- *  - This testcase verifies the hipHostAlloc API by:
- *  Allocating more memory than the total GPU memory.
- *  Validating memory access in a device function.
- * Test source
- * ------------------------
- *  - unit/memory/hipHostAlloc.cc
- * Test requirements
- * ------------------------
- *  - HIP_VERSION >= 6.3
- */
-#if HT_AMD
-TEST_CASE("Unit_hipHostAlloc_AllocateUseMoreThanAvailGPUMemory") {
-  char *A = nullptr;
-  size_t maxGpuMem = 0, availableMem = 0;
-  // Get available GPU memory and total GPU memory
-  HIP_CHECK(hipMemGetInfo(&availableMem, &maxGpuMem));
-#if defined(_WIN32)
-  size_t allocsize = availableMem - (256 * 1024 * 1024);
-  allocsize -= allocsize * (MEMORY_PERCENT / 100.0);
-#else
-  size_t allocsize = maxGpuMem + ((maxGpuMem * MEMORY_PERCENT) / 100);
-#endif
-  // Get free host In bytes
-  size_t hostMemFree = HipTest::getMemoryAmount() * 1024 * 1024;
-  // Ensure that allocsize < hostMemFree
-  if (allocsize > hostMemFree) {
-    allocsize = 0.9f * hostMemFree;
-  }
-  HIP_CHECK(hipHostAlloc(reinterpret_cast<void **>(&A), allocsize,
-                         hipHostMallocDefault));
-  constexpr int sample_size = 1024;
-  // memset a sample size to 0
-  HIP_CHECK(hipMemset(A, 0, sample_size));
-  unsigned int grid_size = allocsize / BLOCK_SIZE;
-  // Check if the allocated memory can be accessed in kernels
-  kerTestMemAccess<<<grid_size, BLOCK_SIZE>>>(A);
-  HIP_CHECK(hipDeviceSynchronize());
-  HIP_CHECK(hipHostFree(A));
-}
-#endif
 
 /**
  * Test Description

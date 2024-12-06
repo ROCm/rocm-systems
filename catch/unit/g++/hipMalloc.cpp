@@ -26,10 +26,17 @@ int MallocFunc() {
     hipError_t err;
     err = hipMalloc(reinterpret_cast<void**>(&Ad), 1024);
     if (err == hipSuccess) {
-      std::cout <<"PASSED!" <<std::endl;
-      return 1;
+      std::cout <<"hipMalloc PASSED!" <<std::endl;
+      err = hipFree(Ad);
+      if (err == hipSuccess) {
+        std::cout <<"hipFree PASSED!" <<std::endl;
+        return 1;
+      } else {
+        std::cout <<"hipFree FAILED!" <<std::endl;
+        return 0;
+      }
     } else {
-      std::cout <<"FAILED!" <<std::endl;
+      std::cout <<"hipMalloc FAILED!" <<std::endl;
       return 0;
     }
 }

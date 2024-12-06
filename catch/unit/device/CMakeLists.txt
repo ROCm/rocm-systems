@@ -53,17 +53,30 @@ set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS getDeviceCount)
 add_executable(chkUUIDFrmChildProc_Exe EXCLUDE_FROM_ALL chkUUIDFrmChildProc_Exe.cc)
 add_executable(chkUUIDInGrandChild_Exe EXCLUDE_FROM_ALL chkUUIDInGrandChild_Exe.cc)
 add_executable(setuuidGetDevCount EXCLUDE_FROM_ALL setuuidGetDevCount_Exe.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+             chkUUIDFrmChildProc_Exe
+             chkUUIDInGrandChild_Exe
+             setuuidGetDevCount)
+
 if(UNIX)
 add_executable(getUUIDfrmRocinfo EXCLUDE_FROM_ALL getUUIDfrmRocinfo_Exe.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS getUUIDfrmRocinfo)
 add_dependencies(build_tests getUUIDfrmRocinfo)
 endif()
 add_executable(multipleUUID EXCLUDE_FROM_ALL multipleUUID_Exe.cc)
 add_executable(setEnvInChildProc EXCLUDE_FROM_ALL setEnvInChildProc_Exe.cc)
 add_executable(uuidList EXCLUDE_FROM_ALL uuidList.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+             multipleUUID
+             setEnvInChildProc
+             uuidList)
 #Disabled below two executable due to the defect ticket SWDEV-467665
 if(0)
 add_executable(passUUIDToGrandChild_Exe EXCLUDE_FROM_ALL passUUIDToGrandChild_Exe.cc)
 add_executable(ResetUUIDInChild_Exe EXCLUDE_FROM_ALL ResetUUIDInChild_Exe.cc)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_EXE_TARGETS
+             passUUIDToGrandChild_Exe
+             ResetUUIDInChild_Exe)
 endif()
 hip_add_exe_to_target(NAME DeviceTest
                       TEST_SRC ${TEST_SRC}

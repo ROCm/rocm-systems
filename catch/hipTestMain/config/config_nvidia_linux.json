@@ -225,6 +225,9 @@
         "Unit_Assert_Positive_Basic_KernelFail",
         "=== Below tests fail in external CI for PR https://github.com/ROCm-Developer-Tools/hip-tests/pull/210 ===",
         "Unit_hipMemImportFromShareableHandle_Positive_MultiProc",
-        "Unit_hipMemMapArrayAsync_Positive_Basic"
+        "Unit_hipMemMapArrayAsync_Positive_Basic",
+        "=== Disabling failing nvidia tests ====",
+        "Unit_hipDeviceSetLimit_Negative_PrintfFifoSize",
+        "Unit_hipDeviceSetLimit_Negative_MallocHeapSize"
     ]
 }

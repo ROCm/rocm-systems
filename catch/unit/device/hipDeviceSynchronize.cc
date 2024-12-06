@@ -104,6 +104,8 @@ TEST_CASE("Unit_hipDeviceSynchronize_Positive_Nullstream") {
   b_context.unblock_stream();
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(1 << 30 == A_h[0] - 1);
+  HIP_CHECK(hipHostFree(A_h));
+  HIP_CHECK(hipFree(A_d));
 }
 
 /**
@@ -157,7 +159,13 @@ TEST_CASE("Unit_hipDeviceSynchronize_Functional") {
   }
   HIP_CHECK(hipDeviceSynchronize());
   REQUIRE(NUM_ITERS == A[NUM_STREAMS - 1][0] - 1);
+  for (int i = 0; i < NUM_STREAMS; i++) {
+    HIP_CHECK(hipHostFree(A[i]));
+    HIP_CHECK(hipFree(Ad[i]));
+    HIP_CHECK(hipStreamDestroy(stream[i]));
+  }
 }
+
 
 /**
 * End doxygen group DeviceTest.

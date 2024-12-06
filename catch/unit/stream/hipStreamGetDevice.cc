@@ -115,6 +115,7 @@ TEST_CASE("Unit_hipStreamGetDevice_Usecase") {
 
       HIP_CHECK(hipDeviceGet(&device_from_ordinal, i));
       REQUIRE(device_from_stream == device_from_ordinal);
+      HIP_CHECK(hipStreamDestroy(stream));
     }
   }
 }
@@ -203,6 +204,7 @@ TEST_CASE("Unit_hipStreamGetDevice_SetDiffDevice") {
         REQUIRE(device_from_stream == i);
       }
     }
+    HIP_CHECK(hipStreamDestroy(stream));
   }
 }
 

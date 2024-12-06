@@ -25,6 +25,6 @@ set(TEST_SRC
     hipPerfStreamCreateCopyDestroy.cc
 )
 
-hip_add_exe_to_target(NAME streamTest
+hip_add_exe_to_target(NAME perfStreamTest
                       TEST_SRC ${TEST_SRC}
                       TEST_TARGET_NAME perf_test)

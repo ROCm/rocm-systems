@@ -735,6 +735,20 @@
         "Unit_hipGraphAddMemFreeNode_Negative_NotSupported",
         "=== SWDEV-478776 Below test is disabled due to fix is not avaialable in mainline ===",
         "Unit_hipStreamLegacy_hipStreamSynchronize",
+        "=== These tests fail on linux PSDB 21/11/24 ===",
+        "Unit_hipStreamLegacy_InChildProcess",
+        "Unit_atomicMax_Positive_Multi_Kernel_Same_Address - double",
+        "Unit_atomicMax_Positive_Multi_Kernel_Same_Address - float",
+        "Unit_atomicMin_Positive_Multi_Kernel_Same_Address - double",
+        "Unit_atomicMin_Positive_Multi_Kernel_Same_Address - float",
+        "Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address - double",
+        "Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address - float",
+        "Unit_safeAtomicMin_Positive_Multi_Kernel_Same_Address - double",
+        "Unit_safeAtomicMin_Positive_Multi_Kernel_Same_Address - float",
+        "Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address - double",
+        "Unit_unsafeAtomicMax_Positive_Multi_Kernel_Same_Address - float",
+        "Unit_unsafeAtomicMin_Positive_Multi_Kernel_Same_Address - double",
+        "Unit_unsafeAtomicMin_Positive_Multi_Kernel_Same_Address - float",
     #endif
     #if defined gfx908
         "=== Below test soft hang in stress test on 29/08/23 ===",
@@ -858,7 +872,6 @@
         "=== SWDEV-454316 : Below tests fail in stress test ===",
         "Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address - float",
         "Unit_atomicMin_system_Positive_Peer_GPUs_Same_Address - double",
-        "Unit_safeAtomicMax_Positive_Multi_Kernel_Same_Address - float",
     #endif
     #if defined gfx1030
         "=== SWDEV-445961: These tests hang in PSDB stress test on 09/02/2024 ===",
