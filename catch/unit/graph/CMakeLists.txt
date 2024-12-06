@@ -160,6 +160,7 @@ set(TEST_SRC
   hipDeviceSetGraphMemAttribute.cc
   hipDeviceGetGraphMemAttribute.cc
   hipDeviceGraphMemTrim.cc
+  hipDrvGraphExecMemsetNodeSetParams.cc
 )
 
 if(HIP_PLATFORM MATCHES "amd")

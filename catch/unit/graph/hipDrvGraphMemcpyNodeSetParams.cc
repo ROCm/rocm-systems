@@ -26,8 +26,6 @@ THE SOFTWARE.
 #include <hip_test_defgroups.hh>
 #include <memcpy3d_tests_common.hh>
 
-// hipDrvGraphMemcpyNodeSetParams API is is yet to be implemented in HIP runtime.
-#if 0
 /**
  * @addtogroup hipDrvGraphMemcpyNodeSetParams hipDrvGraphMemcpyNodeSetParams
  * @{
@@ -85,6 +83,11 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Positive_Basic") {
       Memcpy3DDeviceToDeviceShell<async, false>(
           std::bind(DrvMemcpy3DGraphWrapper<true>, _1, _2, _3, _4, _5, _6, context, _7));
     }
+    /*
+     * Setting back the old context, since in the Memcpy3DDeviceToDeviceShell
+     * function the current context is getting modified with hipSetDevice calls
+     */
+    HIP_CHECK(hipCtxSetCurrent(context));
   }
 
   HIP_CHECK(hipCtxPopCurrent(&context));
@@ -188,7 +191,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
       auto invalid_params =
           GetDrvMemcpy3DParms(invalid_ptr, dst_pos, src_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params),
-                      hipErrorInvalidPitchValue);
+                      hipErrorInvalidValue);
     }
 
     SECTION("srcPitch < width") {
@@ -197,7 +200,7 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
       auto invalid_params =
           GetDrvMemcpy3DParms(dst_ptr, dst_pos, invalid_ptr, src_pos, extent, kind);
       HIP_CHECK_ERROR(hipDrvGraphMemcpyNodeSetParams(node, &invalid_params),
-                      hipErrorInvalidPitchValue);
+                      hipErrorInvalidValue);
     }
 
     SECTION("dstPitch > max pitch") {
@@ -314,7 +317,6 @@ TEST_CASE("Unit_hipDrvGraphMemcpyNodeSetParams_Negative_Parameters") {
   HIP_CHECK(hipCtxPopCurrent(&context));
   HIP_CHECK(hipCtxDestroy(context));
 }
-#endif // if 0
 
 /**
 * End doxygen group GraphTest.

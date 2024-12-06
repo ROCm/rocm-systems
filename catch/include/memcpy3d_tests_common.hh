@@ -740,8 +740,6 @@ static inline bool operator==(const HIP_MEMCPY3D& lhs, const HIP_MEMCPY3D& rhs) 
   return pos_eq && extent_eq && mem_eq;
 }
 
-// APIs hipDrvGraphMemcpyNodeGetParams, hipDrvGraphMemcpyNodeSetParams are yet to be implemented in HIP runtime.
-#if 0
 template <bool set_params = false>
 hipError_t DrvMemcpy3DGraphWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtrVariant src_ptr,
                                    hipPos src_pos, hipExtent extent, hipMemcpyKind kind,
@@ -774,7 +772,6 @@ hipError_t DrvMemcpy3DGraphWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtr
 
   return hipSuccess;
 }
-#endif //if 0
 
 template <bool async = false>
 hipError_t DrvMemcpy3DWrapper(DrvPtrVariant dst_ptr, hipPos dst_pos, DrvPtrVariant src_ptr,
