@@ -40,12 +40,12 @@ do_update_alternatives(){
     do
         # No obvious recover strategy if things fail
         # No manual or other slave pages to install
-        if [ -e @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/"$i" ]
+        if [ -e $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_BINDIR@/"$i" ]
         then
             update-alternatives --install /usr/bin/"$i" "$i" \
-                                @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/"$i" "$altscore"
+                                $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_BINDIR@/"$i" "$altscore"
         else
-            echo "@CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_BINDIR@/$i not found, but that is OK" >&2
+            echo "$RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_BINDIR@/$i not found, but that is OK" >&2
         fi
     done
     true
@@ -78,7 +78,7 @@ do_create_rdc_user() {
 
 create_rdc_service() {
     if [ -d /run/systemd/system ]; then
-        ln -s -f -r @CPACK_PACKAGING_INSTALL_PREFIX@/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service @DISTRO_ROOT@/rdc.service
+        ln -s -f -r $RPM_INSTALL_PREFIX0/@CMAKE_INSTALL_LIBEXECDIR@/rdc/rdc.service @DISTRO_ROOT@/rdc.service
     fi
 }
 
