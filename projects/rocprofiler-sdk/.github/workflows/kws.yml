@@ -23,7 +23,7 @@ jobs:
     # - KEYWORD_SCAN_USER : your username in keywordsearch.amd.com to access the above project
     # - KEYWORD_SCAN_PASSWORD : your password in keywordsearch.amd.com to access the above project
     if: ${{ github.event_name == 'pull_request' }}
-    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/common.yaml@mainline
+    uses: AMD-ROCm-Internal/rocm_ci_infra/.github/workflows/common.yml@mainline
     secrets: inherit
 
   # Add your repo specific workflows (if any) below this line, edit nothing above this line.
