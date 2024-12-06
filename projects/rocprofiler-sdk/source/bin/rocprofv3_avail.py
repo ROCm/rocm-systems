@@ -6,6 +6,13 @@ import os
 import io
 import csv
 import socket
+import sys
+
+
+def fatal_error(msg, exit_code=1):
+    sys.stderr.write(f"Fatal error: {msg}\n")
+    sys.stderr.flush()
+    sys.exit(exit_code)
 
 
 class derived_counter:

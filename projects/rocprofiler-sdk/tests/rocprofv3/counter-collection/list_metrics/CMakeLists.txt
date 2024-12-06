@@ -52,7 +52,7 @@ set_tests_properties(
         ENVIRONMENT
         "${cc-env-list-metrics}"
         PASS_REGULAR_EXPRESSION
-        "gpu-agent:[0-9]*\\n*; Name:\t[a-zA-Z_]*\\n;Description:\t(.*)\\n*;Expression:\t(.)*\\n*;Block:\t[a-zA-Z]*\\n*;Dimensions:\t([A-Z_]*\\[[0-9]*:[0-9]*\\];Method:\t(.*);Unit:\t(.*);Minimum_Interval:\t[0-9]*;Maximum_Interval:\t[0-9]*)*\\n*;"
+        "gpu-agent:[0-9]*\\n*; Name:\\t[a-zA-Z_]*\\n;Description:\\t(.*)\\n*;Expression:\\t(.)*\\n*;Block:\\t[a-zA-Z]*\\n*;Dimensions:\\t([A-Z_]*\\[[0-9]*:[0-9]*\\])*\\n*;Method:\\t(.*);Unit:\\t(.*);Minimum_Interval:\\t[0-9]*;Maximum_Interval:\\t[0-9]*\\n*;"
     )
 
 set_tests_properties(
