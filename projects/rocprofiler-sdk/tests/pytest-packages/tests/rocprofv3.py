@@ -56,7 +56,6 @@ def test_perfetto_data(
 def test_otf2_data(
     otf2_data, json_data, categories=("hip", "hsa", "marker", "kernel", "memory_copy")
 ):
-
     def get_operation_name(kind_id, op_id):
         return json_data["rocprofiler-sdk-tool"]["strings"]["buffer_records"][kind_id][
             "operations"

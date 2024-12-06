@@ -211,6 +211,18 @@ config::config()
     if(pc_sampling_method_value == ROCPROFILER_PC_SAMPLING_METHOD_HOST_TRAP)
         pc_sampling_host_trap = true;
     pc_sampling_unit_value = pc_sampling_unit_map.at(pc_sampling_unit);
+
+    if(auto _collection_period = get_env("ROCPROF_COLLECTION_PERIOD", "");
+       !_collection_period.empty())
+    {
+        for(const auto& _config : sdk::parse::tokenize(_collection_period, ";"))
+        {
+            auto _config_params = sdk::parse::tokenize(_config, ":");
+            collection_periods.emplace(CollectionPeriod{std::stoull(_config_params.at(0)),
+                                                        std::stoull(_config_params.at(1)),
+                                                        std::stoull(_config_params.at(2))});
+        }
+    }
 }
 
 std::string

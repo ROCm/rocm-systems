@@ -67,6 +67,13 @@ struct config : output_config
 {
     using base_type = output_config;
 
+    struct CollectionPeriod
+    {
+        uint64_t delay    = 0;
+        uint64_t duration = 0;
+        uint64_t repeat   = 0;
+    };
+
     config();
 
     ~config()                 = default;
@@ -109,6 +116,8 @@ struct config : output_config
 
     std::unordered_set<uint32_t> kernel_filter_range = {};
     std::set<std::string>        counters            = {};
+
+    std::queue<CollectionPeriod> collection_periods = {};
 
     template <typename ArchiveT>
     void save(ArchiveT&) const;

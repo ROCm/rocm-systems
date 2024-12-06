@@ -78,7 +78,6 @@ class OTF2Reader:
         self.filename = filename if isinstance(filename, (list, tuple)) else [filename]
 
     def read(self):
-
         def _read_trace(trace_name):
             trace = otf2.reader.Reader(trace_name)
             # print(f"Read {len(trace.definitions.strings)} string definitions")

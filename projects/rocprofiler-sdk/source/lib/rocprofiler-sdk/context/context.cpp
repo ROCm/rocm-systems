@@ -229,9 +229,13 @@ context*
 get_mutable_registered_context(rocprofiler_context_id_t id)
 {
     if(id.handle < get_contexts_offset()) return nullptr;
+    if(!get_registered_contexts_impl()) return nullptr;
     auto _idx = id.handle - get_contexts_offset();
-    if(_idx >= get_registered_contexts_impl()->size()) return nullptr;
-    return &get_registered_contexts_impl()->at(_idx).value();
+    if(_idx >= get_registered_contexts_impl()->size())
+        return nullptr;
+    else if(get_registered_contexts_impl()->at(_idx).has_value())
+        return &get_registered_contexts_impl()->at(_idx).value();
+    return nullptr;
 }
 
 const context*

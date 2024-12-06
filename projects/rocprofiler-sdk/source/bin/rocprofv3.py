@@ -374,6 +374,23 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
         default=None,
         type=str,
     )
+    filter_options.add_argument(
+        "-p",
+        "--collection-period",
+        help="The times are specified in seconds by default, but the unit can be changed using the `--collection-period-unit` or `-pu` option. Start Delay Time is the time in seconds before the collection begins, Collection Time is the duration in seconds for which data is collected, and Rate is the number of times the cycle is repeated. A repeat of 0 indicates that the cycle will repeat indefinitely. Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`",
+        nargs="+",
+        default=None,
+        type=str,
+        metavar=("(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT)"),
+    )
+    filter_options.add_argument(
+        "--collection-period-unit",
+        help="To change the unit used in `--collection-period` or `-p`, you can specify the desired unit using the `--collection-period-unit` or `-pu` option. The available units are `hour` for hours, `min` for minutes, `sec` for seconds, `msec` for milliseconds, `usec` for microseconds, and `nsec` for nanoseconds",
+        nargs=1,
+        default="sec",
+        type=str,
+        choices=("hour", "min", "sec", "msec", "usec", "nsec"),
+    )
 
     perfetto_options = parser.add_argument_group("Perfetto-specific options")
 
@@ -494,7 +511,6 @@ def parse_json(json_file):
 
 
 def parse_text(text_file):
-
     def process_line(line):
         if "pmc:" not in line:
             return ""
@@ -561,7 +577,6 @@ def patch_args(data):
 
 
 def get_args(cmd_args, inp_args):
-
     def ensure_type(name, var, type_id):
         if not isinstance(var, type_id):
             raise TypeError(
@@ -850,6 +865,33 @@ def run(app_args, args, **kwargs):
         args.list_avail,
         overwrite_if_true=True,
     )
+    if args.collection_period:
+        factors = {
+            "hour": 60 * 60 * 1e9,
+            "min": 60 * 1e9,
+            "sec": 1e9,
+            "msec": 1e6,
+            "usec": 1e3,
+            "nsec": 1,
+        }
+
+        def to_nanosec(val):
+            return int(float(val) * factors[args.collection_period_unit[0]])
+
+        def convert_triplet(delay, duration, repeat):
+            return ":".join(
+                [
+                    f"{itr}"
+                    for itr in [to_nanosec(delay), to_nanosec(duration), int(repeat)]
+                ]
+            )
+
+        periods = [convert_triplet(*itr.split(":")) for itr in args.collection_period]
+        update_env(
+            "ROCPROF_COLLECTION_PERIOD",
+            ";".join(periods),
+            overwrite_if_true=True,
+        )
 
     if args.log_level and args.log_level not in ("env"):
         for itr in ("ROCPROF", "ROCPROFILER", "ROCTX"):

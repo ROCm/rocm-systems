@@ -60,16 +60,21 @@
 
 #include <fmt/core.h>
 
+#include <sys/mman.h>
 #include <unistd.h>
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <csignal>
 #include <cstring>
 #include <fstream>
+#include <future>
 #include <iomanip>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <shared_mutex>
+#include <thread>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -263,6 +268,77 @@ flush()
         }
     }
     ROCP_INFO << "Buffers flushed";
+}
+
+void
+collection_period_cntrl(std::promise<void>&& _promise, rocprofiler_context_id_t _ctx)
+{
+    bool testing_cp          = tool::get_env("ROCPROF_COLLECTION_PERIOD_TESTING", false);
+    auto log_fname           = get_output_filename(tool::get_config(), "collection_periods", "log");
+    auto output_testing_file = std::ofstream{};
+
+    if(testing_cp)
+    {
+        ROCP_INFO << "collection period test logging enabled: " << log_fname;
+        output_testing_file.open(log_fname);
+    }
+
+    auto log_period = [testing_cp, &output_testing_file](
+                          std::string_view label, auto _func, auto... _args) {
+        ROCP_INFO << "collection period: " << label;
+
+        auto beg = rocprofiler_timestamp_t{};
+        if(testing_cp)
+        {
+            rocprofiler_get_timestamp(&beg);
+        }
+
+        _func(_args...);
+
+        if(testing_cp)
+        {
+            auto end = rocprofiler_timestamp_t{};
+            rocprofiler_get_timestamp(&end);
+            output_testing_file << label << ":" << beg << ":" << end << '\n' << std::flush;
+        }
+    };
+
+    auto sleep_for_nsec = [](auto _value) {
+        if(_value > 0)
+        {
+            std::this_thread::yield();
+            std::this_thread::sleep_for(std::chrono::nanoseconds{_value});
+        }
+    };
+
+    auto periods = tool::get_config().collection_periods;
+    _promise.set_value();  // allow the launching thread to proceed
+    while(!periods.empty())
+    {
+        auto _period = periods.front();
+        periods.pop();
+
+        auto execute_period = [&]() {
+            if(testing_cp) output_testing_file << "--" << '\n';
+
+            log_period("delay", sleep_for_nsec, _period.delay);
+            log_period("start", rocprofiler_start_context, _ctx);
+            log_period("duration", sleep_for_nsec, _period.duration);
+            log_period("stop", rocprofiler_stop_context, _ctx);
+        };
+
+        if(_period.repeat == 0)
+        {
+            execute_period();
+        }
+        else
+        {
+            for(size_t i = 0; i < _period.repeat; ++i)
+            {
+                execute_period();
+            }
+        }
+    }
 }
 
 int
@@ -553,8 +629,8 @@ code_object_tracing_callback(rocprofiler_callback_tracing_record_t record,
             // add the kernel to the kernel_targets if
             if(success)
             {
-                // if kernel name is provided by user then by default all kernels in the application
-                // are targeted
+                // if kernel name is provided by user then by default all kernels in the
+                // application are targeted
                 const auto* kernel_info =
                     CHECK_NOTNULL(tool_metadata)->get_kernel_symbol(sym_data->kernel_id);
                 auto kernel_filter_include = tool::get_config().kernel_filter_include;
@@ -711,12 +787,14 @@ get_device_counting_service(rocprofiler_agent_id_t agent_id)
 
                     ROCP_FATAL_IF(dev_id_s.empty() ||
                                   dev_id_s.find_first_not_of("0123456789") != std::string::npos)
-                        << "invalid device qualifier format (':device=N) where N is the GPU id: "
+                        << "invalid device qualifier format (':device=N) where N is the "
+                           "GPU "
+                           "id: "
                         << itr;
 
                     auto dev_id_v = std::stol(dev_id_s);
-                    // skip this counter if the counter is for a specific device id (which doesn't
-                    // this agent's device id)
+                    // skip this counter if the counter is for a specific device id (which
+                    // doesn't this agent's device id)
                     if(dev_id_v != agent_v->gpu_index)
                     {
                         --expected_v;  // is not expected
@@ -1257,7 +1335,17 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         }
     }
 
-    ROCPROFILER_CALL(rocprofiler_start_context(get_client_ctx()), "start context failed");
+    if(tool::get_config().collection_periods.empty())
+    {
+        ROCPROFILER_CHECK(rocprofiler_start_context(get_client_ctx()));
+    }
+    else
+    {
+        auto _prom = std::promise<void>{};
+        auto _fut  = _prom.get_future();
+        std::thread{collection_period_cntrl, std::move(_prom), get_client_ctx()}.detach();
+        _fut.wait_for(std::chrono::seconds{1});  // wait for a max of 1 second
+    }
 
     tool_metadata->process_id = getpid();
     rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));

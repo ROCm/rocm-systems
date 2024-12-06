@@ -123,7 +123,7 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
     - Kernel Dispatch Counter Collection
 
   * - ``-L`` \| ``--list-avail``
-    - List metrics for counter collection 
+    - List metrics for counter collection
     - List supported PC sampling configurations.
 
   * - ``-E`` \| ``--extra_counters``
@@ -169,10 +169,18 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
   * - ``--pc-sampling-unit``
     - The unit appropriate to the PC sampling type/method, currently only time unit is supported
     - PC Sampling Configurations
-  
+
   * - ``--pc-sampling-interval``
     - Frequency at which PC samples are generated
     - PC Sampling Configurations
+
+  * - ``--collection-period \| -p [(START_DELAY_TIME):(COLLECTION_TIME):(REPEAT), ...]``
+    - The times are specified in seconds by default, but the unit can be changed using the `--collection-period-unit` or `-pu` option. Start Delay Time is the time in seconds before the collection begins, Collection Time is the duration in seconds for which data is collected, and Rate is the number of times the cycle is repeated. A repeat of 0 indicates that the cycle will repeat indefinitely. Users can specify multiple configurations, each defined by a triplet in the format `start_delay:collection_time:repeat`. For example, the command `-p 10:10:1 5:3:0` specifies two configurations: the first with a start delay of 10 seconds, a collection time of 10 seconds, and a repeat of 1 (the cycle will repeat once); the second with a start delay of 5 seconds, a collection time of 3 seconds, and a repeat of 0 (the cycle will repeat indefinitely).
+    - Filtering Options
+
+  * - ``--collection-period-unit {hour,min,sec,msec,usec,nsec}``
+    - To change the unit used in `--collection-period` or `-p`, you can specify the desired unit using the `--collection-period-unit` option. The available units are `hour` for hours, `min` for minutes, `sec` for seconds, `msec` for milliseconds, `usec` for microseconds, and `nsec` for nanoseconds.
+    - Filtering Options
 
 To see exhaustive list of ``rocprofv3`` options, run:
 
@@ -633,23 +641,23 @@ For the description of the fields in the output file, see :ref:`output-file-fiel
 Output single summary of tracing data at the conclusion of the profiling session
 
 .. code-block:: shell
-   
+
    rocprofv3 -S --hip-trace -- <application_path>
 
 .. image:: /data/rocprofv3_summary.png
-   
- 
+
+
 2.1 Summary per domain
 ++++++++++++++++++++++
 
-Outputs the summary of each tracing domain at the end of profiling session. 
+Outputs the summary of each tracing domain at the end of profiling session.
 
 .. code-block:: shell
 
     rocprofv3 -D --hsa-trace --hip-trace  -- <application_path>
 
 The above command generates a ``hip_trace.csv``, ``hsa_trace.csv`` file prefixed with the process ID along with the summary of each domain at the terminal.
- 
+
 2.2 Summary groups
 +++++++++++++++++++
 
@@ -666,7 +674,7 @@ To create a summary for ``MEMORY_COPY`` domains, use:
 To create a summary for ``MEMORY_COPY`` and ``HIP_API`` domains, use:
 
 .. code-block:: shell
-   
+
    rocprofv3 --summary-groups 'MEMORY_COPY|HIP_API' --sys-trace -- <application_path>
 
 .. image:: /data/rocprofv3_hip_memcpy_summary.png
@@ -816,7 +824,7 @@ To supply the counters via ``command-line`` options, use:
 Extra-counters
 ++++++++++++++++
 
-Counters with custom definitions can be defined through an extra_counters.yaml 
+Counters with custom definitions can be defined through an extra_counters.yaml
 file using the ``command-line`` option.
 
 To supply the extra counters via ``command-line`` options, use:
