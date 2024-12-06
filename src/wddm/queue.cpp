@@ -528,7 +528,7 @@ uint64_t ComputeQueue::GetKernelObjAddr(uint64_t addr) const {
   auto ret = hsakmt_hsa_ven_amd_loader_query_host_address(reinterpret_cast<const void *>(addr),
                                            reinterpret_cast<const void **>(&host_addr));
   if (ret == HSA_STATUS_ERROR_INVALID_ARGUMENT) {
-    return NULL;
+    return 0;
   }
 
   return host_addr;

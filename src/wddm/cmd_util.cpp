@@ -256,8 +256,8 @@ size_t CmdUtil::BuildDispatch(
     // This feature may be enabled as a side effect of indirect calls.
     // However, the compiler team confirmed that the dispatch id itself is not used,
     // so safe to send 0 for each dispatch.
-    dispatch.compute_user_data_regs.compute_user_data[sgpr_no++] = NULL;
-    dispatch.compute_user_data_regs.compute_user_data[sgpr_no++] = NULL;
+    dispatch.compute_user_data_regs.compute_user_data[sgpr_no++] = 0;
+    dispatch.compute_user_data_regs.compute_user_data[sgpr_no++] = 0;
   }
   if (AMD_HSA_BITS_GET(pInfo->pKernelObject->kernel_code_properties,
 		       AMD_KERNEL_CODE_PROPERTIES_ENABLE_SGPR_FLAT_SCRATCH_INIT)) {

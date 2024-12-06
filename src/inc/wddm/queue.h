@@ -69,9 +69,9 @@ public:
             uint32_t engine,
             bool use_hws = true) :
             device(device),
-            context(NULL),
-            queue(NULL),
-            syncobj(NULL),
+            context(0),
+            queue(0),
+            syncobj(0),
             sync_addr(NULL),
             cmdbuf(0),
             cmdbuf_addr(cmdbuf_addr),
