@@ -421,7 +421,8 @@ configure_pc_sampling_on_all_agents(rocprofiler_context_id_t context)
     if(pc_sampler->gpu_agents.empty())
     {
         *utils::get_output_stream() << "No availabe gpu agents supporting PC sampling" << std::endl;
-        *utils::get_output_stream() << "PC sampling unavailable" << std::endl;
+        // Emit the message to skip the test.
+        std::cerr << "PC sampling unavailable" << std::endl;
         // Exit with no error if none of the GPUs support PC sampling.
         exit(0);
     }

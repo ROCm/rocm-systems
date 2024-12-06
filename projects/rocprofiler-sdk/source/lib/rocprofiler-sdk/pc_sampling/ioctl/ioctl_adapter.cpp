@@ -210,7 +210,7 @@ is_pc_sampling_supported(const rocprofiler_agent_t* agent)
     {
         // The KFD IOCTL version is the same for all available devices.
         // Thus, emit the message and skip all tests and samples on the system in use.
-        ROCP_ERROR << "PC sampling unavailable\n";
+        ROCP_INFO << "PC sampling unavailable. Please update amdgpu driver to at least 1.16.";
         return ROCPROFILER_STATUS_ERROR_INCOMPATIBLE_KERNEL;
     }
 
