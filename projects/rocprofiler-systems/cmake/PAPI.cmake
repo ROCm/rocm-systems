@@ -45,6 +45,9 @@ if(NOT EXISTS "${ROCPROFSYS_PAPI_INSTALL_DIR}")
         ${ROCPROFSYS_PAPI_INSTALL_DIR}/lib/libpfm.so)
 endif()
 
+# Set ROCPROFSYS_PAPI_CONFIGURE_JOBS for commands that need to be run nonparallel
+set(ROCPROFSYS_PAPI_CONFIGURE_JOBS 1)
+
 rocprofiler_systems_add_option(ROCPROFSYS_PAPI_AUTO_COMPONENTS
                                "Automatically enable components" OFF)
 
@@ -212,8 +215,10 @@ externalproject_add(
         --with-perf-events --with-tests=no
         --with-components=${_ROCPROFSYS_PAPI_COMPONENTS}
         --libdir=${ROCPROFSYS_PAPI_INSTALL_DIR}/lib
-    CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
-                      ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s
+    CONFIGURE_COMMAND
+        ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
+        ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} static install -s -j
+        ${ROCPROFSYS_PAPI_CONFIGURE_JOBS}
     BUILD_COMMAND ${CMAKE_COMMAND} -E env CFLAGS=-fPIC\ -O3\ -Wno-stringop-truncation
                   ${ROCPROFSYS_PAPI_EXTRA_ENV} ${MAKE_EXECUTABLE} utils install-utils -s
     INSTALL_COMMAND ""

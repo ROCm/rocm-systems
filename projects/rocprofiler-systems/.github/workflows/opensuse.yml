@@ -13,6 +13,7 @@ on:
       - '.github/workflows/cpack.yml'
       - '.github/workflows/containers.yml'
       - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
       - 'docker/**'
   pull_request:
     branches: [ amd-mainline, amd-staging, release/** ]
@@ -25,6 +26,7 @@ on:
       - '.github/workflows/cpack.yml'
       - '.github/workflows/containers.yml'
       - '.github/workflows/formatting.yml'
+      - '.github/workflows/weekly-mainline-sync.yml'
       - 'docker/**'
 
 concurrency:
