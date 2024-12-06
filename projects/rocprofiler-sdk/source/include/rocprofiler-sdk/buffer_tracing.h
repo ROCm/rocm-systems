@@ -217,9 +217,9 @@ typedef struct
     rocprofiler_thread_id_t                   thread_id;  ///< id for thread that triggered copy
     rocprofiler_timestamp_t                   start_timestamp;  ///< start time in nanoseconds
     rocprofiler_timestamp_t                   end_timestamp;    ///< end time in nanoseconds
-    rocprofiler_agent_id_t agent_id;          ///< agent information for memory allocation
-    uint64_t               starting_address;  ///< starting address for memory allocation
-    uint64_t               allocation_size;   ///< size for memory allocation
+    rocprofiler_agent_id_t agent_id;         ///< agent information for memory allocation
+    rocprofiler_address_t  address;          ///< starting address for memory allocation
+    uint64_t               allocation_size;  ///< size for memory allocation
     /// @var kind
     /// @brief ::ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION
     /// @var operation

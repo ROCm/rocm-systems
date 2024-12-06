@@ -486,17 +486,25 @@ write_otf2(
     {
         for(auto& [agent, evt] : itr)
         {
-            const auto* _agent     = _get_agent(agent);
-            auto        _type_name = std::string_view{"UNK"};
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+            // Free functions do not track agent information. Below handles case where
+            // null rocprof agent id is passed to generate OTF2
+            constexpr auto null_rocp_agent_id =
+                rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+            const rocprofiler_agent_t* _agent = nullptr;
+            if(agent != null_rocp_agent_id)
+            {
+                _agent = _get_agent(agent);
+            }
+            auto _type_name = std::string_view{"UNK"};
+            if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_CPU)
                 _type_name = "CPU";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+            else if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_GPU)
                 _type_name = "GPU";
 
-            evt.name = fmt::format("Thread {}, Memory Allocation at {} {}",
+            evt.name = fmt::format("Thread {}, Memory Operation at {} {}",
                                    tid,
                                    _type_name,
-                                   _agent->logical_node_type_id);
+                                   _agent == nullptr ? 0 : _agent->logical_node_type_id);
         }
     }
 
@@ -860,6 +868,12 @@ write_otf2(
         for(auto& [agent, evt] : itr)
         {
             auto _hash = get_hash_id(evt.name);
+            // Using max numeric limits results in an out-of-bound runtime error for OTF2
+            // and perfetto for agent ids. Setting handle to 0 for free functions.
+            constexpr auto null_rocp_agent_id =
+                rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+            auto handle = agent.handle;
+            if(agent == null_rocp_agent_id) handle = 0;
 
             add_write_string(_hash, evt.name);
             OTF2_CHECK(OTF2_GlobalDefWriter_WriteLocation(global_def_writer,
@@ -867,7 +881,7 @@ write_otf2(
                                                           _hash,
                                                           OTF2_LOCATION_TYPE_ACCELERATOR_STREAM,
                                                           2 * evt.event_count,  // # events
-                                                          agent.handle          // location group
+                                                          handle                // location group
                                                           ));
         }
     }

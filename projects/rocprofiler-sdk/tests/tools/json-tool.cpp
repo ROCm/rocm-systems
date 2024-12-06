@@ -49,6 +49,7 @@
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/registration.h>
 #include <rocprofiler-sdk/rocprofiler.h>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <unistd.h>
 #include <algorithm>
@@ -1843,6 +1844,7 @@ write_perfetto()
 
     auto tids            = std::set<rocprofiler_thread_id_t>{};
     auto agent_ids       = std::set<uint64_t>{};
+    auto agent_ids_alloc = std::set<uint64_t>{};
     auto agent_queue_ids = std::map<uint64_t, std::set<uint64_t>>{};
 
     auto _get_agent = [](uint64_t id_handle) -> const rocprofiler_agent_t* {
@@ -1875,7 +1877,7 @@ write_perfetto()
         for(auto itr : memory_allocation_bf_records)
         {
             tids.emplace(itr.thread_id);
-            agent_ids.emplace(itr.agent_id.handle);
+            agent_ids_alloc.emplace(itr.agent_id.handle);
         }
 
         for(auto itr : kernel_dispatch_bf_records)
@@ -1925,6 +1927,36 @@ write_perfetto()
         else
             _namess << _agent->product_name;
 
+        auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
+        auto _desc  = _track.Serialize();
+        _desc.set_name(_namess.str());
+
+        perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
+
+        agent_tracks.emplace(itr, _track);
+    }
+
+    for(auto itr : agent_ids_alloc)
+    {
+        const auto* _agent  = _get_agent(itr);
+        auto        _namess = std::stringstream{};
+
+        if(_agent != nullptr)
+        {
+            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                _namess << "CPU MEMORY OPERATION [" << itr << "] ";
+            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                _namess << "GPU MEMORY OPERATION [" << itr << "] ";
+
+            if(!std::string_view{_agent->model_name}.empty())
+                _namess << _agent->model_name;
+            else
+                _namess << _agent->product_name;
+        }
+        else
+        {
+            _namess << "UNKNOWN MEMORY OPERATION [" << itr << "] ";
+        }
         auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
         auto _desc  = _track.Serialize();
         _desc.set_name(_namess.str());
@@ -2149,35 +2181,6 @@ write_perfetto()
                               "copy_bytes",
                               itr.bytes);
             TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_copy>::name,
-                            track,
-                            itr.end_timestamp,
-                            "end_ns",
-                            itr.end_timestamp);
-        }
-
-        for(auto itr : memory_allocation_bf_records)
-        {
-            auto  name  = buffer_names.at(itr.kind, itr.operation);
-            auto& track = agent_tracks.at(itr.agent_id.handle);
-
-            TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_allocation>::name,
-                              ::perfetto::StaticString(name.data()),
-                              track,
-                              itr.start_timestamp,
-                              ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
-                              "begin_ns",
-                              itr.start_timestamp,
-                              "kind",
-                              itr.kind,
-                              "operation",
-                              itr.operation,
-                              "agent",
-                              agents_map.at(itr.agent_id).logical_node_id,
-                              "Allocation_size",
-                              itr.allocation_size,
-                              "Starting_address",
-                              itr.starting_address);
-            TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_allocation>::name,
                             track,
                             itr.end_timestamp,
                             "end_ns",

@@ -170,6 +170,8 @@ call_hsa_memory_allocate(const size_t i, const size_t base_size, hsa_agent_t age
 
         status = hsa_memory_allocate(region_list[0], base_size, &addr);
         RET_IF_HSA_ERR(status)
+        status = hsa_memory_free(addr);
+        RET_IF_HSA_ERR(status)
     }
 }
 
@@ -198,6 +200,8 @@ call_hsa_memory_pool_allocate(const size_t i, const size_t base_size, hsa_agent_
         uint32_t flags = 0;
 
         status = hsa_amd_memory_pool_allocate(memory_pool_list[0], base_size, flags, &addr);
+        RET_IF_HSA_ERR(status)
+        status = hsa_amd_memory_pool_free(addr);
         RET_IF_HSA_ERR(status)
     }
 }
@@ -243,6 +247,8 @@ call_hsa_vmem_allocate(const size_t i, hsa_agent_t agent)
         status = hsa_amd_vmem_handle_create(
             memory_pool_list[0], size, MEMORY_TYPE_NONE, 0, &memory_handle);
         RET_IF_HSA_ERR(status)
+        status = hsa_amd_vmem_handle_release(memory_handle);
+        RET_IF_HSA_ERR(status)
     }
 }
 
@@ -257,7 +263,7 @@ main()
     hsa_agent_t              cpu_agent = get_cpu_agent(agents);
     hsa_agent_t              gpu_agent = get_gpu_agent(agents);
     call_hsa_memory_allocate(6, 1024, cpu_agent);
-    call_hsa_memory_pool_allocate(9, 512, gpu_agent);
+    call_hsa_memory_pool_allocate(9, 2048, gpu_agent);
     // Virtual memory API not supported in CI. Will add back if this changes
     // call_hsa_vmem_allocate(3, gpu_agent);
 

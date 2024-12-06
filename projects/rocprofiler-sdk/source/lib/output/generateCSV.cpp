@@ -33,6 +33,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/marker/api_id.h>
 #include <rocprofiler-sdk/cxx/operators.hpp>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <unistd.h>
 #include <cstdint>
@@ -456,7 +457,7 @@ generate_csv(const output_config&                                               
                                       "Operation",
                                       "Agent_Id",
                                       "Allocation_Size",
-                                      "Starting_Address",
+                                      "Address",
                                       "Correlation_Id",
                                       "Start_Timestamp",
                                       "End_Timestamp"}};
@@ -464,15 +465,24 @@ generate_csv(const output_config&                                               
     {
         for(auto record : data.get(ditr))
         {
+            uint64_t agent_info{0};
+            // Free functions currently do not track agent information. Only set it on allocation
+            // operations, otherwise set it to 0 currently
+            if(record.operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE ||
+               record.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
+            {
+                agent_info = tool_metadata.get_node_id(record.agent_id);
+            }
             auto api_name = tool_metadata.get_operation_name(record.kind, record.operation);
             auto row_ss   = std::stringstream{};
+
             rocprofiler::tool::csv::memory_allocation_csv_encoder::write_row(
                 row_ss,
                 tool_metadata.get_kind_name(record.kind),
                 api_name,
-                tool_metadata.get_node_id(record.agent_id),
+                agent_info,
                 record.allocation_size,
-                record.starting_address,
+                rocprofiler::sdk::utility::as_hex(record.address.value, 16),
                 record.correlation_id.internal,
                 record.start_timestamp,
                 record.end_timestamp);

@@ -18,12 +18,6 @@ def pytest_addoption(parser):
         help="Input JSON",
     )
     parser.addoption(
-        "--pftrace-input",
-        action="store",
-        default="memory-allocation-tracing/out_results.pftrace",
-        help="Input JSON",
-    )
-    parser.addoption(
         "--otf2-input",
         action="store",
         default="memory-allocation-tracing/out_results.otf2",
@@ -36,12 +30,6 @@ def json_data(request):
     filename = request.config.getoption("--json-input")
     with open(filename, "r") as inp:
         return dotdict(collapse_dict_list(json.load(inp)))
-
-
-@pytest.fixture
-def pftrace_data(request):
-    filename = request.config.getoption("--pftrace-input")
-    return PerfettoReader(filename).read()[0]
 
 
 @pytest.fixture

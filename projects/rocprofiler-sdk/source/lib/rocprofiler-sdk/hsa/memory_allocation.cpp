@@ -68,49 +68,125 @@ using memory_pool_to_agent_map = std::unordered_map<hsa_amd_memory_pool_t, rocpr
 using region_to_agent_pair     = std::pair<region_to_agent_map*, rocprofiler_agent_id_t>;
 using map_pool_to_agent_pair   = std::pair<memory_pool_to_agent_map*, rocprofiler_agent_id_t>;
 
+template <size_t TableIdx, size_t OpIdx, typename... Args>
+hsa_status_t
+memory_allocation_impl(Args... args);
+
+template <size_t TableIdx, size_t OpIdx, typename... Args>
+hsa_status_t
+memory_free_impl(Args... args);
+
+// Local enum to specify implementation of memory function wrappers
+typedef enum
+{
+    HSA_NONE = 0,                  ///< Unknown memory allocation function
+    HSA_MEMORY_ALLOCATE,           ///< Allocate memory function
+    HSA_AMD_MEMORY_POOL_ALLOCATE,  ///< Allocate memory pool
+    HSA_AMD_VMEM_ALLOCATE,         ///< Allocate vmem memory handle
+    HSA_MEMORY_FREE,               ///< Free memory function
+    HSA_AMD_MEMORY_POOL_FREE,      ///< Free memory pool
+    HSA_AMD_VMEM_FREE,             ///< Release vmem memory handle
+    HSA_LAST,
+} hsa_memory_operation_functions_t;
+
 // Set up information to identify agent from regions/pool
 template <size_t OpIdx>
 struct memory_allocation_info;
 
-#define SPECIALIZE_MEMORY_ALLOCATION_INFO(FUNCTION, MAPTYPE, PAIRTYPE, SEARCHTYPE, ITERATEFUNC)    \
+#define SPECIALIZE_MEMORY_ALLOCATION_INFO(                                                         \
+    FUNCTION, ENUM, MAPTYPE, PAIRTYPE, SEARCHTYPE, ITERATEFUNC, IMPLEMENTATION)                    \
     template <>                                                                                    \
-    struct memory_allocation_info<ROCPROFILER_MEMORY_ALLOCATION_##FUNCTION>                        \
+    struct memory_allocation_info<FUNCTION>                                                        \
     {                                                                                              \
         using maptype    = MAPTYPE;                                                                \
         using pairtype   = PAIRTYPE;                                                               \
         using searchtype = SEARCHTYPE;                                                             \
         auto&                 operator()() const { return ITERATEFUNC; }                           \
-        static constexpr auto operation_idx = ROCPROFILER_MEMORY_ALLOCATION_##FUNCTION;            \
-        static constexpr auto name          = "MEMORY_ALLOCATION_" #FUNCTION;                      \
+        static constexpr auto operation_idx = ROCPROFILER_MEMORY_ALLOCATION_##ENUM;                \
+        static constexpr auto name          = "MEMORY_ALLOCATION_" #ENUM;                          \
+                                                                                                   \
+        template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>                  \
+        static auto get_memory_allocation_impl(RetT (*)(Args...))                                  \
+        {                                                                                          \
+            return &IMPLEMENTATION<TableIdx, OpIdx, Args...>;                                      \
+        }                                                                                          \
     };
 
-SPECIALIZE_MEMORY_ALLOCATION_INFO(NONE,
+SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_NONE,
+                                  NONE,
                                   region_to_agent_map,
                                   region_to_agent_pair,
                                   hsa_region_t,
-                                  get_core_table()->hsa_agent_iterate_regions_fn)
-SPECIALIZE_MEMORY_ALLOCATION_INFO(ALLOCATE,
+                                  get_core_table()->hsa_agent_iterate_regions_fn,
+                                  memory_allocation_impl)
+SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_MEMORY_ALLOCATE,
+                                  ALLOCATE,
                                   region_to_agent_map,
                                   region_to_agent_pair,
                                   hsa_region_t,
-                                  get_core_table()->hsa_agent_iterate_regions_fn)
-SPECIALIZE_MEMORY_ALLOCATION_INFO(MEMORY_POOL_ALLOCATE,
+                                  get_core_table()->hsa_agent_iterate_regions_fn,
+                                  memory_allocation_impl)
+SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_AMD_MEMORY_POOL_ALLOCATE,
+                                  ALLOCATE,
                                   memory_pool_to_agent_map,
                                   map_pool_to_agent_pair,
                                   hsa_amd_memory_pool_t,
-                                  get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn)
-SPECIALIZE_MEMORY_ALLOCATION_INFO(VMEM_HANDLE_CREATE,
+                                  get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn,
+                                  memory_allocation_impl)
+SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_AMD_VMEM_ALLOCATE,
+                                  VMEM_ALLOCATE,
                                   memory_pool_to_agent_map,
                                   map_pool_to_agent_pair,
                                   hsa_amd_memory_pool_t,
-                                  get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn)
+                                  get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn,
+                                  memory_allocation_impl)
+SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_MEMORY_FREE,
+                                  FREE,
+                                  region_to_agent_map,
+                                  region_to_agent_pair,
+                                  hsa_region_t,
+                                  get_core_table()->hsa_agent_iterate_regions_fn,
+                                  memory_free_impl)
+SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_AMD_MEMORY_POOL_FREE,
+                                  FREE,
+                                  memory_pool_to_agent_map,
+                                  map_pool_to_agent_pair,
+                                  hsa_amd_memory_pool_t,
+                                  get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn,
+                                  memory_free_impl)
+SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_AMD_VMEM_FREE,
+                                  VMEM_FREE,
+                                  memory_pool_to_agent_map,
+                                  map_pool_to_agent_pair,
+                                  hsa_amd_memory_pool_t,
+                                  get_amd_ext_table()->hsa_amd_agent_iterate_memory_pools_fn,
+                                  memory_free_impl)
 #undef SPECIALIZE_MEMORY_ALLOCATION_INFO
+
+// Map rocprofiler_memory_allocation_operation_t to respective name
+template <size_t OpIdx>
+struct memory_allocation_name;
+
+#define MEMORY_ALLOCATION_NAME(ENUM)                                                               \
+    template <>                                                                                    \
+    struct memory_allocation_name<ROCPROFILER_MEMORY_ALLOCATION_##ENUM>                            \
+    {                                                                                              \
+        static constexpr auto name          = "MEMORY_ALLOCATION_" #ENUM;                          \
+        static constexpr auto operation_idx = ROCPROFILER_MEMORY_ALLOCATION_##ENUM;                \
+    };
+
+MEMORY_ALLOCATION_NAME(NONE)
+MEMORY_ALLOCATION_NAME(ALLOCATE)
+MEMORY_ALLOCATION_NAME(VMEM_ALLOCATE)
+MEMORY_ALLOCATION_NAME(FREE)
+MEMORY_ALLOCATION_NAME(VMEM_FREE)
+#undef MEMORY_ALLOCATION_NAME
 
 template <size_t Idx, size_t... IdxTail>
 const char*
 name_by_id(const uint32_t id, std::index_sequence<Idx, IdxTail...>)
 {
-    if(Idx == id) return memory_allocation_info<Idx>::name;
+    if(Idx == id) return memory_allocation_name<Idx>::name;
     if constexpr(sizeof...(IdxTail) > 0)
         return name_by_id(id, std::index_sequence<IdxTail...>{});
     else
@@ -121,8 +197,8 @@ template <size_t Idx, size_t... IdxTail>
 uint32_t
 id_by_name(const char* name, std::index_sequence<Idx, IdxTail...>)
 {
-    if(std::string_view{memory_allocation_info<Idx>::name} == std::string_view{name})
-        return memory_allocation_info<Idx>::operation_idx;
+    if(std::string_view{memory_allocation_name<Idx>::name} == std::string_view{name})
+        return memory_allocation_name<Idx>::operation_idx;
     if constexpr(sizeof...(IdxTail) > 0)
         return id_by_name(name, std::index_sequence<IdxTail...>{});
     else
@@ -137,7 +213,7 @@ get_ids(std::vector<uint32_t>& _id_list, std::index_sequence<Idx...>)
         if(_v < static_cast<uint32_t>(ROCPROFILER_MEMORY_ALLOCATION_LAST)) _vec.emplace_back(_v);
     };
 
-    (_emplace(_id_list, memory_allocation_info<Idx>::operation_idx), ...);
+    (_emplace(_id_list, memory_allocation_name<Idx>::operation_idx), ...);
 }
 
 template <size_t... Idx>
@@ -148,7 +224,7 @@ get_names(std::vector<const char*>& _name_list, std::index_sequence<Idx...>)
         if(_v != nullptr && strnlen(_v, 1) > 0) _vec.emplace_back(_v);
     };
 
-    (_emplace(_name_list, memory_allocation_info<Idx>::name), ...);
+    (_emplace(_name_list, memory_allocation_name<Idx>::name), ...);
 }
 
 bool
@@ -169,17 +245,24 @@ context_filter(const context::context* ctx)
 enum memory_allocation_core_id
 {
     memory_allocation_core_allocate_id = ROCPROFILER_HSA_CORE_API_ID_hsa_memory_allocate,
+    memory_allocation_core_free_id     = ROCPROFILER_HSA_CORE_API_ID_hsa_memory_free,
 };
-using memory_allocation_core_index_seq_t = std::index_sequence<memory_allocation_core_allocate_id>;
+using memory_allocation_core_index_seq_t =
+    std::index_sequence<memory_allocation_core_allocate_id, memory_allocation_core_free_id>;
 
 enum memory_allocation_amd_ext_id
 {
     memory_allocation_amd_ext_allocate_id =
         ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_allocate,
-    memory_allocation_vmem_allocate_id = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_create
+    memory_allocation_vmem_allocate_id = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_create,
+    memory_allocation_amd_ext_free_id  = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_memory_pool_free,
+    memory_allocation_vmem_release_id  = ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_vmem_handle_release,
 };
 using memory_allocation_amd_ext_index_seq_t =
-    std::index_sequence<memory_allocation_amd_ext_allocate_id, memory_allocation_vmem_allocate_id>;
+    std::index_sequence<memory_allocation_amd_ext_allocate_id,
+                        memory_allocation_vmem_allocate_id,
+                        memory_allocation_amd_ext_free_id,
+                        memory_allocation_vmem_release_id>;
 
 template <size_t TableIdx>
 struct memory_allocation_seq;
@@ -203,14 +286,17 @@ struct arg_indices;
     template <>                                                                                    \
     struct arg_indices<ENUM_ID>                                                                    \
     {                                                                                              \
-        static constexpr auto starting_address_idx = STARTING_ADDRESS_IDX;                         \
-        static constexpr auto size_idx             = SIZE_IDX;                                     \
-        static constexpr auto region_idx           = REGION_IDX;                                   \
+        static constexpr auto address_idx = STARTING_ADDRESS_IDX;                                  \
+        static constexpr auto size_idx    = SIZE_IDX;                                              \
+        static constexpr auto region_idx  = REGION_IDX;                                            \
     };
 
 HSA_MEMORY_ALLOCATE_DEFINE_ARG_INDICES(memory_allocation_core_allocate_id, 2, 1, 0)
 HSA_MEMORY_ALLOCATE_DEFINE_ARG_INDICES(memory_allocation_amd_ext_allocate_id, 3, 1, 0)
 HSA_MEMORY_ALLOCATE_DEFINE_ARG_INDICES(memory_allocation_vmem_allocate_id, 4, 1, 0)
+HSA_MEMORY_ALLOCATE_DEFINE_ARG_INDICES(memory_allocation_core_free_id, 0, 0, 0)
+HSA_MEMORY_ALLOCATE_DEFINE_ARG_INDICES(memory_allocation_amd_ext_free_id, 0, 0, 0)
+HSA_MEMORY_ALLOCATE_DEFINE_ARG_INDICES(memory_allocation_vmem_release_id, 0, 0, 0)
 
 // Define operation indices for each tracked functions
 template <size_t Idx>
@@ -220,12 +306,15 @@ struct memory_allocation_op;
     template <>                                                                                    \
     struct memory_allocation_op<ENUM_ID>                                                           \
     {                                                                                              \
-        static constexpr auto operation_idx = ROCPROFILER_MEMORY_ALLOCATION_##FUNCTION;            \
+        static constexpr auto operation_idx = FUNCTION;                                            \
     };
 
-MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_core_allocate_id, ALLOCATE);
-MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_amd_ext_allocate_id, MEMORY_POOL_ALLOCATE);
-MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_vmem_allocate_id, VMEM_HANDLE_CREATE);
+MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_core_allocate_id, HSA_MEMORY_ALLOCATE);
+MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_amd_ext_allocate_id, HSA_AMD_MEMORY_POOL_ALLOCATE);
+MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_vmem_allocate_id, HSA_AMD_VMEM_ALLOCATE)
+MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_core_free_id, HSA_MEMORY_FREE);
+MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_amd_ext_free_id, HSA_AMD_MEMORY_POOL_FREE);
+MEMORY_ALLOCATE_OPERATION_IDX(memory_allocation_vmem_release_id, HSA_AMD_VMEM_FREE);
 
 template <typename FuncT, typename ArgsT, size_t... Idx>
 decltype(auto)
@@ -255,7 +344,7 @@ struct memory_allocation_data
     rocprofiler_thread_id_t                   tid            = common::get_tid();
     rocprofiler_agent_id_t                    agent          = null_rocp_agent_id;
     uint64_t                                  size_allocated = 0;
-    uint64_t                                  starting_addr  = 0;
+    rocprofiler_address_t                     address        = {.value = 0};
     uint64_t                                  start_ts       = 0;
     context::correlation_id*                  correlation_id = nullptr;
     tracing::tracing_data                     tracing_data   = {};
@@ -271,7 +360,7 @@ memory_allocation_data::callback_data_t
 memory_allocation_data::get_callback_data(timestamp_t _beg, timestamp_t _end) const
 {
     return common::init_public_api_struct(
-        callback_data_t{}, _beg, _end, agent, starting_addr, size_allocated);
+        callback_data_t{}, _beg, _end, agent, address, size_allocated);
 }
 
 memory_allocation_data::buffered_data_t
@@ -291,7 +380,7 @@ memory_allocation_data::get_buffered_record(const context_t* _ctx,
                                           _beg,
                                           _end,
                                           agent,
-                                          starting_addr,
+                                          address,
                                           size_allocated);
 }
 
@@ -336,16 +425,32 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
     return existing.count(val) == 0 ? null_rocp_agent_id : existing.at(val);
 }
 
-uint64_t
+void*
 handle_starting_addr(void** starting_addr_pointer)
 {
-    return reinterpret_cast<uint64_t>(*starting_addr_pointer);
+    return *starting_addr_pointer;
 }
 
-uint64_t
+// The handle field of hsa_amd_vmem_alloc_handle_t is the starting address
+// cast as uint64_t, so returning the handle field after casting to void* suffices
+void*
 handle_starting_addr(hsa_amd_vmem_alloc_handle_t* vmem_alloc_handle)
 {
-    return vmem_alloc_handle->handle;
+    return reinterpret_cast<void*>(vmem_alloc_handle->handle);
+}
+
+// Handling starting address for free memory operations
+void*
+handle_starting_addr(void* starting_addr_pointer)
+{
+    return starting_addr_pointer;
+}
+
+// Handles starting address for releasing handle
+void*
+handle_starting_addr(hsa_amd_vmem_alloc_handle_t vmem_alloc_handle)
+{
+    return reinterpret_cast<void*>(vmem_alloc_handle.handle);
 }
 
 // Wrapper implementation that stores memory allocation information
@@ -353,11 +458,12 @@ template <size_t TableIdx, size_t OpIdx, typename... Args>
 hsa_status_t
 memory_allocation_impl(Args... args)
 {
-    constexpr auto N                    = sizeof...(Args);
-    constexpr auto starting_address_idx = arg_indices<OpIdx>::starting_address_idx;
-    constexpr auto size_idx             = arg_indices<OpIdx>::size_idx;
-    constexpr auto region_idx           = arg_indices<OpIdx>::region_idx;
-    constexpr auto operation            = memory_allocation_op<OpIdx>::operation_idx;
+    constexpr auto N                = sizeof...(Args);
+    constexpr auto address_idx      = arg_indices<OpIdx>::address_idx;
+    constexpr auto size_idx         = arg_indices<OpIdx>::size_idx;
+    constexpr auto region_idx       = arg_indices<OpIdx>::region_idx;
+    constexpr auto operation        = memory_allocation_op<OpIdx>::operation_idx;
+    constexpr auto rocprofiler_enum = memory_allocation_info<operation>::operation_idx;
 
     auto&&                 _tied_args = std::tie(args...);
     memory_allocation_data _data{};
@@ -380,7 +486,7 @@ memory_allocation_impl(Args... args)
     }
 
     auto& tracing_data          = _data.tracing_data;
-    auto  starting_addr_pointer = std::get<starting_address_idx>(_tied_args);
+    auto  starting_addr_pointer = std::get<address_idx>(_tied_args);
     auto  region_or_pool        = std::get<region_idx>(_tied_args);
 
     _data.tid   = common::get_tid();
@@ -389,7 +495,7 @@ memory_allocation_impl(Args... args)
         memory_allocation_info<operation>{}(),
         callback_populate_map<operation, typename memory_allocation_info<operation>::searchtype>);
     _data.size_allocated = std::get<size_idx>(_tied_args);
-    _data.func           = operation;
+    _data.func           = rocprofiler_enum;
     _data.correlation_id = context::get_latest_correlation_id();
 
     if(!_data.correlation_id)
@@ -405,7 +511,7 @@ memory_allocation_impl(Args... args)
         tracing_data.external_correlation_ids,
         thr_id,
         ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
-        operation,
+        rocprofiler_enum,
         _data.correlation_id->internal);
 
     if(!tracing_data.callback_contexts.empty())
@@ -417,7 +523,7 @@ memory_allocation_impl(Args... args)
                                                _data.correlation_id->internal,
                                                tracing_data.external_correlation_ids,
                                                ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
-                                               operation,
+                                               rocprofiler_enum,
                                                _tracer_data);
         // enter callback may update the external correlation id field
         tracing::update_external_correlation_ids(
@@ -433,7 +539,7 @@ memory_allocation_impl(Args... args)
     // checks before retrieving starting address?
     if(starting_addr_pointer != nullptr)
     {
-        _data.starting_addr = handle_starting_addr(starting_addr_pointer);
+        _data.address.ptr = handle_starting_addr(starting_addr_pointer);
     }
 
     if(!tracing_data.empty())
@@ -445,7 +551,7 @@ memory_allocation_impl(Args... args)
             tracing::execute_phase_exit_callbacks(_data.tracing_data.callback_contexts,
                                                   _data.tracing_data.external_correlation_ids,
                                                   ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
-                                                  operation,
+                                                  rocprofiler_enum,
                                                   _tracer_data);
         }
 
@@ -458,7 +564,7 @@ memory_allocation_impl(Args... args)
                                                    _data.correlation_id->internal,
                                                    _data.tracing_data.external_correlation_ids,
                                                    ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
-                                                   operation,
+                                                   rocprofiler_enum,
                                                    record);
         }
     }
@@ -468,11 +574,113 @@ memory_allocation_impl(Args... args)
     return _ret;
 }
 
-template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>
-auto get_memory_allocation_impl(RetT (*)(Args...))
+// Wrapper implementation that stores memory free operation information
+template <size_t TableIdx, size_t OpIdx, typename... Args>
+hsa_status_t
+memory_free_impl(Args... args)
 {
-    return &memory_allocation_impl<TableIdx, OpIdx, Args...>;
+    constexpr auto N                = sizeof...(Args);
+    constexpr auto address_idx      = arg_indices<OpIdx>::address_idx;
+    constexpr auto operation        = memory_allocation_op<OpIdx>::operation_idx;
+    constexpr auto rocprofiler_enum = memory_allocation_info<operation>::operation_idx;
+
+    auto&&                 _tied_args = std::tie(args...);
+    memory_allocation_data _data{};
+
+    {
+        auto tracing_data = tracing::tracing_data{};
+
+        tracing::populate_contexts(ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
+                                   ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                                   OpIdx,
+                                   tracing_data);
+        // if no contexts are tracing memory copies for this direction, execute as usual
+        if(tracing_data.empty())
+        {
+            return invoke(get_next_dispatch<TableIdx, OpIdx>(),
+                          std::move(_tied_args),
+                          std::make_index_sequence<N>{});
+        }
+        _data.tracing_data = std::move(tracing_data);
+    }
+
+    auto& tracing_data = _data.tracing_data;
+
+    _data.tid            = common::get_tid();
+    _data.func           = rocprofiler_enum;
+    _data.correlation_id = context::get_latest_correlation_id();
+    _data.address.ptr    = handle_starting_addr(std::get<address_idx>(_tied_args));
+
+    if(!_data.correlation_id)
+    {
+        constexpr auto ref_count = 1;
+        _data.correlation_id     = context::correlation_tracing_service::construct(ref_count);
+    }
+
+    // increase the reference count to denote that this correlation id is being used in a kernel
+    _data.correlation_id->add_ref_count();
+    auto thr_id = _data.correlation_id->thread_idx;
+    tracing::populate_external_correlation_ids(
+        tracing_data.external_correlation_ids,
+        thr_id,
+        ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION,
+        rocprofiler_enum,
+        _data.correlation_id->internal);
+
+    if(!tracing_data.callback_contexts.empty())
+    {
+        auto _tracer_data = _data.get_callback_data();
+
+        tracing::execute_phase_enter_callbacks(tracing_data.callback_contexts,
+                                               thr_id,
+                                               _data.correlation_id->internal,
+                                               tracing_data.external_correlation_ids,
+                                               ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
+                                               rocprofiler_enum,
+                                               _tracer_data);
+        // enter callback may update the external correlation id field
+        tracing::update_external_correlation_ids(
+            tracing_data.external_correlation_ids,
+            thr_id,
+            ROCPROFILER_EXTERNAL_CORRELATION_REQUEST_MEMORY_ALLOCATION);
+    }
+    auto start_ts = common::timestamp_ns();
+    auto _ret     = invoke(
+        get_next_dispatch<TableIdx, OpIdx>(), std::move(_tied_args), std::make_index_sequence<N>{});
+    auto end_ts = common::timestamp_ns();
+
+    if(!tracing_data.empty())
+    {
+        if(!_data.tracing_data.callback_contexts.empty())
+        {
+            auto _tracer_data = _data.get_callback_data(start_ts, end_ts);
+
+            tracing::execute_phase_exit_callbacks(_data.tracing_data.callback_contexts,
+                                                  _data.tracing_data.external_correlation_ids,
+                                                  ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,
+                                                  rocprofiler_enum,
+                                                  _tracer_data);
+        }
+
+        if(!_data.tracing_data.buffered_contexts.empty())
+        {
+            auto record = _data.get_buffered_record(nullptr, start_ts, end_ts);
+
+            tracing::execute_buffer_record_emplace(_data.tracing_data.buffered_contexts,
+                                                   _data.tid,
+                                                   _data.correlation_id->internal,
+                                                   _data.tracing_data.external_correlation_ids,
+                                                   ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,
+                                                   rocprofiler_enum,
+                                                   record);
+        }
+    }
+
+    // decrement the reference count after usage in the callback/buffers
+    _data.correlation_id->sub_ref_count();
+    return _ret;
 }
+
 }  // namespace
 // check out the assembly here... this compiles to a switch statement
 const char*
@@ -573,7 +781,9 @@ memory_allocation_wrap(Tp* _orig, std::integral_constant<size_t, OpIdx>)
 
     auto& _dispatch = get_next_dispatch<TableIdx, OpIdx>();
     CHECK_NOTNULL(_dispatch);
-    _func = get_memory_allocation_impl<TableIdx, OpIdx>(_func);
+    constexpr auto LocalIdx = memory_allocation_op<OpIdx>::operation_idx;
+    _func = memory_allocation_info<LocalIdx>::template get_memory_allocation_impl<TableIdx, OpIdx>(
+        _func);
 }
 
 template <size_t TableIdx, typename Tp, size_t OpIdx, size_t... OpIdxTail>

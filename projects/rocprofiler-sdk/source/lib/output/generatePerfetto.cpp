@@ -241,33 +241,6 @@ write_perfetto(
         }
     }
 
-    for(const auto& itr : agent_thread_ids_alloc)
-    {
-        const auto* _agent = _get_agent(itr.first);
-
-        for(auto titr : itr.second)
-        {
-            auto _namess = std::stringstream{};
-            _namess << "MEMORY ALLOCATION on AGENT [" << _agent->logical_node_id << "] THREAD ["
-                    << thread_indexes.at(titr) << "] ";
-
-            if(_agent->type == ROCPROFILER_AGENT_TYPE_CPU)
-                _namess << "(CPU)";
-            else if(_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
-                _namess << "(GPU)";
-            else
-                _namess << "(UNK)";
-
-            auto _track = ::perfetto::Track{get_hash_id(_namess.str())};
-            auto _desc  = _track.Serialize();
-            _desc.set_name(_namess.str());
-
-            perfetto::TrackEvent::SetTrackDescriptor(_track, _desc);
-
-            agent_thread_tracks_alloc[itr.first].emplace(titr, _track);
-        }
-    }
-
     for(const auto& aitr : agent_queue_ids)
     {
         uint32_t nqueue = 0;
@@ -463,47 +436,6 @@ write_perfetto(
                 tracing_session->FlushBlocking();
             }
 
-        for(auto ditr : memory_allocation_gen)
-            for(auto itr : memory_allocation_gen.get(ditr))
-            {
-                auto  name  = buffer_names.at(itr.kind, itr.operation);
-                auto& track = agent_thread_tracks_alloc.at(itr.agent_id).at(itr.thread_id);
-                std::stringstream hex_stream;
-                hex_stream << "0x" << std::hex << std::setw(16) << std::setfill('0')
-                           << itr.starting_address;
-                std::string hex_starting_address(hex_stream.str());
-
-                TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::memory_allocation>::name,
-                                  ::perfetto::StaticString(name.data()),
-                                  track,
-                                  itr.start_timestamp,
-                                  ::perfetto::Flow::ProcessScoped(itr.correlation_id.internal),
-                                  "begin_ns",
-                                  itr.start_timestamp,
-                                  "end_ns",
-                                  itr.end_timestamp,
-                                  "delta_ns",
-                                  (itr.end_timestamp - itr.start_timestamp),
-                                  "kind",
-                                  itr.kind,
-                                  "operation",
-                                  itr.operation,
-                                  "agent",
-                                  agents_map.at(itr.agent_id).logical_node_id,
-                                  "allocation_size",
-                                  itr.allocation_size,
-                                  "starting_address",
-                                  hex_starting_address,
-                                  "corr_id",
-                                  itr.correlation_id.internal,
-                                  "tid",
-                                  itr.thread_id);
-                TRACE_EVENT_END(sdk::perfetto_category<sdk::category::memory_allocation>::name,
-                                track,
-                                itr.end_timestamp);
-                tracing_session->FlushBlocking();
-            }
-
         for(auto ditr : kernel_dispatch_gen)
             for(auto itr : kernel_dispatch_gen.get(ditr))
             {
@@ -629,6 +561,99 @@ write_perfetto(
             {
                 TRACE_COUNTER(sdk::perfetto_category<sdk::category::memory_copy>::name,
                               mem_cpy_tracks.at(mitr.first),
+                              itr.first,
+                              itr.second / bytes_multiplier);
+                tracing_session->FlushBlocking();
+            }
+        }
+
+        // memory allocation counter track
+        auto mem_alloc_endpoints = std::map<rocprofiler_agent_id_t, std::map<uint64_t, uint64_t>>{};
+        auto mem_alloc_extremes  = std::pair<uint64_t, uint64_t>{};
+        auto address_to_size     = std::unordered_map<uint64_t, uint64_t>{};
+        for(auto ditr : memory_allocation_gen)
+            for(auto itr : memory_allocation_gen.get(ditr))
+            {
+                uint64_t _mean_timestamp =
+                    itr.start_timestamp + (0.5 * (itr.end_timestamp - itr.start_timestamp));
+
+                mem_alloc_endpoints[itr.agent_id].emplace(itr.start_timestamp - 1000, 0);
+                mem_alloc_endpoints[itr.agent_id].emplace(itr.start_timestamp, 0);
+                mem_alloc_endpoints[itr.agent_id].emplace(_mean_timestamp, 0);
+                mem_alloc_endpoints[itr.agent_id].emplace(itr.end_timestamp, 0);
+                mem_alloc_endpoints[itr.agent_id].emplace(itr.end_timestamp + 1000, 0);
+
+                mem_alloc_extremes =
+                    std::make_pair(std::min(mem_alloc_extremes.first, itr.start_timestamp),
+                                   std::max(mem_alloc_extremes.second, itr.end_timestamp));
+                if(itr.operation == ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE ||
+                   itr.operation == ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE)
+                {
+                    address_to_size.emplace(itr.address.value, itr.allocation_size);
+                }
+            }
+
+        for(auto ditr : memory_allocation_gen)
+            for(auto itr : memory_allocation_gen.get(ditr))
+            {
+                auto alloc_beg =
+                    mem_alloc_endpoints.at(itr.agent_id).lower_bound(itr.start_timestamp);
+                auto alloc_end =
+                    mem_alloc_endpoints.at(itr.agent_id).upper_bound(itr.end_timestamp);
+
+                LOG_IF(FATAL, alloc_beg == alloc_end)
+                    << "Missing range for timestamp [" << itr.start_timestamp << ", "
+                    << itr.end_timestamp << "]";
+
+                for(auto alloc_itr = alloc_beg; alloc_itr != alloc_end; ++alloc_itr)
+                {
+                    if(address_to_size.count(itr.address.value) > 0)
+                    {
+                        alloc_itr->second += address_to_size.at(itr.address.value);
+                    }
+                }
+            }
+
+        auto mem_alloc_tracks =
+            std::unordered_map<rocprofiler_agent_id_t, ::perfetto::CounterTrack>{};
+        auto           mem_alloc_cnt_names = std::vector<std::string>{};
+        constexpr auto null_rocp_agent_id =
+            rocprofiler_agent_id_t{.handle = std::numeric_limits<uint64_t>::max()};
+        mem_alloc_cnt_names.reserve(mem_alloc_endpoints.size());
+        for(auto& alloc_itr : mem_alloc_endpoints)
+        {
+            mem_alloc_endpoints[alloc_itr.first].emplace(mem_alloc_extremes.first - 5000, 0);
+            mem_alloc_endpoints[alloc_itr.first].emplace(mem_alloc_extremes.second + 5000, 0);
+
+            auto                       _track_name = std::stringstream{};
+            const rocprofiler_agent_t* _agent      = nullptr;
+            if(alloc_itr.first != null_rocp_agent_id)
+            {
+                _agent = _get_agent(alloc_itr.first);
+            }
+
+            if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_CPU)
+                _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (CPU)";
+            else if(_agent != nullptr && _agent->type == ROCPROFILER_AGENT_TYPE_GPU)
+                _track_name << "ALLOCATE BYTES on AGENT [" << _agent->logical_node_id << "] (GPU)";
+            else
+                _track_name << "FREE BYTES";
+
+            constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_SIZE_BYTES;
+            auto&          _name = mem_alloc_cnt_names.emplace_back(_track_name.str());
+            mem_alloc_tracks.emplace(alloc_itr.first,
+                                     ::perfetto::CounterTrack{_name.c_str()}
+                                         .set_unit(_unit)
+                                         .set_unit_multiplier(bytes_multiplier)
+                                         .set_is_incremental(false));
+        }
+
+        for(auto& alloc_itr : mem_alloc_endpoints)
+        {
+            for(auto itr : alloc_itr.second)
+            {
+                TRACE_COUNTER(sdk::perfetto_category<sdk::category::memory_allocation>::name,
+                              mem_alloc_tracks.at(alloc_itr.first),
                               itr.first,
                               itr.second / bytes_multiplier);
                 tracing_session->FlushBlocking();

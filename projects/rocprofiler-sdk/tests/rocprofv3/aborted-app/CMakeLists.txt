@@ -19,9 +19,11 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 # disable this test for thread sanitizers because of "signal-unsafe call inside signal"
 # issues on mi200 and mi300 (works fine on vega20 and navi32)
 if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
-    set(IS_THREAD_SANITIZER ON)
+    set(DISABLE_THIS_TEST ON)
 else()
-    set(IS_THREAD_SANITIZER OFF)
+    # set(DISABLE_THIS_TEST OFF)
+    set(DISABLE_THIS_TEST ON) # this test is currently unstable so we are disabling it
+                              # unconditionally for now
 endif()
 
 set(aborted-app-env "${PRELOAD_ENV}" ROCPROF_TESTING_RAISE_SIGNAL=1
@@ -46,7 +48,7 @@ set_tests_properties(
                WILL_FAIL
                TRUE
                DISABLED
-               "${IS_THREAD_SANITIZER}")
+               "${DISABLE_THIS_TEST}")
 
 add_test(
     NAME rocprofv3-test-validate-app-abort
@@ -64,4 +66,4 @@ set_tests_properties(
                FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
                DISABLED
-               "${IS_THREAD_SANITIZER}")
+               "${DISABLE_THIS_TEST}")

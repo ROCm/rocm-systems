@@ -30,6 +30,8 @@
 #include <rocprofiler-sdk/internal_threading.h>
 #include <rocprofiler-sdk/rocprofiler.h>
 #include <rocprofiler-sdk/cxx/name_info.hpp>
+#include <rocprofiler-sdk/cxx/perfetto.hpp>
+#include <rocprofiler-sdk/cxx/utility.hpp>
 
 #include <cereal/archives/binary.hpp>
 #include <cereal/archives/json.hpp>
@@ -64,6 +66,7 @@
 
 #define ROCP_SDK_SAVE_DATA_FIELD(FIELD)       ar(make_nvp(#FIELD, data.FIELD))
 #define ROCP_SDK_SAVE_DATA_VALUE(NAME, VALUE) ar(make_nvp(NAME, data.VALUE))
+#define ROCP_SDK_SAVE_VALUE(NAME, VALUE)      ar(make_nvp(NAME, VALUE))
 #define ROCP_SDK_SAVE_DATA_CSTR(FIELD)                                                             \
     ar(make_nvp(#FIELD, std::string{data.FIELD ? data.FIELD : ""}))
 #define ROCP_SDK_SAVE_DATA_BITFIELD(NAME, VALUE)                                                   \
@@ -338,7 +341,7 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_memory_allocation_data_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(agent_id);
-    ROCP_SDK_SAVE_DATA_FIELD(starting_address);
+    ROCP_SDK_SAVE_VALUE("address", rocprofiler::sdk::utility::as_hex(data.address.value, 16));
     ROCP_SDK_SAVE_DATA_FIELD(allocation_size);
 }
 
@@ -543,7 +546,7 @@ save(ArchiveT& ar, rocprofiler_buffer_tracing_memory_allocation_record_t data)
     ROCP_SDK_SAVE_DATA_FIELD(start_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(end_timestamp);
     ROCP_SDK_SAVE_DATA_FIELD(agent_id);
-    ROCP_SDK_SAVE_DATA_FIELD(starting_address);
+    ROCP_SDK_SAVE_VALUE("address", rocprofiler::sdk::utility::as_hex(data.address.value, 16));
     ROCP_SDK_SAVE_DATA_FIELD(allocation_size);
 }
 

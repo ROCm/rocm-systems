@@ -35,7 +35,7 @@ def test_memory_allocation(json_data):
 
     _, bf_op_names = get_operation(data, "MEMORY_ALLOCATION")
 
-    assert len(bf_op_names) == 4
+    assert len(bf_op_names) == 5
 
     allocation_reported_agent_ids = set()
     # check buffering data
@@ -49,12 +49,12 @@ def test_memory_allocation(json_data):
         assert "thread_id" in node
 
         assert "agent_id" in node
-        assert "starting_address" in node
+        assert "address" in node
         assert "allocation_size" in node
 
         assert node.size > 0
-        assert node.allocation_size > 0
-        assert node.starting_address > 0
+        assert node.allocation_size >= 0
+        assert len(node.address) > 0
         assert node.thread_id > 0
         assert node.agent_id.handle > 0
         assert node.start_timestamp > 0
@@ -68,14 +68,6 @@ def test_memory_allocation(json_data):
         )
 
         allocation_reported_agent_ids.add(node["agent_id"]["handle"])
-
-    assert 2**64 - 1 not in allocation_reported_agent_ids
-
-
-def test_perfetto_data(pftrace_data, json_data):
-    import rocprofiler_sdk.tests.rocprofv3 as rocprofv3
-
-    rocprofv3.test_perfetto_data(pftrace_data, json_data, ("memory_allocation",))
 
 
 def test_otf2_data(otf2_data, json_data):

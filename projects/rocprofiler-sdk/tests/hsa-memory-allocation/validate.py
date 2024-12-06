@@ -175,25 +175,26 @@ def test_memory_alloc_sizes(input_data):
     # Op values:
     #   0 == ??? (unknown)
     #   1 == hsa_memory_allocate
-    #   2 == hsa_amd_ext_memory_allocate
-    #   3 == hsa_amd_vmem_handle_create
+    #   2 == hsa_amd_vmem_handle_create
+    #   3 == hsa_memory_free
+    #   4 == hsa_amd_vmem_handle_release
     memory_alloc_cnt = dict(
         [
             (idx, {"agent": set(), "starting_addr": set(), "size": set(), "count": 0})
-            for idx in range(1, 4)
+            for idx in range(1, 5)
         ]
     )
     for itr in sdk_data["buffer_records"]["memory_allocations"]:
         op_id = itr["operation"]
-        assert op_id > 0 and op_id <= 3, f"{itr}"
+        assert op_id > 0 and op_id <= 5, f"{itr}"
         memory_alloc_cnt[op_id]["count"] += 1
-        memory_alloc_cnt[op_id]["starting_addr"].add(itr.starting_address)
+        memory_alloc_cnt[op_id]["starting_addr"].add(itr.address)
         memory_alloc_cnt[op_id]["size"].add(itr.allocation_size)
         memory_alloc_cnt[op_id]["agent"].add(itr.agent_id.handle)
 
     for itr in sdk_data["callback_records"]["memory_copies"]:
         op_id = itr.operation
-        assert op_id > 0 and op_id <= 3, f"{itr}"
+        assert op_id > 0 and op_id <= 5, f"{itr}"
         memory_alloc_cnt[op_id]["count"] += 1
 
         phase = itr.phase
@@ -210,7 +211,7 @@ def test_memory_alloc_sizes(input_data):
             assert pitr.end_timestamp > 0, f"{itr}"
             assert pitr.end_timestamp >= pitr.start_timestamp, f"{itr}"
 
-            memory_alloc_cnt[op_id]["starting_addr"].add(pitr.starting_address)
+            memory_alloc_cnt[op_id]["starting_addr"].add(pitr.address)
             memory_alloc_cnt[op_id]["size"].add(pitr.allocation_size)
             memory_alloc_cnt[op_id]["agent"].add(pitr.agent_id.handle)
         else:
@@ -218,24 +219,22 @@ def test_memory_alloc_sizes(input_data):
 
     # In the memory allocation test which generates this file
     # 6 hsa_memory_allocation calls with 1024 bytes were called
-    # and 9 hsa_amd_memory_pool_allocations with 512 bytes
+    # and 9 hsa_amd_memory_pool_allocations with 2048 bytes
     # were called
-    assert memory_alloc_cnt[1]["count"] == 6
-    assert memory_alloc_cnt[2]["count"] == 9
+    assert memory_alloc_cnt[1]["count"] == 15
+    assert memory_alloc_cnt[3]["count"] == 15
     # assert memory_alloc_cnt[3]["count"] == 3
-    assert len(memory_alloc_cnt[1]["starting_addr"]) == 6
-    assert len(memory_alloc_cnt[2]["starting_addr"]) == 9
+    assert len(memory_alloc_cnt[1]["starting_addr"]) == len(
+        memory_alloc_cnt[3]["starting_addr"]
+    )
+
     # assert len(memory_alloc_cnt[3]["starting_addr"]) == 3
-    assert len(memory_alloc_cnt[1]["size"]) == 1
-    assert len(memory_alloc_cnt[2]["size"]) == 1
+    assert len(memory_alloc_cnt[1]["size"]) == 2
     # assert len(memory_alloc_cnt[3]["size"]) == 1
     assert 1024 in memory_alloc_cnt[1]["size"]
-    assert 512 in memory_alloc_cnt[2]["size"]
-    assert len(memory_alloc_cnt[1]["agent"]) == 1
-    assert len(memory_alloc_cnt[2]["agent"]) == 1
+    assert 2048 in memory_alloc_cnt[1]["size"]
+    assert len(memory_alloc_cnt[1]["agent"]) == 2
     # assert len(memory_alloc_cnt[3]["agent"]) == 1
-    assert memory_alloc_cnt[1]["agent"] != memory_alloc_cnt[2]["agent"]
-    # assert memory_alloc_cnt[2]["agent"] == memory_alloc_cnt[3]["agent"]
 
 
 def test_retired_correlation_ids(input_data):

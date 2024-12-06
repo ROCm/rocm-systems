@@ -1566,13 +1566,13 @@
                                                 "handle"
                                             ]
                                         },
-                                        "starting_address": {
-                                            "type": "integer",
-                                            "description": "Starting address of allocation"
+                                        "address": {
+                                            "type": "string",
+                                            "description": "Starting address for allocation or freeing memory."
                                         },
                                         "allocation_size": {
                                             "type": "integer",
-                                            "description": "allocation_size"
+                                            "description": "Size of memory allocation. Free operations not tracked currently."
                                         }
                                     },
                                     "required": [
@@ -1584,7 +1584,7 @@
                                         "end_timestamp",
                                         "thread_id",
 					"agent_id",
-                                        "starting_address",
+                                        "address",
                                         "allocation_size"
                                     ]
                                 }

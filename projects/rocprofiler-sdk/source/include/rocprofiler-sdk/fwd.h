@@ -238,10 +238,11 @@ typedef enum  // NOLINT(performance-enum-size)
  */
 typedef enum  // NOLINT(performance-enum-size)
 {
-    ROCPROFILER_MEMORY_ALLOCATION_NONE = 0,              ///< Unknown memory allocation function
-    ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE,              ///< Allocate memory function
-    ROCPROFILER_MEMORY_ALLOCATION_MEMORY_POOL_ALLOCATE,  ///< Allocate memory pool
-    ROCPROFILER_MEMORY_ALLOCATION_VMEM_HANDLE_CREATE,    ///< Allocate vmem memory handle
+    ROCPROFILER_MEMORY_ALLOCATION_NONE = 0,       ///< Unknown memory allocation function
+    ROCPROFILER_MEMORY_ALLOCATION_ALLOCATE,       ///< Allocate memory function
+    ROCPROFILER_MEMORY_ALLOCATION_VMEM_ALLOCATE,  ///< Allocate vmem memory handle
+    ROCPROFILER_MEMORY_ALLOCATION_FREE,           ///< Free memory function
+    ROCPROFILER_MEMORY_ALLOCATION_VMEM_FREE,      ///< Release vmem memory handle
     ROCPROFILER_MEMORY_ALLOCATION_LAST,
 } rocprofiler_memory_allocation_operation_t;
 
@@ -459,11 +460,6 @@ typedef enum
 typedef uint64_t rocprofiler_timestamp_t;
 
 /**
- * @brief ROCProfiler Address.
- */
-typedef uint64_t rocprofiler_address_t;
-
-/**
  * @brief Thread ID. Value will be equivalent to `syscall(__NR_gettid)`
  */
 typedef uint64_t rocprofiler_thread_id_t;
@@ -518,6 +514,16 @@ typedef union rocprofiler_user_data_t
     uint64_t value;  ///< usage example: set to process id, thread id, etc.
     void*    ptr;    ///< usage example: set to address of data allocation
 } rocprofiler_user_data_t;
+
+/**
+ * @brief Stores memory address for profiling
+ *
+ */
+typedef union rocprofiler_address_t
+{
+    uint64_t value;  ///< usage example: store address in uint64_t format
+    void*    ptr;    ///< usage example: generic form of address
+} rocprofiler_address_t;
 
 //--------------------------------------------------------------------------------------//
 //

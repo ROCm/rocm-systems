@@ -1318,5 +1318,5 @@ Properties
                - **`thread_id`** *(integer, required)*: Thread ID.
                - **`agent_id`** *(object, required)*: Agent ID.
                   - **`handle`** *(integer, required)*: Handle of the agent.
-               - **`starting_address`** *(string, required)*: Starting address of allocation.
+               - **`address`** *(string, required)*: Starting address of allocation.
                - **`allocation_size`** *(integer, required)*: Size of allocation.
