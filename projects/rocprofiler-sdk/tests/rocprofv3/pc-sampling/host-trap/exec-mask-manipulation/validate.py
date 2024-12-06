@@ -162,11 +162,11 @@ def exec_mask_manipulation_validate_csv(df, all_sampled=False):
         all_source_lines_samples=all_sampled,
     )
 
-    # assert that v_fmac_f32 instructions are properly decoded
-    # the v_fmac_f32 is executed by odd SIMD threads
+    # assert that v_rcp_f32 instructions are properly decoded
+    # the v_rcp_f32 is executed by odd SIMD threads
     validate_instruction_decoding(
         kernel_65_df,
-        "v_fmac_f32",
+        "v_rcp_f32",
         exec_mask_uint64=np.uint64(int("AAAAAAAAAAAAAAAA", 16)),
         source_code_lines_range=(391, 490),
         all_source_lines_samples=all_sampled,
@@ -210,15 +210,15 @@ def validate_json_exec_mask_manipulation(data_json, all_sampled=False):
     # execution mask where even SIMD lanes are active
     # correspond to the v_rcp_f64 instructions of the last kernel
     odd_simds_active_exec_mask = np.uint64(int("AAAAAAAAAAAAAAAA", 16))
-    # start and end source code lines of the v_fmac_f32 0 instructions of the last kernel
-    v_fmac_f32_start_line_num, v_fmac_f32_end_line_num = 391, 490
+    # start and end source code lines of the v_rcp_f32 0 instructions of the last kernel
+    v_rcp_f32_start_line_num, v_rcp_f32_end_line_num = 391, 490
 
     # sampled wave_ids of the last kernel
     kernel65_sampled_wave_in_grp = set()
     # sampled source lines of the last kernel matching v_rcp_f64 instructions
     kernel65_v_rcp_64_sampled_source_line_set = set()
     # sampled source lines of the last kernel matching v_rcp_f64 instructions
-    kernel65_v_fmac_f32_sampled_source_line_set = set()
+    kernel65_v_rcp_f32_sampled_source_line_set = set()
     # sampled correlation IDs
     sampled_cids_set = set()
     # pairs of sampled SIMD ids and waveslot IDs
@@ -317,14 +317,14 @@ def validate_json_exec_mask_manipulation(data_json, all_sampled=False):
                         and line_num <= v_rcp_f64_end_line_num
                     )
                     kernel65_v_rcp_64_sampled_source_line_set.add(line_num)
-                elif inst.startswith("v_fmac_f32"):
+                elif inst.startswith("v_rcp_f32"):
                     # odd SIMD lanes active
                     assert np.uint64(exec_mask) == odd_simds_active_exec_mask
                     assert (
-                        line_num >= v_fmac_f32_start_line_num
-                        and line_num <= v_fmac_f32_end_line_num
+                        line_num >= v_rcp_f32_start_line_num
+                        and line_num <= v_rcp_f32_end_line_num
                     )
-                    kernel65_v_fmac_f32_sampled_source_line_set.add(line_num)
+                    kernel65_v_rcp_f32_sampled_source_line_set.add(line_num)
 
     if all_sampled:
         # All cids that belongs to the range [1, 65] should be samples
@@ -337,9 +337,9 @@ def validate_json_exec_mask_manipulation(data_json, all_sampled=False):
         assert len(kernel65_v_rcp_64_sampled_source_line_set) == (
             v_rcp_f64_end_line_num - v_rcp_f64_start_line_num + 1
         )
-        # all source lines matches v_fmac_f32 instructions of the last kernel should be sampled
-        assert len(kernel65_v_fmac_f32_sampled_source_line_set) == (
-            v_fmac_f32_end_line_num - v_fmac_f32_start_line_num + 1
+        # all source lines matches v_rcp_f32 instructions of the last kernel should be sampled
+        assert len(kernel65_v_rcp_f32_sampled_source_line_set) == (
+            v_rcp_f32_end_line_num - v_rcp_f32_start_line_num + 1
         )
 
         # all chiplets must be sampled
