@@ -156,6 +156,10 @@
                     "pc_sampling_interval": {
                          "type": "integer",
                          "description": "pc sampling interval"
+                    },
+                    "pc-sampling-beta-enabled": {
+                         "type": "boolean",
+                         "description": "enable pc sampling support; beta version"
                     }
                  }
               }

@@ -161,6 +161,10 @@ Here is the sample of commonly used ``rocprofv3`` command-line options. Some opt
   * - ``--perfetto-shmem-size-hint KB``
     - Perfetto shared memory size hint in KB. default: 64 KB
     - Extension
+    
+  * - ``--pc-sampling-beta-enabled``
+    - pc sampling support is in beta version
+    - This flag set the ROCPROFILER_PC_SAMPLING_BETA_ENABLED environment variable
 
   * - ``--pc-sampling-method``
     - Type of PC Sampling, currently only host trap method is supported
@@ -759,6 +763,8 @@ Properties
       -  **``pc_sampling_unit``** *(string)*: pc sampling unit.
       -  **``pc_sampling_method``** *(string)*: pc sampling method.
       -  **``pc_sampling_interval``** *(integer)*: pc sampling interval.
+      -  **``pc-sampling-beta-enabled``** *(boolean)*: enable pc
+         sampling support; beta version.
 
 .. code-block:: shell
 
