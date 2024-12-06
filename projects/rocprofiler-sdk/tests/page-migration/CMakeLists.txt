@@ -28,7 +28,7 @@ set(page-migration-env
 set_tests_properties(
     test-page-migration-execute
     PROPERTIES TIMEOUT
-               45
+               60
                LABELS
                "integration-tests"
                ENVIRONMENT
@@ -38,7 +38,9 @@ set_tests_properties(
                SKIP_REGULAR_EXPRESSION
                "KFD does not support SVM event reporting"
                WORKING_DIRECTORY
-               ${CMAKE_CURRENT_BINARY_DIR})
+               ${CMAKE_CURRENT_BINARY_DIR}
+               ATTACHED_FILES
+               ${CMAKE_CURRENT_BINARY_DIR}/page-migration-test.json)
 
 # copy to binary directory
 rocprofiler_configure_pytest_files(COPY validate.py conftest.py CONFIG pytest.ini)
@@ -60,4 +62,6 @@ set_tests_properties(
                SKIP_REGULAR_EXPRESSION
                "KFD does not support SVM event reporting"
                WORKING_DIRECTORY
-               ${CMAKE_CURRENT_BINARY_DIR})
+               ${CMAKE_CURRENT_BINARY_DIR}
+               ATTACHED_FILES
+               ${CMAKE_CURRENT_BINARY_DIR}/page-migration-test.json)

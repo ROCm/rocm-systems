@@ -539,11 +539,14 @@ handle_reporting(std::string_view event_data)
 
 }  // namespace
 
+namespace
+{
+void poll_events(small_vector<pollfd>);
+}
+
 // KFD utils
 namespace kfd
 {
-void poll_events(small_vector<pollfd>);
-
 using fd_flags_t = decltype(EFD_NONBLOCK);
 using fd_t       = decltype(pollfd::fd);
 constexpr auto KFD_DEVICE_PATH{"/dev/kfd"};
@@ -619,17 +622,18 @@ struct poll_kfd_t
         const rocprofiler_agent_t* agent   = nullptr;
     };
 
-    kfd_device_fd        kfd_fd        = {};
-    small_vector<pollfd> file_handles  = {};
-    pollfd               thread_notify = {};
-    std::thread          bg_thread     = {};
-    bool                 active        = {false};
+    kfd_device_fd kfd_fd        = {};
+    pollfd        thread_notify = {};
+    std::thread   bg_thread     = {};
+    bool          active        = {false};
 
     poll_kfd_t() = default;
 
     poll_kfd_t(const small_vector<size_t>& rprof_ev)
     : kfd_fd{kfd_device_fd{}}
     {
+        small_vector<pollfd> file_handles = {};
+
         const auto kfd_flags =
             kfd_bitmask(rprof_ev, std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
 
@@ -703,7 +707,24 @@ struct poll_kfd_t
     poll_kfd_t(poll_kfd_t&&) = default;
     poll_kfd_t& operator=(poll_kfd_t&&) = default;
 
-    ~poll_kfd_t();
+    ~poll_kfd_t()
+    {
+        ROCP_TRACE << fmt::format("Terminating poll_kfd\n");
+        if(!active) return;
+
+        // wake thread up
+        auto bytes_written{-1};
+        do
+        {
+            bytes_written = write(thread_notify.fd, "E", 1);
+        } while(bytes_written == -1 && (errno == EINTR || errno == EAGAIN));
+
+        bg_thread.join();
+
+        close(thread_notify.fd);
+
+        ROCP_TRACE << fmt::format("Background thread signalled\n");
+    }
 
     node_fd_t get_node_fd(int gpu_node_id) const
     {
@@ -716,48 +737,36 @@ struct poll_kfd_t
         return args.anon_fd;
     }
 };
+}  // namespace
+}  // namespace kfd
 
 // for all contexts
-struct page_migration_config
+struct config
 {
-    bool should_exit() const { return m_should_exit.load(); }
-    void set_exit(bool val) { m_should_exit.store(val); }
-
-    uint64_t         enabled_events = 0;
-    kfd::poll_kfd_t* kfd_handle     = nullptr;
-
 private:
-    std::atomic<bool> m_should_exit = false;
+    kfd::poll_kfd_t kfd_handle{};
+
+    static inline config* _config{nullptr};
+
+    config(const small_vector<size_t>& _event_ids)
+    : kfd_handle{_event_ids}
+    {}
+
+public:
+    static void init(const small_vector<size_t>& event_ids) { _config = new config{event_ids}; }
+
+    static void reset()
+    {
+        config* ptr = nullptr;
+        std::swap(ptr, _config);
+        delete ptr;
+    }
+
+    static void reset_on_fork() { _config = nullptr; }
 };
 
-page_migration_config&
-get_config()
+namespace
 {
-    static auto& state = *common::static_object<page_migration_config>::construct();
-    return state;
-}
-
-kfd::poll_kfd_t::~poll_kfd_t()
-{
-    ROCP_TRACE << fmt::format("Terminating poll_kfd\n");
-    if(!active) return;
-
-    // wake thread up
-    kfd::get_config().set_exit(true);
-    auto bytes_written{-1};
-    do
-    {
-        bytes_written = write(thread_notify.fd, "E", 1);
-    } while(bytes_written == -1 && (errno == EINTR || errno == EAGAIN));
-
-    if(bg_thread.joinable()) bg_thread.join();
-    ROCP_TRACE << fmt::format("Background thread terminated\n");
-
-    for(const auto& f : file_handles)
-        close(f.fd);
-}
-}  // namespace
-
 void
 poll_events(small_vector<pollfd> file_handles)
 {
@@ -778,7 +787,7 @@ poll_events(small_vector<pollfd> file_handles)
             "Handle = {}, events = {}, revents = {}\n", fd.fd, fd.events, fd.revents);
     }
 
-    while(!kfd::get_config().should_exit())
+    while(true)
     {
         auto poll_ret = poll(file_handles.data(), file_handles.size(), -1);
 
@@ -787,6 +796,10 @@ poll_events(small_vector<pollfd> file_handles)
 
         if((exitfd.revents & POLLIN) != 0)
         {
+            for(const auto& f : file_handles)
+            {
+                close(f.fd);
+            }
             ROCP_INFO << "Terminating background thread\n";
             return;
         }
@@ -809,7 +822,6 @@ poll_events(small_vector<pollfd> file_handles)
         }
     }
 }
-}  // namespace kfd
 
 template <size_t Idx, size_t... IdxTail>
 const char*
@@ -851,19 +863,17 @@ to_bitmask(small_vector<size_t>& _id_list, std::index_sequence<Idx...>)
     (_emplace(_id_list, page_migration_info<Idx>::operation), ...);
 }
 
-namespace
+template <size_t... Inxs>
+rocprofiler_status_t init(std::index_sequence<Inxs...>)
 {
-rocprofiler_status_t
-init(const small_vector<size_t>& event_ids)
-{
+    static const small_vector<size_t> event_ids{Inxs...};
     // Check if version is more than 1.11
     auto ver = kfd::get_version();
     if(ver.major_version * 1000 + ver.minor_version > 1011)
     {
         if(!context::get_registered_contexts(context_filter).empty())
         {
-            if(!kfd::get_config().kfd_handle)
-                kfd::get_config().kfd_handle = new kfd::poll_kfd_t{event_ids};
+            config::init(event_ids);
         }
         return ROCPROFILER_STATUS_SUCCESS;
     }
@@ -879,31 +889,28 @@ init(const small_vector<size_t>& event_ids)
 }
 }  // namespace
 
+}  // namespace page_migration
+}  // namespace rocprofiler
+
+namespace rocprofiler::page_migration
+{
 rocprofiler_status_t
 init()
 {
-    // Testing page migration
-    return init({
-        ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_START,
-        ROCPROFILER_PAGE_MIGRATION_PAGE_MIGRATE_END,
-        ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_START,
-        ROCPROFILER_PAGE_MIGRATION_PAGE_FAULT_END,
-        ROCPROFILER_PAGE_MIGRATION_QUEUE_EVICTION,
-        ROCPROFILER_PAGE_MIGRATION_QUEUE_RESTORE,
-        ROCPROFILER_PAGE_MIGRATION_UNMAP_FROM_GPU,
-        ROCPROFILER_PAGE_MIGRATION_DROPPED_EVENT,
+    pthread_atfork(nullptr, nullptr, []() {
+        // null out child's copy on fork and reinitialize
+        // otherwise all children wait on the same thread to join
+        config::reset_on_fork();
+        init(std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
     });
+
+    return init(std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
 }
 
 void
 finalize()
 {
-    if(kfd::get_config().kfd_handle)
-    {
-        kfd::poll_kfd_t* _handle = nullptr;
-        std::swap(kfd::get_config().kfd_handle, _handle);
-        delete _handle;
-    }
+    config::reset();
 }
 
 const char*
@@ -920,5 +927,4 @@ get_ids()
     get_ids(_data, std::make_index_sequence<ROCPROFILER_PAGE_MIGRATION_LAST>{});
     return _data;
 }
-}  // namespace page_migration
-}  // namespace rocprofiler
+}  // namespace rocprofiler::page_migration

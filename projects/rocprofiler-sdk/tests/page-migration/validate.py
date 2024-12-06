@@ -243,16 +243,23 @@ def test_retired_correlation_ids(input_data):
     api_corr_ids = _sort_dict(api_corr_ids)
     async_corr_ids = _sort_dict(async_corr_ids)
     retired_corr_ids = _sort_dict(retired_corr_ids)
+    missing_corr_ids = {}
 
     for cid, itr in async_corr_ids.items():
-        assert cid in retired_corr_ids.keys()
-        ts = retired_corr_ids[cid]["timestamp"]
-        assert (ts - itr["end_timestamp"]) > 0, f"correlation-id: {cid}, data: {itr}"
+        if cid not in retired_corr_ids.keys():
+            missing_corr_ids[cid] = itr
+        else:
+            ts = retired_corr_ids[cid]["timestamp"]
+            assert (ts - itr["end_timestamp"]) > 0, f"correlation-id: {cid}, data: {itr}"
 
     for cid, itr in api_corr_ids.items():
-        assert cid in retired_corr_ids.keys()
-        ts = retired_corr_ids[cid]["timestamp"]
-        assert (ts - itr["end_timestamp"]) > 0, f"correlation-id: {cid}, data: {itr}"
+        if cid not in retired_corr_ids.keys():
+            missing_corr_ids[cid] = itr
+        else:
+            ts = retired_corr_ids[cid]["timestamp"]
+            assert (ts - itr["end_timestamp"]) > 0, f"correlation-id: {cid}, data: {itr}"
+
+    assert len(missing_corr_ids) == 0, f"{missing_corr_ids}"
 
     assert len(api_corr_ids.keys()) == (len(retired_corr_ids.keys()))
 
