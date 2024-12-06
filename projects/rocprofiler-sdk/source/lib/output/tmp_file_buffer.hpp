@@ -106,10 +106,16 @@ offload_buffer(domain_type type)
     auto                         _lk      = std::lock_guard<std::mutex>(filebuf->file.file_mutex);
     [[maybe_unused]] static auto _success = filebuf->file.open();
     auto&                        _fs      = filebuf->file.stream;
-    filebuf->file.file_pos.emplace(_fs.tellg());
+
+    ROCP_CI_LOG_IF(WARNING, _fs.tellg() != _fs.tellp())  // this should always be true
+        << "tellg=" << _fs.tellg() << ", tellp=" << _fs.tellp();
+
+    filebuf->file.file_pos.emplace(_fs.tellp());
     filebuf->buffer.save(_fs);
     filebuf->buffer.clear();
-    CHECK(filebuf->buffer.is_empty() == true);
+
+    ROCP_CI_LOG_IF(ERROR, !filebuf->buffer.is_empty())
+        << "buffer is not empty after offload: count=" << filebuf->buffer.count();
 }
 
 template <typename Tp>

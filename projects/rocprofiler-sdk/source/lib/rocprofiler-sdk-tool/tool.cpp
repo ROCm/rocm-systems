@@ -958,19 +958,23 @@ counter_record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_da
     counter_record.dispatch_data = dispatch_data;
     counter_record.thread_id     = user_data.value;
 
-    std::vector<rocprofiler::tool::tool_counter_value_t> serialized_records;
-    serialized_records.resize(record_count);
+    auto serialized_records = std::vector<tool::tool_counter_value_t>{};
+    serialized_records.reserve(record_count);
 
-    for(size_t count = 0; count < record_count; count++)
+    for(size_t count = 0; count < record_count; ++count)
     {
         auto _counter_id = rocprofiler_counter_id_t{};
         ROCPROFILER_CALL(rocprofiler_query_record_counter_id(record_data[count].id, &_counter_id),
                          "query record counter id");
-        serialized_records[count] = {_counter_id, record_data[count].counter_value};
+        serialized_records.emplace_back(
+            tool::tool_counter_value_t{_counter_id, record_data[count].counter_value});
     }
 
-    counter_record.writeRecord(serialized_records.data(), serialized_records.size());
-    tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
+    if(!serialized_records.empty())
+    {
+        counter_record.write(serialized_records);
+        tool::write_ring_buffer(counter_record, domain_type::COUNTER_COLLECTION);
+    }
 }
 
 rocprofiler_client_finalize_t client_finalizer  = nullptr;

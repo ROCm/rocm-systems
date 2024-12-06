@@ -86,29 +86,30 @@ struct tool_counter_value_t
 
 struct serialized_counter_record_t
 {
-    size_t offset = 0;
-    size_t count  = 0;
+    std::optional<std::streampos> fpos = std::nullopt;
 };
 
 struct tool_counter_record_t
 {
+    using container_type = std::vector<tool_counter_value_t>;
+
     uint64_t                                     thread_id     = 0;
     rocprofiler_dispatch_counting_service_data_t dispatch_data = {};
-    serialized_counter_record_t                  records       = {};
+    serialized_counter_record_t                  record        = {};
 
     template <typename ArchiveT>
     void save(ArchiveT& ar) const
     {
         // should be removed when moving to buffered tracing
-        auto tmp = getRecords();
+        auto tmp = read();
 
         ar(cereal::make_nvp("thread_id", thread_id));
         ar(cereal::make_nvp("dispatch_data", dispatch_data));
         ar(cereal::make_nvp("records", tmp));
     }
 
-    std::vector<tool_counter_value_t> getRecords() const;
-    void writeRecord(const tool_counter_value_t* ptr, size_t num_records);
+    container_type read() const;
+    void           write(const container_type& data);
 };
 }  // namespace tool
 }  // namespace rocprofiler

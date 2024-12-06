@@ -22,12 +22,16 @@
 
 #pragma once
 
-#include <atomic>
+#include "lib/common/logging.hpp"
+
+#include <fmt/format.h>
+
 #include <fstream>
 #include <ios>
 #include <mutex>
 #include <set>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 struct tmp_file
@@ -43,38 +47,14 @@ struct tmp_file
 
     explicit operator bool() const;
 
-    template <typename Type>
-    size_t write(const Type* data, size_t num_records)
-    {
-        // Assert we are not mixing types with tool_counter_value_t
-        static_assert(sizeof(Type) == 16);
-        size_t allocated = offset.fetch_add(num_records);
+    template <typename Tp>
+    std::streampos write(const Tp* data, size_t num_records);
 
-        std::unique_lock<std::mutex> lk(file_mutex);
-        if(!stream.is_open()) open();
-        stream.seekp(allocated * sizeof(Type));
-        stream.write((char*) data, num_records * sizeof(Type));
-        return allocated;
-    };
+    template <typename Tp>
+    std::streampos write(const Tp& data);
 
-    template <typename Type>
-    std::vector<Type> read(size_t seekpos, size_t num_elements)
-    {
-        // Assert we are not mixing types with tool_counter_value_t
-        static_assert(sizeof(Type) == 16);
-
-        std::vector<Type> ret;
-        ret.resize(num_elements);
-
-        std::unique_lock<std::mutex> lk(file_mutex);
-        if(!stream.is_open()) open();
-
-        stream.seekg(seekpos * sizeof(Type));
-        stream.read((char*) ret.data(), num_elements * sizeof(Type));
-        return ret;
-    }
-
-    std::atomic<size_t> offset{0};
+    template <typename Tp>
+    std::vector<Tp> read(std::streampos seekpos);
 
     std::string              filename     = {};
     std::string              subdirectory = {};
@@ -84,3 +64,57 @@ struct tmp_file
     std::set<std::streampos> file_pos     = {};
     std::mutex               file_mutex   = {};
 };
+
+template <typename Tp>
+std::streampos
+tmp_file::write(const Tp* data, size_t num_records)
+{
+    auto lk = std::unique_lock<std::mutex>{file_mutex};
+
+    if(!stream.is_open()) open();
+    ROCP_CI_LOG_IF(WARNING, stream.tellg() != stream.tellp())  // this should always be true
+        << "tellg=" << stream.tellg() << ", tellp=" << stream.tellp();
+
+    auto pos = stream.tellp();
+    stream.write(reinterpret_cast<const char*>(&num_records), sizeof(size_t));
+    stream.write(reinterpret_cast<const char*>(data), num_records * sizeof(Tp));
+    return pos;
+}
+
+template <typename Tp>
+std::streampos
+tmp_file::write(const Tp& data)
+{
+    static_assert(std::is_standard_layout<Tp>::value, "only supports standard layout types");
+    static_assert(!std::is_pointer<Tp>::value, "only supports non-pointer types");
+
+    auto lk = std::unique_lock<std::mutex>{file_mutex};
+
+    if(!stream.is_open()) open();
+    ROCP_CI_LOG_IF(WARNING, stream.tellg() != stream.tellp())
+        << fmt::format("tellg={}, tellp={}", stream.tellg(), stream.tellp());
+
+    auto   pos         = stream.tellp();
+    size_t num_records = 1;
+    stream.write(reinterpret_cast<const char*>(&num_records), sizeof(size_t));
+    stream.write(reinterpret_cast<const char*>(&data), num_records * sizeof(Tp));
+    return pos;
+}
+
+template <typename Tp>
+std::vector<Tp>
+tmp_file::read(std::streampos seekpos)
+{
+    auto lk = std::unique_lock<std::mutex>{file_mutex};
+    if(!stream.is_open()) open();
+
+    stream.seekg(seekpos);
+    size_t num_elements = 0;
+    stream.read(reinterpret_cast<char*>(&num_elements), sizeof(size_t));
+
+    auto ret = std::vector<Tp>{};
+    ret.resize(num_elements, Tp{});
+    stream.read(reinterpret_cast<char*>(ret.data()), num_elements * sizeof(Tp));
+
+    return ret;
+}

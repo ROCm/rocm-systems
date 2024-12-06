@@ -579,7 +579,9 @@ generate_csv(const output_config&                    cfg,
                                       "Start_Timestamp",
                                       "End_Timestamp"}};
 
-    auto counter_id_to_name = std::map<rocprofiler_counter_id_t, std::string>{};
+    auto counter_id_to_name = std::unordered_map<rocprofiler_counter_id_t, std::string_view>{};
+    for(const auto& itr : tool_metadata.get_counter_info())
+        counter_id_to_name.emplace(itr.id, itr.name);
 
     for(auto ditr : data)
     {
@@ -587,19 +589,12 @@ generate_csv(const output_config&                    cfg,
         {
             auto kernel_id        = record.dispatch_data.dispatch_info.kernel_id;
             auto counter_id_value = std::map<rocprofiler_counter_id_t, double>{};
-            auto record_vector    = record.getRecords();
+            auto record_vector    = record.read();
 
             // Accumulate counters based on ID
             for(auto& count : record_vector)
             {
                 counter_id_value[count.id] += count.value;
-            }
-
-            // Query counter names for all IDs
-            for(auto& [id, _] : counter_id_value)
-            {
-                if(counter_id_to_name.find(id) == counter_id_to_name.end())
-                    counter_id_to_name[id] = tool_metadata.get_counter_info(id)->name;
             }
 
             const auto& correlation_id = record.dispatch_data.correlation_id;

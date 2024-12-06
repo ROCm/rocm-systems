@@ -40,21 +40,22 @@ namespace tool
 {
 constexpr auto type = domain_type::COUNTER_VALUES;
 
-std::vector<tool_counter_value_t>
-tool_counter_record_t::getRecords() const
+tool_counter_record_t::container_type
+tool_counter_record_t::read() const
 {
-    auto& _tmp_file = get_tmp_file_buffer<tool_counter_value_t>(type)->file;
+    if(!record.fpos) return container_type{};
 
-    return _tmp_file.read<tool_counter_value_t>(records.offset, records.count);
+    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(type))->file;
+    return _tmp_file.read<tool_counter_value_t>(*record.fpos);
 }
 
 void
-tool_counter_record_t::writeRecord(const tool_counter_value_t* ptr, size_t num_records)
+tool_counter_record_t::write(const tool_counter_record_t::container_type& _data)
 {
-    auto& _tmp_file = get_tmp_file_buffer<tool_counter_value_t>(type)->file;
+    if(_data.empty()) return;
 
-    records.offset = _tmp_file.write<tool_counter_value_t>(ptr, num_records);
-    records.count  = num_records;
+    auto& _tmp_file = CHECK_NOTNULL(get_tmp_file_buffer<tool_counter_value_t>(type))->file;
+    record.fpos     = _tmp_file.write<tool_counter_value_t>(_data.data(), _data.size());
 }
 }  // namespace tool
 }  // namespace rocprofiler
