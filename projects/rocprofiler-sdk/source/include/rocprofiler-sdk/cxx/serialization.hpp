@@ -52,7 +52,6 @@
 #include <cereal/types/set.hpp>
 #include <cereal/types/stack.hpp>
 #include <cereal/types/string.hpp>
-#include <cereal/types/tuple.hpp>
 #include <cereal/types/unordered_map.hpp>
 #include <cereal/types/unordered_set.hpp>
 #include <cereal/types/utility.hpp>

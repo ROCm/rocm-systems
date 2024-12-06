@@ -103,7 +103,6 @@ struct memory_allocation_info;
         using searchtype = SEARCHTYPE;                                                             \
         auto&                 operator()() const { return ITERATEFUNC; }                           \
         static constexpr auto operation_idx = ROCPROFILER_MEMORY_ALLOCATION_##ENUM;                \
-        static constexpr auto name          = "MEMORY_ALLOCATION_" #ENUM;                          \
                                                                                                    \
         template <size_t TableIdx, size_t OpIdx, typename RetT, typename... Args>                  \
         static auto get_memory_allocation_impl(RetT (*)(Args...))                                  \
@@ -112,13 +111,6 @@ struct memory_allocation_info;
         }                                                                                          \
     };
 
-SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_NONE,
-                                  NONE,
-                                  region_to_agent_map,
-                                  region_to_agent_pair,
-                                  hsa_region_t,
-                                  get_core_table()->hsa_agent_iterate_regions_fn,
-                                  memory_allocation_impl)
 SPECIALIZE_MEMORY_ALLOCATION_INFO(HSA_MEMORY_ALLOCATE,
                                   ALLOCATE,
                                   region_to_agent_map,
@@ -425,32 +417,32 @@ get_agent(T val, IterateFunc iterate_func, CallbackFunc callback)
     return existing.count(val) == 0 ? null_rocp_agent_id : existing.at(val);
 }
 
-void*
+rocprofiler_address_t
 handle_starting_addr(void** starting_addr_pointer)
 {
-    return *starting_addr_pointer;
+    return rocprofiler_address_t{.ptr = (starting_addr_pointer) ? *starting_addr_pointer : nullptr};
 }
 
 // The handle field of hsa_amd_vmem_alloc_handle_t is the starting address
 // cast as uint64_t, so returning the handle field after casting to void* suffices
-void*
+rocprofiler_address_t
 handle_starting_addr(hsa_amd_vmem_alloc_handle_t* vmem_alloc_handle)
 {
-    return reinterpret_cast<void*>(vmem_alloc_handle->handle);
+    return rocprofiler_address_t{.value = (vmem_alloc_handle) ? vmem_alloc_handle->handle : 0};
 }
 
 // Handling starting address for free memory operations
-void*
+rocprofiler_address_t
 handle_starting_addr(void* starting_addr_pointer)
 {
-    return starting_addr_pointer;
+    return rocprofiler_address_t{.ptr = starting_addr_pointer};
 }
 
 // Handles starting address for releasing handle
-void*
+rocprofiler_address_t
 handle_starting_addr(hsa_amd_vmem_alloc_handle_t vmem_alloc_handle)
 {
-    return reinterpret_cast<void*>(vmem_alloc_handle.handle);
+    return rocprofiler_address_t{.value = vmem_alloc_handle.handle};
 }
 
 // Wrapper implementation that stores memory allocation information
@@ -539,7 +531,7 @@ memory_allocation_impl(Args... args)
     // checks before retrieving starting address?
     if(starting_addr_pointer != nullptr)
     {
-        _data.address.ptr = handle_starting_addr(starting_addr_pointer);
+        _data.address = handle_starting_addr(starting_addr_pointer);
     }
 
     if(!tracing_data.empty())
@@ -584,6 +576,8 @@ memory_free_impl(Args... args)
     constexpr auto operation        = memory_allocation_op<OpIdx>::operation_idx;
     constexpr auto rocprofiler_enum = memory_allocation_info<operation>::operation_idx;
 
+    common::consume_args(arg_indices<OpIdx>::size_idx, arg_indices<OpIdx>::region_idx);
+
     auto&&                 _tied_args = std::tie(args...);
     memory_allocation_data _data{};
 
@@ -609,7 +603,7 @@ memory_free_impl(Args... args)
     _data.tid            = common::get_tid();
     _data.func           = rocprofiler_enum;
     _data.correlation_id = context::get_latest_correlation_id();
-    _data.address.ptr    = handle_starting_addr(std::get<address_idx>(_tied_args));
+    _data.address        = handle_starting_addr(std::get<address_idx>(_tied_args));
 
     if(!_data.correlation_id)
     {

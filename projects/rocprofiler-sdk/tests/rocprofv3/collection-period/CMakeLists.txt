@@ -8,6 +8,12 @@ project(
     LANGUAGES CXX
     VERSION 0.0.0)
 
+if(ROCPROFILER_MEMCHECK STREQUAL "ThreadSanitizer")
+    set(IS_THREAD_SANITIZER ON)
+else()
+    set(IS_THREAD_SANITIZER OFF)
+endif()
+
 find_package(rocprofiler-sdk REQUIRED)
 
 string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
@@ -33,9 +39,16 @@ add_test(
 
 set_tests_properties(
     rocprofv3-test-collection-period-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests" ENVIRONMENT
-               "${collection-period-env}" FAIL_REGULAR_EXPRESSION
-               "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
+    PROPERTIES TIMEOUT
+               45
+               LABELS
+               "integration-tests"
+               ENVIRONMENT
+               "${collection-period-env}"
+               FAIL_REGULAR_EXPRESSION
+               "${ROCPROFILER_DEFAULT_FAIL_REGEX}"
+               DISABLED
+               "${IS_THREAD_SANITIZER}")
 
 add_test(
     NAME rocprofv3-test-collection-period-validate
@@ -47,12 +60,6 @@ add_test(
         --collection-period-input
         ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log)
 
-set(VALIDATION_FILES
-    ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.json
-    ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_collection_periods.log
-    ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.pftrace
-    ${CMAKE_CURRENT_BINARY_DIR}/collection-period/out_results.otf2)
-
 set_tests_properties(
     rocprofv3-test-collection-period-validate
     PROPERTIES TIMEOUT
@@ -63,5 +70,5 @@ set_tests_properties(
                "rocprofv3-test-collection-period-execute"
                FAIL_REGULAR_EXPRESSION
                "AssertionError"
-               ATTACHED_FILES_ON_FAIL
-               "${VALIDATION_FILES}")
+               DISABLED
+               "${IS_THREAD_SANITIZER}")

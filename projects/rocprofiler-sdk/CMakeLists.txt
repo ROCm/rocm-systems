@@ -61,6 +61,9 @@ else()
     set(ROCPROFILER_GIT_REVISION "")
 endif()
 
+# make sure that cmake re-runs when version file changes
+configure_file(${PROJECT_SOURCE_DIR}/VERSION ${PROJECT_BINARY_DIR}/VERSION COPYONLY)
+
 message(
     STATUS
         "[${PROJECT_NAME}] version ${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}.${PROJECT_VERSION_PATCH} (${FULL_VERSION_STRING})"

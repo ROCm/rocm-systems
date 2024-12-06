@@ -631,30 +631,6 @@ get_agent_mapping()
     static auto*& _v = common::static_object<std::vector<agent_pair>>::construct();
     return *CHECK_NOTNULL(_v);
 }
-}  // namespace
-
-std::vector<const rocprofiler_agent_t*>
-get_agents()
-{
-    auto& agents   = rocprofiler::agent::get_agent_topology();
-    auto  pointers = std::vector<const rocprofiler_agent_t*>{};
-    pointers.reserve(agents.size());
-    for(auto& agent : agents)
-    {
-        pointers.emplace_back(agent.get());
-    }
-    return pointers;
-}
-
-const rocprofiler_agent_t*
-get_agent(rocprofiler_agent_id_t id)
-{
-    for(const auto& itr : get_agents())
-    {
-        if(itr && itr->id.handle == id.handle) return itr;
-    }
-    return nullptr;
-}
 
 const std::vector<aqlprofile_agent_handle_t>&
 get_aql_handles()
@@ -681,6 +657,30 @@ get_aql_handles()
         }());
 
     return *CHECK_NOTNULL(_v);
+}
+}  // namespace
+
+std::vector<const rocprofiler_agent_t*>
+get_agents()
+{
+    auto& agents   = rocprofiler::agent::get_agent_topology();
+    auto  pointers = std::vector<const rocprofiler_agent_t*>{};
+    pointers.reserve(agents.size());
+    for(auto& agent : agents)
+    {
+        pointers.emplace_back(agent.get());
+    }
+    return pointers;
+}
+
+const rocprofiler_agent_t*
+get_agent(rocprofiler_agent_id_t id)
+{
+    for(const auto& itr : get_agents())
+    {
+        if(itr && itr->id.handle == id.handle) return itr;
+    }
+    return nullptr;
 }
 
 const aqlprofile_agent_handle_t*

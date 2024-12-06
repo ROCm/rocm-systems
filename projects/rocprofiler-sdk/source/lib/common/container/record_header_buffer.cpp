@@ -86,8 +86,8 @@ record_header_buffer::get_record_headers(size_t _n)
 {
     auto _lk = rhb_raii_lock{*this};
 
-    auto _sz = m_index.load(std::memory_order_acquire);
-    if(_n > _sz) _n = _sz;
+    auto _sz  = m_index.load(std::memory_order_acquire);
+    _n        = std::min(_n, _sz);
     auto _ret = record_ptr_vec_t{};
     _ret.reserve(_n);
     for(size_t i = 0; i < _n; ++i)

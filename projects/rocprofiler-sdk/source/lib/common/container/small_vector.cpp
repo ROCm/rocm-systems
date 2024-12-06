@@ -75,7 +75,7 @@ get_new_capacity(size_t min_size, size_t /*t_size*/, size_t old_capacity)
 
     // In theory 2*capacity can overflow if the capacity is 64 bit, but the
     // original capacity would never be large enough for this to be a problem.
-    size_t new_capacity = 2 * old_capacity + 1;  // Always grow.
+    size_t new_capacity = (2 * old_capacity) + 1;  // Always grow.
     return std::clamp(new_capacity, min_size, max_size);
 }
 }  // namespace

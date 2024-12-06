@@ -1311,10 +1311,8 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         auto agent_ptr_vec      = get_gpu_agents();
         for(auto& itr : agent_ptr_vec)
         {
-            auto method = static_cast<rocprofiler_pc_sampling_method_t>(
-                tool::get_config().pc_sampling_method_value);
-            auto unit = static_cast<rocprofiler_pc_sampling_unit_t>(
-                tool::get_config().pc_sampling_unit_value);
+            auto method = tool::get_config().pc_sampling_method_value;
+            auto unit   = tool::get_config().pc_sampling_unit_value;
             if(if_pc_sample_config_match(
                    itr->id, method, unit, tool::get_config().pc_sampling_interval))
             {
