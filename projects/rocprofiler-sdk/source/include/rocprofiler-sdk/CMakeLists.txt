@@ -27,7 +27,6 @@ set(ROCPROFILER_HEADER_FILES
     internal_threading.h
     marker.h
     ompt.h
-    openmp.h
     pc_sampling.h
     profile_config.h
     registration.h
@@ -43,7 +42,7 @@ install(
 add_subdirectory(hip)
 add_subdirectory(hsa)
 add_subdirectory(marker)
-add_subdirectory(openmp)
+add_subdirectory(ompt)
 add_subdirectory(rccl)
 add_subdirectory(cxx)
 add_subdirectory(kfd)

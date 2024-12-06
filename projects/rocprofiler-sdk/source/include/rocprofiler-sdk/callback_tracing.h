@@ -27,7 +27,7 @@
 #include <rocprofiler-sdk/hip.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
-#include <rocprofiler-sdk/openmp.h>
+#include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/rccl.h>
 
 #include <hsa/hsa.h>
@@ -80,13 +80,13 @@ typedef struct
 } rocprofiler_callback_tracing_hip_api_data_t;
 
 /**
- * @brief ROCProfiler OPENMP Callback Data
+ * @brief ROCProfiler OMPT Callback Data
  */
 typedef struct
 {
-    uint64_t                    size;  ///< size of this struct
-    rocprofiler_ompt_api_args_t args;
-} rocprofiler_callback_tracing_ompt_api_data_t;
+    uint64_t                size;  ///< size of this struct
+    rocprofiler_ompt_args_t args;
+} rocprofiler_callback_tracing_ompt_data_t;
 
 /**
  * @brief ROCProfiler Marker Tracer Callback Data.

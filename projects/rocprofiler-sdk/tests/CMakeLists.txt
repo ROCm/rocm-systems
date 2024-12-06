@@ -61,7 +61,8 @@ add_subdirectory(page-migration)
 add_subdirectory(pc_sampling)
 add_subdirectory(thread-trace)
 add_subdirectory(hip-graph-tracing)
+add_subdirectory(counter-collection)
+add_subdirectory(openmp-tools)
 
 # rocprofv3 validation tests
 add_subdirectory(rocprofv3)
-add_subdirectory(counter-collection)

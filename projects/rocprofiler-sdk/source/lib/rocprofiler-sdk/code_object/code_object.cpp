@@ -66,7 +66,7 @@ struct code_object_info;
     struct code_object_info<ROCPROFILER_CODE_OBJECT_##OPERATION>                                   \
     {                                                                                              \
         static constexpr auto operation_idx = ROCPROFILER_CODE_OBJECT_##OPERATION;                 \
-        static constexpr auto name          = #OPERATION;                                          \
+        static constexpr auto name          = "CODE_OBJECT_" #OPERATION;                           \
     };
 
 SPECIALIZE_CODE_OBJECT_INFO(NONE)

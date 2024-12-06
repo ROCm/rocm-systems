@@ -170,7 +170,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,    ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,        ///< @see ::rocprofiler_memory_copy_operation_t
     ROCPROFILER_CALLBACK_TRACING_RCCL_API,           ///< @RCCL tracing
-    ROCPROFILER_CALLBACK_TRACING_OPENMP,             ///< @see ::rocprofiler_ompt_operation_t
+    ROCPROFILER_CALLBACK_TRACING_OMPT,               ///< @see ::rocprofiler_ompt_operation_t
     ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,  ///< @see
                                                      ///< ::rocprofiler_memory_allocation_operation_t
     ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION,  ///< Callback notifying that a runtime
@@ -200,7 +200,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_BUFFER_TRACING_SCRATCH_MEMORY,      ///< Buffer scratch memory reclaimation info
     ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT,  ///< Correlation ID in no longer in use
     ROCPROFILER_BUFFER_TRACING_RCCL_API,                   ///< RCCL tracing
-    ROCPROFILER_BUFFER_TRACING_OPENMP,                     ///< @see ::rocprofiler_ompt_operation_t
+    ROCPROFILER_BUFFER_TRACING_OMPT,                       ///< @see ::rocprofiler_ompt_operation_t
     ROCPROFILER_BUFFER_TRACING_MEMORY_ALLOCATION,          ///< @see
                                                    ///< ::rocprofiler_memory_allocation_operation_t
     ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION,  ///< Record indicating a runtime library has

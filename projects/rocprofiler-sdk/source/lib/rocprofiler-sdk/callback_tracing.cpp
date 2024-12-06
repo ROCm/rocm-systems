@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
+#include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
 #include "lib/rocprofiler-sdk/runtime_initialization.hpp"
@@ -85,7 +86,7 @@ ROCPROFILER_CALLBACK_TRACING_KIND_STRING(KERNEL_DISPATCH)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_COPY)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(MEMORY_ALLOCATION)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RCCL_API)
-ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OPENMP)
+ROCPROFILER_CALLBACK_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_CALLBACK_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 
 template <size_t Idx, size_t... Tail>
@@ -255,9 +256,9 @@ rocprofiler_query_callback_tracing_kind_operation_name(rocprofiler_callback_trac
             val = rocprofiler::hsa::async_copy::name_by_id(operation);
             break;
         }
-        case ROCPROFILER_CALLBACK_TRACING_OPENMP:
+        case ROCPROFILER_CALLBACK_TRACING_OMPT:
         {
-            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+            val = rocprofiler::ompt::name_by_id(operation);
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
@@ -383,9 +384,9 @@ rocprofiler_iterate_callback_tracing_kind_operations(
             ops = rocprofiler::hsa::async_copy::get_ids();
             break;
         }
-        case ROCPROFILER_CALLBACK_TRACING_OPENMP:
+        case ROCPROFILER_CALLBACK_TRACING_OMPT:
         {
-            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
+            ops = rocprofiler::ompt::get_ids();
             break;
         }
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
@@ -522,13 +523,22 @@ rocprofiler_iterate_callback_tracing_kind_operation_args(
                 user_data);
             return ROCPROFILER_STATUS_SUCCESS;
         }
+        case ROCPROFILER_CALLBACK_TRACING_OMPT:
+        {
+            rocprofiler::ompt::iterate_args(
+                record.operation,
+                *static_cast<rocprofiler_callback_tracing_ompt_data_t*>(record.payload),
+                callback,
+                max_deref,
+                user_data);
+            return ROCPROFILER_STATUS_SUCCESS;
+        }
         case ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY:
         case ROCPROFILER_CALLBACK_TRACING_CODE_OBJECT:
         case ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY:
         case ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION:
         case ROCPROFILER_CALLBACK_TRACING_RCCL_API:
-        case ROCPROFILER_CALLBACK_TRACING_OPENMP:
         case ROCPROFILER_CALLBACK_TRACING_RUNTIME_INITIALIZATION:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;

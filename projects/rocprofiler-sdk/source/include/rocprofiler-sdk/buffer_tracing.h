@@ -84,7 +84,7 @@ typedef struct
 } rocprofiler_buffer_tracing_hip_api_record_t;
 
 /**
- * @brief Additional trace data for OpenMP target routines
+ * @brief Additional trace data for OMPT target routines
  */
 
 typedef struct rocprofiler_buffer_tracing_ompt_target_t
@@ -98,13 +98,13 @@ typedef struct rocprofiler_buffer_tracing_ompt_target_t
 
 typedef struct rocprofiler_buffer_tracing_ompt_target_data_op_t
 {
-    uint64_t    host_op_id;       // from the host_op_id argument to the OMPT callback
-    int32_t     optype;           // ompt_target_data_op_t kind of operation
-    int32_t     src_device_num;   // ompt device number for data source
-    int32_t     dest_device_num;  // ompt device number for data destination
-    int32_t     reserved;         // for padding
-    uint64_t    bytes;            // size in bytes of the operation
-    const void* codeptr_ra;       // pointer to the callsite of the target_data_op
+    uint64_t    host_op_id;      // from the host_op_id argument to the OMPT callback
+    int32_t     optype;          // ompt_target_data_op_t kind of operation
+    int32_t     src_device_num;  // ompt device number for data source
+    int32_t     dst_device_num;  // ompt device number for data destination
+    int32_t     reserved;        // for padding
+    uint64_t    bytes;           // size in bytes of the operation
+    const void* codeptr_ra;      // pointer to the callsite of the target_data_op
 } rocprofiler_buffer_tracing_ompt_target_data_op_t;
 
 typedef struct rocprofiler_buffer_tracing_ompt_target_kernel_t
@@ -115,9 +115,9 @@ typedef struct rocprofiler_buffer_tracing_ompt_target_kernel_t
 } rocprofiler_buffer_tracing_ompt_target_kernel_t;
 
 /**
- * @brief ROCProfiler Buffer OPENMP API Tracer Record.
+ * @brief ROCProfiler Buffer OMPT Tracer Record.
  */
-typedef struct rocprofiler_buffer_tracing_ompt_api_record_t
+typedef struct rocprofiler_buffer_tracing_ompt_record_t
 {
     uint64_t                          size;  ///< size of this struct
     rocprofiler_buffer_tracing_kind_t kind;
@@ -129,16 +129,16 @@ typedef struct rocprofiler_buffer_tracing_ompt_api_record_t
     union
     {
         rocprofiler_buffer_tracing_ompt_target_t         target;
-        rocprofiler_buffer_tracing_ompt_target_data_op_t target_data;
-        rocprofiler_buffer_tracing_ompt_target_kernel_t  kernel;
+        rocprofiler_buffer_tracing_ompt_target_data_op_t target_data_op;
+        rocprofiler_buffer_tracing_ompt_target_kernel_t  target_kernel;
         uint64_t                                         reserved[5];
     };
 
     /// @var kind
-    /// @brief ::ROCPROFILER_CALLBACK_TRACING_OPENMP
+    /// @brief ::ROCPROFILER_BUFFER_TRACING_OMPT
     /// @var operation
-    /// @brief Specification of the API function,::rocprofiler_ompt_operation_t
-} rocprofiler_buffer_tracing_ompt_api_record_t;
+    /// @brief Specification of the ::rocprofiler_ompt_operation_t
+} rocprofiler_buffer_tracing_ompt_record_t;
 
 /**
  * @brief ROCProfiler Buffer Marker Tracer Record.

@@ -41,6 +41,7 @@
 #include "lib/rocprofiler-sdk/intercept_table.hpp"
 #include "lib/rocprofiler-sdk/internal_threading.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
+#include "lib/rocprofiler-sdk/ompt.hpp"
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/code_object.hpp"
 #include "lib/rocprofiler-sdk/pc_sampling/service.hpp"
@@ -51,6 +52,7 @@
 #include <rocprofiler-sdk/fwd.h>
 #include <rocprofiler-sdk/hsa.h>
 #include <rocprofiler-sdk/marker.h>
+#include <rocprofiler-sdk/ompt.h>
 #include <rocprofiler-sdk/version.h>
 
 #include <hsa/hsa_api_trace.h>
@@ -639,6 +641,7 @@ finalize()
         counters::device_counting_service_finalize();
         hsa::queue_controller_fini();
         thread_trace::finalize();
+        ompt::finalize_ompt();
         page_migration::finalize();
 #if ROCPROFILER_SDK_HSA_PC_SAMPLING > 0
         // WARNING: this must precede `code_object::finalize()`

@@ -22,5 +22,11 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/openmp/api_args.h>
-#include <rocprofiler-sdk/openmp/api_id.h>
+namespace rocprofiler
+{
+namespace ompt
+{
+void
+finalize_ompt();
+}  // namespace ompt
+}  // namespace rocprofiler

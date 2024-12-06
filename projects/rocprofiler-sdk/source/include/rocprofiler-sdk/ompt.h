@@ -24,22 +24,20 @@
 
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/openmp/omp-tools.h>
-#include <rocprofiler-sdk/registration.h>
+#include <rocprofiler-sdk/ompt/api_args.h>
+#include <rocprofiler-sdk/ompt/api_id.h>
+#include <rocprofiler-sdk/ompt/omp-tools.h>
 
 /**
  * @defgroup OMPT_REGISTRATION Tool registration for OpenMP Tools
  *
- * Functions for enabling OpenMP support in tools which provide their own ompt_start_tool symbol but
+ * Functions for enabling OMPT support in tools which provide their own ompt_start_tool symbol but
  * want to defer to rocprofiler-sdk for OMPT.
  *
  * @{
  */
 
 ROCPROFILER_EXTERN_C_INIT
-
-void
-rocprofiler_ompt_finalize_tool() ROCPROFILER_API;
 
 rocprofiler_status_t
 rocprofiler_ompt_is_initialized(int* status) ROCPROFILER_API ROCPROFILER_NONNULL(1);

@@ -152,20 +152,53 @@ pop_latest_correlation_id(correlation_id* val)
         return nullptr;
     }
 
-    if(get_latest_correlation_id_impl().empty())
+    auto& stack = get_latest_correlation_id_impl();
+    if(stack.empty())
     {
         ROCP_ERROR << "empty thread-local correlation id stack";
         return nullptr;
     }
 
-    ROCP_ERROR_IF(get_latest_correlation_id_impl().back() != val)
-        << "pop_latest_correlation_id is happening out of order for " << val->internal
-        << ". top of stack is " << get_latest_correlation_id_impl().back()->internal;
+    if(stack.back() != val)
+    {
+        ROCP_ERROR << "pop_latest_correlation_id is happening out of order for " << val->internal
+                   << ". top of stack is " << stack.back()->internal;
+    }
 
-    get_latest_correlation_id_impl().pop_back();
+    stack.pop_back();
 
-    return (get_latest_correlation_id_impl().empty()) ? nullptr
-                                                      : get_latest_correlation_id_impl().back();
+    return (stack.empty()) ? nullptr : stack.back();
 }
+
+correlation_id*
+push_correlation_id(correlation_id* val)
+{
+    if(!val)
+    {
+        ROCP_ERROR << "passed nullptr to correlation id";
+        return nullptr;
+    }
+
+    val->thread_idx = common::get_tid();
+    get_latest_correlation_id_impl().emplace_back(val);
+
+    return val;
+}
+
+void
+dump_correlation_stack(const char* s)
+{
+    auto& stack = get_latest_correlation_id_impl();
+    auto  info  = std::stringstream{};
+    info << s << ": tid: " << common::get_tid() << " :";
+    for(const auto* itr : stack)
+    {
+        info << " " << itr->internal;
+        ;
+    }
+    info << "\n";
+    printf("%s", info.str().c_str());
+}
+
 }  // namespace context
 }  // namespace rocprofiler

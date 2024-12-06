@@ -5,7 +5,7 @@ rocprofiler_activate_clang_tidy()
 
 set(ROCPROFILER_LIB_HEADERS
     agent.hpp buffer.hpp external_correlation.hpp intercept_table.hpp
-    internal_threading.hpp registration.hpp runtime_initialization.hpp)
+    internal_threading.hpp ompt.hpp registration.hpp runtime_initialization.hpp)
 set(ROCPROFILER_LIB_SOURCES
     agent.cpp
     buffer.cpp
@@ -18,10 +18,11 @@ set(ROCPROFILER_LIB_SOURCES
     external_correlation.cpp
     intercept_table.cpp
     internal_threading.cpp
+    ompt.cpp
     pc_sampling.cpp
     profile_config.cpp
-    registration.cpp
     rocprofiler.cpp
+    registration.cpp
     runtime_initialization.cpp)
 
 # ----------------------------------------------------------------------------------------#
@@ -52,6 +53,7 @@ add_subdirectory(kernel_dispatch)
 add_subdirectory(page_migration)
 add_subdirectory(rccl)
 add_subdirectory(details)
+add_subdirectory(ompt)
 
 target_link_libraries(
     rocprofiler-sdk-object-library

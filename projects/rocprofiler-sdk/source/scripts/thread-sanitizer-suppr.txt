@@ -11,6 +11,10 @@ race:libamdhip64.so
 # data race arising from hsa runtime
 race:libhsa-runtime64.so
 
+# data race(s) arising from OpenMP
+race:__kmp_resume_template
+race:__kmp_suspend_initialize_thread
+
 # unlock of an unlocked mutex (or by a wrong thread)
 mutex:libhsa-runtime64.so
 

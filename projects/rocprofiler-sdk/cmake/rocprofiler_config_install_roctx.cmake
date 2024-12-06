@@ -60,7 +60,6 @@ set(${PACKAGE_NAME}_BUILD_TREE
 set(PROJECT_BUILD_TREE_TARGETS
     ${SDK_PACKAGE_NAME}::${PACKAGE_NAME}-shared-library
     ${SDK_PACKAGE_NAME}::${SDK_PACKAGE_NAME}-headers
-    ${SDK_PACKAGE_NAME}::${SDK_PACKAGE_NAME}-build-flags
     ${SDK_PACKAGE_NAME}::${SDK_PACKAGE_NAME}-stack-protector)
 
 configure_file(

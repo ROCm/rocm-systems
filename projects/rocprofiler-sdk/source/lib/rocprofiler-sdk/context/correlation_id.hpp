@@ -86,6 +86,14 @@ get_latest_correlation_id();
 const correlation_id*
 pop_latest_correlation_id(correlation_id*);
 
+// push correlation id
+correlation_id*
+push_correlation_id(correlation_id*);
+
+// dump the cid stack for debugging
+void
+dump_correlation_stack(const char*);
+
 /// permits tools opportunity to modify the correlation id based on the domain, op, and
 /// the rocprofiler generated correlation id
 struct correlation_tracing_service

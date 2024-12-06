@@ -360,6 +360,14 @@ save(ArchiveT& ar, rocprofiler_callback_tracing_rccl_api_data_t data)
 
 template <typename ArchiveT>
 void
+save(ArchiveT& ar, rocprofiler_callback_tracing_ompt_data_t data)
+{
+    ROCP_SDK_SAVE_DATA_FIELD(size);
+    // ROCP_SDK_SAVE_DATA_FIELD(args);
+}
+
+template <typename ArchiveT>
+void
 save(ArchiveT& ar, rocprofiler_dispatch_counting_service_data_t data)
 {
     ROCP_SDK_SAVE_DATA_FIELD(size);
@@ -441,6 +449,56 @@ void
 save(ArchiveT& ar, rocprofiler_buffer_tracing_rccl_api_record_t data)
 {
     save_buffer_tracing_api_record(ar, data);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_ompt_target_t data)
+{
+    ROCP_SDK_SAVE_DATA_VALUE("kind", kind);
+    ROCP_SDK_SAVE_DATA_VALUE("device", device_num);
+    ROCP_SDK_SAVE_DATA_VALUE("task_id", task_id);
+    ROCP_SDK_SAVE_DATA_VALUE("target_id", target_id);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_ompt_target_data_op_t data)
+{
+    ROCP_SDK_SAVE_DATA_VALUE("host_op_id", host_op_id);
+    ROCP_SDK_SAVE_DATA_VALUE("optype", optype);
+    ROCP_SDK_SAVE_DATA_VALUE("src_device_num", src_device_num);
+    ROCP_SDK_SAVE_DATA_VALUE("dst_device_num", dst_device_num);
+    ROCP_SDK_SAVE_DATA_VALUE("bytes", bytes);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_ompt_target_kernel_t data)
+{
+    ROCP_SDK_SAVE_DATA_VALUE("host_op_id", host_op_id);
+    ROCP_SDK_SAVE_DATA_VALUE("device_num", device_num);
+    ROCP_SDK_SAVE_DATA_VALUE("requested_num_teams", requested_num_teams);
+}
+
+template <typename ArchiveT>
+void
+save(ArchiveT& ar, rocprofiler_buffer_tracing_ompt_record_t data)
+{
+    save_buffer_tracing_api_record(ar, data);
+
+    if(data.operation == ROCPROFILER_OMPT_ID_target_emi)
+    {
+        ROCP_SDK_SAVE_DATA_FIELD(target);
+    }
+    else if(data.operation == ROCPROFILER_OMPT_ID_target_data_op_emi)
+    {
+        ROCP_SDK_SAVE_DATA_FIELD(target_data_op);
+    }
+    else if(data.operation == ROCPROFILER_OMPT_ID_target_submit_emi)
+    {
+        ROCP_SDK_SAVE_DATA_FIELD(target_kernel);
+    }
 }
 
 template <typename ArchiveT>

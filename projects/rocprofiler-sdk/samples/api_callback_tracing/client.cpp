@@ -189,7 +189,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     call_stack_v->emplace_back(source_location{__FUNCTION__, __FILE__, __LINE__, ""});
 
-    callback_name_info name_info = common::get_callback_id_names();
+    callback_name_info name_info = common::get_callback_tracing_names();
 
     for(const auto& itr : name_info)
     {

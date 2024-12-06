@@ -30,6 +30,7 @@
 #include "lib/rocprofiler-sdk/hsa/scratch_memory.hpp"
 #include "lib/rocprofiler-sdk/kernel_dispatch/kernel_dispatch.hpp"
 #include "lib/rocprofiler-sdk/marker/marker.hpp"
+#include "lib/rocprofiler-sdk/ompt/ompt.hpp"
 #include "lib/rocprofiler-sdk/page_migration/page_migration.hpp"
 #include "lib/rocprofiler-sdk/rccl/rccl.hpp"
 #include "lib/rocprofiler-sdk/registration.hpp"
@@ -88,7 +89,7 @@ ROCPROFILER_BUFFER_TRACING_KIND_STRING(PAGE_MIGRATION)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(SCRATCH_MEMORY)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(CORRELATION_ID_RETIREMENT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RCCL_API)
-ROCPROFILER_BUFFER_TRACING_KIND_STRING(OPENMP)
+ROCPROFILER_BUFFER_TRACING_KIND_STRING(OMPT)
 ROCPROFILER_BUFFER_TRACING_KIND_STRING(RUNTIME_INITIALIZATION)
 
 template <size_t Idx, size_t... Tail>
@@ -273,16 +274,17 @@ rocprofiler_query_buffer_tracing_kind_operation_name(rocprofiler_buffer_tracing_
             val = rocprofiler::page_migration::name_by_id(operation);
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_OMPT:
+        {
+            val = rocprofiler::ompt::name_by_id(operation);
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION:
         {
             val = rocprofiler::runtime_init::name_by_id(operation);
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
-        {
-            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-        }
-        case ROCPROFILER_BUFFER_TRACING_OPENMP:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }
@@ -403,16 +405,17 @@ rocprofiler_iterate_buffer_tracing_kind_operations(
             ops = rocprofiler::page_migration::get_ids();
             break;
         }
+        case ROCPROFILER_BUFFER_TRACING_OMPT:
+        {
+            ops = rocprofiler::ompt::get_ids();
+            break;
+        }
         case ROCPROFILER_BUFFER_TRACING_RUNTIME_INITIALIZATION:
         {
             ops = rocprofiler::runtime_init::get_ids();
             break;
         }
         case ROCPROFILER_BUFFER_TRACING_CORRELATION_ID_RETIREMENT:
-        {
-            return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
-        }
-        case ROCPROFILER_BUFFER_TRACING_OPENMP:
         {
             return ROCPROFILER_STATUS_ERROR_NOT_IMPLEMENTED;
         }

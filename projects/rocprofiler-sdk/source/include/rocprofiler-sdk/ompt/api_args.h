@@ -25,7 +25,7 @@
 #include <rocprofiler-sdk/defines.h>
 #include <rocprofiler-sdk/version.h>
 
-#include <rocprofiler-sdk/openmp/omp-tools.h>
+#include <rocprofiler-sdk/ompt/omp-tools.h>
 
 #include <stdint.h>
 
@@ -60,7 +60,7 @@ typedef struct rocprofiler_ompt_no_args
     char empty;
 } rocprofiler_ompt_no_args;
 
-typedef union rocprofiler_ompt_api_args_t
+typedef union rocprofiler_ompt_args_t
 {
     // The ompt_data_t* values passed to the client tool are proxies.
     // This allows the client tool to use them as it would in their own
@@ -150,11 +150,11 @@ typedef union rocprofiler_ompt_api_args_t
         uint64_t    module_id;
     } device_load;
 
-    struct
-    {
-        int      device_num;
-        uint64_t module_id;
-    } device_unload;
+    // struct
+    // {
+    //     int      device_num;
+    //     uint64_t module_id;
+    // } device_unload;
 
     struct
     {
@@ -299,10 +299,10 @@ typedef union rocprofiler_ompt_api_args_t
         ompt_data_t*          target_data;
         ompt_data_t*          host_op_id;
         ompt_target_data_op_t optype;
-        void*                 src_addr;
+        void*                 src_address;
         int                   src_device_num;
-        void*                 dest_addr;
-        int                   dest_device_num;
+        void*                 dst_address;
+        int                   dst_device_num;
         size_t                bytes;
         const void*           codeptr_ra;
     } target_data_op_emi;
@@ -315,15 +315,15 @@ typedef union rocprofiler_ompt_api_args_t
         unsigned int          requested_num_teams;
     } target_submit_emi;
 
-    struct
-    {
-        unsigned int  nitems;
-        void**        host_addr;
-        void**        device_addr;
-        size_t*       bytes;
-        unsigned int* mapping_flags;
-        const void*   codeptr_ra;
-    } target_map_emi;
+    // struct
+    // {
+    //     unsigned int  nitems;
+    //     void**        host_addr;
+    //     void**        device_addr;
+    //     size_t*       bytes;
+    //     unsigned int* mapping_flags;
+    //     const void*   codeptr_ra;
+    // } target_map_emi;
 
     struct
     {
@@ -335,6 +335,6 @@ typedef union rocprofiler_ompt_api_args_t
 
     rocprofiler_ompt_callback_functions_t callback_functions;
 
-} rocprofiler_ompt_api_args_t;
+} rocprofiler_ompt_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

@@ -22,34 +22,23 @@
 
 #pragma once
 
-#include <rocprofiler-sdk/fwd.h>
-#include <rocprofiler-sdk/rocprofiler.h>
-#include <rocprofiler-sdk/cxx/name_info.hpp>
+#ifdef openmp_target_sample_client_EXPORTS
+#    define CLIENT_API __attribute__((visibility("default")))
+#else
+#    define CLIENT_API
+#endif
 
-#include "defines.hpp"
-
-#include <iostream>
-#include <map>
-#include <sstream>
-#include <stdexcept>
-#include <string>
-#include <unordered_map>
-#include <unordered_set>
-
-namespace common
+namespace client
 {
-using callback_name_info = rocprofiler::sdk::callback_name_info;
-using buffer_name_info   = rocprofiler::sdk::buffer_name_info;
+void
+setup() CLIENT_API;
 
-inline auto
-get_buffer_tracing_names()
-{
-    return rocprofiler::sdk::get_buffer_tracing_names();
-}
+void
+shutdown() CLIENT_API;
 
-inline auto
-get_callback_tracing_names()
-{
-    return rocprofiler::sdk::get_callback_tracing_names();
-}
-}  // namespace common
+void
+start() CLIENT_API;
+
+void
+stop() CLIENT_API;
+}  // namespace client
