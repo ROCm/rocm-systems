@@ -170,6 +170,12 @@ For MPI applications (or other job launchers such as SLURM), place rocprofv3 ins
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")
 
+    add_parser_bool_argument(
+        pc_sampling_options,
+        "--pc-sampling-beta-enabled",
+        help="enable pc sampling support; beta version",
+    )
+
     pc_sampling_options.add_argument(
         "--pc-sampling-unit",
         help="",
@@ -981,17 +987,32 @@ def run(app_args, args, **kwargs):
     if args.log_level in ("info", "trace", "env"):
         log_config(app_env)
 
-    if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_method:
+    if args.pc_sampling_unit or args.pc_sampling_method or args.pc_sampling_interval:
+
+        if (
+            not args.pc_sampling_beta_enabled
+            and os.environ.get("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", None) is None
+        ):
+            fatal_error(
+                "PC sampling unavailable. The feature is implicitly disabled. To enable it, use --pc-sampling-beta-enable option or set ROCPROFILER_PC_SAMPLING_BETA_ENABLED=ON in the environment"
+            )
+
+        update_env(
+            "ROCPROFILER_PC_SAMPLING_BETA_ENABLED",
+            args.pc_sampling_beta_enabled,
+            overwrite_if_true=True,
+        )
+
         if not (
-            args.pc_sampling_unit and args.pc_sampling_method and args.pc_sampling_method
+            args.pc_sampling_unit
+            and args.pc_sampling_method
+            and args.pc_sampling_interval
         ):
             fatal_error("All three PC sampling configurations need to be set")
 
-        update_env("ROCPROFILER_PC_SAMPLING_BETA_ENABLED", "ON")
         update_env("ROCPROF_PC_SAMPLING_UNIT", args.pc_sampling_unit)
         update_env("ROCPROF_PC_SAMPLING_METHOD", args.pc_sampling_method)
         update_env("ROCPROF_PC_SAMPLING_INTERVAL", args.pc_sampling_interval)
-        update_env("ROCPROF_ENABLE_PC_SAMPLING", args.pc_sampling)
 
     if use_execv:
         # does not return
