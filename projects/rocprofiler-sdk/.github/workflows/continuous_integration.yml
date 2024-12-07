@@ -469,6 +469,7 @@ jobs:
         ## Tests + Samples
         $(get-full-md-contents all)
 
+        <!-- code-coverage-comment-identifier -->
         EOF
 
         echo 'CODECOVERAGE_REPORT<<EOF' > $GITHUB_OUTPUT
@@ -484,10 +485,8 @@ jobs:
       with:
         github-token: ${{ secrets.TOKEN }}
         script: |
-          const commentIdentifier = '<!-- unique-comment-identifier -->'; // Use this to identify your comment
-            const commentBody = `
-              ${commentIdentifier}
-              ` + process.env.COMMENT_BODY;
+          const commentIdentifier = '<!-- code-coverage-comment-identifier -->'; // Used to identify codecov comment
+            const commentBody = process.env.COMMENT_BODY;
 
             // Fetch existing comments
             const { data: comments } = await github.rest.issues.listComments({
