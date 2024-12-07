@@ -122,6 +122,7 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Changed naming of "dispatch profiling service" to a more descriptive "dispatch counting service". To convert existing tool or user code to the new names, the following sed can be used: `-type f -exec sed -i -e 's/dispatch_profile_counting_service/dispatch_counting_service/g' -e 's/dispatch_profile.h/dispatch_counting_service.h/g' -e 's/rocprofiler_profile_counting_dispatch_callback_t/rocprofiler_dispatch_counting_service_callback_t/g' -e 's/rocprofiler_profile_counting_dispatch_data_t/rocprofiler_dispatch_counting_service_data_t/g'  -e 's/rocprofiler_profile_counting_dispatch_record_t/rocprofiler_dispatch_counting_service_record_t/g' {} +`
 - `FETCH_SIZE` metric on gfx94x now uses `TCC_BUBBLE` for 128B reads.
 - PMC dispatch-based counter collection serialization is now per-device instead of being global across all devices.
+- Added output return functionality to rocprofiler_sample_device_counting_service
 - Added rocprofiler_load_counter_definition.
 
 ### Resolved issues

@@ -358,7 +358,7 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
         // below to select the profile config to use when a kernel dispatch is
         // recieved.
         get_profile_cache().emplace(
-            agent.id.handle, build_profile_for_agent(agent.id, std::set<std::string>{"SQ_WAVES"}));
+            agent.id.handle, build_profile_for_agent(agent.id, std::set<std::string>{"TCC_HIT"}));
     }
 
     auto client_thread = rocprofiler_callback_thread_t{};

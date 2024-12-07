@@ -27,6 +27,8 @@
 #include "lib/rocprofiler-sdk/counters/device_counting.hpp"
 #include "rocprofiler-sdk/fwd.h"
 
+#include <string.h>
+
 extern "C" {
 rocprofiler_status_t
 rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_id,
@@ -40,11 +42,35 @@ rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_i
 }
 
 rocprofiler_status_t
-rocprofiler_sample_device_counting_service(rocprofiler_context_id_t   context_id,
-                                           rocprofiler_user_data_t    user_data,
-                                           rocprofiler_counter_flag_t flags)
+rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context_id,
+                                           rocprofiler_user_data_t       user_data,
+                                           rocprofiler_counter_flag_t    flags,
+                                           rocprofiler_record_counter_t* output_records,
+                                           size_t*                       rec_count)
 {
+    if(output_records != nullptr)
+    {
+        if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) != 0)
+            return ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT;
+        CHECK(rec_count);
+        auto recs   = std::vector<rocprofiler_record_counter_t>{};
+        auto status = rocprofiler::counters::read_agent_ctx(
+            rocprofiler::context::get_registered_context(context_id), user_data, flags, &recs);
+        if(status == ROCPROFILER_STATUS_SUCCESS)
+        {
+            if(recs.size() > *rec_count)
+            {
+                *rec_count = recs.size();
+                return ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES;
+            }
+            *rec_count = recs.size();
+            std::memcpy(
+                output_records, recs.data(), sizeof(rocprofiler_record_counter_t) * recs.size());
+        }
+        return status;
+    }
+
     return rocprofiler::counters::read_agent_ctx(
-        rocprofiler::context::get_registered_context(context_id), user_data, flags);
+        rocprofiler::context::get_registered_context(context_id), user_data, flags, nullptr);
 }
 }

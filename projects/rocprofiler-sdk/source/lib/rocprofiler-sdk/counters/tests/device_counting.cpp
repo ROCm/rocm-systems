@@ -108,10 +108,10 @@ test_init()
     hsa::get_queue_controller()->init(get_api_table(), get_ext_table());
 }
 
-std::vector<rocprofiler_record_counter_t>&
+common::Synchronized<std::vector<rocprofiler_record_counter_t>>&
 global_recs()
 {
-    static std::vector<rocprofiler_record_counter_t> recs;
+    static common::Synchronized<std::vector<rocprofiler_record_counter_t>> recs;
     return recs;
 }
 
@@ -146,7 +146,7 @@ check_output_created(rocprofiler_context_id_t,
             }
             found_value = record->user_data.value;
             // ROCP_ERROR << fmt::format("Found counter value: {}", record->counter_value);
-            global_recs().push_back(*record);
+            global_recs().wlock([&](auto& data) { data.push_back(*record); });
         }
     }
 
@@ -319,6 +319,7 @@ protected:
             size_t track_metric = 0;
             for(auto& metric : metrics)
             {
+                std::vector<rocprofiler_record_counter_t> output_records(10000);
                 // global_recs().clear();
                 track_metric++;
                 ROCP_ERROR << "Testing metric " << metric.name();
@@ -402,9 +403,23 @@ protected:
                                         HSA_WAIT_STATE_BLOCKED);
 
                 // Sample the counting service.
-                ROCPROFILER_CALL(
-                    rocprofiler_sample_device_counting_service(ctx, {.value = track_metric}, flags),
-                    "Could not sample");
+
+                if(flags == ROCPROFILER_COUNTER_FLAG_ASYNC)
+                {
+                    ROCPROFILER_CALL(rocprofiler_sample_device_counting_service(
+                                         ctx, {.value = track_metric}, flags, nullptr, nullptr),
+                                     "Could not sample");
+                }
+                else
+                {
+                    global_recs().wlock([&](auto& _data) { _data.clear(); });
+                    size_t out_count = output_records.size();
+                    ROCPROFILER_CALL(
+                        rocprofiler_sample_device_counting_service(
+                            ctx, {.value = track_metric}, flags, output_records.data(), &out_count),
+                        "Could not sample");
+                    output_records.resize(out_count);
+                }
                 ROCPROFILER_CALL(rocprofiler_stop_context(ctx), "Could not stop context");
                 rocprofiler_flush_buffer(opt_buff_id);
 
@@ -416,6 +431,27 @@ protected:
                    static_cast<int64_t>(track_metric))
                 {
                     ROCP_FATAL << "Failed to get data for " << metric.name();
+                }
+                else if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
+                {
+                    auto recs_local = global_recs().rlock([](const auto& data) { return data; });
+
+                    if(recs_local.size() != output_records.size())
+                    {
+                        ROCP_FATAL << "Output size does not match: " << recs_local.size() << " "
+                                   << output_records.size();
+                    }
+                    if(!std::equal(recs_local.begin(),
+                                   recs_local.end(),
+                                   output_records.begin(),
+                                   [](const auto& a, const auto& b) {
+                                       return a.id == b.id && a.counter_value == b.counter_value &&
+                                              a.dispatch_id == b.dispatch_id &&
+                                              a.agent_id.handle == b.agent_id.handle;
+                                   }))
+                    {
+                        ROCP_FATAL << "Output does not match between buffer and callback";
+                    }
                 }
             }
             hsa_signal_destroy(completion_signal);
@@ -599,9 +635,10 @@ TEST_F(device_counting_service_test, async_counters) { test_run(ROCPROFILER_COUN
 TEST_F(device_counting_service_test, sync_grbm_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GRBM_COUNT"}, 50000);
-    ROCP_ERROR << global_recs().size();
+    auto local_recs = global_recs().rlock([](const auto& data) { return data; });
+    ROCP_ERROR << local_recs.size();
 
-    for(const auto& val : global_recs())
+    for(const auto& val : local_recs)
     {
         rocprofiler_counter_id_t id;
         rocprofiler_query_record_counter_id(val.id, &id);
@@ -615,9 +652,10 @@ TEST_F(device_counting_service_test, sync_grbm_verify)
 TEST_F(device_counting_service_test, sync_gpu_util_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"GPU_UTIL"}, 50000);
-    ROCP_ERROR << global_recs().size();
+    auto local_recs = global_recs().rlock([](const auto& data) { return data; });
+    ROCP_ERROR << local_recs.size();
 
-    for(const auto& val : global_recs())
+    for(const auto& val : local_recs)
     {
         rocprofiler_counter_id_t id;
         rocprofiler_query_record_counter_id(val.id, &id);
@@ -631,9 +669,10 @@ TEST_F(device_counting_service_test, sync_gpu_util_verify)
 TEST_F(device_counting_service_test, sync_sq_waves_verify)
 {
     test_run(ROCPROFILER_COUNTER_FLAG_NONE, {"SQ_WAVES_sum"}, 50000);
-    ROCP_ERROR << global_recs().size();
+    auto local_recs = global_recs().rlock([](const auto& data) { return data; });
+    ROCP_ERROR << local_recs.size();
 
-    for(const auto& val : global_recs())
+    for(const auto& val : local_recs)
     {
         rocprofiler_counter_id_t id;
         rocprofiler_query_record_counter_id(val.id, &id);

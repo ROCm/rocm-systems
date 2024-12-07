@@ -289,8 +289,11 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
         rocprofiler_start_context(get_client_ctx());
         while(exit_toggle().load() == false)
         {
-            rocprofiler_sample_device_counting_service(
-                get_client_ctx(), {.value = count}, ROCPROFILER_COUNTER_FLAG_NONE);
+            rocprofiler_sample_device_counting_service(get_client_ctx(),
+                                                       {.value = count},
+                                                       ROCPROFILER_COUNTER_FLAG_NONE,
+                                                       nullptr,
+                                                       nullptr);
             count++;
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }

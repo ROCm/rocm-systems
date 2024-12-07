@@ -106,18 +106,28 @@ rocprofiler_configure_device_counting_service(rocprofiler_context_id_t context_i
  * @param [in] context_id context id
  * @param [in] user_data User supplied data, included in records outputted to buffer.
  * @param [in] flags Flags to specify how the counter data should be collected (defaults to sync).
+ * @param [in/out] output_records Output records collected via sampling (output is also written to
+ * buffer). Must be allocated by caller.
+ * @param [in/out] rec_count On entry, this is the maximum number of records rocprof can store in
+ * output_records. On exit, contains the number of actual records.
  * @return ::rocprofiler_status_t
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_INVALID Returned if the context does not exist or
  * the context is not configured for agent profiling.
  * @retval ::ROCPROFILER_STATUS_ERROR_CONTEXT_ERROR Returned if another operation is in progress (
  * start/stop ctx or another read).
  * @retval ::ROCPROFILER_STATUS_ERROR Returned if HSA has not been initialized yet.
+ * @retval ::ROCPROFILER_STATUS_ERROR_OUT_OF_RESOURCES Returned output_records is set but size is
+ * too small to store results
  * @retval ::ROCPROFILER_STATUS_SUCCESS Returned if read request was successful.
+ * @retval ::ROCPROFILER_STATUS_ERROR_INVALID_ARGUMENT Returned If ASYNC is being used while
+ * output_records is not null.
  */
 rocprofiler_status_t
-rocprofiler_sample_device_counting_service(rocprofiler_context_id_t   context_id,
-                                           rocprofiler_user_data_t    user_data,
-                                           rocprofiler_counter_flag_t flags) ROCPROFILER_API;
+rocprofiler_sample_device_counting_service(rocprofiler_context_id_t      context_id,
+                                           rocprofiler_user_data_t       user_data,
+                                           rocprofiler_counter_flag_t    flags,
+                                           rocprofiler_record_counter_t* output_records,
+                                           size_t*                       rec_count) ROCPROFILER_API;
 
 /** @} */
 

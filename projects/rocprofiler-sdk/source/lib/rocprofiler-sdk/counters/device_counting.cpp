@@ -156,6 +156,10 @@ agent_async_handler(hsa_signal_value_t /*signal_v*/, void* data)
         {
             val.user_data = callback_data.user_data;
             val.agent_id  = prof_config->agent->id;
+            if(callback_data.cached_counters)
+            {
+                callback_data.cached_counters->push_back(val);
+            }
             buf->emplace(
                 ROCPROFILER_BUFFER_CATEGORY_COUNTERS, ROCPROFILER_COUNTER_RECORD_VALUE, val);
         }
@@ -253,9 +257,10 @@ init_callback_data(rocprofiler::counters::agent_callback_data& callback_data,
  * and trigger the async handler manually.
  */
 rocprofiler_status_t
-read_agent_ctx(const context::context*    ctx,
-               rocprofiler_user_data_t    user_data,
-               rocprofiler_counter_flag_t flags)
+read_agent_ctx(const context::context*                    ctx,
+               rocprofiler_user_data_t                    user_data,
+               rocprofiler_counter_flag_t                 flags,
+               std::vector<rocprofiler_record_counter_t>* out_counters)
 {
     rocprofiler_status_t status = ROCPROFILER_STATUS_SUCCESS;
     if(!ctx->device_counter_collection)
@@ -282,6 +287,18 @@ read_agent_ctx(const context::context*    ctx,
 
     for(auto& callback_data : agent_ctx.agent_data)
     {
+        auto wait_if_sync = [&]() {
+            if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0)
+            {
+                // Wait for any inprogress samples to complete before returning
+                hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
+                                                                  HSA_SIGNAL_CONDITION_EQ,
+                                                                  1,
+                                                                  UINT64_MAX,
+                                                                  HSA_WAIT_STATE_ACTIVE);
+            }
+        };
+
         if(!callback_data.profile || !callback_data.set_profile) continue;
         const auto* agent = agent::get_agent_cache(callback_data.profile->agent);
 
@@ -295,6 +312,11 @@ read_agent_ctx(const context::context*    ctx,
         // No AQL packet, nothing to do here.
         if(!callback_data.packet) continue;
 
+        wait_if_sync();
+
+        if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0)
+            callback_data.cached_counters = out_counters;
+
         // If we have no hardware counters but a packet. The caller is expecting
         // non-hardware based counter values to be returned. We can skip packet injection
         // and trigger the async handler directly
@@ -302,16 +324,7 @@ read_agent_ctx(const context::context*    ctx,
         {
             callback_data.user_data = user_data;
             hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, -1);
-            // Wait for the barrier/read packet to complete
-            if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
-            {
-                // Wait for any inprogress samples to complete before returning
-                hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                                  HSA_SIGNAL_CONDITION_EQ,
-                                                                  1,
-                                                                  UINT64_MAX,
-                                                                  HSA_WAIT_STATE_ACTIVE);
-            }
+            wait_if_sync();
             continue;
         }
 
@@ -334,17 +347,8 @@ read_agent_ctx(const context::context*    ctx,
         hsa::get_core_table()->hsa_signal_store_relaxed_fn(callback_data.completion, 0);
         callback_data.user_data = user_data;
         submitPacket(agent->profile_queue(), &barrier.barrier_and);
-
-        // Wait for the barrier/read packet to complete
-        if(flags != ROCPROFILER_COUNTER_FLAG_ASYNC)
-        {
-            // Wait for any inprogress samples to complete before returning
-            hsa::get_core_table()->hsa_signal_wait_relaxed_fn(callback_data.completion,
-                                                              HSA_SIGNAL_CONDITION_EQ,
-                                                              1,
-                                                              UINT64_MAX,
-                                                              HSA_WAIT_STATE_ACTIVE);
-        }
+        wait_if_sync();
+        if((flags & ROCPROFILER_COUNTER_FLAG_ASYNC) == 0) callback_data.cached_counters = nullptr;
     }
 
     agent_ctx.status.exchange(rocprofiler::context::device_counting_service::state::ENABLED);
