@@ -69,12 +69,22 @@ static void mallocDevBuf(void** pp, size_t size, DEV_MEM_TYPE memType) {
     HIP_CHECK(hipMalloc(pp, size));
     break;
   case FINE_GRAINED:
+#if HT_AMD
     HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocFinegrained));
+#else
+    fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
+    REQUIRE(false);
+#endif
     break;
   case EXTENDED_FINE_GRAINED:
     // Extended - Scope Fine Grained Memory: read is cached, write is not
     // Perf gain compared with cacheable write
+#if HT_AMD
     HIP_CHECK(hipExtMallocWithFlags(pp, size, hipDeviceMallocUncached));
+#else
+    fprintf(stderr, "Unsupported memType for nvidia hardware: %d\n", memType);
+    REQUIRE(false);
+#endif
     break;
   default:
     fprintf(stderr, "Unknown memType = %d\n", memType);
@@ -232,12 +242,17 @@ static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu,
 
 static void testCopyPerf(bool toRemote, bool kernelCopy, bool onOneGpu) {
   fprintf(stderr, "**********************************************************\n");
+#if HT_AMD
   for (int srcType = COARSE_GRAINED; srcType < UNKNOWN_MEM; srcType++) {
     for (int dstType = COARSE_GRAINED; dstType < UNKNOWN_MEM; dstType++) {
       testCopyPerf(toRemote, kernelCopy, onOneGpu,
         static_cast<DEV_MEM_TYPE>(srcType), static_cast<DEV_MEM_TYPE>(dstType));
     }
   }
+#else
+  // Only support coarse grained memory allocation on nvidia GPUs
+  testCopyPerf(toRemote, kernelCopy, onOneGpu, COARSE_GRAINED, COARSE_GRAINED);
+#endif
 }
 
 /**
