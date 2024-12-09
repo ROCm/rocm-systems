@@ -44,10 +44,18 @@ __global__  void CoherentTst(int *ptr, int PeakClk) {
   // Incrementing the value by 1
   int64_t GpuFrq = int64_t(PeakClk) * 1000;
   int64_t StrtTck = clock64();
+  #if HT_AMD
+  atomicAdd_system(ptr, 1);
+  #else
   atomicAdd(ptr, 1);
+  #endif
   // The following while loop checks the value in ptr for around 3-4 seconds
   while ((clock64() - StrtTck) <= (3 * GpuFrq)) {
+    #if HT_AMD
+    if (atomicCAS_system(ptr, 3, 4) == 3) break;
+    #else
     if (atomicCAS(ptr, 3, 4) == 3) break;
+    #endif
   }
 }
 
@@ -56,10 +64,10 @@ __global__  void CoherentTst_gfx11(int *ptr, int PeakClk) {
   // Incrementing the value by 1
   int64_t GpuFrq = int64_t(PeakClk) * 1000;
   int64_t StrtTck = clock_function();
-  atomicAdd(ptr, 1);
+  atomicAdd_system(ptr, 1);
   // The following while loop checks the value in ptr for around 3-4 seconds
   while ((clock_function() - StrtTck) <= (3 * GpuFrq)) {
-    if (atomicCAS(ptr, 3, 4) == 3) break;
+    if (atomicCAS_system(ptr, 3, 4) == 3) break;
   }
 #endif
 }
