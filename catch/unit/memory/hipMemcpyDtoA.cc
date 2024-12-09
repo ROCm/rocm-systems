@@ -77,3 +77,59 @@ TEST_CASE("Unit_hipMemcpyDtoA_Negative") {
 
   HIP_CHECK(hipFreeArray(dst_array));
 }
+
+/**
+ * Test Description
+ * ------------------------
+ * - Test case to validate basic functionality of hipMemcpyDtoA,
+ *   Step 1 : Take two host arrays srcHost, dstHost(fill with value)
+ *   Step 2 : Fill srcHost with valid value and dstHost with 0
+ *   Step 3 : Take srcDevice and copy data from srcHost to srcDevice
+ *   Step 4 : Take the array and copy data from srcDevice to array
+ *   Step 5 : Copy data from array to dstHost
+ *   Step 6 : Validate dstHost, it should contain valid value
+ * Test source
+ * ------------------------
+ *    - catch/unit/memory/hipMemcpyDtoA.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 6.2
+ */
+TEST_CASE("Unit_hipMemcpyDtoA_BasicPositive") {
+  CHECK_IMAGE_SUPPORT
+
+  const size_t width = 1024;
+  const size_t height = 1;
+  const int size = width * height;
+  const int sizeBytes = size * sizeof(int);
+  const int value = 200;
+
+  std::vector<int> srcHost(size), dstHost(size);
+  for (int i = 0; i < size; i++) {
+    srcHost[i] = value; dstHost[i] = 0;
+  }
+
+  int* srcDevice = nullptr;
+  HIP_CHECK(hipMalloc(&srcDevice, sizeBytes));
+  REQUIRE(srcDevice != nullptr);
+  HIP_CHECK(hipMemcpy(srcDevice, srcHost.data(), sizeBytes,
+            hipMemcpyHostToDevice));
+
+  hipChannelFormatDesc desc = hipCreateChannelDesc<int>();
+  unsigned int flags = hipArrayDefault;
+  hipArray_t array = nullptr;
+  HIP_CHECK(hipMallocArray(&array, &desc, width, height, flags));
+  REQUIRE(array != nullptr);
+
+  HIP_CHECK(hipMemcpyDtoA(array, 0,
+                          reinterpret_cast<hipDeviceptr_t>(srcDevice),
+                          sizeBytes));
+
+  HIP_CHECK(hipMemcpyAtoH(dstHost.data(), array, 0, sizeBytes));
+  for (int i = 0; i < size; i++) {
+    REQUIRE(dstHost[i] == value);
+  }
+
+  HIP_CHECK(hipFree(srcDevice));
+  HIP_CHECK(hipFreeArray(array));
+}
