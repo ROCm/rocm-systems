@@ -59,6 +59,13 @@ function(DOCS_EXECUTE_PROCESS)
     endif()
 endfunction()
 
+include(ProcessorCount)
+processorcount(ROCP_NUM_PROCS)
+if(NOT ROCP_NUM_PROCS EQUAL 0)
+    set(DOCS_BUILD_JOBS -j${ROCP_NUM_PROCS})
+    message(STATUS "Using ${ROCP_NUM_PROCS} jobs for docs build")
+endif()
+
 file(
     WRITE "${CMAKE_CURRENT_BINARY_DIR}/build-docs.sh"
     "#!${SHELL_CMD}
@@ -112,7 +119,7 @@ doxygen rocprofiler-sdk.dox
 
 doxysphinx build \${WORK_DIR} \${WORK_DIR}/_build/html \${WORK_DIR}/_doxygen/html
 
-make html SPHINXOPTS=\"-W --keep-going -n\"
+make html SPHINXOPTS=\"-W --keep-going ${DOCS_BUILD_JOBS} -n\"
 
 rm -rf ${PROJECT_SOURCE_DIR}/build-docs
 ")

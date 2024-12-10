@@ -108,7 +108,7 @@ CITE_BIB_FILES         =
 #---------------------------------------------------------------------------
 # Configuration options related to warning and progress messages
 #---------------------------------------------------------------------------
-QUIET                  = NO
+QUIET                  = YES
 WARNINGS               = YES
 WARN_IF_UNDOCUMENTED   = YES
 WARN_IF_DOC_ERROR      = YES
@@ -145,7 +145,11 @@ EXCLUDE_SYMLINKS       = YES
 EXCLUDE_PATTERNS       = */.git/* \
                          @SOURCE_DIR@/**/tests/* \
                          @SOURCE_DIR@/**/scripts/* \
-                         @SOURCE_DIR@/**/docs/*
+                         @SOURCE_DIR@/**/docs/* \
+                         @SOURCE_DIR@/**/cmake/* \
+                         @SOURCE_DIR@/**/external/* \
+                         @SOURCE_DIR@/**/RPM/* \
+                         @SOURCE_DIR@/**/ISSUE_TEMPLATE/*
 EXCLUDE_SYMBOLS        = "std::*" \
                          "ROCPROFILER_ATTRIBUTE" \
                          "ROCPROFILER_API" \
@@ -395,7 +399,7 @@ DIAFILE_DIRS           =
 PLANTUML_JAR_PATH      =
 PLANTUML_CFG_FILE      =
 PLANTUML_INCLUDE_PATH  =
-DOT_GRAPH_MAX_NODES    = 50
+DOT_GRAPH_MAX_NODES    = 100
 MAX_DOT_GRAPH_DEPTH    = 0
 DOT_MULTI_TARGETS      = YES
 GENERATE_LEGEND        = YES

@@ -169,7 +169,7 @@ typedef enum  // NOLINT(performance-enum-size)
     ROCPROFILER_CALLBACK_TRACING_SCRATCH_MEMORY,  ///< @see ::rocprofiler_scratch_memory_operation_t
     ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,    ///< Callbacks for kernel dispatches
     ROCPROFILER_CALLBACK_TRACING_MEMORY_COPY,        ///< @see ::rocprofiler_memory_copy_operation_t
-    ROCPROFILER_CALLBACK_TRACING_RCCL_API,           ///< @RCCL tracing
+    ROCPROFILER_CALLBACK_TRACING_RCCL_API,           ///< RCCL tracing
     ROCPROFILER_CALLBACK_TRACING_OMPT,               ///< @see ::rocprofiler_ompt_operation_t
     ROCPROFILER_CALLBACK_TRACING_MEMORY_ALLOCATION,  ///< @see
                                                      ///< ::rocprofiler_memory_allocation_operation_t

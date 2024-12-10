@@ -66,8 +66,7 @@ typedef struct
  * @param [in] shader_engine_id ID of shader engine, as enabled by SE_MASK
  * @param [in] data Pointer to the buffer containing the ATT data
  * @param [in] data_size Number of bytes in "data"
- * @param [in] userdata_dispatch Passed back to user from rocprofiler_att_dispatch_callback_t()
- * @param [in] userdata_config Passed back to user from configure_[...]_service()
+ * @param [in] userdata Passed back to user from rocprofiler_att_dispatch_callback_t()
  */
 typedef void (*rocprofiler_att_shader_data_callback_t)(int64_t                 shader_engine_id,
                                                        void*                   data,
