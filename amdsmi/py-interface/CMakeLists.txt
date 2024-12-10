@@ -97,8 +97,10 @@ add_custom_target(
             ${PY_PACKAGE_DIR}/libamd_smi.so)
 
 install(
-    FILES ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/pyproject.toml
-          ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/setup.py ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/_version.py
+    FILES
+        ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/pyproject.toml
+        ${CMAKE_CURRENT_BINARY_DIR}/${PY_BUILD_DIR}/setup.py
+        ${CMAKE_CURRENT_BINARY_DIR}/${PY_PACKAGE_DIR}/_version.py
     DESTINATION ${PY_WRAPPER_INSTALL_DIR}
     COMPONENT dev)
 

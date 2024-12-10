@@ -45,6 +45,7 @@ from functools import lru_cache
 from amdsmi_init import *
 from BDF import BDF
 
+ENABLE_ESMI_LIB = not os.path.exists('/sys/module/dxgkrnl')
 
 class AMDSMIHelpers():
     """Helper functions that aren't apart of the AMDSMI API
@@ -207,7 +208,7 @@ class AMDSMIHelpers():
 
 
     def is_amd_hsmp_initialized(self):
-        return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_CPUS
+        return AMDSMI_INIT_FLAG & amdsmi_interface.amdsmi_wrapper.AMDSMI_INIT_AMD_CPUS & ENABLE_ESMI_LIB
 
 
     def is_ainic_initialized(self):
