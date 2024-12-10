@@ -537,10 +537,8 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
         return AMDSMI_STATUS_INVAL;
     }
 
-    std::vector<amd::smi::AMDSmiSocket*>& sockets
-            = amd::smi::AMDSmiSystem::getInstance().get_sockets();
-    uint32_t socket_size = static_cast<uint32_t>(sockets.size());
-    // Get the socket size
+    auto& platform = Platform::instance();
+    uint32_t socket_size = platform.GetDeviceCount();
     if (socket_handles == nullptr) {
         *socket_count = socket_size;
         return AMDSMI_STATUS_SUCCESS;
@@ -548,10 +546,9 @@ amdsmi_status_t amdsmi_get_socket_handles(uint32_t *socket_count,
 
     // If the socket_handles can hold all sockets, return all of them.
     *socket_count = *socket_count >= socket_size ? socket_size : *socket_count;
-
     // Copy the socket handles
     for (uint32_t i = 0; i < *socket_count; i++) {
-        socket_handles[i] = reinterpret_cast<amdsmi_socket_handle>(sockets[i]);
+        socket_handles[i] = platform.GetDevice(i);
     }
 
     return AMDSMI_STATUS_SUCCESS;
@@ -566,13 +563,7 @@ amdsmi_status_t amdsmi_get_socket_info(
         return AMDSMI_STATUS_INVAL;
     }
 
-
-    amd::smi::AMDSmiSocket* socket = nullptr;
-    amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
-                    .handle_to_socket(socket_handle, &socket);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
-
-    snprintf(name, len, "%s", socket->get_socket_id().c_str()); 
+    memset(name, 0, sizeof(char) * len);
 
     return AMDSMI_STATUS_SUCCESS;
 }
