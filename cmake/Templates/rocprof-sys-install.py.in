@@ -11,6 +11,7 @@ from urllib import request
 from urllib.error import HTTPError
 
 rocprofsys_version = "@ROCPROFSYS_VERSION@"
+rocprofsys_git_tag = "@ROCPROFSYS_GIT_TAG@"
 _rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
 _rocm_version = None
 
@@ -232,7 +233,7 @@ if __name__ == "__main__":
         )
 
     script = f"rocprofiler-systems-{rocprofsys_version}-{os_distrib}-{os_version}{rocm_version}{extensions}.sh"
-    url = f"https://github.com/ROCm/rocprofiler-systems/releases/download/v{rocprofsys_version}/{script}"
+    url = f"https://github.com/ROCm/rocprofiler-systems/releases/download/{rocprofsys_git_tag}/{script}"
     download_dir = (
         tempfile.mkdtemp(prefix="rocprof-sys-install-")
         if args.download_path is None

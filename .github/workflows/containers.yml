@@ -91,6 +91,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "20.04"
             rocm-version: "6.2"
+          - os-distro: "ubuntu"
+            os-version: "20.04"
+            rocm-version: "6.3"
           # ubuntu 22.04
           - os-distro: "ubuntu"
             os-version: "22.04"
@@ -98,6 +101,9 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "6.2"
+          - os-distro: "ubuntu"
+            os-version: "22.04"
+            rocm-version: "6.3"
           # opensuse 15.5
           - os-distro: "opensuse"
             os-version: "15.5"
@@ -105,6 +111,9 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.5"
             rocm-version: "6.2"
+          - os-distro: "opensuse"
+            os-version: "15.5"
+            rocm-version: "6.3"
           # opensuse 15.6
           - os-distro: "opensuse"
             os-version: "15.6"
@@ -112,12 +121,15 @@ jobs:
           - os-distro: "opensuse"
             os-version: "15.6"
             rocm-version: "6.2"
-          # RHEL 8.8
+          - os-distro: "opensuse"
+            os-version: "15.6"
+            rocm-version: "6.3"
+          # RHEL 8.9
           - os-distro: "rhel"
-            os-version: "8.8"
+            os-version: "8.9"
             rocm-version: "0.0"
           - os-distro: "rhel"
-            os-version: "8.8"
+            os-version: "8.9"
             rocm-version: "6.2"
           # RHEL 8.10
           - os-distro: "rhel"
@@ -126,12 +138,15 @@ jobs:
           - os-distro: "rhel"
             os-version: "8.10"
             rocm-version: "6.2"
-          # RHEL 9.2
           - os-distro: "rhel"
-            os-version: "9.2"
+            os-version: "8.10"
+            rocm-version: "6.3"
+          # RHEL 9.3
+          - os-distro: "rhel"
+            os-version: "9.3"
             rocm-version: "0.0"
           - os-distro: "rhel"
-            os-version: "9.2"
+            os-version: "9.3"
             rocm-version: "6.2"
           # RHEL 9.4
           - os-distro: "rhel"
@@ -140,6 +155,16 @@ jobs:
           - os-distro: "rhel"
             os-version: "9.4"
             rocm-version: "6.2"
+          - os-distro: "rhel"
+            os-version: "9.4"
+            rocm-version: "6.3"
+          # RHEL 9.5
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "0.0"
+          - os-distro: "rhel"
+            os-version: "9.5"
+            rocm-version: "6.3"
 
     steps:
       - uses: actions/checkout@v4
