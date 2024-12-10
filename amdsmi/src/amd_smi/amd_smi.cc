@@ -609,27 +609,23 @@ amdsmi_status_t amdsmi_get_processor_handles(amdsmi_socket_handle socket_handle,
         return AMDSMI_STATUS_INVAL;
     }
 
-    // Get the socket object via socket handle.
-    amd::smi::AMDSmiSocket* socket = nullptr;
-    amdsmi_status_t r = amd::smi::AMDSmiSystem::getInstance()
-                    .handle_to_socket(socket_handle, &socket);
-    if (r != AMDSMI_STATUS_SUCCESS) return r;
+    // unused parameter socket_handle
+    (void)socket_handle;
+    auto& platform = Platform::instance();
+    auto device_count = static_cast<uint32_t>(platform.GetDeviceCount());
 
-
-    std::vector<amd::smi::AMDSmiProcessor*>& processors = socket->get_processors();
-    uint32_t processor_size = static_cast<uint32_t>(processors.size());
     // Get the processor count only
     if (processor_handles == nullptr) {
-        *processor_count = processor_size;
+        *processor_count = device_count;
         return AMDSMI_STATUS_SUCCESS;
     }
 
     // If the processor_handles can hold all processors, return all of them.
-    *processor_count = *processor_count >= processor_size ? processor_size : *processor_count;
+    *processor_count = *processor_count >= device_count ? device_count : *processor_count;
 
     // Copy the processor handles
     for (uint32_t i = 0; i < *processor_count; i++) {
-        processor_handles[i] = reinterpret_cast<amdsmi_processor_handle>(processors[i]);
+        processor_handles[i] = reinterpret_cast<amdsmi_processor_handle>(platform.GetDevice(i));
     }
 
     return AMDSMI_STATUS_SUCCESS;
