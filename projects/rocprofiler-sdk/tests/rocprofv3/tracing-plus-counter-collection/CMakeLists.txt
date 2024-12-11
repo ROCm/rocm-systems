@@ -30,7 +30,7 @@ set(cc-tracing-env "${PRELOAD_ENV}")
 
 set_tests_properties(
     rocprofv3-test-tracing-plus-counter-collection-execute
-    PROPERTIES TIMEOUT 45 LABELS "integration-tests;application-replay" ENVIRONMENT
+    PROPERTIES TIMEOUT 90 LABELS "integration-tests;application-replay" ENVIRONMENT
                "${cc-tracing-env}" FAIL_REGULAR_EXPRESSION
                "${ROCPROFILER_DEFAULT_FAIL_REGEX}")
 

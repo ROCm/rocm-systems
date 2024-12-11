@@ -59,6 +59,12 @@ start()
 
 namespace
 {
+struct tool_data_t
+{
+    std::mutex    mut{};
+    std::ostream* output_stream{nullptr};
+};
+
 rocprofiler_context_id_t&
 get_client_ctx()
 {
@@ -70,8 +76,8 @@ void
 record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
                 rocprofiler_record_counter_t*                record_data,
                 size_t                                       record_count,
-                rocprofiler_user_data_t                      user_data,
-                void*                                        callback_data_args)
+                rocprofiler_user_data_t /* user_data */,
+                void* callback_data_args)
 {
     std::stringstream ss;
     ss << "Dispatch_Id=" << dispatch_data.dispatch_info.dispatch_id
@@ -81,11 +87,11 @@ record_callback(rocprofiler_dispatch_counting_service_data_t dispatch_data,
         ss << "(Id: " << record_data[i].id << " Value [D]: " << record_data[i].counter_value
            << "),";
 
-    auto* output_stream = static_cast<std::ostream*>(callback_data_args);
-    if(!output_stream) throw std::runtime_error{"nullptr to output stream"};
-    *output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
+    auto* tool = static_cast<tool_data_t*>(callback_data_args);
+    if(!tool || !tool->output_stream) throw std::runtime_error{"nullptr to output stream"};
 
-    (void) user_data;
+    auto _lk = std::unique_lock{tool->mut};
+    *tool->output_stream << "[" << __FUNCTION__ << "] " << ss.str() << "\n";
 }
 
 /**
@@ -197,12 +203,20 @@ tool_init(rocprofiler_client_finalize_t, void* user_data)
 void
 tool_fini(void* user_data)
 {
+    assert(user_data);
     std::clog << "In tool fini\n";
     rocprofiler_stop_context(get_client_ctx());
+    auto* tool_data = static_cast<tool_data_t*>(user_data);
 
-    auto* output_stream = static_cast<std::ostream*>(user_data);
-    *output_stream << std::flush;
-    if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
+    {
+        auto  _lk           = std::unique_lock{tool_data->mut};
+        auto* output_stream = tool_data->output_stream;
+
+        *output_stream << std::flush;
+        if(output_stream != &std::cout && output_stream != &std::cerr) delete output_stream;
+    }
+
+    delete tool_data;
 }
 }  // namespace
 
@@ -227,22 +241,23 @@ rocprofiler_configure(uint32_t                 version,
 
     std::clog << info.str() << std::endl;
 
-    std::ostream* output_stream = nullptr;
-    std::string   filename      = "counter_collection.log";
+    auto* tool_data = new tool_data_t{};
+
+    std::string filename = "counter_collection.log";
     if(auto* outfile = getenv("ROCPROFILER_SAMPLE_OUTPUT_FILE"); outfile) filename = outfile;
     if(filename == "stdout")
-        output_stream = &std::cout;
+        tool_data->output_stream = &std::cout;
     else if(filename == "stderr")
-        output_stream = &std::cerr;
+        tool_data->output_stream = &std::cerr;
     else
-        output_stream = new std::ofstream{filename};
+        tool_data->output_stream = new std::ofstream{filename};
 
     // create configure data
     static auto cfg =
         rocprofiler_tool_configure_result_t{sizeof(rocprofiler_tool_configure_result_t),
                                             &tool_init,
                                             &tool_fini,
-                                            static_cast<void*>(output_stream)};
+                                            static_cast<void*>(tool_data)};
 
     // return pointer to configure data
     return &cfg;

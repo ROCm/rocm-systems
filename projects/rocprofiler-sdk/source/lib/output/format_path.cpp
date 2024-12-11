@@ -43,6 +43,8 @@
 #include <cstring>
 #include <ctime>
 #include <fstream>
+#include <limits>
+#include <locale>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -65,6 +67,17 @@ const auto env_regexes =
 //  - $ENV{USER}        Similar to CMake
 //  - %q{USER}          Compatibility with NVIDIA
 //
+
+// https://gcc.gnu.org/bugzilla/show_bug.cgi?id=77704
+// NOLINTBEGIN
+[[maybe_unused]] volatile bool _initLocale = []() {
+    const std::ctype<char>& ct(std::use_facet<std::ctype<char>>(std::locale()));
+    for(size_t i = 0; i <= std::numeric_limits<unsigned char>::max(); i++)
+        ct.narrow(static_cast<char>(i), '\0');
+    ct.narrow(0, 0, 0, 0);
+    return true;
+}();
+// NOLINTEND
 
 std::string
 format_path_impl(std::string _fpath, const std::vector<output_key>& _keys)

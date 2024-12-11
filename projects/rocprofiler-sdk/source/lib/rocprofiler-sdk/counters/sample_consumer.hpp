@@ -44,21 +44,23 @@ public:
 
     void start()
     {
-        {
-            std::unique_lock<std::mutex> lk(mut);
-            if(valid.exchange(true)) return;
-        }
+        std::unique_lock<std::mutex> lk(mut);
+
+        if(valid.exchange(true)) return;
+        exited.store(false);
+
         consumer = std::thread{&consumer_thread_t::consumer_loop, this};
     }
 
     void exit()
     {
-        {
-            std::unique_lock<std::mutex> lk(mut);
-            if(!valid.exchange(false)) return;
-            cv.notify_one();
-        }
-        consumer.join();
+        std::unique_lock<std::mutex> lk(mut);
+
+        valid.store(false);
+        cv.notify_all();
+
+        if(!exited) cv.wait(lk, [&] { return exited.load(); });
+        if(consumer.joinable()) consumer.join();
     }
 
     void add(DataType&& params)
@@ -74,7 +76,7 @@ public:
 
         buffer.at(write_ptr % buffer.size()) = std::move(params);
         write_ptr.fetch_add(1);
-        cv.notify_one();
+        cv.notify_all();
     }
 
 protected:
@@ -86,7 +88,12 @@ protected:
             {
                 std::unique_lock<std::mutex> lk(mut);
                 cv.wait(lk, [&] { return read_ptr != write_ptr || !valid; });
-                if(!valid && read_ptr == write_ptr) return;
+                if(!valid && read_ptr == write_ptr)
+                {
+                    exited.store(true);
+                    cv.notify_all();
+                    return;
+                }
             }
 
             auto retrieved = std::move(buffer.at(read_ptr % buffer.size()));
@@ -97,6 +104,7 @@ protected:
 
     consume_func_t             consume_fn;
     std::atomic<bool>          valid{false};
+    std::atomic<bool>          exited{true};
     std::mutex                 mut;
     std::atomic<size_t>        write_ptr{0};
     std::atomic<size_t>        read_ptr{0};
