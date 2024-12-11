@@ -174,14 +174,14 @@ double RdcRocpBase::run_profiler(uint32_t gpu_index, rdc_field_t field) {
   status = rocprofiler_stop(contexts[gpu_index], 0);
   assert(status == HSA_STATUS_SUCCESS);
 
-  double raw_value = read_feature(contexts[gpu_index], gpu_index);
+  double value = read_feature(contexts[gpu_index], gpu_index);
 
   usleep(100);
 
   status = rocprofiler_close(contexts[gpu_index]);
   assert(status == HSA_STATUS_SUCCESS);
 
-  return raw_value;
+  return value;
 }
 
 const char* RdcRocpBase::get_field_id_from_name(rdc_field_t field) {
@@ -293,10 +293,6 @@ RdcRocpBase::RdcRocpBase() {
       auto found = std::find(checked_fields.begin(), checked_fields.end(), v);
       if (found != checked_fields.end()) {
         field_to_metric.insert({k, v});
-        // initialize the buffer
-        const rdc_field_pair_t field_pair = {gpu_index, k};
-        const rdc_average_t avg = {std::vector<double>(), 0};
-        average.insert({field_pair, avg});
       }
     }
   }
@@ -328,49 +324,6 @@ RdcRocpBase::~RdcRocpBase() {
   assert(status == HSA_STATUS_ERROR_NOT_INITIALIZED);
 }
 
-double RdcRocpBase::get_average(rdc_field_pair_t field_pair, double raw_value) {
-  // check if vector exists
-  if (average.find(field_pair) == average.end()) {
-    RDC_LOG(RDC_ERROR,
-            "gpu[" << field_pair.first << "]field[" << field_pair.second << "] not found");
-    return NAN;
-  }
-
-  if (average[field_pair].buffer.size() < buffer_length_k) {
-    // buffer not yet filled up
-    average[field_pair].buffer.push_back(raw_value);
-  } else {
-    // buffer is filled up
-    average[field_pair].buffer[average[field_pair].index] = raw_value;
-  }
-
-  // RDC_LOG(RDC_DEBUG, "gpu[" << field_pair.first << "]field[" << field_pair.second <<
-  // "]avg_index["
-  //                           << average[field_pair].index << "] = " << raw_value);
-
-  average[field_pair].index++;
-  // cap index at buffer_length_k
-  average[field_pair].index = average[field_pair].index % buffer_length_k;
-
-  double sum =
-      std::accumulate(average[field_pair].buffer.begin(), average[field_pair].buffer.end(), 0.0);
-  double avg = sum / static_cast<double>(average[field_pair].buffer.size());
-
-  return avg;
-}
-
-void RdcRocpBase::reset_average(rdc_gpu_field_t gpu_field) {
-  rdc_field_pair_t pair = {gpu_field.gpu_index, gpu_field.field_id};
-  // check if vector exists
-  if (average.find(pair) == average.end()) {
-    RDC_LOG(RDC_ERROR, "gpu[" << pair.first << "]field[" << pair.second << "] not found");
-    return;
-  }
-
-  average[pair].buffer.clear();
-  average[pair].index = 0;
-}
-
 rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) {
   const auto& gpu_index = gpu_field.gpu_index;
   const auto& field = gpu_field.field_id;
@@ -384,9 +337,8 @@ rdc_status_t RdcRocpBase::rocp_lookup(rdc_gpu_field_t gpu_field, double* value) 
     return Rocp2RdcError(status);
   }
   const auto start_time = std::chrono::high_resolution_clock::now();
-  double raw_value = run_profiler(gpu_index, field);
+  *value = run_profiler(gpu_index, field);
   const auto stop_time = std::chrono::high_resolution_clock::now();
-  *value = get_average({gpu_index, field}, raw_value);
   // extra processing required
   if (eval_fields.find(field) != eval_fields.end()) {
     const auto elapsed =

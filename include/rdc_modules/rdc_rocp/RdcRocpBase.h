@@ -65,17 +65,8 @@ class RdcRocpBase {
   const char* get_field_id_from_name(rdc_field_t);
   const std::vector<rdc_field_t> get_field_ids();
 
-  /**
-   * @brief Reset average metrics for gpu_field
-   */
-  void reset_average(rdc_gpu_field_t gpu_field);
-
  protected:
  private:
-  typedef struct {
-    std::vector<double> buffer;
-    uint32_t index;
-  } rdc_average_t;
   typedef std::pair<uint32_t, rdc_field_t> rdc_field_pair_t;
   static const size_t buffer_length_k = 5;
   /**
@@ -85,13 +76,11 @@ class RdcRocpBase {
 
   double read_feature(rocprofiler_t* context, uint32_t gpu_index);
   double run_profiler(uint32_t gpu_index, rdc_field_t field);
-  double get_average(rdc_field_pair_t field_pair, double raw_value);
 
   hsa_agent_arr_t agent_arr = {};
   std::vector<hsa_queue_t*> queues;
   std::map<uint32_t, rocprofiler_feature_t> gpuid_to_feature;
   std::map<rdc_field_t, const char*> field_to_metric = {};
-  std::map<rdc_field_pair_t, rdc_average_t> average = {};
 
   // these fields must be divided by time passed
   std::unordered_set<rdc_field_t> eval_fields = {
