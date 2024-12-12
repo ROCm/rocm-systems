@@ -176,6 +176,9 @@ do
             case "${ROCM_VERSION}" in
                 6.*)
                     case "${VERSION}" in
+                        24.04)
+                            ROCM_REPO_DIST="noble"
+                            ;;
                         22.04)
                             ROCM_REPO_DIST="jammy"
                             ;;
