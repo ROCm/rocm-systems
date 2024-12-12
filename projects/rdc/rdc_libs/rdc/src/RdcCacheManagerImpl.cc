@@ -307,6 +307,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_get_stats(const char jobId[64],
   auto gpus = job_stats->second.gpu_stats.begin();
   for (; gpus != job_stats->second.gpu_stats.end(); gpus++) {
     auto& gpu_info = p_job_info->gpus[gpus->first];
+    gpu_info.gpu_id = gpus->first;  // Explicit assignment
     gpu_info.start_time = summary_info.start_time;
     gpu_info.end_time = summary_info.end_time;
     gpu_info.energy_consumed = gpus->second.energy_consumed;
@@ -449,8 +450,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(const char job_id[64],
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcCacheManagerImpl::rdc_health_set(rdc_gpu_group_t group_id,
-                                                 uint32_t gpu_index,
+rdc_status_t RdcCacheManagerImpl::rdc_health_set(rdc_gpu_group_t group_id, uint32_t gpu_index,
                                                  const rdc_field_value& value) {
   std::lock_guard<std::mutex> guard(cache_mutex_);
   RdcFieldKey field{gpu_index, value.field_id};
@@ -470,8 +470,7 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_set(rdc_gpu_group_t group_id,
     cache_sample.insert({field, ve});
 
     cache_health_.insert({group_id, cache_sample});
-  }
-  else {
+  } else {
     auto samples_ite = health_ite->second.find(field);
     if (samples_ite == health_ite->second.end()) {
       std::vector<RdcCacheEntry> ve;
@@ -486,31 +485,24 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_set(rdc_gpu_group_t group_id,
   return RDC_ST_OK;
 }
 
-rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(rdc_gpu_group_t group_id,
-                                                        uint32_t gpu_index,
-                                                        rdc_field_t field_id,
-                                                        uint64_t start_timestamp,
-                                                        uint64_t end_timestamp,
-                                                        rdc_field_value* start_value,
-                                                        rdc_field_value* end_value) {
-  if (!start_value && !end_value)
-    return RDC_ST_BAD_PARAMETER;
+rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(
+    rdc_gpu_group_t group_id, uint32_t gpu_index, rdc_field_t field_id, uint64_t start_timestamp,
+    uint64_t end_timestamp, rdc_field_value* start_value, rdc_field_value* end_value) {
+  if (!start_value && !end_value) return RDC_ST_BAD_PARAMETER;
 
   std::lock_guard<std::mutex> guard(cache_mutex_);
   auto health_ite = cache_health_.find(group_id);
-  if (health_ite == cache_health_.end())
-    return RDC_ST_NOT_FOUND;
+  if (health_ite == cache_health_.end()) return RDC_ST_NOT_FOUND;
 
   RdcFieldKey field{gpu_index, field_id};
   auto samples_ite = health_ite->second.find(field);
-  if (samples_ite == health_ite->second.end() ||
-      samples_ite->second.size() == 0)
+  if (samples_ite == health_ite->second.end() || samples_ite->second.size() == 0)
     return RDC_ST_NOT_FOUND;
 
   auto cache_values = samples_ite->second;
   rdc_status_t result = RDC_ST_OK;
   if (start_value != nullptr) {
-    //get start value
+    // get start value
     result = RDC_ST_NOT_FOUND;
     for (auto entry = cache_values.begin(); entry != cache_values.end(); entry++) {
       if (entry->last_time >= start_timestamp) {
@@ -524,8 +516,8 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(rdc_gpu_group_t group_id
         result = RDC_ST_OK;
         break;
       }
-    } //end for
-  } //end if
+    }  // end for
+  }    // end if
 
   if ((RDC_ST_OK == result) && (end_value != nullptr)) {
     // get end value
@@ -542,8 +534,8 @@ rdc_status_t RdcCacheManagerImpl::rdc_health_get_values(rdc_gpu_group_t group_id
         result = RDC_ST_OK;
         break;
       }
-    } //end for
-  } //end if
+    }  // end for
+  }    // end if
 
   return result;
 }
