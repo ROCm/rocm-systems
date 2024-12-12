@@ -53,6 +53,16 @@ jobs:
           - os-distro: "ubuntu"
             os-version: "22.04"
             rocm-version: "6.3"
+          # ubuntu 24.04
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "0.0"
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "6.2"
+          - os-distro: "ubuntu"
+            os-version: "24.04"
+            rocm-version: "6.3"
           # opensuse 15.5
           - os-distro: "opensuse"
             os-version: "15.5"
