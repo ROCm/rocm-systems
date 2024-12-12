@@ -404,7 +404,7 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterMemoryWithFlags(
   if ((MemFlags.ui32.HostAccess != 1) || (MemFlags.ui32.NonPaged == 1))
     return HSAKMT_STATUS_NOT_SUPPORTED;
 
-  if (!is_dgpu)
+  if (!hsakmt_is_dgpu)
     /* TODO: support mixed APU and dGPU configurations */
     return HSAKMT_STATUS_NOT_SUPPORTED;
 

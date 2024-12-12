@@ -40,7 +40,7 @@ wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
 extern unsigned long dxg_open_count;
 extern bool hsakmt_forked;
 extern pthread_mutex_t hsakmt_mutex;
-extern bool is_dgpu;
+extern bool hsakmt_is_dgpu;
 extern bool is_svm_api_supported;
 extern int zfb_support;
 extern int vendor_packet_process;

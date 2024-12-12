@@ -390,8 +390,9 @@ err:
 
 void topology_setup_is_dgpu_param(HsaNodeProperties *props) {
   /* if we found a dGPU node, then treat the whole system as dGPU */
+  /* noted that some APUs are also treated as dGPU in runtime */
   if (!props->NumCPUCores && props->NumFComputeCores)
-    is_dgpu = true;
+    hsakmt_is_dgpu = true;
 }
 
 static HSAKMT_STATUS topology_get_cpu_model_name(HsaNodeProperties& props,
@@ -1010,6 +1011,8 @@ HSAKMT_STATUS topology_take_snapshot(void) {
         goto err;
       }
 
+      topology_setup_is_dgpu_param(&temp_props[i].node);
+
       if (temp_props[i].node.NumCPUCores)
         topology_get_cpu_model_name(temp_props[i].node, cpuinfo);
 
@@ -1176,8 +1179,6 @@ hsaKmtAcquireSystemProperties(HsaSystemProperties *SystemProperties) {
   assert(g_system);
 
   // err = fmm_init_process_apertures(g_system->NumNodes);
-  //  TODO: Determine if it is a dGPU
-  is_dgpu = true;
   if (err != HSAKMT_STATUS_SUCCESS)
     goto init_process_apertures_failed;
 
