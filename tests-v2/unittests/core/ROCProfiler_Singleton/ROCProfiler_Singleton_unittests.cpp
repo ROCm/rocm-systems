@@ -69,7 +69,7 @@ TEST(WhenTestingDeviceInfo, DeviceInfoReadSuccessfully) {
   uint32_t array_count = 0;
   uint32_t se_num = 0;
   uint32_t cu_num = 0;
-  uint32_t cu_per_simd_array = 0;
+  uint32_t simd_count = 0;
   uint32_t simd_per_cu = 0;
   uint64_t unique_gpu_id = 0;
   uint32_t xcc_num = 1;
@@ -114,15 +114,15 @@ TEST(WhenTestingDeviceInfo, DeviceInfoReadSuccessfully) {
               shader_arrays_per_se = static_cast<uint32_t>(prop_value);
             else if (prop_name == "max_waves_per_simd")
               max_waves_per_simd = static_cast<uint32_t>(prop_value);
-            else if (prop_name == "cu_per_simd_array")
-              cu_per_simd_array = static_cast<uint32_t>(prop_value);
+            else if (prop_name == "simd_count")
+              simd_count = static_cast<uint32_t>(prop_value);
             else if (prop_name == "unique_id")
               unique_gpu_id = static_cast<uint64_t>(prop_value);
             else if (prop_name == "num_xcc")
               xcc_num = static_cast<uint32_t>(prop_value);
           }
           se_num = array_count / shader_arrays_per_se;
-          cu_num = cu_per_simd_array * array_count;
+          cu_num = simd_count / simd_per_cu;
           waves_per_cu = max_waves_per_simd * simd_per_cu;
           compute_units_per_sh = cu_num / (se_num * shader_arrays_per_se);
           wave_slots_per_simd = waves_per_cu / simd_per_cu;
