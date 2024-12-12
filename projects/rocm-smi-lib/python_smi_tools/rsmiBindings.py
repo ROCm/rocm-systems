@@ -663,6 +663,7 @@ amdgpu_xcp_metrics_t._fields_ = [
     ('jpeg_busy', c_uint16 * 32),
     ('vcn_busy', c_uint16 * 4),
     ('gfx_busy_acc', c_uint64 * 8),
+    ('gfx_below_host_limit_acc', c_uint64 * 8),
 ]
 xcp_stats_t = amdgpu_xcp_metrics_t
 
@@ -739,5 +740,7 @@ rsmi_gpu_metrics_t._fields_ = [
     ('num_partition', c_uint16),
     ('xcp_stats', xcp_stats_t * 8),
     ('pcie_lc_perf_other_end_recovery', c_uint32),
+    ('vram_max_bandwidth', c_uint64),
+    ('xgmi_link_status', c_uint16 * 8),
 ]
 amdsmi_gpu_metrics_t = rsmi_gpu_metrics_t

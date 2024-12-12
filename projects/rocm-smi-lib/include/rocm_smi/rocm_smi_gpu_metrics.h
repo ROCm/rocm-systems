@@ -109,6 +109,19 @@ struct AMDGpuMetricsHeader_v1_t {
   uint8_t  m_content_revision;
 };
 
+struct amdgpu_xcp_metrics_v1_1 {
+  /* Utilization Instantaneous (%) */
+  uint32_t gfx_busy_inst[kRSMI_MAX_NUM_XCC];
+  uint16_t jpeg_busy[kRSMI_MAX_JPEG_ENGINES];
+  uint16_t vcn_busy[kRSMI_MAX_NUM_VCNS];
+
+  /* Utilization Accumulated (%) */
+  uint64_t gfx_busy_acc[kRSMI_MAX_NUM_XCC];
+
+  /* Total App Clock Counter Accumulated */
+  uint64_t gfx_below_host_limit_acc[kRSMI_MAX_NUM_XCC];
+};
+
 struct amdgpu_xcp_metrics {
   /* Utilization Instantaneous (%) */
   uint32_t gfx_busy_inst[kRSMI_MAX_NUM_XCC];
@@ -572,7 +585,107 @@ struct AMDGpuMetrics_v16_t {
   /* PCIE other end recovery counter */
   uint32_t m_pcie_lc_perf_other_end_recovery;
 };
-using AMGpuMetricsLatest_t = AMDGpuMetrics_v16_t;
+
+struct AMDGpuMetrics_v17_t {
+  ~AMDGpuMetrics_v17_t() = default;
+  struct AMDGpuMetricsHeader_v1_t m_common_header;
+
+  /* Temperature (Celsius) */
+  uint16_t m_temperature_hotspot;
+  uint16_t m_temperature_mem;
+  uint16_t m_temperature_vrsoc;
+
+  /* Power (Watts) */
+  uint16_t m_current_socket_power;
+
+  /* Utilization (%) */
+  uint16_t m_average_gfx_activity;
+  uint16_t m_average_umc_activity;  // memory controller
+
+  /* VRAM max bandwidth at max memory clock */
+  uint64_t m_vram_max_bandwidth;  // new for 1.7
+
+  /* Energy (15.259uJ (2^-16) units) */
+  uint64_t m_energy_accumulator;
+
+  /* Driver attached timestamp (in ns) */
+  uint64_t m_system_clock_counter;
+
+  /* Accumulation cycle counter */
+  uint32_t m_accumulation_counter;
+
+  /* Accumulated throttler residencies */
+  uint32_t m_prochot_residency_acc;
+  uint32_t m_ppt_residency_acc;
+  uint32_t m_socket_thm_residency_acc;
+  uint32_t m_vr_thm_residency_acc;
+  uint32_t m_hbm_thm_residency_acc;
+
+  /* Clock Lock Status. Each bit corresponds to clock instance */
+  uint32_t m_gfxclk_lock_status;
+
+  /* Link width (number of lanes) and speed (in 0.1 GT/s) */
+  uint16_t m_pcie_link_width;
+  uint16_t m_pcie_link_speed;
+
+  /* XGMI bus width and bitrate (in Gbps) */
+  uint16_t m_xgmi_link_width;
+  uint16_t m_xgmi_link_speed;
+
+  /* Utilization Accumulated (%) */
+  uint32_t m_gfx_activity_acc;
+  uint32_t m_mem_activity_acc;
+
+  /*PCIE accumulated bandwidth (GB/sec) */
+  uint64_t m_pcie_bandwidth_acc;
+
+  /*PCIE instantaneous bandwidth (GB/sec) */
+  uint64_t m_pcie_bandwidth_inst;
+
+  /* PCIE L0 to recovery state transition accumulated count */
+  uint64_t m_pcie_l0_to_recov_count_acc;
+
+  /* PCIE replay accumulated count */
+  uint64_t m_pcie_replay_count_acc;
+
+  /* PCIE replay rollover accumulated count */
+  uint64_t m_pcie_replay_rover_count_acc;
+
+  /* PCIE NAK sent accumulated count */
+  uint32_t m_pcie_nak_sent_count_acc;
+
+  /* PCIE NAK received accumulated count */
+  uint32_t m_pcie_nak_rcvd_count_acc;
+
+  /* XGMI accumulated data transfer size(KiloBytes) */
+  uint64_t m_xgmi_read_data_acc[kRSMI_MAX_NUM_XGMI_LINKS];
+  uint64_t m_xgmi_write_data_acc[kRSMI_MAX_NUM_XGMI_LINKS];
+
+  /* XGMI link status(up/down) */
+  uint16_t m_xgmi_link_status[kRSMI_MAX_NUM_XGMI_LINKS];  // new for 1.7
+
+  uint16_t m_padding;
+
+  /* PMFW attached timestamp (10ns resolution) */
+  uint64_t m_firmware_timestamp;
+
+  /* Current clocks (Mhz) */
+  uint16_t m_current_gfxclk[kRSMI_MAX_NUM_GFX_CLKS];
+  uint16_t m_current_socclk[kRSMI_MAX_NUM_CLKS];
+  uint16_t m_current_vclk0[kRSMI_MAX_NUM_CLKS];
+  uint16_t m_current_dclk0[kRSMI_MAX_NUM_CLKS];
+  uint16_t m_current_uclk;
+
+  /* Number of current partition */
+  uint16_t m_num_partition;
+
+  /* XCP metrics stats */
+  struct amdgpu_xcp_metrics_v1_1 m_xcp_stats[kRSMI_MAX_NUM_XCP];
+
+  /* PCIE other end recovery counter */
+  uint32_t m_pcie_lc_perf_other_end_recovery;
+};
+using AMGpuMetricsLatest_t = AMDGpuMetrics_v17_t;
 
 /**
  *  This is GPU Metrics version that gets to public access.
@@ -787,8 +900,11 @@ enum class AMDGpuMetricsUnitType_t : AMDGpuMetricTypeId_t
   kMetricJpegBusy,                           // v1.6
   kMetricVcnBusy,                            // v1.6
   kMetricGfxBusyAcc,                         // v1.6
-
   kMetricPcieLCPerfOtherEndRecov,            // v1.6
+
+  kMetricVramMaxBandwidth,                   // v1.7
+  kMetricXgmiLinkStatus,                     // v1.7
+  kMetricGfxBelowHostLimitAccumulator,       // v1.7
 };
 using AMDGpuMetricsUnitTypeTranslationTbl_t = std::map<AMDGpuMetricsUnitType_t, std::string>;
 
@@ -826,6 +942,7 @@ enum class AMDGpuMetricVersionFlags_t : AMDGpuMetricVersionFlagId_t
   kGpuMetricV14 = (0x1 << 4),
   kGpuMetricV15 = (0x1 << 5),
   kGpuMetricV16 = (0x1 << 6),
+  kGpuMetricV17 = (0x1 << 7),
 };
 using AMDGpuMetricVersionTranslationTbl_t = std::map<uint16_t, AMDGpuMetricVersionFlags_t>;
 using GpuMetricTypePtr_t = std::shared_ptr<void>;
@@ -1042,6 +1159,36 @@ class GpuMetricsBase_v16_t final : public GpuMetricsBase_t {
  private:
   AMDGpuMetrics_v16_t m_gpu_metrics_tbl;
   std::shared_ptr<AMDGpuMetrics_v16_t> m_gpu_metric_ptr;
+};
+
+class GpuMetricsBase_v17_t final : public GpuMetricsBase_t {
+ public:
+  ~GpuMetricsBase_v17_t() = default;
+
+  size_t sizeof_metric_table() override {
+    return sizeof(AMDGpuMetrics_v17_t);
+  }
+
+  GpuMetricTypePtr_t get_metrics_table() override {
+    if (!m_gpu_metric_ptr) {
+      m_gpu_metric_ptr.reset(&m_gpu_metrics_tbl, [](AMDGpuMetrics_v17_t*){});
+    }
+    assert(m_gpu_metric_ptr != nullptr);
+    return m_gpu_metric_ptr;
+  }
+
+  void dump_internal_metrics_table() override;
+
+  AMDGpuMetricVersionFlags_t get_gpu_metrics_version_used() override {
+    return AMDGpuMetricVersionFlags_t::kGpuMetricV17;
+  }
+
+  rsmi_status_t populate_metrics_dynamic_tbl() override;
+  AMGpuMetricsPublicLatestTupl_t copy_internal_to_external_metrics() override;
+
+ private:
+  AMDGpuMetrics_v17_t m_gpu_metrics_tbl;
+  std::shared_ptr<AMDGpuMetrics_v17_t> m_gpu_metric_ptr;
 };
 
 template<typename T>

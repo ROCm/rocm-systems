@@ -921,6 +921,8 @@ int main() {
               << gpu_metrics.pcie_bandwidth_acc << "\n";
     std::cout << "\t**.pcie_bandwidth_inst : " << std::dec
               << gpu_metrics.pcie_bandwidth_inst << "\n";
+    std::cout << "\t**.vram_max_bandwidth=" << std::dec
+              << gpu_metrics.vram_max_bandwidth << "\n";
     std::cout << "\t**.pcie_l0_to_recov_count_acc : " << std::dec
               << gpu_metrics.pcie_l0_to_recov_count_acc << "\n";
     std::cout << "\t**.pcie_replay_count_acc : " << std::dec
@@ -961,6 +963,11 @@ int main() {
 
     std::cout << "\t**.xgmi_write_data_acc[] : " << std::dec << "\n";
     for (const auto& write_data : gpu_metrics.xgmi_write_data_acc) {
+      std::cout << "\t  -> " << std::dec << write_data << "\n";
+    }
+
+    std::cout << "\t**.xgmi_link_status[] : " << std::dec << "\n";
+    for (const auto& write_data : gpu_metrics.xgmi_link_status) {
       std::cout << "\t  -> " << std::dec << write_data << "\n";
     }
 
@@ -1026,6 +1033,17 @@ int main() {
                   amd::smi::make_ostream_joiner(&std::cout, ", "));
         std::cout << " ]\n";
         xcp++;
+    }
+
+    xcp = 0;
+    std::cout << std::dec << "xcp_stats.gfx_below_host_limit_acc = \n";  // new for 1.7
+    for (auto& row : gpu_metrics.xcp_stats) {
+      std::cout << "XCP[" << xcp << "] = " << "[ ";
+      std::copy(std::begin(row.gfx_below_host_limit_acc),
+              std::end(row.gfx_below_host_limit_acc),
+              amd::smi::make_ostream_joiner(&std::cout, ", "));
+      std::cout << " ]\n";
+      xcp++;
     }
 
     std::cout << "\n";

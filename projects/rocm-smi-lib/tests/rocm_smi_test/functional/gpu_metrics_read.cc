@@ -269,6 +269,12 @@ void TestGpuMetricsRead::Run(void) {
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
           std::cout << std::dec << "]\n";
 
+          std::cout << std::dec << "xgmi_link_status= [";
+          std::copy(std::begin(smu.xgmi_link_status),
+                    std::end(smu.xgmi_link_status),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
+          std::cout << std::dec << "]\n";
+
           // Voltage (mV)
           std::cout << "voltage_soc = " << std::dec << smu.voltage_soc << "\n";
           std::cout << "voltage_gfx = " << std::dec << smu.voltage_gfx << "\n";
@@ -283,6 +289,9 @@ void TestGpuMetricsRead::Run(void) {
           // Bandwidth (GB/sec)
           std::cout << "pcie_bandwidth_acc=" << std::dec << smu.pcie_bandwidth_acc << "\n";
           std::cout << "pcie_bandwidth_inst=" << std::dec << smu.pcie_bandwidth_inst << "\n";
+
+          // VRAM max bandwidth at max memory clock
+          std::cout << "vram_max_bandwidth=" << std::dec << smu.vram_max_bandwidth << "\n";
 
           // Counts
           std::cout << "pcie_l0_to_recov_count_acc= " << std::dec << smu.pcie_l0_to_recov_count_acc
@@ -355,6 +364,17 @@ void TestGpuMetricsRead::Run(void) {
             std::cout << "XCP[" << xcp << "] = " << "[ ";
             std::copy(std::begin(row.gfx_busy_acc),
                     std::end(row.gfx_busy_acc),
+                    amd::smi::make_ostream_joiner(&std::cout, ", "));
+            std::cout << " ]\n";
+            xcp++;
+          }
+
+          xcp = 0;
+          std::cout << std::dec << "xcp_stats.gfx_below_host_limit_acc = \n";  // new for 1.7
+          for (auto& row : smu.xcp_stats) {
+            std::cout << "XCP[" << xcp << "] = " << "[ ";
+            std::copy(std::begin(row.gfx_below_host_limit_acc),
+                    std::end(row.gfx_below_host_limit_acc),
                     amd::smi::make_ostream_joiner(&std::cout, ", "));
             std::cout << " ]\n";
             xcp++;
