@@ -61,7 +61,7 @@ DeviceInfo::DeviceInfo(uint32_t topology_id, uint32_t gpu_id) {
   gpu_id_ = gpu_id;
   fs::path properties_path = node_path / "properties";
   std::ifstream props_ifs(properties_path);
-  uint32_t cu_per_simd_array = 0, array_count = 0;
+  uint32_t simd_count = 0, array_count = 0;
   uint32_t max_waves_per_simd = 0, gfx_target_version = 0;
   std::string prop_name, minor_version_str, stepping_str;
   uint64_t prop_value;
@@ -80,10 +80,10 @@ DeviceInfo::DeviceInfo(uint32_t topology_id, uint32_t gpu_id) {
     if (prop_name == "wave_front_size") {
       max_wave_size_ = static_cast<uint32_t>(prop_value);
       if (max_wave_size_ <= 0) rocprofiler::fatal("Invalid max_wave_size_ in the topology file");
-    } else if (prop_name == "cu_per_simd_array") {
-      cu_per_simd_array = static_cast<uint32_t>(prop_value);
-      if (cu_per_simd_array <= 0)
-        rocprofiler::fatal("Invalid cu_per_simd_array in the topology file");
+    } else if (prop_name == "simd_count") {
+      simd_count = static_cast<uint32_t>(prop_value);
+      if (simd_count <= 0)
+        rocprofiler::fatal("Invalid simd_count in the topology file");
     } else if (prop_name == "array_count") {
       array_count = static_cast<uint32_t>(prop_value);
       if (array_count <= 0) rocprofiler::fatal("Invalid array_count in the topology file");
@@ -113,7 +113,7 @@ DeviceInfo::DeviceInfo(uint32_t topology_id, uint32_t gpu_id) {
 
   se_num_ = array_count / shader_arrays_per_se_;
   waves_per_cu_ = max_waves_per_simd * simds_per_cu_;
-  cu_num_ = cu_per_simd_array * array_count;
+  cu_num_ = simd_count / simds_per_cu_;
   major_version = (gfx_target_version / 100) / 100;
   std::string major_version_str = std::to_string(major_version);
   minor_version = (gfx_target_version / 100) % 100;
