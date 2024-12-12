@@ -4,9 +4,53 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
-## rocm_smi_lib for ROCm 6.3
+## rocm_smi_lib for ROCm 6.4
 
 ### Added
+
+- **Added support for GPU metrics 1.7 to `rsmi_dev_gpu_metrics_info_get()`**  
+Updated `rsmi_dev_gpu_metrics_info_get()` and structure `rsmi_gpu_metrics_t` to include new fields for XGMI Link Status, graphics clocks below host limit (per XCP), and VRAM max bandwidth:  
+  - `uint64_t vram_max_bandwidth` - VRAM max bandwidth at max memory clock (GB/s)
+  - `uint16_t xgmi_link_status[MAX_NUM_XGMI_LINKS]` - XGMI link statis, 1=Up 0=Down
+  - `uint64_t gfx_below_host_limit_acc[MAX_NUM_XCC]` - graphics clocks below host limit (per XCP) accumulators. Used for graphic clk below host limit violation status.
+
+- **Added new GPU metrics 1.7 to `rocm-smi --showmetrics`**  
+New metrics added to `rocm-smi --showmetrics`
+```shell
+$ rocm-smi --showmetrics
+  GPU[0]          : vram_max_bandwidth (GB/s): 1555
+  GPU[0]          : xgmi_link_status (Up/Down): ['1', '1', '1', '1', '0', '1', '0', '1']
+  GPU[0] XCP[0]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[0] XCP[1]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[0] XCP[2]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[0] XCP[3]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[0] XCP[4]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[0] XCP[5]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[0] XCP[6]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[0] XCP[7]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1]          : vram_max_bandwidth (GB/s): 1555
+  GPU[1]          : xgmi_link_status (Up/Down): ['1', '1', '1', '1', '0', '1', '0', '1']
+  ...
+  GPU[1] XCP[0]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1] XCP[1]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1] XCP[2]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1] XCP[3]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1] XCP[4]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1] XCP[5]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1] XCP[6]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  GPU[1] XCP[7]   : xcp_stats.gfx_below_host_limit_acc (%): ['0', '0', '0', '0', '0', '0', '0', '0']
+  ...
+```
+
+### Changed
+
+### Removed
+
+### Resolved issues
+
+### Upcoming changes
+
+## rocm_smi_lib for ROCm 6.3
 
 - **Added `rsmi_dev_memory_partition_capabilities_get` which returns driver memory partition capablities.**  
 Driver now has the ability to report what the user can set memory partition modes to. User can now see available

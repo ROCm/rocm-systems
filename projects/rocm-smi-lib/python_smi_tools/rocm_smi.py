@@ -3550,6 +3550,7 @@ def showGPUMetrics(deviceList):
     clock_unit="MHz"
     fan_speed="rpm"
     percent_unit="%"
+    vram_max_bw="GB/s"
     pcie_acc_unit="GB/s"
     pcie_lanes_unit="Lanes"
     pcie_speed_unit="0.1 GT/s"
@@ -3558,6 +3559,7 @@ def showGPUMetrics(deviceList):
     time_unit="ns"
     time_unit_10="10ns resolution"
     count="Count"
+    link_status="Up/Down"
     no_unit = None
 
     for device in deviceList:
@@ -3765,6 +3767,14 @@ def showGPUMetrics(deviceList):
                 "value": validateIfMaxUint(gpu_metrics.pcie_lc_perf_other_end_recovery, UIntegerTypes.UINT32_T),
                 "unit": count,
             },
+            "vram_max_bandwidth": {
+                "value": validateIfMaxUint(gpu_metrics.vram_max_bandwidth, UIntegerTypes.UINT64_T),
+                "unit": vram_max_bw,
+            },
+            "xgmi_link_status": {
+                "value": validateIfMaxUint(list(gpu_metrics.xgmi_link_status), UIntegerTypes.UINT16_T),
+                "unit": link_status,
+            },
             "num_partition": {
                 "value": validateIfMaxUint(gpu_metrics.num_partition, UIntegerTypes.UINT16_T),
                 "unit": no_unit,
@@ -3782,6 +3792,10 @@ def showGPUMetrics(deviceList):
                 "unit": percent_unit,
             },
             "xcp_stats.gfx_busy_acc": {
+                "value": gpu_metrics.xcp_stats,
+                "unit": percent_unit,
+            },
+            "xcp_stats.gfx_below_host_limit_acc": {
                 "value": gpu_metrics.xcp_stats,
                 "unit": percent_unit,
             },
@@ -3817,6 +3831,12 @@ def showGPUMetrics(deviceList):
                     for curr_xcp, item in enumerate(v['value']):
                         print_xcp_detail = []
                         for _, val in enumerate(item.gfx_busy_acc):
+                            print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
+                        printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
+                if 'xcp_stats.gfx_below_host_limit_acc' in k:
+                    for curr_xcp, item in enumerate(v['value']):
+                        print_xcp_detail = []
+                        for _, val in enumerate(item.gfx_below_host_limit_acc):
                             print_xcp_detail.append(validateIfMaxUint(val, UIntegerTypes.UINT64_T))
                         printLog(device, k + " (" + str(v["unit"]) + ")", str(print_xcp_detail), xcp=str(curr_xcp))
 

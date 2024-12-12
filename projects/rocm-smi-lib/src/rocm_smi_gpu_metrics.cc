@@ -157,6 +157,7 @@ std::string stringfy_metric_header_version(const AMDGpuMetricsHeader_v1_t& metri
 //  version 1.4: 260
 //  version 1.5: 261
 //  version 1.6: 262
+//  version 1.7: 263
 //
 const AMDGpuMetricVersionTranslationTbl_t amdgpu_metric_version_translation_table
 {
@@ -166,6 +167,7 @@ const AMDGpuMetricVersionTranslationTbl_t amdgpu_metric_version_translation_tabl
   {join_metrics_version(1, 4), AMDGpuMetricVersionFlags_t::kGpuMetricV14},
   {join_metrics_version(1, 5), AMDGpuMetricVersionFlags_t::kGpuMetricV15},
   {join_metrics_version(1, 6), AMDGpuMetricVersionFlags_t::kGpuMetricV16},
+  {join_metrics_version(1, 7), AMDGpuMetricVersionFlags_t::kGpuMetricV17},
 };
 
 /**
@@ -285,6 +287,12 @@ const AMDGpuMetricsUnitTypeTranslationTbl_t amdgpu_metrics_unit_type_translation
 
   // kGpuMetricLinkWidthSpeed
   {AMDGpuMetricsUnitType_t::kMetricPcieLCPerfOtherEndRecov, "PcieLCPerfOtherEndRecov"},   /* v1.6 */
+
+
+  {AMDGpuMetricsUnitType_t::kMetricXgmiLinkStatus, "XgmiLinkStatus"},           /* v1.7 */
+  {AMDGpuMetricsUnitType_t::kMetricVramMaxBandwidth, "VramMaxBandwidth"},       /* v1.7 */
+  {AMDGpuMetricsUnitType_t::kMetricGfxBelowHostLimitAccumulator,
+    "GfxBelowHostLimitAccumulator"},  /* v1.7 */
 };
 
 
@@ -373,6 +381,7 @@ AMDGpuMetricFactories_t amd_gpu_metrics_factory_table
   {AMDGpuMetricVersionFlags_t::kGpuMetricV14, std::make_shared<GpuMetricsBase_v14_t>(GpuMetricsBase_v14_t{})},
   {AMDGpuMetricVersionFlags_t::kGpuMetricV15, std::make_shared<GpuMetricsBase_v15_t>(GpuMetricsBase_v15_t{})},
   {AMDGpuMetricVersionFlags_t::kGpuMetricV16, std::make_shared<GpuMetricsBase_v16_t>(GpuMetricsBase_v16_t{})},
+  {AMDGpuMetricVersionFlags_t::kGpuMetricV17, std::make_shared<GpuMetricsBase_v17_t>(GpuMetricsBase_v17_t{})},
 };
 
 GpuMetricsBasePtr amdgpu_metrics_factory(AMDGpuMetricVersionFlags_t gpu_metric_version)
@@ -490,6 +499,197 @@ AMDGpuDynamicMetricTblValues_t format_metric_row(const T& metric, const std::str
 
   return multi_values;
 }
+
+void GpuMetricsBase_v17_t::dump_internal_metrics_table()
+{
+  std::ostringstream ss;
+  auto idx = uint64_t(0);
+  auto idy = uint64_t(0);
+  std::cout << __PRETTY_FUNCTION__ << " | ======= start ======= \n";
+  ss << __PRETTY_FUNCTION__
+     << " | ======= DEBUG ======= "
+     << " | Metric Version: "
+     << stringfy_metric_header_version(m_gpu_metrics_tbl.m_common_header)
+     << " | Size: "
+     << print_unsigned_int(m_gpu_metrics_tbl.m_common_header.m_structure_size)
+     << " |"
+     << "\n";
+  ss  << " temperature_hotspot: " << m_gpu_metrics_tbl.m_temperature_hotspot  << "\n"
+      << " temperature_mem: " << m_gpu_metrics_tbl.m_temperature_mem << "\n"
+      << " temperature_vrsoc: " << m_gpu_metrics_tbl.m_temperature_vrsoc << "\n"
+      << " current_socket_power: " << m_gpu_metrics_tbl.m_current_socket_power << "\n"
+      << " average_gfx_activity: " << m_gpu_metrics_tbl.m_average_gfx_activity << "\n"
+      << " average_umc_activity: " << m_gpu_metrics_tbl.m_average_umc_activity << "\n";
+
+  ss  << " vram_max_bandwidth: " << m_gpu_metrics_tbl.m_vram_max_bandwidth << "\n"  // new for v1.7
+      << " energy_accumulator: " << m_gpu_metrics_tbl.m_energy_accumulator << "\n"
+      << " system_clock_counter: " << m_gpu_metrics_tbl.m_system_clock_counter << "\n"
+      << " accumulation_counter: " << m_gpu_metrics_tbl.m_accumulation_counter << "\n"
+      << " prochot_residency_acc: " << m_gpu_metrics_tbl.m_prochot_residency_acc << "\n"
+      << " ppt_residency_acc: " << m_gpu_metrics_tbl.m_ppt_residency_acc << "\n"
+      << " socket_thm_residency_acc: " << m_gpu_metrics_tbl.m_socket_thm_residency_acc << "\n"
+      << " vr_thm_residency_acc: " << m_gpu_metrics_tbl.m_vr_thm_residency_acc << "\n"
+      << " hbm_thm_residency_acc: " << m_gpu_metrics_tbl.m_hbm_thm_residency_acc << "\n"
+      << " gfxclk_lock_status: " << m_gpu_metrics_tbl.m_gfxclk_lock_status << "\n"
+      << " pcie_link_width: " << m_gpu_metrics_tbl.m_pcie_link_width << "\n"
+      << " pcie_link_speed: " << m_gpu_metrics_tbl.m_pcie_link_speed << "\n"
+      << " xgmi_link_width: " << m_gpu_metrics_tbl.m_xgmi_link_width << "\n"
+      << " xgmi_link_speed: " << m_gpu_metrics_tbl.m_xgmi_link_speed << "\n"
+      << " gfx_activity_acc: " << m_gpu_metrics_tbl.m_gfx_activity_acc << "\n"
+      << " mem_activity_acc: " << m_gpu_metrics_tbl.m_mem_activity_acc << "\n"
+      << " pcie_bandwidth_acc: " << m_gpu_metrics_tbl.m_pcie_bandwidth_acc << "\n"
+      << " pcie_bandwidth_inst: " << m_gpu_metrics_tbl.m_pcie_bandwidth_inst << "\n"
+      << " pcie_l0_to_recov_count_acc: " << m_gpu_metrics_tbl.m_pcie_l0_to_recov_count_acc << "\n"
+      << " pcie_replay_count_acc: " << m_gpu_metrics_tbl.m_pcie_replay_count_acc << "\n"
+      << " pcie_replay_rover_count_acc: " << m_gpu_metrics_tbl.m_pcie_replay_rover_count_acc << "\n"
+      << " pcie_nak_sent_count_acc: " << m_gpu_metrics_tbl.m_pcie_nak_sent_count_acc << "\n"
+      << " pcie_nak_rcvd_count_acc: " << m_gpu_metrics_tbl.m_pcie_nak_rcvd_count_acc << "\n"
+      << " firmware_timestamp: " << m_gpu_metrics_tbl.m_firmware_timestamp << "\n"
+      << " current_uclk: " << m_gpu_metrics_tbl.m_current_uclk << "\n"
+      << " num_partition: " << m_gpu_metrics_tbl.m_num_partition << "\n"
+      << " pcie_lc_perf_other_end_recovery: "
+      << m_gpu_metrics_tbl.m_pcie_lc_perf_other_end_recovery << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_xgmi_link_status) { // new for v1.7
+    ss << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  for (const auto& temp : m_gpu_metrics_tbl.m_xgmi_read_data_acc) {
+    ss << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ss  << " xgmi_write_data_acc: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_xgmi_write_data_acc) {
+    ss << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ss  << " current_gfxclk: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_gfxclk) {
+    ss << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ss  << " current_socclk: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_socclk) {
+    ss << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ss  << " current_vclk0: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_vclk0) {
+    ss << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  ss  << " current_dclk0: " << "\n";
+  idx = 0;
+  for (const auto& temp : m_gpu_metrics_tbl.m_current_dclk0) {
+    ss << "\t [" << idx << "]: " << temp << "\n";
+    ++idx;
+  }
+
+  idx = 0;
+  idy = 0;
+  ss  << " xcp_stats.gfx_busy_inst: " << "\n";
+  for (auto& row : m_gpu_metrics_tbl.m_xcp_stats) {
+    if (idx == 0) {
+      ss << "\t [ ";
+    }
+    for (auto& col : row.gfx_busy_inst) {
+      ss << "\t [" << idx << "] [" << idy << "]: " << col;
+      if (idy + 1 != (std::end(row.gfx_busy_inst) - std::end(row.gfx_busy_inst) - 1)) {
+        ss << ", ";
+      }
+      if (idx + 1 !=
+          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+        ss << "\n";
+      } else {
+        ss << "]\n";
+      }
+      idy++;
+    }
+    idx++;
+  }
+
+  idx = 0;
+  idy = 0;
+  ss  << " xcp_stats.vcn_busy: " << "\n";
+  for (auto& row : m_gpu_metrics_tbl.m_xcp_stats) {
+    if (idx == 0) {
+      ss << "\t [ ";
+    }
+    for (auto& col : row.vcn_busy) {
+      ss << "\t [" << idx << "] [" << idy << "]: " << col;
+      if (idy + 1 != (std::end(row.vcn_busy) - std::end(row.vcn_busy) - 1)) {
+        ss << ", ";
+      }
+      if (idx + 1 !=
+          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+        ss << "\n";
+      } else {
+        ss << "]\n";
+      }
+      idy++;
+    }
+    idx++;
+  }
+
+  idx = 0;
+  idy = 0;
+  ss  << " xcp_stats.jpeg_busy: " << "\n";
+  for (auto& row : m_gpu_metrics_tbl.m_xcp_stats) {
+    if (idx == 0) {
+      ss << "\t [ ";
+    }
+    for (auto& col : row.jpeg_busy) {
+      ss << "\t [" << idx << "] [" << idy << "]: " << col;
+      if (idy + 1 != (std::end(row.jpeg_busy) - std::end(row.jpeg_busy) - 1)) {
+        ss << ", ";
+      }
+      if (idx + 1 !=
+          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+        ss << "\n";
+      } else {
+        ss << "]\n";
+      }
+      idy++;
+    }
+    idx++;
+  }
+
+  idx = 0;
+  idy = 0;
+  ss  << " xcp_stats.gfx_busy_acc: " << "\n";
+  for (auto& row : m_gpu_metrics_tbl.m_xcp_stats) {
+    if (idx == 0) {
+      ss << "\t [ ";
+    }
+    for (auto& col : row.gfx_busy_acc) {
+      ss << "\t [" << idx << "] [" << idy << "]: " << col;
+      if (idy + 1 != (std::end(row.gfx_busy_acc) - std::end(row.gfx_busy_acc) - 1)) {
+        ss << ", ";
+      }
+      if (idx + 1 !=
+          (std::end(m_gpu_metrics_tbl.m_xcp_stats) - std::end(m_gpu_metrics_tbl.m_xcp_stats) - 1)) {
+        ss << "\n";
+      } else {
+        ss << "]\n";
+      }
+      idy++;
+    }
+    idx++;
+  }
+
+  LOG_DEBUG(ss);
+}
+
 
 void GpuMetricsBase_v16_t::dump_internal_metrics_table()
 {
@@ -677,6 +877,263 @@ void GpuMetricsBase_v16_t::dump_internal_metrics_table()
   LOG_DEBUG(ss);
 }
 
+rsmi_status_t GpuMetricsBase_v17_t::populate_metrics_dynamic_tbl() {
+  std::ostringstream ss;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+
+  if (!m_metrics_dynamic_tbl.empty()) {
+    m_metrics_dynamic_tbl.clear();
+  }
+
+  //
+  //  Note: Any metric treatment/changes (if any) should happen before they
+  //        get written to internal/external tables.
+  //
+  auto run_metric_adjustments_v17 = [&]() {
+    ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+    const auto gpu_metrics_version =
+      translate_flag_to_metric_version(get_gpu_metrics_version_used());
+    ss << __PRETTY_FUNCTION__
+                << " | ======= info ======= "
+                << " | Applying adjustments "
+                << " | Metric Version: " << stringfy_metric_header_version(
+                                              disjoin_metrics_version(gpu_metrics_version))
+                << " |";
+    LOG_TRACE(ss);
+
+    // firmware_timestamp is at 10ns resolution
+    ss << __PRETTY_FUNCTION__
+                << " | ======= Changes ======= "
+                << " | {m_firmware_timestamp} from: " << m_gpu_metrics_tbl.m_firmware_timestamp
+                << " to: " << (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    m_gpu_metrics_tbl.m_firmware_timestamp = (m_gpu_metrics_tbl.m_firmware_timestamp * 10);
+    LOG_DEBUG(ss);
+  };
+
+  //  Adjustments/Changes specific to this version
+  run_metric_adjustments_v17();
+
+  // Temperature Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHotspot,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_hotspot,
+                               "temperature_hotspot")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempMem,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_mem,
+                                "temperature_mem")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempVrSoc,
+              format_metric_row(m_gpu_metrics_tbl.m_temperature_vrsoc,
+                                "temperature_vrsoc")));
+
+  // Power/Energy Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrSocketPower,
+              format_metric_row(m_gpu_metrics_tbl.m_current_socket_power,
+                                "curr_socket_power")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPowerEnergy]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricEnergyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_energy_accumulator,
+                                "energy_acc")));
+
+  // Utilization Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgGfxActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_gfx_activity,
+                                "average_gfx_activity")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAvgUmcActivity,
+              format_metric_row(m_gpu_metrics_tbl.m_average_umc_activity,
+                                "average_umc_activity")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricGfxActivityAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_gfx_activity_acc,
+                                "gfx_activity_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricUtilization]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricMemActivityAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_mem_activity_acc,
+                                "mem_activity_acc")));
+
+  // Timestamp Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTimestamp]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTSFirmware,
+              format_metric_row(m_gpu_metrics_tbl.m_firmware_timestamp,
+                                "firmware_timestamp")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTimestamp]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTSClockCounter,
+              format_metric_row(m_gpu_metrics_tbl.m_system_clock_counter,
+                                "system_clock_counter")));
+
+
+  // GfxLock Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricGfxClkLockStatus]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricGfxClkLockStatus,
+              format_metric_row(m_gpu_metrics_tbl.m_gfxclk_lock_status,
+                                "gfxclk_lock_status")));
+
+  // Link/Width/Speed Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieLinkWidth,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_link_width,
+                                "pcie_link_width")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieLinkSpeed,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_link_speed,
+                                "pcie_link_speed")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricXgmiLinkWidth,
+              format_metric_row(m_gpu_metrics_tbl.m_xgmi_link_width,
+                                "xgmi_link_width")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricXgmiLinkSpeed,
+              format_metric_row(m_gpu_metrics_tbl.m_xgmi_link_speed,
+                                "xgmi_link_speed")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieBandwidthAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_bandwidth_acc,
+                                "pcie_bandwidth_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieBandwidthInst,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_bandwidth_inst,
+                                "pcie_bandwidth_inst")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieL0RecovCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_l0_to_recov_count_acc,
+                                "pcie_l0_recov_count_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieReplayCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_replay_count_acc,
+                                "pcie_replay_count_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieReplayRollOverCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_replay_rover_count_acc,
+                                "pcie_replay_rollover_count_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieNakSentCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_nak_sent_count_acc,
+                                "pcie_nak_sent_count_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieNakReceivedCountAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_pcie_nak_rcvd_count_acc,
+                                "pcie_nak_rcvd_count_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricXgmiReadDataAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_xgmi_read_data_acc,
+                                "[xgmi_read_data_acc]")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricXgmiWriteDataAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_xgmi_write_data_acc,
+                                "[xgmi_write_data_acc]")));
+  // new for v1.7
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricXgmiLinkStatus,
+              format_metric_row(m_gpu_metrics_tbl.m_xgmi_link_status,
+                                "[xgmi_link_status]")));
+  // CurrentClock Info
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrGfxClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_gfxclk,
+                                "[current_gfxclk]")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrSocClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_socclk,
+                                "[current_socclk]")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrVClock0,
+              format_metric_row(m_gpu_metrics_tbl.m_current_vclk0,
+                                "[current_vclk0]")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrDClock0,
+              format_metric_row(m_gpu_metrics_tbl.m_current_dclk0,
+                                "[current_dclk0]")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricCurrentClock]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricCurrUClock,
+              format_metric_row(m_gpu_metrics_tbl.m_current_uclk,
+                                "current_uclk")));
+
+  /* Accumulation cycle counter */
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricAccumulationCounter,
+              format_metric_row(m_gpu_metrics_tbl.m_accumulation_counter,
+                                "accumulation_counter")));
+
+  /* Accumulated throttler residencies */
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricProchotResidencyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_prochot_residency_acc,
+                                "prochot_residency_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPPTResidencyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_ppt_residency_acc,
+                                "ppt_residency_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricSocketThmResidencyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_socket_thm_residency_acc,
+                                "socket_thm_residency_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricVRThmResidencyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_vr_thm_residency_acc,
+                                "vr_thm_residency_acc")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricHBMThmResidencyAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_hbm_thm_residency_acc,
+                                "hbm_thm_residency_acc")));
+
+  /* Partition info */
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricPartition]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kGpuMetricNumPartition,
+              format_metric_row(m_gpu_metrics_tbl.m_num_partition,
+                                "num_partition")));
+
+  /* xcp_stats info */
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricXcpStats]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricGfxBusyInst,
+              format_metric_row(m_gpu_metrics_tbl.m_xcp_stats->gfx_busy_inst,
+                                "xcp_stats->gfx_busy_inst")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricXcpStats]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricVcnBusy,
+              format_metric_row(m_gpu_metrics_tbl.m_xcp_stats->vcn_busy,
+                                "xcp_stats->vcn_busy")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricXcpStats]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricJpegBusy,
+              format_metric_row(m_gpu_metrics_tbl.m_xcp_stats->jpeg_busy,
+                                "xcp_stats->jpeg_busy")));
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricXcpStats]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricGfxBusyAcc,
+              format_metric_row(m_gpu_metrics_tbl.m_xcp_stats->gfx_busy_acc,
+                                "xcp_stats->gfx_busy_acc")));
+
+  /* PCIE other end recovery counter info */
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricPcieLCPerfOtherEndRecov,
+           format_metric_row(m_gpu_metrics_tbl.m_pcie_lc_perf_other_end_recovery,
+                                "pcie_lc_perf_other_end_recovery")));
+
+  /* VRAM max bandwidth at max memory clock */
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricVramMaxBandwidth,
+              format_metric_row(m_gpu_metrics_tbl.m_vram_max_bandwidth,
+                                "vram_max_bandwidth")));
+
+  /* Total App Clock Counter Accumulated */
+  m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricThrottleResidency]
+    .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricGfxBelowHostLimitAccumulator,
+              format_metric_row(m_gpu_metrics_tbl.m_xcp_stats->gfx_below_host_limit_acc,
+                                "gfx_below_host_limit_acc")));
+
+  ss << __PRETTY_FUNCTION__
+              << " | ======= end ======= "
+              << " | Success "
+              << " | Returning = " << getRSMIStatusString(status_code)
+              << " |";
+  LOG_TRACE(ss);
+
+  return status_code;
+}
+
 rsmi_status_t GpuMetricsBase_v16_t::populate_metrics_dynamic_tbl() {
   std::ostringstream ss;
   auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
@@ -714,7 +1171,6 @@ rsmi_status_t GpuMetricsBase_v16_t::populate_metrics_dynamic_tbl() {
 
   //  Adjustments/Changes specific to this version
   run_metric_adjustments_v16();
-
   // Temperature Info
   m_metrics_dynamic_tbl[AMDGpuMetricsClassId_t::kGpuMetricTemperature]
     .insert(std::make_pair(AMDGpuMetricsUnitType_t::kMetricTempHotspot,
@@ -1608,6 +2064,12 @@ rsmi_status_t init_max_public_gpu_matrics(AMGpuMetricsPublicLatest_t& rsmi_gpu_m
   rsmi_gpu_metrics.pcie_link_speed = init_max_uint_types<decltype(rsmi_gpu_metrics.pcie_link_speed)>();
   rsmi_gpu_metrics.gfx_activity_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.gfx_activity_acc)>();
   rsmi_gpu_metrics.mem_activity_acc = init_max_uint_types<decltype(rsmi_gpu_metrics.mem_activity_acc)>();
+  rsmi_gpu_metrics.vram_max_bandwidth = init_max_uint_types<decltype(rsmi_gpu_metrics.vram_max_bandwidth)>();
+
+  std::fill(std::begin(rsmi_gpu_metrics.xgmi_link_status),
+            std::end(rsmi_gpu_metrics.xgmi_link_status),
+            init_max_uint_types<std::uint16_t>());
+
 
   std::fill(std::begin(rsmi_gpu_metrics.temperature_hbm),
             std::end(rsmi_gpu_metrics.temperature_hbm),
@@ -1684,6 +2146,8 @@ rsmi_status_t init_max_public_gpu_matrics(AMGpuMetricsPublicLatest_t& rsmi_gpu_m
               init_max_uint_types<std::uint16_t>());
     std::fill(std::begin(row.gfx_busy_acc), std::end(row.gfx_busy_acc),
               init_max_uint_types<std::uint64_t>());
+    std::fill(std::begin(row.gfx_below_host_limit_acc), std::end(row.gfx_below_host_limit_acc),
+              init_max_uint_types<std::uint64_t>());
   }
 
   ss << __PRETTY_FUNCTION__
@@ -1694,6 +2158,225 @@ rsmi_status_t init_max_public_gpu_matrics(AMGpuMetricsPublicLatest_t& rsmi_gpu_m
   LOG_TRACE(ss);
 
   return status_code;
+}
+
+AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v17_t::copy_internal_to_external_metrics()
+{
+  std::ostringstream ss;
+  auto status_code(rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ss << __PRETTY_FUNCTION__ << " | ======= start =======";
+  LOG_TRACE(ss);
+
+  auto copy_data_from_internal_metrics_tbl = [&]() {
+    AMGpuMetricsPublicLatest_t metrics_public_init{};
+
+    //
+    //  Note: Initializing data members with their max. If field is max,
+    //        no data was assigned to it.
+    init_max_public_gpu_matrics(metrics_public_init);
+
+    // Header
+    metrics_public_init.common_header.structure_size = m_gpu_metrics_tbl.m_common_header.m_structure_size;
+    metrics_public_init.common_header.format_revision = m_gpu_metrics_tbl.m_common_header.m_format_revision;
+    metrics_public_init.common_header.content_revision = m_gpu_metrics_tbl.m_common_header.m_content_revision;
+
+
+    // Temperature
+    metrics_public_init.temperature_hotspot = m_gpu_metrics_tbl.m_temperature_hotspot;
+    metrics_public_init.temperature_mem = m_gpu_metrics_tbl.m_temperature_mem;
+    metrics_public_init.temperature_vrsoc = m_gpu_metrics_tbl.m_temperature_vrsoc;
+
+    // Power
+    metrics_public_init.current_socket_power = m_gpu_metrics_tbl.m_current_socket_power;
+
+    // Utilization
+    metrics_public_init.average_gfx_activity = m_gpu_metrics_tbl.m_average_gfx_activity;
+    metrics_public_init.average_umc_activity = m_gpu_metrics_tbl.m_average_umc_activity;
+
+    // Power/Energy
+    metrics_public_init.energy_accumulator = m_gpu_metrics_tbl.m_energy_accumulator;
+
+    // Driver attached timestamp (in ns)
+    metrics_public_init.system_clock_counter = m_gpu_metrics_tbl.m_system_clock_counter;
+
+    // Clock Lock Status. Each bit corresponds to clock instance
+    metrics_public_init.gfxclk_lock_status = m_gpu_metrics_tbl.m_gfxclk_lock_status;
+
+    // Link width (number of lanes) and speed
+    metrics_public_init.pcie_link_width = m_gpu_metrics_tbl.m_pcie_link_width;
+    metrics_public_init.pcie_link_speed = m_gpu_metrics_tbl.m_pcie_link_speed;
+
+    // XGMI bus width and bitrate
+    metrics_public_init.xgmi_link_width = m_gpu_metrics_tbl.m_xgmi_link_width;
+    metrics_public_init.xgmi_link_speed = m_gpu_metrics_tbl.m_xgmi_link_speed;
+
+    // Utilization Accumulated
+    metrics_public_init.gfx_activity_acc = m_gpu_metrics_tbl.m_gfx_activity_acc;
+    metrics_public_init.mem_activity_acc = m_gpu_metrics_tbl.m_mem_activity_acc;
+
+    // PCIE accumulated bandwidth
+    metrics_public_init.pcie_bandwidth_acc = m_gpu_metrics_tbl.m_pcie_bandwidth_acc;
+
+    // PCIE instantaneous bandwidth
+    metrics_public_init.pcie_bandwidth_inst = m_gpu_metrics_tbl.m_pcie_bandwidth_inst;
+
+    // PCIE L0 to recovery state transition accumulated count
+    metrics_public_init.pcie_l0_to_recov_count_acc = m_gpu_metrics_tbl.m_pcie_l0_to_recov_count_acc;
+
+    // PCIE replay accumulated count
+    metrics_public_init.pcie_replay_count_acc = m_gpu_metrics_tbl.m_pcie_replay_count_acc;
+
+    // PCIE replay rollover accumulated count
+    metrics_public_init.pcie_replay_rover_count_acc = m_gpu_metrics_tbl.m_pcie_replay_rover_count_acc;
+
+    // PCIE NAK sent accumulated count
+    metrics_public_init.pcie_nak_sent_count_acc = m_gpu_metrics_tbl.m_pcie_nak_sent_count_acc;
+
+    // PCIE NAK received accumulated count
+    metrics_public_init.pcie_nak_rcvd_count_acc = m_gpu_metrics_tbl.m_pcie_nak_rcvd_count_acc;
+
+    // Accumulated throttler residencies
+    // bumped up public to uint64_t due to planned size increase for newer ASICs
+    metrics_public_init.accumulation_counter = m_gpu_metrics_tbl.m_accumulation_counter;
+    metrics_public_init.prochot_residency_acc = m_gpu_metrics_tbl.m_prochot_residency_acc;
+    metrics_public_init.ppt_residency_acc = m_gpu_metrics_tbl.m_ppt_residency_acc;
+    metrics_public_init.socket_thm_residency_acc = m_gpu_metrics_tbl.m_socket_thm_residency_acc;
+    metrics_public_init.vr_thm_residency_acc = m_gpu_metrics_tbl.m_vr_thm_residency_acc;
+    metrics_public_init.hbm_thm_residency_acc = m_gpu_metrics_tbl.m_hbm_thm_residency_acc;
+
+    /* VRAM max bandwidth at max memory clock */
+    metrics_public_init.vram_max_bandwidth = m_gpu_metrics_tbl.m_vram_max_bandwidth;
+
+    // XGMI accumulated data transfer size
+    // xgmi_read_data
+    const auto xgmi_read_data_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_xgmi_read_data_acc) -
+        std::begin(m_gpu_metrics_tbl.m_xgmi_read_data_acc));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_xgmi_read_data_acc),
+                xgmi_read_data_num_elems,
+                metrics_public_init.xgmi_read_data_acc);
+    // xgmi_write_data
+    const auto xgmi_write_data_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_xgmi_write_data_acc) -
+        std::begin(m_gpu_metrics_tbl.m_xgmi_write_data_acc));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_xgmi_write_data_acc),
+                xgmi_write_data_num_elems,
+                metrics_public_init.xgmi_write_data_acc);
+
+    // xgmi_link_status // new for 1.7
+    const auto xgmi_link_status_num_elems = static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_xgmi_link_status) -
+        std::begin(m_gpu_metrics_tbl.m_xgmi_link_status));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_xgmi_link_status),
+                xgmi_link_status_num_elems,
+                metrics_public_init.xgmi_link_status);
+
+    // PMFW attached timestamp (10ns resolution)
+    metrics_public_init.firmware_timestamp = m_gpu_metrics_tbl.m_firmware_timestamp;
+
+    // Current clocks
+    // current_gfxclk
+    const auto curr_gfxclk_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_gfxclk) -
+        std::begin(m_gpu_metrics_tbl.m_current_gfxclk));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_gfxclk),
+                curr_gfxclk_num_elems,
+                metrics_public_init.current_gfxclks);
+
+    // current_socclk
+    const auto curr_socclk_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_socclk) -
+        std::begin(m_gpu_metrics_tbl.m_current_socclk));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_socclk),
+                curr_socclk_num_elems,
+                metrics_public_init.current_socclks);
+
+    // current_vclk0
+    const auto curr_vclk0_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_vclk0) -
+        std::begin(m_gpu_metrics_tbl.m_current_vclk0));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_vclk0),
+                curr_vclk0_num_elems,
+                metrics_public_init.current_vclk0s);
+
+    // current_dclk0
+    const auto curr_dclk0_num_elems =
+      static_cast<uint16_t>(
+        std::end(m_gpu_metrics_tbl.m_current_dclk0) -
+        std::begin(m_gpu_metrics_tbl.m_current_dclk0));
+    std::copy_n(std::begin(m_gpu_metrics_tbl.m_current_dclk0),
+                curr_dclk0_num_elems,
+                metrics_public_init.current_dclk0s);
+
+    metrics_public_init.current_uclk = m_gpu_metrics_tbl.m_current_uclk;
+
+    metrics_public_init.num_partition = m_gpu_metrics_tbl.m_num_partition;
+
+    metrics_public_init.pcie_lc_perf_other_end_recovery =
+      m_gpu_metrics_tbl.m_pcie_lc_perf_other_end_recovery;
+
+    auto priv_it = std::begin(m_gpu_metrics_tbl.m_xcp_stats);
+    for (auto pub_it = std::begin(metrics_public_init.xcp_stats);
+         pub_it != std::end(metrics_public_init.xcp_stats);
+         ++pub_it, ++priv_it) {
+      std::copy_n(std::begin(priv_it->gfx_busy_inst), RSMI_MAX_NUM_XCC,
+                  pub_it->gfx_busy_inst);
+      std::copy_n(std::begin(priv_it->jpeg_busy), RSMI_MAX_NUM_JPEG_ENGS,
+                  pub_it->jpeg_busy);
+      std::copy_n(std::begin(priv_it->vcn_busy), RSMI_MAX_NUM_VCNS,
+                  pub_it->vcn_busy);
+      std::copy_n(std::begin(priv_it->gfx_busy_acc), RSMI_MAX_NUM_XCC,
+                  pub_it->gfx_busy_acc);
+      std::copy_n(std::begin(priv_it->gfx_below_host_limit_acc), RSMI_MAX_NUM_XCC,
+                  pub_it->gfx_below_host_limit_acc);
+    }
+
+    //
+    // Note:  Backwards compatibility -> Handling extra/exception cases
+    //        related to earlier versions (1.3/1.4/1.5)
+    metrics_public_init.current_gfxclk = metrics_public_init.current_gfxclks[0];
+
+    metrics_public_init.current_socclk = metrics_public_init.current_socclks[0];
+
+    metrics_public_init.current_vclk0 = metrics_public_init.current_vclk0s[0];
+
+    metrics_public_init.current_vclk1 = metrics_public_init.current_vclk0s[1];
+
+    metrics_public_init.current_dclk0 = metrics_public_init.current_dclk0s[0];
+
+    metrics_public_init.current_dclk1 = metrics_public_init.current_dclk0s[1];
+
+    // separate by XCP
+    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
+        && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy[0] != UINT16_MAX) {
+       std::copy(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
+              std::end(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].vcn_busy),
+              std::begin(metrics_public_init.vcn_activity));
+    }
+    if (this->m_partition_id < kRSMI_MAX_NUM_XCP
+        && m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy[0] != UINT16_MAX) {
+      std::copy(std::begin(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy),
+              std::end(m_gpu_metrics_tbl.m_xcp_stats[this->m_partition_id].jpeg_busy),
+              std::begin(metrics_public_init.jpeg_activity));
+    }
+
+    return metrics_public_init;
+  }();
+
+  ss << __PRETTY_FUNCTION__
+     << " | ======= end ======= "
+     << " | Success "
+     << " | Returning = " << getRSMIStatusString(status_code)
+     << " |";
+  LOG_TRACE(ss);
+
+  return std::make_tuple(status_code, copy_data_from_internal_metrics_tbl);
+
 }
 
 AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v16_t::copy_internal_to_external_metrics()
@@ -2695,8 +3378,17 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v13_t::copy_internal_to_external_m
     // Note:  Backwards compatibility -> Handling extra/exception cases
     //        related to earlier versions (1.2)
     // metrics_public_init.current_socket_power = metrics_public_init.average_socket_power;
-    if (metrics_public_init.average_mm_activity != UINT16_MAX) {
+    // average_mm_activity needs to not be UIN16_MAX and
+    // metrics_public_init.vcn_activity[0] should also be UIN16_MAX
+    if (metrics_public_init.average_mm_activity != UINT16_MAX
+        && metrics_public_init.vcn_activity[0] == UINT16_MAX) {
       metrics_public_init.vcn_activity[0] = metrics_public_init.average_mm_activity;
+    }
+    // average_mm_activity needs to not be UIN16_MAX and
+    // metrics_public_init.xcp_stats->vcn_busy[0] should also be UIN16_MAX
+    if (metrics_public_init.average_mm_activity != UINT16_MAX
+        && metrics_public_init.xcp_stats->vcn_busy[0] == UINT16_MAX) {
+      metrics_public_init.xcp_stats->vcn_busy[0] = metrics_public_init.average_mm_activity;
     }
 
     return metrics_public_init;
