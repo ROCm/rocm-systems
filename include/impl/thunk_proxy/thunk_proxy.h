@@ -100,6 +100,7 @@ typedef struct {
   bool platform_atomic_support;
   void *adapter_info;
   void *adapter_ex_info;
+  void *adapter_proxy_info;
 } DeviceInfo;
 
 int EngineOrdinal(int engine, DeviceInfo *device_info);
