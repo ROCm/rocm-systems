@@ -168,7 +168,7 @@ std::string RdcRocpLib::get_rocm_path() {
 
   std::string line;
   while (getline(file, line)) {
-    size_t index_end = line.find("librocprofiler64.so");
+    size_t index_end = line.find("librocprofiler-register.so");
     size_t index_start = index_end;
     if (index_end == std::string::npos) {
       // no library on this line
@@ -189,28 +189,27 @@ std::string RdcRocpLib::get_rocm_path() {
 }
 
 rdc_status_t RdcRocpLib::set_rocprofiler_path() {
-  // rocprofiler requires ROCP_METRICS to be set
-  std::string rocprofiler_metrics_path =
-      get_rocm_path() + "/libexec/rocprofiler/counters/derived_counters.xml";
+  // rocprofiler requires ROCPROFILER_METRICS_PATH to be set
+  std::string rocprofiler_metrics_path = get_rocm_path() + "/share/rocprofiler-sdk/";
 
   // set rocm prefix
-  int result = setenv("ROCP_METRICS", rocprofiler_metrics_path.c_str(), 0);
+  int result = setenv("ROCPROFILER_METRICS_PATH", rocprofiler_metrics_path.c_str(), 0);
   if (result != 0) {
-    RDC_LOG(RDC_ERROR, "setenv ROCP_METRICS failed! " << result);
+    RDC_LOG(RDC_ERROR, "setenv ROCPROFILER_METRICS_PATH failed! " << result);
     return RDC_ST_PERM_ERROR;
   }
 
   // check that env exists
-  const char* rocprofiler_metrics_env = getenv("ROCP_METRICS");
+  const char* rocprofiler_metrics_env = getenv("ROCPROFILER_METRICS_PATH");
   if (rocprofiler_metrics_env == nullptr) {
-    RDC_LOG(RDC_ERROR, "ROCP_METRICS is not set!");
+    RDC_LOG(RDC_ERROR, "ROCPROFILER_METRICS_PATH is not set!");
     return RDC_ST_NO_DATA;
   }
 
   // check that file can be accessed
   std::ifstream test_file(rocprofiler_metrics_env);
   if (!test_file.good()) {
-    RDC_LOG(RDC_ERROR, "failed to open ROCP_METRICS: " << rocprofiler_metrics_env);
+    RDC_LOG(RDC_ERROR, "failed to open ROCPROFILER_METRICS_PATH: " << rocprofiler_metrics_env);
     return RDC_ST_FILE_ERROR;
   }
 

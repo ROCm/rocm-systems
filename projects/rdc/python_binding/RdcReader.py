@@ -12,7 +12,8 @@ default_field_ids = [
         rdc_field_t.RDC_FI_POWER_USAGE,
         rdc_field_t.RDC_FI_GPU_CLOCK,
         rdc_field_t.RDC_FI_GPU_UTIL,
-        rdc_field_t.RDC_FI_GPU_TEMP
+        rdc_field_t.RDC_FI_GPU_TEMP,
+        rdc_field_t.RDC_FI_GPU_MEMORY_USAGE
 ]
 
 default_unit_coverter = {
