@@ -2883,18 +2883,25 @@ inline static hipError_t hipMemExportToShareableHandle(void* shareableHandle,
                                                        unsigned long long flags) {
     return hipCUResultTohipError(cuMemExportToShareableHandle(shareableHandle, handle, (CUmemAllocationHandleType)handleType, flags));
 }
-inline static hipError_t hipMemGetAccess(unsigned long long* flags,
-                                         const hipMemLocation* location,
+inline static hipError_t hipMemGetAccess(unsigned long long* flags, const hipMemLocation* location,
                                          hipDeviceptr_t ptr) {
-    CUmemLocation loc = hipMemLocationToCUmemLocation(location);
-    return hipCUResultTohipError(cuMemGetAccess(flags, &loc, ptr));
+    if (location == NULL) {
+        return hipCUResultTohipError(cuMemGetAccess(flags, NULL, ptr));
+    } else {
+        CUmemLocation loc = hipMemLocationToCUmemLocation(location);
+        return hipCUResultTohipError(cuMemGetAccess(flags, &loc, ptr));
+    }
 }
-inline static hipError_t hipMemGetAllocationPropertiesFromHandle(hipMemAllocationProp* prop,
-                                                                 hipMemGenericAllocationHandle_t handle) {
-    CUmemAllocationProp cuProp;
-    auto err = cuMemGetAllocationPropertiesFromHandle(&cuProp, handle);
-    *prop = CUmemAllocationPropToHipMemAllocationProp(&cuProp);
-    return hipCUResultTohipError(err);
+inline static hipError_t hipMemGetAllocationPropertiesFromHandle(
+    hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t handle) {
+    if (prop == NULL) {
+        return hipCUResultTohipError(cuMemGetAllocationPropertiesFromHandle(NULL, handle));
+    } else {
+        CUmemAllocationProp cuProp;
+        auto result = cuMemGetAllocationPropertiesFromHandle(&cuProp, handle);
+        *prop = CUmemAllocationPropToHipMemAllocationProp(&cuProp);
+        return hipCUResultTohipError(result);
+    }
 }
 inline static hipError_t hipMemImportFromShareableHandle(hipMemGenericAllocationHandle_t* handle,
                                                          void* osHandle,
