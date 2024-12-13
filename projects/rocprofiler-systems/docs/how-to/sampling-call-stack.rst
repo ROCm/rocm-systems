@@ -343,7 +343,7 @@ An rocprof-sys-sample example
 Here is the full output from the previous
 ``rocprof-sys-sample -PTDH -E all -o rocprof-sys-output %tag% -- ./parallel-overhead-locks 30 4 100`` command:
 
-.. code-block:: shell
+.. code-block:: shell-session
 
    $ rocprof-sys-sample -PTDH -E all -o rocprof-sys-output %tag% -c -- ./parallel-overhead-locks 30 4 100
 
@@ -403,3 +403,4 @@ Here is the full output from the previous
    [rocprof-sys][1785877][metadata]> Outputting 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksmetadata-1785877.json' and 'rocprof-sys-output/2024-07-15_16.21/parallel-overhead-locksfunctions-1785877.json'
    [rocprof-sys][1785877][0][rocprofsys_finalize] Finalized: 0.054582 sec wall_clock,    0.000 MB peak_rss,   -1.798 MB page_rss, 0.040000 sec cpu_clock,   73.3 % cpu_util
    [989.312]       perfetto.cc:60128 Tracing session 1 ended, total sessions:0
+

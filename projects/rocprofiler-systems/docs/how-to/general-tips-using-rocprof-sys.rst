@@ -2,9 +2,9 @@
    :description: ROCm Systems Profiler general tips and usage documentation and reference
    :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, tips, how to, profiler, tracking, visualization, tool, Instinct, accelerator, AMD
 
-**********************************
+********************************************
 General tips for using ROCm Systems Profiler
-**********************************
+********************************************
 
 Follow these general guidelines when using ROCm Systems Profiler. For an explanation of the terms used in this topic, see
 the :doc:`ROCm Systems Profiler glossary <../reference/rocprof-sys-glossary>`.

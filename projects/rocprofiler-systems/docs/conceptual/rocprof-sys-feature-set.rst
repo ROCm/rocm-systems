@@ -2,9 +2,9 @@
    :description: ROCm Systems Profiler feature set documentation and reference
    :keywords: rocprof-sys, rocprofiler-systems, Omnitrace, ROCm, profiler, feature set, use cases, tracking, visualization, tool, Instinct, accelerator, AMD
 
-***************************************
-The ROCm Systems Profiler feature set and use cases
-***************************************
+********************************************
+ROCm Systems Profiler features and use cases
+********************************************
 
 `ROCm Systems Profiler <https://github.com/ROCm/rocprofiler-systems>`_ is designed to be highly extensible.
 Internally, it leverages the `Timemory performance analysis toolkit <https://github.com/ROCm/timemory>`_
