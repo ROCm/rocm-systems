@@ -1001,7 +1001,7 @@ TEST_CASE("Unit_hipLaunchParm") {
               0, 0, Ad), true, "firstCall");
     float* A;
     float e1;
-    MY_LAUNCH_WITH_PAREN(hipMalloc(&A, 100), true, "launch2");
+    MY_LAUNCH_WITH_PAREN(static_cast<void>(hipMalloc(&A, 100)), true, "launch2");
 
 #ifdef EXTRA_PARENS_2
     // MY_LAUNCH_WITH_PAREN wraps cmd in () which can cause issues.

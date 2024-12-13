@@ -36,6 +36,18 @@ TEST_CASE("Unit_hipModuleLoadData_Positive_Basic") {
     HIP_CHECK(hipModuleUnload(module));
   }
 
+#if defined(__HIP_PLATFORM_AMD__)
+  SECTION("Load compiled module from file with compressed code objects") {
+    const auto loaded_module = LoadModuleIntoBuffer("copyKernelCompressed.code");
+    HIP_CHECK(hipModuleLoadData(&module, loaded_module.data()));
+    REQUIRE(module != nullptr);
+    hipFunction_t kernel = nullptr;
+    HIP_CHECK(hipModuleGetFunction(&kernel, module, "copy_ker"));
+    REQUIRE(kernel != nullptr);
+    HIP_CHECK(hipModuleUnload(module));
+  }
+#endif
+
   SECTION("Load RTCd module") {
     const auto rtc = CreateRTCCharArray(R"(extern "C" __global__ void kernel() {})");
     HIP_CHECK(hipModuleLoadData(&module, rtc.data()));
@@ -65,6 +77,7 @@ TEST_CASE("Unit_hipModuleLoadData_Negative_Image_Is_An_Empty_String") {
 
   HIP_CHECK_ERROR(hipModuleLoadData(&module, ""), hipErrorInvalidImage);
 }
+
 /**
 * @addtogroup hipModuleLoad hipModuleGetFunction
 * @{

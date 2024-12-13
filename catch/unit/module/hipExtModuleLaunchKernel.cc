@@ -51,6 +51,7 @@ THE SOFTWARE.
 
 constexpr auto fileName = "copyKernel.code";
 constexpr auto kernel_name = "copy_ker";
+constexpr auto fileNameCompressed = "copyKernelCompressed.code";
 static constexpr auto totalWorkGroups{1024};
 static constexpr auto localWorkSize{512};
 static constexpr auto lastWorkSizeEven{256};
@@ -189,7 +190,12 @@ TEST_CASE("Unit_hipExtModuleLaunchKernel_UniformWorkGroup") {
   // Get module and function from module
   hipModule_t Module;
   hipFunction_t Function;
-  HIP_CHECK(hipModuleLoad(&Module, fileName));
+  SECTION("uncompressed codeobjects") {
+     HIP_CHECK(hipModuleLoad(&Module, fileName));
+  }
+  SECTION("compressed codeobjects") {
+     HIP_CHECK(hipModuleLoad(&Module, fileNameCompressed));
+  }
   HIP_CHECK(hipModuleGetFunction(&Function, Module, kernel_name));
   // Allocate resources
   int* A = new int[arraylength];
