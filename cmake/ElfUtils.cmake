@@ -112,7 +112,8 @@ externalproject_add(
         CXXFLAGS=-fPIC\ -O3\ -Wno-error=null-dereference
         [=[LDFLAGS=-Wl,-rpath='$$ORIGIN']=] <SOURCE_DIR>/configure --enable-install-elfh
         --prefix=${_eu_root} --disable-libdebuginfod --disable-debuginfod --disable-nls
-        --enable-thread-safety --enable-silent-rules --libdir=${_eu_root}/lib
+        --enable-thread-safety --enable-silent-rules ${ElfUtils_CONFIG_OPTIONS}
+        --libdir=${_eu_root}/lib
     BUILD_COMMAND ${MAKE_COMMAND} install -s
     BUILD_BYPRODUCTS "${_eu_build_byproducts}"
     INSTALL_COMMAND "")
